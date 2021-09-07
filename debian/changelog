@@ -1,3 +1,10 @@
+systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
+
+  * d/p/dell-clamshell-accel-location-base-with-sku.patch:
+    Revert incorrect patch (LP: #1942899)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Tue, 07 Sep 2021 10:15:58 -0400
+
 systemd (248.3-1ubuntu7) impish; urgency=medium
 
   * d/tests/tests-in-lxd: suppress the cgroups v2 warning on stderr from
