@@ -1,9 +1,16 @@
 systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
 
+  [ Dan Streetman ]
   * d/p/dell-clamshell-accel-location-base-with-sku.patch:
     Revert incorrect patch (LP: #1942899)
 
- -- Dan Streetman <ddstreet@canonical.com>  Tue, 07 Sep 2021 10:15:58 -0400
+  [ Lukas Märdian ]
+  * Add d/p/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch (LP: #1942113)
+    Files:
+    - debian/patches/lp1942113.patch
+    - debian/patches/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 10 Sep 2021 15:00:47 +0200
 
 systemd (248.3-1ubuntu7) impish; urgency=medium
 
