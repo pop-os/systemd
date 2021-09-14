@@ -5,12 +5,13 @@ systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
     Revert incorrect patch (LP: #1942899)
 
   [ Lukas Märdian ]
-  * Add d/p/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch (LP: #1942113)
+  * Add d/p/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+    Replace lp1942113.patch with upstream commit 54966b7 (LP: #1942113)
     Files:
     - debian/patches/lp1942113.patch
     - debian/patches/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 
- -- Lukas Märdian <slyon@ubuntu.com>  Fri, 10 Sep 2021 15:00:47 +0200
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 13 Sep 2021 12:59:26 +0200
 
 systemd (248.3-1ubuntu7) impish; urgency=medium
 
