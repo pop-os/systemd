@@ -1,3 +1,15 @@
+systemd (247.9-2) unstable; urgency=medium
+
+  * Demote systemd-timesyncd from Depends to Recommends.
+    This avoids a dependency cycle between systemd and systemd-timesyncd and
+    thus makes dist upgrades more predictable and robust.
+    It also allows minimal, systemd based containers where no NTP client is
+    strictly necessary.
+    To ensure that systemd-timesyncd is installed in a default installation
+    created by d-i, bump its priority to standard. (Closes: #986651, #993947)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 22 Sep 2021 21:10:53 +0200
+
 systemd (247.9-1) unstable; urgency=medium
 
   [ Michael Biebl ]
