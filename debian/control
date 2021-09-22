@@ -65,7 +65,8 @@ Architecture: linux-any
 Multi-Arch: foreign
 Section: admin
 Priority: important
-Recommends: dbus
+Recommends: dbus,
+            systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
           policykit-1
 Pre-Depends: ${shlibs:Pre-Depends},
@@ -73,7 +74,6 @@ Pre-Depends: ${shlibs:Pre-Depends},
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
-         systemd-timesyncd | time-daemon,
          util-linux (>= 2.27.1),
          mount (>= 2.26),
          adduser,
@@ -185,7 +185,7 @@ Package: systemd-timesyncd
 Architecture: linux-any
 Multi-Arch: foreign
 Section: admin
-Priority: optional
+Priority: standard
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
