@@ -1,10 +1,16 @@
 systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
 
+  [ Lukas Märdian ]
   * Allow target units to fail (LP: #1948476)
     File: d/p/lp1948476-pid1-target-units-can-fail-through-dependencies.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fe0cb0bd66baea89d8bbe47cb47d88540f46d470
 
- -- Lukas Märdian <slyon@ubuntu.com>  Fri, 05 Nov 2021 12:14:56 +0100
+  [ Dan Streetman ]
+  * d/p/lp1944711-login-filenames-in-run-systemd-users-are-uids.patch:
+    Fix systemd-logind restart loading of existing sessions
+    (LP: #1944711)
+
+ -- Dan Streetman <ddstreet@ieee.org>  Wed, 10 Nov 2021 11:35:23 -0500
 
 systemd (245.4-4ubuntu3.13) focal; urgency=medium
 
