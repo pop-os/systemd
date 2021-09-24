@@ -44,6 +44,8 @@ debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
+debian/timedatectl-lp1650688.patch
+debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
 debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
 Revert-namespace-be-more-careful-when-handling-namespacin.patch
