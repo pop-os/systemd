@@ -1,3 +1,12 @@
+systemd (247.9-3) unstable; urgency=medium
+
+  * Revert multipath symlink race fix.
+    Revert upstream commits which caused a regression in udev resulting in
+    long delays when processing partitions with the same label.
+    (Closes: #993738)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 25 Sep 2021 22:01:17 +0200
+
 systemd (247.9-2) unstable; urgency=medium
 
   * Demote systemd-timesyncd from Depends to Recommends.
