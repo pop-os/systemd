@@ -1,0 +1,30 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Sat, 25 Sep 2021 21:07:17 +0200
+Subject: Revert "udev: fix memleak"
+
+This reverts commit 5dd2b56443e2ed81c238094f516a622804b35518.
+---
+ src/udev/udev-node.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/udev/udev-node.c b/src/udev/udev-node.c
+index b8b93ee..2cc78c9 100644
+--- a/src/udev/udev-node.c
++++ b/src/udev/udev-node.c
+@@ -194,7 +194,7 @@ static int link_find_prioritized(sd_device *dev, bool add, const char *stackdir,
+ 
+ /* manage "stack of names" with possibly specified device priorities */
+ static int link_update(sd_device *dev, const char *slink, bool add) {
+-        _cleanup_free_ char *filename = NULL, *dirname = NULL;
++        _cleanup_free_ char *target = NULL, *filename = NULL, *dirname = NULL;
+         char name_enc[PATH_MAX];
+         const char *id_filename;
+         int i, r, retries;
+@@ -237,7 +237,6 @@ static int link_update(sd_device *dev, const char *slink, bool add) {
+         retries = sd_device_get_is_initialized(dev) > 0 ? LINK_UPDATE_MAX_RETRIES : 1;
+ 
+         for (i = 0; i < retries; i++) {
+-                _cleanup_free_ char *target = NULL;
+                 struct stat st1 = {}, st2 = {};
+ 
+                 r = stat(dirname, &st1);

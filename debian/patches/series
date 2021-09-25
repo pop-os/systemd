@@ -25,3 +25,6 @@ debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/test-disable-DnsmasqClientTest.test_resolved_etc_hosts-in.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
+debian/Revert-udev-fix-memleak.patch
+debian/Revert-udev-link_update-should-fail-if-the-entry-in-symli.patch
+debian/Revert-udev-make-algorithm-that-selects-highest-priority-.patch
