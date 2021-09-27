@@ -28,3 +28,4 @@ debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Revert-udev-fix-memleak.patch
 debian/Revert-udev-link_update-should-fail-if-the-entry-in-symli.patch
 debian/Revert-udev-make-algorithm-that-selects-highest-priority-.patch
+debian/Revert-tests-udev-test.pl-add-multiple-device-test.patch
