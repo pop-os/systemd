@@ -1,3 +1,25 @@
+systemd (247.9-4) unstable; urgency=medium
+
+  * Revert "tests/udev-test.pl: add multiple device test"
+    Follow-up to make sure the udev autopkgtest passes successfully again
+    after reverting the multipath symlink race fix.
+  * test: Fix flakiness in TEST-10-ISSUE-2467
+  * autopktest: Fix timedated test dependencies.
+    Add an explicit systemd-timesyncd dependency as it is required by the
+    timedated test.
+  * autopkgtest: Merge configuration of logind test with timedated and related
+    tests.
+    They share the same restrictions and merging them avoids a bit of
+    duplication.
+  * Revert "test: disable DnsmasqClientTest.test_resolved_etc_hosts in
+    networkd-test.py"
+    Let's see if this test is still flaky on debci.
+  * networkd-test: fix resolved_domain_restricted_dns.
+    Cherry-pick upstream commit which hopefully fixes the flakiness in
+    DnsmasqClientTest.test_resolved_domain_restricted_dns.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 01 Oct 2021 10:12:14 +0200
+
 systemd (247.9-3) unstable; urgency=medium
 
   * Revert multipath symlink race fix.
