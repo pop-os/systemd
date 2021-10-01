@@ -4,6 +4,7 @@ rules-Move-ID_SMARTCARD_READER-definition-to-a-70-configu.patch
 table-drop-trailing-white-spaces-of-the-last-cell-in-row.patch
 basic-unit-name-adjust-comments.patch
 test-fix-TEST-10-ISSUE-2467.patch
+networkd-test-fix-resolved_domain_restricted_dns.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
