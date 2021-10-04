@@ -1,4 +1,4 @@
-systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
+systemd (248.3-1ubuntu8) impish; urgency=medium
 
   [ Dan Streetman ]
   * d/p/dell-clamshell-accel-location-base-with-sku.patch:
@@ -14,7 +14,7 @@ systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
     File: debian/tests/tests-in-lxd
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f9f340f74abdc4060cfd27a7cb3001929b6f9cf4
 
- -- Lukas Märdian <slyon@ubuntu.com>  Mon, 04 Oct 2021 11:21:48 +0200
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 04 Oct 2021 11:23:28 +0200
 
 systemd (248.3-1ubuntu7) impish; urgency=medium
 
