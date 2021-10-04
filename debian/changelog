@@ -10,8 +10,11 @@ systemd (248.3-1ubuntu8) UNRELEASED; urgency=medium
     Files:
     - debian/patches/lp1942113.patch
     - debian/patches/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+  * Drop snapd cgroupv2 workaround, not needed anymore as of snapd 2.53~pre1
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f9f340f74abdc4060cfd27a7cb3001929b6f9cf4
 
- -- Lukas Märdian <slyon@ubuntu.com>  Mon, 13 Sep 2021 12:59:26 +0200
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 04 Oct 2021 11:21:48 +0200
 
 systemd (248.3-1ubuntu7) impish; urgency=medium
 
