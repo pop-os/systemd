@@ -1,0 +1,59 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Fri, 1 Oct 2021 01:00:28 +0200
+Subject: networkd-test: fix resolved_domain_restricted_dns
+
+megasearch.net was meant to be a non-existing bogus domain, and had been
+for a long time. But it seems some domain grabber recently registered
+it, and it's an actual thing now:
+
+  $ host megasearch.net
+  megasearch.net has address 207.148.248.143
+
+This causes the test to fail randomly.
+
+Use search.example.com instead which yields
+
+  $ host search.example.com
+  Host search.example.com not found: 3(NXDOMAIN)
+
+Fixes: #18357
+(cherry picked from commit 528dd6a42389fcf4aa490c0fa0d858772e930d13)
+---
+ test/networkd-test.py | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index 799df08..6062207 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -635,7 +635,7 @@ Name={}
+ [Network]
+ DHCP=ipv4
+ IPv6AcceptRA=False
+-DNSSECNegativeTrustAnchors=megasearch.net
++DNSSECNegativeTrustAnchors=search.example.com
+ '''.format(self.iface))
+ 
+         # create second device/dnsmasq for a .company/.lab VPN interface
+@@ -681,8 +681,8 @@ DNSSECNegativeTrustAnchors=company lab
+         self.assertIn(b'kettle.cantina.company: 10.241.4.4', out)
+ 
+         # test general domains
+-        out = subprocess.check_output(['resolvectl', 'query', 'megasearch.net'])
+-        self.assertIn(b'megasearch.net: 192.168.42.1', out)
++        out = subprocess.check_output(['resolvectl', 'query', 'search.example.com'])
++        self.assertIn(b'search.example.com: 192.168.42.1', out)
+ 
+         with open(self.dnsmasq_log) as f:
+             general_log = f.read()
+@@ -696,8 +696,8 @@ DNSSECNegativeTrustAnchors=company lab
+         self.assertNotIn('.company', general_log)
+ 
+         # general domains should not be sent to the VPN DNS
+-        self.assertRegex(general_log, 'query.*megasearch.net')
+-        self.assertNotIn('megasearch.net', vpn_log)
++        self.assertRegex(general_log, 'query.*search.example.com')
++        self.assertNotIn('search.example.com', vpn_log)
+ 
+     def test_resolved_etc_hosts(self):
+         '''resolved queries to /etc/hosts'''

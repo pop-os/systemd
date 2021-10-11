@@ -224,6 +224,74 @@ systemd (248-1) experimental; urgency=medium
 
  -- Michael Biebl <biebl@debian.org>  Thu, 06 May 2021 23:00:08 +0200
 
+systemd (247.9-4) unstable; urgency=medium
+
+  * Revert "tests/udev-test.pl: add multiple device test"
+    Follow-up to make sure the udev autopkgtest passes successfully again
+    after reverting the multipath symlink race fix.
+  * test: Fix flakiness in TEST-10-ISSUE-2467
+  * autopktest: Fix timedated test dependencies.
+    Add an explicit systemd-timesyncd dependency as it is required by the
+    timedated test.
+  * autopkgtest: Merge configuration of logind test with timedated and related
+    tests.
+    They share the same restrictions and merging them avoids a bit of
+    duplication.
+  * Revert "test: disable DnsmasqClientTest.test_resolved_etc_hosts in
+    networkd-test.py"
+    Let's see if this test is still flaky on debci.
+  * networkd-test: fix resolved_domain_restricted_dns.
+    Cherry-pick upstream commit which hopefully fixes the flakiness in
+    DnsmasqClientTest.test_resolved_domain_restricted_dns.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 01 Oct 2021 10:12:14 +0200
+
+systemd (247.9-3) unstable; urgency=medium
+
+  * Revert multipath symlink race fix.
+    Revert upstream commits which caused a regression in udev resulting in
+    long delays when processing partitions with the same label.
+    (Closes: #993738)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 25 Sep 2021 22:01:17 +0200
+
+systemd (247.9-2) unstable; urgency=medium
+
+  * Demote systemd-timesyncd from Depends to Recommends.
+    This avoids a dependency cycle between systemd and systemd-timesyncd and
+    thus makes dist upgrades more predictable and robust.
+    It also allows minimal, systemd based containers where no NTP client is
+    strictly necessary.
+    To ensure that systemd-timesyncd is installed in a default installation
+    created by d-i, bump its priority to standard. (Closes: #986651, #993947)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 22 Sep 2021 21:10:53 +0200
+
+systemd (247.9-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 247.9
+  * Rebase patches
+  * Fix removal of systemd-hwdb-update.service.
+    As we don't support factory-reset, we don't need this service.
+    In Debian, the hwdb binary database is updated via a dpkg file trigger.
+
+  [ Balint Reczey ]
+  * debian/rules: Don't ship README files in (/usr)/lib/*.d.
+    README files are typically shipped in /usr/share/doc.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 15 Aug 2021 21:10:56 +0200
+
+systemd (247.3-6) unstable; urgency=high
+
+  * Non-maintainer upload (acked by maintainers)
+  * unit-name: generate a clear error code when converting an overly long fs
+    path to a unit name
+  * basic/unit-name: do not use strdupa() on a path (CVE-2021-33910)
+  * basic/unit-name: adjust comments
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Tue, 13 Jul 2021 19:29:24 +0200
+
 systemd (247.3-5) unstable; urgency=medium
 
   * udev-udeb: setup /dev/fd, /dev/std{in,out,err} symlinks.
