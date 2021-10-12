@@ -1,3 +1,11 @@
+systemd (249.4-2) unstable; urgency=medium
+
+  * Upload to unstable
+  * Remove unused initialize_coredump() function
+  * Fix #993738 by pulling the patches from upstream PR#20603
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 12 Oct 2021 14:03:31 +0200
+
 systemd (249.4-1) experimental; urgency=medium
 
   * New upstream version 249.4
