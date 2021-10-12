@@ -1,5 +1,4 @@
 test-fix-TEST-10-ISSUE-2467.patch
-networkd-test-fix-resolved_domain_restricted_dns.patch
 sd-device-introduce-device_has_devlink.patch
 udev-node-split-out-permission-handling-from-udev_node_ad.patch
 udev-node-stack-directory-must-exist-when-adding-device-n.patch
