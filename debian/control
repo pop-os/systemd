@@ -67,7 +67,7 @@ Architecture: linux-any
 Multi-Arch: foreign
 Section: admin
 Priority: important
-Recommends: dbus,
+Recommends: default-dbus-system-bus | dbus-system-bus,
             networkd-dispatcher,
             systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
@@ -140,7 +140,7 @@ Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
-         dbus
+         default-dbus-system-bus | dbus-system-bus
 Recommends: libnss-mymachines,
 Description: systemd container/nspawn tools
  This package provides systemd's tools for nspawn and container/VM management:
@@ -224,7 +224,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
          libpam-runtime (>= 1.0.1-6),
-         dbus,
+         default-dbus-system-bus | dbus-system-bus,
          systemd-sysv
 Provides: logind (= ${binary:Version}), default-logind (= ${binary:Version})
 Description: system and service manager - PAM module
