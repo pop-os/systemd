@@ -1,3 +1,14 @@
+systemd (249.5-2) unstable; urgency=medium
+
+  [ Helmut Grohne ]
+  * Fix FTCBFS: Annotate python3-jinja2 dependency with :native
+    (Closes: #996501)
+
+  [ Michael Biebl ]
+  * hwdb: Allow console users access to media* nodes (Closes: #996749)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 02 Nov 2021 17:29:45 +0100
+
 systemd (249.5-1) unstable; urgency=medium
 
   * New upstream version 249.5
