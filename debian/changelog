@@ -1,3 +1,11 @@
+systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
+
+  * Allow target units to fail (LP: #1948476)
+    File: d/p/lp1948476-pid1-target-units-can-fail-through-dependencies.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fe0cb0bd66baea89d8bbe47cb47d88540f46d470
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 05 Nov 2021 12:14:56 +0100
+
 systemd (245.4-4ubuntu3.13) focal; urgency=medium
 
   * d/p/dell-clamshell-accel-location-base-with-sku.patch:
