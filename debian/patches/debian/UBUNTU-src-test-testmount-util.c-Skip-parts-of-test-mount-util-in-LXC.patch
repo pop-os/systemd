@@ -8,10 +8,10 @@ LP: #1878051
  1 file changed, 11 insertions(+)
 
 diff --git a/src/test/test-mount-util.c b/src/test/test-mount-util.c
-index 2e9116d..70fde1e 100644
+index d3d0040..3038b03 100644
 --- a/src/test/test-mount-util.c
 +++ b/src/test/test-mount-util.c
-@@ -15,6 +15,7 @@
+@@ -19,6 +19,7 @@
  #include "strv.h"
  #include "tests.h"
  #include "tmpfile-util.h"
@@ -19,7 +19,7 @@ index 2e9116d..70fde1e 100644
  
  static void test_mount_option_mangle(void) {
          char *opts = NULL;
-@@ -75,6 +76,11 @@ static void test_bind_remount_recursive(void) {
+@@ -134,6 +135,11 @@ static void test_bind_remount_recursive(void) {
          _cleanup_free_ char *subdir = NULL;
          const char *p;
  
@@ -28,10 +28,10 @@ index 2e9116d..70fde1e 100644
 +                return;
 +        }
 +
-         if (geteuid() != 0) {
-                 (void) log_tests_skipped("not running as root");
-                 return;
-@@ -133,6 +139,11 @@ static void test_bind_remount_one(void) {
+         log_info("/* %s */", __func__);
+ 
+         if (geteuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0) {
+@@ -196,6 +202,11 @@ static void test_bind_remount_one(void) {
                  return;
          }
  
