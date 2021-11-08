@@ -13,7 +13,7 @@ Co-authored-by: Dan Streetman <ddstreet@canonical.com>
  4 files changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
-index 3fdf5de..666275f 100644
+index ef6fa24..579ea17 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
 @@ -246,10 +246,10 @@
@@ -43,7 +43,7 @@ index eab4c7e..ad15c7a 100644
  Resolve.ReadEtcHosts,              config_parse_bool,                    0,                   offsetof(Manager, read_etc_hosts)
  Resolve.ResolveUnicastSingleLabel, config_parse_bool,                    0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index ed5d41a..1fae6cc 100644
+index 246e2d9..74e29a4 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -591,7 +591,7 @@ int manager_new(Manager **ret) {
@@ -56,13 +56,13 @@ index ed5d41a..1fae6cc 100644
                  .read_resolv_conf = true,
                  .need_builtin_fallbacks = true,
 diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
-index ba448c4..c7a8303 100644
+index 6d4176d..3c506f9 100644
 --- a/src/resolve/resolved.conf.in
 +++ b/src/resolve/resolved.conf.in
 @@ -26,7 +26,7 @@
- #DNSOverTLS=@DEFAULT_DNS_OVER_TLS_MODE@
- #MulticastDNS=@DEFAULT_MDNS_MODE@
- #LLMNR=@DEFAULT_LLMNR_MODE@
+ #DNSOverTLS={{DEFAULT_DNS_OVER_TLS_MODE_STR}}
+ #MulticastDNS={{DEFAULT_MDNS_MODE_STR}}
+ #LLMNR={{DEFAULT_LLMNR_MODE_STR}}
 -#Cache=yes
 +#Cache=no-negative
  #CacheFromLocalhost=no
