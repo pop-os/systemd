@@ -15,7 +15,6 @@
 #include "analyze-condition.h"
 #include "analyze-security.h"
 #include "analyze-verify.h"
-#include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
@@ -53,6 +52,7 @@
 #include "unit-name.h"
 #include "util.h"
 #include "verbs.h"
+#include "version.h"
 
 #define SCALE_X (0.1 / 1000.0) /* pixels per us */
 #define SCALE_Y (20.0)
@@ -342,7 +342,7 @@ static int acquire_time_data(sd_bus *bus, UnitTimes **out) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(unit_times_free_arrayp) UnitTimes *unit_times = NULL;
         BootTimes *boot_times = NULL;
-        size_t allocated = 0, c = 0;
+        size_t c = 0;
         UnitInfo u;
         int r;
 
@@ -361,7 +361,7 @@ static int acquire_time_data(sd_bus *bus, UnitTimes **out) {
         while ((r = bus_parse_unit_info(reply, &u)) > 0) {
                 UnitTimes *t;
 
-                if (!GREEDY_REALLOC(unit_times, allocated, c + 2))
+                if (!GREEDY_REALLOC(unit_times, c + 2))
                         return log_oom();
 
                 unit_times[c + 1].has_data = false;

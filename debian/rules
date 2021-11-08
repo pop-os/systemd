@@ -111,6 +111,7 @@ CONFFLAGS_deb = \
 	-Dnss-resolve=true \
 	-Dnss-systemd=true \
 	-Dresolve=true \
+	-Dstandalone-binaries=true \
 	-Dlink-systemctl-shared=false
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -244,19 +245,27 @@ override_dh_install:
 	# remove files related to factory-reset feature
 	find debian/install/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \
-		-name systemd-udev-hwdb-update.service -o \
+		-name systemd-hwdb-update.service -o \
 		-name ldconfig.service -o \
-		-name etc.conf \) -delete
+		-name etc.conf \) -print -delete
 	rm -rf debian/install/*/usr/share/factory/
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
 	# remove resolvconf compat symlink
 	rm -f debian/install/*/sbin/resolvconf
+	# remove obsolete compat symlink
+	rm -f debian/install/*/usr/bin/systemd-resolve
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
 
 	dh_install --remaining-packages --sourcedir=debian/install/deb
+
+	# install standalone binaries
+	for pkg in sysusers tmpfiles; do \
+		mkdir -p debian/systemd-standalone-$$pkg/bin; \
+		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
+	done
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
@@ -276,7 +285,7 @@ endif
 
 	# remove duplicate files shipped by systemd-*/udev
 	echo "Removing duplicate files in systemd package:"
-	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd); do \
+	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
 		echo "... from $$pkg..."; \
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
 		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \

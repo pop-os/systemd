@@ -1,3 +1,162 @@
+systemd (249.5-2) unstable; urgency=medium
+
+  [ Helmut Grohne ]
+  * Fix FTCBFS: Annotate python3-jinja2 dependency with :native
+    (Closes: #996501)
+
+  [ Michael Biebl ]
+  * hwdb: Allow console users access to media* nodes (Closes: #996749)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 02 Nov 2021 17:29:45 +0100
+
+systemd (249.5-1) unstable; urgency=medium
+
+  * New upstream version 249.5
+  * Rebase patches
+  * Update debian/copyright
+  * Clean up lintian overrides
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 12 Oct 2021 22:39:59 +0200
+
+systemd (249.4-2) unstable; urgency=medium
+
+  * Upload to unstable
+  * Remove unused initialize_coredump() function
+  * Fix #993738 by pulling the patches from upstream PR#20603
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 12 Oct 2021 14:03:31 +0200
+
+systemd (249.4-1) experimental; urgency=medium
+
+  * New upstream version 249.4
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 30 Aug 2021 11:20:16 +0200
+
+systemd (249.3-4) experimental; urgency=medium
+
+  * Add Conflicts/Replaces: systemd to systemd-standalone-{sysusers,tmpfiles}
+    This allows upgrades from older systemd versions which do not have
+    Provides: systemd-{sysusers,tmpfiles}. (Closes: #992376)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 25 Aug 2021 09:35:03 +0200
+
+systemd (249.3-3) experimental; urgency=medium
+
+  * Use C/R/P for systemd-sysusers and systemd-tmpfiles.
+    It's an interface/facility that can only be provided by a single package
+    at a time.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Aug 2021 22:45:02 +0200
+
+systemd (249.3-2) experimental; urgency=medium
+
+  * Provide standalone binaries for sysusers and tmpfiles (Closes: #946456)
+  * Fix test dependencies of upstream test.
+    After splitting out the standalone binaries for sysusers and tmpfiles
+    into separate packages (which conflict with the main systemd package),
+    we can no longer use the '@' notation in the upstream test.
+    This reverts commit 5eeeb1b562a1a9802df105091bda4741c263336d and also
+    adds systemd-tests and systemd-timesyncd to the upstream test
+    dependencies.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 08 Aug 2021 22:51:18 +0200
+
+systemd (249.3-1) experimental; urgency=medium
+
+  * New upstream version 249.3
+  * Rebase patches
+  * Remove obsolete systemd-resolve compat symlink
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 08 Aug 2021 22:39:25 +0200
+
+systemd (249.2-2) experimental; urgency=medium
+
+  * Remove obsolete upgrade code from maintainer scripts
+  * Clean up old versions from maintscript files
+  * Drop obsolete systemd Breaks/Replaces
+  * Drop obsolete python-dbusmock Breaks
+  * Turn versioned systemd-shim Breaks into unversioned Conflicts.
+    There never was a fixed systemd-shim version before it was removed from
+    the archive.
+  * Drop patches which are no longer needed after bullseye
+  * Stop setting up device symlinks for CD-RW/DVD drives.
+    Those udev rules were a Debian specific workaround that were mainly
+    added for compat with older software which wasn't able to automatically
+    discover those types of devices. Those rules didn't provide
+    stable/predictable names though, so remove them. (Closes: #991639)
+  * autopkgtest: add systemd-timesyncd dependency to timedated test.
+    We need systemd-timesyncd in the timedated test, not just an arbitrary
+    provider of time-daemon.
+  * autopkgtest: clean up dependencies of boot-smoke test.
+    A lot of the dependencies are not needed but were originally added to
+    avoid a testbed reset and make it possible to reuse the testbed of the
+    upstream test. This turned out to be a maintenance problem and the
+    dependencies were not updated accordingly. Instead of trying to keep the
+    two tests in sync, trim down the boot-smoke dependencies to its bare
+    minimum.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 31 Jul 2021 21:49:05 +0200
+
+systemd (249.2-1) experimental; urgency=medium
+
+  * New upstream version 249.2
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 23 Jul 2021 21:44:35 +0200
+
+systemd (249.1-1) experimental; urgency=medium
+
+  * New upstream version 249.1
+    - basic/unit-name: do not use strdupa() on a path (CVE-2021-33910)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 20 Jul 2021 21:20:12 +0200
+
+systemd (249-1) experimental; urgency=medium
+
+  * New upstream version 249
+  * Rebase patches
+  * Update symbol versions for the v249 release
+  * Fix removal of systemd-hwdb-update.service.
+    As we don't support factory-reset, we don't need this service.
+    In Debian, the hwdb binary database is updated via a dpkg file trigger.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 07 Jul 2021 22:33:31 +0200
+
+systemd (249~rc3-1) experimental; urgency=medium
+
+  * New upstream version 249~rc3
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 01 Jul 2021 23:55:11 +0200
+
+systemd (249~rc2-1) experimental; urgency=medium
+
+  * New upstream version 249~rc2
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 27 Jun 2021 17:10:18 +0200
+
+systemd (249~rc1-1) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 249~rc1
+  * Rebase patches
+  * Replace m4 Build-Depends with python3-jinja2
+  * Update symbols file for libsystemd0
+  * test: do not run 'meson configure' if NO_BUILD is set
+  * test: drop the mawk-incompatible expression
+  * Add gawk <!nocheck> to Build-Depends.
+    It is used in tools/check-directives.sh which is run during "meson test".
+  * autopkgtest: add udev dependency to unit-tests.
+    Without a properly set up hwdb the test-sd-hwdb test is skipped.
+
+  [ Luca Boccassi ]
+  * autopkgtest: add dependency on dosfstools for upstream test.
+    Needed to create EFI partition (vfat)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 17 Jun 2021 18:09:43 +0200
+
 systemd (248.3-1ubuntu8) impish; urgency=medium
 
   [ Dan Streetman ]
@@ -280,6 +439,74 @@ systemd (248-1) experimental; urgency=medium
     urlification. This requires less 563 or later.
 
  -- Michael Biebl <biebl@debian.org>  Thu, 06 May 2021 23:00:08 +0200
+
+systemd (247.9-4) unstable; urgency=medium
+
+  * Revert "tests/udev-test.pl: add multiple device test"
+    Follow-up to make sure the udev autopkgtest passes successfully again
+    after reverting the multipath symlink race fix.
+  * test: Fix flakiness in TEST-10-ISSUE-2467
+  * autopktest: Fix timedated test dependencies.
+    Add an explicit systemd-timesyncd dependency as it is required by the
+    timedated test.
+  * autopkgtest: Merge configuration of logind test with timedated and related
+    tests.
+    They share the same restrictions and merging them avoids a bit of
+    duplication.
+  * Revert "test: disable DnsmasqClientTest.test_resolved_etc_hosts in
+    networkd-test.py"
+    Let's see if this test is still flaky on debci.
+  * networkd-test: fix resolved_domain_restricted_dns.
+    Cherry-pick upstream commit which hopefully fixes the flakiness in
+    DnsmasqClientTest.test_resolved_domain_restricted_dns.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 01 Oct 2021 10:12:14 +0200
+
+systemd (247.9-3) unstable; urgency=medium
+
+  * Revert multipath symlink race fix.
+    Revert upstream commits which caused a regression in udev resulting in
+    long delays when processing partitions with the same label.
+    (Closes: #993738)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 25 Sep 2021 22:01:17 +0200
+
+systemd (247.9-2) unstable; urgency=medium
+
+  * Demote systemd-timesyncd from Depends to Recommends.
+    This avoids a dependency cycle between systemd and systemd-timesyncd and
+    thus makes dist upgrades more predictable and robust.
+    It also allows minimal, systemd based containers where no NTP client is
+    strictly necessary.
+    To ensure that systemd-timesyncd is installed in a default installation
+    created by d-i, bump its priority to standard. (Closes: #986651, #993947)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 22 Sep 2021 21:10:53 +0200
+
+systemd (247.9-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 247.9
+  * Rebase patches
+  * Fix removal of systemd-hwdb-update.service.
+    As we don't support factory-reset, we don't need this service.
+    In Debian, the hwdb binary database is updated via a dpkg file trigger.
+
+  [ Balint Reczey ]
+  * debian/rules: Don't ship README files in (/usr)/lib/*.d.
+    README files are typically shipped in /usr/share/doc.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 15 Aug 2021 21:10:56 +0200
+
+systemd (247.3-6) unstable; urgency=high
+
+  * Non-maintainer upload (acked by maintainers)
+  * unit-name: generate a clear error code when converting an overly long fs
+    path to a unit name
+  * basic/unit-name: do not use strdupa() on a path (CVE-2021-33910)
+  * basic/unit-name: adjust comments
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Tue, 13 Jul 2021 19:29:24 +0200
 
 systemd (247.3-5ubuntu1) impish; urgency=medium
 

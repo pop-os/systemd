@@ -571,7 +571,7 @@ int get_home_dir(char **_h) {
                 if (!h)
                         return -ENOMEM;
 
-                *_h = path_simplify(h, true);
+                *_h = path_simplify(h);
                 return 0;
         }
 
@@ -609,7 +609,7 @@ int get_home_dir(char **_h) {
         if (!h)
                 return -ENOMEM;
 
-        *_h = path_simplify(h, true);
+        *_h = path_simplify(h);
         return 0;
 }
 
@@ -628,7 +628,7 @@ int get_shell(char **_s) {
                 if (!s)
                         return -ENOMEM;
 
-                *_s = path_simplify(s, true);
+                *_s = path_simplify(s);
                 return 0;
         }
 
@@ -666,7 +666,7 @@ int get_shell(char **_s) {
         if (!s)
                 return -ENOMEM;
 
-        *_s = path_simplify(s, true);
+        *_s = path_simplify(s);
         return 0;
 }
 
@@ -1072,3 +1072,16 @@ int fgetsgent_sane(FILE *stream, struct sgrp **sg) {
         return !!s;
 }
 #endif
+
+int is_this_me(const char *username) {
+        uid_t uid;
+        int r;
+
+        /* Checks if the specified username is our current one. Passed string might be a UID or a user name. */
+
+        r = get_user_creds(&username, &uid, NULL, NULL, NULL, USER_CREDS_ALLOW_MISSING);
+        if (r < 0)
+                return r;
+
+        return uid == getuid();
+}

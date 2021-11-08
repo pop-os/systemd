@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/loop.h>
+#include <linux/magic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/file.h>
@@ -34,6 +35,7 @@
 #include "os-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
+#include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -160,7 +162,7 @@ static int image_new(
         if (!i->path)
                 return -ENOMEM;
 
-        path_simplify(i->path, false);
+        path_simplify(i->path);
 
         *ret = TAKE_PTR(i);
 
@@ -262,7 +264,7 @@ static int image_make(
 
                 if (btrfs_might_be_subvol(st)) {
 
-                        r = btrfs_is_filesystem(fd);
+                        r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                         if (r < 0)
                                 return r;
                         if (r) {
@@ -303,7 +305,7 @@ static int image_make(
                 }
 
                 /* Get directory creation time (not available everywhere, but that's OK */
-                (void) fd_getcrtime(dfd, &crtime);
+                (void) fd_getcrtime(fd, &crtime);
 
                 /* If the IMMUTABLE bit is set, we consider the directory read-only. Since the ioctl is not
                  * supported everywhere we ignore failures. */
@@ -1198,7 +1200,17 @@ int image_read_metadata(Image *i) {
                 if (r < 0)
                         return r;
 
-                r = dissect_image(d->fd, NULL, NULL, DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_RELAX_VAR_CHECK, &m);
+                r = dissect_image(
+                                d->fd,
+                                NULL, NULL,
+                                d->uevent_seqnum_not_before,
+                                d->timestamp_not_before,
+                                DISSECT_IMAGE_GENERIC_ROOT |
+                                DISSECT_IMAGE_REQUIRE_ROOT |
+                                DISSECT_IMAGE_RELAX_VAR_CHECK |
+                                DISSECT_IMAGE_READ_ONLY |
+                                DISSECT_IMAGE_USR_NO_ROOT,
+                                &m);
                 if (r < 0)
                         return r;
 

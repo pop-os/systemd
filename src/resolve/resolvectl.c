@@ -104,22 +104,15 @@ static int interface_info_compare(const InterfaceInfo *a, const InterfaceInfo *b
 
 int ifname_mangle(const char *s) {
         _cleanup_free_ char *iface = NULL;
-        const char *dot;
         int ifi;
 
         assert(s);
 
-        dot = strchr(s, '.');
-        if (dot) {
-                log_debug("Ignoring protocol specifier '%s'.", dot + 1);
-                iface = strndup(s, dot - s);
-
-        } else
-                iface = strdup(s);
+        iface = strdup(s);
         if (!iface)
                 return log_oom();
 
-        ifi = resolve_interface(NULL, iface);
+        ifi = rtnl_resolve_interface(NULL, iface);
         if (ifi < 0) {
                 if (ifi == -ENODEV && arg_ifindex_permissive) {
                         log_debug("Interface '%s' not found, but -f specified, ignoring.", iface);
@@ -136,6 +129,24 @@ int ifname_mangle(const char *s) {
         free_and_replace(arg_ifname, iface);
 
         return 1;
+}
+
+int ifname_resolvconf_mangle(const char *s) {
+        const char *dot;
+
+        assert(s);
+
+        dot = strchr(s, '.');
+        if (dot) {
+                _cleanup_free_ char *iface = NULL;
+
+                log_debug("Ignoring protocol specifier '%s'.", dot + 1);
+                iface = strndup(s, dot - s);
+                if (!iface)
+                        return log_oom();
+                return ifname_mangle(iface);
+        } else
+                return ifname_mangle(s);
 }
 
 static void print_source(uint64_t flags, usec_t rtt) {
@@ -1963,7 +1974,7 @@ static int status_all(sd_bus *bus, StatusMode mode) {
                 return log_error_errno(r, "Failed to enumerate links: %m");
 
         _cleanup_free_ InterfaceInfo *infos = NULL;
-        size_t n_allocated = 0, n_infos = 0;
+        size_t n_infos = 0;
 
         for (sd_netlink_message *i = reply; i; i = sd_netlink_message_next(i)) {
                 const char *name;
@@ -1988,7 +1999,7 @@ static int status_all(sd_bus *bus, StatusMode mode) {
                 if (r < 0)
                         return rtnl_log_parse_error(r);
 
-                if (!GREEDY_REALLOC(infos, n_allocated, n_infos + 1))
+                if (!GREEDY_REALLOC(infos, n_infos + 1))
                         return log_oom();
 
                 infos[n_infos++] = (InterfaceInfo) { ifindex, name };
@@ -2018,7 +2029,7 @@ static int verb_status(int argc, char **argv, void *userdata) {
                 STRV_FOREACH(ifname, argv + 1) {
                         int ifindex, q;
 
-                        ifindex = resolve_interface(&rtnl, *ifname);
+                        ifindex = rtnl_resolve_interface(&rtnl, *ifname);
                         if (ifindex < 0) {
                                 log_warning_errno(ifindex, "Failed to resolve interface \"%s\", ignoring: %m", *ifname);
                                 continue;

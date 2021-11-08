@@ -7,22 +7,47 @@
 #include <sys/types.h>
 
 #include "ether-addr-util.h"
+#include "hexdecoct.h"
 #include "macro.h"
 #include "string-util.h"
 
-char* hw_addr_to_string(const hw_addr_data *addr, char buffer[HW_ADDR_TO_STRING_MAX]) {
+char* hw_addr_to_string(const struct hw_addr_data *addr, char buffer[HW_ADDR_TO_STRING_MAX]) {
         assert(addr);
         assert(buffer);
         assert(addr->length <= HW_ADDR_MAX_SIZE);
 
-        for (size_t i = 0; i < addr->length; i++) {
-                sprintf(&buffer[3*i], "%02"PRIx8, addr->addr.bytes[i]);
-                if (i < addr->length - 1)
-                        buffer[3*i + 2] = ':';
+        for (size_t i = 0, j = 0; i < addr->length; i++) {
+                buffer[j++] = hexchar(addr->bytes[i] >> 4);
+                buffer[j++] = hexchar(addr->bytes[i] & 0x0f);
+                buffer[j++] = ':';
         }
 
+        buffer[addr->length > 0 ? addr->length * 3 - 1 : 0] = '\0';
         return buffer;
 }
+
+int hw_addr_compare(const struct hw_addr_data *a, const struct hw_addr_data *b) {
+        int r;
+
+        assert(a);
+        assert(b);
+
+        r = CMP(a->length, b->length);
+        if (r != 0)
+                return r;
+
+        return memcmp(a->bytes, b->bytes, a->length);
+}
+
+static void hw_addr_hash_func(const struct hw_addr_data *p, struct siphash *state) {
+        assert(p);
+        assert(state);
+
+        siphash24_compress(&p->length, sizeof(p->length), state);
+        siphash24_compress(p->bytes, p->length, state);
+}
+
+DEFINE_HASH_OPS(hw_addr_hash_ops, struct hw_addr_data, hw_addr_hash_func, hw_addr_compare);
 
 char* ether_addr_to_string(const struct ether_addr *addr, char buffer[ETHER_ADDR_TO_STRING_MAX]) {
         assert(addr);
@@ -41,6 +66,22 @@ char* ether_addr_to_string(const struct ether_addr *addr, char buffer[ETHER_ADDR
                 addr->ether_addr_octet[5]);
 
         return buffer;
+}
+
+int ether_addr_to_string_alloc(const struct ether_addr *addr, char **ret) {
+        char *buf;
+
+        assert(addr);
+        assert(ret);
+
+        buf = new(char, ETHER_ADDR_TO_STRING_MAX);
+        if (!buf)
+                return -ENOMEM;
+
+        ether_addr_to_string(addr, buf);
+
+        *ret = buf;
+        return 0;
 }
 
 int ether_addr_compare(const struct ether_addr *a, const struct ether_addr *b) {

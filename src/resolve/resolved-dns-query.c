@@ -12,6 +12,10 @@
 
 #define QUERIES_MAX 2048
 #define AUXILIARY_QUERIES_MAX 64
+#define CNAME_REDIRECTS_MAX 16
+
+assert_cc(AUXILIARY_QUERIES_MAX < UINT8_MAX);
+assert_cc(CNAME_REDIRECTS_MAX < UINT8_MAX);
 
 static int dns_query_candidate_new(DnsQueryCandidate **ret, DnsQuery *q, DnsScope *s) {
         DnsQueryCandidate *c;
@@ -199,7 +203,7 @@ static DnsTransactionState dns_query_candidate_state(DnsQueryCandidate *c) {
         if (c->error_code != 0)
                 return DNS_TRANSACTION_ERRNO;
 
-        SET_FOREACH(t, c->transactions) {
+        SET_FOREACH(t, c->transactions)
 
                 switch (t->state) {
 
@@ -229,7 +233,6 @@ static DnsTransactionState dns_query_candidate_state(DnsQueryCandidate *c) {
 
                         break;
                 }
-        }
 
         return state;
 }
@@ -518,7 +521,7 @@ int dns_query_new(
                         log_debug("Looking up bypass packet for %s.",
                                   dns_resource_key_to_string(key, key_str, sizeof key_str));
         } else {
-                /* First dump UTF8  question */
+                /* First dump UTF8 question */
                 DNS_QUESTION_FOREACH(key, question_utf8)
                         log_debug("Looking up RR for %s.",
                                   dns_resource_key_to_string(key, key_str, sizeof key_str));
@@ -1005,9 +1008,9 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
 
         assert(q);
 
-        q->n_cname_redirects++;
-        if (q->n_cname_redirects > CNAME_REDIRECT_MAX)
+        if (q->n_cname_redirects >= CNAME_REDIRECTS_MAX)
                 return -ELOOP;
+        q->n_cname_redirects++;
 
         r = dns_question_cname_redirect(q->question_idna, cname, &nq_idna);
         if (r < 0)
@@ -1099,7 +1102,7 @@ int dns_query_process_cname_one(DnsQuery *q) {
          * Hence we first check of the answers we collected are sufficient to answer all our questions
          * directly. If one question wasn't answered we go on, waiting for more replies. However, if there's
          * a CNAME/DNAME response we use it, and redirect to it, regardless if it was a response to the A or
-         * the AAAA query.*/
+         * the AAAA query. */
 
         DNS_QUESTION_FOREACH(k, question) {
                 bool match = false;
@@ -1273,12 +1276,12 @@ bool dns_query_fully_authoritative(DnsQuery *q) {
 
         /* We are authoritative for everything synthetic (except if a previous CNAME/DNAME) wasn't
          * synthetic. (Note: SD_RESOLVED_SYNTHETIC is reset on each CNAME/DNAME, hence the explicit check for
-         * previous synthetic DNAME/CNAME redirections.)*/
+         * previous synthetic DNAME/CNAME redirections.) */
         if ((q->answer_query_flags & SD_RESOLVED_SYNTHETIC) && !q->previous_redirect_non_synthetic)
                 return true;
 
         /* We are also authoritative for everything coming only from the trust anchor and the local
          * zones. (Note: the SD_RESOLVED_FROM_xyz flags we merge on each redirect, hence no need to
-         * explicitly check previous redirects here.)*/
+         * explicitly check previous redirects here.) */
         return (q->answer_query_flags & SD_RESOLVED_FROM_MASK & ~(SD_RESOLVED_FROM_TRUST_ANCHOR | SD_RESOLVED_FROM_ZONE)) == 0;
 }

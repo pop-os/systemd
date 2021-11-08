@@ -196,7 +196,7 @@ void service_close_socket_fd(Service *s) {
 static void service_stop_watchdog(Service *s) {
         assert(s);
 
-        s->watchdog_event_source = sd_event_source_unref(s->watchdog_event_source);
+        s->watchdog_event_source = sd_event_source_disable_unref(s->watchdog_event_source);
         s->watchdog_timestamp = DUAL_TIMESTAMP_NULL;
 }
 
@@ -395,8 +395,8 @@ static void service_done(Unit *u) {
 
         service_stop_watchdog(s);
 
-        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
-        s->exec_fd_event_source = sd_event_source_unref(s->exec_fd_event_source);
+        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
+        s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
 
         service_release_resources(u);
 }
@@ -548,6 +548,22 @@ static int service_verify(Service *s) {
         assert(s);
         assert(UNIT(s)->load_state == UNIT_LOADED);
 
+        for (ServiceExecCommand c = 0; c < _SERVICE_EXEC_COMMAND_MAX; c++) {
+                ExecCommand *command;
+
+                LIST_FOREACH(command, command, s->exec_command[c]) {
+                        if (!path_is_absolute(command->path) && !filename_is_valid(command->path))
+                                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC),
+                                                            "Service %s= binary path \"%s\" is neither a valid executable name nor an absolute path. Refusing.",
+                                                            command->path,
+                                                            service_exec_command_to_string(c));
+                        if (strv_isempty(command->argv))
+                                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC),
+                                                            "Service has an empty argv in %s=. Refusing.",
+                                                            service_exec_command_to_string(c));
+                }
+        }
+
         if (!s->exec_command[SERVICE_EXEC_START] && !s->exec_command[SERVICE_EXEC_STOP] &&
             UNIT(s)->success_action == EMERGENCY_ACTION_NONE)
                 /* FailureAction= only makes sense if one of the start or stop commands is specified.
@@ -668,7 +684,8 @@ static int service_setup_bus_name(Service *s) {
 
         assert(s);
 
-        if (s->type != SERVICE_DBUS)
+        /* If s->bus_name is not set, then the unit will be refused by service_verify() later. */
+        if (s->type != SERVICE_DBUS || !s->bus_name)
                 return 0;
 
         r = unit_add_dependency_by_name(UNIT(s), UNIT_REQUIRES, SPECIAL_DBUS_SOCKET, true, UNIT_DEPENDENCY_FILE);
@@ -1054,7 +1071,7 @@ static void service_set_state(Service *s, ServiceState state) {
                     SERVICE_FINAL_WATCHDOG, SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL,
                     SERVICE_AUTO_RESTART,
                     SERVICE_CLEANING))
-                s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+                s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
 
         if (!IN_SET(state,
                     SERVICE_START, SERVICE_START_POST,
@@ -1090,7 +1107,7 @@ static void service_set_state(Service *s, ServiceState state) {
                 service_close_socket_fd(s);
 
         if (state != SERVICE_START)
-                s->exec_fd_event_source = sd_event_source_unref(s->exec_fd_event_source);
+                s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
 
         if (!IN_SET(state, SERVICE_START_POST, SERVICE_RUNNING, SERVICE_RELOAD))
                 service_stop_watchdog(s);
@@ -1245,12 +1262,11 @@ static int service_collect_fds(
 
                 rn_socket_fds = 1;
         } else {
-                void *v;
                 Unit *u;
 
                 /* Pass all our configured sockets for singleton services */
 
-                HASHMAP_FOREACH_KEY(v, u, UNIT(s)->dependencies[UNIT_TRIGGERED_BY]) {
+                UNIT_FOREACH_DEPENDENCY(u, UNIT(s), UNIT_ATOM_TRIGGERED_BY) {
                         _cleanup_free_ int *cfds = NULL;
                         Socket *sock;
                         int cn_fds;
@@ -1351,7 +1367,7 @@ static int service_allocate_exec_fd_event_source(
         if (r < 0)
                 return log_unit_error_errno(UNIT(s), r, "Failed to adjust priority of exec_fd event source: %m");
 
-        (void) sd_event_source_set_description(source, "service event_fd");
+        (void) sd_event_source_set_description(source, "service exec_fd");
 
         r = sd_event_source_set_io_fd_own(source, true);
         if (r < 0)
@@ -1364,9 +1380,9 @@ static int service_allocate_exec_fd_event_source(
 static int service_allocate_exec_fd(
                 Service *s,
                 sd_event_source **ret_event_source,
-                int* ret_exec_fd) {
+                int *ret_exec_fd) {
 
-        _cleanup_close_pair_ int p[2] = { -1, -1 };
+        _cleanup_close_pair_ int p[] = { -1, -1 };
         int r;
 
         assert(s);
@@ -1380,7 +1396,7 @@ static int service_allocate_exec_fd(
         if (r < 0)
                 return r;
 
-        p[0] = -1;
+        TAKE_FD(p[0]);
         *ret_exec_fd = TAKE_FD(p[1]);
 
         return 0;
@@ -1410,7 +1426,7 @@ static int service_spawn(
                 ExecCommand *c,
                 usec_t timeout,
                 ExecFlags flags,
-                pid_t *_pid) {
+                pid_t *ret_pid) {
 
         _cleanup_(exec_params_clear) ExecParameters exec_params = {
                 .flags     = flags,
@@ -1427,11 +1443,13 @@ static int service_spawn(
 
         assert(s);
         assert(c);
-        assert(_pid);
+        assert(ret_pid);
 
         r = unit_prepare_exec(UNIT(s)); /* This realizes the cgroup, among other things */
         if (r < 0)
                 return r;
+
+        assert(!s->exec_fd_event_source);
 
         if (flags & EXEC_IS_CONTROL) {
                 /* If this is a control process, mask the permissions/chroot application if this is requested. */
@@ -1458,8 +1476,6 @@ static int service_spawn(
         }
 
         if (!FLAGS_SET(flags, EXEC_IS_CONTROL) && s->type == SERVICE_EXEC) {
-                assert(!s->exec_fd_event_source);
-
                 r = service_allocate_exec_fd(s, &exec_fd_source, &exec_params.exec_fd);
                 if (r < 0)
                         return r;
@@ -1582,7 +1598,7 @@ static int service_spawn(
         if (r < 0)
                 return r;
 
-        *_pid = pid;
+        *ret_pid = pid;
 
         return 0;
 }
@@ -2265,7 +2281,7 @@ static void service_enter_restart(Service *s) {
                 goto fail;
 
         /* Count the jobs we enqueue for restarting. This counter is maintained as long as the unit isn't fully
-         * stopped, i.e. as long as it remains up or remains in auto-start states. The use can reset the counter
+         * stopped, i.e. as long as it remains up or remains in auto-start states. The user can reset the counter
          * explicitly however via the usual "systemctl reset-failure" logic. */
         s->n_restarts ++;
         s->flush_n_restarts = false;
@@ -2440,13 +2456,6 @@ static int service_start(Unit *u) {
 
         assert(IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED));
 
-        /* Make sure we don't enter a busy loop of some kind. */
-        r = unit_test_start_limit(u);
-        if (r < 0) {
-                service_enter_dead(s, SERVICE_FAILURE_START_LIMIT_HIT, false);
-                return r;
-        }
-
         r = unit_acquire_invocation_id(u);
         if (r < 0)
                 return r;
@@ -2559,10 +2568,10 @@ static unsigned service_exec_command_index(Unit *u, ServiceExecCommand id, ExecC
 
 static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command) {
         _cleanup_free_ char *args = NULL, *p = NULL;
-        size_t allocated = 0, length = 0;
         Service *s = SERVICE(u);
         const char *type, *key;
         ServiceExecCommand id;
+        size_t length = 0;
         unsigned idx;
         char **arg;
 
@@ -2591,7 +2600,7 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
                         return log_oom();
 
                 n = strlen(e);
-                if (!GREEDY_REALLOC(args, allocated, length + 2 + n + 2))
+                if (!GREEDY_REALLOC(args, length + 2 + n + 2))
                         return log_oom();
 
                 if (length > 0)
@@ -2603,7 +2612,7 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
                 args[length++] = '"';
         }
 
-        if (!GREEDY_REALLOC(args, allocated, length + 1))
+        if (!GREEDY_REALLOC(args, length + 1))
                 return log_oom();
 
         args[length++] = 0;
@@ -2930,7 +2939,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
 
                 r = extract_first_word(&value, &fdn, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
                 if (r <= 0) {
-                        log_unit_debug_errno(u, r, "Failed to parse fd-store-fd value \"%s\": %m", value);
+                        log_unit_debug(u, "Failed to parse fd-store-fd value: %s", value);
                         return 0;
                 }
 
@@ -3019,7 +3028,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                 if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse exec-fd value: %s", value);
                 else {
-                        s->exec_fd_event_source = sd_event_source_unref(s->exec_fd_event_source);
+                        s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
 
                         fd = fdset_remove(fds, fd);
                         if (service_allocate_exec_fd_event_source(s, fd, &s->exec_fd_event_source) < 0)
@@ -3142,7 +3151,7 @@ static int service_demand_pid_file(Service *s) {
                 return -ENOMEM;
         }
 
-        path_simplify(ps->path, false);
+        path_simplify(ps->path);
 
         /* PATH_CHANGED would not be enough. There are daemons (sendmail) that
          * keep their PID file open all the time. */
@@ -3216,7 +3225,7 @@ static int service_dispatch_exec_io(sd_event_source *source, int fd, uint32_t ev
                 }
                 if (n == 0) { /* EOF → the event we are waiting for */
 
-                        s->exec_fd_event_source = sd_event_source_unref(s->exec_fd_event_source);
+                        s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
 
                         if (s->exec_fd_hot) { /* Did the child tell us to expect EOF now? */
                                 log_unit_debug(UNIT(s), "Got EOF on exec-fd");
@@ -3396,6 +3405,11 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                 assert_not_reached("Unknown code");
 
         if (s->main_pid == pid) {
+                /* Clean up the exec_fd event source. We want to do this here, not later in
+                 * service_set_state(), because service_enter_stop_post() calls service_spawn().
+                 * The source owns its end of the pipe, so this will close that too. */
+                s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
+
                 /* Forking services may occasionally move to a new PID.
                  * As long as they update the PID file before exiting the old
                  * PID, they're fine. */
@@ -3441,16 +3455,14 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                     s->type == SERVICE_ONESHOT &&
                     f == SERVICE_SUCCESS) {
 
-                        /* There is another command to *
-                         * execute, so let's do that. */
+                        /* There is another command to execute, so let's do that. */
 
                         log_unit_debug(u, "Running next main command for state %s.", service_state_to_string(s->state));
                         service_run_next_main(s);
 
                 } else {
 
-                        /* The service exited, so the service is officially
-                         * gone. */
+                        /* The service exited, so the service is officially gone. */
                         s->main_command = NULL;
 
                         switch (s->state) {
@@ -3463,12 +3475,11 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                 if (control_pid_good(s) <= 0)
                                         service_enter_stop(s, f);
 
-                                /* Otherwise need to wait untill the operation is done. */
+                                /* Otherwise need to wait until the operation is done. */
                                 break;
 
                         case SERVICE_STOP:
-                                /* Need to wait until the operation is
-                                 * done */
+                                /* Need to wait until the operation is done. */
                                 break;
 
                         case SERVICE_START:
@@ -3527,6 +3538,9 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                 }
 
         } else if (s->control_pid == pid) {
+                const char *kind;
+                bool success;
+
                 s->control_pid = 0;
 
                 if (s->control_command) {
@@ -3541,15 +3555,24 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                         if (f == SERVICE_FAILURE_EXIT_CODE && status < 255) {
                                 UNIT(s)->condition_result = false;
                                 f = SERVICE_SKIP_CONDITION;
-                        } else if (f == SERVICE_SUCCESS)
+                                success = true;
+                        } else if (f == SERVICE_SUCCESS) {
                                 UNIT(s)->condition_result = true;
+                                success = true;
+                        } else
+                                success = false;
+
+                        kind = "Condition check process";
+                } else {
+                        kind = "Control process";
+                        success = f == SERVICE_SUCCESS;
                 }
 
                 unit_log_process_exit(
                                 u,
-                                "Control process",
+                                kind,
                                 service_exec_command_to_string(s->control_command_id),
-                                f == SERVICE_SUCCESS,
+                                success,
                                 code, status);
 
                 if (s->state != SERVICE_RELOAD && s->result == SERVICE_SUCCESS)
@@ -4406,7 +4429,7 @@ static int service_clean(Unit *u, ExecCleanMask mask) {
 fail:
         log_unit_warning_errno(u, r, "Failed to initiate cleaning: %m");
         s->clean_result = SERVICE_FAILURE_RESOURCES;
-        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
         return r;
 }
 
@@ -4419,15 +4442,29 @@ static int service_can_clean(Unit *u, ExecCleanMask *ret) {
 }
 
 static const char *service_finished_job(Unit *u, JobType t, JobResult result) {
-        if (t == JOB_START && result == JOB_DONE) {
-                Service *s = SERVICE(u);
-
-                if (s->type == SERVICE_ONESHOT)
-                        return "Finished %s.";
-        }
+        if (t == JOB_START &&
+            result == JOB_DONE &&
+            SERVICE(u)->type == SERVICE_ONESHOT)
+                return "Finished %s.";
 
         /* Fall back to generic */
         return NULL;
+}
+
+static int service_test_start_limit(Unit *u) {
+        Service *s = SERVICE(u);
+        int r;
+
+        assert(s);
+
+        /* Make sure we don't enter a busy loop of some kind. */
+        r = unit_test_start_limit(u);
+        if (r < 0) {
+                service_enter_dead(s, SERVICE_FAILURE_START_LIMIT_HIT, false);
+                return r;
+        }
+
+        return 0;
 }
 
 static const char* const service_restart_table[_SERVICE_RESTART_MAX] = {
@@ -4583,10 +4620,6 @@ const UnitVTable service_vtable = {
         .exit_status = service_exit_status,
 
         .status_message_formats = {
-                .starting_stopping = {
-                        [0] = "Starting %s...",
-                        [1] = "Stopping %s...",
-                },
                 .finished_start_job = {
                         [JOB_FAILED]     = "Failed to start %s.",
                 },
@@ -4596,4 +4629,6 @@ const UnitVTable service_vtable = {
                 },
                 .finished_job = service_finished_job,
         },
+
+        .test_start_limit = service_test_start_limit,
 };

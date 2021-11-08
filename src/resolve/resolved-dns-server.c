@@ -362,9 +362,8 @@ void dns_server_packet_rcode_downgrade(DnsServer *s, DnsServerFeatureLevel level
         if (s->possible_feature_level > level) {
                 s->possible_feature_level = level;
                 dns_server_reset_counters(s);
+                log_debug("Downgrading transaction feature level fixed an RCODE error, downgrading server %s too.", strna(dns_server_string_full(s)));
         }
-
-        log_debug("Downgrading transaction feature level fixed an RCODE error, downgrading server %s too.", strna(dns_server_string_full(s)));
 }
 
 void dns_server_packet_invalid(DnsServer *s, DnsServerFeatureLevel level) {
@@ -533,7 +532,7 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
                            DNS_SERVER_FEATURE_LEVEL_IS_DNSSEC(s->possible_feature_level) &&
                            dns_server_get_dnssec_mode(s) != DNSSEC_YES) {
 
-                        /* RRSIG data was missing on a EDNS0 packet with DO bit set. This means the server
+                        /* RRSIG data was missing on an EDNS0 packet with DO bit set. This means the server
                          * doesn't augment responses with DNSSEC RRs. If so, let's better not ask the server
                          * for it anymore, after all some servers generate different replies depending if an
                          * OPT RR is in the query or not. If we are in strict DNSSEC mode, don't allow such
@@ -805,30 +804,30 @@ void dns_server_unlink_all(DnsServer *first) {
         dns_server_unlink_all(next);
 }
 
-bool dns_server_unlink_marked(DnsServer *first) {
-        DnsServer *next;
-        bool changed;
+bool dns_server_unlink_marked(DnsServer *server) {
+        bool changed = false;
 
-        if (!first)
-                return false;
+        while (server) {
+                DnsServer *next;
 
-        next = first->servers_next;
+                next = server->servers_next;
 
-        if (first->marked) {
-                changed = true;
-                dns_server_unlink(first);
-        } else
-                changed = false;
+                if (server->marked) {
+                        dns_server_unlink(server);
+                        changed = true;
+                }
 
-        return changed || dns_server_unlink_marked(next);
+                server = next;
+        }
+
+        return changed;
 }
 
-void dns_server_mark_all(DnsServer *first) {
-        if (!first)
-                return;
-
-        first->marked = true;
-        dns_server_mark_all(first->servers_next);
+void dns_server_mark_all(DnsServer *server) {
+        while (server) {
+                server->marked = true;
+                server = server->servers_next;
+        }
 }
 
 DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, uint16_t port, int ifindex, const char *name) {
@@ -1086,19 +1085,19 @@ DnsScope *dns_server_scope(DnsServer *s) {
 }
 
 static const char* const dns_server_type_table[_DNS_SERVER_TYPE_MAX] = {
-        [DNS_SERVER_SYSTEM] = "system",
+        [DNS_SERVER_SYSTEM]   = "system",
         [DNS_SERVER_FALLBACK] = "fallback",
-        [DNS_SERVER_LINK] = "link",
+        [DNS_SERVER_LINK]     = "link",
 };
 DEFINE_STRING_TABLE_LOOKUP(dns_server_type, DnsServerType);
 
 static const char* const dns_server_feature_level_table[_DNS_SERVER_FEATURE_LEVEL_MAX] = {
-        [DNS_SERVER_FEATURE_LEVEL_TCP] = "TCP",
-        [DNS_SERVER_FEATURE_LEVEL_UDP] = "UDP",
-        [DNS_SERVER_FEATURE_LEVEL_EDNS0] = "UDP+EDNS0",
+        [DNS_SERVER_FEATURE_LEVEL_TCP]       = "TCP",
+        [DNS_SERVER_FEATURE_LEVEL_UDP]       = "UDP",
+        [DNS_SERVER_FEATURE_LEVEL_EDNS0]     = "UDP+EDNS0",
         [DNS_SERVER_FEATURE_LEVEL_TLS_PLAIN] = "TLS+EDNS0",
-        [DNS_SERVER_FEATURE_LEVEL_DO] = "UDP+EDNS0+DO",
-        [DNS_SERVER_FEATURE_LEVEL_LARGE] = "UDP+EDNS0+DO+LARGE",
-        [DNS_SERVER_FEATURE_LEVEL_TLS_DO] = "TLS+EDNS0+D0",
+        [DNS_SERVER_FEATURE_LEVEL_DO]        = "UDP+EDNS0+DO",
+        [DNS_SERVER_FEATURE_LEVEL_LARGE]     = "UDP+EDNS0+DO+LARGE",
+        [DNS_SERVER_FEATURE_LEVEL_TLS_DO]    = "TLS+EDNS0+D0",
 };
 DEFINE_STRING_TABLE_LOOKUP(dns_server_feature_level, DnsServerFeatureLevel);

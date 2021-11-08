@@ -506,6 +506,10 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option");
                 }
 
+        /* If we are talking to the per-user instance PolicyKit isn't going to help */
+        if (arg_user)
+                arg_ask_password = false;
+
         with_trigger = !!arg_path_property || !!arg_socket_property || arg_with_timer;
 
         /* currently, only single trigger (path, socket, timer) unit can be created simultaneously */
@@ -667,15 +671,8 @@ static int transient_cgroup_set_properties(sd_bus_message *m) {
                 *end = 0;
         }
 
-        if (!isempty(arg_slice)) {
-                if (name) {
-                        char *j = strjoin(name, "-", arg_slice);
-                        free_and_replace(name, j);
-                } else
-                        name = strdup(arg_slice);
-                if (!name)
-                        return log_oom();
-        }
+        if (!isempty(arg_slice) && !strextend_with_separator(&name, "-", arg_slice))
+                return log_oom();
 
         if (!name)
                 return 0;

@@ -1,15 +1,6 @@
-Tests: timedated, hostnamed, localed-locale, localed-x11-keymap
+Tests: timedated, hostnamed, localed-locale, localed-x11-keymap, logind
 Depends: systemd,
-  udev,
-  libpam-systemd,
-  libnss-systemd,
-  acl,
-  locales,
-Restrictions: needs-root, isolation-container
-
-Tests: logind
-Depends: systemd,
-  udev,
+  systemd-timesyncd,
   libpam-systemd,
   libnss-systemd,
   acl,
@@ -107,8 +98,8 @@ Restrictions: needs-root, allow-stderr, isolation-machine, skippable
 
 Tests: unit-tests
 Depends: systemd-tests,
-  udev,
   libpam-systemd,
+  udev,
   tree,
   perl,
   python3,
@@ -134,6 +125,11 @@ Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-
 
 Tests: upstream-1, upstream-2
 Depends: @,
+  systemd-tests,
+  systemd-journal-remote,
+  systemd-container,
+  systemd-coredump,
+  systemd-timesyncd,
   attr,
   tree,
   perl,
@@ -169,46 +165,16 @@ Depends: @,
   zstd,
   squashfs-tools,
   vim-tiny,
+  dosfstools,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
-Depends: libsystemd-dev,
-  tree,
-  perl,
-  xz-utils,
-  libcap2-bin,
-  iproute2,
-  liblz4-tool,
-  acl,
-  kbd,
-  cryptsetup-bin,
-  net-tools,
-  isc-dhcp-client,
-  iputils-ping,
-  strace,
-  qemu-system-x86 [amd64 i386],
-  qemu-system-arm [arm64 armhf],
-  qemu-system-s390x [s390x],
-  less,
-  pkg-config,
-  gcc,
-  libc6-dev | libc-dev,
-  make,
-  quota,
-  systemd-journal-remote,
-  systemd-container,
-  systemd-coredump,
-  systemd-sysv,
-  systemd,
-  udev,
-  fdisk,
-  netcat-openbsd,
-  busybox-static,
-  plymouth,
+Depends: systemd-sysv,
   network-manager,
-  policykit-1,
   gdm3 [!s390x],
   xserver-xorg-video-dummy,
+  systemd,
+  udev,
 Restrictions: needs-root, isolation-container, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds

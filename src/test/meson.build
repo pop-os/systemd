@@ -146,6 +146,8 @@ tests += [
 
         [['src/test/test-utf8.c']],
 
+        [['src/test/test-blockdev-util.c']],
+
         [['src/test/test-dev-setup.c']],
 
         [['src/test/test-capability.c'],
@@ -158,6 +160,8 @@ tests += [
         [['src/test/test-locale-util.c']],
 
         [['src/test/test-copy.c']],
+
+        [['src/test/test-data-fd-util.c']],
 
         [['src/test/test-static-destruct.c']],
 
@@ -224,7 +228,7 @@ tests += [
         [['src/test/test-os-util.c']],
 
         [['src/test/test-libcrypt-util.c'],
-         [], [], [], '', 'timeout=120'],
+         [], [libcrypt], [], '', 'timeout=120'],
 
         [['src/test/test-escape.c']],
 
@@ -237,6 +241,8 @@ tests += [
         [['src/test/test-extract-word.c']],
 
         [['src/test/test-parse-argument.c']],
+
+        [['src/test/test-parse-socket-bind-item.c']],
 
         [['src/test/test-parse-util.c']],
 
@@ -335,6 +341,12 @@ tests += [
           libblkid],
          core_includes],
 
+        [['src/test/test-bpf-foreign-programs.c'],
+         [libcore,
+          libshared],
+         [],
+         core_includes],
+
         [['src/test/test-watch-pid.c'],
          [libcore,
           libshared],
@@ -359,6 +371,8 @@ tests += [
         [['src/test/test-set-disable-mempool.c'],
          [],
          [threads]],
+
+        [['src/test/test-hash-funcs.c']],
 
         [['src/test/test-bitmap.c']],
 
@@ -415,6 +429,8 @@ tests += [
         [['src/test/test-date.c']],
 
         [['src/test/test-sleep.c']],
+
+        [['src/test/test-tpm2.c']],
 
         [['src/test/test-replace-var.c']],
 
@@ -554,7 +570,16 @@ tests += [
         [['src/test/test-gcrypt-util.c'],
          [], [], [], 'HAVE_GCRYPT'],
 
-        [['src/test/test-nss.c'],
+        [['src/test/test-nss-hosts.c',
+          'src/test/nss-test-util.c',
+          'src/test/nss-test-util.h'],
+         [],
+         [libdl],
+         [], 'ENABLE_NSS', 'manual'],
+
+        [['src/test/test-nss-users.c',
+          'src/test/nss-test-util.c',
+          'src/test/nss-test-util.h'],
          [],
          [libdl],
          [], 'ENABLE_NSS', 'manual'],
@@ -595,4 +620,13 @@ tests += [
         [['src/libudev/test-udev-device-thread.c'],
          [libudev],
          [threads]],
+]
+
+tests += [
+         [['src/test/test-socket-bind.c'],
+          [libcore,
+          libshared],
+         [libdl],
+         core_includes,
+         'BPF_FRAMEWORK'],
 ]

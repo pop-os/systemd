@@ -38,10 +38,7 @@ enable_udev() {
 }
 
 upgrade_fixes() {
-  # new Default-Stop (see #791944)
-  if dpkg --compare-versions "$2" lt-nl "239-8"; then
-    update-rc.d -f udev remove
-  fi
+  :
 }
 
 update_hwdb() {

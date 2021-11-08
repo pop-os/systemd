@@ -14,6 +14,18 @@ if ! mountpoint -q "$SRCDIR"; then
         umask 022
 fi
 
+# On Fedora "ld" is (unfortunately — if you ask me) managed via
+# "alternatives". Since we'd like to support building images in environments
+# with only /usr/ around (e.g. mkosi's UsrOnly=1 option), we have the problem
+# that /usr/bin/ld is a symlink that points to a non-existing file in
+# /etc/alternative/ in this mode. Let's work around this for now by manually
+# redirect "ld" to "ld.bfd", i.e. circumventing the /usr/bin/ld symlink.
+if [ ! -x /usr/bin/ld -a -x /usr/bin/ld.bfd ] ; then
+        mkdir -p "$HOME"/bin
+        ln -s /usr/bin/ld.bfd "$HOME"/bin/ld
+        PATH="$HOME/bin:$PATH"
+fi
+
 # If mkosi.builddir/ exists mkosi will set $BUILDDIR to it, let's then use it
 # as out-of-tree build dir. Otherwise, let's make up our own builddir.
 [ -z "$BUILDDIR" ] && BUILDDIR=build
@@ -121,6 +133,28 @@ cat > "$DESTDIR"/etc/issue <<EOF
 Kernel \r on an \m (\l)
 
 EOF
+
+if [ -n "$IMAGE_ID" ] ; then
+    mkdir -p "$DESTDIR"/usr/lib
+    sed -n \
+        -e '/^IMAGE_ID=/!p' \
+        -e '$aIMAGE_ID='$IMAGE_ID < /usr/lib/os-release > "$DESTDIR"/usr/lib/os-release
+
+    OSRELEASEFILE="$DESTDIR"/usr/lib/os-release
+else
+    OSRELEASEFILE=/usr/lib/os-release
+fi
+
+
+if [ -n "$IMAGE_VERSION" ] ; then
+    mkdir -p "$DESTDIR"/usr/lib
+    sed -n \
+        -e '/^IMAGE_VERSION=/!p' \
+        -e '$aIMAGE_VERSION='$IMAGE_VERSION < $OSRELEASEFILE > /tmp/os-release.tmp
+
+    cat /tmp/os-release.tmp > "$DESTDIR"/usr/lib/os-release
+    rm /tmp/os-release.tmp
+fi
 
 # Manually update the boot loader from the one we just built
 mkdir -p "$DESTDIR"/boot/efi/EFI/systemd "$DESTDIR"/boot/efi/EFI/BOOT

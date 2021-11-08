@@ -34,7 +34,10 @@ int readlink_value(const char *p, char **ret);
 int readlink_and_make_absolute(const char *p, char **r);
 
 int chmod_and_chown(const char *path, mode_t mode, uid_t uid, gid_t gid);
-int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid);
+int fchmod_and_chown_with_fallback(int fd, const char *path, mode_t mode, uid_t uid, gid_t gid);
+static inline int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid) {
+        return fchmod_and_chown_with_fallback(fd, NULL, mode, uid, gid); /* no fallback */
+}
 
 int fchmod_umask(int fd, mode_t mode);
 int fchmod_opath(int fd, mode_t m);
@@ -91,6 +94,8 @@ enum {
         CHASE_WARN        = 1 << 7, /* Emit an appropriate warning when an error is encountered */
 };
 
+bool unsafe_transition(const struct stat *a, const struct stat *b);
+
 /* How many iterations to execute before returning -ELOOP */
 #define CHASE_SYMLINKS_MAX 32
 
@@ -139,8 +144,6 @@ int fsync_path_at(int at_fd, const char *path);
 int syncfs_path(int atfd, const char *path);
 
 int open_parent(const char *path, int flags, mode_t mode);
-
-int path_is_encrypted(const char *path);
 
 int conservative_renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath);
 static inline int conservative_rename(const char *oldpath, const char *newpath) {

@@ -3,7 +3,6 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
-#include <stdio.h>
 
 #include "sd-netlink.h"
 
@@ -14,6 +13,7 @@
 
 typedef struct Manager Manager;
 typedef struct Network Network;
+typedef struct Request Request;
 
 typedef struct Route {
         Network *network;
@@ -52,6 +52,7 @@ typedef struct Route {
         bool protocol_set:1;
         bool pref_set:1;
         bool gateway_from_dhcp_or_ra:1;
+        bool removing:1;
 
         union in_addr_union gw;
         union in_addr_union dst;
@@ -65,22 +66,36 @@ typedef struct Route {
 
 void route_hash_func(const Route *route, struct siphash *state);
 int route_compare_func(const Route *a, const Route *b);
+bool route_equal(const Route *r1, const Route *r2);
 extern const struct hash_ops route_hash_ops;
 
 int route_new(Route **ret);
 Route *route_free(Route *route);
 DEFINE_NETWORK_SECTION_FUNCTIONS(Route, route_free);
+int route_dup(const Route *src, Route **ret);
 
-int route_configure(const Route *route, Link *link, link_netlink_message_handler_t callback, Route **ret);
-int route_remove(const Route *route, Manager *manager, Link *link, link_netlink_message_handler_t callback);
+int route_configure_handler_internal(sd_netlink *rtnl, sd_netlink_message *m, Link *link, const char *error_msg);
+int route_remove(const Route *route, Manager *manager, Link *link);
 
-int link_set_routes(Link *link);
-int link_set_routes_with_gateway(Link *link);
+int link_has_route(Link *link, const Route *route);
+int manager_find_uplink(Manager *m, int family, Link *exclude, Link **ret);
+bool gateway_is_ready(Link *link, int onlink, int family, const union in_addr_union *gw);
+
 int link_drop_routes(Link *link);
 int link_drop_foreign_routes(Link *link);
 
 uint32_t link_get_dhcp_route_table(const Link *link);
 uint32_t link_get_ipv6_accept_ra_route_table(const Link *link);
+
+int link_request_route(
+                Link *link,
+                Route *route,
+                bool consume_object,
+                unsigned *message_counter,
+                link_netlink_message_handler_t netlink_handler,
+                Request **ret);
+int link_request_static_routes(Link *link, bool only_ipv4);
+int request_process_route(Request *req);
 
 int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
 

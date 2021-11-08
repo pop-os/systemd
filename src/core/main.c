@@ -54,6 +54,7 @@
 #include "loopback-setup.h"
 #include "machine-id-setup.h"
 #include "manager.h"
+#include "manager-dump.h"
 #include "mkdir.h"
 #include "mount-setup.h"
 #include "os-util.h"
@@ -1198,8 +1199,8 @@ static void bump_file_max_and_nr_open(void) {
 #endif
 
 #if BUMP_PROC_SYS_FS_FILE_MAX
-        /* The maximum the kernel allows for this since 5.2 is LONG_MAX, use that. (Previously thing where
-         * different but the operation would fail silently.) */
+        /* The maximum the kernel allows for this since 5.2 is LONG_MAX, use that. (Previously things were
+         * different, but the operation would fail silently.) */
         r = sysctl_writef("fs/file-max", "%li\n", LONG_MAX);
         if (r < 0)
                 log_full_errno(IN_SET(r, -EROFS, -EPERM, -EACCES) ? LOG_DEBUG : LOG_WARNING, r, "Failed to bump fs.file-max, ignoring: %m");
@@ -1367,7 +1368,7 @@ static int status_welcome(void) {
 
 static int write_container_id(void) {
         const char *c;
-        int r;
+        int r = 0;  /* avoid false maybe-uninitialized warning */
 
         c = getenv("container");
         if (isempty(c))
@@ -1719,9 +1720,50 @@ static void update_numa_policy(bool skip_setup) {
                 log_warning_errno(r, "Failed to set NUMA memory policy: %m");
 }
 
+static void filter_args(const char* dst[], unsigned *pos, char **src, int argc) {
+        assert(dst);
+        assert(pos);
+
+        /* Copy some filtered arguments into the dst array from src. */
+        for (int i = 1; i < argc; i++) {
+                if (STR_IN_SET(src[i],
+                               "--switched-root",
+                               "--system",
+                               "--user"))
+                        continue;
+
+                if (startswith(src[i], "--deserialize="))
+                        continue;
+                if (streq(src[i], "--deserialize")) {
+                        i++;                            /* Skip the argument too */
+                        continue;
+                }
+
+                /* Skip target unit designators. We already acted upon this information and have queued
+                 * appropriate jobs. We don't want to redo all this after reexecution. */
+                if (startswith(src[i], "--unit="))
+                        continue;
+                if (streq(src[i], "--unit")) {
+                        i++;                            /* Skip the argument too */
+                        continue;
+                }
+
+                if (startswith(src[i],
+                               in_initrd() ? "rd.systemd.unit=" : "systemd.unit="))
+                        continue;
+
+                if (runlevel_to_target(src[i]))
+                        continue;
+
+                /* Seems we have a good old option. Let's pass it over to the new instance. */
+                dst[*pos] = src[i];
+                (*pos)++;
+        }
+}
+
 static void do_reexecute(
                 int argc,
-                char *argv[],
+                char* argv[],
                 const struct rlimit *saved_rlimit_nofile,
                 const struct rlimit *saved_rlimit_memlock,
                 FDSet *fds,
@@ -1729,7 +1771,7 @@ static void do_reexecute(
                 const char *switch_root_init,
                 const char **ret_error_message) {
 
-        unsigned i, j, args_size;
+        unsigned i, args_size;
         const char **args;
         int r;
 
@@ -1759,11 +1801,11 @@ static void do_reexecute(
                         log_error_errno(r, "Failed to switch root, trying to continue: %m");
         }
 
-        args_size = MAX(6, argc+1);
+        args_size = argc + 6;
         args = newa(const char*, args_size);
 
         if (!switch_root_init) {
-                char sfd[DECIMAL_STR_MAX(int) + 1];
+                char sfd[DECIMAL_STR_MAX(int)];
 
                 /* First try to spawn ourselves with the right path, and with full serialization. We do this only if
                  * the user didn't specify an explicit init to spawn. */
@@ -1773,8 +1815,9 @@ static void do_reexecute(
 
                 xsprintf(sfd, "%i", fileno(arg_serialization));
 
-                i = 0;
-                args[i++] = SYSTEMD_BINARY_PATH;
+                i = 1;         /* Leave args[0] empty for now. */
+                filter_args(args, &i, argv, argc);
+
                 if (switch_root_dir)
                         args[i++] = "--switched-root";
                 args[i++] = arg_system ? "--system" : "--user";
@@ -1792,8 +1835,9 @@ static void do_reexecute(
                  */
                 valgrind_summary_hack();
 
+                args[0] = SYSTEMD_BINARY_PATH;
                 (void) execv(args[0], (char* const*) args);
-                log_debug_errno(errno, "Failed to execute our own binary, trying fallback: %m");
+                log_debug_errno(errno, "Failed to execute our own binary %s, trying fallback: %m", args[0]);
         }
 
         /* Try the fallback, if there is any, without any serialization. We pass the original argv[] and envp[]. (Well,
@@ -1806,9 +1850,9 @@ static void do_reexecute(
         /* Reopen the console */
         (void) make_console_stdio();
 
-        for (j = 1, i = 1; j < (unsigned) argc; j++)
+        i = 1;         /* Leave args[0] empty for now. */
+        for (int j = 1; j <= argc; j++)
                 args[i++] = argv[j];
-        args[i++] = NULL;
         assert(i <= args_size);
 
         /* Re-enable any blocked signals, especially important if we switch from initial ramdisk to init=... */
@@ -1819,7 +1863,7 @@ static void do_reexecute(
         if (switch_root_init) {
                 args[0] = switch_root_init;
                 (void) execve(args[0], (char* const*) args, saved_env);
-                log_warning_errno(errno, "Failed to execute configured init, trying fallback: %m");
+                log_warning_errno(errno, "Failed to execute configured init %s, trying fallback: %m", args[0]);
         }
 
         args[0] = "/sbin/init";
@@ -1999,7 +2043,7 @@ static void log_execution_mode(bool *ret_first_boot) {
         if (arg_system) {
                 int v;
 
-                log_info("systemd " GIT_VERSION " running in %ssystem mode. (%s)",
+                log_info("systemd " GIT_VERSION " running in %ssystem mode (%s)",
                          arg_action == ACTION_TEST ? "test " : "",
                          systemd_features);
 
@@ -2218,7 +2262,7 @@ static int do_queue_default_job(
         } else
                 log_info("Queued %s job for default target %s.",
                          job_type_to_string(job->type),
-                         unit_status_string(job->unit));
+                         unit_status_string(job->unit, NULL));
 
         m->default_unit_job_id = job->id;
 
@@ -2410,6 +2454,9 @@ static int parse_configuration(const struct rlimit *saved_rlimit_nofile,
         /* Push variables into the manager environment block */
         setenv_manager_environment();
 
+        /* Parse log environment variables again to take into account any new environment variables. */
+        log_parse_environment();
+
         return 0;
 }
 
@@ -2500,16 +2547,6 @@ static int initialize_security(
         return 0;
 }
 
-static void test_summary(Manager *m) {
-        assert(m);
-
-        printf("-> By units:\n");
-        manager_dump_units(m, stdout, "\t");
-
-        printf("-> By jobs:\n");
-        manager_dump_jobs(m, stdout, "\t");
-}
-
 static int collect_fds(FDSet **ret_fds, const char **ret_error_message) {
         int r;
 
@@ -2549,18 +2586,16 @@ static void setup_console_terminal(bool skip_setup) {
 
 static bool early_skip_setup_check(int argc, char *argv[]) {
         bool found_deserialize = false;
-        int i;
 
         /* Determine if this is a reexecution or normal bootup. We do the full command line parsing much later, so
          * let's just have a quick peek here. Note that if we have switched root, do all the special setup things
          * anyway, even if in that case we also do deserialization. */
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++)
                 if (streq(argv[i], "--switched-root"))
                         return false; /* If we switched root, don't skip the setup. */
                 else if (streq(argv[i], "--deserialize"))
                         found_deserialize = true;
-        }
 
         return found_deserialize; /* When we are deserializing, then we are reexecuting, hence avoid the extensive setup */
 }
@@ -2884,7 +2919,7 @@ int main(int argc, char *argv[]) {
                  format_timespan(timespan, sizeof(timespan), after_startup - before_startup, 100 * USEC_PER_MSEC));
 
         if (arg_action == ACTION_TEST) {
-                test_summary(m);
+                manager_test_summary(m);
                 retval = EXIT_SUCCESS;
                 goto finish;
         }

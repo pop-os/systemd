@@ -36,7 +36,7 @@ static int load_kexec_kernel(void) {
                 return log_error_errno(r,
                                        "No kexec kernel loaded and autodetection failed.\n%s",
                                        is_efi_boot()
-                                       ? "Cannot automatically load kernel: ESP partition mount point not found."
+                                       ? "Cannot automatically load kernel: ESP mount point not found."
                                        : "Automatic loading works only on systems booted with EFI.");
         if (r < 0)
                 return r;
@@ -201,6 +201,7 @@ int start_special(int argc, char *argv[], void *userdata) {
                 if (IN_SET(a,
                            ACTION_POWEROFF,
                            ACTION_REBOOT,
+                           ACTION_KEXEC,
                            ACTION_HALT,
                            ACTION_SUSPEND,
                            ACTION_HIBERNATE,
@@ -220,9 +221,9 @@ int start_special(int argc, char *argv[], void *userdata) {
 
                         arg_no_block = true;
 
-                } else if (IN_SET(a, ACTION_EXIT, ACTION_KEXEC))
-                        /* Since exit/kexec are so close in behaviour to power-off/reboot, let's also make
-                         * them asynchronous, in order to not confuse the user needlessly with unexpected
+                } else if (IN_SET(a, ACTION_EXIT))
+                        /* Since exit is so close in behaviour to power-off/reboot, let's also make
+                         * it asynchronous, in order to not confuse the user needlessly with unexpected
                          * behaviour. */
                         arg_no_block = true;
 

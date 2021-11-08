@@ -27,7 +27,7 @@ jobs:
     - uses: systemd/mkosi@v9
 
     - name: Install
-      run: sudo apt-get update && sudo apt-get install --no-install-recommends python3-pexpect
+      run: sudo apt-get update && sudo apt-get install --no-install-recommends python3-pexpect python3-jinja2
 
     - name: Symlink
       run: ln -s .mkosi/mkosi.${{ matrix.distro }} mkosi.default
@@ -47,6 +47,9 @@ jobs:
 
     - name: Build ${{ matrix.distro }}
       run: sudo python3 -m mkosi --password= --qemu-headless build
+
+    - name: Show ${{ matrix.distro }} image summary
+      run: sudo python3 -m mkosi --password= --qemu-headless summary
 
     - name: Boot ${{ matrix.distro }} systemd-nspawn
       run: sudo ./.github/workflows/test_mkosi_boot.py python3 -m mkosi --password= --qemu-headless boot

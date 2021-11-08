@@ -332,6 +332,9 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option");
                 }
 
+        if (arg_user)
+                arg_ask_password = false;
+
         if (arg_user && arg_transport != BUS_TRANSPORT_LOCAL)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Execution in user context is not supported on non-local systems.");
@@ -386,7 +389,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (!arg_mount_what)
                                 return log_oom();
 
-                        path_simplify(arg_mount_what, false);
+                        path_simplify(arg_mount_what);
 
                         if (!path_is_absolute(arg_mount_what))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -403,7 +406,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 if (!arg_mount_where)
                                         return log_oom();
 
-                                path_simplify(arg_mount_where, false);
+                                path_simplify(arg_mount_where);
 
                                 if (!path_is_absolute(arg_mount_where))
                                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -723,7 +726,7 @@ static int find_mount_points(const char *what, char ***list) {
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         _cleanup_strv_free_ char **l = NULL;
-        size_t bufsize = 0, n = 0;
+        size_t n = 0;
         int r;
 
         assert(what);
@@ -755,7 +758,7 @@ static int find_mount_points(const char *what, char ***list) {
                         continue;
 
                 /* one extra slot is needed for the terminating NULL */
-                if (!GREEDY_REALLOC0(l, bufsize, n + 2))
+                if (!GREEDY_REALLOC0(l, n + 2))
                         return log_oom();
 
                 l[n] = strdup(target);
@@ -764,7 +767,7 @@ static int find_mount_points(const char *what, char ***list) {
                 n++;
         }
 
-        if (!GREEDY_REALLOC0(l, bufsize, n + 1))
+        if (!GREEDY_REALLOC0(l, n + 1))
                 return log_oom();
 
         *list = TAKE_PTR(l);
@@ -786,8 +789,6 @@ static int find_loop_device(const char *backing_file, char **loop_dev) {
         FOREACH_DIRENT(de, d, return -errno) {
                 _cleanup_free_ char *sys = NULL, *fname = NULL;
                 int r;
-
-                dirent_ensure_type(d, de);
 
                 if (de->d_type != DT_DIR)
                         continue;
@@ -985,7 +986,7 @@ static int action_umount(
                         if (!p)
                                 return log_oom();
 
-                        path_simplify(p, false);
+                        path_simplify(p);
 
                         r = stop_mounts(bus, p);
                         if (r < 0)

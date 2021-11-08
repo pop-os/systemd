@@ -34,6 +34,7 @@
 #include "process-util.h"
 #include "selinux-util.h"
 #include "serialize.h"
+#include "service.h"
 #include "signal-util.h"
 #include "smack-util.h"
 #include "socket.h"
@@ -174,7 +175,7 @@ static void socket_done(Unit *u) {
 
         s->fdname = mfree(s->fdname);
 
-        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
 }
 
 static int socket_arm_timer(Socket *s, usec_t usec) {
@@ -934,7 +935,7 @@ static void socket_close_fds(Socket *s) {
 
                 was_open = p->fd >= 0;
 
-                p->event_source = sd_event_source_unref(p->event_source);
+                p->event_source = sd_event_source_disable_unref(p->event_source);
                 p->fd = safe_close(p->fd);
                 socket_cleanup_fd_list(p);
 
@@ -1347,7 +1348,7 @@ static int usbffs_dispatch_eps(SocketPort *p) {
                         goto fail;
                 }
 
-                path_simplify(ep, false);
+                path_simplify(ep);
 
                 r = usbffs_address_create(ep);
                 if (r < 0)
@@ -1834,7 +1835,7 @@ static void socket_set_state(Socket *s, SocketState state) {
                     SOCKET_FINAL_SIGKILL,
                     SOCKET_CLEANING)) {
 
-                s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+                s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
                 socket_unwatch_control_pid(s);
                 s->control_command = NULL;
                 s->control_command_id = _SOCKET_EXEC_COMMAND_INVALID;
@@ -2048,7 +2049,7 @@ static int socket_chown(Socket *s, pid_t *_pid) {
         return 0;
 
 fail:
-        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
         return r;
 }
 
@@ -2340,11 +2341,9 @@ static void socket_enter_running(Socket *s, int cfd_in) {
         if (cfd < 0) {
                 bool pending = false;
                 Unit *other;
-                void *v;
 
-                /* If there's already a start pending don't bother to
-                 * do anything */
-                HASHMAP_FOREACH_KEY(v, other, UNIT(s)->dependencies[UNIT_TRIGGERS])
+                /* If there's already a start pending don't bother to do anything */
+                UNIT_FOREACH_DEPENDENCY(other, UNIT(s), UNIT_ATOM_TRIGGERS)
                         if (unit_active_or_pending(other)) {
                                 pending = true;
                                 break;
@@ -2516,12 +2515,6 @@ static int socket_start(Unit *u) {
 
         assert(IN_SET(s->state, SOCKET_DEAD, SOCKET_FAILED));
 
-        r = unit_test_start_limit(u);
-        if (r < 0) {
-                socket_enter_dead(s, SOCKET_FAILURE_START_LIMIT_HIT);
-                return r;
-        }
-
         r = unit_acquire_invocation_id(u);
         if (r < 0)
                 return r;
@@ -2628,13 +2621,6 @@ static int socket_serialize(Unit *u, FILE *f, FDSet *fds) {
         return 0;
 }
 
-static void socket_port_take_fd(SocketPort *p, FDSet *fds, int fd) {
-        assert(p);
-
-        safe_close(p->fd);
-        p->fd = fdset_remove(fds, fd);
-}
-
 static int socket_deserialize_item(Unit *u, const char *key, const char *value, FDSet *fds) {
         Socket *s = SOCKET(u);
 
@@ -2696,13 +2682,20 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse fifo value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (p->type == SOCKET_FIFO &&
+                                if (p->fd < 0 &&
+                                    p->type == SOCKET_FIFO &&
                                     path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching fifo socket found: %s", value+skip);
+                }
 
         } else if (streq(key, "special")) {
                 int fd, skip = 0;
@@ -2710,13 +2703,20 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse special value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (p->type == SOCKET_SPECIAL &&
+                                if (p->fd < 0 &&
+                                    p->type == SOCKET_SPECIAL &&
                                     path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching special socket found: %s", value+skip);
+                }
 
         } else if (streq(key, "mqueue")) {
                 int fd, skip = 0;
@@ -2724,13 +2724,20 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse mqueue value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (p->type == SOCKET_MQUEUE &&
+                                if (p->fd < 0 &&
+                                    p->type == SOCKET_MQUEUE &&
                                     streq(p->path, value+skip)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching mqueue socket found: %s", value+skip);
+                }
 
         } else if (streq(key, "socket")) {
                 int fd, type, skip = 0;
@@ -2738,12 +2745,20 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %i %n", &fd, &type, &skip) < 2 || fd < 0 || type < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse socket value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (socket_address_is(&p->address, value+skip, type)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                if (p->fd < 0 &&
+                                    socket_address_is(&p->address, value+skip, type)) {
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching %s socket found: %s",
+                                               socket_address_type_to_string(type), value+skip);
+                }
 
         } else if (streq(key, "netlink")) {
                 int fd, skip = 0;
@@ -2751,12 +2766,19 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse socket value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (socket_address_is_netlink(&p->address, value+skip)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                if (p->fd < 0 &&
+                                    socket_address_is_netlink(&p->address, value+skip)) {
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching netlink socket found: %s", value+skip);
+                }
 
         } else if (streq(key, "ffs")) {
                 int fd, skip = 0;
@@ -2764,13 +2786,20 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
 
                 if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse ffs value: %s", value);
-                else
+                else {
+                        bool found = false;
+
                         LIST_FOREACH(port, p, s->ports)
-                                if (p->type == SOCKET_USB_FUNCTION &&
+                                if (p->fd < 0 &&
+                                    p->type == SOCKET_USB_FUNCTION &&
                                     path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        socket_port_take_fd(p, fds, fd);
+                                        p->fd = fdset_remove(fds, fd);
+                                        found = true;
                                         break;
                                 }
+                        if (!found)
+                                log_unit_debug(u, "No matching ffs socket found: %s", value+skip);
+                }
 
         } else
                 log_unit_debug(UNIT(s), "Unknown serialization key: %s", key);
@@ -3382,7 +3411,7 @@ static int socket_clean(Unit *u, ExecCleanMask mask) {
 fail:
         log_unit_warning_errno(u, r, "Failed to initiate cleaning: %m");
         s->clean_result = SOCKET_FAILURE_RESOURCES;
-        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
         return r;
 }
 
@@ -3392,6 +3421,21 @@ static int socket_can_clean(Unit *u, ExecCleanMask *ret) {
         assert(s);
 
         return exec_context_get_clean_mask(&s->exec_context, ret);
+}
+
+static int socket_test_start_limit(Unit *u) {
+        Socket *s = SOCKET(u);
+        int r;
+
+        assert(s);
+
+        r = unit_test_start_limit(u);
+        if (r < 0) {
+                socket_enter_dead(s, SOCKET_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
+
+        return 0;
 }
 
 static const char* const socket_exec_command_table[_SOCKET_EXEC_COMMAND_MAX] = {
@@ -3509,10 +3553,6 @@ const UnitVTable socket_vtable = {
         .bus_commit_properties = bus_socket_commit_properties,
 
         .status_message_formats = {
-                /*.starting_stopping = {
-                        [0] = "Starting socket %s...",
-                        [1] = "Stopping socket %s...",
-                },*/
                 .finished_start_job = {
                         [JOB_DONE]       = "Listening on %s.",
                         [JOB_FAILED]     = "Failed to listen on %s.",
@@ -3524,4 +3564,6 @@ const UnitVTable socket_vtable = {
                         [JOB_TIMEOUT]    = "Timed out stopping %s.",
                 },
         },
+
+        .test_start_limit = socket_test_start_limit,
 };

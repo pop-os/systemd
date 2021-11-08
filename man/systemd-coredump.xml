@@ -340,7 +340,7 @@ flags:   ...
       <varlistentry>
         <term><varname>COREDUMP_FILENAME=</varname></term>
 
-        <listitem><para>When the core is stored externally, the path the the core file.</para>
+        <listitem><para>When the core is stored externally, the path to the core file.</para>
         </listitem>
       </varlistentry>
 
@@ -350,6 +350,20 @@ flags:   ...
         <listitem><para>Set to <literal>1</literal> when the saved coredump was truncated. (A partial core
         image may still be processed by some tools, though obviously not all information is available.)
         </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>COREDUMP_PACKAGE_NAME=</varname></term>
+        <term><varname>COREDUMP_PACKAGE_VERSION=</varname></term>
+        <term><varname>COREDUMP_PACKAGE_JSON=</varname></term>
+
+        <listitem><para>If the executable contained .package metadata ELF notes, they will be
+        parsed and attached. The <varname>package</varname> and <varname>packageVersion</varname>
+        of the 'main' ELF module (ie: the executable) will be appended individually. The
+        JSON-formatted content of all modules will be appended as a single JSON object, each with
+        the module name as the key. For more information about this metadata format and content, see
+        <ulink url="https://systemd.io/COREDUMP_PACKAGE_METADATA/">the coredump metadata spec</ulink>.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>

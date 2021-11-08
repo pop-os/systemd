@@ -200,6 +200,7 @@ UserRecord* user_record_new(void) {
                 .password_change_now = -1,
                 .pkcs11_protected_authentication_path_permitted = -1,
                 .fido2_user_presence_permitted = -1,
+                .fido2_user_verification_permitted = -1,
         };
 
         return h;
@@ -707,7 +708,7 @@ static int json_dispatch_tasks_or_memory_max(const char *name, JsonVariant *vari
         }
 
         if (!json_variant_is_unsigned(variant))
-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a integer.", strna(name));
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an integer.", strna(name));
 
         k = json_variant_unsigned(variant);
         if (k <= 0 || k >= UINT64_MAX)
@@ -727,7 +728,7 @@ static int json_dispatch_weight(const char *name, JsonVariant *variant, JsonDisp
         }
 
         if (!json_variant_is_unsigned(variant))
-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a integer.", strna(name));
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an integer.", strna(name));
 
         k = json_variant_unsigned(variant);
         if (k <= CGROUP_WEIGHT_MIN || k >= CGROUP_WEIGHT_MAX)
@@ -774,6 +775,7 @@ static int dispatch_secret(const char *name, JsonVariant *variant, JsonDispatchF
                 { "pkcs11Pin",   /* legacy alias */             _JSON_VARIANT_TYPE_INVALID, json_dispatch_strv,     offsetof(UserRecord, token_pin),                                      0 },
                 { "pkcs11ProtectedAuthenticationPathPermitted", JSON_VARIANT_BOOLEAN,       json_dispatch_tristate, offsetof(UserRecord, pkcs11_protected_authentication_path_permitted), 0 },
                 { "fido2UserPresencePermitted",                 JSON_VARIANT_BOOLEAN,       json_dispatch_tristate, offsetof(UserRecord, fido2_user_presence_permitted),                  0 },
+                { "fido2UserVerificationPermitted",             JSON_VARIANT_BOOLEAN,       json_dispatch_tristate, offsetof(UserRecord, fido2_user_verification_permitted),              0 },
                 {},
         };
 
@@ -1016,9 +1018,12 @@ static int dispatch_fido2_hmac_salt(const char *name, JsonVariant *variant, Json
                 Fido2HmacSalt *array, *k;
 
                 static const JsonDispatch fido2_hmac_salt_dispatch_table[] = {
-                        { "credential",     JSON_VARIANT_STRING, dispatch_fido2_hmac_credential, offsetof(Fido2HmacSalt, credential),      JSON_MANDATORY },
-                        { "salt",           JSON_VARIANT_STRING, dispatch_fido2_hmac_salt_value, 0,                                        JSON_MANDATORY },
-                        { "hashedPassword", JSON_VARIANT_STRING, json_dispatch_string,           offsetof(Fido2HmacSalt, hashed_password), JSON_MANDATORY },
+                        { "credential",     JSON_VARIANT_STRING,  dispatch_fido2_hmac_credential, offsetof(Fido2HmacSalt, credential),      JSON_MANDATORY },
+                        { "salt",           JSON_VARIANT_STRING,  dispatch_fido2_hmac_salt_value, 0,                                        JSON_MANDATORY },
+                        { "hashedPassword", JSON_VARIANT_STRING,  json_dispatch_string,           offsetof(Fido2HmacSalt, hashed_password), JSON_MANDATORY },
+                        { "up",             JSON_VARIANT_BOOLEAN, json_dispatch_tristate,         offsetof(Fido2HmacSalt, up),              0              },
+                        { "uv",             JSON_VARIANT_BOOLEAN, json_dispatch_tristate,         offsetof(Fido2HmacSalt, uv),              0              },
+                        { "clientPin",      JSON_VARIANT_BOOLEAN, json_dispatch_tristate,         offsetof(Fido2HmacSalt, client_pin),      0              },
                         {},
                 };
 
@@ -1031,7 +1036,11 @@ static int dispatch_fido2_hmac_salt(const char *name, JsonVariant *variant, Json
 
                 h->fido2_hmac_salt = array;
                 k = h->fido2_hmac_salt + h->n_fido2_hmac_salt;
-                *k = (Fido2HmacSalt) {};
+                *k = (Fido2HmacSalt) {
+                        .uv = -1,
+                        .up = -1,
+                        .client_pin = -1,
+                };
 
                 r = json_dispatch(e, fido2_hmac_salt_dispatch_table, NULL, flags, k);
                 if (r < 0) {
@@ -1552,7 +1561,7 @@ int user_group_record_mangle(
         if (FLAGS_SET(load_flags, USER_RECORD_REQUIRE_REGULAR) && !FLAGS_SET(m, USER_RECORD_REGULAR))
                 return json_log(v, json_flags, SYNTHETIC_ERRNO(EBADMSG), "Record lacks basic identity fields, which are required.");
 
-        if (m == 0)
+        if (!FLAGS_SET(load_flags, USER_RECORD_EMPTY_OK) && m == 0)
                 return json_log(v, json_flags, SYNTHETIC_ERRNO(EBADMSG), "Record is empty.");
 
         if (w)
@@ -1904,9 +1913,9 @@ uint64_t user_record_luks_pbkdf_memory_cost(UserRecord *h) {
         assert(h);
 
         /* Returns a value with kb granularity, since that's what libcryptsetup expects */
-
         if (h->luks_pbkdf_memory_cost == UINT64_MAX)
-                return 64*1024*1024; /* We default to 64M, since this should work on smaller systems too */
+                return streq(user_record_luks_pbkdf_type(h), "pbkdf2") ? 0 : /* doesn't apply for simple pbkdf2 */
+                        64*1024*1024; /* We default to 64M, since this should work on smaller systems too */
 
         return MIN(DIV_ROUND_UP(h->luks_pbkdf_memory_cost, 1024), UINT32_MAX) * 1024;
 }
@@ -1914,8 +1923,9 @@ uint64_t user_record_luks_pbkdf_memory_cost(UserRecord *h) {
 uint64_t user_record_luks_pbkdf_parallel_threads(UserRecord *h) {
         assert(h);
 
-        if (h->luks_pbkdf_memory_cost == UINT64_MAX)
-                return 1; /* We default to 1, since this should work on smaller systems too */
+        if (h->luks_pbkdf_parallel_threads == UINT64_MAX)
+                return streq(user_record_luks_pbkdf_type(h), "pbkdf2") ? 0 : /* doesn't apply for simple pbkdf2 */
+                        1; /* We default to 1, since this should work on smaller systems too */
 
         return MIN(h->luks_pbkdf_parallel_threads, UINT32_MAX);
 }
@@ -2105,7 +2115,7 @@ int user_record_masked_equal(UserRecord *a, UserRecord *b, UserRecordMask mask) 
         /* Compares the two records, but ignores anything not listed in the specified mask */
 
         if ((a->mask & ~mask) != 0) {
-                r = user_record_clone(a, USER_RECORD_ALLOW(mask) | USER_RECORD_STRIP(~mask & _USER_RECORD_MASK_MAX), &x);
+                r = user_record_clone(a, USER_RECORD_ALLOW(mask) | USER_RECORD_STRIP(~mask & _USER_RECORD_MASK_MAX) | USER_RECORD_PERMISSIVE, &x);
                 if (r < 0)
                         return r;
 
@@ -2113,7 +2123,7 @@ int user_record_masked_equal(UserRecord *a, UserRecord *b, UserRecordMask mask) 
         }
 
         if ((b->mask & ~mask) != 0) {
-                r = user_record_clone(b, USER_RECORD_ALLOW(mask) | USER_RECORD_STRIP(~mask & _USER_RECORD_MASK_MAX), &y);
+                r = user_record_clone(b, USER_RECORD_ALLOW(mask) | USER_RECORD_STRIP(~mask & _USER_RECORD_MASK_MAX) | USER_RECORD_PERMISSIVE, &y);
                 if (r < 0)
                         return r;
 

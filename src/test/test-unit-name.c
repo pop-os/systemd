@@ -129,8 +129,8 @@ static void test_unit_name_from_path(void) {
         test_unit_name_from_path_one("/", ".mount", "-.mount", 0);
         test_unit_name_from_path_one("///", ".mount", "-.mount", 0);
         test_unit_name_from_path_one("/foo/../bar", ".mount", NULL, -EINVAL);
-        test_unit_name_from_path_one("/foo/./bar", ".mount", NULL, -EINVAL);
-        test_unit_name_from_path_one("/waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ".mount", NULL, -EINVAL);
+        test_unit_name_from_path_one("/foo/./bar", ".mount", "foo-bar.mount", 0);
+        test_unit_name_from_path_one("/waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ".mount", NULL, -ENAMETOOLONG);
 }
 
 static void test_unit_name_from_path_instance_one(const char *pattern, const char *path, const char *suffix, const char *expected, int ret) {
@@ -160,7 +160,7 @@ static void test_unit_name_from_path_instance(void) {
         test_unit_name_from_path_instance_one("waldo", "..", ".mount", NULL, -EINVAL);
         test_unit_name_from_path_instance_one("waldo", "/foo", ".waldi", NULL, -EINVAL);
         test_unit_name_from_path_instance_one("wa--ldo", "/--", ".mount", "wa--ldo@\\x2d\\x2d.mount", 0);
-        test_unit_name_from_path_instance_one("waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "/waldo", ".mount", NULL, -EINVAL);
+        test_unit_name_from_path_instance_one("waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "/waldo", ".mount", NULL, -ENAMETOOLONG);
 }
 
 static void test_unit_name_to_path_one(const char *unit, const char *path, int ret) {
@@ -228,8 +228,8 @@ static int test_unit_printf(void) {
 
         log_info("/* %s */", __func__);
 
-        assert_se(specifier_machine_id('m', NULL, NULL, &mid) >= 0 && mid);
-        assert_se(specifier_boot_id('b', NULL, NULL, &bid) >= 0 && bid);
+        assert_se(specifier_machine_id('m', NULL, NULL, NULL, &mid) >= 0 && mid);
+        assert_se(specifier_boot_id('b', NULL, NULL, NULL, &bid) >= 0 && bid);
         assert_se(host = gethostname_malloc());
         assert_se(user = uid_to_name(getuid()));
         assert_se(group = gid_to_name(getgid()));
@@ -471,8 +471,8 @@ static void test_build_parent_slice(void) {
 }
 
 static void test_unit_name_to_instance(void) {
+        UnitNameFlags r;
         char *instance;
-        int r;
 
         log_info("/* %s */", __func__);
 

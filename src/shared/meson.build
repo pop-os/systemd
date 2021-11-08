@@ -17,16 +17,22 @@ shared_sources = files('''
         bitmap.c
         bitmap.h
         blkid-util.h
+        blockdev-util.c
+        blockdev-util.h
         bond-util.c
         bond-util.h
         boot-timestamps.c
         boot-timestamps.h
         bootspec.c
         bootspec.h
+        bpf-dlopen.c
+        bpf-dlopen.h
         bpf-program.c
         bpf-program.h
         bridge-util.c
         bridge-util.h
+        btrfs-util.c
+        btrfs-util.h
         bus-get-properties.c
         bus-get-properties.h
         bus-locator.c
@@ -69,6 +75,8 @@ shared_sources = files('''
         condition.h
         conf-parser.c
         conf-parser.h
+        copy.c
+        copy.h
         coredump-util.c
         coredump-util.h
         cpu-set-util.c
@@ -76,13 +84,19 @@ shared_sources = files('''
         cryptsetup-util.c
         cryptsetup-util.h
         daemon-util.h
+        data-fd-util.c
+        data-fd-util.h
         dev-setup.c
         dev-setup.h
+        device-nodes.c
+        device-nodes.h
         devnode-acl.h
         discover-image.c
         discover-image.h
         dissect-image.c
         dissect-image.h
+        dlfcn-util.c
+        dlfcn-util.h
         dm-util.c
         dm-util.h
         dns-domain.c
@@ -125,6 +139,8 @@ shared_sources = files('''
         group-record.h
         hostname-setup.c
         hostname-setup.h
+        hwdb-util.c
+        hwdb-util.h
         id128-print.c
         id128-print.h
         idn-util.c
@@ -138,10 +154,10 @@ shared_sources = files('''
         install-printf.h
         install.c
         install.h
-        ipvlan-util.c
-        ipvlan-util.h
         ip-protocol-list.c
         ip-protocol-list.h
+        ipvlan-util.c
+        ipvlan-util.h
         journal-importer.c
         journal-importer.h
         journal-util.c
@@ -153,6 +169,8 @@ shared_sources = files('''
         kbd-util.h
         killall.c
         killall.h
+        label.c
+        label.h
         libcrypt-util.c
         libcrypt-util.h
         libfido2-util.c
@@ -182,6 +200,7 @@ shared_sources = files('''
         macvlan-util.c
         macvlan-util.h
         main-func.h
+        mkdir-label.c
         mkfs-util.c
         mkfs-util.h
         module-util.h
@@ -206,6 +225,8 @@ shared_sources = files('''
         pager.h
         parse-argument.c
         parse-argument.h
+        parse-socket-bind-item.c
+        parse-socket-bind-item.h
         pe-header.h
         pkcs11-util.c
         pkcs11-util.h
@@ -219,21 +240,30 @@ shared_sources = files('''
         pwquality-util.h
         qrcode-util.c
         qrcode-util.h
+        quota-util.c
+        quota-util.h
         reboot-util.c
         reboot-util.h
         resize-fs.c
         resize-fs.h
         resolve-util.c
         resolve-util.h
+        rm-rf.c
+        rm-rf.h
         seccomp-util.h
         securebits-util.c
         securebits-util.h
+        selinux-util.c
+        selinux-util.h
         serialize.c
         serialize.h
         service-util.c
         service-util.h
         sleep-config.c
         sleep-config.h
+        smack-util.c
+        smack-util.h
+        socket-label.c
         socket-netlink.c
         socket-netlink.h
         spawn-ask-password-agent.c
@@ -260,6 +290,8 @@ shared_sources = files('''
         user-record-show.h
         user-record.c
         user-record.h
+        userdb-dropin.c
+        userdb-dropin.h
         userdb.c
         userdb.h
         utmp-wtmp.h
@@ -317,6 +349,13 @@ endif
 
 if conf.get('HAVE_LIBIPTC') == 1
         shared_sources += files('firewall-util-iptables.c')
+endif
+
+if conf.get('HAVE_LIBBPF') == 1
+        shared_sources += files('''
+                bpf-link.c
+                bpf-link.h
+        '''.split())
 endif
 
 if conf.get('HAVE_KMOD') == 1
@@ -380,6 +419,7 @@ libshared_deps = [threads,
                   libblkid,
                   libcap,
                   libcrypt,
+                  libdl,
                   libgcrypt,
                   libiptc,
                   libkmod,

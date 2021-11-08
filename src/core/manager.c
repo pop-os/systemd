@@ -30,6 +30,7 @@
 #include "clean-ipc.h"
 #include "clock-util.h"
 #include "core-varlink.h"
+#include "creds-util.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
 #include "dbus-unit.h"
@@ -49,11 +50,12 @@
 #include "install.h"
 #include "io-util.h"
 #include "label.h"
-#include "locale-setup.h"
 #include "load-fragment.h"
+#include "locale-setup.h"
 #include "log.h"
 #include "macro.h"
 #include "manager.h"
+#include "manager-dump.h"
 #include "memory-util.h"
 #include "mkdir.h"
 #include "parse-util.h"
@@ -238,11 +240,18 @@ static void manager_print_jobs_in_progress(Manager *m) {
         if (job_get_timeout(j, &x) > 0)
                 format_timespan(limit, sizeof(limit), x - j->begin_usec, 1*USEC_PER_SEC);
 
+        /* We want to use enough information for the user to identify previous lines talking about the same
+         * unit, but keep the message as short as possible. So if 'Starting foo.service' or 'Starting
+         * foo.service (Description)' were used, 'foo.service' is enough here. On the other hand, if we used
+         * 'Starting Description' before, then we shall also use 'Description' here. So we pass NULL as the
+         * second argument to unit_status_string(). */
+        const char *ident = unit_status_string(j->unit, NULL);
+
         manager_status_printf(m, STATUS_TYPE_EPHEMERAL, cylon,
                               "%sA %s job is running for %s (%s / %s)",
                               strempty(job_of_n),
                               job_type_to_string(j->type),
-                              unit_status_string(j->unit),
+                              ident,
                               time, limit);
 }
 
@@ -285,7 +294,7 @@ static int manager_dispatch_ask_password_fd(sd_event_source *source,
 static void manager_close_ask_password(Manager *m) {
         assert(m);
 
-        m->ask_password_event_source = sd_event_source_unref(m->ask_password_event_source);
+        m->ask_password_event_source = sd_event_source_disable_unref(m->ask_password_event_source);
         m->ask_password_inotify_fd = safe_close(m->ask_password_inotify_fd);
         m->have_ask_password = -EINVAL;
 }
@@ -354,7 +363,7 @@ static int manager_watch_idle_pipe(Manager *m) {
 static void manager_close_idle_pipe(Manager *m) {
         assert(m);
 
-        m->idle_pipe_event_source = sd_event_source_unref(m->idle_pipe_event_source);
+        m->idle_pipe_event_source = sd_event_source_disable_unref(m->idle_pipe_event_source);
 
         safe_close_pair(m->idle_pipe);
         safe_close_pair(m->idle_pipe + 2);
@@ -368,7 +377,7 @@ static int manager_setup_time_change(Manager *m) {
         if (MANAGER_IS_TEST_RUN(m))
                 return 0;
 
-        m->time_change_event_source = sd_event_source_unref(m->time_change_event_source);
+        m->time_change_event_source = sd_event_source_disable_unref(m->time_change_event_source);
         m->time_change_fd = safe_close(m->time_change_fd);
 
         m->time_change_fd = time_change_fd();
@@ -687,7 +696,8 @@ static int manager_setup_prefix(Manager *m) {
         for (ExecDirectoryType i = 0; i < _EXEC_DIRECTORY_TYPE_MAX; i++) {
                 r = sd_path_lookup(p[i].type, p[i].suffix, &m->prefix[i]);
                 if (r < 0)
-                        return r;
+                        return log_warning_errno(r, "Failed to lookup %s path: %m",
+                                                 exec_directory_type_to_string(i));
         }
 
         return 0;
@@ -852,8 +862,8 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
         if (r < 0)
                 return r;
 
-        e = secure_getenv("CREDENTIALS_DIRECTORY");
-        if (e) {
+        r = get_credentials_dir(&e);
+        if (r >= 0) {
                 m->received_credentials = strdup(e);
                 if (!m->received_credentials)
                         return -ENOMEM;
@@ -867,7 +877,7 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
         if (r < 0)
                 return r;
 
-        if (test_run_flags == MANAGER_TEST_RUN_MINIMAL) {
+        if (FLAGS_SET(test_run_flags, MANAGER_TEST_RUN_MINIMAL)) {
                 m->cgroup_root = strdup("");
                 if (!m->cgroup_root)
                         return -ENOMEM;
@@ -935,7 +945,7 @@ static int manager_setup_notify(Manager *m) {
 
                 /* First free all secondary fields */
                 m->notify_socket = mfree(m->notify_socket);
-                m->notify_event_source = sd_event_source_unref(m->notify_event_source);
+                m->notify_event_source = sd_event_source_disable_unref(m->notify_event_source);
 
                 fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
                 if (fd < 0)
@@ -1023,7 +1033,7 @@ static int manager_setup_cgroups_agent(Manager *m) {
                 _cleanup_close_ int fd = -1;
 
                 /* First free all secondary fields */
-                m->cgroups_agent_event_source = sd_event_source_unref(m->cgroups_agent_event_source);
+                m->cgroups_agent_event_source = sd_event_source_disable_unref(m->cgroups_agent_event_source);
 
                 fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
                 if (fd < 0)
@@ -1088,7 +1098,7 @@ static int manager_setup_user_lookup_fd(Manager *m) {
 
                 /* Free all secondary fields */
                 safe_close_pair(m->user_lookup_fds);
-                m->user_lookup_event_source = sd_event_source_unref(m->user_lookup_event_source);
+                m->user_lookup_event_source = sd_event_source_disable_unref(m->user_lookup_event_source);
 
                 if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, m->user_lookup_fds) < 0)
                         return log_error_errno(errno, "Failed to allocate user lookup socket: %m");
@@ -1139,12 +1149,11 @@ enum {
 
 static void unit_gc_mark_good(Unit *u, unsigned gc_marker) {
         Unit *other;
-        void *v;
 
         u->gc_marker = gc_marker + GC_OFFSET_GOOD;
 
         /* Recursively mark referenced units as GOOD as well */
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCES])
+        UNIT_FOREACH_DEPENDENCY(other, u, UNIT_ATOM_REFERENCES)
                 if (other->gc_marker == gc_marker + GC_OFFSET_UNSURE)
                         unit_gc_mark_good(other, gc_marker);
 }
@@ -1152,7 +1161,6 @@ static void unit_gc_mark_good(Unit *u, unsigned gc_marker) {
 static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
         Unit *other;
         bool is_bad;
-        void *v;
 
         assert(u);
 
@@ -1170,7 +1178,7 @@ static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
 
         is_bad = true;
 
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCED_BY]) {
+        UNIT_FOREACH_DEPENDENCY(other, u, UNIT_ATOM_REFERENCED_BY) {
                 unit_gc_sweep(other, gc_marker);
 
                 if (other->gc_marker == gc_marker + GC_OFFSET_GOOD)
@@ -1295,13 +1303,89 @@ static unsigned manager_dispatch_stop_when_unneeded_queue(Manager *m) {
                 /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
                  * service being unnecessary after a while. */
 
-                if (!ratelimit_below(&u->auto_stop_ratelimit)) {
+                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
                         log_unit_warning(u, "Unit not needed anymore, but not stopping since we tried this too often recently.");
                         continue;
                 }
 
                 /* Ok, nobody needs us anymore. Sniff. Then let's commit suicide */
                 r = manager_add_job(u->manager, JOB_STOP, u, JOB_FAIL, NULL, &error, NULL);
+                if (r < 0)
+                        log_unit_warning_errno(u, r, "Failed to enqueue stop job, ignoring: %s", bus_error_message(&error, r));
+        }
+
+        return n;
+}
+
+static unsigned manager_dispatch_start_when_upheld_queue(Manager *m) {
+        unsigned n = 0;
+        Unit *u;
+        int r;
+
+        assert(m);
+
+        while ((u = m->start_when_upheld_queue)) {
+                _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+                Unit *culprit = NULL;
+
+                assert(u->in_start_when_upheld_queue);
+                LIST_REMOVE(start_when_upheld_queue, m->start_when_upheld_queue, u);
+                u->in_start_when_upheld_queue = false;
+
+                n++;
+
+                if (!unit_is_upheld_by_active(u, &culprit))
+                        continue;
+
+                log_unit_debug(u, "Unit is started because upheld by active unit %s.", culprit->id);
+
+                /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
+                 * service being unnecessary after a while. */
+
+                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
+                        log_unit_warning(u, "Unit needs to be started because active unit %s upholds it, but not starting since we tried this too often recently.", culprit->id);
+                        continue;
+                }
+
+                r = manager_add_job(u->manager, JOB_START, u, JOB_FAIL, NULL, &error, NULL);
+                if (r < 0)
+                        log_unit_warning_errno(u, r, "Failed to enqueue start job, ignoring: %s", bus_error_message(&error, r));
+        }
+
+        return n;
+}
+
+static unsigned manager_dispatch_stop_when_bound_queue(Manager *m) {
+        unsigned n = 0;
+        Unit *u;
+        int r;
+
+        assert(m);
+
+        while ((u = m->stop_when_bound_queue)) {
+                _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+                Unit *culprit = NULL;
+
+                assert(u->in_stop_when_bound_queue);
+                LIST_REMOVE(stop_when_bound_queue, m->stop_when_bound_queue, u);
+                u->in_stop_when_bound_queue = false;
+
+                n++;
+
+                if (!unit_is_bound_by_inactive(u, &culprit))
+                        continue;
+
+                log_unit_debug(u, "Unit is stopped because bound to inactive unit %s.", culprit->id);
+
+                /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
+                 * service being unnecessary after a while. */
+
+                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
+                        log_unit_warning(u, "Unit needs to be stopped because it is bound to inactive unit %s it, but not stopping since we tried this too often recently.", culprit->id);
+                        continue;
+                }
+
+                r = manager_add_job(u->manager, JOB_STOP, u, JOB_REPLACE, NULL, &error, NULL);
                 if (r < 0)
                         log_unit_warning_errno(u, r, "Failed to enqueue stop job, ignoring: %s", bus_error_message(&error, r));
         }
@@ -1326,7 +1410,13 @@ static void manager_clear_jobs_and_units(Manager *m) {
         assert(!m->cleanup_queue);
         assert(!m->gc_unit_queue);
         assert(!m->gc_job_queue);
+        assert(!m->cgroup_realize_queue);
+        assert(!m->cgroup_empty_queue);
+        assert(!m->cgroup_oom_queue);
+        assert(!m->target_deps_queue);
         assert(!m->stop_when_unneeded_queue);
+        assert(!m->start_when_upheld_queue);
+        assert(!m->stop_when_bound_queue);
 
         assert(hashmap_isempty(m->jobs));
         assert(hashmap_isempty(m->units));
@@ -1730,13 +1820,13 @@ int manager_add_job(
         assert(mode < _JOB_MODE_MAX);
 
         if (mode == JOB_ISOLATE && type != JOB_START)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Isolate is only valid for start.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Isolate is only valid for start.");
 
         if (mode == JOB_ISOLATE && !unit->allow_isolate)
-                return sd_bus_error_setf(error, BUS_ERROR_NO_ISOLATION, "Operation refused, unit may not be isolated.");
+                return sd_bus_error_set(error, BUS_ERROR_NO_ISOLATION, "Operation refused, unit may not be isolated.");
 
         if (mode == JOB_TRIGGERING && type != JOB_STOP)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "--job-mode=triggering is only valid for stop.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "--job-mode=triggering is only valid for stop.");
 
         log_unit_debug(unit, "Trying to enqueue job %s/%s/%s", unit->id, job_type_to_string(type), job_mode_to_string(mode));
 
@@ -1868,30 +1958,28 @@ static int manager_dispatch_target_deps_queue(Manager *m) {
         Unit *u;
         int r = 0;
 
-        static const UnitDependency deps[] = {
-                UNIT_REQUIRED_BY,
-                UNIT_REQUISITE_OF,
-                UNIT_WANTED_BY,
-                UNIT_BOUND_BY
-        };
-
         assert(m);
 
         while ((u = m->target_deps_queue)) {
+                _cleanup_free_ Unit **targets = NULL;
+                int n_targets;
+
                 assert(u->in_target_deps_queue);
 
                 LIST_REMOVE(target_deps_queue, u->manager->target_deps_queue, u);
                 u->in_target_deps_queue = false;
 
-                for (size_t k = 0; k < ELEMENTSOF(deps); k++) {
-                        Unit *target;
-                        void *v;
+                /* Take an "atomic" snapshot of dependencies here, as the call below will likely modify the
+                 * dependencies, and we can't have it that hash tables we iterate through are modified while
+                 * we are iterating through them. */
+                n_targets = unit_get_dependency_array(u, UNIT_ATOM_DEFAULT_TARGET_DEPENDENCIES, &targets);
+                if (n_targets < 0)
+                        return n_targets;
 
-                        HASHMAP_FOREACH_KEY(v, target, u->dependencies[deps[k]]) {
-                                r = unit_add_default_target_dependency(u, target);
-                                if (r < 0)
-                                        return r;
-                        }
+                for (int i = 0; i < n_targets; i++) {
+                        r = unit_add_default_target_dependency(u, targets[i]);
+                        if (r < 0)
+                                return r;
                 }
         }
 
@@ -2075,74 +2163,6 @@ int manager_load_startable_unit_or_warn(
                 return log_error_errno(r, "%s", bus_error_message(&error, r));
 
         *ret = unit;
-        return 0;
-}
-
-void manager_dump_jobs(Manager *s, FILE *f, const char *prefix) {
-        Job *j;
-
-        assert(s);
-        assert(f);
-
-        HASHMAP_FOREACH(j, s->jobs)
-                job_dump(j, f, prefix);
-}
-
-void manager_dump_units(Manager *s, FILE *f, const char *prefix) {
-        Unit *u;
-        const char *t;
-
-        assert(s);
-        assert(f);
-
-        HASHMAP_FOREACH_KEY(u, t, s->units)
-                if (u->id == t)
-                        unit_dump(u, f, prefix);
-}
-
-void manager_dump(Manager *m, FILE *f, const char *prefix) {
-        assert(m);
-        assert(f);
-
-        for (ManagerTimestamp q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
-                const dual_timestamp *t = m->timestamps + q;
-                char buf[CONST_MAX(FORMAT_TIMESPAN_MAX, FORMAT_TIMESTAMP_MAX)];
-
-                if (dual_timestamp_is_set(t))
-                        fprintf(f, "%sTimestamp %s: %s\n",
-                                strempty(prefix),
-                                manager_timestamp_to_string(q),
-                                timestamp_is_set(t->realtime) ? format_timestamp(buf, sizeof buf, t->realtime) :
-                                                                format_timespan(buf, sizeof buf, t->monotonic, 1));
-        }
-
-        manager_dump_units(m, f, prefix);
-        manager_dump_jobs(m, f, prefix);
-}
-
-int manager_get_dump_string(Manager *m, char **ret) {
-        _cleanup_free_ char *dump = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t size;
-        int r;
-
-        assert(m);
-        assert(ret);
-
-        f = open_memstream_unlocked(&dump, &size);
-        if (!f)
-                return -errno;
-
-        manager_dump(m, f, NULL);
-
-        r = fflush_and_check(f);
-        if (r < 0)
-                return r;
-
-        f = safe_fclose(f);
-
-        *ret = TAKE_PTR(dump);
-
         return 0;
 }
 
@@ -2956,6 +2976,12 @@ int manager_loop(Manager *m) {
                 if (manager_dispatch_cgroup_realize_queue(m) > 0)
                         continue;
 
+                if (manager_dispatch_start_when_upheld_queue(m) > 0)
+                        continue;
+
+                if (manager_dispatch_stop_when_bound_queue(m) > 0)
+                        continue;
+
                 if (manager_dispatch_stop_when_unneeded_queue(m) > 0)
                         continue;
 
@@ -3306,11 +3332,7 @@ int manager_serialize(
                 if (u->id != t)
                         continue;
 
-                /* Start marker */
-                fputs(u->id, f);
-                fputc('\n', f);
-
-                r = unit_serialize(u, f, fds, !switching_root);
+                r = unit_serialize(u, f, fds, switching_root);
                 if (r < 0)
                         return r;
         }
@@ -3678,7 +3700,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                         if (safe_atoi(val, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
                                 log_notice("Failed to parse notify fd, ignoring: \"%s\"", val);
                         else {
-                                m->notify_event_source = sd_event_source_unref(m->notify_event_source);
+                                m->notify_event_source = sd_event_source_disable_unref(m->notify_event_source);
                                 safe_close(m->notify_fd);
                                 m->notify_fd = fdset_remove(fds, fd);
                         }
@@ -3694,7 +3716,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                         if (safe_atoi(val, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
                                 log_notice("Failed to parse cgroups agent fd, ignoring.: %s", val);
                         else {
-                                m->cgroups_agent_event_source = sd_event_source_unref(m->cgroups_agent_event_source);
+                                m->cgroups_agent_event_source = sd_event_source_disable_unref(m->cgroups_agent_event_source);
                                 safe_close(m->cgroups_agent_fd);
                                 m->cgroups_agent_fd = fdset_remove(fds, fd);
                         }
@@ -3705,7 +3727,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                         if (sscanf(val, "%i %i", &fd0, &fd1) != 2 || fd0 < 0 || fd1 < 0 || fd0 == fd1 || !fdset_contains(fds, fd0) || !fdset_contains(fds, fd1))
                                 log_notice("Failed to parse user lookup fd, ignoring: %s", val);
                         else {
-                                m->user_lookup_event_source = sd_event_source_unref(m->user_lookup_event_source);
+                                m->user_lookup_event_source = sd_event_source_disable_unref(m->user_lookup_event_source);
                                 safe_close_pair(m->user_lookup_fds);
                                 m->user_lookup_fds[0] = fdset_remove(fds, fd0);
                                 m->user_lookup_fds[1] = fdset_remove(fds, fd1);
@@ -3780,7 +3802,7 @@ int manager_reload(Manager *m) {
 
         /* Start by flushing out all jobs and units, all generated units, all runtime environments, all dynamic users
          * and everything else that is worth flushing out. We'll get it all back from the serialization — if we need
-         * it.*/
+         * it. */
 
         manager_clear_jobs_and_units(m);
         lookup_paths_flush_generator(&m->lookup_paths);
@@ -3916,7 +3938,7 @@ static void manager_notify_finished(Manager *m) {
 
                 if (dual_timestamp_is_set(&m->timestamps[MANAGER_TIMESTAMP_INITRD])) {
 
-                        /* The initrd case on bare-metal*/
+                        /* The initrd case on bare-metal */
                         kernel_usec = m->timestamps[MANAGER_TIMESTAMP_INITRD].monotonic - m->timestamps[MANAGER_TIMESTAMP_KERNEL].monotonic;
                         initrd_usec = m->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic - m->timestamps[MANAGER_TIMESTAMP_INITRD].monotonic;
 
@@ -3932,7 +3954,7 @@ static void manager_notify_finished(Manager *m) {
                                                format_timespan(userspace, sizeof(userspace), userspace_usec, USEC_PER_MSEC),
                                                format_timespan(sum, sizeof(sum), total_usec, USEC_PER_MSEC)));
                 } else {
-                        /* The initrd-less case on bare-metal*/
+                        /* The initrd-less case on bare-metal */
 
                         kernel_usec = m->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic - m->timestamps[MANAGER_TIMESTAMP_KERNEL].monotonic;
                         initrd_usec = 0;
@@ -4500,16 +4522,14 @@ void manager_status_printf(Manager *m, StatusType type, const char *status, cons
         va_end(ap);
 }
 
-Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path) {
-        char p[strlen(path)+1];
-
+Set* manager_get_units_requiring_mounts_for(Manager *m, const char *path) {
         assert(m);
         assert(path);
 
-        strcpy(p, path);
-        path_simplify(p, false);
+        if (path_equal(path, "/"))
+                path = "";
 
-        return hashmap_get(m->units_requiring_mounts_for, streq(p, "/") ? "" : p);
+        return hashmap_get(m->units_requiring_mounts_for, path);
 }
 
 int manager_update_failed_units(Manager *m, Unit *u, bool failed) {

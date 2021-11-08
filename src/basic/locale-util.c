@@ -169,8 +169,6 @@ static int add_locales_from_libdir (Set *locales) {
         FOREACH_DIRENT(entry, dir, return -errno) {
                 char *z;
 
-                dirent_ensure_type(dir, entry);
-
                 if (entry->d_type != DT_DIR)
                         continue;
 
@@ -427,8 +425,10 @@ const char *special_glyph(SpecialGlyph code) {
                 },
         };
 
-        assert(code < _SPECIAL_GLYPH_MAX);
+        if (code < 0)
+                return NULL;
 
+        assert(code < _SPECIAL_GLYPH_MAX);
         return draw_table[code >= _SPECIAL_GLYPH_FIRST_EMOJI ? emoji_enabled() : is_locale_utf8()][code];
 }
 

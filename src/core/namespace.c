@@ -275,7 +275,7 @@ static bool mount_entry_read_only(const MountEntry *p) {
 static bool mount_entry_noexec(const MountEntry *p) {
         assert(p);
 
-        return p->noexec || IN_SET(p->mode, NOEXEC, INACCESSIBLE);
+        return p->noexec || IN_SET(p->mode, NOEXEC, INACCESSIBLE, SYSFS, PROCFS);
 }
 
 static bool mount_entry_exec(const MountEntry *p) {
@@ -1157,6 +1157,15 @@ static int mount_image(const MountEntry *m, const char *root_directory) {
                                 host_os_release_id, host_os_release_version_id, host_os_release_sysext_level);
         if (r == -ENOENT && m->ignore)
                 return 0;
+        if (r == -ESTALE && host_os_release_id)
+                return log_error_errno(r,
+                                       "Failed to mount image %s, extension-release metadata does not match the lower layer's: ID=%s%s%s%s%s",
+                                       mount_entry_source(m),
+                                       host_os_release_id,
+                                       host_os_release_version_id ? " VERSION_ID=" : "",
+                                       strempty(host_os_release_version_id),
+                                       host_os_release_sysext_level ? " SYSEXT_LEVEL=" : "",
+                                       strempty(host_os_release_sysext_level));
         if (r < 0)
                 return log_debug_errno(r, "Failed to mount image %s on %s: %m", mount_entry_source(m), mount_entry_path(m));
 
@@ -1387,8 +1396,8 @@ static int apply_one_mount(
 
 static int make_read_only(const MountEntry *m, char **deny_list, FILE *proc_self_mountinfo) {
         unsigned long new_flags = 0, flags_mask = 0;
-        bool submounts = false;
-        int r = 0;
+        bool submounts;
+        int r;
 
         assert(m);
         assert(proc_self_mountinfo);
@@ -1432,8 +1441,8 @@ static int make_read_only(const MountEntry *m, char **deny_list, FILE *proc_self
 
 static int make_noexec(const MountEntry *m, char **deny_list, FILE *proc_self_mountinfo) {
         unsigned long new_flags = 0, flags_mask = 0;
-        bool submounts = false;
-        int r = 0;
+        bool submounts;
+        int r;
 
         assert(m);
         assert(proc_self_mountinfo);
@@ -1456,6 +1465,27 @@ static int make_noexec(const MountEntry *m, char **deny_list, FILE *proc_self_mo
         else
                 r = bind_remount_one_with_mountinfo(mount_entry_path(m), new_flags, flags_mask, proc_self_mountinfo);
 
+        if (r == -ENOENT && m->ignore)
+                return 0;
+        if (r < 0)
+                return log_debug_errno(r, "Failed to re-mount '%s'%s: %m", mount_entry_path(m),
+                                       submounts ? " and its submounts" : "");
+        return 0;
+}
+
+static int make_nosuid(const MountEntry *m, FILE *proc_self_mountinfo) {
+        bool submounts;
+        int r;
+
+        assert(m);
+        assert(proc_self_mountinfo);
+
+        submounts = !IN_SET(m->mode, EMPTY_DIR, TMPFS);
+
+        if (submounts)
+                r = bind_remount_recursive_with_mountinfo(mount_entry_path(m), MS_NOSUID, MS_NOSUID, NULL, proc_self_mountinfo);
+        else
+                r = bind_remount_one_with_mountinfo(mount_entry_path(m), MS_NOSUID, MS_NOSUID, proc_self_mountinfo);
         if (r == -ENOENT && m->ignore)
                 return 0;
         if (r < 0)
@@ -1660,6 +1690,17 @@ static int apply_mounts(
                 }
         }
 
+        /* Fourth round, flip the nosuid bits without a deny list. */
+        if (ns_info->mount_nosuid)
+                for (MountEntry *m = mounts; m < mounts + *n_mounts; ++m) {
+                        r = make_nosuid(m, proc_self_mountinfo);
+                        if (r < 0) {
+                                if (error_path && mount_entry_path(m))
+                                        *error_path = strdup(mount_entry_path(m));
+                                return r;
+                        }
+                }
+
         return 1;
 }
 
@@ -1802,7 +1843,6 @@ int setup_namespace(
                 const char *propagate_dir,
                 const char *incoming_dir,
                 const char *notify_socket,
-                DissectImageFlags dissect_image_flags,
                 char **error_path) {
 
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
@@ -1813,6 +1853,14 @@ int setup_namespace(
         MountEntry *m = NULL, *mounts = NULL;
         bool require_prefix = false, setup_propagate = false;
         const char *root, *extension_dir = "/run/systemd/unit-extensions";
+        DissectImageFlags dissect_image_flags =
+                DISSECT_IMAGE_GENERIC_ROOT |
+                DISSECT_IMAGE_REQUIRE_ROOT |
+                DISSECT_IMAGE_DISCARD_ON_LOOP |
+                DISSECT_IMAGE_RELAX_VAR_CHECK |
+                DISSECT_IMAGE_FSCK |
+                DISSECT_IMAGE_USR_NO_ROOT |
+                DISSECT_IMAGE_GROWFS;
         size_t n_mounts;
         int r;
 
@@ -1825,8 +1873,6 @@ int setup_namespace(
                 mount_flags = MS_SHARED;
 
         if (root_image) {
-                dissect_image_flags |= DISSECT_IMAGE_REQUIRE_ROOT;
-
                 /* Make the whole image read-only if we can determine that we only access it in a read-only fashion. */
                 if (root_read_only(read_only_paths,
                                    ns_info->protect_system) &&
@@ -1849,7 +1895,7 @@ int setup_namespace(
 
                 r = loop_device_make_by_path(
                                 root_image,
-                                FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
+                                FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
                                 &loop_device);
                 if (r < 0)
@@ -1859,6 +1905,8 @@ int setup_namespace(
                                 loop_device->fd,
                                 &verity,
                                 root_image_options,
+                                loop_device->uevent_seqnum_not_before,
+                                loop_device->timestamp_not_before,
                                 dissect_image_flags,
                                 &dissected_image);
                 if (r < 0)
@@ -2163,7 +2211,7 @@ int setup_namespace(
 
         if (root_image) {
                 /* A root image is specified, mount it to the right place */
-                r = dissected_image_mount(dissected_image, root, UID_INVALID, dissect_image_flags);
+                r = dissected_image_mount(dissected_image, root, UID_INVALID, UID_INVALID, dissect_image_flags);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to mount root image: %m");
                         goto finish;

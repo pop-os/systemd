@@ -13,7 +13,7 @@ This reverts commit ebef02dd8f35f8b6ee58060b71b7f321a5027760.
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/src/shared/pretty-print.c b/src/shared/pretty-print.c
-index 0f02f32..ca5b25a 100644
+index 137ba77..b8aeb14 100644
 --- a/src/shared/pretty-print.c
 +++ b/src/shared/pretty-print.c
 @@ -21,6 +21,10 @@

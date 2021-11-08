@@ -198,7 +198,7 @@ static void test_replace_env2(bool extended) {
                 "BAR=bar",
                 NULL
         };
-        _cleanup_free_ char *t = NULL, *s = NULL, *q = NULL, *r = NULL, *p = NULL, *x = NULL;
+        _cleanup_free_ char *t = NULL, *s = NULL, *q = NULL, *r = NULL, *p = NULL, *x = NULL, *y = NULL;
         unsigned flags = REPLACE_ENV_ALLOW_EXTENDED*extended;
 
         t = replace_env("FOO=${FOO:-${BAR}}", (char**) env, flags);
@@ -218,6 +218,9 @@ static void test_replace_env2(bool extended) {
 
         x = replace_env("XXX=${XXX:+${BAR}post}", (char**) env, flags);
         assert_se(streq(x, extended ? "XXX=" : "XXX=${XXX:+barpost}"));
+
+        y = replace_env("FOO=${FOO}between${BAR:-baz}", (char**) env, flags);
+        assert_se(streq(y, extended ? "FOO=foobetweenbar" : "FOO=foobetween${BAR:-baz}"));
 }
 
 static void test_replace_env_argv(void) {
@@ -365,13 +368,13 @@ static void test_putenv_dup(void) {
         log_info("/* %s */", __func__);
 
         assert_se(putenv_dup("A=a1", true) == 0);
-        assert_se(streq(getenv("A"), "a1"));
+        assert_se(streq_ptr(getenv("A"), "a1"));
         assert_se(putenv_dup("A=a1", true) == 0);
-        assert_se(streq(getenv("A"), "a1"));
+        assert_se(streq_ptr(getenv("A"), "a1"));
         assert_se(putenv_dup("A=a2", false) == 0);
-        assert_se(streq(getenv("A"), "a1"));
+        assert_se(streq_ptr(getenv("A"), "a1"));
         assert_se(putenv_dup("A=a2", true) == 0);
-        assert_se(streq(getenv("A"), "a2"));
+        assert_se(streq_ptr(getenv("A"), "a2"));
 }
 
 static void test_setenv_systemd_exec_pid(void) {

@@ -65,8 +65,8 @@ static void timer_done(Unit *u) {
 
         timer_free_values(t);
 
-        t->monotonic_event_source = sd_event_source_unref(t->monotonic_event_source);
-        t->realtime_event_source = sd_event_source_unref(t->realtime_event_source);
+        t->monotonic_event_source = sd_event_source_disable_unref(t->monotonic_event_source);
+        t->realtime_event_source = sd_event_source_disable_unref(t->realtime_event_source);
 
         free(t->stamp_path);
 }
@@ -124,7 +124,7 @@ static int timer_add_trigger_dependencies(Timer *t) {
 
         assert(t);
 
-        if (!hashmap_isempty(UNIT(t)->dependencies[UNIT_TRIGGERS]))
+        if (UNIT_TRIGGER(UNIT(t)))
                 return 0;
 
         r = unit_load_related_unit(UNIT(t), ".service", &x);
@@ -296,8 +296,8 @@ static void timer_set_state(Timer *t, TimerState state) {
         t->state = state;
 
         if (state != TIMER_WAITING) {
-                t->monotonic_event_source = sd_event_source_unref(t->monotonic_event_source);
-                t->realtime_event_source = sd_event_source_unref(t->realtime_event_source);
+                t->monotonic_event_source = sd_event_source_disable_unref(t->monotonic_event_source);
+                t->realtime_event_source = sd_event_source_disable_unref(t->realtime_event_source);
                 t->next_elapse_monotonic_or_boottime = USEC_INFINITY;
                 t->next_elapse_realtime = USEC_INFINITY;
         }
@@ -635,12 +635,6 @@ static int timer_start(Unit *u) {
         if (r < 0)
                 return r;
 
-        r = unit_test_start_limit(u);
-        if (r < 0) {
-                timer_enter_dead(t, TIMER_FAILURE_START_LIMIT_HIT);
-                return r;
-        }
-
         r = unit_acquire_invocation_id(u);
         if (r < 0)
                 return r;
@@ -901,6 +895,21 @@ static int timer_can_clean(Unit *u, ExecCleanMask *ret) {
         return 0;
 }
 
+static int timer_test_start_limit(Unit *u) {
+        Timer *t = TIMER(u);
+        int r;
+
+        assert(t);
+
+        r = unit_test_start_limit(u);
+        if (r < 0) {
+                timer_enter_dead(t, TIMER_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
+
+        return 0;
+}
+
 static const char* const timer_base_table[_TIMER_BASE_MAX] = {
         [TIMER_ACTIVE] = "OnActiveSec",
         [TIMER_BOOT] = "OnBootSec",
@@ -960,4 +969,6 @@ const UnitVTable timer_vtable = {
         .timezone_change = timer_timezone_change,
 
         .bus_set_property = bus_timer_set_property,
+
+        .test_start_limit = timer_test_start_limit,
 };

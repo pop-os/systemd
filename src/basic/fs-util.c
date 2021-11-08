@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "blockdev-util.h"
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -227,7 +226,7 @@ int chmod_and_chown(const char *path, mode_t mode, uid_t uid, gid_t gid) {
         return fchmod_and_chown(fd, mode, uid, gid);
 }
 
-int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid) {
+int fchmod_and_chown_with_fallback(int fd, const char *path, mode_t mode, uid_t uid, gid_t gid) {
         bool do_chown, do_chmod;
         struct stat st;
         int r;
@@ -238,7 +237,11 @@ int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid) {
          * unaffected if the uid/gid is changed, i.e. it undoes implicit suid/sgid dropping the kernel does
          * on chown().
          *
-         * This call is happy with O_PATH fds. */
+         * This call is happy with O_PATH fds.
+         *
+         * If path is given, allow a fallback path which does not use /proc/self/fd/. On any normal system
+         * /proc will be mounted, but in certain improperly assembled environments it might not be. This is
+         * less secure (potential TOCTOU), so should only be used after consideration. */
 
         if (fstat(fd, &st) < 0)
                 return -errno;
@@ -263,8 +266,14 @@ int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid) {
 
                 if (((minimal ^ st.st_mode) & 07777) != 0) {
                         r = fchmod_opath(fd, minimal & 07777);
-                        if (r < 0)
-                                return r;
+                        if (r < 0) {
+                                if (!path || r != -ENOSYS)
+                                        return r;
+
+                                /* Fallback path which doesn't use /proc/self/fd/. */
+                                if (chmod(path, minimal & 07777) < 0)
+                                        return -errno;
+                        }
                 }
         }
 
@@ -274,8 +283,14 @@ int fchmod_and_chown(int fd, mode_t mode, uid_t uid, gid_t gid) {
 
         if (do_chmod) {
                 r = fchmod_opath(fd, mode & 07777);
-                if (r < 0)
-                        return r;
+                if (r < 0) {
+                        if (!path || r != -ENOSYS)
+                                return r;
+
+                        /* Fallback path which doesn't use /proc/self/fd/. */
+                        if (chmod(path, mode & 07777) < 0)
+                                return -errno;
+                }
         }
 
         return do_chown || do_chmod;
@@ -549,10 +564,10 @@ int mkfifoat_atomic(int dirfd, const char *path, mode_t mode) {
 }
 
 int get_files_in_directory(const char *path, char ***list) {
+        _cleanup_strv_free_ char **l = NULL;
         _cleanup_closedir_ DIR *d = NULL;
         struct dirent *de;
-        size_t bufsize = 0, n = 0;
-        _cleanup_strv_free_ char **l = NULL;
+        size_t n = 0;
 
         assert(path);
 
@@ -565,14 +580,12 @@ int get_files_in_directory(const char *path, char ***list) {
                 return -errno;
 
         FOREACH_DIRENT_ALL(de, d, return -errno) {
-                dirent_ensure_type(d, de);
-
                 if (!dirent_is_file(de))
                         continue;
 
                 if (list) {
                         /* one extra slot is needed for the terminating NULL */
-                        if (!GREEDY_REALLOC(l, bufsize, n + 2))
+                        if (!GREEDY_REALLOC(l, n + 2))
                                 return -ENOMEM;
 
                         l[n] = strdup(de->d_name);
@@ -717,7 +730,7 @@ int inotify_add_watch_and_warn(int fd, const char *pathname, uint32_t mask) {
         return wd;
 }
 
-static bool unsafe_transition(const struct stat *a, const struct stat *b) {
+bool unsafe_transition(const struct stat *a, const struct stat *b) {
         /* Returns true if the transition from a to b is safe, i.e. that we never transition from unprivileged to
          * privileged files or directories. Why bother? So that unprivileged code can't symlink to privileged files
          * making us believe we read something safe even though it isn't safe in the specific context we open it in. */
@@ -729,7 +742,8 @@ static bool unsafe_transition(const struct stat *a, const struct stat *b) {
 }
 
 static int log_unsafe_transition(int a, int b, const char *path, unsigned flags) {
-        _cleanup_free_ char *n1 = NULL, *n2 = NULL;
+        _cleanup_free_ char *n1 = NULL, *n2 = NULL, *user_a = NULL, *user_b = NULL;
+        struct stat st;
 
         if (!FLAGS_SET(flags, CHASE_WARN))
                 return -ENOLINK;
@@ -737,9 +751,14 @@ static int log_unsafe_transition(int a, int b, const char *path, unsigned flags)
         (void) fd_get_path(a, &n1);
         (void) fd_get_path(b, &n2);
 
+        if (fstat(a, &st) == 0)
+                user_a = uid_to_name(st.st_uid);
+        if (fstat(b, &st) == 0)
+                user_b = uid_to_name(st.st_uid);
+
         return log_warning_errno(SYNTHETIC_ERRNO(ENOLINK),
-                                 "Detected unsafe path transition %s %s %s during canonicalization of %s.",
-                                 strna(n1), special_glyph(SPECIAL_GLYPH_ARROW), strna(n2), path);
+                                 "Detected unsafe path transition %s (owned by %s) %s %s (owned by %s) during canonicalization of %s.",
+                                 strna(n1), strna(user_a), special_glyph(SPECIAL_GLYPH_ARROW), strna(n2), strna(user_b), path);
 }
 
 static int log_autofs_mount_point(int fd, const char *path, unsigned flags) {
@@ -759,9 +778,9 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
         _cleanup_free_ char *buffer = NULL, *done = NULL, *root = NULL;
         _cleanup_close_ int fd = -1;
         unsigned max_follow = CHASE_SYMLINKS_MAX; /* how many symlinks to follow before giving up and returning ELOOP */
+        bool exists = true, append_trail_slash = false;
         struct stat previous_stat;
-        bool exists = true;
-        char *todo;
+        const char *todo;
         int r;
 
         assert(path);
@@ -850,7 +869,7 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                  * anyway. Moreover at the end of this function after processing everything we'll always turn
                  * the empty string back to "/". */
                 delete_trailing_chars(root, "/");
-                path_simplify(root, true);
+                path_simplify(root);
 
                 if (flags & CHASE_PREFIX_ROOT) {
                         /* We don't support relative paths in combination with a root directory */
@@ -869,84 +888,51 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
         if (fd < 0)
                 return -errno;
 
-        if (flags & CHASE_SAFE) {
+        if (flags & CHASE_SAFE)
                 if (fstat(fd, &previous_stat) < 0)
                         return -errno;
-        }
+
+        if (flags & CHASE_TRAIL_SLASH)
+                append_trail_slash = endswith(buffer, "/") || endswith(buffer, "/.");
 
         if (root) {
-                _cleanup_free_ char *absolute = NULL;
-                const char *e;
-
                 /* If we are operating on a root directory, let's take the root directory as it is. */
 
-                e = path_startswith(buffer, root);
-                if (!e)
+                todo = path_startswith(buffer, root);
+                if (!todo)
                         return log_full_errno(flags & CHASE_WARN ? LOG_WARNING : LOG_DEBUG,
                                               SYNTHETIC_ERRNO(ECHRNG),
                                               "Specified path '%s' is outside of specified root directory '%s', refusing to resolve.",
                                               path, root);
 
                 done = strdup(root);
-                if (!done)
-                        return -ENOMEM;
-
-                /* Make sure "todo" starts with a slash */
-                absolute = strjoin("/", e);
-                if (!absolute)
-                        return -ENOMEM;
-
-                free_and_replace(buffer, absolute);
+        } else {
+                todo = buffer;
+                done = strdup("/");
         }
 
-        todo = buffer;
         for (;;) {
                 _cleanup_free_ char *first = NULL;
                 _cleanup_close_ int child = -1;
                 struct stat st;
-                size_t n, m;
+                const char *e;
 
-                /* Determine length of first component in the path */
-                n = strspn(todo, "/");                  /* The slashes */
-
-                if (n > 1) {
-                        /* If we are looking at more than a single slash then skip all but one, so that when
-                         * we are done with everything we have a normalized path with only single slashes
-                         * separating the path components. */
-                        todo += n - 1;
-                        n = 1;
+                r = path_find_first_component(&todo, true, &e);
+                if (r < 0)
+                        return r;
+                if (r == 0) { /* We reached the end. */
+                        if (append_trail_slash)
+                                if (!strextend(&done, "/"))
+                                        return -ENOMEM;
+                        break;
                 }
 
-                m = n + strcspn(todo + n, "/");         /* The entire length of the component */
-
-                /* Extract the first component. */
-                first = strndup(todo, m);
+                first = strndup(e, r);
                 if (!first)
                         return -ENOMEM;
 
-                todo += m;
-
-                /* Empty? Then we reached the end. */
-                if (isempty(first))
-                        break;
-
-                /* Just a single slash? Then we reached the end. */
-                if (path_equal(first, "/")) {
-                        /* Preserve the trailing slash */
-
-                        if (flags & CHASE_TRAIL_SLASH)
-                                if (!strextend(&done, "/"))
-                                        return -ENOMEM;
-
-                        break;
-                }
-
-                /* Just a dot? Then let's eat this up. */
-                if (path_equal(first, "/."))
-                        continue;
-
                 /* Two dots? Then chop off the last bit of what we already found out. */
-                if (path_equal(first, "/..")) {
+                if (path_equal(first, "..")) {
                         _cleanup_free_ char *parent = NULL;
                         _cleanup_close_ int fd_parent = -1;
 
@@ -991,22 +977,16 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                 }
 
                 /* Otherwise let's see what this is. */
-                child = openat(fd, first + n, O_CLOEXEC|O_NOFOLLOW|O_PATH);
+                child = openat(fd, first, O_CLOEXEC|O_NOFOLLOW|O_PATH);
                 if (child < 0) {
-
                         if (errno == ENOENT &&
                             (flags & CHASE_NONEXISTENT) &&
-                            (isempty(todo) || path_is_normalized(todo))) {
+                            (isempty(todo) || path_is_safe(todo))) {
+                                /* If CHASE_NONEXISTENT is set, and the path does not exist, then
+                                 * that's OK, return what we got so far. But don't allow this if the
+                                 * remaining path contains "../" or something else weird. */
 
-                                /* If CHASE_NONEXISTENT is set, and the path does not exist, then that's OK, return
-                                 * what we got so far. But don't allow this if the remaining path contains "../ or "./"
-                                 * or something else weird. */
-
-                                /* If done is "/", as first also contains slash at the head, then remove this redundant slash. */
-                                if (streq_ptr(done, "/"))
-                                        *done = '\0';
-
-                                if (!strextend(&done, first, todo))
+                                if (!path_extend(&done, first, todo))
                                         return -ENOMEM;
 
                                 exists = false;
@@ -1029,15 +1009,14 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                         return log_autofs_mount_point(child, path, flags);
 
                 if (S_ISLNK(st.st_mode) && !((flags & CHASE_NOFOLLOW) && isempty(todo))) {
-                        char *joined;
                         _cleanup_free_ char *destination = NULL;
 
-                        /* This is a symlink, in this case read the destination. But let's make sure we don't follow
-                         * symlinks without bounds. */
+                        /* This is a symlink, in this case read the destination. But let's make sure we
+                         * don't follow symlinks without bounds. */
                         if (--max_follow <= 0)
                                 return -ELOOP;
 
-                        r = readlinkat_malloc(fd, first + n, &destination);
+                        r = readlinkat_malloc(fd, first, &destination);
                         if (r < 0)
                                 return r;
                         if (isempty(destination))
@@ -1063,27 +1042,19 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                                         previous_stat = st;
                                 }
 
-                                free(done);
-
                                 /* Note that we do not revalidate the root, we take it as is. */
-                                if (isempty(root))
-                                        done = NULL;
-                                else {
-                                        done = strdup(root);
-                                        if (!done)
-                                                return -ENOMEM;
-                                }
+                                r = free_and_strdup(&done, empty_to_root(root));
+                                if (r < 0)
+                                        return r;
+                        }
 
-                                /* Prefix what's left to do with what we just read, and start the loop again, but
-                                 * remain in the current directory. */
-                                joined = path_join(destination, todo);
-                        } else
-                                joined = path_join("/", destination, todo);
-                        if (!joined)
+                        /* Prefix what's left to do with what we just read, and start the loop again, but
+                         * remain in the current directory. */
+                        if (!path_extend(&destination, todo))
                                 return -ENOMEM;
 
-                        free(buffer);
-                        todo = buffer = joined;
+                        free_and_replace(buffer, destination);
+                        todo = buffer;
 
                         if (flags & CHASE_STEP)
                                 goto chased_one;
@@ -1092,27 +1063,12 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                 }
 
                 /* If this is not a symlink, then let's just add the name we read to what we already verified. */
-                if (!done)
-                        done = TAKE_PTR(first);
-                else {
-                        /* If done is "/", as first also contains slash at the head, then remove this redundant slash. */
-                        if (streq(done, "/"))
-                                *done = '\0';
-
-                        if (!strextend(&done, first))
-                                return -ENOMEM;
-                }
+                if (!path_extend(&done, first))
+                        return -ENOMEM;
 
                 /* And iterate again, but go one directory further down. */
                 safe_close(fd);
                 fd = TAKE_FD(child);
-        }
-
-        if (!done) {
-                /* Special case, turn the empty string into "/", to indicate the root directory. */
-                done = strdup("/");
-                if (!done)
-                        return -ENOMEM;
         }
 
         if (ret_path)
@@ -1133,13 +1089,23 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
 
 chased_one:
         if (ret_path) {
-                char *c;
+                const char *e;
 
-                c = strjoin(strempty(done), todo);
-                if (!c)
-                        return -ENOMEM;
+                /* todo may contain slashes at the beginning. */
+                r = path_find_first_component(&todo, true, &e);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        *ret_path = TAKE_PTR(done);
+                else {
+                        char *c;
 
-                *ret_path = c;
+                        c = path_join(done, e);
+                        if (!c)
+                                return -ENOMEM;
+
+                        *ret_path = c;
+                }
         }
 
         return 0;
@@ -1539,91 +1505,6 @@ int open_parent(const char *path, int flags, mode_t mode) {
                 return -errno;
 
         return fd;
-}
-
-static int blockdev_is_encrypted(const char *sysfs_path, unsigned depth_left) {
-        _cleanup_free_ char *p = NULL, *uuids = NULL;
-        _cleanup_closedir_ DIR *d = NULL;
-        int r, found_encrypted = false;
-
-        assert(sysfs_path);
-
-        if (depth_left == 0)
-                return -EINVAL;
-
-        p = path_join(sysfs_path, "dm/uuid");
-        if (!p)
-                return -ENOMEM;
-
-        r = read_one_line_file(p, &uuids);
-        if (r != -ENOENT) {
-                if (r < 0)
-                        return r;
-
-                /* The DM device's uuid attribute is prefixed with "CRYPT-" if this is a dm-crypt device. */
-                if (startswith(uuids, "CRYPT-"))
-                        return true;
-        }
-
-        /* Not a dm-crypt device itself. But maybe it is on top of one? Follow the links in the "slaves/"
-         * subdir. */
-
-        p = mfree(p);
-        p = path_join(sysfs_path, "slaves");
-        if (!p)
-                return -ENOMEM;
-
-        d = opendir(p);
-        if (!d) {
-                if (errno == ENOENT) /* Doesn't have underlying devices */
-                        return false;
-
-                return -errno;
-        }
-
-        for (;;) {
-                _cleanup_free_ char *q = NULL;
-                struct dirent *de;
-
-                errno = 0;
-                de = readdir_no_dot(d);
-                if (!de) {
-                        if (errno != 0)
-                                return -errno;
-
-                        break; /* No more underlying devices */
-                }
-
-                q = path_join(p, de->d_name);
-                if (!q)
-                        return -ENOMEM;
-
-                r = blockdev_is_encrypted(q, depth_left - 1);
-                if (r < 0)
-                        return r;
-                if (r == 0) /* we found one that is not encrypted? then propagate that immediately */
-                        return false;
-
-                found_encrypted = true;
-        }
-
-        return found_encrypted;
-}
-
-int path_is_encrypted(const char *path) {
-        char p[SYS_BLOCK_PATH_MAX(NULL)];
-        dev_t devt;
-        int r;
-
-        r = get_block_device(path, &devt);
-        if (r < 0)
-                return r;
-        if (r == 0) /* doesn't have a block device */
-                return false;
-
-        xsprintf_sys_block_path(p, NULL, devt);
-
-        return blockdev_is_encrypted(p, 10 /* safety net: maximum recursion depth */);
 }
 
 int conservative_renameat(

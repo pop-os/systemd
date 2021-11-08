@@ -2074,6 +2074,11 @@ static int simple_varlink_call(const char *option, const char *method) {
 }
 
 static int flush_to_var(void) {
+        if (access("/run/systemd/journal/flushed", F_OK) >= 0)
+                return 0; /* Already flushed, no need to contact journald */
+        if (errno != ENOENT)
+                return log_error_errno(errno, "Unable to check for existence of /run/systemd/journal/flushed: %m");
+
         return simple_varlink_call("--flush", "io.systemd.Journal.FlushToVar");
 }
 
@@ -2150,8 +2155,11 @@ int main(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
-                                DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_VALIDATE_OS|DISSECT_IMAGE_RELAX_VAR_CHECK|
-                                (arg_action == ACTION_UPDATE_CATALOG ? DISSECT_IMAGE_FSCK : DISSECT_IMAGE_READ_ONLY),
+                                DISSECT_IMAGE_GENERIC_ROOT |
+                                DISSECT_IMAGE_REQUIRE_ROOT |
+                                DISSECT_IMAGE_VALIDATE_OS |
+                                DISSECT_IMAGE_RELAX_VAR_CHECK |
+                                (arg_action == ACTION_UPDATE_CATALOG ? DISSECT_IMAGE_FSCK|DISSECT_IMAGE_GROWFS : DISSECT_IMAGE_READ_ONLY),
                                 &unlink_dir,
                                 &loop_device,
                                 &decrypted_image);

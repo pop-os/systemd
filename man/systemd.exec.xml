@@ -241,7 +241,7 @@
         <para>This option is supported only for disk images that contain a single file system, without an
         enveloping partition table. Images that contain a GPT partition table should instead include both
         root file system and matching Verity data in the same image, implementing the <ulink
-        url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable Partition Specification</ulink>.</para>
+        url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable Partitions Specification</ulink>.</para>
 
         <xi:include href="system-only.xml" xpointer="singular"/></listitem>
       </varlistentry>
@@ -402,14 +402,15 @@
         <term><varname>ExtensionImages=</varname></term>
 
         <listitem><para>This setting is similar to <varname>MountImages=</varname> in that it mounts a file
-        system hierarchy from a block device node or loopback file, but instead of providing a destination path,
-        an overlay will be set up. This option expects a whitespace separated list of mount definitions. Each
-        definition consists of a source path, optionally followed by a colon and a list of mount options.</para>
+        system hierarchy from a block device node or loopback file, but instead of providing a destination
+        path, an overlay will be set up. This option expects a whitespace separated list of mount
+        definitions. Each definition consists of a source path, optionally followed by a colon and a list of
+        mount options.</para>
 
         <para>A read-only OverlayFS will be set up on top of <filename>/usr/</filename> and
-        <filename>/opt/</filename> hierarchies from the root. The order in which the images are listed
-        will determine the order in which the overlay is laid down: images specified first to last will result
-        in overlayfs layers bottom to top.</para>
+        <filename>/opt/</filename> hierarchies. The order in which the images are listed will determine the
+        order in which the overlay is laid down: images specified first to last will result in overlayfs
+        layers bottom to top.</para>
 
         <para>Mount options may be defined as a single comma-separated list of options, in which case they
         will be implicitly applied to the root partition on the image, or a series of colon-separated tuples
@@ -675,7 +676,9 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <varname>SystemCallArchitectures=</varname>,
         <varname>SystemCallFilter=</varname>, or
         <varname>SystemCallLog=</varname> are specified. Note that even if this setting is overridden
-        by them, <command>systemctl show</command> shows the original value of this setting. Also see
+        by them, <command>systemctl show</command> shows the original value of this setting. In case the
+        service will be run in a new mount namespace anyway and SELinux is disabled, all file systems
+        are mounted with <constant>MS_NOSUID</constant> flag. Also see
         <ulink url="https://www.kernel.org/doc/html/latest/userspace-api/no_new_privs.html">No New
         Privileges Flag</ulink>.</para></listitem>
       </varlistentry>
@@ -1036,8 +1039,10 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
       <varlistentry>
         <term><varname>Nice=</varname></term>
 
-        <listitem><para>Sets the default nice level (scheduling priority) for executed processes. Takes an integer
-        between -20 (highest priority) and 19 (lowest priority). See
+        <listitem><para>Sets the default nice level (scheduling priority) for executed processes. Takes an
+        integer between -20 (highest priority) and 19 (lowest priority). In case of resource contention,
+        smaller values mean more resources will be made available to the unit's processes, larger values mean
+        less resources will be made available. See
         <citerefentry><refentrytitle>setpriority</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
         details.</para></listitem>
       </varlistentry>
@@ -1054,11 +1059,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
       <varlistentry>
         <term><varname>CPUSchedulingPriority=</varname></term>
 
-        <listitem><para>Sets the CPU scheduling priority for executed processes. The available priority range depends
-        on the selected CPU scheduling policy (see above). For real-time scheduling policies an integer between 1
-        (lowest priority) and 99 (highest priority) can be used. See
-        <citerefentry project='man-pages'><refentrytitle>sched_setscheduler</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
-        details. </para></listitem>
+        <listitem><para>Sets the CPU scheduling priority for executed processes. The available priority range
+        depends on the selected CPU scheduling policy (see above). For real-time scheduling policies an
+        integer between 1 (lowest priority) and 99 (highest priority) can be used. In case of CPU resource
+        contention, smaller values mean less CPU time is made available to the service, larger values mean
+        more. See <citerefentry
+        project='man-pages'><refentrytitle>sched_setscheduler</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        for details. </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1122,11 +1129,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
       <varlistentry>
         <term><varname>IOSchedulingPriority=</varname></term>
 
-        <listitem><para>Sets the I/O scheduling priority for executed processes. Takes an integer between 0 (highest
-        priority) and 7 (lowest priority). The available priorities depend on the selected I/O scheduling class (see
-        above). If the empty string is assigned to this option, all prior assignments to both
-        <varname>IOSchedulingClass=</varname> and <varname>IOSchedulingPriority=</varname> have no effect.
-        See <citerefentry><refentrytitle>ioprio_set</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
+        <listitem><para>Sets the I/O scheduling priority for executed processes. Takes an integer between 0
+        (highest priority) and 7 (lowest priority). In case of I/O contention, smaller values mean more I/O
+        bandwidth is made available to the unit's processes, larger values mean less bandwidth. The available
+        priorities depend on the selected I/O scheduling class (see above). If the empty string is assigned
+        to this option, all prior assignments to both <varname>IOSchedulingClass=</varname> and
+        <varname>IOSchedulingPriority=</varname> have no effect.  See
+        <citerefentry><refentrytitle>ioprio_set</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
         details.</para></listitem>
       </varlistentry>
 
@@ -1282,16 +1291,15 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <varname>RootDirectory=</varname> or <varname>RootImage=</varname> these paths always reside on the host and
         are mounted from there into the unit's file system namespace.</para>
 
-        <para>If <varname>DynamicUser=</varname> is used in conjunction with
-        <varname>StateDirectory=</varname>, the logic for <varname>CacheDirectory=</varname> and
-        <varname>LogsDirectory=</varname> is slightly altered: the directories are created below
-        <filename>/var/lib/private</filename>, <filename>/var/cache/private</filename> and
-        <filename>/var/log/private</filename>, respectively, which are host directories made inaccessible to
+        <para>If <varname>DynamicUser=</varname> is used, the logic for <varname>CacheDirectory=</varname>,
+        <varname>LogsDirectory=</varname> and <varname>StateDirectory=</varname> is slightly altered: the directories are created below
+        <filename>/var/cache/private</filename>, <filename>/var/log/private</filename> and <filename>/var/lib/private</filename>,
+        respectively, which are host directories made inaccessible to
         unprivileged users, which ensures that access to these directories cannot be gained through dynamic
         user ID recycling. Symbolic links are created to hide this difference in behaviour. Both from
         perspective of the host and from inside the unit, the relevant directories hence always appear
-        directly below <filename>/var/lib</filename>, <filename>/var/cache</filename> and
-        <filename>/var/log</filename>.</para>
+        directly below <filename>/var/cache</filename>, <filename>/var/log</filename> and
+        <filename>/var/lib</filename>.</para>
 
         <para>Use <varname>RuntimeDirectory=</varname> to manage one or more runtime directories for the unit and bind
         their lifetime to the daemon runtime. This is particularly useful for unprivileged daemons that cannot create
@@ -1777,11 +1785,13 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         <term><varname>RestrictAddressFamilies=</varname></term>
 
         <listitem><para>Restricts the set of socket address families accessible to the processes of this
-        unit. Takes a space-separated list of address family names to allow-list, such as
-        <constant>AF_UNIX</constant>, <constant>AF_INET</constant> or <constant>AF_INET6</constant>. When
-        prefixed with <constant>~</constant> the listed address families will be applied as deny list,
-        otherwise as allow list.  Note that this restricts access to the <citerefentry
-        project='man-pages'><refentrytitle>socket</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        unit. Takes <literal>none</literal>, or a space-separated list of address family names to
+        allow-list, such as <constant>AF_UNIX</constant>, <constant>AF_INET</constant> or
+        <constant>AF_INET6</constant>. When <literal>none</literal> is specified, then all address
+        families will be denied. When prefixed with <literal>~</literal> the listed address
+        families will be applied as deny list, otherwise as allow list. Note that this restricts access
+        to the
+        <citerefentry project='man-pages'><refentrytitle>socket</refentrytitle><manvolnum>2</manvolnum></citerefentry>
         system call only. Sockets passed into the process by other means (for example, by using socket
         activation with socket units, see
         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
@@ -2295,7 +2305,7 @@ SystemCallErrorNumber=EPERM</programlisting>
 
         <listitem><para>Sets environment variables for executed processes. Each line is unquoted using the
         rules described in "Quoting" section in
-        <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>7</manvolnum></citerefentry>
         and becomes a list of variable assignments. If you need to assign a value containing spaces or the
         equals sign to a variable, put quotes around the whole assignment. Variable expansion is not
         performed inside the strings and the <literal>$</literal> character has no special meaning. Specifier
@@ -2822,7 +2832,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
     <variablelist class='unit-directives'>
 
       <varlistentry>
-        <term><varname>LoadCredential=</varname><replaceable>ID</replaceable>:<replaceable>PATH</replaceable></term>
+        <term><varname>LoadCredential=</varname><replaceable>ID</replaceable><optional>:<replaceable>PATH</replaceable></optional></term>
 
         <listitem><para>Pass a credential to the unit. Credentials are limited-size binary or textual objects
         that may be passed to unit processes. They are primarily used for passing cryptographic keys (both
@@ -2835,19 +2845,21 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         environment variable to the unit's processes.</para>
 
         <para>The <varname>LoadCredential=</varname> setting takes a textual ID to use as name for a
-        credential plus a file system path. The ID must be a short ASCII string suitable as filename in the
-        filesystem, and may be chosen freely by the user. If the specified path is absolute it is opened as
-        regular file and the credential data is read from it. If the absolute path refers to an
-        <constant>AF_UNIX</constant> stream socket in the file system a connection is made to it (only once
-        at unit start-up) and the credential data read from the connection, providing an easy IPC integration
-        point for dynamically providing credentials from other services. If the specified path is not
-        absolute and itself qualifies as valid credential identifier it is understood to refer to a
-        credential that the service manager itself received via the <varname>$CREDENTIALS_DIRECTORY</varname>
-        environment variable, which may be used to propagate credentials from an invoking environment (e.g. a
-        container manager that invoked the service manager) into a service. The contents of the file/socket
-        may be arbitrary binary or textual data, including newline characters and <constant>NUL</constant>
-        bytes. This option may be used multiple times, each time defining an additional credential to pass to
-        the unit.</para>
+        credential plus a file system path, separated by a colon. The ID must be a short ASCII string
+        suitable as filename in the filesystem, and may be chosen freely by the user. If the specified path
+        is absolute it is opened as regular file and the credential data is read from it. If the absolute
+        path refers to an <constant>AF_UNIX</constant> stream socket in the file system a connection is made
+        to it (only once at unit start-up) and the credential data read from the connection, providing an
+        easy IPC integration point for dynamically providing credentials from other services. If the
+        specified path is not absolute and itself qualifies as valid credential identifier it is understood
+        to refer to a credential that the service manager itself received via the
+        <varname>$CREDENTIALS_DIRECTORY</varname> environment variable, which may be used to propagate
+        credentials from an invoking environment (e.g. a container manager that invoked the service manager)
+        into a service. The contents of the file/socket may be arbitrary binary or textual data, including
+        newline characters and <constant>NUL</constant> bytes. If the file system path is omitted it is
+        chosen identical to the credential name, i.e. this is a terse way do declare credentials to inherit
+        from the service manager into a service. This option may be used multiple times, each time defining
+        an additional credential to pass to the unit.</para>
 
         <para>The credential files/IPC sockets must be accessible to the service manager, but don't have to
         be directly accessible to the unit's processes: the credential data is read and copied into separate,
@@ -3007,7 +3019,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
           in the system manager. When compiled for systems with "unmerged <filename>/usr/</filename>"
           (<filename>/bin</filename> is not a symlink to <filename>/usr/bin</filename>),
           <literal>:<filename>/sbin</filename>:<filename>/bin</filename></literal> is appended. In case of
-          the the user manager, a different path may be configured by the distribution. It is recommended to
+          the user manager, a different path may be configured by the distribution. It is recommended to
           not rely on the order of entries, and have only one program with a given name in
           <varname>$PATH</varname>.</para></listitem>
         </varlistentry>

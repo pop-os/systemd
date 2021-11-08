@@ -46,6 +46,7 @@
 #include "cgroup-setup.h"
 #include "chown-recursive.h"
 #include "cpu-set-util.h"
+#include "data-fd-util.h"
 #include "def.h"
 #include "env-file.h"
 #include "env-util.h"
@@ -64,6 +65,7 @@
 #include "log.h"
 #include "macro.h"
 #include "manager.h"
+#include "manager-dump.h"
 #include "memory-util.h"
 #include "missing_fs.h"
 #include "mkdir.h"
@@ -744,7 +746,7 @@ static int chown_terminal(int fd, uid_t uid) {
         }
 
         /* This might fail. What matters are the results. */
-        r = fchmod_and_chown(fd, TTY_MODE, uid, -1);
+        r = fchmod_and_chown(fd, TTY_MODE, uid, GID_INVALID);
         if (r < 0)
                 return r;
 
@@ -1846,7 +1848,7 @@ static int build_environment(
                 if (!x)
                         return -ENOMEM;
 
-                path_simplify(x + 5, true);
+                path_simplify(x + 5);
                 our_env[n_env++] = x;
         }
 
@@ -1867,7 +1869,7 @@ static int build_environment(
                 if (!x)
                         return -ENOMEM;
 
-                path_simplify(x + 6, true);
+                path_simplify(x + 6);
                 our_env[n_env++] = x;
         }
 
@@ -1967,7 +1969,7 @@ static int build_environment(
 
 static int build_pass_environment(const ExecContext *c, char ***ret) {
         _cleanup_strv_free_ char **pass_env = NULL;
-        size_t n_env = 0, n_bufsize = 0;
+        size_t n_env = 0;
         char **i;
 
         STRV_FOREACH(i, c->pass_environment) {
@@ -1981,7 +1983,7 @@ static int build_pass_environment(const ExecContext *c, char ***ret) {
                 if (!x)
                         return -ENOMEM;
 
-                if (!GREEDY_REALLOC(pass_env, n_bufsize, n_env + 2))
+                if (!GREEDY_REALLOC(pass_env, n_env + 2))
                         return -ENOMEM;
 
                 pass_env[n_env++] = TAKE_PTR(x);
@@ -2287,8 +2289,6 @@ static int setup_exec_directory(
                         goto fail;
 
                 if (exec_directory_is_private(context, type)) {
-                        _cleanup_free_ char *private_root = NULL;
-
                         /* So, here's one extra complication when dealing with DynamicUser=1 units. In that
                          * case we want to avoid leaving a directory around fully accessible that is owned by
                          * a dynamic user whose UID is later on reused. To lock this down we use the same
@@ -2314,19 +2314,18 @@ static int setup_exec_directory(
                          * Also, note that we don't do this for EXEC_DIRECTORY_RUNTIME as that's often used
                          * for sharing files or sockets with other services. */
 
-                        private_root = path_join(params->prefix[type], "private");
-                        if (!private_root) {
+                        pp = path_join(params->prefix[type], "private");
+                        if (!pp) {
                                 r = -ENOMEM;
                                 goto fail;
                         }
 
                         /* First set up private root if it doesn't exist yet, with access mode 0700 and owned by root:root */
-                        r = mkdir_safe_label(private_root, 0700, 0, 0, MKDIR_WARN_MODE);
+                        r = mkdir_safe_label(pp, 0700, 0, 0, MKDIR_WARN_MODE);
                         if (r < 0)
                                 goto fail;
 
-                        pp = path_join(private_root, *rt);
-                        if (!pp) {
+                        if (!path_extend(&pp, *rt)) {
                                 r = -ENOMEM;
                                 goto fail;
                         }
@@ -2452,7 +2451,7 @@ static int setup_exec_directory(
 
                 /* Then, change the ownership of the whole tree, if necessary. When dynamic users are used we
                  * drop the suid/sgid bits, since we really don't want SUID/SGID files for dynamic UID/GID
-                 * assignments to exist.*/
+                 * assignments to exist. */
                 r = path_chown_recursive(pp ?: p, uid, gid, context->dynamic_user ? 01777 : 07777);
                 if (r < 0)
                         goto fail;
@@ -2564,6 +2563,7 @@ static int acquire_credentials(
                 ReadFullFileFlags flags = READ_FULL_FILE_SECURE;
                 _cleanup_(erase_and_freep) char *data = NULL;
                 _cleanup_free_ char *j = NULL, *bindname = NULL;
+                bool missing_ok = true;
                 const char *source;
                 size_t size, add;
 
@@ -2577,6 +2577,8 @@ static int acquire_credentials(
                         if (asprintf(&bindname, "@%" PRIx64"/unit/%s/%s", random_u64(), unit, *id) < 0)
                                 return -ENOMEM;
 
+                        missing_ok = false;
+
                 } else if (params->received_credentials) {
                         /* If this is a relative path, take it relative to the credentials we received
                          * ourselves. We don't support the AF_UNIX stuff in this mode, since we are operating
@@ -2589,16 +2591,23 @@ static int acquire_credentials(
                 } else
                         source = NULL;
 
-
                 if (source)
                         r = read_full_file_full(AT_FDCWD, source, UINT64_MAX, SIZE_MAX, flags, bindname, &data, &size);
                 else
                         r = -ENOENT;
-                if (r == -ENOENT &&
-                    faccessat(dfd, *id, F_OK, AT_SYMLINK_NOFOLLOW) >= 0) /* If the source file doesn't exist, but we already acquired the key otherwise, then don't fail */
+                if (r == -ENOENT && (missing_ok || faccessat(dfd, *id, F_OK, AT_SYMLINK_NOFOLLOW) >= 0)) {
+                        /* Make a missing inherited credential non-fatal, let's just continue. After all apps
+                         * will get clear errors if we don't pass such a missing credential on as they
+                         * themselves will get ENOENT when trying to read them, which should not be much
+                         * worse than when we handle the error here and make it fatal.
+                         *
+                         * Also, if the source file doesn't exist, but we already acquired the key otherwise,
+                         * then don't fail either. */
+                        log_debug_errno(r, "Couldn't read inherited credential '%s', skipping: %m", *fn);
                         continue;
+                }
                 if (r < 0)
-                        return r;
+                        return log_debug_errno(r, "Failed to read credential '%s': %m", *fn);
 
                 add = strlen(*id) + size;
                 if (add > left)
@@ -2878,7 +2887,7 @@ static int setup_credentials(
                  * Yes it's nasty playing games with /dev/ and /dev/shm/ like this, since it does not exist
                  * for this purpose, but there are few other candidates that work equally well for us, and
                  * given that the we do this in a privately namespaced short-lived single-threaded process
-                 * that no one else sees this should be OK to do.*/
+                 * that no one else sees this should be OK to do. */
 
                 r = mount_nofollow_verbose(LOG_DEBUG, NULL, "/dev", NULL, MS_SLAVE|MS_REC, NULL); /* Turn off propagation from our namespace to host */
                 if (r < 0)
@@ -3181,6 +3190,8 @@ static int apply_mount_namespace(
                         .protect_proc = context->protect_proc,
                         .proc_subset = context->proc_subset,
                         .private_ipc = context->private_ipc || context->ipc_namespace_path,
+                        /* If NNP is on, we can turn on MS_NOSUID, since it won't have any effect anymore. */
+                        .mount_nosuid = context->no_new_privileges && !mac_selinux_use(),
                 };
         } else if (!context->dynamic_user && root_dir)
                 /*
@@ -3247,7 +3258,6 @@ static int apply_mount_namespace(
                             propagate_dir,
                             incoming_dir,
                             root_dir || root_image ? params->notify_socket : NULL,
-                            DISSECT_IMAGE_DISCARD_ON_LOOP|DISSECT_IMAGE_RELAX_VAR_CHECK|DISSECT_IMAGE_FSCK,
                             error_path);
 
         /* If we couldn't set up the namespace this is probably due to a missing capability. setup_namespace() reports
@@ -3829,7 +3839,7 @@ static int exec_child(
                 _cleanup_strv_free_ char **suggested_paths = NULL;
 
                 /* On top of that, make sure we bypass our own NSS module nss-systemd comprehensively for any NSS
-                 * checks, if DynamicUser=1 is used, as we shouldn't create a feedback loop with ourselves here.*/
+                 * checks, if DynamicUser=1 is used, as we shouldn't create a feedback loop with ourselves here. */
                 if (putenv((char*) "SYSTEMD_NSS_DYNAMIC_BYPASS=1") != 0) {
                         *exit_status = EXIT_USER;
                         return log_unit_error_errno(unit, errno, "Failed to update environment: %m");
@@ -4335,11 +4345,22 @@ static int exec_child(
         }
 
 #if HAVE_SELINUX
-        if (needs_sandboxing && use_selinux && params->selinux_context_net && socket_fd >= 0) {
-                r = mac_selinux_get_child_mls_label(socket_fd, executable, context->selinux_context, &mac_selinux_context_net);
-                if (r < 0) {
-                        *exit_status = EXIT_SELINUX_CONTEXT;
-                        return log_unit_error_errno(unit, r, "Failed to determine SELinux context: %m");
+        if (needs_sandboxing && use_selinux && params->selinux_context_net) {
+                int fd = -1;
+
+                if (socket_fd >= 0)
+                        fd = socket_fd;
+                else if (params->n_socket_fds == 1)
+                        /* If stdin is not connected to a socket but we are triggered by exactly one socket unit then we
+                         * use context from that fd to compute the label. */
+                        fd = params->fds[0];
+
+                if (fd >= 0) {
+                        r = mac_selinux_get_child_mls_label(fd, executable, context->selinux_context, &mac_selinux_context_net);
+                        if (r < 0) {
+                                *exit_status = EXIT_SELINUX_CONTEXT;
+                                return log_unit_error_errno(unit, r, "Failed to determine SELinux context: %m");
+                        }
                 }
         }
 #endif
@@ -5766,6 +5787,9 @@ void exec_context_free_log_extra_fields(ExecContext *c) {
 }
 
 void exec_context_revert_tty(ExecContext *c) {
+        _cleanup_close_ int fd = -1;
+        const char *path;
+        struct stat st;
         int r;
 
         assert(c);
@@ -5776,17 +5800,33 @@ void exec_context_revert_tty(ExecContext *c) {
         /* And then undo what chown_terminal() did earlier. Note that we only do this if we have a path
          * configured. If the TTY was passed to us as file descriptor we assume the TTY is opened and managed
          * by whoever passed it to us and thus knows better when and how to chmod()/chown() it back. */
+        if (!exec_context_may_touch_tty(c))
+                return;
 
-        if (exec_context_may_touch_tty(c)) {
-                const char *path;
+        path = exec_context_tty_path(c);
+        if (!path)
+                return;
 
-                path = exec_context_tty_path(c);
-                if (path) {
-                        r = chmod_and_chown(path, TTY_MODE, 0, TTY_GID);
-                        if (r < 0 && r != -ENOENT)
-                                log_warning_errno(r, "Failed to reset TTY ownership/access mode of %s, ignoring: %m", path);
-                }
-        }
+        fd = open(path, O_PATH|O_CLOEXEC);
+        if (fd < 0)
+                return (void) log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_WARNING, errno,
+                                             "Failed to open TTY inode of '%s' to adjust ownership/access mode, ignoring: %m",
+                                             path);
+
+        if (fstat(fd, &st) < 0)
+                return (void) log_warning_errno(errno, "Failed to stat TTY '%s', ignoring: %m", path);
+
+        /* Let's add a superficial check that we only do this for stuff that looks like a TTY. We only check
+         * if things are a character device, since a proper check either means we'd have to open the TTY and
+         * use isatty(), but we'd rather not do that since opening TTYs comes with all kinds of side-effects
+         * and is slow. Or we'd have to hardcode dev_t major information, which we'd rather avoid. Why bother
+         * with this at all? → https://github.com/systemd/systemd/issues/19213 */
+        if (!S_ISCHR(st.st_mode))
+                return log_warning("Configured TTY '%s' is not actually a character device, ignoring.", path);
+
+        r = fchmod_and_chown(fd, TTY_MODE, 0, TTY_GID);
+        if (r < 0)
+                log_warning_errno(r, "Failed to reset TTY ownership/access mode of %s, ignoring: %m", path);
 }
 
 int exec_context_get_clean_directories(
@@ -6222,7 +6262,7 @@ int exec_runtime_acquire(Manager *m, const ExecContext *c, const char *id, bool 
 
         rt = hashmap_get(m->exec_runtime_by_id, id);
         if (rt)
-                /* We already have a ExecRuntime object, let's increase the ref count and reuse it */
+                /* We already have an ExecRuntime object, let's increase the ref count and reuse it */
                 goto ref;
 
         if (!create) {
@@ -6343,38 +6383,24 @@ int exec_runtime_deserialize_compat(Unit *u, const char *key, const char *value,
                 return 0;
         }
 
-        r = hashmap_ensure_allocated(&u->manager->exec_runtime_by_id, &string_hash_ops);
-        if (r < 0) {
-                log_unit_debug_errno(u, r, "Failed to allocate storage for runtime parameter: %m");
-                return 0;
-        }
+        if (hashmap_ensure_allocated(&u->manager->exec_runtime_by_id, &string_hash_ops) < 0)
+                return log_oom();
 
         rt = hashmap_get(u->manager->exec_runtime_by_id, u->id);
         if (!rt) {
-                r = exec_runtime_allocate(&rt_create, u->id);
-                if (r < 0)
+                if (exec_runtime_allocate(&rt_create, u->id) < 0)
                         return log_oom();
 
                 rt = rt_create;
         }
 
         if (streq(key, "tmp-dir")) {
-                char *copy;
-
-                copy = strdup(value);
-                if (!copy)
-                        return log_oom();
-
-                free_and_replace(rt->tmp_dir, copy);
+                if (free_and_strdup_warn(&rt->tmp_dir, value) < 0)
+                        return -ENOMEM;
 
         } else if (streq(key, "var-tmp-dir")) {
-                char *copy;
-
-                copy = strdup(value);
-                if (!copy)
-                        return log_oom();
-
-                free_and_replace(rt->var_tmp_dir, copy);
+                if (free_and_strdup_warn(&rt->var_tmp_dir, value) < 0)
+                        return -ENOMEM;
 
         } else if (streq(key, "netns-socket-0")) {
                 int fd;
@@ -6398,27 +6424,6 @@ int exec_runtime_deserialize_compat(Unit *u, const char *key, const char *value,
                 safe_close(rt->netns_storage_socket[1]);
                 rt->netns_storage_socket[1] = fdset_remove(fds, fd);
 
-        } else if (streq(key, "ipcns-socket-0")) {
-                int fd;
-
-                if (safe_atoi(value, &fd) < 0 || !fdset_contains(fds, fd)) {
-                        log_unit_debug(u, "Failed to parse ipcns socket value: %s", value);
-                        return 0;
-                }
-
-                safe_close(rt->ipcns_storage_socket[0]);
-                rt->ipcns_storage_socket[0] = fdset_remove(fds, fd);
-
-        } else if (streq(key, "ipcns-socket-1")) {
-                int fd;
-
-                if (safe_atoi(value, &fd) < 0 || !fdset_contains(fds, fd)) {
-                        log_unit_debug(u, "Failed to parse ipcns socket value: %s", value);
-                        return 0;
-                }
-
-                safe_close(rt->ipcns_storage_socket[1]);
-                rt->ipcns_storage_socket[1] = fdset_remove(fds, fd);
         } else
                 return 0;
 

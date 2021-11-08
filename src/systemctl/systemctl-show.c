@@ -2,6 +2,7 @@
 
 #include <sys/mount.h>
 
+#include "af-list.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
@@ -16,6 +17,7 @@
 #include "hexdecoct.h"
 #include "hostname-util.h"
 #include "in-addr-util.h"
+#include "ip-protocol-list.h"
 #include "journal-file.h"
 #include "list.h"
 #include "locale-util.h"
@@ -39,7 +41,7 @@
 
 static OutputFlags get_output_flags(void) {
         return
-                arg_all * OUTPUT_SHOW_ALL |
+                FLAGS_SET(arg_print_flags, BUS_PRINT_PROPERTY_SHOW_EMPTY) * OUTPUT_SHOW_ALL |
                 (arg_full || !on_tty() || pager_have()) * OUTPUT_FULL_WIDTH |
                 colors_enabled() * OUTPUT_COLOR |
                 !arg_quiet * OUTPUT_WARN_CUTOFF;
@@ -246,6 +248,7 @@ typedef struct UnitStatusInfo {
         uint64_t memory_max;
         uint64_t memory_swap_max;
         uint64_t memory_limit;
+        uint64_t memory_available;
         uint64_t cpu_usage_nsec;
         uint64_t tasks_current;
         uint64_t tasks_max;
@@ -323,7 +326,7 @@ static void print_status_info(
         printf("\n");
 
         if (i->following)
-                printf("   Follow: unit currently follows state of %s\n", i->following);
+                printf("    Follows: unit currently follows state of %s\n", i->following);
 
         if (STRPTR_IN_SET(i->load_state, "error", "not-found", "bad-setting")) {
                 on = ansi_highlight_red();
@@ -681,6 +684,7 @@ static void print_status_info(
                 if (i->memory_min > 0 || i->memory_low > 0 ||
                     i->memory_high != CGROUP_LIMIT_MAX || i->memory_max != CGROUP_LIMIT_MAX ||
                     i->memory_swap_max != CGROUP_LIMIT_MAX ||
+                    i->memory_available != CGROUP_LIMIT_MAX ||
                     i->memory_limit != CGROUP_LIMIT_MAX) {
                         const char *prefix = "";
 
@@ -707,6 +711,10 @@ static void print_status_info(
                         }
                         if (i->memory_limit != CGROUP_LIMIT_MAX) {
                                 printf("%slimit: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_limit));
+                                prefix = " ";
+                        }
+                        if (i->memory_available != CGROUP_LIMIT_MAX) {
+                                printf("%savailable: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_available));
                                 prefix = " ";
                         }
                         printf(")");
@@ -955,7 +963,7 @@ static int map_exec(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_e
         return 0;
 }
 
-static int print_property(const char *name, const char *expected_value, sd_bus_message *m, bool value, bool all) {
+static int print_property(const char *name, const char *expected_value, sd_bus_message *m, BusPrintPropertyFlags flags) {
         char bus_type;
         const char *contents;
         int r;
@@ -980,9 +988,9 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return r;
 
                         if (i >= 0 && i <= 255)
-                                bus_print_property_valuef(name, expected_value, value, "%"PRIi32, i);
-                        else if (all)
-                                bus_print_property_value(name, expected_value, value, "[not set]");
+                                bus_print_property_valuef(name, expected_value, flags, "%"PRIi32, i);
+                        else if (FLAGS_SET(flags, BUS_PRINT_PROPERTY_SHOW_EMPTY))
+                                bus_print_property_value(name, expected_value, flags, "[not set]");
 
                         return 1;
                 } else if (streq(name, "NUMAPolicy")) {
@@ -992,7 +1000,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return r;
 
-                        bus_print_property_valuef(name, expected_value, value, "%s", strna(mpol_to_string(i)));
+                        bus_print_property_valuef(name, expected_value, flags, "%s", strna(mpol_to_string(i)));
 
                         return 1;
                 }
@@ -1008,9 +1016,9 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         if (u > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%"PRIu32, u);
-                        else if (all)
-                                bus_print_property_value(name, expected_value, value, "");
+                                bus_print_property_valuef(name, expected_value, flags, "%"PRIu32, u);
+                        else
+                                bus_print_property_value(name, expected_value, flags, NULL);
 
                         return 1;
 
@@ -1021,8 +1029,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(s))
-                                bus_print_property_value(name, expected_value, value, s);
+                        bus_print_property_value(name, expected_value, flags, s);
 
                         return 1;
 
@@ -1034,9 +1041,9 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         if (!isempty(a) || !isempty(b))
-                                bus_print_property_valuef(name, expected_value, value, "%s \"%s\"", strempty(a), strempty(b));
-                        else if (all)
-                                bus_print_property_value(name, expected_value, value, "");
+                                bus_print_property_valuef(name, expected_value, flags, "%s \"%s\"", strempty(a), strempty(b));
+                        else
+                                bus_print_property_value(name, expected_value, flags, NULL);
 
                         return 1;
 
@@ -1060,11 +1067,11 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || allow_list || !strv_isempty(l)) {
+                        if (FLAGS_SET(flags, BUS_PRINT_PROPERTY_SHOW_EMPTY) || allow_list || !strv_isempty(l)) {
                                 bool first = true;
                                 char **i;
 
-                                if (!value) {
+                                if (!FLAGS_SET(flags, BUS_PRINT_PROPERTY_ONLY_VALUE)) {
                                         fputs(name, stdout);
                                         fputc('=', stdout);
                                 }
@@ -1094,9 +1101,9 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         if (!isempty(s))
-                                bus_print_property_valuef(name, expected_value, value, "%s%s", ignore ? "-" : "", s);
-                        else if (all)
-                                bus_print_property_value(name, expected_value, value, "");
+                                bus_print_property_valuef(name, expected_value, flags, "%s%s", ignore ? "-" : "", s);
+                        else
+                                bus_print_property_value(name, expected_value, flags, NULL);
 
                         return 1;
 
@@ -1123,10 +1130,10 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         n_status /= sizeof(int32_t);
                         n_signal /= sizeof(int32_t);
 
-                        if (all || n_status > 0 || n_signal > 0) {
+                        if (FLAGS_SET(flags, BUS_PRINT_PROPERTY_SHOW_EMPTY) || n_status > 0 || n_signal > 0) {
                                 bool first = true;
 
-                                if (!value) {
+                                if (!FLAGS_SET(flags, BUS_PRINT_PROPERTY_ONLY_VALUE)) {
                                         fputs(name, stdout);
                                         fputc('=', stdout);
                                 }
@@ -1174,8 +1181,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(sb)", &path, &ignore)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s (ignore_errors=%s)", path, yes_no(ignore));
-
+                                bus_print_property_valuef(name, expected_value, flags, "%s (ignore_errors=%s)", path, yes_no(ignore));
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1193,7 +1199,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(ss)", &type, &path)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s (%s)", path, type);
+                                bus_print_property_valuef(name, expected_value, flags, "%s (%s)", path, type);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1211,7 +1217,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(ss)", &type, &path)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s (%s)", path, type);
+                                bus_print_property_valuef(name, expected_value, flags, "%s (%s)", path, type);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1235,7 +1241,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 (void) format_timespan(timespan1, sizeof timespan1, v, 0);
                                 (void) format_timespan(timespan2, sizeof timespan2, next_elapse, 0);
 
-                                bus_print_property_valuef(name, expected_value, value,
+                                bus_print_property_valuef(name, expected_value, flags,
                                                           "{ %s=%s ; next_elapse=%s }", base, timespan1, timespan2);
                         }
                         if (r < 0)
@@ -1259,7 +1265,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 char timestamp[FORMAT_TIMESTAMP_MAX] = "n/a";
 
                                 (void) format_timestamp_style(timestamp, sizeof(timestamp), next_elapse, arg_timestamp_style);
-                                bus_print_property_valuef(name, expected_value, value,
+                                bus_print_property_valuef(name, expected_value, flags,
                                                           "{ %s=%s ; next_elapse=%s }", base, spec, timestamp);
                         }
                         if (r < 0)
@@ -1293,7 +1299,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
 
                                         o = strv_join(optv, " ");
 
-                                        bus_print_property_valuef(name, expected_value, value,
+                                        bus_print_property_valuef(name, expected_value, flags,
                                                                   "{ path=%s ; argv[]=%s ; flags=%s ; start_time=[%s] ; stop_time=[%s] ; pid="PID_FMT" ; code=%s ; status=%i%s%s }",
                                                                   strna(info.path),
                                                                   strna(tt),
@@ -1306,7 +1312,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                                                   info.code == CLD_EXITED ? "" : "/",
                                                                   strempty(info.code == CLD_EXITED ? NULL : signal_to_string(info.status)));
                                 } else
-                                        bus_print_property_valuef(name, expected_value, value,
+                                        bus_print_property_valuef(name, expected_value, flags,
                                                                   "{ path=%s ; argv[]=%s ; ignore_errors=%s ; start_time=[%s] ; stop_time=[%s] ; pid="PID_FMT" ; code=%s ; status=%i%s%s }",
                                                                   strna(info.path),
                                                                   strna(tt),
@@ -1338,7 +1344,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(ss)", &path, &rwm)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s %s", strna(path), strna(rwm));
+                                bus_print_property_valuef(name, expected_value, flags, "%s %s", strna(path), strna(rwm));
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1358,7 +1364,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(st)", &path, &weight)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s %"PRIu64, strna(path), weight);
+                                bus_print_property_valuef(name, expected_value, flags, "%s %"PRIu64, strna(path), weight);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1379,7 +1385,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(st)", &path, &bandwidth)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s %"PRIu64, strna(path), bandwidth);
+                                bus_print_property_valuef(name, expected_value, flags, "%s %"PRIu64, strna(path), bandwidth);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -1400,7 +1406,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(st)", &path, &target)) > 0)
-                                bus_print_property_valuef(name, expected_value, value, "%s %s", strna(path),
+                                bus_print_property_valuef(name, expected_value, flags, "%s %s", strna(path),
                                                           format_timespan(ts, sizeof(ts), target, 1));
                         if (r < 0)
                                 return bus_log_parse_error(r);
@@ -1425,8 +1431,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (n < 0)
                                 return log_oom();
 
-                        if (all || !isempty(h))
-                                bus_print_property_value(name, expected_value, value, h);
+                        bus_print_property_value(name, expected_value, flags, h);
 
                         return 1;
 
@@ -1486,8 +1491,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(addresses))
-                                bus_print_property_value(name, expected_value, value, strempty(addresses));
+                        bus_print_property_value(name, expected_value, flags, addresses);
 
                         return 1;
 
@@ -1525,8 +1529,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(paths))
-                                bus_print_property_value(name, expected_value, value, strempty(paths));
+                        bus_print_property_value(name, expected_value, flags, paths);
 
                         return 1;
 
@@ -1557,8 +1560,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(paths))
-                                bus_print_property_value(name, expected_value, value, strempty(paths));
+                        bus_print_property_value(name, expected_value, flags, paths);
 
                         return 1;
 
@@ -1605,11 +1607,14 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(fields))
-                                bus_print_property_value(name, expected_value, value, strempty(fields));
+                        bus_print_property_value(name, expected_value, flags, fields);
 
                         return 1;
-                } else if (contents[0] == SD_BUS_TYPE_BYTE && STR_IN_SET(name, "CPUAffinity", "NUMAMask", "AllowedCPUs", "AllowedMemoryNodes", "EffectiveCPUs", "EffectiveMemoryNodes")) {
+                } else if (contents[0] == SD_BUS_TYPE_BYTE &&
+                           STR_IN_SET(name,
+                                      "CPUAffinity", "NUMAMask", "AllowedCPUs", "AllowedMemoryNodes",
+                                      "EffectiveCPUs", "EffectiveMemoryNodes")) {
+
                         _cleanup_free_ char *affinity = NULL;
                         _cleanup_(cpu_set_reset) CPUSet set = {};
                         const void *a;
@@ -1627,8 +1632,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (!affinity)
                                 return log_oom();
 
-                        if (all || !isempty(affinity))
-                                bus_print_property_value(name, expected_value, value, affinity);
+                        bus_print_property_value(name, expected_value, flags, affinity);
 
                         return 1;
                 } else if (streq(name, "MountImages")) {
@@ -1662,14 +1666,9 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (r < 0)
                                         return r;
 
-                                while ((r = sd_bus_message_read(m, "(ss)", &partition, &mount_options)) > 0) {
-                                        _cleanup_free_ char *previous = NULL;
-
-                                        previous = TAKE_PTR(str);
-                                        str = strjoin(strempty(previous), previous ? ":" : "", partition, ":", mount_options);
-                                        if (!str)
+                                while ((r = sd_bus_message_read(m, "(ss)", &partition, &mount_options)) > 0)
+                                        if (!strextend_with_separator(&str, ":", partition, ":", mount_options))
                                                 return log_oom();
-                                }
                                 if (r < 0)
                                         return r;
 
@@ -1691,11 +1690,66 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        if (all || !isempty(paths))
-                                bus_print_property_value(name, expected_value, value, strempty(paths));
+                        bus_print_property_value(name, expected_value, flags, paths);
 
                         return 1;
 
+                } else if (streq(name, "BPFProgram")) {
+                        const char *a, *p;
+
+                        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(ss)");
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        while ((r = sd_bus_message_read(m, "(ss)", &a, &p)) > 0)
+                                bus_print_property_valuef(name, expected_value, flags, "%s:%s", a, p);
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        r = sd_bus_message_exit_container(m);
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        return 1;
+                } else if (STR_IN_SET(name, "SocketBindAllow", "SocketBindDeny")) {
+                        uint16_t nr_ports, port_min;
+                        int32_t af, ip_protocol;
+
+                        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(iiqq)");
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+                        while ((r = sd_bus_message_read(m, "(iiqq)", &af, &ip_protocol, &nr_ports, &port_min)) > 0) {
+                                const char *family, *colon1, *protocol = "", *colon2 = "";
+
+                                family = strempty(af_to_ipv4_ipv6(af));
+                                colon1 = isempty(family) ? "" : ":";
+
+                                if (ip_protocol != 0) {
+                                        protocol = ip_protocol_to_tcp_udp(ip_protocol);
+                                        colon2 = "";
+                                }
+
+                                if (nr_ports == 0)
+                                        bus_print_property_valuef(name, expected_value, flags, "%s%s%s%sany",
+                                                        family, colon1, protocol, colon2);
+                                else if (nr_ports == 1)
+                                        bus_print_property_valuef(
+                                                        name, expected_value, flags, "%s%s%s%s%hu",
+                                                        family, colon1, protocol, colon2, port_min);
+                                else
+                                        bus_print_property_valuef(
+                                                        name, expected_value, flags, "%s%s%s%s%hu-%hu",
+                                                        family, colon1, protocol, colon2, port_min,
+                                                        (uint16_t) (port_min + nr_ports - 1));
+                        }
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        r = sd_bus_message_exit_container(m);
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        return 1;
                 }
 
                 break;
@@ -1788,6 +1842,7 @@ static int show_one(
                 { "Where",                          "s",               NULL,           offsetof(UnitStatusInfo, where)                             },
                 { "What",                           "s",               NULL,           offsetof(UnitStatusInfo, what)                              },
                 { "MemoryCurrent",                  "t",               NULL,           offsetof(UnitStatusInfo, memory_current)                    },
+                { "MemoryAvailable",                "t",               NULL,           offsetof(UnitStatusInfo, memory_available)                  },
                 { "DefaultMemoryMin",               "t",               NULL,           offsetof(UnitStatusInfo, default_memory_min)                },
                 { "DefaultMemoryLow",               "t",               NULL,           offsetof(UnitStatusInfo, default_memory_low)                },
                 { "MemoryMin",                      "t",               NULL,           offsetof(UnitStatusInfo, memory_min)                        },
@@ -1830,6 +1885,7 @@ static int show_one(
                 .memory_max = CGROUP_LIMIT_MAX,
                 .memory_swap_max = CGROUP_LIMIT_MAX,
                 .memory_limit = UINT64_MAX,
+                .memory_available = CGROUP_LIMIT_MAX,
                 .cpu_usage_nsec = UINT64_MAX,
                 .tasks_current = UINT64_MAX,
                 .tasks_max = UINT64_MAX,
@@ -1859,7 +1915,7 @@ static int show_one(
                 return log_error_errno(r, "Failed to get properties: %s", bus_error_message(&error, r));
 
         if (unit && streq_ptr(info.load_state, "not-found") && streq_ptr(info.active_state, "inactive")) {
-                log_full(show_mode == SYSTEMCTL_SHOW_STATUS ? LOG_ERR : LOG_DEBUG,
+                log_full(show_mode == SYSTEMCTL_SHOW_PROPERTIES ? LOG_DEBUG : LOG_ERR,
                          "Unit %s could not be found.", unit);
 
                 if (show_mode == SYSTEMCTL_SHOW_STATUS)
@@ -1890,7 +1946,7 @@ static int show_one(
         if (r < 0)
                 return log_error_errno(r, "Failed to rewind: %s", bus_error_message(&error, r));
 
-        r = bus_message_print_all_properties(reply, print_property, arg_properties, arg_value, arg_all, &found_properties);
+        r = bus_message_print_all_properties(reply, print_property, arg_properties, arg_print_flags, &found_properties);
         if (r < 0)
                 return bus_log_parse_error(r);
 

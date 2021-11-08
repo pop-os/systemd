@@ -314,7 +314,7 @@ static int link_send_lldp(Link *link) {
                 SD_LLDP_SYSTEM_CAPABILITIES_STATION;
 
         r = lldp_make_packet(link->network->lldp_emit,
-                             &link->hw_addr.addr.ether,
+                             &link->hw_addr.ether,
                              sd_id128_to_string(machine_id, machine_id_string),
                              link->ifname,
                              (uint16_t) ttl,
@@ -378,7 +378,7 @@ int link_lldp_emit_start(Link *link) {
         link->lldp_tx_fast = LLDP_TX_FAST_INIT;
 
         next = usec_add(usec_add(now(clock_boottime_or_monotonic()), LLDP_FAST_TX_USEC),
-                     (usec_t) random_u64() % LLDP_JITTER_USEC);
+                        (usec_t) random_u64() % LLDP_JITTER_USEC);
 
         if (link->lldp_emit_event_source) {
                 usec_t old;
@@ -413,7 +413,7 @@ int link_lldp_emit_start(Link *link) {
 void link_lldp_emit_stop(Link *link) {
         assert(link);
 
-        link->lldp_emit_event_source = sd_event_source_unref(link->lldp_emit_event_source);
+        link->lldp_emit_event_source = sd_event_source_disable_unref(link->lldp_emit_event_source);
 }
 
 int config_parse_lldp_mud(

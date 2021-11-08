@@ -432,8 +432,10 @@ static void test_exec_systemcallfilter(Manager *m) {
 
         test(m, "exec-systemcallfilter-not-failing.service", 0, CLD_EXITED);
         test(m, "exec-systemcallfilter-not-failing2.service", 0, CLD_EXITED);
+        test(m, "exec-systemcallfilter-not-failing3.service", 0, CLD_EXITED);
         test(m, "exec-systemcallfilter-failing.service", SIGSYS, CLD_KILLED);
         test(m, "exec-systemcallfilter-failing2.service", SIGSYS, CLD_KILLED);
+        test(m, "exec-systemcallfilter-failing3.service", SIGSYS, CLD_KILLED);
 
         r = find_executable("python3", NULL);
         if (r < 0) {
@@ -924,8 +926,8 @@ int main(int argc, char *argv[]) {
         can_unshare = have_namespaces();
 
         /* It is needed otherwise cgroup creation fails */
-        if (getuid() != 0)
-                return log_tests_skipped("not root");
+        if (geteuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0)
+                return log_tests_skipped("not privileged");
 
         r = enter_cgroup_subroot(NULL);
         if (r == -ENOMEDIUM)

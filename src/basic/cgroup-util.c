@@ -506,7 +506,7 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
                 if (!t)
                         return -ENOMEM;
 
-                *fs = path_simplify(t, false);
+                *fs = path_simplify(t);
                 return 0;
         }
 
@@ -523,7 +523,7 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
         if (r < 0)
                 return r;
 
-        path_simplify(*fs, false);
+        path_simplify(*fs);
         return 0;
 }
 
@@ -660,7 +660,7 @@ int cg_remove_xattr(const char *controller, const char *path, const char *name) 
 
 int cg_pid_get_path(const char *controller, pid_t pid, char **ret_path) {
         _cleanup_fclose_ FILE *f = NULL;
-        const char *fs, *controller_str;
+        const char *fs, *controller_str = NULL;  /* avoid false maybe-uninitialized warning */
         int unified, r;
 
         assert(pid >= 0);
@@ -720,6 +720,7 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **ret_path) {
                                 continue;
                         *e = 0;
 
+                        assert(controller_str);
                         r = string_contains_word(l, ",", controller_str);
                         if (r < 0)
                                 return r;
@@ -918,7 +919,7 @@ int cg_split_spec(const char *spec, char **ret_controller, char **ret_path) {
                         if (!path)
                                 return -ENOMEM;
 
-                        path_simplify(path, false);
+                        path_simplify(path);
                 }
 
         } else {
@@ -941,7 +942,7 @@ int cg_split_spec(const char *spec, char **ret_controller, char **ret_path) {
                                     !path_is_absolute(path))
                                         return -EINVAL;
 
-                                path_simplify(path, false);
+                                path_simplify(path);
                         }
 
                 } else {
@@ -978,7 +979,7 @@ int cg_mangle_path(const char *path, char **result) {
                 if (!t)
                         return -ENOMEM;
 
-                *result = path_simplify(t, false);
+                *result = path_simplify(t);
                 return 0;
         }
 
@@ -1816,9 +1817,9 @@ done:
 
 int cg_mask_to_string(CGroupMask mask, char **ret) {
         _cleanup_free_ char *s = NULL;
-        size_t n = 0, allocated = 0;
         bool space = false;
         CGroupController c;
+        size_t n = 0;
 
         assert(ret);
 
@@ -1837,7 +1838,7 @@ int cg_mask_to_string(CGroupMask mask, char **ret) {
                 k = cgroup_controller_to_string(c);
                 l = strlen(k);
 
-                if (!GREEDY_REALLOC(s, allocated, n + space + l + 1))
+                if (!GREEDY_REALLOC(s, n + space + l + 1))
                         return -ENOMEM;
 
                 if (space)
@@ -2162,6 +2163,8 @@ static const char *const cgroup_controller_table[_CGROUP_CONTROLLER_MAX] = {
         [CGROUP_CONTROLLER_PIDS] = "pids",
         [CGROUP_CONTROLLER_BPF_FIREWALL] = "bpf-firewall",
         [CGROUP_CONTROLLER_BPF_DEVICES] = "bpf-devices",
+        [CGROUP_CONTROLLER_BPF_FOREIGN] = "bpf-foreign",
+        [CGROUP_CONTROLLER_BPF_SOCKET_BIND] = "bpf-socket-bind",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(cgroup_controller, CGroupController);

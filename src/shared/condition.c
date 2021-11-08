@@ -5,6 +5,7 @@
 #include <fnmatch.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <time.h>
@@ -16,12 +17,14 @@
 #include "apparmor-util.h"
 #include "architecture.h"
 #include "audit-util.h"
+#include "blockdev-util.h"
 #include "cap-list.h"
 #include "cgroup-util.h"
 #include "condition.h"
 #include "cpu-set-util.h"
 #include "efi-loader.h"
 #include "env-file.h"
+#include "env-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -33,6 +36,7 @@
 #include "list.h"
 #include "macro.h"
 #include "mountpoint-util.h"
+#include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
@@ -261,6 +265,61 @@ static int condition_test_kernel_version(Condition *c, char **env) {
         return true;
 }
 
+static int condition_test_osrelease(Condition *c, char **env) {
+        const char *parameter = c->parameter;
+        int r;
+
+        assert(c);
+        assert(c->parameter);
+        assert(c->type == CONDITION_OS_RELEASE);
+
+        for (;;) {
+                _cleanup_free_ char *key = NULL, *condition = NULL, *actual_value = NULL;
+                OrderOperator order;
+                const char *word;
+                bool matches;
+
+                r = extract_first_word(&parameter, &condition, NULL, EXTRACT_UNQUOTE);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to parse parameter: %m");
+                if (r == 0)
+                        break;
+
+                /* parse_order() needs the string to start with the comparators */
+                word = condition;
+                r = extract_first_word(&word, &key, "!<=>", EXTRACT_RETAIN_SEPARATORS);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to parse parameter: %m");
+                /* The os-release spec mandates env-var-like key names */
+                if (r == 0 || isempty(word) || !env_name_is_valid(key))
+                        return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Failed to parse parameter, key/value format expected: %m");
+
+                /* Do not allow whitespace after the separator, as that's not a valid os-release format */
+                order = parse_order(&word);
+                if (order < 0 || isempty(word) || strchr(WHITESPACE, *word) != NULL)
+                        return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Failed to parse parameter, key/value format expected: %m");
+
+                r = parse_os_release(NULL, key, &actual_value);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to parse os-release: %m");
+
+                /* Might not be comparing versions, so do exact string matching */
+                if (order == ORDER_EQUAL)
+                        matches = streq_ptr(actual_value, word);
+                else if (order == ORDER_UNEQUAL)
+                        matches = !streq_ptr(actual_value, word);
+                else
+                        matches = test_order(strverscmp_improved(actual_value, word), order);
+
+                if (!matches)
+                        return false;
+        }
+
+        return true;
+}
+
 static int condition_test_memory(Condition *c, char **env) {
         OrderOperator order;
         uint64_t m, k;
@@ -450,6 +509,81 @@ static int condition_test_architecture(Condition *c, char **env) {
         return a == b;
 }
 
+#define DTCOMPAT_FILE "/sys/firmware/devicetree/base/compatible"
+static int condition_test_firmware_devicetree_compatible(const char *dtcarg) {
+        int r;
+        _cleanup_free_ char *dtcompat = NULL;
+        _cleanup_strv_free_ char **dtcompatlist = NULL;
+        size_t size;
+
+        r = read_full_virtual_file(DTCOMPAT_FILE, &dtcompat, &size);
+        if (r < 0) {
+                /* if the path doesn't exist it is incompatible */
+                if (r != -ENOENT)
+                        log_debug_errno(r, "Failed to open() '%s', assuming machine is incompatible: %m", DTCOMPAT_FILE);
+                return false;
+        }
+
+        /* Not sure this can happen, but play safe. */
+        if (size == 0) {
+                log_debug("%s has zero length, assuming machine is incompatible", DTCOMPAT_FILE);
+                return false;
+        }
+
+        /*
+         * /sys/firmware/devicetree/base/compatible consists of one or more
+         * strings, each ending in '\0'. So the last character in dtcompat must
+         * be a '\0'.
+         */
+        if (dtcompat[size - 1] != '\0') {
+                log_debug("%s is in an unknown format, assuming machine is incompatible", DTCOMPAT_FILE);
+                return false;
+        }
+
+        dtcompatlist = strv_parse_nulstr(dtcompat, size);
+        if (!dtcompatlist)
+                return -ENOMEM;
+
+        return strv_contains(dtcompatlist, dtcarg);
+}
+
+static int condition_test_firmware(Condition *c, char **env) {
+        sd_char *dtc;
+
+        assert(c);
+        assert(c->parameter);
+        assert(c->type == CONDITION_FIRMWARE);
+
+        if (streq(c->parameter, "device-tree")) {
+                if (access("/sys/firmware/device-tree/", F_OK) < 0) {
+                        if (errno != ENOENT)
+                                log_debug_errno(errno, "Unexpected error when checking for /sys/firmware/device-tree/: %m");
+                        return false;
+                } else
+                        return true;
+        } else if ((dtc = startswith(c->parameter, "device-tree-compatible("))) {
+                _cleanup_free_ char *dtcarg = NULL;
+                char *end;
+
+                end = strchr(dtc, ')');
+                if (!end || *(end + 1) != '\0') {
+                        log_debug("Malformed Firmware condition \"%s\"", c->parameter);
+                        return false;
+                }
+
+                dtcarg = strndup(dtc, end - dtc);
+                if (!dtcarg)
+                        return -ENOMEM;
+
+                return condition_test_firmware_devicetree_compatible(dtcarg);
+        } else if (streq(c->parameter, "uefi"))
+                return is_efi_boot();
+        else {
+                log_debug("Unsupported Firmware condition \"%s\"", c->parameter);
+                return false;
+        }
+}
+
 static int condition_test_host(Condition *c, char **env) {
         _cleanup_free_ char *h = NULL;
         sd_id128_t x, y;
@@ -598,6 +732,11 @@ static int condition_test_needs_update(Condition *c, char **env) {
                 log_debug_errno(r, "Failed to parse systemd.condition-needs-update= kernel command line argument, ignoring: %m");
         if (r > 0)
                 return b;
+
+        if (in_initrd()) {
+                log_debug("We are in an initrd, not doing any updates.");
+                return false;
+        }
 
         if (!path_is_absolute(c->parameter)) {
                 log_debug("Specified condition parameter '%s' is not absolute, assuming an update is needed.", c->parameter);
@@ -843,6 +982,7 @@ int condition_test(Condition *c, char **env) {
                 [CONDITION_HOST]                     = condition_test_host,
                 [CONDITION_AC_POWER]                 = condition_test_ac_power,
                 [CONDITION_ARCHITECTURE]             = condition_test_architecture,
+                [CONDITION_FIRMWARE]                 = condition_test_firmware,
                 [CONDITION_NEEDS_UPDATE]             = condition_test_needs_update,
                 [CONDITION_FIRST_BOOT]               = condition_test_first_boot,
                 [CONDITION_USER]                     = condition_test_user,
@@ -852,6 +992,7 @@ int condition_test(Condition *c, char **env) {
                 [CONDITION_MEMORY]                   = condition_test_memory,
                 [CONDITION_ENVIRONMENT]              = condition_test_environment,
                 [CONDITION_CPU_FEATURE]              = condition_test_cpufeature,
+                [CONDITION_OS_RELEASE]               = condition_test_osrelease,
         };
 
         int r, b;
@@ -949,6 +1090,7 @@ void condition_dump_list(Condition *first, FILE *f, const char *prefix, conditio
 
 static const char* const condition_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_ARCHITECTURE] = "ConditionArchitecture",
+        [CONDITION_FIRMWARE] = "ConditionFirmware",
         [CONDITION_VIRTUALIZATION] = "ConditionVirtualization",
         [CONDITION_HOST] = "ConditionHost",
         [CONDITION_KERNEL_COMMAND_LINE] = "ConditionKernelCommandLine",
@@ -975,12 +1117,14 @@ static const char* const condition_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_MEMORY] = "ConditionMemory",
         [CONDITION_ENVIRONMENT] = "ConditionEnvironment",
         [CONDITION_CPU_FEATURE] = "ConditionCPUFeature",
+        [CONDITION_OS_RELEASE] = "ConditionOSRelease",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(condition_type, ConditionType);
 
 static const char* const assert_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_ARCHITECTURE] = "AssertArchitecture",
+        [CONDITION_FIRMWARE] = "AssertFirmware",
         [CONDITION_VIRTUALIZATION] = "AssertVirtualization",
         [CONDITION_HOST] = "AssertHost",
         [CONDITION_KERNEL_COMMAND_LINE] = "AssertKernelCommandLine",
@@ -1007,6 +1151,7 @@ static const char* const assert_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_MEMORY] = "AssertMemory",
         [CONDITION_ENVIRONMENT] = "AssertEnvironment",
         [CONDITION_CPU_FEATURE] = "AssertCPUFeature",
+        [CONDITION_OS_RELEASE] = "AssertOSRelease",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(assert_type, ConditionType);

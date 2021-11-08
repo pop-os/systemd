@@ -8,6 +8,9 @@
 
 #include "macro.h"
 
+/* maximum length of fdname */
+#define FDNAME_MAX 255
+
 /* Make sure we can distinguish fd 0 and NULL */
 #define FD_TO_PTR(fd) INT_TO_PTR((fd)+1)
 #define PTR_TO_FD(p) (PTR_TO_INT(p)-1)
@@ -73,10 +76,6 @@ enum {
         ACQUIRE_NO_REGULAR  = 1 << 4,
 };
 
-int acquire_data_fd(const void *data, size_t size, unsigned flags);
-
-int fd_duplicate_data_fd(int fd);
-
 int fd_move_above_stdio(int fd);
 
 int rearrange_stdio(int original_input_fd, int original_output_fd, int original_error_fd);
@@ -104,5 +103,5 @@ static inline int make_null_stdio(void) {
 
 
 int fd_reopen(int fd, int flags);
-
 int read_nr_open(void);
+int btrfs_defrag_fd(int fd);

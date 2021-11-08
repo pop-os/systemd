@@ -14,6 +14,7 @@ DefaultDependencies=no
 Before=multi-user.target shutdown.target
 Conflicts=shutdown.target
 ConditionControlGroupController=v2
+ConditionControlGroupController=memory
 ConditionPathExists=/proc/pressure/cpu
 ConditionPathExists=/proc/pressure/io
 ConditionPathExists=/proc/pressure/memory
@@ -22,7 +23,7 @@ ConditionPathExists=/proc/pressure/memory
 AmbientCapabilities=CAP_KILL CAP_DAC_OVERRIDE
 BusName=org.freedesktop.oom1
 CapabilityBoundingSet=CAP_KILL CAP_DAC_OVERRIDE
-ExecStart=@rootlibexecdir@/systemd-oomd
+ExecStart={{ROOTLIBEXECDIR}}/systemd-oomd
 IPAddressDeny=any
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
@@ -51,7 +52,7 @@ SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
 Type=notify
 User=systemd-oom
-@SERVICE_WATCHDOG@
+{{SERVICE_WATCHDOG}}
 
 [Install]
 WantedBy=multi-user.target

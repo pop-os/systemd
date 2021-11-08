@@ -695,9 +695,9 @@ static int method_create_session(sd_bus_message *message, void *userdata, sd_bus
                 return r;
 
         if (!uid_is_valid(uid))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid UID");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid UID");
         if (leader < 0 || leader == 1 || leader == getpid_cached())
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid leader PID");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid leader PID");
 
         if (isempty(type))
                 t = _SESSION_TYPE_INVALID;
@@ -828,10 +828,10 @@ static int method_create_session(sd_bus_message *message, void *userdata, sd_bus
          */
         if (c != SESSION_GREETER &&
             vtnr > 0 &&
-            vtnr < m->seat0->position_count &&
+            vtnr < MALLOC_ELEMENTSOF(m->seat0->positions) &&
             m->seat0->positions[vtnr] &&
             m->seat0->positions[vtnr]->class != SESSION_GREETER)
-                return sd_bus_error_setf(error, BUS_ERROR_SESSION_BUSY, "Already occupied by a session");
+                return sd_bus_error_set(error, BUS_ERROR_SESSION_BUSY, "Already occupied by a session");
 
         if (hashmap_size(m->sessions) >= m->sessions_max)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_LIMITS_EXCEEDED,
@@ -1319,18 +1319,9 @@ static int trigger_device(Manager *m, sd_device *d) {
         }
 
         FOREACH_DEVICE(e, d) {
-                _cleanup_free_ char *t = NULL;
-                const char *p;
-
-                r = sd_device_get_syspath(d, &p);
+                r = sd_device_trigger(d, SD_DEVICE_CHANGE);
                 if (r < 0)
-                        return r;
-
-                t = path_join(p, "uevent");
-                if (!t)
-                        return -ENOMEM;
-
-                (void) write_string_file(t, "change", WRITE_STRING_FILE_DISABLE_BUFFER);
+                        log_device_debug_errno(d, r, "Failed to trigger device, ignoring: %m");
         }
 
         return 0;
@@ -1383,7 +1374,6 @@ static int flush_devices(Manager *m) {
                 struct dirent *de;
 
                 FOREACH_DIRENT_ALL(de, d, break) {
-                        dirent_ensure_type(d, de);
                         if (!dirent_is_file(de))
                                 continue;
 
@@ -1860,7 +1850,7 @@ static int method_do_shutdown_or_sleep(
                 const char *action,
                 const char *action_multiple_sessions,
                 const char *action_ignore_inhibit,
-                const char *sleep_verb,
+                SleepOperation sleep_operation,
                 bool with_flags,
                 sd_bus_error *error) {
 
@@ -1879,7 +1869,9 @@ static int method_do_shutdown_or_sleep(
                 if (r < 0)
                         return r;
                 if ((flags & ~SD_LOGIND_SHUTDOWN_AND_SLEEP_FLAGS_PUBLIC) != 0)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
+                if (!streq(unit_name, SPECIAL_REBOOT_TARGET) && (flags & SD_LOGIND_REBOOT_VIA_KEXEC))
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Reboot via kexec is only applicable with reboot operations");
         } else {
                 /* Old style method: no flags parameter, but interactive bool passed as boolean in
                  * payload. Let's convert this argument to the new-style flags parameter for our internal
@@ -1893,19 +1885,22 @@ static int method_do_shutdown_or_sleep(
                 flags = interactive ? SD_LOGIND_INTERACTIVE : 0;
         }
 
+        if ((flags & SD_LOGIND_REBOOT_VIA_KEXEC) && kexec_loaded())
+                unit_name = SPECIAL_KEXEC_TARGET;
+
         /* Don't allow multiple jobs being executed at the same time */
         if (m->action_what > 0)
                 return sd_bus_error_setf(error, BUS_ERROR_OPERATION_IN_PROGRESS,
                                          "There's already a shutdown or sleep operation in progress");
 
-        if (sleep_verb) {
-                r = can_sleep(sleep_verb);
+        if (sleep_operation >= 0) {
+                r = can_sleep(sleep_operation);
                 if (r == -ENOSPC)
                         return sd_bus_error_set(error, BUS_ERROR_SLEEP_VERB_NOT_SUPPORTED,
                                                 "Not enough swap space for hibernation");
                 if (r == 0)
                         return sd_bus_error_setf(error, BUS_ERROR_SLEEP_VERB_NOT_SUPPORTED,
-                                                 "Sleep verb \"%s\" not supported", sleep_verb);
+                                                 "Sleep verb \"%s\" not supported", sleep_operation_to_string(sleep_operation));
                 if (r < 0)
                         return r;
         }
@@ -1932,7 +1927,7 @@ static int method_poweroff(sd_bus_message *message, void *userdata, sd_bus_error
                         "org.freedesktop.login1.power-off",
                         "org.freedesktop.login1.power-off-multiple-sessions",
                         "org.freedesktop.login1.power-off-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         sd_bus_message_is_method_call(message, NULL, "PowerOffWithFlags"),
                         error);
 }
@@ -1947,7 +1942,7 @@ static int method_reboot(sd_bus_message *message, void *userdata, sd_bus_error *
                         "org.freedesktop.login1.reboot",
                         "org.freedesktop.login1.reboot-multiple-sessions",
                         "org.freedesktop.login1.reboot-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         sd_bus_message_is_method_call(message, NULL, "RebootWithFlags"),
                         error);
 }
@@ -1962,7 +1957,7 @@ static int method_halt(sd_bus_message *message, void *userdata, sd_bus_error *er
                         "org.freedesktop.login1.halt",
                         "org.freedesktop.login1.halt-multiple-sessions",
                         "org.freedesktop.login1.halt-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         sd_bus_message_is_method_call(message, NULL, "HaltWithFlags"),
                         error);
 }
@@ -1977,7 +1972,7 @@ static int method_suspend(sd_bus_message *message, void *userdata, sd_bus_error 
                         "org.freedesktop.login1.suspend",
                         "org.freedesktop.login1.suspend-multiple-sessions",
                         "org.freedesktop.login1.suspend-ignore-inhibit",
-                        "suspend",
+                        SLEEP_SUSPEND,
                         sd_bus_message_is_method_call(message, NULL, "SuspendWithFlags"),
                         error);
 }
@@ -1992,7 +1987,7 @@ static int method_hibernate(sd_bus_message *message, void *userdata, sd_bus_erro
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "hibernate",
+                        SLEEP_HIBERNATE,
                         sd_bus_message_is_method_call(message, NULL, "HibernateWithFlags"),
                         error);
 }
@@ -2007,7 +2002,7 @@ static int method_hybrid_sleep(sd_bus_message *message, void *userdata, sd_bus_e
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "hybrid-sleep",
+                        SLEEP_HYBRID_SLEEP,
                         sd_bus_message_is_method_call(message, NULL, "HybridSleepWithFlags"),
                         error);
 }
@@ -2022,7 +2017,7 @@ static int method_suspend_then_hibernate(sd_bus_message *message, void *userdata
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "hybrid-sleep",
+                        SLEEP_SUSPEND_THEN_HIBERNATE,
                         sd_bus_message_is_method_call(message, NULL, "SuspendThenHibernateWithFlags"),
                         error);
 }
@@ -2040,6 +2035,11 @@ static int nologin_timeout_handler(
                 create_shutdown_run_nologin_or_warn() >= 0;
 
         return 0;
+}
+
+static usec_t nologin_timeout_usec(usec_t elapse) {
+        /* Issue /run/nologin five minutes before shutdown */
+        return LESS_BY(elapse, 5 * USEC_PER_MINUTE);
 }
 
 static int update_schedule_file(Manager *m) {
@@ -2135,6 +2135,8 @@ static int manager_scheduled_shutdown_handler(
                 target = SPECIAL_POWEROFF_TARGET;
         else if (streq(m->scheduled_shutdown_type, "reboot"))
                 target = SPECIAL_REBOOT_TARGET;
+        else if (streq(m->scheduled_shutdown_type, "kexec"))
+                target = SPECIAL_KEXEC_TARGET;
         else if (streq(m->scheduled_shutdown_type, "halt"))
                 target = SPECIAL_HALT_TARGET;
         else
@@ -2200,7 +2202,7 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
                 action = "org.freedesktop.login1.power-off";
                 action_multiple_sessions = "org.freedesktop.login1.power-off-multiple-sessions";
                 action_ignore_inhibit = "org.freedesktop.login1.power-off-ignore-inhibit";
-        } else if (streq(type, "reboot")) {
+        } else if (STR_IN_SET(type, "reboot", "kexec")) {
                 action = "org.freedesktop.login1.reboot";
                 action_multiple_sessions = "org.freedesktop.login1.reboot-multiple-sessions";
                 action_ignore_inhibit = "org.freedesktop.login1.reboot-ignore-inhibit";
@@ -2209,7 +2211,7 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
                 action_multiple_sessions = "org.freedesktop.login1.halt-multiple-sessions";
                 action_ignore_inhibit = "org.freedesktop.login1.halt-ignore-inhibit";
         } else
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unsupported shutdown type");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Unsupported shutdown type");
 
         r = verify_shutdown_creds(m, message, INHIBIT_SHUTDOWN, action, action_multiple_sessions,
                                   action_ignore_inhibit, 0, error);
@@ -2240,7 +2242,7 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
         m->shutdown_dry_run = dry_run;
 
         if (m->nologin_timeout_source) {
-                r = sd_event_source_set_time(m->nologin_timeout_source, elapse);
+                r = sd_event_source_set_time(m->nologin_timeout_source, nologin_timeout_usec(elapse));
                 if (r < 0)
                         return log_error_errno(r, "sd_event_source_set_time() failed: %m");
 
@@ -2249,7 +2251,7 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
                         return log_error_errno(r, "sd_event_source_set_enabled() failed: %m");
         } else {
                 r = sd_event_add_time(m->event, &m->nologin_timeout_source,
-                                      CLOCK_REALTIME, elapse - 5 * USEC_PER_MINUTE, 0, nologin_timeout_handler, m);
+                                      CLOCK_REALTIME, nologin_timeout_usec(elapse), 0, nologin_timeout_handler, m);
                 if (r < 0)
                         return log_error_errno(r, "sd_event_add_time() failed: %m");
         }
@@ -2319,7 +2321,7 @@ static int method_can_shutdown_or_sleep(
                 const char *action,
                 const char *action_multiple_sessions,
                 const char *action_ignore_inhibit,
-                const char *sleep_verb,
+                SleepOperation sleep_operation,
                 sd_bus_error *error) {
 
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
@@ -2337,8 +2339,8 @@ static int method_can_shutdown_or_sleep(
         assert(action_multiple_sessions);
         assert(action_ignore_inhibit);
 
-        if (sleep_verb) {
-                r = can_sleep(sleep_verb);
+        if (sleep_operation >= 0) {
+                r = can_sleep(sleep_operation);
                 if (IN_SET(r,  0, -ENOSPC))
                         return sd_bus_reply_method_return(message, "s", "na");
                 if (r < 0)
@@ -2360,7 +2362,7 @@ static int method_can_shutdown_or_sleep(
         multiple_sessions = r > 0;
         blocked = manager_is_inhibited(m, w, INHIBIT_BLOCK, NULL, false, true, uid, NULL);
 
-        handle = handle_action_from_string(sleep_verb);
+        handle = handle_action_from_string(sleep_operation_to_string(sleep_operation));
         if (handle >= 0) {
                 const char *target;
 
@@ -2436,7 +2438,7 @@ static int method_can_poweroff(sd_bus_message *message, void *userdata, sd_bus_e
                         "org.freedesktop.login1.power-off",
                         "org.freedesktop.login1.power-off-multiple-sessions",
                         "org.freedesktop.login1.power-off-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         error);
 }
 
@@ -2449,7 +2451,7 @@ static int method_can_reboot(sd_bus_message *message, void *userdata, sd_bus_err
                         "org.freedesktop.login1.reboot",
                         "org.freedesktop.login1.reboot-multiple-sessions",
                         "org.freedesktop.login1.reboot-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         error);
 }
 
@@ -2462,7 +2464,7 @@ static int method_can_halt(sd_bus_message *message, void *userdata, sd_bus_error
                         "org.freedesktop.login1.halt",
                         "org.freedesktop.login1.halt-multiple-sessions",
                         "org.freedesktop.login1.halt-ignore-inhibit",
-                        NULL,
+                        _SLEEP_OPERATION_INVALID,
                         error);
 }
 
@@ -2475,7 +2477,7 @@ static int method_can_suspend(sd_bus_message *message, void *userdata, sd_bus_er
                         "org.freedesktop.login1.suspend",
                         "org.freedesktop.login1.suspend-multiple-sessions",
                         "org.freedesktop.login1.suspend-ignore-inhibit",
-                        "suspend",
+                        SLEEP_SUSPEND,
                         error);
 }
 
@@ -2488,7 +2490,7 @@ static int method_can_hibernate(sd_bus_message *message, void *userdata, sd_bus_
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "hibernate",
+                        SLEEP_HIBERNATE,
                         error);
 }
 
@@ -2501,7 +2503,7 @@ static int method_can_hybrid_sleep(sd_bus_message *message, void *userdata, sd_b
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "hybrid-sleep",
+                        SLEEP_HYBRID_SLEEP,
                         error);
 }
 
@@ -2514,7 +2516,7 @@ static int method_can_suspend_then_hibernate(sd_bus_message *message, void *user
                         "org.freedesktop.login1.hibernate",
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
-                        "suspend-then-hibernate",
+                        SLEEP_SUSPEND_THEN_HIBERNATE,
                         error);
 }
 
@@ -2667,7 +2669,7 @@ static int method_set_reboot_to_firmware_setup(
 
                 r = efi_reboot_to_firmware_supported();
                 if (r == -EOPNOTSUPP)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Firmware does not support boot into firmware.");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Firmware does not support boot into firmware.");
                 if (r < 0)
                         return r;
 
@@ -2679,7 +2681,7 @@ static int method_set_reboot_to_firmware_setup(
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse $SYSTEMD_REBOOT_TO_FIRMWARE_SETUP: %m");
 
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Firmware does not support boot into firmware.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Firmware does not support boot into firmware.");
         } else
                 /* non-EFI case: $SYSTEMD_REBOOT_TO_FIRMWARE_SETUP is set to on */
                 use_efi = false;
@@ -2835,7 +2837,7 @@ static int method_set_reboot_to_boot_loader_menu(
                 if (r < 0)
                         log_warning_errno(r, "Failed to determine whether reboot to boot loader menu is supported: %m");
                 if (r < 0 || !FLAGS_SET(features, EFI_LOADER_FEATURE_CONFIG_TIMEOUT_ONE_SHOT))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Boot loader does not support boot into boot loader menu.");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Boot loader does not support boot into boot loader menu.");
 
                 use_efi = true;
 
@@ -2845,7 +2847,7 @@ static int method_set_reboot_to_boot_loader_menu(
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse $SYSTEMD_REBOOT_TO_BOOT_LOADER_MENU: %m");
 
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Boot loader does not support boot into boot loader menu.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Boot loader does not support boot into boot loader menu.");
         } else
                 /* non-EFI case: $SYSTEMD_REBOOT_TO_BOOT_LOADER_MENU is set to on */
                 use_efi = false;
@@ -2865,12 +2867,12 @@ static int method_set_reboot_to_boot_loader_menu(
 
         if (use_efi) {
                 if (x == UINT64_MAX)
-                        r = efi_set_variable(EFI_VENDOR_LOADER, "LoaderConfigTimeoutOneShot", NULL, 0);
+                        r = efi_set_variable(EFI_LOADER_VARIABLE(LoaderConfigTimeoutOneShot), NULL, 0);
                 else {
                         char buf[DECIMAL_STR_MAX(uint64_t) + 1];
                         xsprintf(buf, "%" PRIu64, DIV_ROUND_UP(x, USEC_PER_SEC)); /* second granularity */
 
-                        r = efi_set_variable_string(EFI_VENDOR_LOADER, "LoaderConfigTimeoutOneShot", buf);
+                        r = efi_set_variable_string(EFI_LOADER_VARIABLE(LoaderConfigTimeoutOneShot), buf);
                 }
                 if (r < 0)
                         return r;
@@ -3037,7 +3039,7 @@ static int method_set_reboot_to_boot_loader_entry(
                 if (r < 0)
                         log_warning_errno(r, "Failed to determine whether reboot into boot loader entry is supported: %m");
                 if (r < 0 || !FLAGS_SET(features, EFI_LOADER_FEATURE_ENTRY_ONESHOT))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Loader does not support boot into boot loader entry.");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Loader does not support boot into boot loader entry.");
 
                 use_efi = true;
 
@@ -3047,7 +3049,7 @@ static int method_set_reboot_to_boot_loader_entry(
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse $SYSTEMD_REBOOT_TO_BOOT_LOADER_ENTRY: %m");
 
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Loader does not support boot into boot loader entry.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Loader does not support boot into boot loader entry.");
         } else
                 /* non-EFI case: $SYSTEMD_REBOOT_TO_BOOT_LOADER_ENTRY is set to on */
                 use_efi = false;
@@ -3068,9 +3070,9 @@ static int method_set_reboot_to_boot_loader_entry(
         if (use_efi) {
                 if (isempty(v))
                         /* Delete item */
-                        r = efi_set_variable(EFI_VENDOR_LOADER, "LoaderEntryOneShot", NULL, 0);
+                        r = efi_set_variable(EFI_LOADER_VARIABLE(LoaderEntryOneShot), NULL, 0);
                 else
-                        r = efi_set_variable_string(EFI_VENDOR_LOADER, "LoaderEntryOneShot", v);
+                        r = efi_set_variable_string(EFI_LOADER_VARIABLE(LoaderEntryOneShot), v);
                 if (r < 0)
                         return r;
         } else {

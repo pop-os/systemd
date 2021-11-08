@@ -84,7 +84,7 @@ static void unmount_autofs(Automount *a) {
         if (a->pipe_fd < 0)
                 return;
 
-        a->pipe_event_source = sd_event_source_unref(a->pipe_event_source);
+        a->pipe_event_source = sd_event_source_disable_unref(a->pipe_event_source);
         a->pipe_fd = safe_close(a->pipe_fd);
 
         /* If we reload/reexecute things we keep the mount point around */
@@ -113,7 +113,7 @@ static void automount_done(Unit *u) {
         a->tokens = set_free(a->tokens);
         a->expire_tokens = set_free(a->expire_tokens);
 
-        a->expire_event_source = sd_event_source_unref(a->expire_event_source);
+        a->expire_event_source = sd_event_source_disable_unref(a->expire_event_source);
 }
 
 static int automount_add_trigger_dependencies(Automount *a) {
@@ -199,7 +199,7 @@ static int automount_set_where(Automount *a) {
         if (r < 0)
                 return r;
 
-        path_simplify(a->where, false);
+        path_simplify(a->where);
         return 1;
 }
 
@@ -651,7 +651,7 @@ fail:
 
 static void *expire_thread(void *p) {
         struct autofs_dev_ioctl param;
-        _cleanup_(expire_data_freep) struct expire_data *data = (struct expire_data*)p;
+        _cleanup_(expire_data_freep) struct expire_data *data = p;
         int r;
 
         assert(data->dev_autofs_fd >= 0);
@@ -813,12 +813,6 @@ static int automount_start(Unit *u) {
         r = unit_test_trigger_loaded(u);
         if (r < 0)
                 return r;
-
-        r = unit_test_start_limit(u);
-        if (r < 0) {
-                automount_enter_dead(a, AUTOMOUNT_FAILURE_START_LIMIT_HIT);
-                return r;
-        }
 
         r = unit_acquire_invocation_id(u);
         if (r < 0)
@@ -1065,6 +1059,21 @@ static bool automount_supported(void) {
         return supported;
 }
 
+static int automount_test_start_limit(Unit *u) {
+        Automount *a = AUTOMOUNT(u);
+        int r;
+
+        assert(a);
+
+        r = unit_test_start_limit(u);
+        if (r < 0) {
+                automount_enter_dead(a, AUTOMOUNT_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
+
+        return 0;
+}
+
 static const char* const automount_result_table[_AUTOMOUNT_RESULT_MAX] = {
         [AUTOMOUNT_SUCCESS] = "success",
         [AUTOMOUNT_FAILURE_RESOURCES] = "resources",
@@ -1087,6 +1096,7 @@ const UnitVTable automount_vtable = {
         .can_transient = true,
         .can_fail = true,
         .can_trigger = true,
+        .exclude_from_switch_root_serialization = true,
 
         .init = automount_init,
         .load = automount_load,
@@ -1126,4 +1136,6 @@ const UnitVTable automount_vtable = {
                         [JOB_FAILED]     = "Failed to unset automount %s.",
                 },
         },
+
+        .test_start_limit = automount_test_start_limit,
 };

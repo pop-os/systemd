@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <sys/un.h>
 
+#include "errno-util.h"
 #include "macro.h"
 #include "missing_network.h"
 #include "missing_socket.h"
@@ -138,6 +139,7 @@ typedef enum {
         IFNAME_VALID_NUMERIC     = 1 << 1,
         _IFNAME_VALID_ALL        = IFNAME_VALID_ALTERNATIVE | IFNAME_VALID_NUMERIC,
 } IfnameValidFlags;
+bool ifname_valid_char(char a);
 bool ifname_valid_full(const char *p, IfnameValidFlags flags);
 static inline bool ifname_valid(const char *p) {
         return ifname_valid_full(p, 0);
@@ -264,7 +266,7 @@ static inline int getsockopt_int(int fd, int level, int optname, int *ret) {
         socklen_t sl = sizeof(v);
 
         if (getsockopt(fd, level, optname, &v, &sl) < 0)
-                return -errno;
+                return negative_errno();
         if (sl != sizeof(v))
                 return -EIO;
 
@@ -274,6 +276,28 @@ static inline int getsockopt_int(int fd, int level, int optname, int *ret) {
 
 int socket_bind_to_ifname(int fd, const char *ifname);
 int socket_bind_to_ifindex(int fd, int ifindex);
+
+/* Define a 64bit version of timeval/timespec in any case, even on 32bit userspace. */
+struct timeval_large {
+        uint64_t tvl_sec, tvl_usec;
+};
+struct timespec_large {
+        uint64_t tvl_sec, tvl_nsec;
+};
+
+/* glibc duplicates timespec/timeval on certain 32bit archs, once in 32bit and once in 64bit.
+ * See __convert_scm_timestamps() in glibc source code. Hence, we need additional buffer space for them
+ * to prevent from recvmsg_safe() returning -EXFULL. */
+#define CMSG_SPACE_TIMEVAL                                              \
+        ((sizeof(struct timeval) == sizeof(struct timeval_large)) ?     \
+         CMSG_SPACE(sizeof(struct timeval)) :                           \
+         CMSG_SPACE(sizeof(struct timeval)) +                           \
+         CMSG_SPACE(sizeof(struct timeval_large)))
+#define CMSG_SPACE_TIMESPEC                                             \
+        ((sizeof(struct timespec) == sizeof(struct timespec_large)) ?   \
+         CMSG_SPACE(sizeof(struct timespec)) :                          \
+         CMSG_SPACE(sizeof(struct timespec)) +                          \
+         CMSG_SPACE(sizeof(struct timespec_large)))
 
 ssize_t recvmsg_safe(int sockfd, struct msghdr *msg, int flags);
 

@@ -242,7 +242,7 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
 
 static bool uid_for_system_journal(uid_t uid) {
 
-        /* Returns true if the specified UID shall get its data stored in the system journal*/
+        /* Returns true if the specified UID shall get its data stored in the system journal. */
 
         return uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY;
 }
@@ -414,6 +414,13 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
 
         if (s->runtime_journal)
                 return s->runtime_journal;
+
+        /* If we are not in persistent mode, then we need return NULL immediately rather than opening a
+         * persistent journal of any sort.
+         *
+         * Fixes https://github.com/systemd/systemd/issues/20390 */
+        if (!IN_SET(s->storage, STORAGE_AUTO, STORAGE_PERSISTENT))
+                return NULL;
 
         if (uid_for_system_journal(uid))
                 return s->system_journal;
@@ -1254,12 +1261,12 @@ int server_process_datagram(
                 uint32_t revents,
                 void *userdata) {
 
+        size_t label_len = 0, m;
         Server *s = userdata;
         struct ucred *ucred = NULL;
         struct timeval *tv = NULL;
         struct cmsghdr *cmsg;
         char *label = NULL;
-        size_t label_len = 0, m;
         struct iovec iovec;
         ssize_t n;
         int *fds = NULL, v = 0;
@@ -1268,11 +1275,14 @@ int server_process_datagram(
         /* We use NAME_MAX space for the SELinux label here. The kernel currently enforces no limit, but
          * according to suggestions from the SELinux people this will change and it will probably be
          * identical to NAME_MAX. For now we use that, but this should be updated one day when the final
-         * limit is known. */
+         * limit is known.
+         *
+         * Here, we need to explicitly initialize the buffer with zero, as glibc has a bug in
+         * __convert_scm_timestamps(), which assumes the buffer is initialized. See #20741. */
         CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred)) +
-                         CMSG_SPACE(sizeof(struct timeval)) +
+                         CMSG_SPACE_TIMEVAL +
                          CMSG_SPACE(sizeof(int)) + /* fd */
-                         CMSG_SPACE(NAME_MAX) /* selinux label */) control;
+                         CMSG_SPACE(NAME_MAX) /* selinux label */) control = {};
 
         union sockaddr_union sa = {};
 
@@ -1302,10 +1312,10 @@ int server_process_datagram(
                             (size_t) LINE_MAX,
                             ALIGN(sizeof(struct nlmsghdr)) + ALIGN((size_t) MAX_AUDIT_MESSAGE_LENGTH)) + 1);
 
-        if (!GREEDY_REALLOC(s->buffer, s->buffer_size, m))
+        if (!GREEDY_REALLOC(s->buffer, m))
                 return log_oom();
 
-        iovec = IOVEC_MAKE(s->buffer, s->buffer_size - 1); /* Leave room for trailing NUL we add later */
+        iovec = IOVEC_MAKE(s->buffer, MALLOC_ELEMENTSOF(s->buffer) - 1); /* Leave room for trailing NUL we add later */
 
         n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
         if (IN_SET(n, -EINTR, -EAGAIN))

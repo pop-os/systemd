@@ -74,6 +74,7 @@ struct NamespaceInfo {
         bool mount_apivfs;
         bool protect_hostname;
         bool private_ipc;
+        bool mount_nosuid;
         ProtectHome protect_home;
         ProtectSystem protect_system;
         ProtectProc protect_proc;
@@ -143,7 +144,6 @@ int setup_namespace(
                 const char *propagate_dir,
                 const char *incoming_dir,
                 const char *notify_socket,
-                DissectImageFlags dissected_image_flags,
                 char **error_path);
 
 #define RUN_SYSTEMD_EMPTY "/run/systemd/empty"
