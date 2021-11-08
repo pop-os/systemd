@@ -1,5 +1,4 @@
 units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
-test-Allow-running-only-a-subset-of-integration-tests-by-.patch
 hwdb-Add-ProBook-to-use-micmute-hotkey.patch
 test-fix-TEST-10-ISSUE-2467.patch
 sd-device-introduce-device_has_devlink.patch
