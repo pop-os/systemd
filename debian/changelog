@@ -1,3 +1,62 @@
+systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes (applied upstream):
+      + UBUNTU-units-disable-journald-watchdog.patch
+      + test-Allow-running-only-a-subset-of-integration-tests-by-.patch
+      + hwdb-Add-ProBook-to-use-micmute-hotkey.patch
+      + d/p/lp1931578/*.patch (ActivationPolicy=)
+      + lp1932352-hwdb-Add-mic-mute-key-mapping-for-HP-Elite-Dragonfly.patch
+      + d/p/lp1858210/*.patch (tzdata.zi)
+      + lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch
+      + lp1934981-correct-suspend-then-sleep-string.patch
+      + CVE-2020-13529.patch
+      + CVE-2021-33910.patch
+      + Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
+      + udev-fix-slot-based-network-names-on-s390.patch
+      + udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
+      + udev-allow-onboard-index-up-to-65535.patch
+      + lp1940635.patch (networkd failed to acquire a DHCP6 lease, v249.5)
+  * debian/gbp.conf: Update debian-branch to ubuntu-jammy
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f35b4d6c0653c3125b2e0e5d962f84543733c3c0
+  * Refresh Ubuntu-UseDomains-by-default.patch
+    File: debian/patches/debian/Ubuntu-UseDomains-by-default.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6e3b2ffb1c2c2bf2223f91b350c1fd06b8903346
+  * Refresh UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
+    File: debian/patches/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7142fb9381ab98d750a7c2473087ea7264be860d
+  * Refresh UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
+    File: debian/patches/debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3de0f444bfc0cf3b601c4a1ad8939d2cd69cdad6
+  * Refresh UBUNTU-resolved-default-no-negative-caching.patch
+    File: debian/patches/debian/UBUNTU-resolved-default-no-negative-caching.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d7b25651ea7ceae2ebfeafb84d9d65fb8284367a
+  * Refresh Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
+    File: debian/patches/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=61b004d7710b305d9996b3ad9bb47dc372fcbbac
+  * Refresh UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.patch
+    File: debian/patches/debian/UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5fe343a0fc89771820f997c2d6621ac517d9070f
+  * Refresh Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+    File: debian/patches/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e88125e4580e29ccc4417464301d68a23f313415
+  * Refresh patches/offset, using gbp
+    Files:
+    - debian/patches/debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
+    - debian/patches/debian/UBUNTU-Support-system-image-read-only-etc.patch
+    - debian/patches/debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
+    - debian/patches/debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
+    - debian/patches/debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
+    - debian/patches/debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
+    - debian/patches/debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
+    - debian/patches/debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
+    - debian/patches/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
+    - debian/patches/lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fd33ff25c6aa25f33054053c06f2936d51e8f645
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 09 Nov 2021 12:47:29 +0100
+
 systemd (249.5-2) unstable; urgency=medium
 
   [ Helmut Grohne ]
