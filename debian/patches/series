@@ -51,7 +51,6 @@ debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
-lp1932352-hwdb-Add-mic-mute-key-mapping-for-HP-Elite-Dragonfly.patch
 lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
 lp1858210/0001-time-simplify-get_timezones.patch
 lp1858210/0002-time-split-get_timezone-into-main-function-and-zone1.patch
