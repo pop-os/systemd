@@ -82,7 +82,7 @@ Depends: ${shlibs:Depends},
          adduser,
 Conflicts: consolekit,
            libpam-ck-connector,
-           systemd-shim, upstart,
+           systemd-shim,
 Breaks: resolvconf (<< 1.83~),
         udev (<< 247~),
 Provides: systemd-sysusers (= ${binary:Version}),
@@ -113,8 +113,8 @@ Replaces: sysvinit-core,
           upstart (<< 1.13.2-0ubuntu10~),
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
-         ${misc:Depends},
          systemd (= ${binary:Version}),
+         ${misc:Depends}
 Recommends: libpam-systemd,
             libnss-systemd
 Description: system and service manager - SysV links
