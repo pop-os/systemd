@@ -68,7 +68,7 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Recommends: dbus,
-            networkd-dispatcher
+            networkd-dispatcher,
             systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
           policykit-1
