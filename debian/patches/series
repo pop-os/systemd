@@ -52,7 +52,6 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
 lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
-CVE-2021-33910.patch
 Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
 udev-fix-slot-based-network-names-on-s390.patch
 udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
