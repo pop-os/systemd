@@ -52,7 +52,6 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
 lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
-udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
 udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
