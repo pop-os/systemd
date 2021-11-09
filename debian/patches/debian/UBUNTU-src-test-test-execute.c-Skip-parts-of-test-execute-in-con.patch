@@ -9,7 +9,7 @@ LP: #1878051
  1 file changed, 36 insertions(+)
 
 diff --git a/src/test/test-execute.c b/src/test/test-execute.c
-index 239fcea..0d388cc 100644
+index 1119ad4..cf53178 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
 @@ -224,6 +224,10 @@ static void _test_service(const char *file, unsigned line, const char *func,
@@ -91,7 +91,7 @@ index 239fcea..0d388cc 100644
          test(m, "exec-temporaryfilesystem-options.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
          test(m, "exec-temporaryfilesystem-ro.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
          test(m, "exec-temporaryfilesystem-rw.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
-@@ -585,6 +617,10 @@ static void test_exec_dynamicuser(Manager *m) {
+@@ -587,6 +619,10 @@ static void test_exec_dynamicuser(Manager *m) {
                  return;
          }
  

@@ -15,10 +15,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 52 insertions(+), 13 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 2ece8b2..8314f53 100644
+index 36702f2..a49baec 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -27,6 +27,7 @@
+@@ -28,6 +28,7 @@
  #include "os-util.h"
  #include "parse-util.h"
  #include "path-util.h"
@@ -114,10 +114,10 @@ index 2ece8b2..8314f53 100644
                  return r;
  
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 3c4bd82..394e528 100644
+index 2083c9d..00fb521 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -280,6 +280,25 @@ static int context_read_data(Context *c) {
+@@ -290,6 +290,25 @@ static int context_read_data(Context *c) {
          return 0;
  }
  
@@ -143,7 +143,7 @@ index 3c4bd82..394e528 100644
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
-@@ -297,10 +316,10 @@ static int context_write_data_timezone(Context *c) {
+@@ -307,10 +326,10 @@ static int context_write_data_timezone(Context *c) {
  
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
@@ -156,7 +156,7 @@ index 3c4bd82..394e528 100644
                                  r = -errno;
  
                          return r;
-@@ -315,12 +334,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -325,12 +344,12 @@ static int context_write_data_timezone(Context *c) {
                  source = p;
          }
  
@@ -172,7 +172,7 @@ index 3c4bd82..394e528 100644
                  if (r < 0)
                          return r;
          }
-@@ -386,7 +405,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -396,7 +415,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(stpcpy(mempcpy(w, s, a), prepend), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

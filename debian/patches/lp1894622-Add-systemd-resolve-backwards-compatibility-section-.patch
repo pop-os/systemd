@@ -1,17 +1,19 @@
-From 9fcfc0470df856c870dcfc6df78bfbc714da6bd2 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 29 Jun 2021 06:29:53 -0400
 Subject: [PATCH] Add systemd-resolve backwards compatibility section to
  resolvectl docs
+
+From 9fcfc0470df856c870dcfc6df78bfbc714da6bd2 Mon Sep 17 00:00:00 2001
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1894622
 Origin: upstream, https://github.com/systemd/systemd/pull/20064
 Origin: upstream, https://github.com/systemd/systemd/pull/20077
-
 ---
  man/resolvectl.xml    | 13 +++++++++++++
  man/rules/meson.build |  2 +-
  2 files changed, 14 insertions(+), 1 deletion(-)
 
+diff --git a/man/resolvectl.xml b/man/resolvectl.xml
+index 3ef2e51..674d8fd 100644
 --- a/man/resolvectl.xml
 +++ b/man/resolvectl.xml
 @@ -19,6 +19,7 @@
@@ -22,10 +24,11 @@ Origin: upstream, https://github.com/systemd/systemd/pull/20077
      <refpurpose>Resolve domain names, IPV4 and IPv6 addresses, DNS resource records, and services; introspect and reconfigure the DNS resolver</refpurpose>
    </refnamediv>
  
-@@ -462,6 +463,18 @@
+@@ -472,6 +473,18 @@
+     for details on those command line options.</para>
    </refsect1>
  
-   <refsect1>
++  <refsect1>
 +    <title>Backwards compatibility with <command>systemd-resolve</command></title>
 +
 +    <para><command>resolvectl</command> is a multi-call binary, which previously was named <literal>systemd-resolve</literal>
@@ -37,10 +40,11 @@ Origin: upstream, https://github.com/systemd/systemd/pull/20077
 +    as <literal>resolvectl</literal>.</para>
 +  </refsect1>
 +
-+  <refsect1>
+   <refsect1>
      <title>Examples</title>
  
-     <example>
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index b50e5a0..a164d29 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
 @@ -67,7 +67,7 @@ manpages = [

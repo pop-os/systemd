@@ -9,7 +9,7 @@ LP: #1696970
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
-index c743254..3a6e566 100644
+index cd17b6b..8badc28 100644
 --- a/units/systemd-journald.service.in
 +++ b/units/systemd-journald.service.in
 @@ -27,6 +27,7 @@ OOMScoreAdjust=-250
