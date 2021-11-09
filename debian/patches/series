@@ -52,7 +52,6 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
 lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
-lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch
 lp1934981-correct-suspend-then-sleep-string.patch
 CVE-2020-13529.patch
 CVE-2021-33910.patch
