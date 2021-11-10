@@ -299,6 +299,11 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
 endif
 
+	# Remove unneeded file that produces errors in debugedit (LP: #1950445)
+ifeq ($(DEB_HOST_ARCH),i386)
+	rm -f debian/systemd/usr/lib/systemd/boot/efi/linuxia32.elf.stub
+endif
+
 override_dh_missing:
 	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
 
