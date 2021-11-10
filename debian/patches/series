@@ -63,3 +63,4 @@ udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch
+lp1950511-meson.build-change-operator-combining-bools-from-to-.patch
