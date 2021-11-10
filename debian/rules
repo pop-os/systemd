@@ -65,6 +65,7 @@ CONFFLAGS = \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
+	-Ddefault-hierarchy=unified \
 	-Ddefault-dnssec=no \
 	-Ddefault-llmnr=no \
 	-Ddefault-mdns=no \
