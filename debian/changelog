@@ -1,3 +1,11 @@
+systemd (248.3-1ubuntu9) UNRELEASED; urgency=medium
+
+  * d/p/lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch:
+    Use cgroupv1 in container if host using cgroupv1
+    (LP: #1950508)
+
+ -- Dan Streetman <ddstreet@ieee.org>  Wed, 10 Nov 2021 13:47:28 -0500
+
 systemd (248.3-1ubuntu8) impish; urgency=medium
 
   [ Dan Streetman ]
