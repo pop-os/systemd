@@ -1,0 +1,30 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 11 Nov 2021 08:55:10 +0900
+Subject: test: use kbd-mode-map we ship in one more test case
+
+Follow-up for be0cc2ce6c947aafadb3f42dba405269f670b31c.
+
+Fixes https://github.com/systemd/systemd/pull/19670#issuecomment-965817823.
+
+(cherry picked from commit a914901d38e01b90e21883b6a2ca1bec21997201)
+---
+ src/locale/test-keymap-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/locale/test-keymap-util.c b/src/locale/test-keymap-util.c
+index a5d40af..f726e8e 100644
+--- a/src/locale/test-keymap-util.c
++++ b/src/locale/test-keymap-util.c
+@@ -196,11 +196,11 @@ int main(int argc, char **argv) {
+ 
+         test_find_language_fallback();
+         test_find_converted_keymap();
+-        test_find_legacy_keymap();
+ 
+         assert_se(get_testdata_dir("test-keymap-util/kbd-model-map", &map) >= 0);
+         assert_se(setenv("SYSTEMD_KBD_MODEL_MAP", map, 1) == 0);
+ 
++        test_find_legacy_keymap();
+         test_vconsole_convert_to_x11();
+         test_x11_convert_to_vconsole();
+ 
