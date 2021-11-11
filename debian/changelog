@@ -1,8 +1,26 @@
-systemd (249.6-1) UNRELEASED; urgency=medium
+systemd (249.6-1) unstable; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 249.6
+  * Rebase patches
+  * test: use kbd-mode-map we ship in one more test case
+  * Bump Standards-Version to 4.6.0
+  * Drop obsolete C/R upstart from systemd-sysv
+  * Drop obsolete dpkg (>= 1.19.3) | systemd-sysv dependency from udev.
+    It was added to ensure we have a dpkg with --notify-await which is now
+    satisfied by a dpkg from oldstable.
+  * Make the C/R against systemd versioned in
+    systemd-standalone-{sysusers,tmpfiles}
+    Those were added to facilitate an upgrade from bullseye. The version
+    makes it more explicit.
+  * Drop obsolete migration code for RAMTMP, TPMTIME and UTC
 
- -- Michael Biebl <biebl@debian.org>  Wed, 10 Nov 2021 22:36:15 +0100
+  [ Luca Boccassi ]
+  * Depend on default-dbus-system-bus | dbus-system-bus.
+    Allows users to install only a single system bus implementation.
+    Prefer the default (dbus-daemon).
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 11 Nov 2021 22:04:31 +0100
 
 systemd (249.5-2ubuntu4) jammy; urgency=medium
 
