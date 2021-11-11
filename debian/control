@@ -335,7 +335,6 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
-         dpkg (>= 1.19.3) | systemd-sysv,
          libudev1 (= ${binary:Version}),
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
