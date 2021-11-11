@@ -404,9 +404,9 @@ Section: admin
 Architecture: linux-any
 Priority: optional
 Conflicts: systemd-sysusers,
-           systemd
+           systemd (<< 249.3-3)
 Replaces: systemd-sysusers,
-          systemd
+          systemd (<< 249.3-3)
 Provides: systemd-sysusers (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -420,9 +420,9 @@ Section: admin
 Architecture: linux-any
 Priority: optional
 Conflicts: systemd-tmpfiles,
-           systemd
+           systemd (<< 249.3-3)
 Replaces: systemd-tmpfiles,
-          systemd
+          systemd (<< 249.3-3)
 Provides: systemd-tmpfiles (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
