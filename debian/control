@@ -106,11 +106,9 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Conflicts: sysvinit-core,
-           upstart (<< 1.13.2-0ubuntu10~),
            file-rc,
            systemd-shim,
 Replaces: sysvinit-core,
-          upstart (<< 1.13.2-0ubuntu10~),
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
          systemd (= ${binary:Version}),
