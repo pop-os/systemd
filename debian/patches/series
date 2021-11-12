@@ -1,4 +1,3 @@
-units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
 test-fix-TEST-10-ISSUE-2467.patch
 sd-device-introduce-device_has_devlink.patch
 udev-node-split-out-permission-handling-from-udev_node_ad.patch
