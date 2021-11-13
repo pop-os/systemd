@@ -34,7 +34,7 @@ export DEB_BUILD_PROFILES += noudeb
 endif
 
 CONFFLAGS = \
-	-Db_lto=true \
+	-Db_lto=false \
 	-Db_pie=true \
 	-Dmode=release \
 	-Drootlibdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
