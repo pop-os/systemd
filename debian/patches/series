@@ -11,6 +11,8 @@ udev-node-shorten-code-a-bit-and-update-log-message.patch
 udev-node-add-random-delay-on-conflict-in-updating-device.patch
 udev-node-drop-redundant-trial-of-devlink-creation.patch
 test-use-kbd-mode-map-we-ship-in-one-more-test-case.patch
+sysusers-split-up-systemd.conf.patch
+meson-minor-cleanup.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
