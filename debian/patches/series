@@ -51,3 +51,4 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
