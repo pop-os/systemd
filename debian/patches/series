@@ -13,6 +13,7 @@ udev-node-drop-redundant-trial-of-devlink-creation.patch
 test-use-kbd-mode-map-we-ship-in-one-more-test-case.patch
 sysusers-split-up-systemd.conf.patch
 meson-minor-cleanup.patch
+scope-count-successful-cgroup-additions-when-delegating-v.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
