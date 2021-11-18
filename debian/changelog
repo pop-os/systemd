@@ -54,8 +54,58 @@ systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
     - debian/patches/lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fd33ff25c6aa25f33054053c06f2936d51e8f645
+  * debian/rules: Fix FTBFS on i386 by removing unneeded linuxia32.elf.sub to avoid
+    debugedit errors
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=381cc855978f441f6f45f215a7c864e61d67ab0a
+  * debian/control: cleanup (upstart is no more)
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e93509e1970ee170e4a4ed655c55f55446e4078d
+  * debian/systemd.NEWS: re-add comment about cgroups v2
+    File: debian/systemd.NEWS
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=51a7a11dba9a6248b8575c05c00e70aa6b9141fb
+  * debian/rules: explicitly enable default-hierarchy=unified
+    to stay in line with Debian
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b6804a5aee1bcf1dfd3415c048cbf94d482652a2
+  * debian/udev.postinst: Drop old 'getent group kvm' workaround
+    File: debian/udev.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=081fddb76415eb959fd898b503eec0354d44fb31
+  * d/t/boot-and-services: skip test_service, broken on kernel > 5.10
+    (systemd#20989)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8ca6fbb84ccd09c4e199dec9fd9536c0b3637bc5
+  * d/t/tests-in-lxd: account for different locations of source tree
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f454c89619915566af2644b14eada41075631f6a
+  * d/t/control: fix upstream* test dependencies
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ca404329f73f90316241680985ee8721d27d6092
+  * d/t/tests-in-lxd: work around systemd-sysusers issue on privileged containers
+    (LP: #1950787)
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d4e05ecbc1a32d2e6d454c05a2899058c3a04bac
+  * Drop units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
+    we do run udevd in our containers and actually rely on udevadm trigger
+    happening on boot for the udev database to populate with the relevant
+    network devices that are present in the container
+    It was added when systemd upstream made udevadm trigger more picky
+    (would fail when it used to succeed), but they now have failures from udevadm
+    ignored in the upstream unit
+    making this patch un-necessary and actually harmful to those running Ubuntu in
+    system containers
+    File: debian/patches/units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ba89ae0b007e1fed3d9e1b2aefa86cf9c6e7a022
+  * Drop lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch.
+    The systemd-resolve symlink for backwards compatibility is no more as of v249
+    File: debian/patches/lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c26f6843f498966e8506e71870255b627fcbd7c7
+  * Revert: sd-dhcp: do not use detect_container() to guess udev is running or not
+    (LP: #1950794)
+    File: debian/patches/lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=794597758ac9527b81696bb785d99cd2ddfa2707
 
- -- Lukas Märdian <slyon@ubuntu.com>  Tue, 09 Nov 2021 12:47:29 +0100
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 18 Nov 2021 09:20:51 +0100
 
 systemd (249.5-2) unstable; urgency=medium
 
