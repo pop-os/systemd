@@ -1,3 +1,10 @@
+systemd (249.6-3) unstable; urgency=medium
+
+  * scope: count successful cgroup additions when delegating via D-Bus
+    (Closes: #999745)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 18 Nov 2021 21:13:02 +0100
+
 systemd (249.6-2) unstable; urgency=medium
 
   * Consider dbus-broker in systemd-logind.service Condition check
