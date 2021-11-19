@@ -200,6 +200,7 @@ int main(int argc, char **argv) {
         assert_se(get_testdata_dir("test-keymap-util/kbd-model-map", &map) >= 0);
         assert_se(setenv("SYSTEMD_KBD_MODEL_MAP", map, 1) == 0);
 
+        test_find_legacy_keymap();
         test_vconsole_convert_to_x11();
         test_x11_convert_to_vconsole();
 
