@@ -105,6 +105,11 @@ systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
     File: debian/patches/lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=794597758ac9527b81696bb785d99cd2ddfa2707
 
+  [Dan Streetman]
+  * d/p/lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch:
+    Use cgroupv1 in container if host using cgroupv1
+    (LP: #1950508)
+
  -- Lukas Märdian <slyon@ubuntu.com>  Thu, 18 Nov 2021 09:20:51 +0100
 
 systemd (249.5-2) unstable; urgency=medium
