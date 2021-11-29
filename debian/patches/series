@@ -63,3 +63,5 @@ udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-Hotke.patch
+lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
