@@ -104,13 +104,18 @@ systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
     (LP: #1950794)
     File: debian/patches/lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=794597758ac9527b81696bb785d99cd2ddfa2707
+  * Support detection for ARM64 Hyper-V guests (LP: #1952599)
+    Files:
+    - debian/patches/lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+    - debian/patches/lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=57f51781646327832f15294368842da015f3c433
 
   [Dan Streetman]
   * d/p/lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch:
     Use cgroupv1 in container if host using cgroupv1
     (LP: #1950508)
 
- -- Lukas Märdian <slyon@ubuntu.com>  Thu, 18 Nov 2021 09:20:51 +0100
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 29 Nov 2021 10:48:50 +0100
 
 systemd (249.5-2) unstable; urgency=medium
 
