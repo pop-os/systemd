@@ -11,7 +11,7 @@ Forwarded: https://github.com/systemd/systemd/issues/13629
  1 file changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 5c07aa7..aba367c 100644
+index 5c07aa7..6b343e5 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
 @@ -2650,13 +2650,10 @@ void unit_prune_cgroup(Unit *u) {

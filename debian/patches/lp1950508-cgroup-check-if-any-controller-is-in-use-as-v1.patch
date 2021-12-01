@@ -1,7 +1,8 @@
-From 22eeada9354a45c6aa0685d49016ac78a57c41ea Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 5 Oct 2021 08:49:21 -0400
 Subject: [PATCH] cgroup: check if any controller is in use as v1
+
+From 22eeada9354a45c6aa0685d49016ac78a57c41ea Mon Sep 17 00:00:00 2001
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1950508
 Origin: upstream, https://github.com/systemd/systemd/commit/22eeada9354a45c6aa0685d49016ac78a57c41ea
 
@@ -15,9 +16,11 @@ This shouldn't be needed if the container manager has pre-mounted cgroups
 appropriately based on the host system cgroup setup, but we can't rely
 on that always being the case.
 ---
- src/shared/cgroup-setup.c | 61 +++++++++++++++++++++++++++++++++++++++
+ src/shared/cgroup-setup.c | 61 +++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 61 insertions(+)
 
+diff --git a/src/shared/cgroup-setup.c b/src/shared/cgroup-setup.c
+index f197f71..31e973e 100644
 --- a/src/shared/cgroup-setup.c
 +++ b/src/shared/cgroup-setup.c
 @@ -17,6 +17,63 @@
