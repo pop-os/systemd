@@ -110,12 +110,27 @@ systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=57f51781646327832f15294368842da015f3c433
 
+  [Yao Wei]
+  * Add ACCEL_LOCATION=base property for Dell clamshell models (LP: #1943561)
+    Files:
+    - debian/patches/lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
+    - debian/patches/lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9f99081482b76a7b717e39ef4380f08093e4359a
+
+  [Andy Chi]
+  * Add privacy micmute hotkey for Dell machine. (LP: #1952733)
+    File: debian/patches/lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e590db02f015a0e999909b67e0cefbb4295c53a5
+  * Add microphone mute key for Dell machine. (LP: #1952735)
+    File: debian/patches/lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03799d7649fd5e0dae226c81441932d19cb6cc36
+
   [Dan Streetman]
   * d/p/lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch:
     Use cgroupv1 in container if host using cgroupv1
     (LP: #1950508)
 
- -- Lukas Märdian <slyon@ubuntu.com>  Mon, 29 Nov 2021 10:48:50 +0100
+ -- Lukas Märdian <slyon@ubuntu.com>  Wed, 01 Dec 2021 17:44:12 +0100
 
 systemd (249.5-2) unstable; urgency=medium
 
