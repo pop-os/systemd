@@ -1,3 +1,24 @@
+systemd (248.3-1ubuntu9) UNRELEASED; urgency=medium
+
+  * Cherry-pick upstream 5ed0ea: hwdb: 60-keyboard:: Update Dell Privacy Local Mic Mute Hotkey (LP: #1926547)
+    File: debian/patches/hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-Hotke.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=041be812ac5c204ad09830dc796ebdb0d6d0894a
+  * Support detection for ARM64 Hyper-V guests (LP: #1952599)
+    Files:
+    - debian/patches/lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+    - debian/patches/lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5060ac86698b206459cef42daa84499781147378
+
+  [Andy Chi]
+  * Add privacy micmute hotkey for Dell machine. (LP: #1952733)
+    File: debian/patches/lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f74b782d3ceb01d76c7bffdce7502763dd540150
+  * Add microphone mute key for Dell machine. (LP: #1952735)
+    File: debian/patches/lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03c117092c1a32b5db025613d328add54bef3718
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 02 Dec 2021 14:16:30 +0100
+
 systemd (248.3-1ubuntu8) impish; urgency=medium
 
   [ Dan Streetman ]
