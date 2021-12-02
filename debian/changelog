@@ -17,7 +17,14 @@ systemd (248.3-1ubuntu9) UNRELEASED; urgency=medium
     File: debian/patches/lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03c117092c1a32b5db025613d328add54bef3718
 
- -- Lukas Märdian <slyon@ubuntu.com>  Thu, 02 Dec 2021 14:16:30 +0100
+  [Yao Wei]
+  * Add ACCEL_LOCATION=base property for Dell clamshell models (LP: #1943561)
+    Files:
+    - debian/patches/lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
+    - debian/patches/lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b6b30ad3d9ef862d30f397ba481fe4f647751c99
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 02 Dec 2021 15:58:51 +0100
 
 systemd (248.3-1ubuntu8) impish; urgency=medium
 
