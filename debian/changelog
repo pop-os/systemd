@@ -1,4 +1,4 @@
-systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
+systemd (249.5-2ubuntu1) jammy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
     - Dropped changes (applied upstream):
@@ -130,7 +130,7 @@ systemd (249.5-2ubuntu1) UNRELEASED; urgency=medium
     Use cgroupv1 in container if host using cgroupv1
     (LP: #1950508)
 
- -- Lukas Märdian <slyon@ubuntu.com>  Wed, 01 Dec 2021 17:44:12 +0100
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 02 Dec 2021 10:16:33 +0100
 
 systemd (249.5-2) unstable; urgency=medium
 
