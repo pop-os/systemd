@@ -161,3 +161,4 @@ lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
 lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
 lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
 lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+lp1943561-dell-clamshell-accel-location-base-with-sku.patch
