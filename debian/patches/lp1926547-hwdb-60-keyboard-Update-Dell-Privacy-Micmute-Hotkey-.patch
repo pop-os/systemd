@@ -28,7 +28,7 @@ Signed-off-by: Perry Yuan <perry_yuan@dell.com>
  
 +# Dell Latitude privacy microphone mute
 +evdev:name:Dell Privacy Driver:dmi:bvn*:bvr*:bd*:svnDell*:pnLatitude*:*
-+ KEYBOARD_KEY_120001=f20                                 # Mic mute toggle, should be micmute
++ KEYBOARD_KEY_120001=f20                                # Mic mute toggle, should be micmute
 +
  ###########################################################
  # Everex
