@@ -4,13 +4,34 @@ systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
   * Allow target units to fail (LP: #1948476)
     File: d/p/lp1948476-pid1-target-units-can-fail-through-dependencies.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fe0cb0bd66baea89d8bbe47cb47d88540f46d470
+  * Fix whitespace in lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch to match upstream
+    File: debian/patches/lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=80fef80a1b018556939011707c4ce00cebc58806
+  * Support detection for ARM64 Hyper-V guests (LP: #1952599)
+    Files:
+    - debian/patches/lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+    - debian/patches/lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=caf3aff933cc7bf21565faba05f78ce78b3196cd
+
+  [ Andy Chi ]
+  * Add privacy micmute hotkey for Dell machine. (LP: #1952733)
+    File: debian/patches/lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ff8dc41f55baa418076e42509ddbf3212a8c1353
+  * Add microphone mute key for Dell machine. (LP: #1952735)
+    File: debian/patches/lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=175fb4e209fba889b4bcd81cb2ed262923943a3f
+
+  [ Yao Wei ]
+  * Add ACCEL_LOCATION=base property for 6 Dell clamshell models (LP: #1943561)
+    File: debian/patches/lp1943561-dell-clamshell-accel-location-base-with-sku.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=246195d68b2bb0473f4a3f1c2ebe54dfd37f068b
 
   [ Dan Streetman ]
   * d/p/lp1944711-login-filenames-in-run-systemd-users-are-uids.patch:
     Fix systemd-logind restart loading of existing sessions
     (LP: #1944711)
 
- -- Dan Streetman <ddstreet@ieee.org>  Wed, 10 Nov 2021 11:35:23 -0500
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 03 Dec 2021 10:24:13 +0100
 
 systemd (245.4-4ubuntu3.13) focal; urgency=medium
 
