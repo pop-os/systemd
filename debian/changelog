@@ -1,3 +1,13 @@
+systemd (249.5-2ubuntu2) jammy; urgency=medium
+
+  * d/p/debian/timedatectl-lp1650688.patch,
+    d/p/debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch:
+    Fix timedated unable to retrieve & properly set timezone on
+    read-only /etc (e.g. Ubuntu Core and system-image-based systems)
+    (LP: #1650688, LP: #1733881)
+
+ -- Ratchanan Srirattanamet <ratchanan@ubports.com>  Wed, 08 Dec 2021 09:25:28 +0100
+
 systemd (249.5-2ubuntu1) jammy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
