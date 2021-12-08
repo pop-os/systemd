@@ -31,6 +31,13 @@ systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
     Fix systemd-logind restart loading of existing sessions
     (LP: #1944711)
 
+  [ Ratchanan Srirattanamet ]
+  * d/p/debian/timedatectl-lp1650688.patch,
+    d/p/debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch:
+    Fix timedated unable to retrieve & properly set timezone on
+    read-only /etc (e.g. Ubuntu Core and system-image-based systems)
+    (LP: #1650688)
+
  -- Lukas Märdian <slyon@ubuntu.com>  Fri, 03 Dec 2021 10:24:13 +0100
 
 systemd (245.4-4ubuntu3.13) focal; urgency=medium
