@@ -1,17 +1,3 @@
-test-fix-TEST-10-ISSUE-2467.patch
-sd-device-introduce-device_has_devlink.patch
-udev-node-split-out-permission-handling-from-udev_node_ad.patch
-udev-node-stack-directory-must-exist-when-adding-device-n.patch
-udev-node-save-information-about-device-node-and-priority.patch
-udev-node-always-update-timestamp-of-stack-directory.patch
-udev-node-assume-no-new-claim-to-a-symlink-if-run-udev-li.patch
-udev-node-always-atomically-create-symlink-to-device-node.patch
-udev-node-check-stack-directory-change-even-if-devlink-is.patch
-udev-node-shorten-code-a-bit-and-update-log-message.patch
-udev-node-add-random-delay-on-conflict-in-updating-device.patch
-udev-node-drop-redundant-trial-of-devlink-creation.patch
-sysusers-split-up-systemd.conf.patch
-meson-minor-cleanup.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

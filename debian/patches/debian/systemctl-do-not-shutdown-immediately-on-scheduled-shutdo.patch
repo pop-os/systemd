@@ -16,7 +16,7 @@ Fixes: #17575
  2 files changed, 6 insertions(+), 5 deletions(-)
 
 diff --git a/src/systemctl/systemctl-compat-halt.c b/src/systemctl/systemctl-compat-halt.c
-index 51a89ae..60eda72 100644
+index 7607583..9c8a714 100644
 --- a/src/systemctl/systemctl-compat-halt.c
 +++ b/src/systemctl/systemctl-compat-halt.c
 @@ -148,11 +148,11 @@ int halt_main(void) {
@@ -36,10 +36,10 @@ index 51a89ae..60eda72 100644
                  if (arg_dry_run || arg_force > 0) {
                          (void) must_be_root();
 diff --git a/src/systemctl/systemctl-logind.c b/src/systemctl/systemctl-logind.c
-index 28dd25b..e2bdeb9 100644
+index 2d2043f..ccabd0f 100644
 --- a/src/systemctl/systemctl-logind.c
 +++ b/src/systemctl/systemctl-logind.c
-@@ -336,8 +336,9 @@ int logind_schedule_shutdown(void) {
+@@ -335,8 +335,9 @@ int logind_schedule_shutdown(void) {
          (void) logind_set_wall_message();
  
          r = bus_call_method(bus, bus_login_mgr, "ScheduleShutdown", &error, NULL, "st", action, arg_when);
@@ -49,4 +49,4 @@ index 28dd25b..e2bdeb9 100644
 +                return log_warning_errno(r, "Failed to call ScheduleShutdown in logind, no action will be taken: %s", bus_error_message(&error, r));
  
          if (!arg_quiet)
-                 log_info("%s scheduled for %s, use 'shutdown -c' to cancel.", log_action, format_timestamp_style(date, sizeof(date), arg_when, arg_timestamp_style));
+                 log_info("%s scheduled for %s, use 'shutdown -c' to cancel.",

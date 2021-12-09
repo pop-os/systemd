@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 164 insertions(+), 113 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 5d162e8..4b0a3bf 100644
+index b659d69..5e75b85 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1498,19 +1498,43 @@ int get_timezone(char **ret) {
+@@ -1496,19 +1496,43 @@ int get_timezone(char **ret) {
          const char *e;
          char *z;
          int r;
@@ -69,7 +69,7 @@ index 5d162e8..4b0a3bf 100644
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 64761dd..b4ea9e2 100644
+index 59ddb9c..25cf884 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
 @@ -58,6 +58,27 @@ int locale_setup(char ***environment) {
@@ -101,7 +101,7 @@ index 64761dd..b4ea9e2 100644
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index d2f0566..6d064e2 100644
+index 10d2ed7..479771a 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -91,6 +91,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
