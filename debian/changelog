@@ -24,12 +24,6 @@ systemd (248.3-1ubuntu9) UNRELEASED; urgency=medium
     - debian/patches/lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
     - debian/patches/lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b6b30ad3d9ef862d30f397ba481fe4f647751c99
-  [ Ratchanan Srirattanamet ]
-  * d/p/debian/timedatectl-lp1650688.patch,
-    d/p/debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch:
-    Fix timedated unable to retrieve & properly set timezone on
-    read-only /etc (e.g. Ubuntu Core and system-image-based systems)
-    (LP: #1650688)
 
  -- Lukas Märdian <slyon@ubuntu.com>  Thu, 02 Dec 2021 15:58:51 +0100
 
