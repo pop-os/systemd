@@ -78,6 +78,7 @@ CONFFLAGS = \
 	-Dp11kit=false \
 	-Dtpm2=false \
 	-Doomd=false \
+	-Durlify=false \
 	-Dsysext=true \
 	-Dnscd=true \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
