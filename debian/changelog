@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.14) focal; urgency=medium
 
   [ Lukas Märdian ]
   * Allow target units to fail (LP: #1948476)
@@ -38,7 +38,7 @@ systemd (245.4-4ubuntu3.14) UNRELEASED; urgency=medium
     read-only /etc (e.g. Ubuntu Core and system-image-based systems)
     (LP: #1650688)
 
- -- Lukas Märdian <slyon@ubuntu.com>  Fri, 03 Dec 2021 10:24:13 +0100
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 10 Dec 2021 10:04:02 +0100
 
 systemd (245.4-4ubuntu3.13) focal; urgency=medium
 
