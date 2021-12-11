@@ -227,6 +227,7 @@ endif
 
 override_dh_install:
 	# remove unnecessary / unused files
+	rm -rf debian/install/*/usr/share/doc/systemd/LICENSES/
 	rm -f debian/install/*/usr/share/doc/systemd/LICENSE.*
 	rm -f debian/install/*/var/log/README
 	rm -f debian/install/*/etc/init.d/README
