@@ -151,6 +151,7 @@ Depends: systemd-tests,
   dosfstools,
   libdw-dev,
   libelf-dev,
+  dbus-user-session,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
