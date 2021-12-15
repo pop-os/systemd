@@ -73,7 +73,7 @@ CONFFLAGS = \
 	-Dpwquality=false \
 	-Dp11kit=false \
 	-Dtpm2=false \
-	-Doomd=false \
+	-Doomd=true \
 	-Durlify=false \
 	-Dopenssl=false \
 	-Dlink-udev-shared=false \
@@ -236,6 +236,7 @@ override_dh_installinit:
 
 override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
+	dh_installsystemd -psystemd-oomd
 
 override_dh_installsystemduser:
 
