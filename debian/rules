@@ -256,10 +256,10 @@ PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' build-d
 # quasi-essential, so add their dependencies to Pre-Depends
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
-	dh_shlibdeps -psystemd -- -dPre-Depends \
+	dh_shlibdeps -psystemd -Xlibsystemd-shared -Xlibsystemd-core -- -dPre-Depends \
 		-edebian/systemd/bin/systemctl \
 		-dDepends
-	dh_shlibdeps --remaining-packages -Lsystemd
+	dh_shlibdeps --remaining-packages -Lsystemd -Xlibsystemd-shared -Xlibsystemd-core
 
 override_dh_makeshlibs:
 	sed 's/SHARED_LIB_VERSION/$(PROJECT_VERSION)/' debian/shlibs.local.in > debian/shlibs.local
