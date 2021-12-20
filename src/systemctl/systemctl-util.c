@@ -10,6 +10,7 @@
 #include "bus-locator.h"
 #include "bus-map-properties.h"
 #include "bus-unit-util.h"
+#include "chase-symlinks.h"
 #include "dropin.h"
 #include "env-util.h"
 #include "exit-status.h"
@@ -52,7 +53,7 @@ int acquire_bus(BusFocus focus, sd_bus **ret) {
                 else
                         r = bus_connect_transport(arg_transport, arg_host, user, &buses[focus]);
                 if (r < 0)
-                        return bus_log_connect_error(r);
+                        return bus_log_connect_error(r, arg_transport);
 
                 (void) sd_bus_set_allow_interactive_authorization(buses[focus], arg_ask_password);
         }
@@ -930,6 +931,6 @@ int halt_now(enum action a) {
                                              (arg_dry_run ? REBOOT_DRY_RUN : 0));
 
         default:
-                assert_not_reached("Unknown action.");
+                assert_not_reached();
         }
 }

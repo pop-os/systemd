@@ -29,6 +29,7 @@
 #include "syslog-util.h"
 #include "udev-builtin.h"
 #include "udev-event.h"
+#include "udev-netlink.h"
 #include "udev-rules.h"
 #include "udev-util.h"
 #include "user-util.h"
@@ -1154,7 +1155,7 @@ static void rule_resolve_goto(UdevRuleFile *rule_file) {
                 if (!FLAGS_SET(line->type, LINE_HAS_GOTO))
                         continue;
 
-                LIST_FOREACH_AFTER(rule_lines, i, line)
+                LIST_FOREACH(rule_lines, i, line->rule_lines_next)
                         if (streq_ptr(i->label, line->goto_label)) {
                                 line->goto_line = i;
                                 break;
@@ -1374,7 +1375,7 @@ static bool token_match_string(UdevRuleToken *token, const char *str) {
                         }
                 break;
         default:
-                assert_not_reached("Invalid match type");
+                assert_not_reached();
         }
 
         return token->op == (match ? OP_MATCH : OP_NOMATCH);
@@ -1396,7 +1397,7 @@ static bool token_match_attr(UdevRuleToken *token, sd_device *dev, UdevEvent *ev
                 name = nbuf;
                 _fallthrough_;
         case SUBST_TYPE_PLAIN:
-                if (sd_device_get_sysattr_value(dev, name, &value) < 0)
+                if (device_get_sysattr_value_maybe_from_netlink(dev, &event->rtnl, name, &value) < 0)
                         return false;
                 break;
         case SUBST_TYPE_SUBSYS:
@@ -1405,7 +1406,7 @@ static bool token_match_attr(UdevRuleToken *token, sd_device *dev, UdevEvent *ev
                 value = vbuf;
                 break;
         default:
-                assert_not_reached("Invalid attribute substitution type");
+                assert_not_reached();
         }
 
         /* remove trailing whitespace, if not asked to match for it */
@@ -1493,7 +1494,6 @@ static int import_parent_into_properties(sd_device *dev, const char *filter) {
 
 static int attr_subst_subdir(char attr[static UDEV_PATH_SIZE]) {
         _cleanup_closedir_ DIR *dir = NULL;
-        struct dirent *dent;
         char buf[UDEV_PATH_SIZE], *p;
         const char *tail;
         size_t len, size;
@@ -1515,11 +1515,11 @@ static int attr_subst_subdir(char attr[static UDEV_PATH_SIZE]) {
         if (!dir)
                 return -errno;
 
-        FOREACH_DIRENT_ALL(dent, dir, break) {
-                if (dent->d_name[0] == '.')
+        FOREACH_DIRENT_ALL(de, dir, break) {
+                if (de->d_name[0] == '.')
                         continue;
 
-                strscpyl(p, size, dent->d_name, tail, NULL);
+                strscpyl(p, size, de->d_name, tail, NULL);
                 if (faccessat(dirfd(dir), p, F_OK, 0) < 0)
                         continue;
 
@@ -1607,7 +1607,7 @@ static int udev_rule_apply_token_to_event(
                 else if (streq(k, "virt"))
                         val = virtualization_to_string(detect_virtualization());
                 else
-                        assert_not_reached("Invalid CONST key");
+                        assert_not_reached();
                 return token_match_string(token, val);
         }
         case TK_M_TAG:
@@ -1829,7 +1829,7 @@ static int udev_rule_apply_token_to_event(
                 (void) udev_event_apply_format(event, token->value, buf, sizeof(buf), false);
                 log_rule_debug(dev, rules, "Importing properties from results of builtin command '%s'", buf);
 
-                r = udev_builtin_run(dev, cmd, buf, false);
+                r = udev_builtin_run(dev, &event->rtnl, cmd, buf, false);
                 if (r < 0) {
                         /* remember failure */
                         log_rule_debug_errno(dev, rules, r, "Failed to run builtin '%s': %m", buf);
@@ -2233,7 +2233,7 @@ static int udev_rule_apply_token_to_event(
                 /* do nothing for events. */
                 break;
         default:
-                assert_not_reached("Invalid token type");
+                assert_not_reached();
         }
 
         return true;

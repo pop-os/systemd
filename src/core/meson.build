@@ -13,6 +13,8 @@ libcore_sources = '''
         bpf-firewall.h
         bpf-foreign.c
         bpf-foreign.h
+        bpf-lsm.c
+        bpf-lsm.h
         bpf-socket-bind.c
         bpf-socket-bind.h
         cgroup.c
@@ -71,8 +73,6 @@ libcore_sources = '''
         generator-setup.h
         ima-setup.c
         ima-setup.h
-        ip-address-access.c
-        ip-address-access.h
         job.c
         job.h
         kill.c
@@ -87,6 +87,8 @@ libcore_sources = '''
         locale-setup.h
         manager-dump.c
         manager-dump.h
+        manager-serialize.c
+        manager-serialize.h
         manager.c
         manager.h
         mount.c
@@ -95,6 +97,8 @@ libcore_sources = '''
         namespace.h
         path.c
         path.h
+        restrict-ifaces.c
+        restrict-ifaces.h
         scope.c
         scope.h
         selinux-access.c
@@ -129,17 +133,25 @@ libcore_sources = '''
         unit.h
 '''.split()
 
+subdir('bpf')
+
 subdir('bpf/socket_bind')
 if conf.get('BPF_FRAMEWORK') == 1
         libcore_sources += [socket_bind_skel_h]
+        subdir('bpf/restrict_fs')
+        libcore_sources += [restrict_fs_skel_h]
+endif
+
+subdir('bpf/restrict_ifaces')
+if conf.get('BPF_FRAMEWORK') == 1
+        libcore_sources += [restrict_ifaces_skel_h]
 endif
 
 load_fragment_gperf_gperf = custom_target(
         'load-fragment-gperf.gperf',
         input : 'load-fragment-gperf.gperf.in',
         output: 'load-fragment-gperf.gperf',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true)
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'])
 
 load_fragment_gperf_c = custom_target(
         'load-fragment-gperf.c',
@@ -172,7 +184,8 @@ libcore = static_library(
                         libapparmor,
                         libselinux,
                         libmount,
-                        libacl])
+                        libacl],
+        build_by_default : false)
 
 core_includes = [includes, include_directories('.')]
 
@@ -191,8 +204,7 @@ foreach item : in_files
                 file,
                 input : file + '.in',
                 output: file,
-                command : [meson_render_jinja2, config_h, '@INPUT@'],
-                capture : true,
+                command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
                 install : (dir == pkgsysconfdir) ? install_sysconfdir_samples : (dir != 'no'),
                 install_dir : dir)
 endforeach
@@ -208,9 +220,9 @@ meson.add_install_script('sh', '-c', mkdir_p.format(systemgeneratordir))
 meson.add_install_script('sh', '-c', mkdir_p.format(usergeneratordir))
 
 if install_sysconfdir
-        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'system')))
-        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'user')))
-        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(sysconfdir, 'xdg/systemd')))
+        meson.add_install_script('sh', '-c', mkdir_p.format(pkgsysconfdir / 'system'))
+        meson.add_install_script('sh', '-c', mkdir_p.format(pkgsysconfdir / 'user'))
+        meson.add_install_script('sh', '-c', mkdir_p.format(sysconfdir / 'xdg/systemd'))
 endif
 
 ############################################################

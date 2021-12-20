@@ -18,6 +18,8 @@ typedef struct RoutingPolicyRule {
         Manager *manager;
         Network *network;
         NetworkConfigSection *section;
+        NetworkConfigSource source;
+        NetworkConfigState state;
 
         bool invert_rule;
         bool priority_set;
@@ -49,7 +51,10 @@ typedef struct RoutingPolicyRule {
         struct fib_rule_uid_range uid_range;
 
         int suppress_prefixlen;
+        int32_t suppress_ifgroup;
 } RoutingPolicyRule;
+
+const char *fr_act_type_full_to_string(int t) _const_;
 
 RoutingPolicyRule *routing_policy_rule_free(RoutingPolicyRule *rule);
 
@@ -66,9 +71,13 @@ int manager_drop_routing_policy_rules_internal(Manager *m, bool foreign, const L
 static inline int manager_drop_foreign_routing_policy_rules(Manager *m) {
         return manager_drop_routing_policy_rules_internal(m, true, NULL);
 }
-static inline int manager_drop_routing_policy_rules(Manager *m, const Link *except) {
-        return manager_drop_routing_policy_rules_internal(m, false, except);
+static inline int link_drop_routing_policy_rules(Link *link) {
+        assert(link);
+        return manager_drop_routing_policy_rules_internal(link->manager, false, link);
 }
+void link_foreignize_routing_policy_rules(Link *link);
+
+DEFINE_NETWORK_CONFIG_STATE_FUNCTIONS(RoutingPolicyRule, routing_policy_rule);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_tos);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_table);
@@ -82,4 +91,5 @@ CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_invert);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_family);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_uid_range);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_suppress_prefixlen);
+CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_suppress_ifgroup);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_type);

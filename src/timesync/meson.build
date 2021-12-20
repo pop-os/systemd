@@ -32,14 +32,14 @@ libtimesyncd_core = static_library(
         'timesyncd-core',
         sources,
         include_directories : includes,
-        link_with : [timesyncd_link_with])
+        link_with : timesyncd_link_with,
+        build_by_default : false)
 
 custom_target(
         'timesyncd.conf',
         input : 'timesyncd.conf.in',
         output : 'timesyncd.conf',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true,
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
         install : conf.get('ENABLE_TIMESYNCD') == 1 and install_sysconfdir_samples,
         install_dir : pkgsysconfdir)
 

@@ -12,6 +12,7 @@
 #include "cryptenroll-wipe.h"
 #include "cryptenroll.h"
 #include "cryptsetup-util.h"
+#include "env-util.h"
 #include "escape.h"
 #include "libfido2-util.h"
 #include "main-func.h"
@@ -358,7 +359,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
         }
 
@@ -378,6 +379,28 @@ static int parse_argv(int argc, char *argv[]) {
                 arg_tpm2_pcr_mask = TPM2_PCR_MASK_DEFAULT;
 
         return 1;
+}
+
+static int check_for_homed(struct crypt_device *cd) {
+        int r;
+
+        assert_se(cd);
+
+        /* Politely refuse operating on homed volumes. The enrolled tokens for the user record and the LUKS2
+         * volume should not get out of sync. */
+
+        for (int token = 0; token < crypt_token_max(CRYPT_LUKS2); token ++) {
+                r = cryptsetup_get_token_as_json(cd, token, "systemd-homed", NULL);
+                if (IN_SET(r, -ENOENT, -EINVAL, -EMEDIUMTYPE))
+                        continue;
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read JSON token data off disk: %m");
+
+                return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                       "LUKS2 volume is managed by systemd-homed, please use homectl to enroll tokens.");
+        }
+
+        return 0;
 }
 
 static int prepare_luks(
@@ -404,6 +427,10 @@ static int prepare_luks(
         if (r < 0)
                 return log_error_errno(r, "Failed to load LUKS2 superblock: %m");
 
+        r = check_for_homed(cd);
+        if (r < 0)
+                return r;
+
         if (!ret_volume_key) {
                 *ret_cd = TAKE_PTR(cd);
                 return 0;
@@ -426,8 +453,7 @@ static int prepare_luks(
                 if (!password)
                         return log_oom();
 
-                string_erase(e);
-                assert_se(unsetenv("PASSWORD") >= 0);
+                assert_se(unsetenv_erase("PASSWORD") >= 0);
 
                 r = crypt_volume_key_get(
                                 cd,

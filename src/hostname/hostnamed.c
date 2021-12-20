@@ -166,10 +166,10 @@ static void context_read_os_release(Context *c) {
         c->etc_os_release_stat = current_stat;
 }
 
-static bool valid_chassis(const char *chassis) {
+static const char* valid_chassis(const char *chassis) {
         assert(chassis);
 
-        return nulstr_contains(
+        return nulstr_get(
                         "vm\0"
                         "container\0"
                         "desktop\0"
@@ -190,6 +190,7 @@ static bool valid_deployment(const char *deployment) {
 }
 
 static const char* fallback_chassis(void) {
+        const char *chassis;
         char *type;
         unsigned t;
         int v, r;
@@ -261,14 +262,14 @@ try_acpi:
         r = read_one_line_file("/sys/firmware/acpi/pm_profile", &type);
         if (r < 0) {
                 log_debug_errno(r, "Failed read ACPI PM profile, ignoring: %m");
-                return NULL;
+                goto try_devicetree;
         }
 
         r = safe_atou(type, &t);
         free(type);
         if (r < 0) {
                 log_debug_errno(r, "Failed parse ACPI PM profile, ignoring: %m");
-                return NULL;
+                goto try_devicetree;
         }
 
         /* We only list the really obvious cases here as the ACPI data is not really super reliable.
@@ -300,7 +301,24 @@ try_acpi:
                 log_debug("Unhandled ACPI PM profile 0x%02x, ignoring.", t);
         }
 
-        return NULL;
+try_devicetree:
+        r = read_one_line_file("/proc/device-tree/chassis-type", &type);
+        if (r < 0) {
+                log_debug_errno(r, "Failed to read device-tree chassis type, ignoring: %m");
+                return NULL;
+        }
+
+        /* Note that the Devicetree specification uses the very same vocabulary
+         * of chassis types as we do, hence we do not need to translate these types:
+         *
+         * https://github.com/devicetree-org/devicetree-specification/blob/master/source/chapter3-devicenodes.rst */
+        chassis = valid_chassis(type);
+        if (!chassis)
+                log_debug("Invalid device-tree chassis type '%s', ignoring.", type);
+
+        free(type);
+
+        return chassis;
 }
 
 static char* context_fallback_icon_name(Context *c) {
@@ -575,8 +593,7 @@ static int property_get_default_hostname(
 }
 
 static void context_determine_hostname_source(Context *c) {
-        char hostname[HOST_NAME_MAX + 1] = {};
-        _cleanup_free_ char *fallback = NULL;
+        _cleanup_free_ char *hostname = NULL;
         int r;
 
         assert(c);
@@ -584,11 +601,13 @@ static void context_determine_hostname_source(Context *c) {
         if (c->hostname_source >= 0)
                 return;
 
-        (void) get_hostname_filtered(hostname);
+        (void) gethostname_full(GET_HOSTNAME_ALLOW_LOCALHOST, &hostname);
 
         if (streq_ptr(hostname, c->data[PROP_STATIC_HOSTNAME]))
                 c->hostname_source = HOSTNAME_STATIC;
         else {
+                _cleanup_free_ char *fallback = NULL;
+
                 /* If the hostname was not set by us, try to figure out where it came from. If we set it to
                  * the default hostname, the file will tell us. We compare the string because it is possible
                  * that the hostname was set by an older version that had a different fallback, in the

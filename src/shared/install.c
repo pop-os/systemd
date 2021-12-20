@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "chase-symlinks.h"
 #include "conf-files.h"
 #include "conf-parser.h"
 #include "def.h"
@@ -25,7 +26,7 @@
 #include "locale-util.h"
 #include "log.h"
 #include "macro.h"
-#include "mkdir.h"
+#include "mkdir-label.h"
 #include "path-lookup.h"
 #include "path-util.h"
 #include "rm-rf.h"
@@ -460,7 +461,7 @@ static int create_symlink(
          * the right place, or negative on error.
          */
 
-        mkdir_parents_label(new_path, 0755);
+        (void) mkdir_parents_label(new_path, 0755);
 
         if (symlink(old_path, new_path) >= 0) {
                 unit_file_changes_add(changes, n_changes, UNIT_FILE_SYMLINK, new_path, old_path);
@@ -548,7 +549,6 @@ static int remove_marked_symlinks_fd(
                 size_t *n_changes) {
 
         _cleanup_closedir_ DIR *d = NULL;
-        struct dirent *de;
         int r = 0;
 
         assert(remove_symlinks_to);
@@ -728,7 +728,6 @@ static int find_symlinks_in_directory(
                 const char *config_path,
                 bool *same_name_link) {
 
-        struct dirent *de;
         int r = 0;
 
         FOREACH_DIRENT(de, dir, return -errno) {
@@ -813,7 +812,6 @@ static int find_symlinks(
                 bool *same_name_link) {
 
         _cleanup_closedir_ DIR *config_dir = NULL;
-        struct dirent *de;
         int r = 0;
 
         assert(i);
@@ -2897,7 +2895,7 @@ int unit_file_lookup_state(
                 break;
 
         default:
-                assert_not_reached("Unexpected unit file type.");
+                assert_not_reached();
         }
 
         *ret = state;
@@ -2989,7 +2987,7 @@ static int presets_find_config(UnitFileScope scope, const char *root_dir, char *
         else if (IN_SET(scope, UNIT_FILE_GLOBAL, UNIT_FILE_USER))
                 dirs = user_dirs;
         else
-                assert_not_reached("Invalid unit file scope");
+                assert_not_reached();
 
         return conf_files_list_strv(files, ".preset", root_dir, 0, dirs);
 }
@@ -3173,7 +3171,7 @@ static int query_presets(const char *name, const UnitFilePresets *presets, char 
                 log_debug("Preset files say disable %s.", name);
                 return 0;
         default:
-                assert_not_reached("invalid preset action");
+                assert_not_reached();
         }
 }
 
@@ -3368,7 +3366,6 @@ int unit_file_preset_all(
 
         STRV_FOREACH(i, paths.search_path) {
                 _cleanup_closedir_ DIR *d = NULL;
-                struct dirent *de;
 
                 d = opendir(*i);
                 if (!d) {
@@ -3433,7 +3430,6 @@ int unit_file_get_list(
 
         STRV_FOREACH(dirname, paths.search_path) {
                 _cleanup_closedir_ DIR *d = NULL;
-                struct dirent *de;
 
                 d = opendir(*dirname);
                 if (!d) {

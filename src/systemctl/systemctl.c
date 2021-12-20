@@ -128,7 +128,7 @@ static int systemctl_help(void) {
         _cleanup_free_ char *link = NULL;
         int r;
 
-        (void) pager_open(arg_pager_flags);
+        pager_open(arg_pager_flags);
 
         r = terminal_urlify_man("systemctl", "1", &link);
         if (r < 0)
@@ -922,7 +922,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         /* If we are in --user mode, there's no point in talking to PolicyKit or the infra to query system
@@ -1169,6 +1169,10 @@ static int run(int argc, char *argv[]) {
                 r = logind_cancel_shutdown();
                 break;
 
+        case ACTION_SHOW_SHUTDOWN:
+                r = logind_show_shutdown();
+                break;
+
         case ACTION_RUNLEVEL:
                 r = runlevel_main();
                 break;
@@ -1189,7 +1193,7 @@ static int run(int argc, char *argv[]) {
 
         case _ACTION_INVALID:
         default:
-                assert_not_reached("Unknown action");
+                assert_not_reached();
         }
 
 finish:

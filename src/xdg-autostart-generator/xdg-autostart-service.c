@@ -397,10 +397,11 @@ int xdg_autostart_format_exec_start(
         first_arg = true;
         for (i = n = 0; exec_split[i]; i++) {
                 _cleanup_free_ char *c = NULL, *raw = NULL, *p = NULL, *escaped = NULL, *quoted = NULL;
+                ssize_t l;
 
-                r = cunescape(exec_split[i], 0, &c);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to unescape '%s': %m", exec_split[i]);
+                l = cunescape(exec_split[i], 0, &c);
+                if (l < 0)
+                        return log_debug_errno(l, "Failed to unescape '%s': %m", exec_split[i]);
 
                 if (first_arg) {
                         _cleanup_free_ char *executable = NULL;
@@ -415,8 +416,7 @@ int xdg_autostart_format_exec_start(
                         if (!escaped)
                                 return log_oom();
 
-                        free(exec_split[n]);
-                        exec_split[n++] = TAKE_PTR(escaped);
+                        free_and_replace(exec_split[n++], escaped);
                         continue;
                 }
 
@@ -456,8 +456,7 @@ int xdg_autostart_format_exec_start(
                 if (!quoted)
                         return log_oom();
 
-                free(exec_split[n]);
-                exec_split[n++] = TAKE_PTR(quoted);
+                free_and_replace(exec_split[n++], quoted);
         }
         for (; exec_split[n]; n++)
                 exec_split[n] = mfree(exec_split[n]);
@@ -598,6 +597,7 @@ int xdg_autostart_service_generate_unit(
         fprintf(f,
                 "\n[Service]\n"
                 "Type=exec\n"
+                "ExitType=cgroup\n"
                 "ExecStart=:%s\n"
                 "Restart=no\n"
                 "TimeoutSec=5s\n"

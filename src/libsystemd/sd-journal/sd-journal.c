@@ -25,6 +25,7 @@
 #include "hashmap.h"
 #include "hostname-util.h"
 #include "id128-util.h"
+#include "inotify-util.h"
 #include "io-util.h"
 #include "journal-def.h"
 #include "journal-file.h"
@@ -190,7 +191,7 @@ static bool same_field(const void *_a, size_t s, const void *_b, size_t t) {
                         return true;
         }
 
-        assert_not_reached("\"=\" not found");
+        assert_not_reached();
 }
 
 static Match *match_new(Match *p, MatchType t) {
@@ -920,7 +921,6 @@ _public_ int sd_journal_previous_skip(sd_journal *j, uint64_t skip) {
 _public_ int sd_journal_get_cursor(sd_journal *j, char **cursor) {
         Object *o;
         int r;
-        char bid[SD_ID128_STRING_MAX], sid[SD_ID128_STRING_MAX];
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
@@ -933,13 +933,10 @@ _public_ int sd_journal_get_cursor(sd_journal *j, char **cursor) {
         if (r < 0)
                 return r;
 
-        sd_id128_to_string(j->current_file->header->seqnum_id, sid);
-        sd_id128_to_string(o->entry.boot_id, bid);
-
         if (asprintf(cursor,
                      "s=%s;i=%"PRIx64";b=%s;m=%"PRIx64";t=%"PRIx64";x=%"PRIx64,
-                     sid, le64toh(o->entry.seqnum),
-                     bid, le64toh(o->entry.monotonic),
+                     SD_ID128_TO_STRING(j->current_file->header->seqnum_id), le64toh(o->entry.seqnum),
+                     SD_ID128_TO_STRING(o->entry.boot_id), le64toh(o->entry.monotonic),
                      le64toh(o->entry.realtime),
                      le64toh(o->entry.xor_hash)) < 0)
                 return -ENOMEM;
@@ -1337,7 +1334,7 @@ static int add_any_file(
                 goto finish;
         }
 
-        r = journal_file_open(fd, path, O_RDONLY, 0, false, 0, false, NULL, j->mmap, NULL, NULL, &f);
+        r = journal_file_open(fd, path, O_RDONLY, 0, false, 0, false, NULL, j->mmap, NULL, &f);
         if (r < 0) {
                 log_debug_errno(r, "Failed to open journal file %s: %m", path);
                 goto finish;
@@ -1471,7 +1468,7 @@ static int dirname_is_machine_id(const char *fn) {
                 if (!log_namespace_name_valid(e + 1))
                         return false;
 
-                k = strndupa(fn, e - fn);
+                k = strndupa_safe(fn, e - fn);
                 r = sd_id128_from_string(k, &id);
         } else
                 r = sd_id128_from_string(fn, &id);
@@ -1496,7 +1493,7 @@ static int dirname_has_namespace(const char *fn, const char *namespace) {
                 if (!streq(e + 1, namespace))
                         return false;
 
-                k = strndupa(fn, e - fn);
+                k = strndupa_safe(fn, e - fn);
                 return id128_is_valid(k);
         }
 
@@ -1533,7 +1530,7 @@ static bool dirent_is_journal_subdir(const struct dirent *de) {
         if (!e)
                 return id128_is_valid(de->d_name); /* No namespace */
 
-        n = strndupa(de->d_name, e - de->d_name);
+        n = strndupa_safe(de->d_name, e - de->d_name);
         if (!id128_is_valid(n))
                 return false;
 
@@ -1563,14 +1560,11 @@ static int directory_open(sd_journal *j, const char *path, DIR **ret) {
 static int add_directory(sd_journal *j, const char *prefix, const char *dirname);
 
 static void directory_enumerate(sd_journal *j, Directory *m, DIR *d) {
-        struct dirent *de;
-
         assert(j);
         assert(m);
         assert(d);
 
         FOREACH_DIRENT_ALL(de, d, goto fail) {
-
                 if (dirent_is_journal_file(de))
                         (void) add_file_by_name(j, m->path, de->d_name);
 
@@ -1579,7 +1573,6 @@ static void directory_enumerate(sd_journal *j, Directory *m, DIR *d) {
         }
 
         return;
-
 fail:
         log_debug_errno(errno, "Failed to enumerate directory %s, ignoring: %m", m->path);
 }
@@ -2300,6 +2293,7 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
 
         n = journal_file_entry_n_items(o);
         for (i = 0; i < n; i++) {
+                Object *d;
                 uint64_t p, l;
                 le64_t le_hash;
                 size_t t;
@@ -2307,20 +2301,26 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
 
                 p = le64toh(o->entry.items[i].object_offset);
                 le_hash = o->entry.items[i].hash;
-                r = journal_file_move_to_object(f, OBJECT_DATA, p, &o);
+                r = journal_file_move_to_object(f, OBJECT_DATA, p, &d);
+                if (r == -EBADMSG) {
+                        log_debug("Entry item %"PRIu64" data object is bad, skipping over it.", i);
+                        continue;
+                }
                 if (r < 0)
                         return r;
 
-                if (le_hash != o->data.hash)
-                        return -EBADMSG;
+                if (le_hash != d->data.hash) {
+                        log_debug("Entry item %"PRIu64" hash is bad, skipping over it.", i);
+                        continue;
+                }
 
-                l = le64toh(o->object.size) - offsetof(Object, data.payload);
+                l = le64toh(d->object.size) - offsetof(Object, data.payload);
 
-                compression = o->object.flags & OBJECT_COMPRESSION_MASK;
+                compression = d->object.flags & OBJECT_COMPRESSION_MASK;
                 if (compression) {
 #if HAVE_COMPRESSION
                         r = decompress_startswith(compression,
-                                                  o->data.payload, l,
+                                                  d->data.payload, l,
                                                   &f->compress_buffer,
                                                   field, field_length, '=');
                         if (r < 0)
@@ -2331,7 +2331,7 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
                                 size_t rsize;
 
                                 r = decompress_blob(compression,
-                                                    o->data.payload, l,
+                                                    d->data.payload, l,
                                                     &f->compress_buffer, &rsize,
                                                     j->data_threshold);
                                 if (r < 0)
@@ -2346,23 +2346,19 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
                         return -EPROTONOSUPPORT;
 #endif
                 } else if (l >= field_length+1 &&
-                           memcmp(o->data.payload, field, field_length) == 0 &&
-                           o->data.payload[field_length] == '=') {
+                           memcmp(d->data.payload, field, field_length) == 0 &&
+                           d->data.payload[field_length] == '=') {
 
                         t = (size_t) l;
 
                         if ((uint64_t) t != l)
                                 return -E2BIG;
 
-                        *data = o->data.payload;
+                        *data = d->data.payload;
                         *size = t;
 
                         return 0;
                 }
-
-                r = journal_file_move_to_object(f, OBJECT_ENTRY, f->current_offset, &o);
-                if (r < 0)
-                        return r;
         }
 
         return -ENOENT;
@@ -2425,10 +2421,8 @@ static int return_data(
 
 _public_ int sd_journal_enumerate_data(sd_journal *j, const void **data, size_t *size) {
         JournalFile *f;
-        uint64_t p, n;
-        le64_t le_hash;
-        int r;
         Object *o;
+        int r;
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
@@ -2446,26 +2440,39 @@ _public_ int sd_journal_enumerate_data(sd_journal *j, const void **data, size_t 
         if (r < 0)
                 return r;
 
-        n = journal_file_entry_n_items(o);
-        if (j->current_field >= n)
-                return 0;
+        for (uint64_t n = journal_file_entry_n_items(o); j->current_field < n; j->current_field++) {
+                uint64_t p;
+                le64_t le_hash;
 
-        p = le64toh(o->entry.items[j->current_field].object_offset);
-        le_hash = o->entry.items[j->current_field].hash;
-        r = journal_file_move_to_object(f, OBJECT_DATA, p, &o);
-        if (r < 0)
-                return r;
+                p = le64toh(o->entry.items[j->current_field].object_offset);
+                le_hash = o->entry.items[j->current_field].hash;
+                r = journal_file_move_to_object(f, OBJECT_DATA, p, &o);
+                if (r == -EBADMSG) {
+                        log_debug("Entry item %"PRIu64" data object is bad, skipping over it.", j->current_field);
+                        continue;
+                }
+                if (r < 0)
+                        return r;
 
-        if (le_hash != o->data.hash)
-                return -EBADMSG;
+                if (le_hash != o->data.hash) {
+                        log_debug("Entry item %"PRIu64" hash is bad, skipping over it.", j->current_field);
+                        continue;
+                }
 
-        r = return_data(j, f, o, data, size);
-        if (r < 0)
-                return r;
+                r = return_data(j, f, o, data, size);
+                if (r == -EBADMSG) {
+                        log_debug("Entry item %"PRIu64" data payload is bad, skipping over it.", j->current_field);
+                        continue;
+                }
+                if (r < 0)
+                        return r;
 
-        j->current_field++;
+                j->current_field++;
 
-        return 1;
+                return 1;
+        }
+
+        return 0;
 }
 
 _public_ int sd_journal_enumerate_available_data(sd_journal *j, const void **data, size_t *size) {
@@ -2687,7 +2694,7 @@ _public_ int sd_journal_process(sd_journal *j) {
 
                 l = read(j->inotify_fd, &buffer, sizeof(buffer));
                 if (l < 0) {
-                        if (IN_SET(errno, EAGAIN, EINTR))
+                        if (ERRNO_IS_TRANSIENT(errno))
                                 return got_something ? determine_change(j) : SD_JOURNAL_NOP;
 
                         return -errno;

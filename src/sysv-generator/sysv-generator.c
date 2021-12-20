@@ -289,7 +289,7 @@ static int sysv_translate_facility(SysvStub *s, unsigned line, const char *name,
         }
 
         /* Strip ".sh" suffix from file name for comparison */
-        filename_no_sh = strdupa(filename);
+        filename_no_sh = strdupa_safe(filename);
         e = endswith(filename_no_sh, ".sh");
         if (e) {
                 *e = '\0';
@@ -718,7 +718,6 @@ static int enumerate_sysv(const LookupPaths *lp, Hashmap *all_services) {
 
         STRV_FOREACH(path, sysvinit_path) {
                 _cleanup_closedir_ DIR *d = NULL;
-                struct dirent *de;
 
                 d = opendir(*path);
                 if (!d) {
@@ -805,7 +804,6 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
                 for (unsigned i = 0; i < ELEMENTSOF(rcnd_table); i ++) {
                         _cleanup_closedir_ DIR *d = NULL;
                         _cleanup_free_ char *path = NULL;
-                        struct dirent *de;
 
                         path = path_join(*p, rcnd_table[i].path);
                         if (!path) {

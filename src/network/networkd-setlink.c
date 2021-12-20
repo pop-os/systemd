@@ -3,9 +3,12 @@
 #include <netinet/in.h>
 #include <linux/if.h>
 #include <linux/if_arp.h>
+#include <linux/if_bridge.h>
 
 #include "missing_network.h"
+#include "netif-util.h"
 #include "netlink-util.h"
+#include "networkd-address.h"
 #include "networkd-can.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -21,6 +24,7 @@ static const char *const set_link_operation_table[_SET_LINK_OPERATION_MAX] = {
         [SET_LINK_CAN]                     = "CAN interface configurations",
         [SET_LINK_FLAGS]                   = "link flags",
         [SET_LINK_GROUP]                   = "interface group",
+        [SET_LINK_IPOIB]                   = "IPoIB configurations",
         [SET_LINK_MAC]                     = "MAC address",
         [SET_LINK_MASTER]                  = "master interface",
         [SET_LINK_MTU]                     = "MTU",
@@ -150,6 +154,10 @@ static int link_set_group_handler(sd_netlink *rtnl, sd_netlink_message *m, Link 
         return set_link_handler_internal(rtnl, m, link, SET_LINK_GROUP, /* ignore = */ false, NULL);
 }
 
+static int link_set_ipoib_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+        return set_link_handler_internal(rtnl, m, link, SET_LINK_IPOIB, /* ignore = */ true, NULL);
+}
+
 static int link_set_mac_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
         return set_link_handler_internal(rtnl, m, link, SET_LINK_MAC, /* ignore = */ true, get_link_default_handler);
 }
@@ -181,7 +189,7 @@ static int link_set_mac_allow_retry_handler(sd_netlink *rtnl, sd_netlink_message
                 return 0;
         }
 
-        /* set_link_mac_handler() also decrement set_link_messages, so once increment the value. */
+        /* set_link_mac_handler() also decrements set_link_messages, so increment the value once. */
         link->set_link_messages++;
         return link_set_mac_handler(rtnl, m, link);
 }
@@ -233,7 +241,7 @@ static int link_configure(
                 r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_NEWLINK, link->master_ifindex);
                 if (r < 0)
                         return log_link_debug_errno(link, r, "Could not allocate RTM_NEWLINK message: %m");
-        } else if (op == SET_LINK_CAN) {
+        } else if (IN_SET(op, SET_LINK_CAN, SET_LINK_IPOIB)) {
                 r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_NEWLINK, link->ifindex);
                 if (r < 0)
                         return log_link_debug_errno(link, r, "Could not allocate RTM_NEWLINK message: %m");
@@ -405,7 +413,7 @@ static int link_configure(
                 if (r < 0)
                         return log_link_debug_errno(link, r, "Could not open IFLA_AF_SPEC container: %m");
 
-                if (!link->network->bridge) {
+                if (link->master_ifindex <= 0) {
                         /* master needs BRIDGE_FLAGS_SELF flag */
                         r = sd_netlink_message_append_u16(req, IFLA_BRIDGE_FLAGS, BRIDGE_FLAGS_SELF);
                         if (r < 0)
@@ -456,14 +464,19 @@ static int link_configure(
                 break;
         }
         case SET_LINK_GROUP:
-                r = sd_netlink_message_append_u32(req, IFLA_GROUP, link->network->group);
+                r = sd_netlink_message_append_u32(req, IFLA_GROUP, (uint32_t) link->network->group);
                 if (r < 0)
                         return log_link_debug_errno(link, r, "Could not append IFLA_GROUP attribute: %m");
                 break;
         case SET_LINK_MAC:
-                r = sd_netlink_message_append_ether_addr(req, IFLA_ADDRESS, link->network->mac);
+                r = netlink_message_append_hw_addr(req, IFLA_ADDRESS, &link->requested_hw_addr);
                 if (r < 0)
                         return log_link_debug_errno(link, r, "Could not append IFLA_ADDRESS attribute: %m");
+                break;
+        case SET_LINK_IPOIB:
+                r = ipoib_set_netlink_message(link, req);
+                if (r < 0)
+                        return r;
                 break;
         case SET_LINK_MASTER:
                 r = sd_netlink_message_append_u32(req, IFLA_MASTER, PTR_TO_UINT32(userdata));
@@ -476,7 +489,7 @@ static int link_configure(
                         return log_link_debug_errno(link, r, "Could not append IFLA_MTU attribute: %m");
                 break;
         default:
-                assert_not_reached("Invalid set link operation");
+                assert_not_reached();
         }
 
         r = netlink_call_async(link->manager->rtnl, NULL, req, callback,
@@ -505,6 +518,9 @@ static bool link_is_ready_to_call_set_link(Request *req) {
         int r;
 
         assert(req);
+        assert(req->link);
+        assert(req->link->manager);
+        assert(req->link->network);
 
         link = req->link;
         op = PTR_TO_INT(req->set_link_operation_ptr);
@@ -515,8 +531,15 @@ static bool link_is_ready_to_call_set_link(Request *req) {
         switch (op) {
         case SET_LINK_BOND:
         case SET_LINK_BRIDGE:
+                if (!link->master_set)
+                        return false;
+                if (link->network->keep_master && link->master_ifindex <= 0)
+                        return false;
+                break;
         case SET_LINK_BRIDGE_VLAN:
                 if (!link->master_set)
+                        return false;
+                if (link->network->keep_master && link->master_ifindex <= 0 && !streq_ptr(link->kind, "bridge"))
                         return false;
                 break;
         case SET_LINK_CAN:
@@ -533,9 +556,9 @@ static bool link_is_ready_to_call_set_link(Request *req) {
                 break;
         case SET_LINK_MAC:
                 if (req->netlink_handler == link_set_mac_handler) {
-                        /* This is the second trial to set MTU. On the first attempt
+                        /* This is the second attempt to set hardware address. On the first attempt
                          * req->netlink_handler points to link_set_mac_allow_retry_handler().
-                         * The first trial failed as the interface was up. */
+                         * The first attempt failed as the interface was up. */
                         r = link_down(link);
                         if (r < 0) {
                                 link_enter_failed(link);
@@ -545,14 +568,19 @@ static bool link_is_ready_to_call_set_link(Request *req) {
                 break;
         case SET_LINK_MASTER: {
                 uint32_t m = 0;
-
-                assert(link->network);
+                Request req_mac = {
+                        .link = link,
+                        .type = REQUEST_TYPE_SET_LINK,
+                        .set_link_operation_ptr = INT_TO_PTR(SET_LINK_MAC),
+                };
 
                 if (link->network->batadv) {
                         if (!netdev_is_ready(link->network->batadv))
                                 return false;
                         m = link->network->batadv->ifindex;
                 } else if (link->network->bond) {
+                        if (ordered_set_contains(link->manager->request_queue, &req_mac))
+                                return false;
                         if (!netdev_is_ready(link->network->bond))
                                 return false;
                         m = link->network->bond->ifindex;
@@ -568,6 +596,8 @@ static bool link_is_ready_to_call_set_link(Request *req) {
                                 }
                         }
                 } else if (link->network->bridge) {
+                        if (ordered_set_contains(link->manager->request_queue, &req_mac))
+                                return false;
                         if (!netdev_is_ready(link->network->bridge))
                                 return false;
                         m = link->network->bridge->ifindex;
@@ -579,6 +609,15 @@ static bool link_is_ready_to_call_set_link(Request *req) {
 
                 req->userdata = UINT32_TO_PTR(m);
                 break;
+        }
+        case SET_LINK_MTU: {
+                Request req_ipoib = {
+                        .link = link,
+                        .type = REQUEST_TYPE_SET_LINK,
+                        .set_link_operation_ptr = INT_TO_PTR(SET_LINK_IPOIB),
+                };
+
+                return !ordered_set_contains(link->manager->request_queue, &req_ipoib);
         }
         default:
                 break;
@@ -672,8 +711,18 @@ int link_request_to_set_bond(Link *link) {
         assert(link);
         assert(link->network);
 
-        if (!link->network->bond)
-                return 0;
+        if (!link->network->bond) {
+                Link *master;
+
+                if (!link->network->keep_master)
+                        return 0;
+
+                if (link_get_master(link, &master) < 0)
+                        return 0;
+
+                if (!streq_ptr(master->kind, "bond"))
+                        return 0;
+        }
 
         return link_request_set_link(link, SET_LINK_BOND, link_set_bond_handler, NULL);
 }
@@ -682,8 +731,18 @@ int link_request_to_set_bridge(Link *link) {
         assert(link);
         assert(link->network);
 
-        if (!link->network->bridge)
-                return 0;
+        if (!link->network->bridge) {
+                Link *master;
+
+                if (!link->network->keep_master)
+                        return 0;
+
+                if (link_get_master(link, &master) < 0)
+                        return 0;
+
+                if (!streq_ptr(master->kind, "bridge"))
+                        return 0;
+        }
 
         return link_request_set_link(link, SET_LINK_BRIDGE, link_set_bridge_handler, NULL);
 }
@@ -695,8 +754,18 @@ int link_request_to_set_bridge_vlan(Link *link) {
         if (!link->network->use_br_vlan)
                 return 0;
 
-        if (!link->network->bridge && !streq_ptr(link->kind, "bridge"))
-                return 0;
+        if (!link->network->bridge && !streq_ptr(link->kind, "bridge")) {
+                Link *master;
+
+                if (!link->network->keep_master)
+                        return 0;
+
+                if (link_get_master(link, &master) < 0)
+                        return 0;
+
+                if (!streq_ptr(master->kind, "bridge"))
+                        return 0;
+        }
 
         return link_request_set_link(link, SET_LINK_BRIDGE_VLAN, link_set_bridge_vlan_handler, NULL);
 }
@@ -731,27 +800,28 @@ int link_request_to_set_group(Link *link) {
         assert(link);
         assert(link->network);
 
-        if (!link->network->group_set)
+        if (link->network->group < 0)
                 return 0;
 
         return link_request_set_link(link, SET_LINK_GROUP, link_set_group_handler, NULL);
 }
 
 int link_request_to_set_mac(Link *link, bool allow_retry) {
+        int r;
+
         assert(link);
         assert(link->network);
 
-        if (!link->network->mac)
+        if (link->network->hw_addr.length == 0)
                 return 0;
 
-        if (link->hw_addr.length != sizeof(struct ether_addr)) {
-                /* Note that for now we only support changing hardware addresses on Ethernet. */
-                log_link_debug(link, "Size of the hardware address (%zu) does not match the size of MAC address (%zu), ignoring.",
-                               link->hw_addr.length, sizeof(struct ether_addr));
-                return 0;
-        }
+        link->requested_hw_addr = link->network->hw_addr;
+        r = net_verify_hardware_address(link->ifname, /* is_static = */ true,
+                                        link->iftype, &link->hw_addr, &link->requested_hw_addr);
+        if (r < 0)
+                return r;
 
-        if (ether_addr_equal(&link->hw_addr.ether, link->network->mac))
+        if (hw_addr_equal(&link->hw_addr, &link->requested_hw_addr))
                 return 0;
 
         return link_request_set_link(link, SET_LINK_MAC,
@@ -759,9 +829,28 @@ int link_request_to_set_mac(Link *link, bool allow_retry) {
                                      NULL);
 }
 
+int link_request_to_set_ipoib(Link *link) {
+        assert(link);
+        assert(link->network);
+
+        if (link->iftype != ARPHRD_INFINIBAND)
+                return 0;
+
+        if (link->network->ipoib_mode < 0 &&
+            link->network->ipoib_umcast < 0)
+                return 0;
+
+        return link_request_set_link(link, SET_LINK_IPOIB, link_set_ipoib_handler, NULL);
+}
+
 int link_request_to_set_master(Link *link) {
         assert(link);
         assert(link->network);
+
+        if (link->network->keep_master) {
+                link->master_set = true;
+                return 0;
+        }
 
         link->master_set = false;
 
@@ -1018,7 +1107,7 @@ int link_request_to_activate(Link *link) {
                 up = false;
                 break;
         default:
-                assert_not_reached("invalid activation policy");
+                assert_not_reached();
         }
 
         link->activated = false;
@@ -1089,5 +1178,45 @@ int link_request_to_bring_up_or_down(Link *link, bool up) {
         req->userdata = INT_TO_PTR(up);
 
         log_link_debug(link, "Requested to bring link %s", up_or_down(up));
+        return 0;
+}
+
+static int link_remove_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+        int r;
+
+        assert(m);
+        assert(link);
+
+        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                return 0;
+
+        r = sd_netlink_message_get_errno(m);
+        if (r < 0)
+                log_link_message_warning_errno(link, m, r, "Could not remove interface, ignoring");
+
+        return 0;
+}
+
+int link_remove(Link *link) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        int r;
+
+        assert(link);
+        assert(link->manager);
+        assert(link->manager->rtnl);
+
+        log_link_debug(link, "Removing link.");
+
+        r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_DELLINK, link->ifindex);
+        if (r < 0)
+                return log_link_debug_errno(link, r, "Could not allocate RTM_DELLINK message: %m");
+
+        r = netlink_call_async(link->manager->rtnl, NULL, req, link_remove_handler,
+                               link_netlink_destroy_callback, link);
+        if (r < 0)
+                return log_link_debug_errno(link, r, "Could not send rtnetlink message: %m");
+
+        link_ref(link);
+
         return 0;
 }

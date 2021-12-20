@@ -30,7 +30,7 @@
 /* Nontrivial value serves as a placeholder to check that parsing function (didn't) change it */
 #define CGROUP_LIMIT_DUMMY      3
 
-static int test_unit_file_get_set(void) {
+TEST_RET(unit_file_get_set) {
         int r;
         Hashmap *h;
         UnitFileList *p;
@@ -78,7 +78,7 @@ static void check_execcommand(ExecCommand *c,
         assert_se(!!(c->flags & EXEC_COMMAND_IGNORE_FAILURE) == ignore);
 }
 
-static void test_config_parse_exec(void) {
+TEST(config_parse_exec) {
         /* int config_parse_exec(
                  const char *unit,
                  const char *filename,
@@ -104,7 +104,7 @@ static void test_config_parse_exec(void) {
         }
 
         assert_se(r >= 0);
-        assert_se(manager_startup(m, NULL, NULL) >= 0);
+        assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         assert_se(u = unit_new(m, sizeof(Service)));
 
@@ -422,7 +422,7 @@ static void test_config_parse_exec(void) {
         exec_command_free_list(c);
 }
 
-static void test_config_parse_log_extra_fields(void) {
+TEST(config_parse_log_extra_fields) {
         /* int config_parse_log_extra_fields(
                 const char *unit,
                 const char *filename,
@@ -448,7 +448,7 @@ static void test_config_parse_log_extra_fields(void) {
         }
 
         assert_se(r >= 0);
-        assert_se(manager_startup(m, NULL, NULL) >= 0);
+        assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         assert_se(u = unit_new(m, sizeof(Service)));
 
@@ -486,7 +486,7 @@ static void test_config_parse_log_extra_fields(void) {
         log_info("/* %s – bye */", __func__);
 }
 
-static void test_install_printf(void) {
+TEST(install_printf, .sd_booted = true) {
         char    name[] = "name.service",
                 path[] = "/run/systemd/system/name.service";
         UnitFileInstallInfo i = { .name = name, .path = path, };
@@ -565,7 +565,7 @@ static uint64_t make_cap(int cap) {
         return ((uint64_t) 1ULL << (uint64_t) cap);
 }
 
-static void test_config_parse_capability_set(void) {
+TEST(config_parse_capability_set) {
         /* int config_parse_capability_set(
                  const char *unit,
                  const char *filename,
@@ -618,7 +618,7 @@ static void test_config_parse_capability_set(void) {
         assert_se(capability_bounding_set == (make_cap(CAP_NET_RAW) | make_cap(CAP_NET_ADMIN)));
 }
 
-static void test_config_parse_rlimit(void) {
+TEST(config_parse_rlimit) {
         struct rlimit * rl[_RLIMIT_MAX] = {};
 
         assert_se(config_parse_rlimit(NULL, "fake", 1, "section", 1, "LimitNOFILE", RLIMIT_NOFILE, "55", rl, NULL) >= 0);
@@ -732,7 +732,7 @@ static void test_config_parse_rlimit(void) {
         rl[RLIMIT_RTTIME] = mfree(rl[RLIMIT_RTTIME]);
 }
 
-static void test_config_parse_pass_environ(void) {
+TEST(config_parse_pass_environ) {
         /* int config_parse_pass_environ(
                  const char *unit,
                  const char *filename,
@@ -769,11 +769,11 @@ static void test_config_parse_pass_environ(void) {
         assert_se(streq(passenv[0], "normal_name"));
 }
 
-static void test_unit_dump_config_items(void) {
+TEST(unit_dump_config_items) {
         unit_dump_config_items(stdout);
 }
 
-static void test_config_parse_memory_limit(void) {
+TEST(config_parse_memory_limit) {
         /* int config_parse_memory_limit(
                 const char *unit,
                 const char *filename,
@@ -829,27 +829,80 @@ static void test_config_parse_memory_limit(void) {
 
 }
 
-int main(int argc, char *argv[]) {
-        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
+TEST(contains_instance_specifier_superset) {
+        assert_se(contains_instance_specifier_superset("foobar@a%i"));
+        assert_se(contains_instance_specifier_superset("foobar@%ia"));
+        assert_se(contains_instance_specifier_superset("foobar@%n"));
+        assert_se(contains_instance_specifier_superset("foobar@%n.service"));
+        assert_se(contains_instance_specifier_superset("foobar@%N"));
+        assert_se(contains_instance_specifier_superset("foobar@%N.service"));
+        assert_se(contains_instance_specifier_superset("foobar@baz.%N.service"));
+        assert_se(contains_instance_specifier_superset("@%N.service"));
+        assert_se(contains_instance_specifier_superset("@%N"));
+        assert_se(contains_instance_specifier_superset("@%a%N"));
+
+        assert_se(!contains_instance_specifier_superset("foobar@%i.service"));
+        assert_se(!contains_instance_specifier_superset("foobar%ia.service"));
+        assert_se(!contains_instance_specifier_superset("foobar@%%n.service"));
+        assert_se(!contains_instance_specifier_superset("foobar@baz.service"));
+        assert_se(!contains_instance_specifier_superset("%N.service"));
+        assert_se(!contains_instance_specifier_superset("%N"));
+        assert_se(!contains_instance_specifier_superset("@%aN"));
+        assert_se(!contains_instance_specifier_superset("@%a%b"));
+}
+
+TEST(unit_is_recursive_template_dependency) {
+        _cleanup_(manager_freep) Manager *m = NULL;
+        Unit *u;
         int r;
 
-        test_setup_logging(LOG_INFO);
+        r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        if (manager_errno_skip_test(r)) {
+                log_notice_errno(r, "Skipping test: manager_new: %m");
+                return;
+        }
 
-        r = enter_cgroup_subroot(NULL);
-        if (r == -ENOMEDIUM)
-                return log_tests_skipped("cgroupfs not available");
+        assert_se(r >= 0);
+        assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
-        assert_se(runtime_dir = setup_fake_runtime_dir());
+        assert_se(u = unit_new(m, sizeof(Service)));
+        assert_se(unit_add_name(u, "foobar@1.service") == 0);
+        u->fragment_path = strdup("/foobar@.service");
 
-        r = test_unit_file_get_set();
-        test_config_parse_exec();
-        test_config_parse_log_extra_fields();
-        test_config_parse_capability_set();
-        test_config_parse_rlimit();
-        test_config_parse_pass_environ();
-        TEST_REQ_RUNNING_SYSTEMD(test_install_printf());
-        test_unit_dump_config_items();
-        test_config_parse_memory_limit();
+        assert_se(hashmap_put_strdup(&m->unit_id_map, "foobar@foobar@123.service", "/foobar@.service"));
+        assert_se(hashmap_put_strdup(&m->unit_id_map, "foobar@foobar@456.service", "/custom.service"));
 
-        return r;
+        /* Test that %n, %N and any extension of %i specifiers in the instance are detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%N.service") == 1);
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%n.service") == 1);
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@a%i.service") == 1);
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%ia.service") == 1);
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%x%n.service") == 1);
+        /* Test that %i on its own is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%i.service") == 0);
+        /* Test that a specifier other than %i, %n and %N is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@%xn.service") == 0);
+        /* Test that an expanded specifier is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.service", "foobar@foobar@123.service") == 0);
+        /* Test that a dependency with a custom fragment path is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@456.service", "foobar@%n.service") == 0);
+        /* Test that a dependency without a fragment path is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@789.service", "foobar@%n.service") == 0);
+        /* Test that a dependency with a different prefix is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "quux@foobar@123.service", "quux@%n.service") == 0);
+        /* Test that a dependency of a different type is not detected as recursive. */
+        assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.mount", "foobar@%n.mount") == 0);
 }
+
+DEFINE_CUSTOM_TEST_MAIN(
+        LOG_INFO,
+
+        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
+        ({
+                if (enter_cgroup_subroot(NULL) == -ENOMEDIUM)
+                        return log_tests_skipped("cgroupfs not available");
+
+                assert_se(runtime_dir = setup_fake_runtime_dir());
+        }),
+
+        /* no outro */);

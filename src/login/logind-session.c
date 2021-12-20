@@ -26,7 +26,7 @@
 #include "logind-session-dbus.h"
 #include "logind-session.h"
 #include "logind-user-dbus.h"
-#include "mkdir.h"
+#include "mkdir-label.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -1097,11 +1097,7 @@ int session_create_fifo(Session *s) {
         }
 
         /* Open writing side */
-        r = open(s->fifo_path, O_WRONLY|O_CLOEXEC|O_NONBLOCK);
-        if (r < 0)
-                return -errno;
-
-        return r;
+        return RET_NERRNO(open(s->fifo_path, O_WRONLY|O_CLOEXEC|O_NONBLOCK));
 }
 
 static void session_remove_fifo(Session *s) {
@@ -1323,7 +1319,7 @@ bool session_is_controller(Session *s, const char *sender) {
 }
 
 static void session_release_controller(Session *s, bool notify) {
-        _cleanup_free_ char *name = NULL;
+        _unused_ _cleanup_free_ char *name = NULL;
         SessionDevice *sd;
 
         if (!s->controller)

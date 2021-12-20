@@ -98,7 +98,6 @@ static int detect_vm_device_tree(void) {
         r = read_one_line_file("/proc/device-tree/hypervisor/compatible", &hvtype);
         if (r == -ENOENT) {
                 _cleanup_closedir_ DIR *dir = NULL;
-                struct dirent *dent;
 
                 if (access("/proc/device-tree/ibm,partition-name", F_OK) == 0 &&
                     access("/proc/device-tree/hmc-managed?", F_OK) == 0 &&
@@ -114,9 +113,9 @@ static int detect_vm_device_tree(void) {
                         return -errno;
                 }
 
-                FOREACH_DIRENT(dent, dir, return -errno)
-                        if (strstr(dent->d_name, "fw-cfg")) {
-                                log_debug("Virtualization QEMU: \"fw-cfg\" present in /proc/device-tree/%s", dent->d_name);
+                FOREACH_DIRENT(de, dir, return -errno)
+                        if (strstr(de->d_name, "fw-cfg")) {
+                                log_debug("Virtualization QEMU: \"fw-cfg\" present in /proc/device-tree/%s", de->d_name);
                                 return VIRTUALIZATION_QEMU;
                         }
 
@@ -146,7 +145,8 @@ static int detect_vm_dmi_vendor(void) {
                 "/sys/class/dmi/id/product_name", /* Test this before sys_vendor to detect KVM over QEMU */
                 "/sys/class/dmi/id/sys_vendor",
                 "/sys/class/dmi/id/board_vendor",
-                "/sys/class/dmi/id/bios_vendor"
+                "/sys/class/dmi/id/bios_vendor",
+                "/sys/class/dmi/id/product_version" /* For Hyper-V VMs test */
         };
 
         static const struct {
@@ -165,7 +165,7 @@ static int detect_vm_dmi_vendor(void) {
                 { "Parallels",           VIRTUALIZATION_PARALLELS },
                 /* https://wiki.freebsd.org/bhyve */
                 { "BHYVE",               VIRTUALIZATION_BHYVE     },
-                { "Microsoft",           VIRTUALIZATION_MICROSOFT },
+                { "Hyper-V",             VIRTUALIZATION_MICROSOFT },
         };
         int r;
 
@@ -263,7 +263,7 @@ static int detect_vm_dmi(void) {
                                 return VIRTUALIZATION_AMAZON;
                 }
                 default:
-                        assert_not_reached("Bad virtualization value");
+                        assert_not_reached();
               }
         }
 
@@ -275,19 +275,6 @@ static int detect_vm_dmi(void) {
 #else
         return VIRTUALIZATION_NONE;
 #endif
-}
-
-static int detect_vm_xen(void) {
-
-        /* Check for Dom0 will be executed later in detect_vm_xen_dom0
-           The presence of /proc/xen indicates some form of a Xen domain */
-        if (access("/proc/xen", F_OK) < 0) {
-                log_debug("Virtualization XEN not found, /proc/xen does not exist");
-                return VIRTUALIZATION_NONE;
-        }
-
-        log_debug("Virtualization XEN found (/proc/xen exists)");
-        return VIRTUALIZATION_XEN;
 }
 
 #define XENFEAT_dom0 11 /* xen/include/public/features.h */
@@ -341,6 +328,26 @@ static int detect_vm_xen_dom0(void) {
                         return 1;
                 }
         }
+}
+
+static int detect_vm_xen(void) {
+        int r;
+
+        /* The presence of /proc/xen indicates some form of a Xen domain */
+        if (access("/proc/xen", F_OK) < 0) {
+                log_debug("Virtualization XEN not found, /proc/xen does not exist");
+                return VIRTUALIZATION_NONE;
+        }
+        log_debug("Virtualization XEN found (/proc/xen exists)");
+
+        /* Ignore the Xen hypervisor if we are in Dom0 */
+        r = detect_vm_xen_dom0();
+        if (r < 0)
+                return r;
+        if (r > 0)
+                return VIRTUALIZATION_NONE;
+
+        return VIRTUALIZATION_XEN;
 }
 
 static int detect_vm_hypervisor(void) {
@@ -436,7 +443,8 @@ int detect_vm(void) {
          *
          * → First, try to detect Oracle Virtualbox and Amazon EC2 Nitro, even if they use KVM, as well as Xen even if
          *   it cloaks as Microsoft Hyper-V. Attempt to detect uml at this stage also since it runs as a user-process
-         *   nested inside other VMs.
+         *   nested inside other VMs. Also check for Xen now, because Xen PV mode does not override CPUID when nested
+         *   inside another hypervisor.
          *
          * → Second, try to detect from CPUID, this will report KVM for whatever software is used even if info in DMI is
          *   overwritten.
@@ -451,6 +459,15 @@ int detect_vm(void) {
 
         /* Detect UML */
         r = detect_vm_uml();
+        if (r < 0)
+                return r;
+        if (r == VIRTUALIZATION_VM_OTHER)
+                other = true;
+        else if (r != VIRTUALIZATION_NONE)
+                goto finish;
+
+        /* Detect Xen */
+        r = detect_vm_xen();
         if (r < 0)
                 return r;
         if (r == VIRTUALIZATION_VM_OTHER)
@@ -477,20 +494,7 @@ int detect_vm(void) {
                 goto finish;
         }
 
-        /* x86 xen will most likely be detected by cpuid. If not (most likely
-         * because we're not an x86 guest), then we should try the /proc/xen
-         * directory next. If that's not found, then we check for the high-level
-         * hypervisor sysfs file.
-         */
-
-        r = detect_vm_xen();
-        if (r < 0)
-                return r;
-        if (r == VIRTUALIZATION_VM_OTHER)
-                other = true;
-        else if (r != VIRTUALIZATION_NONE)
-                goto finish;
-
+        /* Check high-level hypervisor sysfs file */
         r = detect_vm_hypervisor();
         if (r < 0)
                 return r;
@@ -512,18 +516,7 @@ int detect_vm(void) {
                 return r;
 
 finish:
-        /* x86 xen Dom0 is detected as XEN in hypervisor and maybe others.
-         * In order to detect the Dom0 as not virtualization we need to
-         * double-check it */
-        if (r == VIRTUALIZATION_XEN) {
-                int dom0;
-
-                dom0 = detect_vm_xen_dom0();
-                if (dom0 < 0)
-                        return dom0;
-                if (dom0 > 0)
-                        r = VIRTUALIZATION_NONE;
-        } else if (r == VIRTUALIZATION_NONE && other)
+        if (r == VIRTUALIZATION_NONE && other)
                 r = VIRTUALIZATION_VM_OTHER;
 
         cached_found = r;

@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "bus-unit-procs.h"
+#include "glyph-util.h"
 #include "hashmap.h"
 #include "list.h"
-#include "locale-util.h"
 #include "macro.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -46,7 +46,7 @@ static int add_cgroup(Hashmap *cgroups, const char *path, bool is_const, struct 
                 if (!e)
                         return -EINVAL;
 
-                pp = strndupa(path, e - path);
+                pp = strndupa_safe(path, e - path);
 
                 r = add_cgroup(cgroups, pp, false, &parent);
                 if (r < 0)
@@ -188,11 +188,13 @@ static int dump_processes(
                         more = i+1 < n || cg->children;
                         special = special_glyph(more ? SPECIAL_GLYPH_TREE_BRANCH : SPECIAL_GLYPH_TREE_RIGHT);
 
-                        fprintf(stdout, "%s%s%*"PID_PRI" %s\n",
+                        fprintf(stdout, "%s%s%s%*"PID_PRI" %s%s\n",
                                 prefix,
                                 special,
+                                ansi_grey(),
                                 width, pids[i],
-                                name);
+                                name,
+                                ansi_normal());
                 }
         }
 

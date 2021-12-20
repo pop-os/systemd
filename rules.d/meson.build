@@ -19,6 +19,7 @@ rules = files('''
         60-persistent-v4l.rules
         60-sensor.rules
         60-serial.rules
+        70-camera.rules
         70-joystick.rules
         70-mouse.rules
         70-touchpad.rules
@@ -51,8 +52,7 @@ foreach file : rules_in
                 file,
                 input : file + '.in',
                 output: file,
-                command : [meson_render_jinja2, config_h, '@INPUT@'],
-                capture : true,
+                command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
                 install : true,
                 install_dir : udevrulesdir)
 endforeach

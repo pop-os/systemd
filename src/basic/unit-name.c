@@ -8,6 +8,7 @@
 #include "alloc-util.h"
 #include "glob-util.h"
 #include "hexdecoct.h"
+#include "memory-util.h"
 #include "path-util.h"
 #include "special.h"
 #include "string-util.h"
@@ -528,7 +529,7 @@ int unit_name_from_path(const char *path, const char *suffix, char **ret) {
         if (strlen(s) >= UNIT_NAME_MAX) /* Return a slightly more descriptive error for this specific condition */
                 return -ENAMETOOLONG;
 
-        /* Refuse this if this got too long or for some other reason didn't result in a valid name */
+        /* Refuse if this for some other reason didn't result in a valid name */
         if (!unit_name_is_valid(s, UNIT_NAME_PLAIN))
                 return -EINVAL;
 
@@ -562,7 +563,7 @@ int unit_name_from_path_instance(const char *prefix, const char *path, const cha
         if (strlen(s) >= UNIT_NAME_MAX) /* Return a slightly more descriptive error for this specific condition */
                 return -ENAMETOOLONG;
 
-        /* Refuse this if this got too long or for some other reason didn't result in a valid name */
+        /* Refuse if this for some other reason didn't result in a valid name */
         if (!unit_name_is_valid(s, UNIT_NAME_INSTANCE))
                 return -EINVAL;
 
@@ -796,4 +797,27 @@ bool slice_name_is_valid(const char *name) {
                 return false;
 
         return true;
+}
+
+bool unit_name_prefix_equal(const char *a, const char *b) {
+        const char *p, *q;
+
+        assert(a);
+        assert(b);
+
+        if (!unit_name_is_valid(a, UNIT_NAME_ANY) || !unit_name_is_valid(b, UNIT_NAME_ANY))
+                return false;
+
+        p = strchr(a, '@');
+        if (!p)
+                p = strrchr(a, '.');
+
+        q = strchr(b, '@');
+        if (!q)
+                q = strrchr(b, '.');
+
+        assert(p);
+        assert(q);
+
+        return memcmp_nn(a, p - a, b, q - b) == 0;
 }

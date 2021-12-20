@@ -2,6 +2,7 @@
 #pragma once
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,6 +33,10 @@ typedef enum CGroupController {
         CGROUP_CONTROLLER_BPF_DEVICES,
         CGROUP_CONTROLLER_BPF_FOREIGN,
         CGROUP_CONTROLLER_BPF_SOCKET_BIND,
+        CGROUP_CONTROLLER_BPF_RESTRICT_NETWORK_INTERFACES,
+        /* The BPF hook implementing RestrictFileSystems= is not defined here.
+         * It's applied as late as possible in exec_child() so we don't block
+         * our own unit setup code. */
 
         _CGROUP_CONTROLLER_MAX,
         _CGROUP_CONTROLLER_INVALID = -EINVAL,
@@ -53,6 +58,7 @@ typedef enum CGroupMask {
         CGROUP_MASK_BPF_DEVICES = CGROUP_CONTROLLER_TO_MASK(CGROUP_CONTROLLER_BPF_DEVICES),
         CGROUP_MASK_BPF_FOREIGN = CGROUP_CONTROLLER_TO_MASK(CGROUP_CONTROLLER_BPF_FOREIGN),
         CGROUP_MASK_BPF_SOCKET_BIND = CGROUP_CONTROLLER_TO_MASK(CGROUP_CONTROLLER_BPF_SOCKET_BIND),
+        CGROUP_MASK_BPF_RESTRICT_NETWORK_INTERFACES = CGROUP_CONTROLLER_TO_MASK(CGROUP_CONTROLLER_BPF_RESTRICT_NETWORK_INTERFACES),
 
         /* All real cgroup v1 controllers */
         CGROUP_MASK_V1 = CGROUP_MASK_CPU|CGROUP_MASK_CPUACCT|CGROUP_MASK_BLKIO|CGROUP_MASK_MEMORY|CGROUP_MASK_DEVICES|CGROUP_MASK_PIDS,
@@ -61,7 +67,7 @@ typedef enum CGroupMask {
         CGROUP_MASK_V2 = CGROUP_MASK_CPU|CGROUP_MASK_CPUSET|CGROUP_MASK_IO|CGROUP_MASK_MEMORY|CGROUP_MASK_PIDS,
 
         /* All cgroup v2 BPF pseudo-controllers */
-        CGROUP_MASK_BPF = CGROUP_MASK_BPF_FIREWALL|CGROUP_MASK_BPF_DEVICES|CGROUP_MASK_BPF_FOREIGN|CGROUP_MASK_BPF_SOCKET_BIND,
+        CGROUP_MASK_BPF = CGROUP_MASK_BPF_FIREWALL|CGROUP_MASK_BPF_DEVICES|CGROUP_MASK_BPF_FOREIGN|CGROUP_MASK_BPF_SOCKET_BIND|CGROUP_MASK_BPF_RESTRICT_NETWORK_INTERFACES,
 
         _CGROUP_MASK_ALL = CGROUP_CONTROLLER_TO_MASK(_CGROUP_CONTROLLER_MAX) - 1
 } CGroupMask;
@@ -172,6 +178,7 @@ typedef enum CGroupFlags {
 typedef int (*cg_kill_log_func_t)(pid_t pid, int sig, void *userdata);
 
 int cg_kill(const char *controller, const char *path, int sig, CGroupFlags flags, Set *s, cg_kill_log_func_t kill_log, void *userdata);
+int cg_kill_kernel_sigkill(const char *controller, const char *path);
 int cg_kill_recursive(const char *controller, const char *path, int sig, CGroupFlags flags, Set *s, cg_kill_log_func_t kill_log, void *userdata);
 
 int cg_split_spec(const char *spec, char **ret_controller, char **ret_path);
@@ -233,6 +240,7 @@ int cg_is_empty_recursive(const char *controller, const char *path);
 
 int cg_get_root_path(char **path);
 
+int cg_path_get_cgroupid(const char *path, uint64_t *ret);
 int cg_path_get_session(const char *path, char **session);
 int cg_path_get_owner_uid(const char *path, uid_t *uid);
 int cg_path_get_unit(const char *path, char **unit);
@@ -272,6 +280,7 @@ int cg_kernel_controllers(Set **controllers);
 
 bool cg_ns_supported(void);
 bool cg_freezer_supported(void);
+bool cg_kill_supported(void);
 
 int cg_all_unified(void);
 int cg_hybrid_unified(void);
@@ -307,3 +316,12 @@ typedef enum ManagedOOMPreference {
 
 const char* managed_oom_preference_to_string(ManagedOOMPreference a) _const_;
 ManagedOOMPreference managed_oom_preference_from_string(const char *s) _pure_;
+
+/* The structure to pass to name_to_handle_at() on cgroupfs2 */
+typedef union {
+        struct file_handle file_handle;
+        uint8_t space[offsetof(struct file_handle, f_handle) + sizeof(uint64_t)];
+} cg_file_handle;
+
+#define CG_FILE_HANDLE_INIT { .file_handle.handle_bytes = sizeof(uint64_t) }
+#define CG_FILE_HANDLE_CGROUPID(fh) (*(uint64_t*) (fh).file_handle.f_handle)

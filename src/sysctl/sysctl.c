@@ -369,7 +369,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         if (arg_cat_config && argc > optind)
@@ -410,7 +410,7 @@ static int run(int argc, char *argv[]) {
                         return log_error_errno(r, "Failed to enumerate sysctl.d files: %m");
 
                 if (arg_cat_config) {
-                        (void) pager_open(arg_pager_flags);
+                        pager_open(arg_pager_flags);
 
                         return cat_files(NULL, files, 0);
                 }

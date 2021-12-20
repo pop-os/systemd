@@ -120,7 +120,8 @@ basic_dns_sources += custom_target(
 libsystemd_resolve_core = static_library(
         'systemd-resolve-core',
         basic_dns_sources,
-        include_directories : includes)
+        include_directories : includes,
+        build_by_default : false)
 
 systemd_resolved_sources += custom_target(
         'resolved_gperf.c',
@@ -166,8 +167,7 @@ custom_target(
         'resolved.conf',
         input : 'resolved.conf.in',
         output : 'resolved.conf',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true,
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
         install : conf.get('ENABLE_RESOLVE') == 1 and install_sysconfdir_samples,
         install_dir : pkgsysconfdir)
 
@@ -177,14 +177,14 @@ tests += [
         [['src/resolve/test-resolve-tables.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm]],
 
         [['src/resolve/test-dns-packet.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm]],
 
@@ -193,28 +193,29 @@ tests += [
           'src/resolve/resolved-etc-hosts.h'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm]],
 
         [['src/resolve/test-resolved-packet.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm]],
 
         [['src/resolve/test-dnssec.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
-          libm]],
+          libm],
+         [], 'HAVE_OPENSSL_OR_GCRYPT'],
 
         [['src/resolve/test-dnssec-complex.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm],
          [], '', 'manual'],
@@ -224,7 +225,7 @@ fuzzers += [
         [['src/resolve/fuzz-dns-packet.c'],
          [libsystemd_resolve_core,
           libshared],
-         [libgcrypt,
+         [lib_openssl_or_gcrypt,
           libgpg_error,
           libm]],
 ]

@@ -9,8 +9,8 @@ basic_sources = files('''
         alloc-util.h
         architecture.c
         architecture.h
-        arphrd-list.c
-        arphrd-list.h
+        arphrd-util.c
+        arphrd-util.h
         async.c
         async.h
         audit-util.c
@@ -25,12 +25,12 @@ basic_sources = files('''
         capability-util.h
         cgroup-util.c
         cgroup-util.h
+        chase-symlinks.c
+        chase-symlinks.h
         chattr-util.c
         chattr-util.h
         conf-files.c
         conf-files.h
-        creds-util.c
-        creds-util.h
         def.h
         dirent-util.c
         dirent-util.h
@@ -54,12 +54,16 @@ basic_sources = files('''
         fd-util.h
         fileio.c
         fileio.h
+        filesystems.c
+        filesystems.h
         format-util.c
         format-util.h
         fs-util.c
         fs-util.h
         glob-util.c
         glob-util.h
+        glyph-util.c
+        glyph-util.h
         gunicode.c
         gunicode.h
         hash-funcs.c
@@ -68,23 +72,28 @@ basic_sources = files('''
         hashmap.h
         hexdecoct.c
         hexdecoct.h
+        hmac.c
+        hmac.h
         hostname-util.c
         hostname-util.h
         in-addr-util.c
         in-addr-util.h
+        inotify-util.c
+        inotify-util.h
         io-util.c
         io-util.h
-        ioprio.h
-        khash.c
-        khash.h
+        ioprio-util.c
+        ioprio-util.h
         limits-util.c
         limits-util.h
         linux/btrfs.h
         linux/btrfs_tree.h
         linux/can/netlink.h
         linux/can/vxcan.h
+        linux/cfm_bridge.h
         linux/fib_rules.h
         linux/fou.h
+        linux/genetlink.h
         linux/hdlc/ioctl.h
         linux/if.h
         linux/if_addr.h
@@ -100,7 +109,7 @@ basic_sources = files('''
         linux/ipv6_route.h
         linux/l2tp.h
         linux/libc-compat.h
-        linux/loadavg.h
+        linux/mrp_bridge.h
         linux/netdevice.h
         linux/netfilter/nf_tables.h
         linux/netfilter/nfnetlink.h
@@ -130,6 +139,7 @@ basic_sources = files('''
         missing_fcntl.h
         missing_fs.h
         missing_input.h
+        missing_ioprio.h
         missing_keyctl.h
         missing_magic.h
         missing_mman.h
@@ -184,6 +194,8 @@ basic_sources = files('''
         raw-reboot.h
         recovery-key.c
         recovery-key.h
+        recurse-dir.c
+        recurse-dir.h
         replace-var.c
         replace-var.h
         rlimit-util.c
@@ -215,6 +227,8 @@ basic_sources = files('''
         strv.h
         strxcpyx.c
         strxcpyx.h
+        sync-util.c
+        sync-util.h
         sysctl-util.c
         sysctl-util.h
         syslog-util.c
@@ -330,6 +344,7 @@ arch_list = [
         'arm64',
         'i386',
         'ia64',
+        'loongarch64',
         'm68k',
         'mips64',
         'mips64n32',
@@ -365,6 +380,44 @@ run_target(
 
 ############################################################
 
+filesystem_includes = ['linux/magic.h',
+                       'linux/gfs2_ondisk.h']
+
+check_filesystems = find_program('check-filesystems.sh')
+r = run_command([check_filesystems, cpp, 'filesystems-gperf.gperf'] + filesystem_includes)
+if r.returncode() != 0
+        error('found unknown filesystem(s) defined in kernel headers:\n\n' + r.stdout())
+        r.stdout()
+endif
+
+filesystems_gperf_h = custom_target(
+        'filesystems-gperf.h',
+        input : 'filesystems-gperf.gperf',
+        output : 'filesystems-gperf.h',
+        command : [gperf, '@INPUT@', '--output-file', '@OUTPUT@'])
+
+generate_filesystem_list = find_program('generate-filesystem-list.py')
+fname = 'filesystem-list.h'
+filesystem_list_h = custom_target(
+        fname,
+        input : 'filesystems-gperf.gperf',
+        output : fname,
+        command : [generate_filesystem_list,
+                   '@INPUT@'],
+        capture : true)
+
+generate_filesystem_switch_case_h = find_program('generate-filesystem-switch-case.py')
+fname = 'filesystem-switch-case.h'
+filesystem_switch_case_h = custom_target(
+        fname,
+        input : 'filesystems-gperf.gperf',
+        output : 'filesystem-switch-case.h',
+        command : [generate_filesystem_switch_case_h,
+                   '@INPUT@'],
+        capture : true)
+
+basic_sources += [filesystem_list_h, filesystem_switch_case_h, filesystems_gperf_h]
+
 libbasic = static_library(
         'basic',
         basic_sources,
@@ -375,7 +428,7 @@ libbasic = static_library(
                         libcap,
                         libm],
         c_args : ['-fvisibility=default'],
-        install : false)
+        build_by_default : false)
 
 ############################################################
 
@@ -390,4 +443,5 @@ libbasic_gcrypt = static_library(
         basic_gcrypt_sources,
         include_directories : basic_includes,
         dependencies : [libgcrypt],
-        c_args : ['-fvisibility=default'])
+        c_args : ['-fvisibility=default'],
+        build_by_default : false)

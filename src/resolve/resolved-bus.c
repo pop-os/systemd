@@ -135,7 +135,7 @@ static int reply_query_state(DnsQuery *q) {
         case DNS_TRANSACTION_VALIDATING:
         case DNS_TRANSACTION_SUCCESS:
         default:
-                assert_not_reached("Impossible state");
+                assert_not_reached();
         }
 }
 
@@ -1005,6 +1005,7 @@ static void resolve_service_all_complete(DnsQuery *q) {
                                         goto finish;
                                 }
 
+                                assert(bad->auxiliary_result < 0);
                                 r = bad->auxiliary_result;
                                 goto finish;
                         }
@@ -1112,7 +1113,7 @@ static void resolve_service_hostname_complete(DnsQuery *q) {
                 return;
 
         /* This auxiliary lookup is finished or failed, let's see if all are finished now. */
-        q->auxiliary_result = r;
+        q->auxiliary_result = r < 0 ? r : 0;
         resolve_service_all_complete(q->auxiliary_for);
 }
 

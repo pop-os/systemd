@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "env-util.h"
 #include "random-util.h"
 #include "serialize.h"
 #include "string-util.h"
@@ -7,10 +8,8 @@
 #include "tests.h"
 #include "time-util.h"
 
-static void test_parse_sec(void) {
+TEST(parse_sec) {
         usec_t u;
-
-        log_info("/* %s */", __func__);
 
         assert_se(parse_sec("5s", &u) >= 0);
         assert_se(u == 5 * USEC_PER_SEC);
@@ -71,10 +70,8 @@ static void test_parse_sec(void) {
         assert_se(parse_sec("1234..", &u) < 0);
 }
 
-static void test_parse_sec_fix_0(void) {
+TEST(parse_sec_fix_0) {
         usec_t u;
-
-        log_info("/* %s */", __func__);
 
         assert_se(parse_sec_fix_0("5s", &u) >= 0);
         assert_se(u == 5 * USEC_PER_SEC);
@@ -86,10 +83,8 @@ static void test_parse_sec_fix_0(void) {
         assert_se(u == USEC_INFINITY);
 }
 
-static void test_parse_sec_def_infinity(void) {
+TEST(parse_sec_def_infinity) {
         usec_t u;
-
-        log_info("/* %s */", __func__);
 
         assert_se(parse_sec_def_infinity("5s", &u) >= 0);
         assert_se(u == 5 * USEC_PER_SEC);
@@ -106,10 +101,8 @@ static void test_parse_sec_def_infinity(void) {
         assert_se(parse_sec_def_infinity("-5s", &u) < 0);
 }
 
-static void test_parse_time(void) {
+TEST(parse_time) {
         usec_t u;
-
-        log_info("/* %s */", __func__);
 
         assert_se(parse_time("5", &u, 1) >= 0);
         assert_se(u == 5);
@@ -133,10 +126,8 @@ static void test_parse_time(void) {
         assert_se(parse_time("1.1111111111111y", &u, 1) >= 0);
 }
 
-static void test_parse_nsec(void) {
+TEST(parse_nsec) {
         nsec_t u;
-
-        log_info("/* %s */", __func__);
 
         assert_se(parse_nsec("5s", &u) >= 0);
         assert_se(u == 5 * NSEC_PER_SEC);
@@ -216,7 +207,7 @@ static void test_format_timespan_one(usec_t x, usec_t accuracy) {
         assert_se(x / accuracy == y / accuracy);
 }
 
-static void test_format_timespan(usec_t accuracy) {
+static void test_format_timespan_accuracy(usec_t accuracy) {
         log_info("/* %s accuracy="USEC_FMT" */", __func__, accuracy);
 
         test_format_timespan_one(0, accuracy);
@@ -243,9 +234,13 @@ static void test_format_timespan(usec_t accuracy) {
         test_format_timespan_one(USEC_INFINITY, accuracy);
 }
 
-static void test_verify_timezone(void) {
-        log_info("/* %s */", __func__);
+TEST(format_timespan) {
+        test_format_timespan_accuracy(1);
+        test_format_timespan_accuracy(USEC_PER_MSEC);
+        test_format_timespan_accuracy(USEC_PER_SEC);
+}
 
+TEST(verify_timezone) {
         assert_se(verify_timezone("Europe/Berlin", LOG_DEBUG) == 0);
         assert_se(verify_timezone("Australia/Sydney", LOG_DEBUG) == 0);
         assert_se(verify_timezone("Europe/Do not exist", LOG_DEBUG) == -EINVAL);
@@ -254,20 +249,16 @@ static void test_verify_timezone(void) {
         assert_se(verify_timezone("DoNotExist/", LOG_DEBUG) == -EINVAL);
 }
 
-static void test_timezone_is_valid(void) {
-        log_info("/* %s */", __func__);
-
+TEST(timezone_is_valid) {
         assert_se(timezone_is_valid("Europe/Berlin", LOG_ERR));
         assert_se(timezone_is_valid("Australia/Sydney", LOG_ERR));
         assert_se(!timezone_is_valid("Europe/Do not exist", LOG_ERR));
 }
 
-static void test_get_timezones(void) {
+TEST(get_timezones) {
         _cleanup_strv_free_ char **zones = NULL;
         int r;
         char **zone;
-
-        log_info("/* %s */", __func__);
 
         r = get_timezones(&zones);
         assert_se(r == 0);
@@ -279,9 +270,7 @@ static void test_get_timezones(void) {
         }
 }
 
-static void test_usec_add(void) {
-        log_info("/* %s */", __func__);
-
+TEST(usec_add) {
         assert_se(usec_add(0, 0) == 0);
         assert_se(usec_add(1, 4) == 5);
         assert_se(usec_add(USEC_INFINITY, 5) == USEC_INFINITY);
@@ -292,9 +281,7 @@ static void test_usec_add(void) {
         assert_se(usec_add(USEC_INFINITY, 2) == USEC_INFINITY);
 }
 
-static void test_usec_sub_unsigned(void) {
-        log_info("/* %s */", __func__);
-
+TEST(usec_sub_unsigned) {
         assert_se(usec_sub_unsigned(0, 0) == 0);
         assert_se(usec_sub_unsigned(0, 2) == 0);
         assert_se(usec_sub_unsigned(0, USEC_INFINITY) == 0);
@@ -315,9 +302,7 @@ static void test_usec_sub_unsigned(void) {
         assert_se(usec_sub_unsigned(USEC_INFINITY, USEC_INFINITY) == USEC_INFINITY);
 }
 
-static void test_usec_sub_signed(void) {
-        log_info("/* %s */", __func__);
-
+TEST(usec_sub_signed) {
         assert_se(usec_sub_signed(0, 0) == 0);
         assert_se(usec_sub_signed(4, 1) == 3);
         assert_se(usec_sub_signed(4, 4) == 0);
@@ -328,15 +313,12 @@ static void test_usec_sub_signed(void) {
         assert_se(usec_sub_signed(USEC_INFINITY, 5) == USEC_INFINITY);
 }
 
-static void test_format_timestamp(void) {
-        log_info("/* %s */", __func__);
-
+TEST(format_timestamp) {
         for (unsigned i = 0; i < 100; i++) {
                 char buf[MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESPAN_MAX)];
                 usec_t x, y;
 
-                random_bytes(&x, sizeof(x));
-                x = x % (2147483600 * USEC_PER_SEC) + 1;
+                x = random_u64_range(2147483600 * USEC_PER_SEC) + 1;
 
                 assert_se(format_timestamp(buf, sizeof(buf), x));
                 log_debug("%s", buf);
@@ -370,9 +352,24 @@ static void test_format_timestamp(void) {
         }
 }
 
-static void test_format_timestamp_relative(void) {
-        log_info("/* %s */", __func__);
+TEST(FORMAT_TIMESTAMP) {
+        for (unsigned i = 0; i < 100; i++) {
+                _cleanup_free_ char *buf;
+                usec_t x, y;
 
+                x = random_u64_range(2147483600 * USEC_PER_SEC) + 1;
+
+                /* strbuf() is to test the macro in an argument to a function call. */
+                assert_se(buf = strdup(FORMAT_TIMESTAMP(x)));
+                log_debug("%s", buf);
+                assert_se(parse_timestamp(buf, &y) >= 0);
+                assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
+
+                assert_se(streq(FORMAT_TIMESTAMP(x), buf));
+        }
+}
+
+TEST(format_timestamp_relative) {
         char buf[MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESPAN_MAX)];
         usec_t x;
 
@@ -452,9 +449,7 @@ static void test_format_timestamp_utc_one(usec_t val, const char *result) {
         assert_se(streq_ptr(t, result));
 }
 
-static void test_format_timestamp_utc(void) {
-        log_info("/* %s */", __func__);
-
+TEST(format_timestamp_utc) {
         test_format_timestamp_utc_one(0, NULL);
         test_format_timestamp_utc_one(1, "Thu 1970-01-01 00:00:00 UTC");
         test_format_timestamp_utc_one(USEC_PER_SEC, "Thu 1970-01-01 00:00:01 UTC");
@@ -470,11 +465,9 @@ static void test_format_timestamp_utc(void) {
         test_format_timestamp_utc_one(USEC_INFINITY, NULL);
 }
 
-static void test_deserialize_dual_timestamp(void) {
+TEST(deserialize_dual_timestamp) {
         int r;
         dual_timestamp t;
-
-        log_info("/* %s */", __func__);
 
         r = deserialize_dual_timestamp("1234 5678", &t);
         assert_se(r == 0);
@@ -520,10 +513,8 @@ static void assert_similar(usec_t a, usec_t b) {
         assert_se(d < 10*USEC_PER_SEC);
 }
 
-static void test_usec_shift_clock(void) {
+TEST(usec_shift_clock) {
         usec_t rt, mn, bt;
-
-        log_info("/* %s */", __func__);
 
         rt = now(CLOCK_REALTIME);
         mn = now(CLOCK_MONOTONIC);
@@ -549,8 +540,8 @@ static void test_usec_shift_clock(void) {
         }
 }
 
-static void test_in_utc_timezone(void) {
-        log_info("/* %s */", __func__);
+TEST(in_utc_timezone) {
+        const char *tz = getenv("TZ");
 
         assert_se(setenv("TZ", ":UTC", 1) >= 0);
         assert_se(in_utc_timezone());
@@ -564,16 +555,14 @@ static void test_in_utc_timezone(void) {
         assert_se(streq(tzname[0], "CET"));
         assert_se(streq(tzname[1], "CEST"));
 
-        assert_se(unsetenv("TZ") == 0);
+        assert_se(set_unset_env("TZ", tz, true) == 0);
+        tzset();
 }
 
-static void test_map_clock_usec(void) {
+TEST(map_clock_usec) {
         usec_t nowr, x, y, z;
 
-        log_info("/* %s */", __func__);
-        nowr = now(CLOCK_REALTIME);
-
-        x = nowr; /* right now */
+        x = nowr = now(CLOCK_REALTIME); /* right now */
         y = map_clock_usec(x, CLOCK_REALTIME, CLOCK_MONOTONIC);
         z = map_clock_usec(y, CLOCK_MONOTONIC, CLOCK_REALTIME);
         /* Converting forth and back will introduce inaccuracies, since we cannot query both clocks atomically, but it should be small. Even on the slowest CI smaller than 1h */
@@ -599,9 +588,7 @@ static void test_map_clock_usec(void) {
         }
 }
 
-int main(int argc, char *argv[]) {
-        test_setup_logging(LOG_INFO);
-
+static void setup_test(void) {
         log_info("realtime=" USEC_FMT "\n"
                  "monotonic=" USEC_FMT "\n"
                  "boottime=" USEC_FMT "\n",
@@ -609,35 +596,13 @@ int main(int argc, char *argv[]) {
                  now(CLOCK_MONOTONIC),
                  now(clock_boottime_or_monotonic()));
 
-        test_parse_sec();
-        test_parse_sec_fix_0();
-        test_parse_sec_def_infinity();
-        test_parse_time();
-        test_parse_nsec();
-        test_format_timespan(1);
-        test_format_timespan(USEC_PER_MSEC);
-        test_format_timespan(USEC_PER_SEC);
-        test_verify_timezone();
-        test_timezone_is_valid();
-        test_get_timezones();
-        test_usec_add();
-        test_usec_sub_signed();
-        test_usec_sub_unsigned();
-        test_format_timestamp();
-        test_format_timestamp_relative();
-        test_format_timestamp_utc();
-        test_deserialize_dual_timestamp();
-        test_usec_shift_clock();
-        test_in_utc_timezone();
-        test_map_clock_usec();
-
         /* Ensure time_t is signed */
         assert_cc((time_t) -1 < (time_t) 1);
 
         /* Ensure TIME_T_MAX works correctly */
         uintmax_t x = TIME_T_MAX;
         x++;
-        assert((time_t) x < 0);
-
-        return 0;
+        assert_se((time_t) x < 0);
 }
+
+DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, setup_test(), /* no outro */);

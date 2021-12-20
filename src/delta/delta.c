@@ -6,11 +6,12 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "chase-symlinks.h"
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
+#include "glyph-util.h"
 #include "hashmap.h"
-#include "locale-util.h"
 #include "log.h"
 #include "main-func.h"
 #include "nulstr-util.h"
@@ -289,7 +290,6 @@ static int enumerate_dir(
                 const char *path, bool dropins) {
 
         _cleanup_closedir_ DIR *d = NULL;
-        struct dirent *de;
         _cleanup_strv_free_ char **files = NULL, **dirs = NULL;
         size_t n_files = 0, n_dirs = 0;
         char **t;
@@ -625,7 +625,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         return 1;
@@ -648,7 +648,7 @@ static int run(int argc, char *argv[]) {
         else if (arg_diff)
                 arg_flags |= SHOW_OVERRIDDEN;
 
-        (void) pager_open(arg_pager_flags);
+        pager_open(arg_pager_flags);
 
         if (optind < argc) {
                 int i;

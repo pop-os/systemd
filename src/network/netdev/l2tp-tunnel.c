@@ -104,7 +104,7 @@ static int netdev_l2tp_fill_message_tunnel(NetDev *netdev, union in_addr_union *
 
         assert(t);
 
-        r = sd_genl_message_new(netdev->manager->genl, SD_GENL_L2TP, L2TP_CMD_TUNNEL_CREATE, &m);
+        r = sd_genl_message_new(netdev->manager->genl, L2TP_GENL_NAME, L2TP_CMD_TUNNEL_CREATE, &m);
         if (r < 0)
                 return log_netdev_error_errno(netdev, r, "Failed to create generic netlink message: %m");
 
@@ -195,7 +195,7 @@ static int netdev_l2tp_fill_message_session(NetDev *netdev, L2tpSession *session
         assert(session);
         assert(session->tunnel);
 
-        r = sd_genl_message_new(netdev->manager->genl, SD_GENL_L2TP, L2TP_CMD_SESSION_CREATE, &m);
+        r = sd_genl_message_new(netdev->manager->genl, L2TP_GENL_NAME, L2TP_CMD_SESSION_CREATE, &m);
         if (r < 0)
                 return log_netdev_error_errno(netdev, r, "Failed to create generic netlink message: %m");
 
@@ -285,10 +285,6 @@ static int l2tp_acquire_local_address(L2tpTunnel *t, Link *link, union in_addr_u
                 if (l2tp_acquire_local_address_one(t, a, ret) >= 0)
                         return 1;
 
-        SET_FOREACH(a, link->addresses_foreign)
-                if (l2tp_acquire_local_address_one(t, a, ret) >= 0)
-                        return 1;
-
         return -ENODATA;
 }
 
@@ -355,7 +351,7 @@ static int l2tp_create_tunnel_handler(sd_netlink *rtnl, sd_netlink_message *m, N
                 log_netdev_info(netdev, "netdev exists, using existing without changing its parameters");
         else if (r < 0) {
                 log_netdev_warning_errno(netdev, r, "netdev could not be created: %m");
-                netdev_drop(netdev);
+                netdev_enter_failed(netdev);
 
                 return 1;
         }

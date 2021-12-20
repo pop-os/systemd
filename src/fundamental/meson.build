@@ -3,19 +3,24 @@
 fundamental_path = meson.current_source_dir()
 
 fundamental_headers = files(
-        'efi-loader-features.h',
+        'bootspec-fundamental.h',
+        'efivars-fundamental.h',
         'macro-fundamental.h',
+        'sha256.h',
         'string-util-fundamental.h',
-        'type.h')
+        'types-fundamental.h')
 
 sources = '''
+        bootspec-fundamental.c
+        efivars-fundamental.c
         string-util-fundamental.c
+        sha256.c
 '''.split()
 
 # for sd-boot
 fundamental_source_paths = []
-foreach s : sources
-        fundamental_source_paths += join_paths(meson.current_source_dir(), s)
+foreach source : sources
+        fundamental_source_paths += meson.current_source_dir() / source
 endforeach
 
 # for libbasic

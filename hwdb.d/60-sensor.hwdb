@@ -198,13 +198,21 @@ sensor:modalias:acpi:BOSC0200*:dmi:bvnAmericanMegatrendsInc.:bvr5.11:*:svnDefaul
 sensor:modalias:acpi:BOSC0200*:dmi:bvnAmericanMegatrendsInc.:bvrP02A_C106.60E:*:svnDefaultstring:pnDefaultstring:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
-# Chuwi Hi10 Pro
+# Chuwi Hi10 Plus (CWI527)
+sensor:modalias:acpi:BOSC0200*:dmi:*:svnCHUWIINNOVATIONANDTECHNOLOGY*:pnHi10plustablet:*
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+
+# Chuwi Hi10 Pro (CWI529)
 sensor:modalias:acpi:BOSC0200*:dmi:*:svn*CHUWIINNOVATIONANDTECHNOLOGY*:pnHi10protablet:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 # Chuwi Hi10 X
 sensor:modalias:acpi:MXC6655*:dmi:*:svnCHUWIInnovationAndTechnology*:pnHi10X:*
  ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
+
+# Chuwi Hi10 Go
+sensor:modalias:acpi:MXC6655*:dmi:*:svnCHUWIINNOVATIONLIMITED:pnHi10Go:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0,-1, 0; 0, 0, 1
 
 # Chuwi Hi12
 sensor:modalias:acpi:BOSC0200*:dmi:*:svnHampoo:pnP02BD6_HI-122LP:*
@@ -240,6 +248,10 @@ sensor:modalias:acpi:BOSC0200*:dmi:*:svnHampoo*:pnP1D6_C109K:*
 # match the entire dmi-alias
 # '*' in ":*svn" is there because kernels >= 5.8 have inserted a br field there
 sensor:modalias:acpi:BOSC0200*:dmi:bvnAmericanMegatrendsInc.:bvrY13D_KB133.103:bd06/01/2018:*svnHampoo:pnDefaultstring:pvrV100:rvnHampoo:rnY13D_KB133:rvrV100:cvnDefaultstring:ct9:cvrDefaultstring:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
+
+# Chuwi SurBook Mini (CWI540)
+sensor:modalias:acpi:BOSC0200*:dmi:*:svnHampoo*:pnC3W6_AP108_4GB:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
 
 #########################################
@@ -280,6 +292,14 @@ sensor:modalias:acpi:KIOX000A*:dmi:*:svnALLDOCUBE:pni1102:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
 
 #########################################
+# Cyberbook
+#########################################
+
+# Cyberbook T116
+sensor:modalias:acpi:KIOX000A*:dmi:*:rvnDefaultstring:rnCherryTrailCR:*:sku20170531:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
+
+#########################################
 # Cytrix (Mytrix)
 #########################################
 sensor:modalias:acpi:*KIOX000A*:dmi:*svn*CytrixTechnology:*pn*Complex11t:*
@@ -289,12 +309,12 @@ sensor:modalias:acpi:*KIOX000A*:dmi:*svn*CytrixTechnology:*pn*Complex11t:*
 # Dell
 #########################################
 sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:pnVostro5581:*
- ACCEL_LOCATION=base
-
-sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:pnLatitude9520:*:ct10:*
- ACCEL_LOCATION=base
-
-sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:pnLatitude7420:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0A36:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0A3E:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0B09:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0B0B:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0B0D:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0B11:*
  ACCEL_LOCATION=base
 
 # Dell Venue 8 Pro 3845
@@ -407,6 +427,16 @@ sensor:modalias:acpi:KIOX000A*:dmi:bvnAmericanMegatrendsInc.:bvr5.11:bd05/25/201
  ACCEL_LOCATION=base
 
 #########################################
+# Hometech
+########################################
+
+# Nobody bothered to use Linux on any device of this manufacturer
+# so current marks might be too general and need fixes.
+# These values are based on Wi101 model.
+sensor:modalias:acpi:BMA250E*:dmi:*:svnInsyde*:pni101c:*
+ ACCEL_MOUNT_MATRIX=0,1,0;-1,0,0;-1,0,0
+
+#########################################
 # HP
 #########################################
 
@@ -512,6 +542,10 @@ sensor:modalias:acpi:BOSC0200*:dmi:*ThinkPadYoga11e3rdGen:*
 
 sensor:modalias:acpi:BOSC0200*:dmi:*:svnLENOVO:*pvrThinkPadYoga11e4thGen:*
  ACCEL_MOUNT_MATRIX=0, 1, 0; -1, 0, 0; 0, 0, -1
+
+# Lenovo ThinkPad Yoga 11e 5th Gen (20LN-S14900)
+sensor:modalias:acpi:BOSC0200*:dmi:*pvrThinkPadYoga11e5thGen:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, -1
 
 # Miix3-1030
 sensor:modalias:acpi:BMA250E*:dmi:bvnLENOVO:*:pvrLenovoMIIX3-1030:*

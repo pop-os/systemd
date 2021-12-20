@@ -433,62 +433,62 @@ char *format_timestamp_relative(char *buf, size_t l, usec_t t) {
                 usec_t years = d / USEC_PER_YEAR;
                 usec_t months = (d % USEC_PER_YEAR) / USEC_PER_MONTH;
 
-                snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
-                         years,
-                         years == 1 ? "year" : "years",
-                         months,
-                         months == 1 ? "month" : "months",
-                         s);
+                (void) snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
+                                years,
+                                years == 1 ? "year" : "years",
+                                months,
+                                months == 1 ? "month" : "months",
+                                s);
         } else if (d >= USEC_PER_MONTH) {
                 usec_t months = d / USEC_PER_MONTH;
                 usec_t days = (d % USEC_PER_MONTH) / USEC_PER_DAY;
 
-                snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
-                         months,
-                         months == 1 ? "month" : "months",
-                         days,
-                         days == 1 ? "day" : "days",
-                         s);
+                (void) snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
+                                months,
+                                months == 1 ? "month" : "months",
+                                days,
+                                days == 1 ? "day" : "days",
+                                s);
         } else if (d >= USEC_PER_WEEK) {
                 usec_t weeks = d / USEC_PER_WEEK;
                 usec_t days = (d % USEC_PER_WEEK) / USEC_PER_DAY;
 
-                snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
-                         weeks,
-                         weeks == 1 ? "week" : "weeks",
-                         days,
-                         days == 1 ? "day" : "days",
-                         s);
+                (void) snprintf(buf, l, USEC_FMT " %s " USEC_FMT " %s %s",
+                                weeks,
+                                weeks == 1 ? "week" : "weeks",
+                                days,
+                                days == 1 ? "day" : "days",
+                                s);
         } else if (d >= 2*USEC_PER_DAY)
-                snprintf(buf, l, USEC_FMT " days %s", d / USEC_PER_DAY, s);
+                (void) snprintf(buf, l, USEC_FMT " days %s", d / USEC_PER_DAY, s);
         else if (d >= 25*USEC_PER_HOUR)
-                snprintf(buf, l, "1 day " USEC_FMT "h %s",
-                         (d - USEC_PER_DAY) / USEC_PER_HOUR, s);
+                (void) snprintf(buf, l, "1 day " USEC_FMT "h %s",
+                                (d - USEC_PER_DAY) / USEC_PER_HOUR, s);
         else if (d >= 6*USEC_PER_HOUR)
-                snprintf(buf, l, USEC_FMT "h %s",
-                         d / USEC_PER_HOUR, s);
+                (void) snprintf(buf, l, USEC_FMT "h %s",
+                                d / USEC_PER_HOUR, s);
         else if (d >= USEC_PER_HOUR)
-                snprintf(buf, l, USEC_FMT "h " USEC_FMT "min %s",
-                         d / USEC_PER_HOUR,
-                         (d % USEC_PER_HOUR) / USEC_PER_MINUTE, s);
+                (void) snprintf(buf, l, USEC_FMT "h " USEC_FMT "min %s",
+                                d / USEC_PER_HOUR,
+                                (d % USEC_PER_HOUR) / USEC_PER_MINUTE, s);
         else if (d >= 5*USEC_PER_MINUTE)
-                snprintf(buf, l, USEC_FMT "min %s",
-                         d / USEC_PER_MINUTE, s);
+                (void) snprintf(buf, l, USEC_FMT "min %s",
+                                d / USEC_PER_MINUTE, s);
         else if (d >= USEC_PER_MINUTE)
-                snprintf(buf, l, USEC_FMT "min " USEC_FMT "s %s",
-                         d / USEC_PER_MINUTE,
-                         (d % USEC_PER_MINUTE) / USEC_PER_SEC, s);
+                (void) snprintf(buf, l, USEC_FMT "min " USEC_FMT "s %s",
+                                d / USEC_PER_MINUTE,
+                                (d % USEC_PER_MINUTE) / USEC_PER_SEC, s);
         else if (d >= USEC_PER_SEC)
-                snprintf(buf, l, USEC_FMT "s %s",
-                         d / USEC_PER_SEC, s);
+                (void) snprintf(buf, l, USEC_FMT "s %s",
+                                d / USEC_PER_SEC, s);
         else if (d >= USEC_PER_MSEC)
-                snprintf(buf, l, USEC_FMT "ms %s",
-                         d / USEC_PER_MSEC, s);
+                (void) snprintf(buf, l, USEC_FMT "ms %s",
+                                d / USEC_PER_MSEC, s);
         else if (d > 0)
-                snprintf(buf, l, USEC_FMT"us %s",
-                         d, s);
+                (void) snprintf(buf, l, USEC_FMT"us %s",
+                                d, s);
         else
-                snprintf(buf, l, "now");
+                (void) snprintf(buf, l, "now");
 
         buf[l-1] = 0;
         return buf;
@@ -553,14 +553,12 @@ char *format_timespan(char *buf, size_t l, usec_t t, usec_t accuracy) {
 
                 /* Let's see if we should shows this in dot notation */
                 if (t < USEC_PER_MINUTE && b > 0) {
-                        usec_t cc;
-                        signed char j;
+                        signed char j = 0;
 
-                        j = 0;
-                        for (cc = table[i].usec; cc > 1; cc /= 10)
+                        for (usec_t cc = table[i].usec; cc > 1; cc /= 10)
                                 j++;
 
-                        for (cc = accuracy; cc > 1; cc /= 10) {
+                        for (usec_t cc = accuracy; cc > 1; cc /= 10) {
                                 b /= 10;
                                 j--;
                         }
@@ -673,7 +671,7 @@ static int parse_timestamp_impl(const char *t, usec_t *usec, bool with_tz) {
                         goto finish;
 
                 } else if ((k = endswith(t, " ago"))) {
-                        t = strndupa(t, k - t);
+                        t = strndupa_safe(t, k - t);
 
                         r = parse_sec(t, &minus);
                         if (r < 0)
@@ -682,7 +680,7 @@ static int parse_timestamp_impl(const char *t, usec_t *usec, bool with_tz) {
                         goto finish;
 
                 } else if ((k = endswith(t, " left"))) {
-                        t = strndupa(t, k - t);
+                        t = strndupa_safe(t, k - t);
 
                         r = parse_sec(t, &plus);
                         if (r < 0)
@@ -694,7 +692,7 @@ static int parse_timestamp_impl(const char *t, usec_t *usec, bool with_tz) {
                 /* See if the timestamp is suffixed with UTC */
                 utc = endswith_no_case(t, " UTC");
                 if (utc)
-                        t = strndupa(t, utc - t);
+                        t = strndupa_safe(t, utc - t);
                 else {
                         const char *e = NULL;
                         int j;
@@ -725,7 +723,7 @@ static int parse_timestamp_impl(const char *t, usec_t *usec, bool with_tz) {
 
                         if (IN_SET(j, 0, 1)) {
                                 /* Found one of the two timezones specified. */
-                                t = strndupa(t, e - t - 1);
+                                t = strndupa_safe(t, e - t - 1);
                                 dst = j;
                                 tzn = tzname[j];
                         }
@@ -926,7 +924,7 @@ int parse_timestamp(const char *t, usec_t *usec) {
 
                 /* Cut off the timezone if we don't need it. */
                 if (with_tz)
-                        t = strndupa(t, last_space - t);
+                        t = strndupa_safe(t, last_space - t);
 
                 shared->return_value = parse_timestamp_impl(t, &shared->usec, with_tz);
 
@@ -1334,10 +1332,10 @@ static int get_timezones_from_tzdata_zi(char ***ret) {
                         continue;
 
                 char *tz;
-                if (*type == 'Z' || *type == 'z')
+                if (IN_SET(*type, 'Z', 'z'))
                         /* Zone lines have timezone in field 1. */
                         tz = f1;
-                else if (*type == 'L' || *type == 'l')
+                else if (IN_SET(*type, 'L', 'l'))
                         /* Link lines have timezone in field 2. */
                         tz = f2;
                 else

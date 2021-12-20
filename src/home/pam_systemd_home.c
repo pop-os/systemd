@@ -324,6 +324,33 @@ static int handle_generic_user_record_error(
                         return PAM_SERVICE_ERR;
                 }
 
+        } else if (sd_bus_error_has_name(error, BUS_ERROR_BAD_RECOVERY_KEY)) {
+                _cleanup_(erase_and_freep) char *newp = NULL;
+
+                assert(secret);
+
+                /* Hmm, homed asks for recovery key (because no regular password is defined maybe)? Provide it. */
+
+                if (strv_isempty(secret->password))
+                        r = pam_prompt(handle, PAM_PROMPT_ECHO_OFF, &newp, "Recovery key: ");
+                else {
+                        (void) pam_prompt(handle, PAM_ERROR_MSG, NULL, "Password/recovery key incorrect or not sufficient for authentication of user %s.", user_name);
+                        r = pam_prompt(handle, PAM_PROMPT_ECHO_OFF, &newp, "Sorry, reenter recovery key: ");
+                }
+                if (r != PAM_SUCCESS)
+                        return PAM_CONV_ERR; /* no logging here */
+
+                if (isempty(newp)) {
+                        pam_syslog(handle, LOG_DEBUG, "Recovery key request aborted.");
+                        return PAM_AUTHTOK_ERR;
+                }
+
+                r = user_record_set_password(secret, STRV_MAKE(newp), true);
+                if (r < 0) {
+                        pam_syslog(handle, LOG_ERR, "Failed to store recovery key: %s", strerror_safe(r));
+                        return PAM_SERVICE_ERR;
+                }
+
         } else if (sd_bus_error_has_name(error, BUS_ERROR_BAD_PASSWORD_AND_NO_TOKEN)) {
                 _cleanup_(erase_and_freep) char *newp = NULL;
 
@@ -909,9 +936,8 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
                 usec_t n = now(CLOCK_REALTIME);
 
                 if (t > n) {
-                        char buf[FORMAT_TIMESPAN_MAX];
                         (void) pam_prompt(handle, PAM_ERROR_MSG, NULL, "Too many logins, try again in %s.",
-                                          format_timespan(buf, sizeof(buf), t - n, USEC_PER_SEC));
+                                          FORMAT_TIMESPAN(t - n, USEC_PER_SEC));
 
                         return PAM_MAXTRIES;
                 }

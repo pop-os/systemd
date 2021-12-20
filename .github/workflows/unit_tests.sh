@@ -1,5 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
+# shellcheck disable=SC2206
 PHASES=(${@:-SETUP RUN RUN_ASAN_UBSAN CLEANUP})
 RELEASE="$(lsb_release -cs)"
 ADDITIONAL_DEPS=(
@@ -27,6 +29,8 @@ function info() {
 
 set -ex
 
+MESON_ARGS=(-Dcryptolib=${CRYPTOLIB:-auto})
+
 for phase in "${PHASES[@]}"; do
     case $phase in
         SETUP)
@@ -42,8 +46,10 @@ for phase in "${PHASES[@]}"; do
             if [[ "$phase" = "RUN_CLANG" ]]; then
                 export CC=clang
                 export CXX=clang++
+                # The docs build is slow and is not affected by compiler/flags, so do it just once
+                MESON_ARGS+=(-Dman=true)
             fi
-            meson --werror -Dtests=unsafe -Dslow-tests=true -Dfuzz-tests=true -Dman=true build
+            meson --werror -Dtests=unsafe -Dslow-tests=true -Dfuzz-tests=true "${MESON_ARGS[@]}" build
             ninja -C build -v
             meson test -C build --print-errorlogs
             ;;

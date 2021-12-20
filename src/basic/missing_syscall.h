@@ -20,6 +20,7 @@
 #include <asm/sgidefs.h>
 #endif
 
+#include "macro.h"
 #include "missing_keyctl.h"
 #include "missing_stat.h"
 #include "missing_syscall_def.h"
@@ -37,6 +38,26 @@ static inline int missing_pivot_root(const char *new_root, const char *put_old) 
 }
 
 #  define pivot_root missing_pivot_root
+#endif
+
+/* ======================================================================= */
+
+#if !HAVE_IOPRIO_GET
+static inline int missing_ioprio_get(int which, int who) {
+        return syscall(__NR_ioprio_get, which, who);
+}
+
+#  define ioprio_get missing_ioprio_get
+#endif
+
+/* ======================================================================= */
+
+#if !HAVE_IOPRIO_SET
+static inline int missing_ioprio_set(int which, int who, int ioprio) {
+        return syscall(__NR_ioprio_set, which, who, ioprio);
+}
+
+#  define ioprio_set missing_ioprio_set
 #endif
 
 /* ======================================================================= */
@@ -445,8 +466,16 @@ struct mount_attr;
 #define MOUNT_ATTR_IDMAP 0x00100000
 #endif
 
+#ifndef MOUNT_ATTR_NOSYMFOLLOW
+#define MOUNT_ATTR_NOSYMFOLLOW 0x00200000
+#endif
+
 #ifndef AT_RECURSIVE
 #define AT_RECURSIVE 0x8000
+#endif
+
+#ifndef MOUNT_ATTR_SIZE_VER0
+#define MOUNT_ATTR_SIZE_VER0 32
 #endif
 
 static inline int missing_mount_setattr(
@@ -519,4 +548,20 @@ static inline int missing_move_mount(
 }
 
 #  define move_mount missing_move_mount
+#endif
+
+/* ======================================================================= */
+
+#if !HAVE_GETDENTS64
+
+static inline ssize_t missing_getdents64(int fd, void *buffer, size_t length) {
+#  if defined __NR_getdents64 && __NR_getdents64 >= 0
+        return syscall(__NR_getdents64, fd, buffer, length);
+#  else
+        errno = ENOSYS;
+        return -1;
+#  endif
+}
+
+#  define getdents64 missing_getdents64
 #endif
