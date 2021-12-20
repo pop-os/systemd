@@ -1,3 +1,10 @@
+systemd (250~rc3-1) UNRELEASED; urgency=medium
+
+  * New upstream version 250~rc3
+  * Switch debian-branch to experimental
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 20 Dec 2021 22:21:34 +0100
+
 systemd (249.7-1) unstable; urgency=medium
 
   * New upstream version 249.7
