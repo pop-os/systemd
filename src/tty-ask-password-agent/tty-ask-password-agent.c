@@ -24,13 +24,13 @@
 #include "exit-status.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "fs-util.h"
 #include "hashmap.h"
+#include "inotify-util.h"
 #include "io-util.h"
 #include "macro.h"
 #include "main-func.h"
 #include "memory-util.h"
-#include "mkdir.h"
+#include "mkdir-label.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
@@ -295,7 +295,6 @@ static int wall_tty_block(void) {
 
 static int process_password_files(void) {
         _cleanup_closedir_ DIR *d = NULL;
-        struct dirent *de;
         int r = 0;
 
         d = opendir("/run/systemd/ask-password");
@@ -338,7 +337,8 @@ static int process_and_watch_password_files(bool watch) {
                 _FD_MAX
         };
 
-        _cleanup_close_ int notify = -1, signal_fd = -1, tty_block_fd = -1;
+        _unused_ _cleanup_close_ int tty_block_fd = -1;
+        _cleanup_close_ int notify = -1, signal_fd = -1;
         struct pollfd pollfd[_FD_MAX];
         sigset_t mask;
         int r;
@@ -508,7 +508,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         if (optind != argc)

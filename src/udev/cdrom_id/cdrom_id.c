@@ -102,22 +102,18 @@ typedef struct Context {
         uint64_t media_session_last_offset;
 } Context;
 
+#define CONTEXT_EMPTY {                                 \
+                .fd = -1,                               \
+                .media_feature = _FEATURE_INVALID,      \
+                .media_state = _MEDIA_STATE_INVALID,    \
+        }
+
 static void context_clear(Context *c) {
         if (!c)
                 return;
 
         safe_close(c->fd);
         free(c->drive_features);
-}
-
-static void context_init(Context *c) {
-        assert(c);
-
-        *c = (Context) {
-                .fd = -1,
-                .media_feature = _FEATURE_INVALID,
-                .media_state = _MEDIA_STATE_INVALID,
-        };
 }
 
 static bool drive_has_feature(const Context *c, Feature f) {
@@ -943,7 +939,7 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'h':
                         return help();
                 default:
-                        assert_not_reached("Unknown option");
+                        assert_not_reached();
                 }
 
         arg_node = argv[optind];
@@ -954,15 +950,13 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_(context_clear) Context c;
+        _cleanup_(context_clear) Context c = CONTEXT_EMPTY;
         int r;
 
         log_set_target(LOG_TARGET_AUTO);
         udev_parse_config();
         log_parse_environment();
         log_open();
-
-        context_init(&c);
 
         r = parse_argv(argc, argv);
         if (r <= 0)

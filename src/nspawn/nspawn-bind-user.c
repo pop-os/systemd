@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "chase-symlinks.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
-#include "fs-util.h"
 #include "nspawn-bind-user.h"
 #include "nspawn.h"
 #include "path-util.h"
@@ -24,7 +24,7 @@ static int check_etc_passwd_collisions(
         assert(directory);
         assert(name || uid_is_valid(uid));
 
-        r = chase_symlinks_and_fopen_unlocked("/etc/passwd", directory, CHASE_PREFIX_ROOT, "re", &f, NULL);
+        r = chase_symlinks_and_fopen_unlocked("/etc/passwd", directory, CHASE_PREFIX_ROOT, "re", NULL, &f);
         if (r == -ENOENT)
                 return 0; /* no user database? then no user, hence no collision */
         if (r < 0)
@@ -57,7 +57,7 @@ static int check_etc_group_collisions(
         assert(directory);
         assert(name || gid_is_valid(gid));
 
-        r = chase_symlinks_and_fopen_unlocked("/etc/group", directory, CHASE_PREFIX_ROOT, "re", &f, NULL);
+        r = chase_symlinks_and_fopen_unlocked("/etc/group", directory, CHASE_PREFIX_ROOT, "re", NULL, &f);
         if (r == -ENOENT)
                 return 0; /* no group database? then no group, hence no collision */
         if (r < 0)
@@ -128,7 +128,7 @@ static int convert_user(
                                         JSON_BUILD_PAIR("gid", JSON_BUILD_UNSIGNED(allocate_uid)),
                                         JSON_BUILD_PAIR_CONDITION(u->disposition >= 0, "disposition", JSON_BUILD_STRING(user_disposition_to_string(u->disposition))),
                                         JSON_BUILD_PAIR("homeDirectory", JSON_BUILD_STRING(h)),
-                                        JSON_BUILD_PAIR("service", JSON_BUILD_STRING("io.systemd.NSpawn")),
+                                        JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.NSpawn")),
                                         JSON_BUILD_PAIR_CONDITION(!strv_isempty(u->hashed_password), "privileged", JSON_BUILD_OBJECT(
                                                                                   JSON_BUILD_PAIR("hashedPassword", JSON_BUILD_VARIANT(hp))))));
         if (r < 0)
@@ -140,7 +140,7 @@ static int convert_user(
                                         JSON_BUILD_PAIR("groupName", JSON_BUILD_STRING(g->group_name)),
                                         JSON_BUILD_PAIR("gid", JSON_BUILD_UNSIGNED(allocate_uid)),
                                         JSON_BUILD_PAIR_CONDITION(g->disposition >= 0, "disposition", JSON_BUILD_STRING(user_disposition_to_string(g->disposition))),
-                                        JSON_BUILD_PAIR("service", JSON_BUILD_STRING("io.systemd.NSpawn"))));
+                                        JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.NSpawn"))));
         if (r < 0)
                 return log_error_errno(r, "Failed to build container group record: %m");
 
@@ -171,10 +171,8 @@ static int find_free_uid(const char *directory, uid_t max_uid, uid_t *current_ui
 
                 /* We want to use the UID also as GID, hence check for it in /etc/group too */
                 r = check_etc_group_collisions(directory, NULL, (gid_t) *current_uid);
-                if (r < 0)
+                if (r <= 0)
                         return r;
-                if (r == 0) /* free! yay! */
-                        return 0;
         }
 }
 

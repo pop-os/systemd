@@ -25,12 +25,13 @@ libsystemd_journal_remote = static_library(
         'systemd-journal-remote',
         libsystemd_journal_remote_sources,
         include_directories : journal_includes,
+        link_with : libjournal_core,
         dependencies : [threads,
                         libmicrohttpd,
                         libgnutls,
                         libxz,
                         liblz4],
-        install : false)
+        build_by_default : false)
 
 systemd_journal_remote_sources = files('''
         journal-remote-main.c
@@ -54,15 +55,14 @@ foreach tuple : in_files
                 file,
                 input : file + '.in',
                 output: file,
-                command : [meson_render_jinja2, config_h, '@INPUT@'],
-                capture : true,
+                command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
                 install : tuple[1],
                 install_dir : pkgsysconfdir)
 endforeach
 
 if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
         install_data('browse.html',
-                     install_dir : join_paths(pkgdatadir, 'gatewayd'))
+                     install_dir : pkgdatadir / 'gatewayd')
 
         if get_option('create-log-dirs')
                 meson.add_install_script('sh', '-c',
@@ -78,5 +78,7 @@ endif
 fuzzers += [
         [['src/journal-remote/fuzz-journal-remote.c'],
          [libsystemd_journal_remote,
-          libshared]],
+          libshared],
+         [],
+         [journal_includes]],
 ]

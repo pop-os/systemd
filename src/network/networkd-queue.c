@@ -5,6 +5,8 @@
 #include "networkd-bridge-fdb.h"
 #include "networkd-bridge-mdb.h"
 #include "networkd-dhcp-server.h"
+#include "networkd-dhcp4.h"
+#include "networkd-dhcp6.h"
 #include "networkd-ipv6-proxy-ndp.h"
 #include "networkd-manager.h"
 #include "networkd-neighbor.h"
@@ -30,9 +32,9 @@ static void request_free_object(RequestType type, void *object) {
         case REQUEST_TYPE_BRIDGE_MDB:
                 bridge_mdb_free(object);
                 break;
-        case REQUEST_TYPE_CREATE_STACKED_NETDEV:
-                break;
         case REQUEST_TYPE_DHCP_SERVER:
+        case REQUEST_TYPE_DHCP4_CLIENT:
+        case REQUEST_TYPE_DHCP6_CLIENT:
                 break;
         case REQUEST_TYPE_IPV6_PROXY_NDP:
                 free(object);
@@ -43,6 +45,8 @@ static void request_free_object(RequestType type, void *object) {
         case REQUEST_TYPE_NEXTHOP:
                 nexthop_free(object);
                 break;
+        case REQUEST_TYPE_RADV:
+                break;
         case REQUEST_TYPE_ROUTE:
                 route_free(object);
                 break;
@@ -50,10 +54,11 @@ static void request_free_object(RequestType type, void *object) {
                 routing_policy_rule_free(object);
                 break;
         case REQUEST_TYPE_SET_LINK:
+        case REQUEST_TYPE_STACKED_NETDEV:
         case REQUEST_TYPE_UP_DOWN:
                 break;
         default:
-                assert_not_reached("invalid request type.");
+                assert_not_reached();
         }
 }
 
@@ -65,9 +70,6 @@ static Request *request_free(Request *req) {
                 /* To prevent from triggering assertions in hash functions, remove this request before
                  * freeing object below. */
                 ordered_set_remove(req->link->manager->request_queue, req);
-        if (req->on_free)
-                /* on_free() may use object. So, let's call this earlier. */
-                req->on_free(req);
         if (req->consume_object)
                 request_free_object(req->type, req->object);
         link_unref(req->link);
@@ -104,13 +106,15 @@ static void request_hash_func(const Request *req, struct siphash *state) {
         case REQUEST_TYPE_ADDRESS_LABEL:
         case REQUEST_TYPE_BRIDGE_FDB:
         case REQUEST_TYPE_BRIDGE_MDB:
-        case REQUEST_TYPE_CREATE_STACKED_NETDEV:
+        case REQUEST_TYPE_STACKED_NETDEV:
                 /* TODO: Currently, these types do not have any specific hash and compare functions.
                  * Fortunately, all these objects are 'static', thus we can use the trivial functions. */
                 trivial_hash_func(req->object, state);
                 break;
         case REQUEST_TYPE_DHCP_SERVER:
-                /* This type does not have object. */
+        case REQUEST_TYPE_DHCP4_CLIENT:
+        case REQUEST_TYPE_DHCP6_CLIENT:
+                /* These types do not have an object. */
                 break;
         case REQUEST_TYPE_IPV6_PROXY_NDP:
                 in6_addr_hash_func(req->ipv6_proxy_ndp, state);
@@ -120,6 +124,9 @@ static void request_hash_func(const Request *req, struct siphash *state) {
                 break;
         case REQUEST_TYPE_NEXTHOP:
                 nexthop_hash_func(req->nexthop, state);
+                break;
+        case REQUEST_TYPE_RADV:
+                /* This type does not have an object. */
                 break;
         case REQUEST_TYPE_ROUTE:
                 route_hash_func(req->route, state);
@@ -134,7 +141,7 @@ static void request_hash_func(const Request *req, struct siphash *state) {
         case REQUEST_TYPE_UP_DOWN:
                 break;
         default:
-                assert_not_reached("invalid request type.");
+                assert_not_reached();
         }
 }
 
@@ -162,9 +169,11 @@ static int request_compare_func(const struct Request *a, const struct Request *b
         case REQUEST_TYPE_ADDRESS_LABEL:
         case REQUEST_TYPE_BRIDGE_FDB:
         case REQUEST_TYPE_BRIDGE_MDB:
-        case REQUEST_TYPE_CREATE_STACKED_NETDEV:
+        case REQUEST_TYPE_STACKED_NETDEV:
                 return trivial_compare_func(a->object, b->object);
         case REQUEST_TYPE_DHCP_SERVER:
+        case REQUEST_TYPE_DHCP4_CLIENT:
+        case REQUEST_TYPE_DHCP6_CLIENT:
                 return 0;
         case REQUEST_TYPE_IPV6_PROXY_NDP:
                 return in6_addr_compare_func(a->ipv6_proxy_ndp, b->ipv6_proxy_ndp);
@@ -174,6 +183,8 @@ static int request_compare_func(const struct Request *a, const struct Request *b
                 return nexthop_compare_func(a->nexthop, b->nexthop);
         case REQUEST_TYPE_ROUTE:
                 return route_compare_func(a->route, b->route);
+        case REQUEST_TYPE_RADV:
+                return 0;
         case REQUEST_TYPE_ROUTING_POLICY_RULE:
                 return routing_policy_rule_compare_func(a->rule, b->rule);
         case REQUEST_TYPE_SET_LINK:
@@ -181,7 +192,7 @@ static int request_compare_func(const struct Request *a, const struct Request *b
         case REQUEST_TYPE_UP_DOWN:
                 return 0;
         default:
-                assert_not_reached("invalid request type.");
+                assert_not_reached();
         }
 }
 
@@ -211,10 +222,18 @@ int link_queue_request(
         assert(IN_SET(type,
                       REQUEST_TYPE_ACTIVATE_LINK,
                       REQUEST_TYPE_DHCP_SERVER,
+                      REQUEST_TYPE_DHCP4_CLIENT,
+                      REQUEST_TYPE_DHCP6_CLIENT,
+                      REQUEST_TYPE_RADV,
                       REQUEST_TYPE_SET_LINK,
                       REQUEST_TYPE_UP_DOWN) ||
                object);
-        assert(type == REQUEST_TYPE_DHCP_SERVER || netlink_handler);
+        assert(IN_SET(type,
+                      REQUEST_TYPE_DHCP_SERVER,
+                      REQUEST_TYPE_DHCP4_CLIENT,
+                      REQUEST_TYPE_DHCP6_CLIENT,
+                      REQUEST_TYPE_RADV) ||
+               netlink_handler);
 
         req = new(Request, 1);
         if (!req) {
@@ -283,11 +302,14 @@ int manager_process_requests(sd_event_source *s, void *userdata) {
                         case REQUEST_TYPE_BRIDGE_MDB:
                                 r = request_process_bridge_mdb(req);
                                 break;
-                        case REQUEST_TYPE_CREATE_STACKED_NETDEV:
-                                r = request_process_create_stacked_netdev(req);
-                                break;
                         case REQUEST_TYPE_DHCP_SERVER:
                                 r = request_process_dhcp_server(req);
+                                break;
+                        case REQUEST_TYPE_DHCP4_CLIENT:
+                                r = request_process_dhcp4_client(req);
+                                break;
+                        case REQUEST_TYPE_DHCP6_CLIENT:
+                                r = request_process_dhcp6_client(req);
                                 break;
                         case REQUEST_TYPE_IPV6_PROXY_NDP:
                                 r = request_process_ipv6_proxy_ndp_address(req);
@@ -298,6 +320,9 @@ int manager_process_requests(sd_event_source *s, void *userdata) {
                         case REQUEST_TYPE_NEXTHOP:
                                 r = request_process_nexthop(req);
                                 break;
+                        case REQUEST_TYPE_RADV:
+                                r = request_process_radv(req);
+                                break;
                         case REQUEST_TYPE_ROUTE:
                                 r = request_process_route(req);
                                 break;
@@ -306,6 +331,9 @@ int manager_process_requests(sd_event_source *s, void *userdata) {
                                 break;
                         case REQUEST_TYPE_SET_LINK:
                                 r = request_process_set_link(req);
+                                break;
+                        case REQUEST_TYPE_STACKED_NETDEV:
+                                r = request_process_stacked_netdev(req);
                                 break;
                         case REQUEST_TYPE_UP_DOWN:
                                 r = request_process_link_up_or_down(req);

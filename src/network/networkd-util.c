@@ -2,53 +2,93 @@
 
 #include "condition.h"
 #include "conf-parser.h"
+#include "escape.h"
 #include "networkd-link.h"
 #include "networkd-util.h"
 #include "parse-util.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "util.h"
+#include "web-util.h"
 
-static const char* const address_family_table[_ADDRESS_FAMILY_MAX] = {
+/* This is used in log messages, and never used in parsing settings. So, upper cases are OK. */
+static const char * const network_config_source_table[_NETWORK_CONFIG_SOURCE_MAX] = {
+        [NETWORK_CONFIG_SOURCE_FOREIGN] = "foreign",
+        [NETWORK_CONFIG_SOURCE_STATIC]  = "static",
+        [NETWORK_CONFIG_SOURCE_IPV4LL]  = "IPv4LL",
+        [NETWORK_CONFIG_SOURCE_DHCP4]   = "DHCPv4",
+        [NETWORK_CONFIG_SOURCE_DHCP6]   = "DHCPv6",
+        [NETWORK_CONFIG_SOURCE_DHCP_PD] = "DHCP-PD",
+        [NETWORK_CONFIG_SOURCE_NDISC]   = "NDisc",
+        [NETWORK_CONFIG_SOURCE_RUNTIME] = "runtime",
+};
+
+DEFINE_STRING_TABLE_LOOKUP_TO_STRING(network_config_source, NetworkConfigSource);
+
+int network_config_state_to_string_alloc(NetworkConfigState s, char **ret) {
+        static const char* states[] = {
+                [LOG2U(NETWORK_CONFIG_STATE_PROBING)]     = "probing",
+                [LOG2U(NETWORK_CONFIG_STATE_REQUESTING)]  = "requesting",
+                [LOG2U(NETWORK_CONFIG_STATE_CONFIGURING)] = "configuring",
+                [LOG2U(NETWORK_CONFIG_STATE_CONFIGURED)]  = "configured",
+                [LOG2U(NETWORK_CONFIG_STATE_MARKED)]      = "marked",
+                [LOG2U(NETWORK_CONFIG_STATE_REMOVING)]    = "removing",
+        };
+        _cleanup_free_ char *buf = NULL;
+
+        assert(ret);
+
+        for (size_t i = 0; i < ELEMENTSOF(states); i++)
+                if (FLAGS_SET(s, 1 << i)) {
+                        assert(states[i]);
+
+                        if (!strextend_with_separator(&buf, ",", states[i]))
+                                return -ENOMEM;
+                }
+
+        *ret = TAKE_PTR(buf);
+        return 0;
+}
+
+static const char * const address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_NO]   = "no",
         [ADDRESS_FAMILY_YES]  = "yes",
         [ADDRESS_FAMILY_IPV4] = "ipv4",
         [ADDRESS_FAMILY_IPV6] = "ipv6",
 };
 
-static const char* const routing_policy_rule_address_family_table[_ADDRESS_FAMILY_MAX] = {
+static const char * const routing_policy_rule_address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_YES]  = "both",
         [ADDRESS_FAMILY_IPV4] = "ipv4",
         [ADDRESS_FAMILY_IPV6] = "ipv6",
 };
 
-static const char* const nexthop_address_family_table[_ADDRESS_FAMILY_MAX] = {
+static const char * const nexthop_address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_IPV4] = "ipv4",
         [ADDRESS_FAMILY_IPV6] = "ipv6",
 };
 
-static const char* const duplicate_address_detection_address_family_table[_ADDRESS_FAMILY_MAX] = {
+static const char * const duplicate_address_detection_address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_NO]   = "none",
         [ADDRESS_FAMILY_YES]  = "both",
         [ADDRESS_FAMILY_IPV4] = "ipv4",
         [ADDRESS_FAMILY_IPV6] = "ipv6",
 };
 
-static const char* const dhcp_deprecated_address_family_table[_ADDRESS_FAMILY_MAX] = {
+static const char * const dhcp_deprecated_address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_NO]   = "none",
         [ADDRESS_FAMILY_YES]  = "both",
         [ADDRESS_FAMILY_IPV4] = "v4",
         [ADDRESS_FAMILY_IPV6] = "v6",
 };
 
-static const char* const ip_masquerade_address_family_table[_ADDRESS_FAMILY_MAX] = {
+static const char * const ip_masquerade_address_family_table[_ADDRESS_FAMILY_MAX] = {
         [ADDRESS_FAMILY_NO]   = "no",
         [ADDRESS_FAMILY_YES]  = "both",
         [ADDRESS_FAMILY_IPV4] = "ipv4",
         [ADDRESS_FAMILY_IPV6] = "ipv6",
 };
 
-static const char* const dhcp_lease_server_type_table[_SD_DHCP_LEASE_SERVER_TYPE_MAX] = {
+static const char * const dhcp_lease_server_type_table[_SD_DHCP_LEASE_SERVER_TYPE_MAX] = {
         [SD_DHCP_LEASE_DNS]  = "DNS servers",
         [SD_DHCP_LEASE_NTP]  = "NTP servers",
         [SD_DHCP_LEASE_SIP]  = "SIP servers",
@@ -161,24 +201,46 @@ int config_parse_ip_masquerade(
         return 0;
 }
 
-/* Router lifetime can be set with netlink interface since kernel >= 4.5
- * so for the supported kernel we don't need to expire routes in userspace */
-int kernel_route_expiration_supported(void) {
-        static int cached = -1;
-        int r;
+int config_parse_mud_url(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
 
-        if (cached < 0) {
-                Condition c = {
-                        .type = CONDITION_KERNEL_VERSION,
-                        .parameter = (char *) ">= 4.5"
-                };
-                r = condition_test(&c, NULL);
-                if (r < 0)
-                        return r;
+        _cleanup_free_ char *unescaped = NULL;
+        char **url = data;
+        ssize_t l;
 
-                cached = r;
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(url);
+
+        if (isempty(rvalue)) {
+                *url = mfree(*url);
+                return 0;
         }
-        return cached;
+
+        l = cunescape(rvalue, 0, &unescaped);
+        if (l < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, l,
+                           "Failed to unescape MUD URL, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        if (l > UINT8_MAX || !http_url_is_valid(unescaped)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Invalid MUD URL, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        return free_and_replace(*url, unescaped);
 }
 
 static void network_config_hash_func(const NetworkConfigSection *c, struct siphash *state) {

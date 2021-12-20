@@ -258,8 +258,7 @@ static int varlink_new(Varlink **ret) {
 
                 .state = _VARLINK_STATE_INVALID,
 
-                .ucred.uid = UID_INVALID,
-                .ucred.gid = GID_INVALID,
+                .ucred = UCRED_INVALID,
 
                 .timestamp = USEC_INFINITY,
                 .timeout = VARLINK_DEFAULT_TIMEOUT_USEC
@@ -906,7 +905,7 @@ static int varlink_dispatch_method(Varlink *v) {
                 break;
 
         default:
-                assert_not_reached("Unexpected state");
+                assert_not_reached();
 
         }
 
@@ -1522,7 +1521,7 @@ int varlink_call(
                 return varlink_log_errno(v, SYNTHETIC_ERRNO(ETIME), "Connection timed out.");
 
         default:
-                assert_not_reached("Unexpected state after method call.");
+                assert_not_reached();
         }
 }
 
@@ -2078,7 +2077,7 @@ static int validate_connection(VarlinkServer *server, const struct ucred *ucred)
         return 1;
 }
 
-static int count_connection(VarlinkServer *server, struct ucred *ucred) {
+static int count_connection(VarlinkServer *server, const struct ucred *ucred) {
         unsigned c;
         int r;
 
@@ -2107,8 +2106,8 @@ static int count_connection(VarlinkServer *server, struct ucred *ucred) {
 
 int varlink_server_add_connection(VarlinkServer *server, int fd, Varlink **ret) {
         _cleanup_(varlink_unrefp) Varlink *v = NULL;
+        struct ucred ucred = UCRED_INVALID;
         bool ucred_acquired;
-        struct ucred ucred;
         int r;
 
         assert_return(server, -EINVAL);
@@ -2146,7 +2145,9 @@ int varlink_server_add_connection(VarlinkServer *server, int fd, Varlink **ret) 
                 v->ucred_acquired = true;
         }
 
-        (void) asprintf(&v->description, "%s-%i", server->description ?: "varlink", v->fd);
+        _cleanup_free_ char *desc = NULL;
+        if (asprintf(&desc, "%s-%i", server->description ?: "varlink", v->fd) >= 0)
+                v->description = TAKE_PTR(desc);
 
         /* Link up the server and the connection, and take reference in both directions. Note that the
          * reference on the connection is left dangling. It will be dropped when the connection is closed,

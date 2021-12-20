@@ -15,25 +15,23 @@ typedef struct NextHop NextHop;
 typedef struct Route Route;
 typedef struct RoutingPolicyRule RoutingPolicyRule;
 
-typedef struct Request Request;
-
-typedef int (*request_after_configure_handler_t)(Request*, void*);
-typedef void (*request_on_free_handler_t)(Request*);
-
 typedef enum RequestType {
         REQUEST_TYPE_ACTIVATE_LINK,
         REQUEST_TYPE_ADDRESS,
         REQUEST_TYPE_ADDRESS_LABEL,
         REQUEST_TYPE_BRIDGE_FDB,
         REQUEST_TYPE_BRIDGE_MDB,
-        REQUEST_TYPE_CREATE_STACKED_NETDEV,
         REQUEST_TYPE_DHCP_SERVER,
+        REQUEST_TYPE_DHCP4_CLIENT,
+        REQUEST_TYPE_DHCP6_CLIENT,
         REQUEST_TYPE_IPV6_PROXY_NDP,
         REQUEST_TYPE_NEIGHBOR,
         REQUEST_TYPE_NEXTHOP,
+        REQUEST_TYPE_RADV,
         REQUEST_TYPE_ROUTE,
         REQUEST_TYPE_ROUTING_POLICY_RULE,
         REQUEST_TYPE_SET_LINK,
+        REQUEST_TYPE_STACKED_NETDEV,
         REQUEST_TYPE_UP_DOWN,
         _REQUEST_TYPE_MAX,
         _REQUEST_TYPE_INVALID = -EINVAL,
@@ -60,8 +58,6 @@ typedef struct Request {
         void *userdata;
         unsigned *message_counter;
         link_netlink_message_handler_t netlink_handler;
-        request_after_configure_handler_t after_configure;
-        request_on_free_handler_t on_free;
 } Request;
 
 void request_drop(Request *req);

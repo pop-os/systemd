@@ -309,7 +309,7 @@ int config_parse_sr_iov_uint32(
                 else if (streq(lvalue, "QualityOfService"))
                         sr_iov->qos = 0;
                 else
-                        assert_not_reached("Invalid lvalue");
+                        assert_not_reached();
 
                 TAKE_PTR(sr_iov);
                 return 0;
@@ -337,7 +337,7 @@ int config_parse_sr_iov_uint32(
         } else if (streq(lvalue, "QualityOfService"))
                 sr_iov->qos = k;
         else
-                assert_not_reached("Invalid lvalue");
+                assert_not_reached();
 
         TAKE_PTR(sr_iov);
         return 0;
@@ -467,7 +467,7 @@ int config_parse_sr_iov_boolean(
                 else if (streq(lvalue, "Trust"))
                         sr_iov->trust = -1;
                 else
-                        assert_not_reached("Invalid lvalue");
+                        assert_not_reached();
 
                 TAKE_PTR(sr_iov);
                 return 0;
@@ -486,7 +486,7 @@ int config_parse_sr_iov_boolean(
         else if (streq(lvalue, "Trust"))
                 sr_iov->trust = r;
         else
-                assert_not_reached("Invalid lvalue");
+                assert_not_reached();
 
         TAKE_PTR(sr_iov);
         return 0;
@@ -523,7 +523,7 @@ int config_parse_sr_iov_mac(
                 return 0;
         }
 
-        r = ether_addr_from_string(rvalue, &sr_iov->mac);
+        r = parse_ether_addr(rvalue, &sr_iov->mac);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to parse SR-IOV '%s=', ignoring assignment: %s", lvalue, rvalue);

@@ -6,7 +6,7 @@ if bashcompletiondir == ''
         if bash_completion.found()
                 bashcompletiondir = bash_completion.get_pkgconfig_variable('completionsdir')
         else
-                bashcompletiondir = join_paths(datadir, 'bash-completion/completions')
+                bashcompletiondir = datadir / 'bash-completion/completions'
         endif
 endif
 
@@ -14,8 +14,7 @@ custom_target(
         'systemctl',
         input : 'systemctl.in',
         output : 'systemctl',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true,
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
         install : bashcompletiondir != 'no',
         install_dir : bashcompletiondir)
 
@@ -33,7 +32,7 @@ items = [['busctl',              ''],
          ['systemd-run',         ''],
          ['udevadm',             ''],
          ['kernel-install',      ''],
-         ['bootctl',             'ENABLE_EFI'],
+         ['bootctl',             'HAVE_GNU_EFI'],
          ['coredumpctl',         'ENABLE_COREDUMP'],
          ['homectl',             'ENABLE_HOMED'],
          ['hostnamectl',         'ENABLE_HOSTNAMED'],

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <linux/bpf_insn.h>
@@ -155,7 +155,7 @@ static int pin_programs(Unit *u, CGroupContext *cc, const Test *test_suite, size
         assert_se(paths_ret);
 
         for (size_t i = 0; i < test_suite_size; i++) {
-                _cleanup_(bpf_program_unrefp) BPFProgram *prog = NULL;
+                _cleanup_(bpf_program_freep) BPFProgram *prog = NULL;
                 _cleanup_free_ char *str = NULL;
 
                 r = bpf_foreign_test_to_string(test_suite[i].attach_type, test_suite[i].bpffs_path, &str);
@@ -304,7 +304,7 @@ int main(int argc, char *argv[]) {
         assert_se(runtime_dir = setup_fake_runtime_dir());
 
         assert_se(manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m) >= 0);
-        assert_se(manager_startup(m, NULL, NULL) >= 0);
+        assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         assert_se(test_bpf_cgroup_programs(m,
                                 "single_prog.service", single_prog, ELEMENTSOF(single_prog)) >= 0);

@@ -53,6 +53,26 @@ typedef struct StatusInfo {
         const char *hardware_model;
 } StatusInfo;
 
+static const char* chassis_string_to_glyph(const char *chassis) {
+        if (streq_ptr(chassis, "laptop"))
+                return "\U0001F4BB"; /* Personal Computer */
+        if (streq_ptr(chassis, "desktop"))
+                return "\U0001F5A5"; /* Desktop Computer */
+        if (streq_ptr(chassis, "server"))
+                return "\U0001F5B3"; /* Old Personal Computer */
+        if (streq_ptr(chassis, "tablet"))
+                return "\u5177";     /* Ideograph tool, implement; draw up, write, looks vaguely tabletty */
+        if (streq_ptr(chassis, "watch"))
+                return "\u231A";     /* Watch */
+        if (streq_ptr(chassis, "handset"))
+                return "\U0001F57B"; /* Left Hand Telephone Receiver */
+        if (streq_ptr(chassis, "vm"))
+                return "\U0001F5B4"; /* Hard disk */
+        if (streq_ptr(chassis, "container"))
+                return "\u2610";     /* Ballot Box  */
+        return NULL;
+}
+
 static int print_status_info(StatusInfo *i) {
         _cleanup_(table_unrefp) Table *table = NULL;
         sd_id128_t mid = {}, bid = {};
@@ -108,9 +128,15 @@ static int print_status_info(StatusInfo *i) {
         }
 
         if (!isempty(i->chassis)) {
+                /* Possibly add a pretty symbol. Let's not bother with non-unicode fallbacks, because this is
+                 * just a prettification and we can't really express this with ASCII anyway. */
+                const char *v = chassis_string_to_glyph(i->chassis);
+                if (v)
+                        v = strjoina(i->chassis, " ", v);
+
                 r = table_add_many(table,
                                    TABLE_STRING, "Chassis:",
-                                   TABLE_STRING, i->chassis);
+                                   TABLE_STRING, v ?: i->chassis);
                 if (r < 0)
                         return table_log_add_error(r);
         }
@@ -620,7 +646,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         return 1;
@@ -660,7 +686,7 @@ static int run(int argc, char *argv[]) {
 
         r = bus_connect_transport(arg_transport, arg_host, false, &bus);
         if (r < 0)
-                return bus_log_connect_error(r);
+                return bus_log_connect_error(r, arg_transport);
 
         return hostnamectl_main(bus, argc, argv);
 }

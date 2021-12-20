@@ -9,8 +9,8 @@
 #include "sd-event.h"
 
 #include "dhcp-internal.h"
+#include "network-common.h"
 #include "ordered-set.h"
-#include "log-link.h"
 #include "time-util.h"
 
 typedef enum DHCPRawOption {
@@ -30,6 +30,8 @@ typedef struct DHCPClientId {
 } DHCPClientId;
 
 typedef struct DHCPLease {
+        sd_dhcp_server *server;
+
         DHCPClientId client_id;
 
         be32_t address;
@@ -66,11 +68,12 @@ struct sd_dhcp_server {
         OrderedSet *vendor_options;
 
         bool emit_router;
+        struct in_addr router_address;
 
-        Hashmap *leases_by_client_id;
+        Hashmap *bound_leases_by_client_id;
+        Hashmap *bound_leases_by_address;
         Hashmap *static_leases_by_client_id;
-        DHCPLease **bound_leases;
-        DHCPLease invalid_lease;
+        Hashmap *static_leases_by_address;
 
         uint32_t max_lease_time, default_lease_time;
 
@@ -96,6 +99,8 @@ typedef struct DHCPRequest {
         const uint8_t *agent_info_option;
 } DHCPRequest;
 
+extern const struct hash_ops dhcp_lease_hash_ops;
+
 int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
                                size_t length);
 int dhcp_server_send_packet(sd_dhcp_server *server,
@@ -108,10 +113,10 @@ int client_id_compare_func(const DHCPClientId *a, const DHCPClientId *b);
 #define log_dhcp_server_errno(server, error, fmt, ...)          \
         log_interface_prefix_full_errno(                        \
                 "DHCPv4 server: ",                              \
-                sd_dhcp_server_get_ifname(server),              \
+                sd_dhcp_server, server,                         \
                 error, fmt, ##__VA_ARGS__)
 #define log_dhcp_server(server, fmt, ...)                       \
         log_interface_prefix_full_errno_zerook(                 \
                 "DHCPv4 server: ",                              \
-                sd_dhcp_server_get_ifname(server),              \
+                sd_dhcp_server, server,                         \
                 0, fmt, ##__VA_ARGS__)

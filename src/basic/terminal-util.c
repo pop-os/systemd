@@ -26,6 +26,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "inotify-util.h"
 #include "io-util.h"
 #include "log.h"
 #include "macro.h"
@@ -73,10 +74,7 @@ int chvt(int vt) {
                 vt = tiocl[0] <= 0 ? 1 : tiocl[0];
         }
 
-        if (ioctl(fd, VT_ACTIVATE, vt) < 0)
-                return -errno;
-
-        return 0;
+        return RET_NERRNO(ioctl(fd, VT_ACTIVATE, vt));
 }
 
 int read_one_char(FILE *f, char *ret, usec_t t, bool *need_nl) {
@@ -408,8 +406,7 @@ int acquire_terminal(
                 assert_se(sigaction(SIGHUP, &sa_new, &sa_old) == 0);
 
                 /* First, try to get the tty */
-                r = ioctl(fd, TIOCSCTTY,
-                          (flags & ~ACQUIRE_TERMINAL_PERMISSIVE) == ACQUIRE_TERMINAL_FORCE) < 0 ? -errno : 0;
+                r = RET_NERRNO(ioctl(fd, TIOCSCTTY, (flags & ~ACQUIRE_TERMINAL_PERMISSIVE) == ACQUIRE_TERMINAL_FORCE));
 
                 /* Reset signal handler to old value */
                 assert_se(sigaction(SIGHUP, &sa_old, NULL) == 0);
@@ -456,7 +453,7 @@ int acquire_terminal(
 
                         l = read(notify, &buffer, sizeof(buffer));
                         if (l < 0) {
-                                if (IN_SET(errno, EINTR, EAGAIN))
+                                if (ERRNO_IS_TRANSIENT(errno))
                                         continue;
 
                                 return -errno;
@@ -499,7 +496,7 @@ int release_terminal(void) {
          * by our own TIOCNOTTY */
         assert_se(sigaction(SIGHUP, &sa_new, &sa_old) == 0);
 
-        r = ioctl(fd, TIOCNOTTY) < 0 ? -errno : 0;
+        r = RET_NERRNO(ioctl(fd, TIOCNOTTY));
 
         assert_se(sigaction(SIGHUP, &sa_old, NULL) == 0);
 
@@ -508,11 +505,7 @@ int release_terminal(void) {
 
 int terminal_vhangup_fd(int fd) {
         assert(fd >= 0);
-
-        if (ioctl(fd, TIOCVHANGUP) < 0)
-                return -errno;
-
-        return 0;
+        return RET_NERRNO(ioctl(fd, TIOCVHANGUP));
 }
 
 int terminal_vhangup(const char *name) {
@@ -854,6 +847,39 @@ unsigned lines(void) {
 
         cached_lines = l;
         return cached_lines;
+}
+
+int terminal_set_size_fd(int fd, const char *ident, unsigned rows, unsigned cols) {
+        struct winsize ws;
+
+        if (rows == UINT_MAX && cols == UINT_MAX)
+                return 0;
+
+        if (ioctl(fd, TIOCGWINSZ, &ws) < 0)
+                return log_debug_errno(errno,
+                                       "TIOCGWINSZ ioctl for getting %s size failed, not setting terminal size: %m",
+                                       ident ?: "TTY");
+
+        if (rows == UINT_MAX)
+                rows = ws.ws_row;
+        else if (rows > USHRT_MAX)
+                rows = USHRT_MAX;
+
+        if (cols == UINT_MAX)
+                cols = ws.ws_col;
+        else if (cols > USHRT_MAX)
+                cols = USHRT_MAX;
+
+        if (rows == ws.ws_row && cols == ws.ws_col)
+                return 0;
+
+        ws.ws_row = rows;
+        ws.ws_col = cols;
+
+        if (ioctl(fd, TIOCSWINSZ, &ws) < 0)
+                return log_debug_errno(errno, "TIOCSWINSZ ioctl for setting %s size failed: %m", ident ?: "TTY");
+
+        return 0;
 }
 
 /* intended to be used as a SIGWINCH sighandler */
@@ -1327,10 +1353,7 @@ int vt_reset_keyboard(int fd) {
         /* If we can't read the default, then default to unicode. It's 2017 after all. */
         kb = vt_default_utf8() != 0 ? K_UNICODE : K_XLATE;
 
-        if (ioctl(fd, KDSKBMODE, kb) < 0)
-                return -errno;
-
-        return 0;
+        return RET_NERRNO(ioctl(fd, KDSKBMODE, kb));
 }
 
 int vt_restore(int fd) {

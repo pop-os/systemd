@@ -47,8 +47,8 @@ DnsResourceKey* dns_resource_key_new_redirect(const DnsResourceKey *key, const D
         if (cname->key->type == DNS_TYPE_CNAME)
                 return dns_resource_key_new(key->class, key->type, cname->cname.name);
         else {
+                _cleanup_free_ char *destination = NULL;
                 DnsResourceKey *k;
-                char *destination = NULL;
 
                 r = dns_name_change_suffix(dns_resource_key_name(key), dns_resource_key_name(cname->key), cname->dname.name, &destination);
                 if (r < 0)
@@ -58,8 +58,9 @@ DnsResourceKey* dns_resource_key_new_redirect(const DnsResourceKey *key, const D
 
                 k = dns_resource_key_new_consume(key->class, key->type, destination);
                 if (!k)
-                        return mfree(destination);
+                        return NULL;
 
+                TAKE_PTR(destination);
                 return k;
         }
 }
@@ -322,10 +323,10 @@ char* dns_resource_key_to_string(const DnsResourceKey *key, char *buf, size_t bu
         c = dns_class_to_string(key->class);
         t = dns_type_to_string(key->type);
 
-        snprintf(buf, buf_size, "%s %s%s%.0u %s%s%.0u",
-                 dns_resource_key_name(key),
-                 strempty(c), c ? "" : "CLASS", c ? 0 : key->class,
-                 strempty(t), t ? "" : "TYPE", t ? 0 : key->type);
+        (void) snprintf(buf, buf_size, "%s %s%s%.0u %s%s%.0u",
+                        dns_resource_key_name(key),
+                        strempty(c), c ? "" : "CLASS", c ? 0 : key->class,
+                        strempty(t), t ? "" : "TYPE", t ? 0 : key->type);
 
         return ans;
 }

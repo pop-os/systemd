@@ -13,12 +13,16 @@ units = [
         ['veritysetup-pre.target',              'HAVE_LIBCRYPTSETUP'],
         ['veritysetup.target',                  'HAVE_LIBCRYPTSETUP',
          'sysinit.target.wants/'],
+        ['integritysetup-pre.target',           'HAVE_LIBCRYPTSETUP'],
+        ['integritysetup.target',               'HAVE_LIBCRYPTSETUP',
+         'sysinit.target.wants/'],
         ['dev-hugepages.mount',                 '',
          'sysinit.target.wants/'],
         ['dev-mqueue.mount',                    '',
          'sysinit.target.wants/'],
         ['emergency.target',                    ''],
         ['exit.target',                         ''],
+        ['factory-reset.target',                ''],
         ['final.target',                        ''],
         ['first-boot-complete.target',          ''],
         ['getty.target',                        '',
@@ -102,8 +106,9 @@ units = [
         ['systemd-ask-password-wall.path',      '',
          'multi-user.target.wants/'],
         ['systemd-ask-password-wall.service',   ''],
-        ['systemd-boot-system-token.service',   'ENABLE_EFI',
+        ['systemd-boot-system-token.service',   'HAVE_GNU_EFI',
          'sysinit.target.wants/'],
+        ['systemd-boot-update.service',         'HAVE_GNU_EFI'],
         ['systemd-coredump.socket',             'ENABLE_COREDUMP',
          'sockets.target.wants/'],
         ['systemd-exit.service',                ''],
@@ -162,6 +167,7 @@ units = [
         ['user.slice',                          ''],
         ['var-lib-machines.mount',              'ENABLE_MACHINED',
          'remote-fs.target.wants/ machines.target.wants/'],
+        ['systemd-oomd.socket',                 'ENABLE_OOMD'],
 ]
 
 in_units = [
@@ -180,7 +186,7 @@ in_units = [
         ['systemd-backlight@.service',           'ENABLE_BACKLIGHT'],
         ['systemd-binfmt.service',               'ENABLE_BINFMT',
          'sysinit.target.wants/'],
-        ['systemd-bless-boot.service',           'ENABLE_EFI HAVE_BLKID'],
+        ['systemd-bless-boot.service',           'HAVE_GNU_EFI HAVE_BLKID'],
         ['systemd-boot-check-no-failures.service', ''],
         ['systemd-coredump@.service',            'ENABLE_COREDUMP'],
         ['systemd-pstore.service',               'ENABLE_PSTORE'],
@@ -211,7 +217,7 @@ in_units = [
          'dbus-org.freedesktop.machine1.service'],
         ['systemd-modules-load.service',         'HAVE_KMOD',
          'sysinit.target.wants/'],
-        ['systemd-network-generator.service',    'ENABLE_NETWORKD'],
+        ['systemd-network-generator.service',    ''],
         ['systemd-networkd.service',             'ENABLE_NETWORKD'],
         ['systemd-networkd-wait-online.service', 'ENABLE_NETWORKD'],
         ['systemd-nspawn@.service',              ''],
@@ -266,8 +272,7 @@ foreach tuple : in_units
                 file,
                 input : file + '.in',
                 output : file,
-                command : [meson_render_jinja2, config_h, '@INPUT@'],
-                capture : true,
+                command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
                 install : install,
                 install_dir : systemunitdir)
 
@@ -307,17 +312,17 @@ install_data('user-.slice.d/10-defaults.conf',
 
 if install_sysconfdir
         meson.add_install_script(meson_make_symlink,
-                                 join_paths(pkgsysconfdir, 'user'),
-                                 join_paths(sysconfdir, 'xdg/systemd/user'))
+                                 pkgsysconfdir / 'user',
+                                 sysconfdir / 'xdg/systemd/user')
 endif
 meson.add_install_script(meson_make_symlink,
-                         join_paths(dbussystemservicedir, 'org.freedesktop.systemd1.service'),
-                         join_paths(dbussessionservicedir, 'org.freedesktop.systemd1.service'))
+                         dbussystemservicedir / 'org.freedesktop.systemd1.service',
+                         dbussessionservicedir / 'org.freedesktop.systemd1.service')
 if conf.get('HAVE_SYSV_COMPAT') == 1
         foreach i : [1, 2, 3, 4, 5]
                 meson.add_install_script(
                         'sh', '-c',
-                        mkdir_p.format(join_paths(systemunitdir, 'runlevel@0@.target.wants'.format(i))))
+                        mkdir_p.format(systemunitdir / 'runlevel@0@.target.wants'.format(i)))
         endforeach
 endif
 

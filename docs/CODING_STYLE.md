@@ -2,6 +2,7 @@
 title: Coding Style
 category: Contributing
 layout: default
+SPDX-License-Identifier: LGPL-2.1-or-later
 ---
 
 # Coding Style
@@ -152,25 +153,34 @@ layout: default
 ## Using C Constructs
 
 - Allocate local variables where it makes sense: at the top of the block, or at
-  the point where they can be initialized. `r` is typically used for a local
-  state variable, but should almost always be declared at the top of the
-  function.
+  the point where they can be initialized. Avoid huge variable declaration
+  lists at the top of the function.
+
+  As an exception, `r` is typically used for a local state variable, but should
+  almost always be declared as the last variable at the top of the function.
 
   ```c
   {
-          uint64_t a, b;
+          uint64_t a;
           int r;
 
-          a = frobnicate();
-          b = a + 5;
-
-          r = do_something();
+          r = frobnicate(&a);
           if (r < 0)
                   …
+
+          uint64_t b = a + 1, c;
+
+          r = foobarify(a, b, &c);
+          if (r < 0)
+                  …
+
+          const char *pretty = prettify(a, b, c);
+          …
   }
   ```
 
-- Do not mix function invocations with variable definitions in one line.
+- Do not mix multiple variable definitions with function invocations or
+  complicated expressions:
 
   ```c
   {
@@ -224,7 +234,7 @@ layout: default
 - To determine the length of a constant string `"foo"`, don't bother with
   `sizeof("foo")-1`, please use `strlen()` instead (both gcc and clang optimize
   the call away for fixed strings). The only exception is when declaring an
-  array. In that case use STRLEN, which evaluates to a static constant and
+  array. In that case use `STRLEN()`, which evaluates to a static constant and
   doesn't force the compiler to create a VLA.
 
 - Please use C's downgrade-to-bool feature only for expressions that are
@@ -274,6 +284,25 @@ layout: default
   Be strict with this. When you write a function that can fail due to more than
   one cause, it *really* should have an `int` as the return value for the error
   code.
+
+- libc system calls typically return -1 on error (with the error code in
+  `errno`), and >= 0 on success. Use the RET_NERRNO() helper if you are looking
+  for a simple way to convert this libc style error returning into systemd
+  style error returning. e.g.
+
+  ```c
+  …
+  r = RET_NERRNO(unlink(t));
+  …
+  ```
+
+  or
+
+  ```c
+  …
+  r = RET_NERRNO(open("/some/file", O_RDONLY|O_CLOEXEC));
+  …
+  ```
 
 - Do not bother with error checking whether writing to stdout/stderr worked.
 
@@ -364,10 +393,11 @@ layout: default
 
 - Avoid fixed-size string buffers, unless you really know the maximum size and
   that maximum size is small. It is often nicer to use dynamic memory,
-  `alloca()` or VLAs. If you do allocate fixed-size strings on the stack, then
-  it is probably only OK if you either use a maximum size such as `LINE_MAX`,
-  or count in detail the maximum size a string can have. (`DECIMAL_STR_MAX` and
-  `DECIMAL_STR_WIDTH` macros are your friends for this!)
+  `alloca_safe()` or VLAs. If you do allocate fixed-size strings on the stack,
+  then it is probably only OK if you either use a maximum size such as
+  `LINE_MAX`, or count in detail the maximum size a string can
+  have. (`DECIMAL_STR_MAX` and `DECIMAL_STR_WIDTH` macros are your friends for
+  this!)
 
   Or in other words, if you use `char buf[256]` then you are likely doing
   something wrong!
@@ -375,13 +405,20 @@ layout: default
 - Make use of `_cleanup_free_` and friends. It makes your code much nicer to
   read (and shorter)!
 
-- Use `alloca()`, but never forget that it is not OK to invoke `alloca()`
-  within a loop or within function call parameters. `alloca()` memory is
-  released at the end of a function, and not at the end of a `{}` block. Thus,
-  if you invoke it in a loop, you keep increasing the stack pointer without
-  ever releasing memory again. (VLAs have better behavior in this case, so
-  consider using them as an alternative.)  Regarding not using `alloca()`
-  within function parameters, see the BUGS section of the `alloca(3)` man page.
+- Do not use `alloca()`, `strdupa()` or `strndupa()` directly. Use
+  `alloca_safe()`, `strdupa_safe()` or `strndupa_safe()` instead. (The
+  difference is that the latter include an assertion that the specified size is
+  below a safety threshold, so that the program rather aborts than runs into
+  possible stack overruns.)
+
+- Use `alloca_safe()`, but never forget that it is not OK to invoke
+  `alloca_safe()` within a loop or within function call
+  parameters. `alloca_safe()` memory is released at the end of a function, and
+  not at the end of a `{}` block. Thus, if you invoke it in a loop, you keep
+  increasing the stack pointer without ever releasing memory again. (VLAs have
+  better behavior in this case, so consider using them as an alternative.)
+  Regarding not using `alloca_safe()` within function parameters, see the BUGS
+  section of the `alloca(3)` man page.
 
 - If you want to concatenate two or more strings, consider using `strjoina()`
   or `strjoin()` rather than `asprintf()`, as the latter is a lot slower. This

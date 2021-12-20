@@ -673,6 +673,7 @@ static uint16_t dns_transaction_port(DnsTransaction *t) {
 }
 
 static int dns_transaction_emit_tcp(DnsTransaction *t) {
+        usec_t stream_timeout_usec = DNS_STREAM_DEFAULT_TIMEOUT_USEC;
         _cleanup_(dns_stream_unrefp) DnsStream *s = NULL;
         _cleanup_close_ int fd = -1;
         union sockaddr_union sa;
@@ -707,6 +708,14 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
                         s = dns_stream_ref(t->server->stream);
                 else
                         fd = dns_scope_socket_tcp(t->scope, AF_UNSPEC, NULL, t->server, dns_transaction_port(t), &sa);
+
+                /* Lower timeout in DNS-over-TLS opportunistic mode. In environments where DoT is blocked
+                 * without ICMP response overly long delays when contacting DoT servers are nasty, in
+                 * particular if multiple DNS servers are defined which we try in turn and all are
+                 * blocked. Hence, substantially lower the timeout in that case. */
+                if (DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level) &&
+                    dns_server_get_dns_over_tls_mode(t->server) == DNS_OVER_TLS_OPPORTUNISTIC)
+                        stream_timeout_usec = DNS_STREAM_OPPORTUNISTIC_TLS_TIMEOUT_USEC;
 
                 type = DNS_STREAM_LOOKUP;
                 break;
@@ -745,7 +754,7 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
                 if (fd < 0)
                         return fd;
 
-                r = dns_stream_new(t->scope->manager, &s, type, t->scope->protocol, fd, &sa);
+                r = dns_stream_new(t->scope->manager, &s, type, t->scope->protocol, fd, &sa, stream_timeout_usec);
                 if (r < 0)
                         return r;
 
@@ -1091,7 +1100,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p, bool encrypt
                 break;
 
         default:
-                assert_not_reached("Invalid DNS protocol.");
+                assert_not_reached();
         }
 
         if (t->received != p) {
@@ -1197,7 +1206,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p, bool encrypt
                 break;
 
         default:
-                assert_not_reached("Invalid DNS protocol.");
+                assert_not_reached();
         }
 
         if (DNS_PACKET_TC(p)) {
@@ -1541,7 +1550,7 @@ static int on_transaction_timeout(sd_event_source *s, usec_t usec, void *userdat
                         break;
 
                 default:
-                        assert_not_reached("Invalid DNS protocol.");
+                        assert_not_reached();
                 }
 
                 log_debug("Timeout reached on transaction %" PRIu16 ".", t->id);
@@ -1580,7 +1589,7 @@ static usec_t transaction_get_resend_timeout(DnsTransaction *t) {
                 return t->scope->resend_timeout;
 
         default:
-                assert_not_reached("Invalid DNS protocol.");
+                assert_not_reached();
         }
 }
 
@@ -1972,7 +1981,7 @@ int dns_transaction_go(DnsTransaction *t) {
                         accuracy = MDNS_JITTER_RANGE_USEC;
                         break;
                 default:
-                        assert_not_reached("bad protocol");
+                        assert_not_reached();
                 }
 
                 assert(!t->timeout_event_source);
@@ -3543,7 +3552,7 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
                         break;
 
                 default:
-                        assert_not_reached("Unexpected NSEC result.");
+                        assert_not_reached();
                 }
         }
 

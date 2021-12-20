@@ -2,15 +2,14 @@
 
 zshcompletiondir = get_option('zshcompletiondir')
 if zshcompletiondir == ''
-        zshcompletiondir = join_paths(datadir, 'zsh/site-functions')
+        zshcompletiondir = datadir / 'zsh/site-functions'
 endif
 
 custom_target(
         '_systemctl',
         input : '_systemctl.in',
         output : '_systemctl',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true,
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
         install : zshcompletiondir != 'no',
         install_dir : zshcompletiondir)
 
@@ -28,7 +27,7 @@ items = [['_busctl',                   ''],
          ['_sd_outputmodes',           ''],
          ['_sd_unit_files',            ''],
          ['_sd_machines',              ''],
-         ['_bootctl',                  'ENABLE_EFI'],
+         ['_bootctl',                  'HAVE_GNU_EFI'],
          ['_coredumpctl',              'ENABLE_COREDUMP'],
          ['_hostnamectl',              'ENABLE_HOSTNAMED'],
          ['_localectl',                'ENABLE_LOCALED'],

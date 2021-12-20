@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "capability-util.h"
+#include "chase-symlinks.h"
 #include "discover-image.h"
 #include "dissect-image.h"
 #include "env-util.h"
@@ -431,12 +432,17 @@ static int validate_version(
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Extension image contains /usr/lib/os-release file, which is not allowed (it may carry /etc/os-release), refusing.");
 
-        return extension_release_validate(
+        r = extension_release_validate(
                         img->name,
                         host_os_release_id,
                         host_os_release_version_id,
                         host_os_release_sysext_level,
+                        in_initrd() ? "initrd" : "system",
                         img->extension_release);
+        if (r < 0)
+                return log_error_errno(r, "Failed to validate extension release information: %m");
+
+        return r;
 }
 
 static int merge_subprocess(Hashmap *images, const char *workspace) {
@@ -464,7 +470,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
          * but let the kernel do that entirely automatically, once our namespace dies. Note that this file
          * system won't be visible to anyone but us, since we opened our own namespace and then made the
          * /run/ hierarchy (which our workspace is contained in) MS_SLAVE, see above. */
-        r = mount_nofollow_verbose(LOG_ERR, "sysexit", workspace, "tmpfs", 0, "mode=0700");
+        r = mount_nofollow_verbose(LOG_ERR, "sysext", workspace, "tmpfs", 0, "mode=0700");
         if (r < 0)
                 return r;
 
@@ -532,10 +538,18 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                                         img->path,
                                         &verity_settings,
                                         NULL,
+                                        d->diskseq,
                                         d->uevent_seqnum_not_before,
                                         d->timestamp_not_before,
                                         flags,
                                         &m);
+                        if (r < 0)
+                                return r;
+
+                        r = dissected_image_load_verity_sig_partition(
+                                        m,
+                                        d->fd,
+                                        &verity_settings);
                         if (r < 0)
                                 return r;
 
@@ -566,7 +580,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         break;
                 }
                 default:
-                        assert_not_reached("Unsupported image type");
+                        assert_not_reached();
                 }
 
                 r = validate_version(
@@ -582,7 +596,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         continue;
                 }
 
-                /* Noice! This one is an extension we want. */
+                /* Nice! This one is an extension we want. */
                 r = strv_extend(&extensions, img->name);
                 if (r < 0)
                         return log_oom();
@@ -957,7 +971,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         return 1;

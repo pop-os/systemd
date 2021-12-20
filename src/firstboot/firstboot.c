@@ -9,6 +9,7 @@
 
 #include "alloc-util.h"
 #include "ask-password-api.h"
+#include "chase-symlinks.h"
 #include "copy.h"
 #include "creds-util.h"
 #include "dissect-image.h"
@@ -16,6 +17,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "glyph-util.h"
 #include "hostname-util.h"
 #include "kbd-util.h"
 #include "libcrypt-util.h"
@@ -32,6 +34,7 @@
 #include "proc-cmdline.h"
 #include "pwquality-util.h"
 #include "random-util.h"
+#include "smack-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
@@ -566,7 +569,6 @@ static int process_hostname(void) {
 
 static int process_machine_id(void) {
         const char *etc_machine_id;
-        char id[SD_ID128_STRING_MAX];
         int r;
 
         etc_machine_id = prefix_roota(arg_root, "/etc/machine-id");
@@ -576,7 +578,7 @@ static int process_machine_id(void) {
         if (sd_id128_is_null(arg_machine_id))
                 return 0;
 
-        r = write_string_file(etc_machine_id, sd_id128_to_string(arg_machine_id, id),
+        r = write_string_file(etc_machine_id, SD_ID128_TO_STRING(arg_machine_id),
                               WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755 |
                               (arg_force ? WRITE_STRING_FILE_ATOMIC : 0));
         if (r < 0)
@@ -1299,7 +1301,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         /* We check if the specified locale strings are valid down here, so that we can take --root= into

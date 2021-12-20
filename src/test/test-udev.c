@@ -15,7 +15,7 @@
 #include "fs-util.h"
 #include "log.h"
 #include "main-func.h"
-#include "mkdir.h"
+#include "mkdir-label.h"
 #include "mount-util.h"
 #include "namespace-util.h"
 #include "selinux-util.h"
@@ -126,7 +126,7 @@ static int run(int argc, char *argv[]) {
                 } else {
                         if (unlink(devname) < 0)
                                 return log_error_errno(errno, "unlink('%s') failed: %m", devname);
-                        (void) rmdir_parents(devname, "/");
+                        (void) rmdir_parents(devname, "/dev");
                 }
         }
 

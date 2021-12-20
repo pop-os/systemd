@@ -5,6 +5,7 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "sd-daemon.h"
 
@@ -438,7 +439,7 @@ static int setup_uploader(Uploader *u, const char *url, const char *state_file) 
                 char *t;
                 size_t x;
 
-                t = strdupa(url);
+                t = strdupa_safe(url);
                 x = strlen(t);
                 while (x > 0 && t[x - 1] == '/')
                         t[x - 1] = '\0';
@@ -779,7 +780,7 @@ static int parse_argv(int argc, char *argv[]) {
                                                argv[optind - 1]);
 
                 default:
-                        assert_not_reached("Unhandled option code.");
+                        assert_not_reached();
                 }
 
         if (!arg_url)
@@ -820,7 +821,7 @@ static int open_journal(sd_journal **j) {
 
 static int run(int argc, char **argv) {
         _cleanup_(destroy_uploader) Uploader u = {};
-        _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
+        _unused_ _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         bool use_journal;
         int r;
 

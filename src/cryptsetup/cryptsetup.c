@@ -18,6 +18,7 @@
 #include "cryptsetup-util.h"
 #include "device-util.h"
 #include "efi-loader.h"
+#include "env-util.h"
 #include "escape.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -82,6 +83,7 @@ static char *arg_tpm2_device = NULL;
 static bool arg_tpm2_device_auto = false;
 static uint32_t arg_tpm2_pcr_mask = UINT32_MAX;
 static bool arg_headless = false;
+static usec_t arg_token_timeout_usec = 30*USEC_PER_SEC;
 
 STATIC_DESTRUCTOR_REGISTER(arg_cipher, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_hash, freep);
@@ -409,7 +411,15 @@ static int parse_one_option(const char *option) {
         } else if (streq(option, "headless"))
                 arg_headless = true;
 
-        else if (!streq(option, "x-initrd.attach"))
+        else if ((val = startswith(option, "token-timeout="))) {
+
+                r = parse_sec_fix_0(val, &arg_token_timeout_usec);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to parse %s, ignoring: %m", option);
+                        return 0;
+                }
+
+        } else if (!streq(option, "x-initrd.attach"))
                 log_warning("Encountered unknown /etc/crypttab option '%s', ignoring.", option);
 
         return 0;
@@ -453,7 +463,6 @@ static char* disk_description(const char *path) {
         _cleanup_(sd_device_unrefp) sd_device *device = NULL;
         const char *i, *name;
         struct stat st;
-        int r;
 
         assert(path);
 
@@ -468,14 +477,15 @@ static char* disk_description(const char *path) {
 
         if (sd_device_get_property_value(device, "ID_PART_ENTRY_NAME", &name) >= 0) {
                 _cleanup_free_ char *unescaped = NULL;
+                ssize_t l;
 
                 /* ID_PART_ENTRY_NAME uses \x style escaping, using libblkid's blkid_encode_string(). Let's
                  * reverse this here to make the string more human friendly in case people embed spaces or
                  * other weird stuff. */
 
-                r = cunescape(name, UNESCAPE_RELAX, &unescaped);
-                if (r < 0) {
-                        log_debug_errno(r, "Failed to unescape ID_PART_ENTRY_NAME, skipping device: %m");
+                l = cunescape(name, UNESCAPE_RELAX, &unescaped);
+                if (l < 0) {
+                        log_debug_errno(l, "Failed to unescape ID_PART_ENTRY_NAME, skipping device: %m");
                         return NULL;
                 }
 
@@ -710,11 +720,25 @@ static char *make_bindname(const char *volume) {
         return s;
 }
 
-static int make_security_device_monitor(sd_event *event, sd_device_monitor **ret) {
+static int make_security_device_monitor(
+                sd_event **ret_event,
+                sd_device_monitor **ret_monitor) {
         _cleanup_(sd_device_monitor_unrefp) sd_device_monitor *monitor = NULL;
+        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         int r;
 
-        assert(ret);
+        assert(ret_event);
+        assert(ret_monitor);
+
+        /* Waits for a device with "security-device" tag to show up in udev */
+
+        r = sd_event_default(&event);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate event loop: %m");
+
+        r = sd_event_add_time_relative(event, NULL, CLOCK_MONOTONIC, arg_token_timeout_usec, USEC_PER_SEC, NULL, INT_TO_PTR(-ETIMEDOUT));
+        if (r < 0)
+                return log_error_errno(r, "Failed to install timeout event source: %m");
 
         r = sd_device_monitor_new(&monitor);
         if (r < 0)
@@ -732,8 +756,145 @@ static int make_security_device_monitor(sd_event *event, sd_device_monitor **ret
         if (r < 0)
                 return log_error_errno(r, "Failed to start device monitor: %m");
 
-        *ret = TAKE_PTR(monitor);
+        *ret_event = TAKE_PTR(event);
+        *ret_monitor = TAKE_PTR(monitor);
         return 0;
+}
+
+static int run_security_device_monitor(
+                sd_event *event,
+                sd_device_monitor *monitor) {
+        bool processed = false;
+        int r;
+
+        assert(event);
+        assert(monitor);
+
+        /* Runs the event loop for the device monitor until either something happens, or the time-out is
+         * hit. */
+
+        for (;;) {
+                int x;
+
+                r = sd_event_get_exit_code(event, &x);
+                if (r < 0) {
+                        if (r != -ENODATA)
+                                return log_error_errno(r, "Failed to query exit code from event loop: %m");
+
+                        /* On ENODATA we aren't told to exit yet. */
+                } else {
+                        assert(x == -ETIMEDOUT);
+                        return log_notice_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                "Timed out waiting for security device, aborting security device based authentication attempt.");
+                }
+
+                /* Wait for one event, and then eat all subsequent events until there are no further ones */
+                r = sd_event_run(event, processed ? 0 : UINT64_MAX);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to run event loop: %m");
+                if (r == 0) /* no events queued anymore */
+                        return 0;
+
+                processed = true;
+        }
+}
+
+static bool libcryptsetup_plugins_support(void) {
+#if HAVE_LIBCRYPTSETUP_PLUGINS
+        int r;
+
+        /* Permit a way to disable libcryptsetup token module support, for debugging purposes. */
+        r = getenv_bool("SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE");
+        if (r < 0 && r != -ENXIO)
+                log_debug_errno(r, "Failed to parse $SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE env var: %m");
+        if (r == 0)
+                return false;
+
+        return crypt_token_external_path();
+#else
+        return false;
+#endif
+}
+
+#if HAVE_LIBCRYPTSETUP_PLUGINS
+static int acquire_pins_from_env_variable(char ***ret_pins) {
+        char *e;
+        _cleanup_strv_free_erase_ char **pins = NULL;
+
+        assert(ret_pins);
+
+        e = getenv("PIN");
+        if (e) {
+                pins = strv_new(e);
+                if (!pins)
+                        return log_oom();
+
+                string_erase(e);
+                if (unsetenv("PIN") < 0)
+                        return log_error_errno(errno, "Failed to unset $PIN: %m");
+        }
+
+        *ret_pins = TAKE_PTR(pins);
+
+        return 0;
+}
+#endif
+
+static int attach_luks2_by_fido2(
+                struct crypt_device *cd,
+                const char *name,
+                usec_t until,
+                bool headless,
+                void *usrptr,
+                uint32_t activation_flags) {
+
+#if HAVE_LIBCRYPTSETUP_PLUGINS
+        AskPasswordFlags flags = ASK_PASSWORD_PUSH_CACHE | ASK_PASSWORD_ACCEPT_CACHED;
+        _cleanup_strv_free_erase_ char **pins = NULL;
+        char **p;
+        int r;
+
+        r = crypt_activate_by_token_pin(cd, name, "systemd-fido2", CRYPT_ANY_TOKEN, NULL, 0, usrptr, activation_flags);
+        if (r > 0) /* returns unlocked keyslot id on success */
+                r = 0;
+        if (r != -ENOANO) /* needs pin or pin is wrong */
+                return r;
+
+        r = acquire_pins_from_env_variable(&pins);
+        if (r < 0)
+                return r;
+
+        STRV_FOREACH(p, pins) {
+                r = crypt_activate_by_token_pin(cd, name, "systemd-fido2", CRYPT_ANY_TOKEN, *p, strlen(*p), usrptr, activation_flags);
+                if (r > 0) /* returns unlocked keyslot id on success */
+                        r = 0;
+                if (r != -ENOANO) /* needs pin or pin is wrong */
+                        return r;
+        }
+
+        if (headless)
+                return log_error_errno(SYNTHETIC_ERRNO(ENOPKG), "PIN querying disabled via 'headless' option. Use the '$PIN' environment variable.");
+
+        for (;;) {
+                pins = strv_free_erase(pins);
+                r = ask_password_auto("Please enter security token PIN:", "drive-harddisk", NULL, "fido2-pin", "cryptsetup.fido2-pin", until, flags, &pins);
+                if (r < 0)
+                        return r;
+
+                STRV_FOREACH(p, pins) {
+                        r = crypt_activate_by_token_pin(cd, name, "systemd-fido2", CRYPT_ANY_TOKEN, *p, strlen(*p), usrptr, activation_flags);
+                        if (r > 0) /* returns unlocked keyslot id on success */
+                                r = 0;
+                        if (r != -ENOANO) /* needs pin or pin is wrong */
+                                return r;
+                }
+
+                flags &= ~ASK_PASSWORD_ACCEPT_CACHED;
+        }
+        return r;
+#else
+        return -EOPNOTSUPP;
+#endif
 }
 
 static int attach_luks_or_plain_or_bitlk_by_fido2(
@@ -750,12 +911,13 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
         _cleanup_(erase_and_freep) void *decrypted_key = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         _cleanup_free_ void *discovered_salt = NULL, *discovered_cid = NULL;
-        size_t discovered_salt_size, discovered_cid_size, cid_size, decrypted_key_size;
+        size_t discovered_salt_size, discovered_cid_size, decrypted_key_size, cid_size = 0;
         _cleanup_free_ char *friendly = NULL, *discovered_rp_id = NULL;
         int keyslot = arg_key_slot, r;
-        const char *rp_id;
-        const void *cid;
+        const char *rp_id = NULL;
+        const void *cid = NULL;
         Fido2EnrollFlags required;
+        bool use_libcryptsetup_plugin = libcryptsetup_plugins_support();
 
         assert(cd);
         assert(name);
@@ -775,7 +937,7 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
                  * use PIN + UP when needed, and do not configure UV at all. Eventually, we should make this
                  * explicitly configurable. */
                 required = FIDO2ENROLL_PIN_IF_NEEDED | FIDO2ENROLL_UP_IF_NEEDED | FIDO2ENROLL_UV_OMIT;
-        } else {
+        } else if (!use_libcryptsetup_plugin) {
                 r = find_fido2_auto_data(
                                 cd,
                                 &discovered_rp_id,
@@ -808,23 +970,30 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
                 return log_oom();
 
         for (;;) {
-                bool processed = false;
+                if (use_libcryptsetup_plugin && !arg_fido2_cid) {
+                        r = attach_luks2_by_fido2(cd, name, until, arg_headless, arg_fido2_device, flags);
+                        if (IN_SET(r, -ENOTUNIQ, -ENXIO, -ENOENT))
+                                return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                       "Automatic FIDO2 metadata discovery was not possible because missing or not unique, falling back to traditional unlocking.");
 
-                r = acquire_fido2_key(
-                                name,
-                                friendly,
-                                arg_fido2_device,
-                                rp_id,
-                                cid, cid_size,
-                                key_file, arg_keyfile_size, arg_keyfile_offset,
-                                key_data, key_data_size,
-                                until,
-                                arg_headless,
-                                required,
-                                &decrypted_key, &decrypted_key_size,
-                                arg_ask_password_flags);
-                if (r >= 0)
-                        break;
+                } else {
+                        r = acquire_fido2_key(
+                                        name,
+                                        friendly,
+                                        arg_fido2_device,
+                                        rp_id,
+                                        cid, cid_size,
+                                        key_file, arg_keyfile_size, arg_keyfile_offset,
+                                        key_data, key_data_size,
+                                        until,
+                                        arg_headless,
+                                        required,
+                                        &decrypted_key, &decrypted_key_size,
+                                        arg_ask_password_flags);
+                        if (r >= 0)
+                                break;
+                }
+
                 if (r != -EAGAIN) /* EAGAIN means: token not found */
                         return r;
 
@@ -834,11 +1003,7 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
 
                         assert(!event);
 
-                        r = sd_event_default(&event);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to allocate event loop: %m");
-
-                        r = make_security_device_monitor(event, &monitor);
+                        r = make_security_device_monitor(&event, &monitor);
                         if (r < 0)
                                 return r;
 
@@ -849,17 +1014,9 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
                         continue;
                 }
 
-                for (;;) {
-                        /* Wait for one event, and then eat all subsequent events until there are no
-                         * further ones */
-                        r = sd_event_run(event, processed ? 0 : UINT64_MAX);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to run event loop: %m");
-                        if (r == 0)
-                                break;
-
-                        processed = true;
-                }
+                r = run_security_device_monitor(event, monitor);
+                if (r < 0)
+                        return r;
 
                 log_debug("Got one or more potentially relevant udev events, rescanning FIDO2...");
         }
@@ -887,6 +1044,36 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
         return 0;
 }
 
+static int attach_luks2_by_pkcs11(
+                struct crypt_device *cd,
+                const char *name,
+                const char *friendly_name,
+                usec_t until,
+                bool headless,
+                uint32_t flags) {
+
+#if HAVE_LIBCRYPTSETUP_PLUGINS
+        int r;
+
+        if (!streq_ptr(crypt_get_type(cd), CRYPT_LUKS2))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Automatic PKCS#11 metadata requires LUKS2 device.");
+
+        systemd_pkcs11_plugin_params params = {
+                .friendly_name = friendly_name,
+                .until = until,
+                .headless = headless
+        };
+
+        r = crypt_activate_by_token_pin(cd, name, "systemd-pkcs11", CRYPT_ANY_TOKEN, NULL, 0, &params, flags);
+        if (r > 0) /* returns unlocked keyslot id on success */
+                r = 0;
+
+        return r;
+#else
+        return -EOPNOTSUPP;
+#endif
+}
+
 static int attach_luks_or_plain_or_bitlk_by_pkcs11(
                 struct crypt_device *cd,
                 const char *name,
@@ -904,23 +1091,26 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         _cleanup_free_ void *discovered_key = NULL;
         int keyslot = arg_key_slot, r;
-        const char *uri;
+        const char *uri = NULL;
+        bool use_libcryptsetup_plugin = libcryptsetup_plugins_support();
 
         assert(cd);
         assert(name);
         assert(arg_pkcs11_uri || arg_pkcs11_uri_auto);
 
         if (arg_pkcs11_uri_auto) {
-                r = find_pkcs11_auto_data(cd, &discovered_uri, &discovered_key, &discovered_key_size, &keyslot);
-                if (IN_SET(r, -ENOTUNIQ, -ENXIO))
-                        return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
-                                               "Automatic PKCS#11 metadata discovery was not possible because missing or not unique, falling back to traditional unlocking.");
-                if (r < 0)
-                        return r;
+                if (!use_libcryptsetup_plugin) {
+                        r = find_pkcs11_auto_data(cd, &discovered_uri, &discovered_key, &discovered_key_size, &keyslot);
+                        if (IN_SET(r, -ENOTUNIQ, -ENXIO))
+                                return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                       "Automatic PKCS#11 metadata discovery was not possible because missing or not unique, falling back to traditional unlocking.");
+                        if (r < 0)
+                                return r;
 
-                uri = discovered_uri;
-                key_data = discovered_key;
-                key_data_size = discovered_key_size;
+                        uri = discovered_uri;
+                        key_data = discovered_key;
+                        key_data_size = discovered_key_size;
+                }
         } else {
                 uri = arg_pkcs11_uri;
 
@@ -933,19 +1123,22 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
                 return log_oom();
 
         for (;;) {
-                bool processed = false;
+                if (use_libcryptsetup_plugin && arg_pkcs11_uri_auto)
+                        r = attach_luks2_by_pkcs11(cd, name, friendly, until, arg_headless, flags);
+                else {
+                        r = decrypt_pkcs11_key(
+                                        name,
+                                        friendly,
+                                        uri,
+                                        key_file, arg_keyfile_size, arg_keyfile_offset,
+                                        key_data, key_data_size,
+                                        until,
+                                        arg_headless,
+                                        &decrypted_key, &decrypted_key_size);
+                        if (r >= 0)
+                                break;
+                }
 
-                r = decrypt_pkcs11_key(
-                                name,
-                                friendly,
-                                uri,
-                                key_file, arg_keyfile_size, arg_keyfile_offset,
-                                key_data, key_data_size,
-                                until,
-                                arg_headless,
-                                &decrypted_key, &decrypted_key_size);
-                if (r >= 0)
-                        break;
                 if (r != -EAGAIN) /* EAGAIN means: token not found */
                         return r;
 
@@ -955,11 +1148,7 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
 
                         assert(!event);
 
-                        r = sd_event_default(&event);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to allocate event loop: %m");
-
-                        r = make_security_device_monitor(event, &monitor);
+                        r = make_security_device_monitor(&event, &monitor);
                         if (r < 0)
                                 return r;
 
@@ -971,20 +1160,13 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
                         continue;
                 }
 
-                for (;;) {
-                        /* Wait for one event, and then eat all subsequent events until there are no
-                         * further ones */
-                        r = sd_event_run(event, processed ? 0 : UINT64_MAX);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to run event loop: %m");
-                        if (r == 0)
-                                break;
-
-                        processed = true;
-                }
+                r = run_security_device_monitor(event, monitor);
+                if (r < 0)
+                        return r;
 
                 log_debug("Got one or more potentially relevant udev events, rescanning PKCS#11...");
         }
+        assert(decrypted_key);
 
         if (pass_volume_key)
                 r = crypt_activate_by_volume_key(cd, name, decrypted_key, decrypted_key_size, flags);
@@ -1015,11 +1197,24 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
         return 0;
 }
 
-static int make_tpm2_device_monitor(sd_event *event, sd_device_monitor **ret) {
+static int make_tpm2_device_monitor(
+                sd_event **ret_event,
+                sd_device_monitor **ret_monitor) {
+
         _cleanup_(sd_device_monitor_unrefp) sd_device_monitor *monitor = NULL;
+        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         int r;
 
-        assert(ret);
+        assert(ret_event);
+        assert(ret_monitor);
+
+        r = sd_event_default(&event);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate event loop: %m");
+
+        r = sd_event_add_time_relative(event, NULL, CLOCK_MONOTONIC, arg_token_timeout_usec, USEC_PER_SEC, NULL, INT_TO_PTR(-ETIMEDOUT));
+        if (r < 0)
+                return log_error_errno(r, "Failed to install timeout event source: %m");
 
         r = sd_device_monitor_new(&monitor);
         if (r < 0)
@@ -1037,8 +1232,36 @@ static int make_tpm2_device_monitor(sd_event *event, sd_device_monitor **ret) {
         if (r < 0)
                 return log_error_errno(r, "Failed to start device monitor: %m");
 
-        *ret = TAKE_PTR(monitor);
+        *ret_event = TAKE_PTR(event);
+        *ret_monitor = TAKE_PTR(monitor);
         return 0;
+}
+
+static int attach_luks2_by_tpm2(
+                struct crypt_device *cd,
+                const char *name,
+                uint32_t flags) {
+
+#if HAVE_LIBCRYPTSETUP_PLUGINS
+        int r;
+
+        systemd_tpm2_plugin_params params = {
+                .search_pcr_mask = arg_tpm2_pcr_mask,
+                .device = arg_tpm2_device
+        };
+
+        if (!crypt_token_external_path())
+                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                       "Libcryptsetup has external plugins support disabled.");
+
+        r = crypt_activate_by_token_pin(cd, name, "systemd-tpm2", CRYPT_ANY_TOKEN, NULL, 0, &params, flags);
+        if (r > 0) /* returns unlocked keyslot id on success */
+                r = 0;
+
+        return r;
+#else
+        return -EOPNOTSUPP;
+#endif
 }
 
 static int attach_luks_or_plain_or_bitlk_by_tpm2(
@@ -1067,8 +1290,6 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                 return log_oom();
 
         for (;;) {
-                bool processed = false;
-
                 if (key_file || key_data) {
                         /* If key data is specified, use that */
 
@@ -1076,6 +1297,8 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                         name,
                                         arg_tpm2_device,
                                         arg_tpm2_pcr_mask == UINT32_MAX ? TPM2_PCR_MASK_DEFAULT : arg_tpm2_pcr_mask,
+                                        UINT16_MAX,
+                                        0,
                                         key_file, arg_keyfile_size, arg_keyfile_offset,
                                         key_data, key_data_size,
                                         NULL, 0, /* we don't know the policy hash */
@@ -1087,6 +1310,20 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                         if (r != -EAGAIN) /* EAGAIN means: no tpm2 chip found */
                                 return r;
                 } else {
+                        r = attach_luks2_by_tpm2(cd, name, flags);
+                        /* EAGAIN     means: no tpm2 chip found
+                         * EOPNOTSUPP means: no libcryptsetup plugins support */
+                        if (r == -ENXIO)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                       "No TPM2 metadata matching the current system state found in LUKS2 header, falling back to traditional unlocking.");
+                        if (r == -ENOENT)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                       "No TPM2 metadata enrolled in LUKS2 header or TPM2 support not available, falling back to traditional unlocking.");
+                        if (!IN_SET(r, -EOPNOTSUPP, -EAGAIN))
+                                return r;
+                }
+
+                if (r == -EOPNOTSUPP) {
                         _cleanup_free_ void *blob = NULL, *policy_hash = NULL;
                         size_t blob_size, policy_hash_size;
                         bool found_some = false;
@@ -1098,12 +1335,15 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
 
                         for (;;) {
                                 uint32_t pcr_mask;
+                                uint16_t pcr_bank, primary_alg;
 
                                 r = find_tpm2_auto_data(
                                                 cd,
                                                 arg_tpm2_pcr_mask, /* if != UINT32_MAX we'll only look for tokens with this PCR mask */
                                                 token, /* search for the token with this index, or any later index than this */
                                                 &pcr_mask,
+                                                &pcr_bank,
+                                                &primary_alg,
                                                 &blob, &blob_size,
                                                 &policy_hash, &policy_hash_size,
                                                 &keyslot,
@@ -1125,6 +1365,8 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                                 name,
                                                 arg_tpm2_device,
                                                 pcr_mask,
+                                                pcr_bank,
+                                                primary_alg,
                                                 NULL, 0, 0, /* no key file */
                                                 blob, blob_size,
                                                 policy_hash, policy_hash_size,
@@ -1151,11 +1393,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                 return log_notice_errno(SYNTHETIC_ERRNO(EAGAIN),
                                                         "No TPM2 hardware discovered and EFI bios indicates no support for it either, assuming TPM2-less system, falling back to traditional unocking.");
 
-                        r = sd_event_default(&event);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to allocate event loop: %m");
-
-                        r = make_tpm2_device_monitor(event, &monitor);
+                        r = make_tpm2_device_monitor(&event, &monitor);
                         if (r < 0)
                                 return r;
 
@@ -1166,17 +1404,9 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                         continue;
                 }
 
-                for (;;) {
-                        /* Wait for one event, and then eat all subsequent events until there are no
-                         * further ones */
-                        r = sd_event_run(event, processed ? 0 : UINT64_MAX);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to run event loop: %m");
-                        if (r == 0)
-                                break;
-
-                        processed = true;
-                }
+                r = run_security_device_monitor(event, monitor);
+                if (r < 0)
+                        return r;
 
                 log_debug("Got one or more potentially relevant udev events, rescanning for TPM2...");
         }
@@ -1482,7 +1712,7 @@ static int run(int argc, char *argv[]) {
         verb = argv[1];
 
         if (streq(verb, "attach")) {
-                _cleanup_(remove_and_erasep) const char *destroy_key_file = NULL;
+                _unused_ _cleanup_(remove_and_erasep) const char *destroy_key_file = NULL;
                 _cleanup_(erase_and_freep) void *key_data = NULL;
                 const char *volume, *source, *key_file, *options;
                 crypt_status_info status;

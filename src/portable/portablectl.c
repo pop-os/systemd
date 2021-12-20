@@ -10,6 +10,7 @@
 #include "bus-locator.h"
 #include "bus-unit-util.h"
 #include "bus-wait-for-jobs.h"
+#include "chase-symlinks.h"
 #include "def.h"
 #include "dirent-util.h"
 #include "env-file.h"
@@ -24,8 +25,8 @@
 #include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
-#include "pretty-print.h"
 #include "portable.h"
+#include "pretty-print.h"
 #include "spawn-polkit-agent.h"
 #include "string-util.h"
 #include "strv.h"
@@ -219,7 +220,7 @@ static int acquire_bus(sd_bus **bus) {
 
         r = bus_connect_transport(arg_transport, arg_host, false, bus);
         if (r < 0)
-                return bus_log_connect_error(r);
+                return bus_log_connect_error(r, arg_transport);
 
         (void) sd_bus_set_allow_interactive_authorization(*bus, arg_ask_password);
 
@@ -332,7 +333,7 @@ static int inspect_image(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        (void) pager_open(arg_pager_flags);
+        pager_open(arg_pager_flags);
 
         if (arg_cat) {
                 printf("%s-- OS Release: --%s\n", ansi_highlight(), ansi_normal());
@@ -1092,7 +1093,7 @@ static int help(int argc, char *argv[], void *userdata) {
         _cleanup_free_ char *link = NULL;
         int r;
 
-        (void) pager_open(arg_pager_flags);
+        pager_open(arg_pager_flags);
 
         r = terminal_urlify_man("portablectl", "1", &link);
         if (r < 0)
@@ -1288,7 +1289,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
         }
 

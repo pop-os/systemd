@@ -99,6 +99,24 @@
         </varlistentry>
 
         <varlistentry>
+          <term><option>--property=<replaceable>NAME</replaceable></option></term>
+          <listitem>
+            <para>When showing device properties using the <option>--query=property</option>
+            option, limit display to properties specified in the argument. The argument should
+            be a comma-separated list of property names. If not specified, all known properties
+            are shown.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--value</option></term>
+          <listitem>
+            <para>When showing device properties using the <option>--query=property</option>
+            option, print only their values, and skip the property name and <literal>=</literal>.</para>
+            <para>Cannot be used together with <option>-x/--export</option> or
+            <option>-P/--export-prefix</option>.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
           <term><option>-p</option></term>
           <term><option>--path=<replaceable>DEVPATH</replaceable></option></term>
           <listitem>
@@ -619,6 +637,18 @@
       for device <replaceable>DEVPATH</replaceable>, and print debug
       output.</para>
       <variablelist>
+        <varlistentry>
+          <term><option>-a</option></term>
+          <term><option>--action=<replaceable>ACTION</replaceable></option></term>
+          <listitem>
+            <para>Type of event to be simulated. Possible actions are <literal>add</literal>,
+            <literal>remove</literal>, <literal>change</literal>, <literal>move</literal>,
+            <literal>online</literal>, <literal>offline</literal>, <literal>bind</literal>,
+            and <literal>unbind</literal>. Also, the special value <literal>help</literal> can be used
+            to list the possible actions. The default value is <literal>add</literal>.</para>
+          </listitem>
+        </varlistentry>
+
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>

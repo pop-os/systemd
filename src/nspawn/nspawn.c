@@ -33,6 +33,7 @@
 #include "cap-list.h"
 #include "capability-util.h"
 #include "cgroup-util.h"
+#include "chase-symlinks.h"
 #include "copy.h"
 #include "cpu-set-util.h"
 #include "creds-util.h"
@@ -228,6 +229,7 @@ static ConsoleMode arg_console_mode = _CONSOLE_MODE_INVALID;
 static Credential *arg_credentials = NULL;
 static size_t arg_n_credentials = 0;
 static char **arg_bind_user = NULL;
+static bool arg_suppress_sync = false;
 
 STATIC_DESTRUCTOR_REGISTER(arg_directory, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_template, freep);
@@ -302,7 +304,7 @@ static int help(void) {
         _cleanup_free_ char *link = NULL;
         int r;
 
-        (void) pager_open(arg_pager_flags);
+        pager_open(arg_pager_flags);
 
         r = terminal_urlify_man("systemd-nspawn", "1", &link);
         if (r < 0)
@@ -338,10 +340,12 @@ static int help(void) {
                "  -a --as-pid2              Maintain a stub init as PID1, invoke binary as PID2\n"
                "  -b --boot                 Boot up full system (i.e. invoke init)\n"
                "     --chdir=PATH           Set working directory in the container\n"
-               "  -E --setenv=NAME=VALUE    Pass an environment variable to PID 1\n"
+               "  -E --setenv=NAME[=VALUE]  Pass an environment variable to PID 1\n"
                "  -u --user=USER            Run the command under specified user or UID\n"
                "     --kill-signal=SIGNAL   Select signal to use for shutting down PID 1\n"
-               "     --notify-ready=BOOLEAN Receive notifications from the child init process\n\n"
+               "     --notify-ready=BOOLEAN Receive notifications from the child init process\n"
+               "     --suppress-sync=BOOLEAN\n"
+               "                            Suppress any form of disk data synchronization\n\n"
                "%3$sSystem Identity:%4$s\n"
                "  -M --machine=NAME         Set the machine name for the container\n"
                "     --hostname=NAME        Override the hostname for the container\n"
@@ -653,6 +657,12 @@ static int parse_environment(void) {
         if (e)
                 arg_container_service_name = e;
 
+        r = getenv_bool("SYSTEMD_SUPPRESS_SYNC");
+        if (r >= 0)
+                arg_suppress_sync = r;
+        else if (r != -ENXIO)
+                log_debug_errno(r, "Failed to parse $SYSTEMD_SUPPRESS_SYNC, ignoring: %m");
+
         return detect_unified_cgroup_hierarchy_from_environment();
 }
 
@@ -712,6 +722,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_SET_CREDENTIAL,
                 ARG_LOAD_CREDENTIAL,
                 ARG_BIND_USER,
+                ARG_SUPPRESS_SYNC,
         };
 
         static const struct option options[] = {
@@ -784,6 +795,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "set-credential",         required_argument, NULL, ARG_SET_CREDENTIAL         },
                 { "load-credential",        required_argument, NULL, ARG_LOAD_CREDENTIAL        },
                 { "bind-user",              required_argument, NULL, ARG_BIND_USER              },
+                { "suppress-sync",          required_argument, NULL, ARG_SUPPRESS_SYNC          },
                 {}
         };
 
@@ -1121,17 +1133,13 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_settings_mask |= SETTING_CUSTOM_MOUNTS;
                         break;
 
-                case 'E': {
-                        if (!env_assignment_is_valid(optarg))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Environment variable assignment '%s' is not valid.", optarg);
-                        r = strv_env_replace_strdup(&arg_setenv, optarg);
+                case 'E':
+                        r = strv_env_replace_strdup_passthrough(&arg_setenv, optarg);
                         if (r < 0)
-                                return r;
+                                return log_error_errno(r, "Cannot assign environment variable %s: %m", optarg);
 
                         arg_settings_mask |= SETTING_ENVIRONMENT;
                         break;
-                }
 
                 case 'q':
                         arg_quiet = true;
@@ -1564,8 +1572,7 @@ static int parse_argv(int argc, char *argv[]) {
                         _cleanup_free_ char *word = NULL, *data = NULL;
                         const char *p = optarg;
                         Credential *a;
-                        size_t i;
-                        int l;
+                        ssize_t l;
 
                         r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
                         if (r == -ENOMEM)
@@ -1578,7 +1585,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (!credential_name_valid(word))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential name is not valid: %s", word);
 
-                        for (i = 0; i < arg_n_credentials; i++)
+                        for (size_t i = 0; i < arg_n_credentials; i++)
                                 if (streq(arg_credentials[i].id, word))
                                         return log_error_errno(SYNTHETIC_ERRNO(EEXIST), "Duplicate credential '%s', refusing.", word);
 
@@ -1672,11 +1679,19 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_settings_mask |= SETTING_BIND_USER;
                         break;
 
+                case ARG_SUPPRESS_SYNC:
+                        r = parse_boolean_argument("--suppress-sync=", optarg, &arg_suppress_sync);
+                        if (r < 0)
+                                return r;
+
+                        arg_settings_mask |= SETTING_SUPPRESS_SYNC;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
                 default:
-                        assert_not_reached("Unhandled option");
+                        assert_not_reached();
                 }
 
         if (argc > optind) {
@@ -1864,10 +1879,7 @@ int userns_lchown(const char *p, uid_t uid, gid_t gid) {
                         return -EOVERFLOW;
         }
 
-        if (lchown(p, uid, gid) < 0)
-                return -errno;
-
-        return 0;
+        return RET_NERRNO(lchown(p, uid, gid));
 }
 
 int userns_mkdir(const char *root, const char *path, mode_t mode, uid_t uid, gid_t gid) {
@@ -1875,7 +1887,7 @@ int userns_mkdir(const char *root, const char *path, mode_t mode, uid_t uid, gid
         int r;
 
         q = prefix_roota(root, path);
-        r = mkdir_errno_wrapper(q, mode);
+        r = RET_NERRNO(mkdir(q, mode));
         if (r == -EEXIST)
                 return 0;
         if (r < 0)
@@ -2014,7 +2026,7 @@ static int setup_timezone(const char *dest) {
                 break;
 
         default:
-                assert_not_reached("unexpected mode");
+                assert_not_reached();
         }
 
         /* Fix permissions of the symlink or file copy we just created */
@@ -2201,13 +2213,12 @@ static int copy_devnodes(const char *dest) {
                 "tty\0"
                 "net/tun\0";
 
-        _cleanup_umask_ mode_t u;
         const char *d;
         int r = 0;
 
         assert(dest);
 
-        u = umask(0000);
+        BLOCK_WITH_UMASK(0000);
 
         /* Create /dev/net, so that we can create /dev/net/tun in it */
         if (userns_mkdir(dest, "/dev/net", 0755, 0, 0) < 0)
@@ -2284,11 +2295,10 @@ static int copy_devnodes(const char *dest) {
 }
 
 static int make_extra_nodes(const char *dest) {
-        _cleanup_umask_ mode_t u;
         size_t i;
         int r;
 
-        u = umask(0000);
+        BLOCK_WITH_UMASK(0000);
 
         for (i = 0; i < arg_n_extra_nodes; i++) {
                 _cleanup_free_ char *path = NULL;
@@ -2331,7 +2341,7 @@ static int setup_pts(const char *dest) {
 
         /* Mount /dev/pts itself */
         p = prefix_roota(dest, "/dev/pts");
-        r = mkdir_errno_wrapper(p, 0755);
+        r = RET_NERRNO(mkdir(p, 0755));
         if (r < 0)
                 return log_error_errno(r, "Failed to create /dev/pts: %m");
 
@@ -2485,12 +2495,11 @@ static int setup_kmsg(int kmsg_socket) {
         _cleanup_(unlink_and_freep) char *from = NULL;
         _cleanup_free_ char *fifo = NULL;
         _cleanup_close_ int fd = -1;
-        _cleanup_umask_ mode_t u;
         int r;
 
         assert(kmsg_socket >= 0);
 
-        u = umask(0000);
+        BLOCK_WITH_UMASK(0000);
 
         /* We create the kmsg FIFO as as temporary file in /run, but immediately delete it after bind mounting it to
          * /proc/kmsg. While FIFOs on the reading side behave very similar to /proc/kmsg, their writing side behaves
@@ -2535,8 +2544,8 @@ static int on_address_change(sd_netlink *rtnl, sd_netlink_message *m, void *user
         assert(m);
         assert(args);
 
-        expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET, &args->address4);
-        expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET6, &args->address6);
+        (void) expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET, &args->address4);
+        (void) expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET6, &args->address6);
         return 0;
 }
 
@@ -2555,7 +2564,6 @@ static int setup_hostname(void) {
 
 static int setup_journal(const char *directory) {
         _cleanup_free_ char *d = NULL;
-        char id[SD_ID128_STRING_MAX];
         const char *dirname, *p, *q;
         sd_id128_t this_id;
         bool try;
@@ -2576,7 +2584,7 @@ static int setup_journal(const char *directory) {
 
         if (sd_id128_equal(arg_uuid, this_id)) {
                 log_full(try ? LOG_WARNING : LOG_ERR,
-                         "Host and machine ids are equal (%s): refusing to link journals", sd_id128_to_string(arg_uuid, id));
+                         "Host and machine ids are equal (%s): refusing to link journals", SD_ID128_TO_STRING(arg_uuid));
                 if (try)
                         return 0;
                 return -EEXIST;
@@ -2592,9 +2600,7 @@ static int setup_journal(const char *directory) {
                 }
         }
 
-        (void) sd_id128_to_string(arg_uuid, id);
-
-        p = strjoina("/var/log/journal/", id);
+        p = strjoina("/var/log/journal/", SD_ID128_TO_STRING(arg_uuid));
         q = prefix_roota(directory, p);
 
         if (path_is_mount_point(p, NULL, 0) > 0) {
@@ -2660,7 +2666,7 @@ static int setup_journal(const char *directory) {
                 /* don't create parents here — if the host doesn't have
                  * permanent journal set up, don't force it here */
 
-                r = mkdir_errno_wrapper(p, 0755);
+                r = RET_NERRNO(mkdir(p, 0755));
                 if (r < 0 && r != -EEXIST) {
                         if (try) {
                                 log_debug_errno(r, "Failed to create %s, skipping journal setup: %m", p);
@@ -3188,10 +3194,9 @@ static int inner_child(
                 char **os_release_pairs) {
 
         _cleanup_free_ char *home = NULL;
-        char as_uuid[ID128_UUID_STRING_MAX];
         size_t n_env = 1;
-        const char *envp[] = {
-                "PATH=" DEFAULT_PATH_COMPAT,
+        char *envp[] = {
+                (char*) "PATH=" DEFAULT_PATH_COMPAT,
                 NULL, /* container */
                 NULL, /* TERM */
                 NULL, /* HOME */
@@ -3303,6 +3308,7 @@ static int inner_child(
                         arg_custom_mounts,
                         arg_n_custom_mounts,
                         0,
+                        0,
                         arg_selinux_apifs_context,
                         MOUNT_NON_ROOT_ONLY | MOUNT_IN_USERNS);
         if (r < 0)
@@ -3393,6 +3399,16 @@ static int inner_child(
                         return r;
         }
 
+        if (arg_suppress_sync) {
+#if HAVE_SECCOMP
+                r = seccomp_suppress_sync();
+                if (r < 0)
+                        log_debug_errno(r, "Failed to install sync() suppression seccomp filter, ignoring: %m");
+#else
+                log_debug("systemd is built without SECCOMP support. Ignoring --suppress-sync= command line option and SuppressSync= setting.");
+#endif
+        }
+
 #if HAVE_SELINUX
         if (arg_selinux_context)
                 if (setexeccon(arg_selinux_context) < 0)
@@ -3427,17 +3443,17 @@ static int inner_child(
                 n_env++;
 
         if (home || !uid_is_valid(arg_uid) || arg_uid == 0)
-                if (asprintf((char**)(envp + n_env++), "HOME=%s", home ?: "/root") < 0)
+                if (asprintf(envp + n_env++, "HOME=%s", home ?: "/root") < 0)
                         return log_oom();
 
         if (arg_user || !uid_is_valid(arg_uid) || arg_uid == 0)
-                if (asprintf((char**)(envp + n_env++), "USER=%s", arg_user ?: "root") < 0 ||
-                    asprintf((char**)(envp + n_env++), "LOGNAME=%s", arg_user ? arg_user : "root") < 0)
+                if (asprintf(envp + n_env++, "USER=%s", arg_user ?: "root") < 0 ||
+                    asprintf(envp + n_env++, "LOGNAME=%s", arg_user ? arg_user : "root") < 0)
                         return log_oom();
 
         assert(!sd_id128_is_null(arg_uuid));
 
-        if (asprintf((char**)(envp + n_env++), "container_uuid=%s", id128_to_uuid_string(arg_uuid, as_uuid)) < 0)
+        if (asprintf(envp + n_env++, "container_uuid=%s", ID128_TO_UUID_STRING(arg_uuid)) < 0)
                 return log_oom();
 
         if (fdset_size(fds) > 0) {
@@ -3445,11 +3461,11 @@ static int inner_child(
                 if (r < 0)
                         return log_error_errno(r, "Failed to unset O_CLOEXEC for file descriptors.");
 
-                if ((asprintf((char **)(envp + n_env++), "LISTEN_FDS=%u", fdset_size(fds)) < 0) ||
-                    (asprintf((char **)(envp + n_env++), "LISTEN_PID=1") < 0))
+                if ((asprintf(envp + n_env++, "LISTEN_FDS=%u", fdset_size(fds)) < 0) ||
+                    (asprintf(envp + n_env++, "LISTEN_PID=1") < 0))
                         return log_oom();
         }
-        if (asprintf((char **)(envp + n_env++), "NOTIFY_SOCKET=%s", NSPAWN_NOTIFY_SOCKET_PATH) < 0)
+        if (asprintf(envp + n_env++, "NOTIFY_SOCKET=%s", NSPAWN_NOTIFY_SOCKET_PATH) < 0)
                 return log_oom();
 
         if (arg_n_credentials > 0) {
@@ -3459,7 +3475,7 @@ static int inner_child(
                 n_env++;
         }
 
-        env_use = strv_env_merge(3, envp, os_release_pairs, arg_setenv);
+        env_use = strv_env_merge(envp, os_release_pairs, arg_setenv);
         if (!env_use)
                 return log_oom();
 
@@ -3497,6 +3513,7 @@ static int inner_child(
         (void) fdset_close_others(fds);
 
         if (arg_start_mode == START_BOOT) {
+                const char *init;
                 char **a;
                 size_t m;
 
@@ -3507,14 +3524,13 @@ static int inner_child(
                 memcpy_safe(a + 1, arg_parameters, m * sizeof(char*));
                 a[1 + m] = NULL;
 
-                a[0] = (char*) "/usr/lib/systemd/systemd";
-                execve(a[0], a, env_use);
-
-                a[0] = (char*) "/lib/systemd/systemd";
-                execve(a[0], a, env_use);
-
-                a[0] = (char*) "/sbin/init";
-                execve(a[0], a, env_use);
+                FOREACH_STRING(init,
+                               "/usr/lib/systemd/systemd",
+                               "/lib/systemd/systemd",
+                               "/sbin/init") {
+                        a[0] = (char*) init;
+                        execve(a[0], a, env_use);
+                }
 
                 exec_target = "/usr/lib/systemd/systemd, /lib/systemd/systemd, /sbin/init";
         } else if (!strv_isempty(arg_parameters)) {
@@ -3698,32 +3714,6 @@ static int outer_child(
                 directory = "/run/systemd/nspawn-root";
         }
 
-        if (arg_userns_mode != USER_NAMESPACE_NO &&
-            IN_SET(arg_userns_ownership, USER_NAMESPACE_OWNERSHIP_MAP, USER_NAMESPACE_OWNERSHIP_AUTO) &&
-            arg_uid_shift != 0) {
-                r = make_mount_point(directory);
-                if (r < 0)
-                        return r;
-
-                r = remount_idmap(directory, arg_uid_shift, arg_uid_range);
-                if (r == -EINVAL || ERRNO_IS_NOT_SUPPORTED(r)) {
-                        /* This might fail because the kernel or file system doesn't support idmapping. We
-                         * can't really distinguish this nicely, nor do we have any guarantees about the
-                         * error codes we see, could be EOPNOTSUPP or EINVAL. */
-                        if (arg_userns_ownership != USER_NAMESPACE_OWNERSHIP_AUTO)
-                                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
-                                                       "ID mapped mounts are apparently not available, sorry.");
-
-                        log_debug("ID mapped mounts are apparently not available on this kernel or for the selected file system, reverting to recursive chown()ing.");
-                        arg_userns_ownership = USER_NAMESPACE_OWNERSHIP_CHOWN;
-                } else if (r < 0)
-                        return log_error_errno(r, "Failed to set up ID mapped mounts: %m");
-                else {
-                        log_debug("ID mapped mounts available, making use of them.");
-                        idmap = true;
-                }
-        }
-
         r = setup_pivot_root(
                         directory,
                         arg_pivot_root_new,
@@ -3774,6 +3764,7 @@ static int outer_child(
                         arg_custom_mounts,
                         arg_n_custom_mounts,
                         arg_uid_shift,
+                        arg_uid_range,
                         arg_selinux_apifs_context,
                         MOUNT_ROOT_ONLY);
         if (r < 0)
@@ -3783,6 +3774,29 @@ static int outer_child(
         r = make_mount_point(directory);
         if (r < 0)
                 return r;
+
+        if (arg_userns_mode != USER_NAMESPACE_NO &&
+            IN_SET(arg_userns_ownership, USER_NAMESPACE_OWNERSHIP_MAP, USER_NAMESPACE_OWNERSHIP_AUTO) &&
+            arg_uid_shift != 0) {
+
+                r = remount_idmap(directory, arg_uid_shift, arg_uid_range);
+                if (r == -EINVAL || ERRNO_IS_NOT_SUPPORTED(r)) {
+                        /* This might fail because the kernel or file system doesn't support idmapping. We
+                         * can't really distinguish this nicely, nor do we have any guarantees about the
+                         * error codes we see, could be EOPNOTSUPP or EINVAL. */
+                        if (arg_userns_ownership != USER_NAMESPACE_OWNERSHIP_AUTO)
+                                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                                       "ID mapped mounts are apparently not available, sorry.");
+
+                        log_debug("ID mapped mounts are apparently not available on this kernel or for the selected file system, reverting to recursive chown()ing.");
+                        arg_userns_ownership = USER_NAMESPACE_OWNERSHIP_CHOWN;
+                } else if (r < 0)
+                        return log_error_errno(r, "Failed to set up ID mapped mounts: %m");
+                else {
+                        log_debug("ID mapped mounts available, making use of them.");
+                        idmap = true;
+                }
+        }
 
         if (dissected_image) {
                 /* Now we know the uid shift, let's now mount everything else that might be in the image. */
@@ -3894,6 +3908,7 @@ static int outer_child(
                         arg_custom_mounts,
                         arg_n_custom_mounts,
                         arg_uid_shift,
+                        arg_uid_range,
                         arg_selinux_apifs_context,
                         MOUNT_NON_ROOT_ONLY);
         if (r < 0)
@@ -4091,7 +4106,7 @@ static int make_uid_map_string(
         int r;
 
         assert(n_bind_user_uid == 0 || bind_user_uid);
-        assert(offset == 0 || offset == 2); /* used to switch between UID and GID map */
+        assert(IN_SET(offset, 0, 2)); /* used to switch between UID and GID map */
         assert(ret);
 
         /* The bind_user_uid[] array is a series of 4 uid_t values, for each --bind-user= entry one
@@ -4184,6 +4199,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         ssize_t n;
         pid_t inner_child_pid;
         _cleanup_strv_free_ char **tags = NULL;
+        int r;
 
         assert(userdata);
 
@@ -4195,14 +4211,15 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         }
 
         n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
-        if (IN_SET(n, -EAGAIN, -EINTR))
-                return 0;
-        if (n == -EXFULL) {
-                log_warning("Got message with truncated control data (too many fds sent?), ignoring.");
-                return 0;
-        }
-        if (n < 0)
+        if (n < 0) {
+                if (ERRNO_IS_TRANSIENT(n))
+                        return 0;
+                if (n == -EXFULL) {
+                        log_warning("Got message with truncated control data (too many fds sent?), ignoring.");
+                        return 0;
+                }
                 return log_warning_errno(n, "Couldn't read notification socket: %m");
+        }
 
         cmsg_close_all(&msghdr);
 
@@ -4222,8 +4239,11 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         if (!tags)
                 return log_oom();
 
-        if (strv_find(tags, "READY=1"))
-                (void) sd_notifyf(false, "READY=1\n");
+        if (strv_find(tags, "READY=1")) {
+                r = sd_notify(false, "READY=1\n");
+                if (r < 0)
+                        log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
+        }
 
         p = strv_find_startswith(tags, "STATUS=");
         if (p)
@@ -4259,7 +4279,8 @@ static int merge_settings(Settings *settings, const char *path) {
                 strv_free_and_replace(arg_parameters, settings->parameters);
         }
 
-        if ((arg_settings_mask & SETTING_EPHEMERAL) == 0)
+        if ((arg_settings_mask & SETTING_EPHEMERAL) == 0 &&
+            settings->ephemeral >= 0)
                 arg_ephemeral = settings->ephemeral;
 
         if ((arg_settings_mask & SETTING_DIRECTORY) == 0 &&
@@ -4311,7 +4332,8 @@ static int merge_settings(Settings *settings, const char *path) {
                 plus = settings->capability;
                 minus = settings->drop_capability;
 
-                if ((arg_settings_mask & SETTING_NETWORK) == 0) {
+                if ((arg_settings_mask & SETTING_NETWORK) == 0 &&
+                    settings_network_configured(settings)) {
                         if (settings_private_network(settings))
                                 plus |= UINT64_C(1) << CAP_NET_ADMIN;
                         else
@@ -4382,15 +4404,7 @@ static int merge_settings(Settings *settings, const char *path) {
         }
 
         if ((arg_settings_mask & SETTING_NETWORK) == 0 &&
-            (settings->private_network >= 0 ||
-             settings->network_veth >= 0 ||
-             settings->network_bridge ||
-             settings->network_zone ||
-             settings->network_interfaces ||
-             settings->network_macvlan ||
-             settings->network_ipvlan ||
-             settings->network_veth_extra ||
-             settings->network_namespace_path)) {
+            settings_network_configured(settings)) {
 
                 if (!arg_settings_trusted)
                         log_warning("Ignoring network settings, file %s is not trusted.", path);
@@ -4434,27 +4448,33 @@ static int merge_settings(Settings *settings, const char *path) {
                 }
         }
 
-        if ((arg_settings_mask & SETTING_BIND_USER) == 0)
+        if ((arg_settings_mask & SETTING_BIND_USER) == 0 &&
+            !strv_isempty(settings->bind_user))
                 strv_free_and_replace(arg_bind_user, settings->bind_user);
 
-        if ((arg_settings_mask & SETTING_NOTIFY_READY) == 0)
+        if ((arg_settings_mask & SETTING_NOTIFY_READY) == 0 &&
+            settings->notify_ready >= 0)
                 arg_notify_ready = settings->notify_ready;
 
         if ((arg_settings_mask & SETTING_SYSCALL_FILTER) == 0) {
 
-                if (!arg_settings_trusted && !strv_isempty(settings->syscall_allow_list))
-                        log_warning("Ignoring SystemCallFilter= settings, file %s is not trusted.", path);
-                else {
-                        strv_free_and_replace(arg_syscall_allow_list, settings->syscall_allow_list);
-                        strv_free_and_replace(arg_syscall_deny_list, settings->syscall_deny_list);
+                if (!strv_isempty(settings->syscall_allow_list) || !strv_isempty(settings->syscall_deny_list)) {
+                        if (!arg_settings_trusted && !strv_isempty(settings->syscall_allow_list))
+                                log_warning("Ignoring SystemCallFilter= settings, file %s is not trusted.", path);
+                        else {
+                                strv_free_and_replace(arg_syscall_allow_list, settings->syscall_allow_list);
+                                strv_free_and_replace(arg_syscall_deny_list, settings->syscall_deny_list);
+                        }
                 }
 
 #if HAVE_SECCOMP
-                if (!arg_settings_trusted && settings->seccomp)
-                        log_warning("Ignoring SECCOMP filter, file %s is not trusted.", path);
-                else {
-                        seccomp_release(arg_seccomp);
-                        arg_seccomp = TAKE_PTR(settings->seccomp);
+                if (settings->seccomp) {
+                        if (!arg_settings_trusted)
+                                log_warning("Ignoring SECCOMP filter, file %s is not trusted.", path);
+                        else {
+                                seccomp_release(arg_seccomp);
+                                arg_seccomp = TAKE_PTR(settings->seccomp);
+                        }
                 }
 #endif
         }
@@ -4559,6 +4579,10 @@ static int merge_settings(Settings *settings, const char *path) {
                 else
                         arg_console_mode = settings->console_mode;
         }
+
+        if ((arg_settings_mask & SETTING_SUPPRESS_SYNC) == 0 &&
+            settings->suppress_sync >= 0)
+                arg_suppress_sync = settings->suppress_sync;
 
         /* The following properties can only be set through the OCI settings logic, not from the command line, hence we
          * don't consult arg_settings_mask for them. */
@@ -5110,8 +5134,11 @@ static int run_container(
         (void) sd_notifyf(false,
                           "STATUS=Container running.\n"
                           "X_NSPAWN_LEADER_PID=" PID_FMT, *pid);
-        if (!arg_notify_ready)
-                (void) sd_notify(false, "READY=1\n");
+        if (!arg_notify_ready) {
+                r = sd_notify(false, "READY=1\n");
+                if (r < 0)
+                        log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
+        }
 
         if (arg_kill_signal > 0) {
                 /* Try to kill the init system on SIGINT or SIGTERM */
@@ -5224,8 +5251,7 @@ static int run_container(
                 }
         }
 
-        r = wait_for_container(*pid, &container_status);
-        *pid = 0;
+        r = wait_for_container(TAKE_PID(*pid), &container_status);
 
         /* Tell machined that we are gone. */
         if (bus)
@@ -5310,6 +5336,15 @@ static int initialize_rlimits(void) {
                                 if (prlimit(1, rl, NULL, &buffer) < 0)
                                         return log_error_errno(errno, "Failed to read resource limit RLIMIT_%s of PID 1: %m", rlimit_to_string(rl));
 
+                                v = &buffer;
+                        } else if (rl == RLIMIT_NOFILE) {
+                                /* We nowadays bump RLIMIT_NOFILE's hard limit early in PID 1 for all
+                                 * userspace. Given that nspawn containers are often run without our PID 1,
+                                 * let's grant the containers a raised RLIMIT_NOFILE hard limit by default,
+                                 * so that container userspace gets similar resources as host userspace
+                                 * gets. */
+                                buffer = kernel_defaults[rl];
+                                buffer.rlim_max = MIN((rlim_t) read_nr_open(), (rlim_t) HIGH_RLIMIT_NOFILE);
                                 v = &buffer;
                         } else
                                 v = kernel_defaults + rl;
@@ -5701,6 +5736,7 @@ static int run(int argc, char *argv[]) {
                                 arg_image,
                                 &arg_verity_settings,
                                 NULL,
+                                loop->diskseq,
                                 loop->uevent_seqnum_not_before,
                                 loop->timestamp_not_before,
                                 dissect_image_flags,
@@ -5718,8 +5754,16 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         goto finish;
 
-                if (!arg_verity_settings.root_hash && dissected_image->can_verity)
-                        log_notice("Note: image %s contains verity information, but no root hash specified! Proceeding without integrity checking.", arg_image);
+                r = dissected_image_load_verity_sig_partition(
+                                dissected_image,
+                                loop->fd,
+                                &arg_verity_settings);
+                if (r < 0)
+                        goto finish;
+
+                if (dissected_image->has_verity && !arg_verity_settings.root_hash && !dissected_image->has_verity_sig)
+                        log_notice("Note: image %s contains verity information, but no root hash specified and no embedded "
+                                   "root hash signature found! Proceeding without integrity checking.", arg_image);
 
                 r = dissected_image_decrypt_interactively(
                                 dissected_image,

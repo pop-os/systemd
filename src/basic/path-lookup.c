@@ -8,6 +8,7 @@
 #include "fs-util.h"
 #include "log.h"
 #include "macro.h"
+#include "nulstr-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
 #include "stat-util.h"
@@ -347,7 +348,7 @@ static int acquire_config_dirs(UnitFileScope scope, char **persistent, char **ru
                 return 0;
 
         default:
-                assert_not_reached("Hmm, unexpected scope value.");
+                assert_not_reached();
         }
 
         if (!a || !b)
@@ -405,7 +406,7 @@ static int acquire_control_dirs(UnitFileScope scope, char **persistent, char **r
                 return -EOPNOTSUPP;
 
         default:
-                assert_not_reached("Hmm, unexpected scope value.");
+                assert_not_reached();
         }
 
         *persistent = TAKE_PTR(a);
@@ -489,7 +490,7 @@ static int get_paths_from_environ(const char *var, char ***paths, bool *append) 
 
                 k = endswith(e, ":");
                 if (k) {
-                        e = strndupa(e, k - e);
+                        e = strndupa_safe(e, k - e);
                         *append = true;
                 }
 
@@ -657,7 +658,7 @@ int lookup_paths_init(
                         break;
 
                 default:
-                        assert_not_reached("Hmm, unexpected scope?");
+                        assert_not_reached();
                 }
 
                 if (!add)
@@ -807,7 +808,7 @@ char **generator_binary_paths(UnitFileScope scope) {
                         break;
 
                 default:
-                        assert_not_reached("Hmm, unexpected scope.");
+                        assert_not_reached();
                 }
 
                 if (!add)
@@ -863,4 +864,31 @@ char **env_generator_binary_paths(bool is_system) {
                 paths = TAKE_PTR(add);
 
         return TAKE_PTR(paths);
+}
+
+int find_portable_profile(const char *name, const char *unit, char **ret_path) {
+        const char *p, *dot;
+
+        assert(name);
+        assert(ret_path);
+
+        assert_se(dot = strrchr(unit, '.'));
+
+        NULSTR_FOREACH(p, PORTABLE_PROFILE_DIRS) {
+                _cleanup_free_ char *joined = NULL;
+
+                joined = strjoin(p, "/", name, "/", dot + 1, ".conf");
+                if (!joined)
+                        return -ENOMEM;
+
+                if (laccess(joined, F_OK) >= 0) {
+                        *ret_path = TAKE_PTR(joined);
+                        return 0;
+                }
+
+                if (errno != ENOENT)
+                        return -errno;
+        }
+
+        return -ENOENT;
 }

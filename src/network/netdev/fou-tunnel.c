@@ -36,7 +36,7 @@ static int netdev_fill_fou_tunnel_message(NetDev *netdev, sd_netlink_message **r
 
         assert(t);
 
-        r = sd_genl_message_new(netdev->manager->genl, SD_GENL_FOU, FOU_CMD_ADD, &m);
+        r = sd_genl_message_new(netdev->manager->genl, FOU_GENL_NAME, FOU_CMD_ADD, &m);
         if (r < 0)
                 return log_netdev_error_errno(netdev, r, "Failed to allocate generic netlink message: %m");
 
@@ -58,7 +58,7 @@ static int netdev_fill_fou_tunnel_message(NetDev *netdev, sd_netlink_message **r
                 encap_type = FOU_ENCAP_GUE;
                 break;
         default:
-                assert_not_reached("invalid encap type");
+                assert_not_reached();
         }
 
         r = sd_netlink_message_append_u8(m, FOU_ATTR_TYPE, encap_type);
@@ -108,7 +108,7 @@ static int fou_tunnel_create_handler(sd_netlink *rtnl, sd_netlink_message *m, Ne
                 log_netdev_info(netdev, "netdev exists, using existing without changing its parameters");
         else if (r < 0) {
                 log_netdev_warning_errno(netdev, r, "netdev could not be created: %m");
-                netdev_drop(netdev);
+                netdev_enter_failed(netdev);
 
                 return 1;
         }
@@ -243,7 +243,7 @@ static int netdev_fou_tunnel_verify(NetDev *netdev, const char *filename) {
                                                       filename);
                 break;
         default:
-                assert_not_reached("Invalid fou encap type");
+                assert_not_reached();
         }
 
         if (t->peer_family == AF_UNSPEC && t->peer_port > 0)

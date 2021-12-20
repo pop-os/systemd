@@ -132,19 +132,23 @@ libsystemd_sources = files('''
         sd-device/sd-device.c
         sd-hwdb/hwdb-internal.h
         sd-hwdb/sd-hwdb.c
-        sd-netlink/generic-netlink.c
-        sd-netlink/generic-netlink.h
+        sd-netlink/netlink-genl.c
+        sd-netlink/netlink-genl.h
         sd-netlink/netlink-internal.h
+        sd-netlink/netlink-message-nfnl.c
+        sd-netlink/netlink-message-rtnl.c
         sd-netlink/netlink-message.c
         sd-netlink/netlink-slot.c
         sd-netlink/netlink-slot.h
         sd-netlink/netlink-socket.c
+        sd-netlink/netlink-types-genl.c
+        sd-netlink/netlink-types-internal.h
+        sd-netlink/netlink-types-nfnl.c
+        sd-netlink/netlink-types-rtnl.c
         sd-netlink/netlink-types.c
         sd-netlink/netlink-types.h
         sd-netlink/netlink-util.c
         sd-netlink/netlink-util.h
-        sd-netlink/nfnl-message.c
-        sd-netlink/rtnl-message.c
         sd-netlink/sd-netlink.c
         sd-network/network-util.c
         sd-network/network-util.h
@@ -162,15 +166,15 @@ libsystemd_c_args = ['-fvisibility=default']
 libsystemd_static = static_library(
         'systemd_static',
         libsystemd_sources,
-        install : false,
         include_directories : libsystemd_includes,
+        c_args : libsystemd_c_args,
         link_with : libbasic,
         dependencies : [threads,
                         librt],
-        c_args : libsystemd_c_args)
+        build_by_default : false)
 
 libsystemd_sym = files('libsystemd.sym')
-libsystemd_sym_path = join_paths(meson.current_source_dir(), 'libsystemd.sym')
+libsystemd_sym_path = meson.current_source_dir() / 'libsystemd.sym'
 
 static_libsystemd = get_option('static-libsystemd')
 static_libsystemd_pic = static_libsystemd == 'true' or static_libsystemd == 'pic'
@@ -179,16 +183,13 @@ custom_target(
         'libsystemd.pc',
         input : 'libsystemd.pc.in',
         output : 'libsystemd.pc',
-        command : [meson_render_jinja2, config_h, '@INPUT@'],
-        capture : true,
+        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
         install : pkgconfiglibdir != 'no',
         install_dir : pkgconfiglibdir)
 
 ############################################################
 
 tests += [
-        [['src/libsystemd/sd-journal/test-journal.c']],
-
         [['src/libsystemd/sd-journal/test-journal-send.c']],
 
         [['src/libsystemd/sd-journal/test-journal-match.c']],
@@ -196,15 +197,7 @@ tests += [
         [['src/libsystemd/sd-journal/test-journal-enum.c'],
          [], [], [], '', 'timeout=360'],
 
-        [['src/libsystemd/sd-journal/test-journal-stream.c']],
-
-        [['src/libsystemd/sd-journal/test-journal-flush.c']],
-
         [['src/libsystemd/sd-journal/test-journal-init.c']],
-
-        [['src/libsystemd/sd-journal/test-journal-verify.c']],
-
-        [['src/libsystemd/sd-journal/test-journal-interleaving.c']],
 
         [['src/libsystemd/sd-journal/test-mmap-cache.c']],
 

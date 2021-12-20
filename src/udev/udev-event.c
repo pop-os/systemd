@@ -30,6 +30,7 @@
 #include "strxcpyx.h"
 #include "udev-builtin.h"
 #include "udev-event.h"
+#include "udev-netlink.h"
 #include "udev-node.h"
 #include "udev-util.h"
 #include "udev-watch.h"
@@ -222,7 +223,7 @@ static int safe_atou_optional_plus(const char *s, unsigned *ret) {
 
         p = endswith(s, "+");
         if (p)
-                s = strndupa(s, p - s);
+                s = strndupa_safe(s, p - s);
 
         r = safe_atou(s, ret);
         if (r < 0)
@@ -247,13 +248,13 @@ static ssize_t udev_event_subst_format(
                 r = sd_device_get_devpath(dev, &val);
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_KERNEL:
                 r = sd_device_get_sysname(dev, &val);
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_KERNEL_NUMBER:
                 r = sd_device_get_sysnum(dev, &val);
@@ -261,7 +262,7 @@ static ssize_t udev_event_subst_format(
                         goto null_terminate;
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_ID:
                 if (!event->dev_parent)
@@ -269,7 +270,7 @@ static ssize_t udev_event_subst_format(
                 r = sd_device_get_sysname(event->dev_parent, &val);
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_DRIVER:
                 if (!event->dev_parent)
@@ -279,7 +280,7 @@ static ssize_t udev_event_subst_format(
                         goto null_terminate;
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_MAJOR:
         case FORMAT_SUBST_MINOR: {
@@ -288,7 +289,7 @@ static ssize_t udev_event_subst_format(
                 r = sd_device_get_devnum(dev, &devnum);
                 if (r < 0 && r != -ENOENT)
                         return r;
-                l = strpcpyf(&s, l, "%u", r < 0 ? 0 : type == FORMAT_SUBST_MAJOR ? major(devnum) : minor(devnum));
+                strpcpyf(&s, l, "%u", r < 0 ? 0 : type == FORMAT_SUBST_MAJOR ? major(devnum) : minor(devnum));
                 break;
         }
         case FORMAT_SUBST_RESULT: {
@@ -307,7 +308,7 @@ static ssize_t udev_event_subst_format(
                 }
 
                 if (index == 0)
-                        l = strpcpy(&s, l, event->program_result);
+                        strpcpy(&s, l, event->program_result);
                 else {
                         const char *start, *p;
                         unsigned i;
@@ -329,11 +330,11 @@ static ssize_t udev_event_subst_format(
                         start = p;
                         /* %c{2+} copies the whole string from the second part on */
                         if (has_plus)
-                                l = strpcpy(&s, l, start);
+                                strpcpy(&s, l, start);
                         else {
                                 while (*p && !strchr(WHITESPACE, *p))
                                         p++;
-                                l = strnpcpy(&s, l, start, p - start);
+                                strnpcpy(&s, l, start, p - start);
                         }
                 }
                 break;
@@ -351,11 +352,11 @@ static ssize_t udev_event_subst_format(
 
                 /* try to read the attribute the device */
                 if (!val)
-                        (void) sd_device_get_sysattr_value(dev, attr, &val);
+                        (void) device_get_sysattr_value_maybe_from_netlink(dev, &event->rtnl, attr, &val);
 
                 /* try to read the attribute of the parent device, other matches have selected */
                 if (!val && event->dev_parent && event->dev_parent != dev)
-                        (void) sd_device_get_sysattr_value(event->dev_parent, attr, &val);
+                        (void) device_get_sysattr_value_maybe_from_netlink(event->dev_parent, &event->rtnl, attr, &val);
 
                 if (!val)
                         goto null_terminate;
@@ -367,7 +368,7 @@ static ssize_t udev_event_subst_format(
                 count = udev_replace_chars(vbuf, UDEV_ALLOWED_CHARS_INPUT);
                 if (count > 0)
                         log_device_debug(dev, "%i character(s) replaced", count);
-                l = strpcpy(&s, l, vbuf);
+                strpcpy(&s, l, vbuf);
                 break;
         }
         case FORMAT_SUBST_PARENT:
@@ -381,7 +382,7 @@ static ssize_t udev_event_subst_format(
                         goto null_terminate;
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val + STRLEN("/dev/"));
+                strpcpy(&s, l, val + STRLEN("/dev/"));
                 break;
         case FORMAT_SUBST_DEVNODE:
                 r = sd_device_get_devname(dev, &val);
@@ -389,34 +390,34 @@ static ssize_t udev_event_subst_format(
                         goto null_terminate;
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         case FORMAT_SUBST_NAME:
                 if (event->name)
-                        l = strpcpy(&s, l, event->name);
+                        strpcpy(&s, l, event->name);
                 else if (sd_device_get_devname(dev, &val) >= 0)
-                        l = strpcpy(&s, l, val + STRLEN("/dev/"));
+                        strpcpy(&s, l, val + STRLEN("/dev/"));
                 else {
                         r = sd_device_get_sysname(dev, &val);
                         if (r < 0)
                                 return r;
-                        l = strpcpy(&s, l, val);
+                        strpcpy(&s, l, val);
                 }
                 break;
         case FORMAT_SUBST_LINKS:
                 FOREACH_DEVICE_DEVLINK(dev, val)
                         if (s == dest)
-                                l = strpcpy(&s, l, val + STRLEN("/dev/"));
+                                strpcpy(&s, l, val + STRLEN("/dev/"));
                         else
-                                l = strpcpyl(&s, l, " ", val + STRLEN("/dev/"), NULL);
+                                strpcpyl(&s, l, " ", val + STRLEN("/dev/"), NULL);
                 if (s == dest)
                         goto null_terminate;
                 break;
         case FORMAT_SUBST_ROOT:
-                l = strpcpy(&s, l, "/dev");
+                strpcpy(&s, l, "/dev");
                 break;
         case FORMAT_SUBST_SYS:
-                l = strpcpy(&s, l, "/sys");
+                strpcpy(&s, l, "/sys");
                 break;
         case FORMAT_SUBST_ENV:
                 if (isempty(attr))
@@ -426,10 +427,10 @@ static ssize_t udev_event_subst_format(
                         goto null_terminate;
                 if (r < 0)
                         return r;
-                l = strpcpy(&s, l, val);
+                strpcpy(&s, l, val);
                 break;
         default:
-                assert_not_reached("Unknown format substitution type");
+                assert_not_reached();
         }
 
         return s - dest;
@@ -600,7 +601,6 @@ reenable:
 
 static int on_spawn_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
         Spawn *spawn = userdata;
-        char timeout[FORMAT_TIMESPAN_MAX];
 
         assert(spawn);
 
@@ -610,20 +610,19 @@ static int on_spawn_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
 
         log_device_error(spawn->device, "Spawned process '%s' ["PID_FMT"] timed out after %s, killing",
                          spawn->cmd, spawn->pid,
-                         format_timespan(timeout, sizeof(timeout), spawn->timeout_usec, USEC_PER_SEC));
+                         FORMAT_TIMESPAN(spawn->timeout_usec, USEC_PER_SEC));
 
         return 1;
 }
 
 static int on_spawn_timeout_warning(sd_event_source *s, uint64_t usec, void *userdata) {
         Spawn *spawn = userdata;
-        char timeout[FORMAT_TIMESPAN_MAX];
 
         assert(spawn);
 
         log_device_warning(spawn->device, "Spawned process '%s' ["PID_FMT"] is taking longer than %s to complete",
                            spawn->cmd, spawn->pid,
-                           format_timespan(timeout, sizeof(timeout), spawn->timeout_warn_usec, USEC_PER_SEC));
+                           FORMAT_TIMESPAN(spawn->timeout_warn_usec, USEC_PER_SEC));
 
         return 1;
 }
@@ -784,7 +783,7 @@ int udev_event_spawn(UdevEvent *event,
                 return log_device_error_errno(event->dev, r,
                                               "Failed to fork() to execute command '%s': %m", cmd);
         if (r == 0) {
-                if (rearrange_stdio(-1, outpipe[WRITE_END], errpipe[WRITE_END]) < 0)
+                if (rearrange_stdio(-1, TAKE_FD(outpipe[WRITE_END]), TAKE_FD(errpipe[WRITE_END])) < 0)
                         _exit(EXIT_FAILURE);
 
                 (void) close_all_fds(NULL, 0);
@@ -856,7 +855,7 @@ static int rename_netif(UdevEvent *event) {
                 return 0;
         }
 
-        r = rtnl_get_link_info(&event->rtnl, ifindex, NULL, &flags);
+        r = rtnl_get_link_info(&event->rtnl, ifindex, NULL, &flags, NULL, NULL);
         if (r < 0)
                 return log_device_warning_errno(dev, r, "Failed to get link flags: %m");
 
@@ -906,9 +905,6 @@ static int update_devnode(UdevEvent *event) {
         if (r < 0)
                 return log_device_error_errno(dev, r, "Failed to get devnum: %m");
 
-        /* remove/update possible left-over symlinks from old database entry */
-        (void) udev_node_update_old_links(dev, event->dev_db_clone);
-
         if (!uid_is_valid(event->uid)) {
                 r = device_get_devnode_uid(dev, &event->uid);
                 if (r < 0 && r != -ENOENT)
@@ -932,7 +928,11 @@ static int update_devnode(UdevEvent *event) {
 
         bool apply_mac = device_for_action(dev, SD_DEVICE_ADD);
 
-        return udev_node_add(dev, apply_mac, event->mode, event->uid, event->gid, event->seclabel_list);
+        r = udev_node_apply_permissions(dev, apply_mac, event->mode, event->uid, event->gid, event->seclabel_list);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to apply devnode permissions: %m");
+
+        return udev_node_update(dev, event->dev_db_clone);
 }
 
 static int event_execute_rules_on_remove(
@@ -1070,10 +1070,7 @@ int udev_event_execute_rules(
 
         device_set_is_initialized(dev);
 
-        /* Yes, we run update_devnode() twice, because in the first invocation, that is before update of udev database,
-         * it could happen that two contenders are replacing each other's symlink. Hence we run it again to make sure
-         * symlinks point to devices that claim them with the highest priority. */
-        return update_devnode(event);
+        return 0;
 }
 
 void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec, int timeout_signal) {
@@ -1086,15 +1083,13 @@ void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec, int timeout_s
 
                 if (builtin_cmd != _UDEV_BUILTIN_INVALID) {
                         log_device_debug(event->dev, "Running built-in command \"%s\"", command);
-                        r = udev_builtin_run(event->dev, builtin_cmd, command, false);
+                        r = udev_builtin_run(event->dev, &event->rtnl, builtin_cmd, command, false);
                         if (r < 0)
                                 log_device_debug_errno(event->dev, r, "Failed to run built-in command \"%s\", ignoring: %m", command);
                 } else {
                         if (event->exec_delay_usec > 0) {
-                                char buf[FORMAT_TIMESPAN_MAX];
-
                                 log_device_debug(event->dev, "Delaying execution of \"%s\" for %s.",
-                                                 command, format_timespan(buf, sizeof(buf), event->exec_delay_usec, USEC_PER_SEC));
+                                                 command, FORMAT_TIMESPAN(event->exec_delay_usec, USEC_PER_SEC));
                                 (void) usleep(event->exec_delay_usec);
                         }
 

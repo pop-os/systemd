@@ -312,17 +312,13 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                         else
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown type --type=%s", optarg);
                         break;
-                case 'c': {
-                        if (streq(optarg, "help")) {
-                                dump_device_action_table();
+                case 'c':
+                        r = parse_device_action(optarg, &action);
+                        if (r < 0)
+                                return log_error_errno(r, "Unknown action '%s'", optarg);
+                        if (r == 0)
                                 return 0;
-                        }
-
-                        action = device_action_from_string(optarg);
-                        if (action < 0)
-                                return log_error_errno(action, "Unknown action '%s'", optarg);
                         break;
-                }
                 case 's':
                         r = sd_device_enumerator_add_match_subsystem(e, optarg, true);
                         if (r < 0)
@@ -416,12 +412,12 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 case '?':
                         return -EINVAL;
                 default:
-                        assert_not_reached("Unknown option");
+                        assert_not_reached();
                 }
         }
 
         if (ping) {
-                _cleanup_(udev_ctrl_unrefp) struct udev_ctrl *uctrl = NULL;
+                _cleanup_(udev_ctrl_unrefp) UdevCtrl *uctrl = NULL;
 
                 r = udev_ctrl_new(&uctrl);
                 if (r < 0)
@@ -482,7 +478,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                         return log_error_errno(r, "Failed to scan devices: %m");
                 break;
         default:
-                assert_not_reached("Unknown device type");
+                assert_not_reached();
         }
 
         r = exec_list(e, action, settle_hashmap);
