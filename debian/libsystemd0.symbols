@@ -30,6 +30,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_247@LIBSYSTEMD_247 247
  LIBSYSTEMD_248@LIBSYSTEMD_248 248
  LIBSYSTEMD_249@LIBSYSTEMD_249 249
+ LIBSYSTEMD_250@LIBSYSTEMD_250 250~rc3
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -353,6 +354,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_get_devnum@LIBSYSTEMD_240 240
  sd_device_get_devpath@LIBSYSTEMD_240 240
  sd_device_get_devtype@LIBSYSTEMD_240 240
+ sd_device_get_diskseq@LIBSYSTEMD_250 250~rc3
  sd_device_get_driver@LIBSYSTEMD_240 240
  sd_device_get_ifindex@LIBSYSTEMD_240 240
  sd_device_get_is_initialized@LIBSYSTEMD_240 240
@@ -410,6 +412,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_add_defer@LIBSYSTEMD_221 221
  sd_event_add_exit@LIBSYSTEMD_221 221
  sd_event_add_inotify@LIBSYSTEMD_239 239
+ sd_event_add_inotify_fd@LIBSYSTEMD_250 250~rc3
  sd_event_add_io@LIBSYSTEMD_221 221
  sd_event_add_post@LIBSYSTEMD_221 221
  sd_event_add_signal@LIBSYSTEMD_221 221
@@ -471,6 +474,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_set_prepare@LIBSYSTEMD_221 221
  sd_event_source_set_priority@LIBSYSTEMD_221 221
  sd_event_source_set_ratelimit@LIBSYSTEMD_248 248
+ sd_event_source_set_ratelimit_expire_callback@LIBSYSTEMD_250 250~rc3
  sd_event_source_set_time@LIBSYSTEMD_221 221
  sd_event_source_set_time_accuracy@LIBSYSTEMD_221 221
  sd_event_source_set_time_relative@LIBSYSTEMD_247 247
