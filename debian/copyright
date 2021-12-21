@@ -38,10 +38,6 @@ Copyright: 2012 Jean-Philippe Aumasson <jeanphilippe.aumasson@gmail.com>
            2012 Daniel J. Bernstein <djb@cr.yp.to>
 License: CC0-1.0
 
-Files: src/basic/ioprio.h
-Copyright: Jens Axboe <axboe@suse.de>
-License: GPL-2
-
 Files: src/shared/linux/*
        src/basic/linux/*
 Copyright: 2004-2009 Red Hat, Inc.
@@ -70,7 +66,9 @@ Files: src/basic/sparse-endian.h
 Copyright: 2012 Josh Triplett <josh@joshtriplett.org>
 License: Expat
 
-Files: src/libsystemd/sd-journal/lookup3.c
+Files: src/basic/MurmurHash2.c
+       src/basic/MurmurHash2.h
+       src/libsystemd/sd-journal/lookup3.c
        src/libsystemd/sd-journal/lookup3.h
 Copyright: none
 License: public-domain
@@ -79,6 +77,7 @@ License: public-domain
 
 Files: src/udev/ata_id/ata_id.c
        src/udev/cdrom_id/cdrom_id.c
+       src/udev/dmi_memory_id/dmi_memory_id.c
        src/udev/mtd_probe/mtd_probe.c
        src/udev/mtd_probe/mtd_probe.h
        src/udev/mtd_probe/probe_smartmedia.c
@@ -106,6 +105,7 @@ Files: src/udev/ata_id/ata_id.c
        src/udev/udev-builtin-usb_id.c
        src/udev/udev-ctrl.h
        src/udev/udevd.c
+       src/udev/udevd.h
        src/udev/udev-event.c
        src/udev/udev-event.h
        src/udev/udev-node.c
