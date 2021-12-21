@@ -1,9 +1,27 @@
-systemd (250~rc3-1) UNRELEASED; urgency=medium
+systemd (250~rc3-1) experimental; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 250~rc3
   * Switch debian-branch to experimental
+  * Bump meson Build-Depends to (>= 0.53.2)
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Update removal of upstream provided license files
+  * Use -Durlify=false instead of shipping an upstream revert patch
+  * Explicitly disable OpenSSL support.
+    We don't want to pick up an OpenSSL dependency in a tainted build
+    environment and pull a second crypto stack into systemd's dependencies.
+  * autopkgtest: install dbus-user-session for upstream test.
+    Required by TEST-43-PRIVATEUSER-UNPRIV and TEST-20-MAINPIDGAMES.
+  * Revert "Temporarily disable LTO"
+  * Small updates to debian/copyright
+  * Remove dbus introspection files
 
- -- Michael Biebl <biebl@debian.org>  Mon, 20 Dec 2021 22:21:34 +0100
+  [ Luca Boccassi ]
+  * autopkgtest: install libdw and libelf for upstream test.
+    Pulled in via dlopen since https://github.com/systemd/systemd/pull/21454
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 21 Dec 2021 01:10:16 +0100
 
 systemd (249.7-1) unstable; urgency=medium
 
