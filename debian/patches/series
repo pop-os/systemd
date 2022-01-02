@@ -1,3 +1,13 @@
+chrattr-util-return-EOPNOTSUPP-from-chrattr_full-if-no-ot.patch
+make-HP-15s-eq0xxx-changes-specific-to-sku9MG38EA-ABZ.patch
+unit-file-fix-symlinked-drop-in-directory-handling.patch
+test-add-testcases-of-symlinked-drop-in-directories.patch
+manager-always-close-idle-pipe-when-sending-ready-notific.patch
+core-do-not-touch-run-systemd-systemd-units-load-from-use.patch
+network-ndisc-ignore-route-prefix-to-0.patch
+nss-systemd-fix-required-buffer-size-calculation.patch
+udev-fix-ID_NET_NAME_MAC-udev-property.patch
+sysusers-use-filename-if-proc-is-not-mounted.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

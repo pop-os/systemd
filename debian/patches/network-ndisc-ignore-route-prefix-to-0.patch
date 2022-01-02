@@ -1,0 +1,27 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 28 Dec 2021 22:42:03 +0900
+Subject: network: ndisc: ignore route prefix to ::/0
+
+Fixes #21912.
+
+(cherry picked from commit 80bfc3b901317ca7c1aaede0cd69150789a6e9be)
+---
+ src/network/networkd-ndisc.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/network/networkd-ndisc.c b/src/network/networkd-ndisc.c
+index 32cb536..f616f2c 100644
+--- a/src/network/networkd-ndisc.c
++++ b/src/network/networkd-ndisc.c
+@@ -612,6 +612,11 @@ static int ndisc_router_process_route(Link *link, sd_ndisc_router *rt) {
+         if (r < 0)
+                 return log_link_error_errno(link, r, "Failed to get route prefix length: %m");
+ 
++        if (in6_addr_is_null(&dst) && prefixlen == 0) {
++                log_link_debug(link, "Route prefix is ::/0, ignoring");
++                return 0;
++        }
++
+         if (in6_prefix_is_filtered(&dst, prefixlen, link->network->ndisc_allow_listed_route_prefix, link->network->ndisc_deny_listed_route_prefix)) {
+                 if (DEBUG_LOGGING) {
+                         _cleanup_free_ char *buf = NULL;

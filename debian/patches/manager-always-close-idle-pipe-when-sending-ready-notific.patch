@@ -1,0 +1,45 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 29 Dec 2021 12:04:46 +0900
+Subject: manager: always close idle pipe when sending ready notification
+
+This fixes a bug introduced by 6d9326595592f98e8126eacb4176acd8c3516d5c.
+
+The commit makes several functions skipped if the manager is already
+in finished state, as
+> In manager_check_finished(), more steps are skipped if MANAGER_IS_FINISHED().
+> Those steps are idempotent, but no need to waste cycles trying to do them
+> more than once.
+
+However, the idle pipe may be re-opened after manager is finished:
+manager_dispatch_run_queue() -> manager_watch_idle_pipe().
+So, the closing the pipe is not idempotent here.
+
+Fixes #21889.
+
+(cherry picked from commit 9c1b17c3dc1541df02118ee3aaf6dd5dd540cdc2)
+---
+ src/core/manager.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 9368a1d..3433c1a 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -3556,14 +3556,14 @@ void manager_check_finished(Manager *m) {
+ 
+         manager_send_ready(m);
+ 
++        /* Notify Type=idle units that we are done now */
++        manager_close_idle_pipe(m);
++
+         if (MANAGER_IS_FINISHED(m))
+                 return;
+ 
+         manager_flip_auto_status(m, false, "boot finished");
+ 
+-        /* Notify Type=idle units that we are done now */
+-        manager_close_idle_pipe(m);
+-
+         /* Turn off confirm spawn now */
+         m->confirm_spawn = NULL;
+ 

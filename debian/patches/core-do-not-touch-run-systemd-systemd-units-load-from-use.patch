@@ -1,0 +1,31 @@
+From: Luca Boccassi <luca.boccassi@microsoft.com>
+Date: Mon, 27 Dec 2021 18:22:43 +0000
+Subject: core: do not touch /run/systemd/systemd-units-load from user session
+ instances
+
+Follow-up for: https://github.com/systemd/systemd/commit/15b9243c0d7f6d1531fa65dbc01bd11e8e6c12ca
+Fixes: https://github.com/systemd/systemd/issues/21911
+
+(cherry picked from commit 4b3ad81bfafcd97acb06db463495e348d159d8e6)
+---
+ src/core/manager.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 3433c1a..601e15f 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1728,9 +1728,10 @@ static void manager_ready(Manager *m) {
+         manager_catchup(m);
+ 
+         /* Create a file which will indicate when the manager started loading units the last time. */
+-        (void) touch_file("/run/systemd/systemd-units-load", false,
+-                m->timestamps[MANAGER_TIMESTAMP_UNITS_LOAD].realtime ?: now(CLOCK_REALTIME),
+-                UID_INVALID, GID_INVALID, 0444);
++        if (MANAGER_IS_SYSTEM(m))
++                (void) touch_file("/run/systemd/systemd-units-load", false,
++                        m->timestamps[MANAGER_TIMESTAMP_UNITS_LOAD].realtime ?: now(CLOCK_REALTIME),
++                        UID_INVALID, GID_INVALID, 0444);
+ 
+         m->honor_device_enumeration = true;
+ }
