@@ -143,19 +143,18 @@ override_dh_auto_build:
 	ninja -C build-deb/ systemd-pot
 
 override_dh_auto_install:
-	dh_auto_install --builddirectory=build-deb \
-		--destdir=debian/install/deb
+	dh_auto_install --builddirectory=build-deb
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
-	# grep -r /usr debian/install/deb/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
-	find debian/install/deb/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'
+	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
+	find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'
 
 override_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
 endif
 	dh_auto_clean --builddirectory=build-deb
-	rm -rf debian/install/ debian/shlibs.local
+	rm -f debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
 	rm -rf tools/chromiumos/__pycache__/
@@ -163,33 +162,33 @@ endif
 
 override_dh_install:
 	# remove unnecessary / unused files
-	rm -rf debian/install/*/usr/share/doc/systemd/LICENSES/
-	rm -f debian/install/*/usr/share/doc/systemd/LICENSE.*
-	rm -f debian/install/*/var/log/README
-	rm -f debian/install/*/etc/init.d/README
-	rm -f debian/install/*/lib/*.d/README
-	rm -f debian/install/*/lib/udev/*.d/README
-	rm -f debian/install/*/usr/lib/*.d/README
-	rm -f debian/install/*/usr/lib/sysctl.d/50-default.conf
-	rm -f debian/install/*/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
-	rmdir -p --ignore-fail-on-non-empty debian/install/*/etc/X11/xinit/xinitrc.d/
+	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
+	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
+	rm -f debian/tmp/var/log/README
+	rm -f debian/tmp/etc/init.d/README
+	rm -f debian/tmp/lib/*.d/README
+	rm -f debian/tmp/lib/udev/*.d/README
+	rm -f debian/tmp/usr/lib/*.d/README
+	rm -f debian/tmp/usr/lib/sysctl.d/50-default.conf
+	rm -f debian/tmp/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
+	rmdir -p --ignore-fail-on-non-empty debian/tmp/etc/X11/xinit/xinitrc.d/
 	# those files should probably be shipped in a -dev package, remove for now
-	rm -rf debian/install/*/usr/share/dbus-1/interfaces/
+	rm -rf debian/tmp/usr/share/dbus-1/interfaces/
 	# remove files related to factory-reset feature
-	find debian/install/ \( -name 'systemd-update-done*' -o \
+	find debian/tmp/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \
 		-name systemd-hwdb-update.service -o \
 		-name ldconfig.service -o \
 		-name etc.conf \) -print -delete
-	rm -rf debian/install/*/usr/share/factory/
+	rm -rf debian/tmp/usr/share/factory/
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
-	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
+	debian/extra/make-sysusers-basic > debian/tmp/usr/lib/sysusers.d/basic.conf
 	# remove resolvconf compat symlink
-	rm -f debian/install/*/sbin/resolvconf
+	rm -f debian/tmp/sbin/resolvconf
 	# remove obsolete compat symlink
-	rm -f debian/install/*/usr/bin/systemd-resolve
+	rm -f debian/tmp/usr/bin/systemd-resolve
 
-	dh_install --sourcedir=debian/install/deb
+	dh_install
 
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
@@ -230,7 +229,7 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 endif
 
 override_dh_missing:
-	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
+	dh_missing $(DH_MISSING)
 
 override_dh_installinit:
 	dh_installinit --no-start
