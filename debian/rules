@@ -29,10 +29,6 @@ else
     GENSYMBOLS_LEVEL = 1
 endif
 
-ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
-export DEB_BUILD_PROFILES += noudeb
-endif
-
 CONFFLAGS = \
 	-Db_lto=true \
 	-Db_pie=true \
@@ -80,20 +76,19 @@ CONFFLAGS = \
 	-Doomd=false \
 	-Durlify=false \
 	-Dopenssl=false \
-	-Dsysext=true \
-	-Dnscd=true \
+	-Dlink-udev-shared=false \
+	-Dlink-systemctl-shared=false \
+	-Dbump-proc-sys-fs-nr-open=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Ddns-servers='' \
-	-Dlink-udev-shared=false \
 	-Dsystem-uid-max=999 \
 	-Dsystem-gid-max=999 \
 	-Dnobody-user=nobody \
 	-Dnobody-group=nogroup \
-	-Dbump-proc-sys-fs-nr-open=false \
 	-Ddev-kvm-mode=0660 \
-	-Dgroup-render-mode=0660
-
-CONFFLAGS_deb = \
+	-Dgroup-render-mode=0660 \
+	-Dsysext=true \
+	-Dnscd=true \
 	-Dselinux=true \
 	-Dhwdb=true \
 	-Dsysusers=true \
@@ -106,11 +101,10 @@ CONFFLAGS_deb = \
 	-Dnss-resolve=true \
 	-Dnss-systemd=true \
 	-Dresolve=true \
-	-Dstandalone-binaries=true \
-	-Dlink-systemctl-shared=false
+	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
-CONFFLAGS_deb += \
+CONFFLAGS += \
 	-Daudit=true \
 	-Dlibcryptsetup=true \
 	-Dcoredump=true \
@@ -124,7 +118,7 @@ CONFFLAGS_deb += \
 	-Dgnutls=true \
 	-Dpcre2=true
 else
-CONFFLAGS_deb += \
+CONFFLAGS += \
 	-Daudit=false \
 	-Dlibcryptsetup=false \
 	-Dcoredump=false \
@@ -138,76 +132,19 @@ CONFFLAGS_deb += \
 	-Dgnutls=false \
 	-Dpcre2=false
 endif
-
-CONFFLAGS_udeb = \
-	-Dlibcryptsetup=false \
-	-Dcoredump=false \
-	-Delfutils=false \
-	-Dpam=false \
-	-Daudit=false \
-	-Dselinux=false\
-	-Dapparmor=false \
-	-Dlibidn2=false \
-	-Dlibiptc=false \
-	-Dsmack=false \
-	-Dima=false \
-	-Dbinfmt=false \
-	-Dquotacheck=false \
-	-Dtmpfiles=false \
-	-Drandomseed=false \
-	-Dbacklight=false \
-	-Dlogind=false \
-	-Dmachined=false \
-	-Dlibcurl=false \
-	-Dimportd=false \
-	-Dmicrohttpd=false \
-	-Dgnutls=false \
-	-Dhostnamed=false \
-	-Dtimedated=false \
-	-Dnetworkd=false \
-	-Dtimesyncd=false \
-	-Dlocaled=false \
-	-Dnss-myhostname=false \
-	-Dnss-mymachines=false \
-	-Dnss-resolve=false \
-	-Dnss-systemd=false \
-	-Dresolve=false \
-	-Dportabled=false \
-	-Dpolkit=false \
-	-Dacl=false \
-	-Dgcrypt=false \
-	-Drfkill=false \
-	-Dhwdb=false \
-	-Dman=false \
-	-Dtranslations=false \
-	-Defi=false \
-	-Dseccomp=false \
-	-Dsysusers=false \
-	-Dpcre2=false
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build-deb \
-		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_deb) $(CONFFLAGS_UPSTREAM)
-ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
-	dh_auto_configure --builddirectory=build-udeb \
-		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_udeb) $(CONFFLAGS_UPSTREAM)
-endif
+		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
 
 override_dh_auto_build:
 	dh_auto_build --builddirectory=build-deb
-ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
-	dh_auto_build --builddirectory=build-udeb
-endif
 	# generate POT file for translators
 	ninja -C build-deb/ systemd-pot
 
 override_dh_auto_install:
 	dh_auto_install --builddirectory=build-deb \
 		--destdir=debian/install/deb
-ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
-	dh_auto_install --builddirectory=build-udeb \
-		--destdir=debian/install/udeb
-endif
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
 	# grep -r /usr debian/install/deb/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
@@ -218,9 +155,6 @@ ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
 endif
 	dh_auto_clean --builddirectory=build-deb
-ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
-	dh_auto_clean --builddirectory=build-udeb
-endif
 	rm -rf debian/install/ debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
@@ -254,11 +188,8 @@ override_dh_install:
 	rm -f debian/install/*/sbin/resolvconf
 	# remove obsolete compat symlink
 	rm -f debian/install/*/usr/bin/systemd-resolve
-ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
-	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
-endif
 
-	dh_install --remaining-packages --sourcedir=debian/install/deb
+	dh_install --sourcedir=debian/install/deb
 
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
