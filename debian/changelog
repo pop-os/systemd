@@ -1,3 +1,17 @@
+systemd (250-2) experimental; urgency=medium
+
+  * Drop separate udeb build.
+    The only real benefit from a separate build apparently is that udev does
+    not get a dependency on libacl and libselinux. But we have udebs for
+    those dependencies anyway.
+    Dropping the separate build basically cuts the build times in half and
+    simplifies debian/rules quite a bit.
+    It also brings udev as used in d-i closer to what is actually used in
+    the installed system, which is a good thing.
+  * Cherry-pick various fixes targeted for v250-stable
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 02 Jan 2022 21:41:56 +0100
+
 systemd (250-1) experimental; urgency=medium
 
   * New upstream version 250
