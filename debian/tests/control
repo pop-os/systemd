@@ -92,6 +92,10 @@ Restrictions: needs-root, allow-stderr, isolation-container, skippable
 Tests: unit-tests
 Depends: systemd-tests,
   libpam-systemd,
+  libnss-myhostname,
+  libnss-mymachines,
+  libnss-resolve,
+  libnss-systemd,
   udev,
   tree,
   perl,
