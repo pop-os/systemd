@@ -1,8 +1,9 @@
-systemd (250.1-1) UNRELEASED; urgency=medium
+systemd (250.1-1) experimental; urgency=medium
 
   * New upstream version 250.1
+  * Rebase patches
 
- -- Michael Biebl <biebl@debian.org>  Wed, 05 Jan 2022 20:10:42 +0100
+ -- Michael Biebl <biebl@debian.org>  Wed, 05 Jan 2022 21:42:54 +0100
 
 systemd (250-2) experimental; urgency=medium
 
