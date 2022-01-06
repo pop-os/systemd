@@ -61,3 +61,13 @@ lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
 lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
 lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
 lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+linux-5.15-compat-ioprio/variuos-add-missing-includes.patch
+linux-5.15-compat-ioprio/Define-ioprio_-get-set-the-same-as-other-compat-syscalls.patch
+linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementati.patch
+linux-5.15-compat-ioprio/shared-split-out-ioprio-related-stuff-into-ioprio-util.-c.patch
+linux-5.15-compat-ioprio/ioprio-util-add-macro-for-default-ioprio-settings.patch
+linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.patch
+linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
+linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
+linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
+linux-5.15-compat-ioprio/test-make-test-execute-pass-on-Linux-5.15.patch
