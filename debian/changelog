@@ -1,3 +1,21 @@
+systemd (249.5-2ubuntu3) jammy; urgency=medium
+
+  * Fix Linux >= 5.15 compat (ioprio API/test-execute)
+    Files:
+    - debian/patches/linux-5.15-compat-ioprio/Define-ioprio_-get-set-the-same-as-other-compat-syscalls.patch
+    - debian/patches/linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementati.patch
+    - debian/patches/linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
+    - debian/patches/linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.patch
+    - debian/patches/linux-5.15-compat-ioprio/ioprio-util-add-macro-for-default-ioprio-settings.patch
+    - debian/patches/linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
+    - debian/patches/linux-5.15-compat-ioprio/shared-split-out-ioprio-related-stuff-into-ioprio-util.-c.patch
+    - debian/patches/linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
+    - debian/patches/linux-5.15-compat-ioprio/test-make-test-execute-pass-on-Linux-5.15.patch
+    - debian/patches/linux-5.15-compat-ioprio/variuos-add-missing-includes.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a88474c8d9a8ea006434512905d84e42a774e1c6
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 07 Jan 2022 12:28:29 +0100
+
 systemd (249.5-2ubuntu2) jammy; urgency=medium
 
   * d/p/debian/timedatectl-lp1650688.patch,
