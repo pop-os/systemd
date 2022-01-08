@@ -1,3 +1,19 @@
+systemd (250.1-2) experimental; urgency=medium
+
+  [ Lukas Märdian ]
+  * d/rules: Enable build of systemd-oomd
+  * d/control: Ship oomd in a systemd-oomd package.
+    Deploying the default configuration as used in Fedora.
+  * Start systemd-oomd.service after package installation
+
+  [ Michael Biebl ]
+  * oomd: move oomctl to bindir
+  * Enable systemd-repart and ship it in the main systemd package.
+    Add fdisk as test dependency, needed by test-repart which calls sfdisk.
+  * test-repart: append /sbin and /usr/sbin to $PATH= so sfdisk can be found
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 08 Jan 2022 23:45:06 +0100
+
 systemd (250.1-1) experimental; urgency=medium
 
   * New upstream version 250.1
