@@ -1,0 +1,37 @@
+Backport of the following upstream commit:
+From bdfe7ada0d4d66e6d6e65f2822acbb1ec230f9c2 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 5 Oct 2021 10:32:56 +0200
+Subject: [PATCH] rm-rf: optionally fsync() after removing directory tree
+
+---
+ src/shared/rm-rf.c | 3 +++
+ src/shared/rm-rf.h | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/src/shared/rm-rf.c b/src/shared/rm-rf.c
+index d9cd8fb2b2d0..a8693660fab2 100644
+--- a/src/shared/rm-rf.c
++++ b/src/shared/rm-rf.c
+@@ -250,6 +250,9 @@ int rm_rf_children(
+                         ret = r;
+         }
+ 
++        if (FLAGS_SET(flags, REMOVE_SYNCFS) && syncfs(dirfd(d)) < 0 && ret >= 0)
++                ret = -errno;
++
+         return ret;
+ }
+ 
+diff --git a/src/shared/rm-rf.h b/src/shared/rm-rf.h
+index 577a2795e0f3..24fd9a2aa2d2 100644
+--- a/src/shared/rm-rf.h
++++ b/src/shared/rm-rf.h
+@@ -14,6 +14,7 @@ typedef enum RemoveFlags {
+         REMOVE_MISSING_OK       = 1 << 4, /* If the top-level directory is missing, ignore the ENOENT for it */
+         REMOVE_CHMOD            = 1 << 5, /* chmod() for write access if we cannot delete or access something */
+         REMOVE_CHMOD_RESTORE    = 1 << 6, /* Restore the old mode before returning */
++        REMOVE_SYNCFS           = 1 << 7, /* syncfs() the root of the specified directory after removing everything in it */
+ } RemoveFlags;
+ 
+ int unlinkat_harder(int dfd, const char *filename, int unlink_flags, RemoveFlags remove_flags);

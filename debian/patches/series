@@ -71,3 +71,8 @@ linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.pat
 linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
 linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
 linux-5.15-compat-ioprio/test-make-test-execute-pass-on-Linux-5.15.patch
+rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch
+rm-rf-optionally-fsync-after-removing-directory-tree.patch
+CVE-2021-3997-1.patch
+CVE-2021-3997-2.patch
+CVE-2021-3997-3.patch
