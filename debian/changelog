@@ -1,3 +1,16 @@
+systemd (250.2-1) UNRELEASED; urgency=medium
+
+  * New upstream version 250.2
+    - shared/rm-rf: loop over nested directories instead of recursing.
+      Fixes uncontrolled recursion in systemd-tmpfiles.
+      (CVE-2021-3997, Closes: #1003467)
+  * test: explicitly configure oomd stuff via dropins
+  * autopkgtest: add systemd-oomd dependency to upstream test.
+    We want systemd-oomd to be tested via the upstream provided
+    TEST-55-OOMD.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 11 Jan 2022 12:49:45 +0100
+
 systemd (250.1-2) experimental; urgency=medium
 
   [ Lukas Märdian ]
