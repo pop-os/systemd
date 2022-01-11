@@ -11,10 +11,10 @@ more suitable place for the binary.
  1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index c6f7167..5e27fa2 100644
+index e07875a..bf8c4ac 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2954,8 +2954,7 @@ if conf.get('ENABLE_OOMD') == 1
+@@ -2961,8 +2961,7 @@ if conf.get('ENABLE_OOMD') == 1
                  link_with : [libshared],
                  dependencies : [],
                  install_rpath : rootlibexecdir,

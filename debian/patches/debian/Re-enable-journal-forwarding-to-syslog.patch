@@ -30,10 +30,10 @@ index 4b0dd90..ed7e428 100644
          <literal>systemd.journald.forward_to_kmsg</literal>,
          <literal>systemd.journald.forward_to_console</literal>, and
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index a244d9c..8575646 100644
+index 9bfe229..f651566 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
-@@ -2204,6 +2204,7 @@ int server_init(Server *s, const char *namespace) {
+@@ -2207,6 +2207,7 @@ int server_init(Server *s, const char *namespace) {
                  .ratelimit_interval = DEFAULT_RATE_LIMIT_INTERVAL,
                  .ratelimit_burst = DEFAULT_RATE_LIMIT_BURST,
  

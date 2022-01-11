@@ -36,7 +36,7 @@ index 7607583..9c8a714 100644
                  if (arg_dry_run || arg_force > 0) {
                          (void) must_be_root();
 diff --git a/src/systemctl/systemctl-logind.c b/src/systemctl/systemctl-logind.c
-index 2d2043f..ccabd0f 100644
+index 114641c..066d8b7 100644
 --- a/src/systemctl/systemctl-logind.c
 +++ b/src/systemctl/systemctl-logind.c
 @@ -335,8 +335,9 @@ int logind_schedule_shutdown(void) {
