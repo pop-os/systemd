@@ -1,4 +1,4 @@
-systemd (250.2-1) UNRELEASED; urgency=medium
+systemd (250.2-1) unstable; urgency=medium
 
   * New upstream version 250.2
     - shared/rm-rf: loop over nested directories instead of recursing.
@@ -8,8 +8,10 @@ systemd (250.2-1) UNRELEASED; urgency=medium
   * autopkgtest: add systemd-oomd dependency to upstream test.
     We want systemd-oomd to be tested via the upstream provided
     TEST-55-OOMD.
+  * Rebase patches
+  * Upload to unstable
 
- -- Michael Biebl <biebl@debian.org>  Tue, 11 Jan 2022 12:49:45 +0100
+ -- Michael Biebl <biebl@debian.org>  Tue, 11 Jan 2022 12:58:15 +0100
 
 systemd (250.1-2) experimental; urgency=medium
 
