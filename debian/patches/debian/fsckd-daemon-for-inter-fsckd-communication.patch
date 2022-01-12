@@ -973,7 +973,7 @@ index 0000000..5237985
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index a9bf28f..df0125f 100644
+index 3184433..8c3137b 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -114,6 +114,7 @@ units = [

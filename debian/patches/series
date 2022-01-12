@@ -1,5 +1,7 @@
 oomd-move-oomctl-to-bindir.patch
 test-explicitly-configure-oomd-stuff-via-dropins.patch
+units-don-t-install-dbus-org.freedesktop.oom1.service-ali.patch
+test-enable-systemd-oomd.service.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
