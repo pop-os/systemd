@@ -105,6 +105,8 @@ Depends: systemd-tests,
   iputils-ping,
   dbus-user-session,
   zstd,
+  libtss2-dev,
+  libfido2-dev,
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: upstream
@@ -153,6 +155,8 @@ Depends: systemd-tests,
   libdw-dev,
   libelf-dev,
   dbus-user-session,
+  libtss2-dev,
+  libfido2-dev,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke

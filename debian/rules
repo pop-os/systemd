@@ -67,10 +67,8 @@ CONFFLAGS = \
 	-Dwheel-group=false \
 	-Duserdb=false \
 	-Dhomed=false \
-	-Dlibfido2=false \
 	-Dpwquality=false \
 	-Dp11kit=false \
-	-Dtpm2=false \
 	-Doomd=true \
 	-Durlify=false \
 	-Dopenssl=false \
@@ -116,6 +114,8 @@ CONFFLAGS += \
 	-Dimportd=true \
 	-Dmicrohttpd=true \
 	-Dgnutls=true \
+	-Dlibfido2=true \
+	-Dtpm2=true \
 	-Dpcre2=true
 else
 CONFFLAGS += \
@@ -130,6 +130,8 @@ CONFFLAGS += \
 	-Dimportd=false \
 	-Dmicrohttpd=false \
 	-Dgnutls=false \
+	-Dlibfido2=false \
+	-Dtpm2=false \
 	-Dpcre2=false
 endif
 
