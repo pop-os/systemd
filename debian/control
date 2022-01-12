@@ -435,6 +435,8 @@ Architecture: linux-any
 Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+Breaks: systemd (<< 250.2-2~)
+Replaces: systemd (<< 250.2-2~)
 Description: A userspace out-of-memory (OOM) killer
  systemd-oomd is a system service that uses cgroups-v2 and
  pressure stall information (PSI) to monitor and take action on
