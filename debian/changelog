@@ -1,3 +1,10 @@
+systemd (250.2-2) unstable; urgency=medium
+
+  * Ship systemd-oomd.socket in correct systemd-oomd package
+  * Don't install dbus-org.freedesktop.oom1.service symlink (Closes: #1003580)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 12 Jan 2022 20:52:26 +0100
+
 systemd (250.2-1) unstable; urgency=medium
 
   * New upstream version 250.2
