@@ -91,6 +91,7 @@ CONFFLAGS = \
 	-Dhwdb=true \
 	-Dsysusers=true \
 	-Dinstall-tests=$(if $(filter noinsttest,$(DEB_BUILD_PROFILES)),false,true) \
+	-Dlibcryptsetup-plugins=false \
 	-Defi=true \
 	-Dman=true \
 	-Dtranslations=true \
