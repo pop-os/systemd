@@ -1,3 +1,26 @@
+systemd (250.2-3) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Build with and suggest fido2 and tpm libraries.
+    These are used via dlopen only if available by some tools like
+    systemd-cryptsetup, systemd-cryptenroll and systemd-repart,
+    with graceful fallbacks if they are not found.
+    Build-depend on them so that the features get compiled in
+    (apart from stage1 builds), and add appropriate Suggests.
+    (Closes: #991129, #1003383)
+  * Disable libcryptsetup-plugins.
+    They are new, and might not even be supported by libcryptsetup yet
+  * Build-depend on libssl-dev.
+    Required to use libfido2-dev until #1003699 is fixed
+
+  [ Michael Biebl ]
+  * Don't stop systemd-oomd.socket during upgrades.
+    This works around an issue in systemd which doesn't process multiple
+    units that are passed to systemctl as a single transaction with the
+    correct ordering. (Closes: #1003641)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 14 Jan 2022 13:54:34 +0100
+
 systemd (250.2-2) unstable; urgency=medium
 
   * Ship systemd-oomd.socket in correct systemd-oomd package
