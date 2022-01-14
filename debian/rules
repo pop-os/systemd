@@ -239,7 +239,8 @@ override_dh_installinit:
 
 override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
-	dh_installsystemd -psystemd-oomd
+	dh_installsystemd -psystemd-oomd systemd-oomd.service
+	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
 
 override_dh_installsystemduser:
 
