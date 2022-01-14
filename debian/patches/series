@@ -62,6 +62,18 @@ udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
 udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-Hotke.patch
+lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
+lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
+lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
+lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
+rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch
+rm-rf-optionally-fsync-after-removing-directory-tree.patch
+CVE-2021-3997-1.patch
+CVE-2021-3997-2.patch
+CVE-2021-3997-3.patch
 
 # Pop patches
 cryptswap-mount-fix.patch
