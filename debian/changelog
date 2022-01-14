@@ -1,3 +1,9 @@
+systemd (245.4-4ubuntu3.15pop0) focal; urgency=medium
+
+  * Ubuntu security updates
+
+ -- Michael Aaron Murphy <mmstick@gaze15.lan>  Fri, 14 Jan 2022 23:43:53 +0100
+
 systemd (245.4-4ubuntu3.13pop0) focal; urgency=medium
 
   * Pop!_OS patches
