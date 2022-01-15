@@ -1,0 +1,11 @@
+include:
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
+
+variables:
+  # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=963788
+  SALSA_CI_DISABLE_REPROTEST: 1
+  # some tests do not work in the salsa-ci infrastructure at build time,
+  # but work fine in the autopkgtest job anyway, so skip them in the build step
+  # also skip the dbg packages to save time, they are not really needed
+  DEB_BUILD_OPTIONS: "nocheck noautodbgsym"
