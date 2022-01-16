@@ -3,3 +3,4 @@ udev: systemd-service-file-missing-install-key
 # Lintian is really bad at associating manpages
 udev: spare-manual-page
 udev: package-supports-alternative-init-but-no-init.d-script
+udev: maintainer-script-calls-systemctl
