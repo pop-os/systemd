@@ -300,7 +300,8 @@ Pre-Depends: ${shlibs:Depends},
              ${misc:Pre-Depends}
 Depends: ${misc:Depends}
 Description: systemd utility library
- The libsystemd0 library provides interfaces to various systemd components.
+ This library provides APIs to interface with various system components such as
+ the system journal, the system service manager, D-Bus and more.
 
 Package: libsystemd-dev
 Architecture: linux-any
@@ -310,9 +311,11 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version})
 Description: systemd utility library - development files
- The libsystemd0 library provides interfaces to various systemd components.
+ This library provides APIs to interface with various system components such as
+ the system journal, the system service manager, D-Bus and more.
  .
- This package contains the development files.
+ This package contains the files needed for developing applications that
+ use libsystemd.
 
 Package: udev
 Priority: important
@@ -338,7 +341,8 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends}
 Description: libudev shared library
- This library provides access to udev device information.
+ This library provides APIs to introspect and enumerate devices on the local
+ system.
 
 Package: libudev-dev
 Section: libdevel
@@ -349,6 +353,9 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          libudev1 (= ${binary:Version})
 Description: libudev development files
+ This library provides APIs to introspect and enumerate devices on the local
+ system.
+ .
  This package contains the files needed for developing applications that
  use libudev.
 
