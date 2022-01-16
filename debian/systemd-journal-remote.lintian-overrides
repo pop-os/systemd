@@ -1,2 +1,3 @@
 # Lintian is really bad at associating manpages
 systemd-journal-remote: spare-manual-page
+systemd-journal-remote: package-supports-alternative-init-but-no-init.d-script
