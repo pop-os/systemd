@@ -417,6 +417,7 @@ Package: systemd-oomd
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         adduser,
 Breaks: systemd (<< 250.2-2~)
 Replaces: systemd (<< 250.2-2~)
 Description: A userspace out-of-memory (OOM) killer
