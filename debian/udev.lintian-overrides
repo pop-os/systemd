@@ -4,3 +4,5 @@ udev: systemd-service-file-missing-install-key
 udev: spare-manual-page
 udev: package-supports-alternative-init-but-no-init.d-script
 udev: maintainer-script-calls-systemctl
+# variable name, not a typo
+udev: spelling-error-in-binary bin/udevadm ressize resize
