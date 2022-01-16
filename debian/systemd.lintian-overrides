@@ -1,3 +1,5 @@
 systemd: maintainer-script-calls-systemctl
 # Our units without [Install] are either event driven or statically enabled
 systemd: systemd-service-file-missing-install-key
+# Lintian is really bad at associating manpages
+systemd: spare-manual-page

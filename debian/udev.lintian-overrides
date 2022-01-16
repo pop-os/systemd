@@ -1,2 +1,4 @@
 # Our units without [Install] are either event driven or statically enabled
 udev: systemd-service-file-missing-install-key
+# Lintian is really bad at associating manpages
+udev: spare-manual-page

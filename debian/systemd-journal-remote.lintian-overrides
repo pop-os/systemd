@@ -1,0 +1,2 @@
+# Lintian is really bad at associating manpages
+systemd-journal-remote: spare-manual-page
