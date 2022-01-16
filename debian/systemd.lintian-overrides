@@ -15,3 +15,5 @@ systemd: package-contains-empty-directory lib/systemd/system/runlevel4.target.wa
 systemd: package-contains-empty-directory lib/systemd/system/runlevel5.target.wants/
 systemd: package-contains-empty-directory usr/lib/binfmt.d/
 systemd: package-contains-empty-directory usr/lib/modules-load.d/
+# Not a shared library
+systemd: shared-library-lacks-prerequisites usr/lib/systemd/boot/efi/linuxx64.elf.stub
