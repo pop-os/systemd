@@ -1,0 +1,2 @@
+# It's not documentation, it's test data
+systemd-tests: package-contains-documentation-outside-usr-share-doc
