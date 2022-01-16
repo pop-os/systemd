@@ -193,10 +193,11 @@ override_dh_install:
 
 	dh_install
 
-	# install standalone binaries
+	# install standalone binaries and manpages
 	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/bin; \
+		mkdir -p debian/systemd-standalone-$$pkg/bin debian/systemd-standalone-$$pkg/usr/share/man/man8; \
 		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
+		cp debian/tmp/usr/share/man/man8/systemd-$$pkg.8 debian/systemd-standalone-$$pkg/usr/share/man/man8/; \
 	done
 
 	# we don't want /tmp to be a tmpfs by default
