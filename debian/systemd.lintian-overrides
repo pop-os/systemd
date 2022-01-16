@@ -17,3 +17,6 @@ systemd: package-contains-empty-directory usr/lib/binfmt.d/
 systemd: package-contains-empty-directory usr/lib/modules-load.d/
 # Not a shared library
 systemd: shared-library-lacks-prerequisites usr/lib/systemd/boot/efi/linuxx64.elf.stub
+# PE-COFF EFI binaries, false positives
+systemd: executable-not-elf-or-script usr/lib/systemd/boot/efi/linuxx64.efi.stub
+systemd: executable-not-elf-or-script usr/lib/systemd/boot/efi/systemd-bootx64.efi
