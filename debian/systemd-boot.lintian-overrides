@@ -1,0 +1,8 @@
+# Lintian is really bad at associating manpages
+systemd-boot: spare-manual-page
+systemd-boot: package-supports-alternative-init-but-no-init.d-script
+# Not a shared library
+systemd-boot: shared-library-lacks-prerequisites usr/lib/systemd/boot/efi/linuxx64.elf.stub
+# PE-COFF EFI binaries, false positives
+systemd-boot: executable-not-elf-or-script usr/lib/systemd/boot/efi/linuxx64.efi.stub
+systemd-boot: executable-not-elf-or-script usr/lib/systemd/boot/efi/systemd-bootx64.efi

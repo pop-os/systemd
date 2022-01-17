@@ -76,6 +76,7 @@ Recommends: default-dbus-system-bus | dbus-system-bus,
 Suggests: systemd-container,
           systemd-homed,
           systemd-userdbd,
+          systemd-boot,
           libfido2-1,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
@@ -460,3 +461,17 @@ Depends: ${shlibs:Depends},
 Description: home area manager
  systemd-homed is a system service designed to manage home directories. This
  package includes the homed and userdbd services, tools and documentation.
+
+Package: systemd-boot
+Architecture: amd64 i386 arm64 armhf
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Recommends: efibootmgr,
+Breaks: systemd (<< 251.2-2~)
+Replaces: systemd (<< 251.2-2~)
+Description: simple UEFI boot manager
+ systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
+ textual menu to select the entry to boot and an editor for the kernel command
+ line. It supports systems with UEFI firmware only.
+ .
+ Installing systemd-boot will not automatically switch your boot loader.
