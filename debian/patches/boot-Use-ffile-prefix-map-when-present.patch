@@ -1,0 +1,24 @@
+Author: Jan Janssen <medhefgo@web.de>
+Description: boot: Use -ffile-prefix-map when present
+Origin: https://github.com/systemd/systemd/commit/1bc8417cfeeebb48b16039f26e0c75937784e75e
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -209,7 +209,17 @@
+ endif
+ 
+ foreach arg : get_option('c_args')
+-        if arg in ['-Werror', '-g', '-ggdb', '-O1', '-O2', '-O3', '-Og', '-Os', '-DNDEBUG', '-flto', '-fno-lto']
++        if arg in [
++                '-DNDEBUG',
++                '-fno-lto',
++                '-g', '-ggdb',
++                '-O1', '-O2', '-O3', '-Og', '-Os',
++                '-Werror',
++           ] or arg.split('=')[0] in [
++                '-ffile-prefix-map',
++                '-flto',
++           ]
++
+                 message('Using "@0@" from c_args for EFI compiler'.format(arg))
+                 efi_cflags += arg
+         endif

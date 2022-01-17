@@ -1,0 +1,49 @@
+Author: Jan Janssen <medhefgo@web.de>
+Description: boot: Only build with debug symbols in developer mode
+ The debug symbols are of very limited use in proper deployments
+ unlike with regular userspace. Unless someone goes through the pain
+ of setting up an EFI debugger (assuming their firmware even supports
+ this in the first place) any provided debug symbols will just be
+ useless.
+ Debugging under QEMU is possible, but even then it is non-trivial
+ to set up, so anyone willing to go that far can just build in
+ developer mode.
+ .
+ Meanwhile, at least x86 firmware tends to refuse binaries that contain
+ debug symbols. We do strip the files when converted to PE anyway, but
+ the elf file needs to stay around on other arches as objcopy does not
+ support PE as input there.
+ .
+ Also, the generated debug symbols seem to be not reproducible when
+ building with LTO. Whether this is an issue in tooling or our side
+ is unclear. This works around this issue.
+Origin: https://github.com/systemd/systemd/commit/76fb85316e9c629b79762457d9515cb632112a6a
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -194,7 +194,7 @@
+ if get_option('werror')
+         efi_cflags += ['-Werror']
+ endif
+-if get_option('debug')
++if get_option('debug') and get_option('mode') == 'developer'
+         efi_cflags += ['-ggdb', '-DEFI_DEBUG']
+ endif
+ if get_option('optimization') != '0'
+@@ -212,13 +212,15 @@
+         if arg in [
+                 '-DNDEBUG',
+                 '-fno-lto',
+-                '-g', '-ggdb',
+                 '-O1', '-O2', '-O3', '-Og', '-Os',
+                 '-Werror',
+            ] or arg.split('=')[0] in [
+                 '-ffile-prefix-map',
+                 '-flto',
+-           ]
++           ] or (get_option('mode') == 'developer' and arg in [
++                '-DEFI_DEBUG',
++                '-g', '-ggdb',
++           ])
+ 
+                 message('Using "@0@" from c_args for EFI compiler'.format(arg))
+                 efi_cflags += arg

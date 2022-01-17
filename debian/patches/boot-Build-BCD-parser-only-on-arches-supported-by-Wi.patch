@@ -1,0 +1,65 @@
+Author: Jan Janssen <medhefgo@web.de>
+Description: boot: Build BCD parser only on arches supported by Windows
+Origin: https://github.com/systemd/systemd/commit/77fcf28cb88b302453b4c991a6571cb37f10634d
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -1941,6 +1941,7 @@
+ }
+ 
+ static void config_entry_add_windows(Config *config, EFI_HANDLE *device, EFI_FILE *root_dir) {
++#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+         _cleanup_freepool_ CHAR8 *bcd = NULL;
+         CHAR16 *title = NULL;
+         EFI_STATUS err;
+@@ -1961,6 +1962,7 @@
+         config_entry_add_loader_auto(config, device, root_dir, NULL,
+                                      L"auto-windows", 'w', title ?: L"Windows Boot Manager",
+                                      L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi");
++#endif
+ }
+ 
+ static void config_entry_add_linux(
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -310,7 +310,6 @@
+         'util.c']
+ 
+ systemd_boot_sources = [
+-        'bcd.c',
+         'boot.c',
+         'console.c',
+         'drivers.c',
+@@ -330,6 +329,18 @@
+         stub_sources += 'linux.c'
+ endif
+ 
++# BCD parser only makes sense on arches that Windows supports.
++if efi_arch[1] in ['ia32', 'x86_64', 'arm', 'aarch64']
++        systemd_boot_sources += 'bcd.c'
++        tests += [
++                [['src/boot/efi/test-bcd.c'],
++                 [],
++                 [libzstd],
++                 [],
++                 'HAVE_ZSTD'],
++        ]
++endif
++
+ systemd_boot_objects = []
+ stub_objects = []
+ foreach file : fundamental_source_paths + common_sources + systemd_boot_sources + stub_sources
+@@ -387,14 +398,6 @@
+ 
+ ############################################################
+ 
+-tests += [
+-        [['src/boot/efi/test-bcd.c'],
+-         [],
+-         [libzstd],
+-         [],
+-         'HAVE_ZSTD'],
+-]
+-
+ test_efi_disk_img = custom_target(
+         'test-efi-disk.img',
+         input : [efi_stubs[0][0], efi_stubs[1][1]],
