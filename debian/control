@@ -171,6 +171,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
          systemd
+Recommends: libdw1
 Conflicts: core-dump-handler
 Replaces: core-dump-handler
 Provides: core-dump-handler
