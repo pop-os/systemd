@@ -1,3 +1,54 @@
+systemd (250.3-1) UNRELEASED; urgency=medium
+
+  [ Luca Boccassi ]
+  * Update d/copyright listing for debian/*
+    Fixes Lintian warning: update-debian-copyright
+  * d/copyright: remove unused GPL-2 stanza
+  * d/watch: bump to version 4
+  * d/control: drop redundant Section/Priority fields.
+    Fixes Lintian warning: installable-field-mirrors-source
+  * d/control: extend descriptions of libudev and libsystemd
+  * systemd-oomd: add dependency on adduser.
+    Needed by postinst script.
+  * systemd-oomd: fix description-synopsis-starts-with-article Lintian warning
+  * systemd-standalone-*: copy manpages too
+  * Lintian: ignore very-long-line-length-in-source-file.
+    It's not a useful check, and it flags test data and such.
+  * Lintian: ignore source-contains-data-from-ieee-data-oui-db.
+    Data formats are not compatible, this is for hwdb.
+  * Lintian: ignore systemd-service-file-missing-install-key.
+    If we don't add [Install], it's because we don't want it and the units are
+    events-driven or enabled statically.
+  * Lintian: ignore spare-manual-page.
+    Lintian is not really good at associating manpages to package contents,
+    so just ignore this, as we have and will keep adding docs related
+    to unit types and so on.
+  * Lintian: ignore package-supports-alternative-init-but-no-init.d-script.
+    Well, duh!
+  * Lintian: ignore package-contains-documentation-outside-usr-share-doc.
+    False positives on test data and a web page.
+  * Lintian: ignore current set of package-contains-empty-directory.
+    These are shipped to provide a skeleton installation.
+  * Update Lintian override for
+    systemd-service-file-refers-to-unusual-wantedby-target
+  * Lintian: ignore systemd: shared-library-lacks-prerequisites false positive
+    on EFI binary
+  * Lintian: ignore maintainer-script-calls-systemctl in more packages
+  * Lintian: ignore executable-not-elf-or-script false positives for EFI
+    binaries
+  * Lintian: ignore spellcheck false positives
+  * Lintian: ignore hardening-no-fortify-functions for test binaries
+  * Ignore blhc false positives.
+    blhc hits false positives due to EFI PE-COFF binaries,
+    c++ fuzzing binaries and meson flags listings, ignore them.
+  * Add d/gitlab-ci.yml.
+    Disable unit tests, as some are failing due to the build environment.
+
+  [ Michael Biebl ]
+  * New upstream version 250.3
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 18 Jan 2022 15:35:39 +0100
+
 systemd (250.2-3) unstable; urgency=medium
 
   [ Luca Boccassi ]
