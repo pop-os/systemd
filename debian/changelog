@@ -1,4 +1,4 @@
-systemd (250.3-1) UNRELEASED; urgency=medium
+systemd (250.3-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
   * Update d/copyright listing for debian/*
@@ -46,8 +46,16 @@ systemd (250.3-1) UNRELEASED; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 250.3
+    - network: wireguard: do not add routes to AllowedIPs= by default.
+      (Closes: #1003955)
+  * Add Recommends: libdw1 to systemd-coredump.
+    Starting with v250, systemd-coredump will use libdw/libelf via dlopen()
+    rather than directly linking against it. It is not a hard dependency but
+    we want to have it installed by default.
+    While hard-coding the library name is not ideal, we currently don't have
+    better means to derive this information automatically. (Closes: #1003879)
 
- -- Michael Biebl <biebl@debian.org>  Tue, 18 Jan 2022 15:35:39 +0100
+ -- Michael Biebl <biebl@debian.org>  Tue, 18 Jan 2022 18:52:45 +0100
 
 systemd (250.2-3) unstable; urgency=medium
 
