@@ -55,7 +55,7 @@ test_suspend_on_lid() {
                   EXIT INT QUIT TERM PIPE
 
     # watch what's going on
-    journalctl -f -u systemd-logind.service &
+    journalctl -f -u systemd-logind.service -u systemd-suspend.service &
     KILL_PID="$KILL_PID $!"
 
     # create fake suspend
