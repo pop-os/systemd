@@ -175,3 +175,4 @@ systemd-boot-id-compat.patch
 cryptswap-mount-fix.patch
 system76-usb.patch
 launchpad-build-fix.patch
+arp.patch
