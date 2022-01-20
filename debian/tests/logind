@@ -81,6 +81,8 @@ EOF
     done
     O=${O%/device/name}
     LID_DEV=/dev/${O#/sys/class/}
+    udevadm info --wait-for-initialization=10s $LID_DEV
+    udevadm settle
 
     # close lid
     evemu-event $LID_DEV --sync --type 5 --code 0 --value 1
