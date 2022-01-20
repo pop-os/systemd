@@ -50,7 +50,7 @@ test_suspend_on_lid() {
     # cleanup handler
     trap 'rm -f /run/udev/rules.d/70-logindtest-*.rules; udevadm control --reload;
           kill $KILL_PID;
-          rm /run/systemd/system/systemd-suspend.service;
+          rm /run/systemd/system/systemd-suspend.service.d/override.conf;
           if [ -d /sys/module/scsi_debug ]; then rmmod scsi_debug 2>/dev/null || (sleep 2; rmmod scsi_debug ) || true; fi' \
                   EXIT INT QUIT TERM PIPE
 
@@ -61,6 +61,7 @@ test_suspend_on_lid() {
     # create fake suspend
     mkdir -p /run/systemd/system/systemd-suspend.service.d
     cat >/run/systemd/system/systemd-suspend.service.d/override.conf <<EOF
+[Service]
 ExecStart=
 ExecStart=touch /run/suspend.flag
 EOF
