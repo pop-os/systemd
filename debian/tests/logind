@@ -59,8 +59,11 @@ test_suspend_on_lid() {
     KILL_PID="$KILL_PID $!"
 
     # create fake suspend
-    UNIT=$(systemctl show -pFragmentPath --value systemd-suspend.service)
-    sed '/^ExecStart=/ s_=.*$_=/bin/touch /run/suspend.flag_' $UNIT > /run/systemd/system/systemd-suspend.service
+    mkdir -p /run/systemd/system/systemd-suspend.service.d
+    cat >/run/systemd/system/systemd-suspend.service.d/override.conf <<EOF
+ExecStart=
+ExecStart=touch /run/suspend.flag
+EOF
     sync
     systemctl daemon-reload
 
