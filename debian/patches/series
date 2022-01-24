@@ -56,7 +56,6 @@ deny-list-TEST-29-PORTABLE-on-ppc64el.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch
-lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
 lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
 lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
 lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
@@ -70,9 +69,3 @@ linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.pa
 linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
 linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
 linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
-linux-5.15-compat-ioprio/test-make-test-execute-pass-on-Linux-5.15.patch
-rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch
-rm-rf-optionally-fsync-after-removing-directory-tree.patch
-CVE-2021-3997-1.patch
-CVE-2021-3997-2.patch
-CVE-2021-3997-3.patch
