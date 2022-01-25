@@ -220,6 +220,7 @@ Depends: ${shlibs:Depends},
          libpam-runtime (>= 1.0.1-6),
          default-dbus-system-bus | dbus-system-bus,
          systemd-sysv
+Recommends: dbus-user-session,
 Provides: logind (= ${binary:Version}), default-logind (= ${binary:Version})
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
