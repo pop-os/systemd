@@ -9,3 +9,4 @@ systemd-tests: spelling-error-in-binary usr/lib/systemd/tests/manual/test-udev r
 # test binaries, we don't care about these flags
 systemd-tests: hardening-no-fortify-functions
 systemd-tests: hardening-no-bindnow
+systemd-tests: hardening-no-relro
