@@ -13,6 +13,11 @@ udev-node-drop-redundant-trial-of-devlink-creation.patch
 sysusers-split-up-systemd.conf.patch
 meson-minor-cleanup.patch
 oomd-move-oomctl-to-bindir.patch
+test-check-memory-pressure-more-frequently.patch
+test-also-show-the-memory-pressure-of-testchill.service.patch
+test-enable-debug-logging-of-systemd-oomd.patch
+test-tweak-parameters-for-TEST-55-OOMD.patch
+test-make-test-55-oomd-less-flaky.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
