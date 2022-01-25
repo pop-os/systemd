@@ -1,3 +1,101 @@
+systemd (249.9-0ubuntu1) UNRELEASED; urgency=medium
+
+  [ Lukas Märdian ]
+  * Merge 249.7-1 from Debian
+    - d/rules: re-enable LTO
+      File: debian/rules
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=616eb2eb7d2b30e50acc9cccdc39a7264c5582fb
+    - Refresh and drop patches, applied upstream
+      Files:
+      - debian/patches/Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+      - debian/patches/lp1952599/0001-virt-Support-detection-for-ARM64-Hyper-V-guests.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=877259bfeb7106a923b3066ad2c10fba2405195e
+  * Merge 249.9 from upstream
+    - Refresh and drop patches, applied upstream
+      Files:
+      - debian/patches/CVE-2021-3997-1.patch
+      - debian/patches/CVE-2021-3997-2.patch
+      - debian/patches/CVE-2021-3997-3.patch
+      - debian/patches/linux-5.15-compat-ioprio/test-make-test-execute-pass-on-Linux-5.15.patch
+      - debian/patches/lp1952599/0002-virt-Fix-the-detection-for-Hyper-V-VMs.patch
+      - debian/patches/rm-rf-optionally-fsync-after-removing-directory-tree.patch
+      - debian/patches/rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch
+      - debian/patches/debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=21b655193a5b91415d75516e458dcc5bce8855c0
+    - Disable new test case for UMask=+BindPaths= combination (LP: #1959013)
+      File: debian/patches/0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5e9df936d2625c84856b101881e217064571e7e7
+  * Fix build in local git tree
+    meson is checking `git ls-files` if built inside a git tree (dpkg-buildpackage,
+    gbp buildpackage) and complaining about the missing src/basic/ioprio.h file.
+    So we should keep that file around (empty) to avoid this failure.
+    File: debian/patches/linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementati.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=94f21032cd1d6e9dfae8d8f892bc627dbf9b4414
+  * Add lp1955997-unmask-intel-hid-for-HP-machines.patch (LP: #1955997)
+    File: debian/patches/lp1955997-unmask-intel-hid-for-HP-machines.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b90d59c81a1fd8a00e10147b1f5fd9bcf135d40e
+  * d/rules: Enable build of systemd-oomd
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f4e16926c4e146f0b106a277b5b499c78db82bcb
+  * d/control: Ship oomd in a systemd-oomd package.
+    Deploying the default configuration as used in Fedora.
+    Files:
+    - debian/control
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf
+    - debian/extra/systemd-oomd-defaults/oomd.conf.d/10-oomd-defaults.conf
+    - debian/extra/systemd-oomd-defaults/user@.service.d/10-oomd-user-service-defaults.conf
+    - debian/systemd-oomd.install
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=771fee9e73316c92e065e93946ec64c578b43706
+  * Start systemd-oomd.service after package installation
+    File: debian/systemd-oomd.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d330cee174bd0e62a344d2aec4ec7435c9484fa2
+  * Cherry-pick upstream fixes to make 55-OOMD test less flaky
+    Files:
+    - debian/patches/test-also-show-the-memory-pressure-of-testchill.service.patch
+    - debian/patches/test-check-memory-pressure-more-frequently.patch
+    - debian/patches/test-enable-debug-logging-of-systemd-oomd.patch
+    - debian/patches/test-make-test-55-oomd-less-flaky.patch
+    - debian/patches/test-tweak-parameters-for-TEST-55-OOMD.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7054dcaf04b028a092c58cf638847b2266377218
+
+  [ Michael Biebl ]
+  * oomd: move oomctl to bindir
+    Author: Michael Biebl
+    Files:
+    - debian/patches/oomd-move-oomctl-to-bindir.patch
+    - debian/systemd-oomd.install
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6ce915c31c8daf3aec8b6d0e7b9712e21a87fa10
+  * test: explicitly configure oomd stuff via dropins
+    Author: Michael Biebl
+    File: debian/patches/test-explicitly-configure-oomd-stuff-via-dropins.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=11d415ee259f5642165e64ddd5d65d344515da66
+  * Don't install dbus-org.freedesktop.oom1.service symlink (Closes: #1003580)
+    Author: Michael Biebl
+    Files:
+    - debian/patches/debian/fsckd-daemon-for-inter-fsckd-communication.patch
+    - debian/patches/test-enable-systemd-oomd.service.patch
+    - debian/patches/units-don-t-install-dbus-org.freedesktop.oom1.service-ali.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b6df52f078fe61acf171300648f87116cf7dac74
+  * autopkgtest: add systemd-oomd dependency to upstream test.
+    We want systemd-oomd to be tested via the upstream provided
+    TEST-55-OOMD.
+    Author: Michael Biebl
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fd80b766c4194c88486ebc62ca7d02b9f41a6454
+
+  [ Luca Boccassi ]
+  * systemd-oomd: add dependency on adduser.
+    Needed by postinst script
+    Author: Luca Boccassi
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=146a97963a3a8551e9bda9fe7e726c6d2bd17cec
+  * systemd-oomd: fix description-synopsis-starts-with-article Lintian warning
+    Author: Luca Boccassi
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5dfe4f9c92e924fdda9e127b339cdccb7f1b2f58
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 25 Jan 2022 16:54:32 +0100
+
 systemd (249.7-1) unstable; urgency=medium
 
   * New upstream version 249.7
