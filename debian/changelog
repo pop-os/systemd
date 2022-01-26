@@ -1,3 +1,31 @@
+systemd (250.3-2) unstable; urgency=medium
+
+  [ Yu Watanabe ]
+  * upstream-ci: logind test: use drop-in config
+  * upstream-ci: logind test: also show logs of systemd-suspend.service
+  * upstream-ci: logind test: make sure the fake lid switch processed by
+    udevd. Also, wait for other uevents, which possibly triggered by the
+    lid switch, being processed.
+  * upstream-ci: logind test: fix drop-in config.
+
+  [ Luca Boccassi ]
+  * Add myself to Uploaders
+  * systemd-tests: ignore hardening-no-relro too. Test binaries, we don't
+    care about hardening flags
+  * Backport patches to fix build reproducibility. EFI binaries have the
+    path embedded which breaks reproducibility, backport patches from
+    upstream to fix it.
+
+  [ Michael Biebl ]
+  * Add Recommends: dbus-user-session to libpam-systemd. For a fully
+    functioning systemd --user instance we want dbus-user-session
+    installed.
+  * Report status of dbus-user-session in systemd reportbug template. Most
+    users will likely file bugs for systemd --user related issues against
+    the main systemd package and not libpam-systemd.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 26 Jan 2022 23:35:36 +0000
+
 systemd (250.3-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
