@@ -1,3 +1,11 @@
+systemd (249.9-0ubuntu2) jammy; urgency=medium
+
+  * Skip flaky 55-OOMD test on ppc64el
+    File: debian/patches/deny-list-TEST-55-OOMD-on-ppc64el.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=211f8962ce89d416c2866444e0e2da794ecd5dd1
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 28 Jan 2022 10:46:41 +0100
+
 systemd (249.9-0ubuntu1) jammy; urgency=medium
 
   [ Lukas Märdian ]
