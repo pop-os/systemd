@@ -80,3 +80,4 @@ linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
 linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
 lp1955997-unmask-intel-hid-for-HP-machines.patch
 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
+deny-list-TEST-55-OOMD-on-ppc64el.patch
