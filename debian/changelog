@@ -1,3 +1,13 @@
+systemd (248.3-1ubuntu8.3) impish; urgency=medium
+
+  [ Jeremy Szu ]
+  * Add a allowlist to unblock intel-hid on new HP machines (LP: #1955997)
+    Author: Jeremy Szu
+    File: debian/patches/lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=554d46e6a6ab80befd424ead7ffa8e6f993b5f66
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 08 Feb 2022 17:59:43 +0100
+
 systemd (248.3-1ubuntu8.2) impish-security; urgency=medium
 
   * SECURITY UPDATE: systemd-tmpfiles could be made to crash.
