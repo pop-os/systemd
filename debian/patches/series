@@ -74,3 +74,4 @@ rm-rf-optionally-fsync-after-removing-directory-tree.patch
 CVE-2021-3997-1.patch
 CVE-2021-3997-2.patch
 CVE-2021-3997-3.patch
+lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
