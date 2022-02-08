@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.15) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.16) UNRELEASED; urgency=medium
 
   [ Dan Streetman ]
   * d/p/lp1946388-sd-journal-don-t-check-namespaces-if-we-have-no-name.patch:
@@ -11,6 +11,23 @@ systemd (245.4-4ubuntu3.15) UNRELEASED; urgency=medium
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=88a859eaddb6c9a611fcbc44edab441aef4c4355
 
  -- Lukas Märdian <slyon@ubuntu.com>  Tue, 08 Feb 2022 17:39:41 +0100
+
+systemd (245.4-4ubuntu3.15) focal-security; urgency=medium
+
+  * SECURITY UPDATE: systemd-tmpfiles could be made to crash.
+    - d/p/rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch:
+      Backport upstream patch from PR#20173
+    - d/p/rm-rf-optionally-fsync-after-removing-directory-tree.patch:
+      Backport upstream patch required for CVE-2021-3997 patches
+    - d/p/CVE-2021-3997-1.patch: Backport upstream patch to refactor
+      rm_rf_children_inner()
+    - d/p/CVE-2021-3997-2.patch: Backport upstream patch to refactor
+      rm_rf()
+    - d/p/CVE-2021-3997-3.patch: Backport upstream patch to loop over
+      nested directories instead of using recursion
+    - CVE-2021-3997
+
+ -- Alex Murray <alex.murray@canonical.com>  Mon, 10 Jan 2022 15:26:38 +1030
 
 systemd (245.4-4ubuntu3.14) focal; urgency=medium
 
