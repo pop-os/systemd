@@ -1,3 +1,20 @@
+systemd (248.3-1ubuntu8.2) impish-security; urgency=medium
+
+  * SECURITY UPDATE: systemd-tmpfiles could be made to crash.
+    - d/p/rm-rf-refactor-rm-rf-children-split-out-body-of-directory.patch:
+      Backport upstream patch from PR#20173
+    - d/p/rm-rf-optionally-fsync-after-removing-directory-tree.patch:
+      Backport upstream patch required for CVE-2021-3997 patches
+    - d/p/CVE-2021-3997-1.patch: Backport upstream patch to refactor
+      rm_rf_children_inner()
+    - d/p/CVE-2021-3997-2.patch: Backport upstream patch to refactor
+      rm_rf()
+    - d/p/CVE-2021-3997-3.patch: Backport upstream patch to loop over
+      nested directories instead of using recursion
+    - CVE-2021-3997
+
+ -- Alex Murray <alex.murray@canonical.com>  Mon, 10 Jan 2022 14:37:51 +1030
+
 systemd (248.3-1ubuntu8.1) impish; urgency=medium
 
   [ Lukas Märdian ]
