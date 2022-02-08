@@ -1,9 +1,16 @@
 systemd (245.4-4ubuntu3.15) UNRELEASED; urgency=medium
 
+  [ Dan Streetman ]
   * d/p/lp1946388-sd-journal-don-t-check-namespaces-if-we-have-no-name.patch:
     Avoid journalctl segfault (LP: #1946388)
 
- -- Dan Streetman <ddstreet@ieee.org>  Tue, 04 Jan 2022 09:42:35 -0500
+  [ Jeremy Szu ]
+  * Add a allowlist to unblock intel-hid on new HP machines (LP: #1955997)
+    Author: Jeremy Szu
+    File: debian/patches/lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=88a859eaddb6c9a611fcbc44edab441aef4c4355
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 08 Feb 2022 17:39:41 +0100
 
 systemd (245.4-4ubuntu3.14) focal; urgency=medium
 
