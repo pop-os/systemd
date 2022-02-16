@@ -1,3 +1,15 @@
+systemd (249.10-0ubuntu1) jammy; urgency=medium
+
+  [ Lukas Märdian ]
+  * Merge 249.10 from upstream
+  * Denylist 29-PORTABLE & 50-DISSECT
+    Files:
+    - debian/patches/deny-list-TEST-29-PORTABLE-and-TEST-50-DISSECT.patch
+    - debian/patches/deny-list-TEST-29-PORTABLE-on-ppc64el.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c16d9b8201f2321395f817e77ec07df5aef152a9
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Wed, 16 Feb 2022 19:08:40 +0100
+
 systemd (249.9-0ubuntu2) jammy; urgency=medium
 
   * Skip flaky 55-OOMD test on ppc64el
