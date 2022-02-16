@@ -61,7 +61,7 @@ debian/UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.pat
 debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
-deny-list-TEST-29-PORTABLE-on-ppc64el.patch
+deny-list-TEST-29-PORTABLE-and-TEST-50-DISSECT.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch
