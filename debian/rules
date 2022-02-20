@@ -6,6 +6,7 @@
 export LC_ALL = C.UTF-8
 
 include /usr/share/dpkg/default.mk
+include /usr/share/debhelper/dh_package_notes/package-notes.mk
 
 ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
