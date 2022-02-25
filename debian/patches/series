@@ -76,3 +76,4 @@ CVE-2021-3997-2.patch
 CVE-2021-3997-3.patch
 lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
 pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
+debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
