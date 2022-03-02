@@ -107,6 +107,7 @@ Depends: systemd-tests,
   zstd,
   libtss2-dev,
   libfido2-dev,
+  libdw-dev,
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: upstream
