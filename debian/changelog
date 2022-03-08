@@ -1,3 +1,14 @@
+systemd (249.10-0ubuntu2) jammy; urgency=medium
+
+  * Fix deadlock between pid1 and dbus-daemon (LP: #1871538)
+    File: debian/patches/pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=100a7bfc2d0f82c3afbede04a022c655529cffac
+  * Don't override Ubuntu's default sysctl values (LP: #1962038)
+    File: debian/patches/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b10cdb7da3539b3a3c3e619b470a75c83e46ef11
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 08 Mar 2022 14:58:00 +0100
+
 systemd (249.10-0ubuntu1) jammy; urgency=medium
 
   [ Lukas Märdian ]
