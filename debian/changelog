@@ -1,3 +1,15 @@
+systemd (249.11-0ubuntu1) jammy; urgency=medium
+
+  * Merge 249.11 bugfix release from upstream systemd-stable
+  * Drop patches applied in upstream systemd-stable v249.11
+    File: debian/patches/pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=67b0362ae91711e037e89ba72af947b788319be5
+  * Refresh patches
+    File: debian/patches/debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ef686a8d28ab452ae4756ab2367a322be66d6262
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 14 Mar 2022 10:57:42 +0100
+
 systemd (249.10-0ubuntu2) jammy; urgency=medium
 
   * Fix deadlock between pid1 and dbus-daemon (LP: #1871538)
