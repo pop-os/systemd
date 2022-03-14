@@ -117,8 +117,7 @@ Conflicts: sysvinit-core,
            systemd-shim,
 Replaces: sysvinit-core,
 Pre-Depends: systemd
-Depends: ${shlibs:Depends},
-         ${misc:Depends}
+Depends: ${misc:Depends},
 Recommends: libpam-systemd,
             libnss-systemd
 Description: system and service manager - SysV links
@@ -311,8 +310,7 @@ Package: libsystemd-dev
 Architecture: linux-any
 Multi-Arch: same
 Section: libdevel
-Depends: ${shlibs:Depends},
-         ${misc:Depends},
+Depends: ${misc:Depends},
          libsystemd0 (= ${binary:Version})
 Description: systemd utility library - development files
  This library provides APIs to interface with various system components such as
@@ -353,8 +351,7 @@ Section: libdevel
 Architecture: linux-any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
-Depends: ${shlibs:Depends},
-         ${misc:Depends},
+Depends: ${misc:Depends},
          libudev1 (= ${binary:Version})
 Description: libudev development files
  This library provides APIs to introspect and enumerate devices on the local
