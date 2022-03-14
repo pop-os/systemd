@@ -79,7 +79,7 @@ Depends: systemd-sysv,
   apparmor,
   pkg-config,
   python3
-Restrictions: needs-root, isolation-container, breaks-testbed
+Restrictions: needs-root, isolation-container, breaks-testbed, allow-stderr
 
 Tests: udev
 Depends: systemd-tests,
