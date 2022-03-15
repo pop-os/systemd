@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index ca19dc7..107c548 100644
+index 26ac25d..948770b 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -863,6 +863,7 @@ manpages = [
+@@ -864,6 +864,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,7 +239,7 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index bf8c4ac..8cdabc9 100644
+index a897bca..d729387 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -3081,6 +3081,15 @@ executable(
@@ -1006,7 +1006,7 @@ index 8378df8..4b1cd43 100644
  OnFailure=emergency.target
  OnFailureJobMode=replace-irreversibly
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 06b91aea..de0b767 100644
+index 06b91ae..de0b767 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
 @@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)

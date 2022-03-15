@@ -11,7 +11,7 @@ more suitable place for the binary.
  1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index e07875a..bf8c4ac 100644
+index cb9936e..a897bca 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -2961,8 +2961,7 @@ if conf.get('ENABLE_OOMD') == 1
