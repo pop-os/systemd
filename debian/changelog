@@ -1,3 +1,13 @@
+systemd (249.11-0ubuntu2) UNRELEASED; urgency=medium
+
+  * Fix calculator key on HP Omen, using upstream 6f2353a & 7092021 (LP: #1929345)
+    Files:
+    - debian/patches/lp1929345/hwdb-Add-force-release-for-HP-Omen-15-calculator-key.-205.patch
+    - debian/patches/lp1929345/hwdb-Force-release-calculator-key-on-all-HP-OMEN-laptops.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f834f64842191c7c7af450806964297babc764d5
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Wed, 16 Mar 2022 11:17:32 +0100
+
 systemd (249.11-0ubuntu1) jammy; urgency=medium
 
   * Merge 249.11 bugfix release from upstream systemd-stable
