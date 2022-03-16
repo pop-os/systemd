@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu1pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Wed, 16 Mar 2022 08:38:57 -0600
+
 systemd (249.11-0ubuntu1) jammy; urgency=medium
 
   * Merge 249.11 bugfix release from upstream systemd-stable
