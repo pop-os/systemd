@@ -171,3 +171,4 @@ CVE-2021-3997-2.patch
 CVE-2021-3997-3.patch
 lp1946388-sd-journal-don-t-check-namespaces-if-we-have-no-name.patch
 lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
+lp1958284-core-move-reset_arguments-to-the-end-of-main-s-finish.patch
