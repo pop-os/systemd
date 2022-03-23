@@ -15,7 +15,13 @@ systemd (245.4-4ubuntu3.16) UNRELEASED; urgency=medium
     File: debian/patches/lp1958284-core-move-reset_arguments-to-the-end-of-main-s-finish.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e61052bd1f20bcc54e7417542c6d445cf5040f56
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 23 Mar 2022 09:09:10 -0400
+  [ Lukas Märdian ]
+  * Fix deadlock between pid1 and dbus-daemon (LP: #1871538)
+    Author: Lukas Märdian
+    File: debian/patches/pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e3aacfa26e3fc6df369e6f28e740389ae0020907
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 23 Mar 2022 09:29:33 -0400
 
 systemd (245.4-4ubuntu3.15) focal-security; urgency=medium
 
