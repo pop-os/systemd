@@ -10,7 +10,12 @@ systemd (245.4-4ubuntu3.16) UNRELEASED; urgency=medium
     File: debian/patches/lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=88a859eaddb6c9a611fcbc44edab441aef4c4355
 
- -- Lukas Märdian <slyon@ubuntu.com>  Tue, 08 Feb 2022 17:39:41 +0100
+  [ Nick Rosbrook ]
+  * Prevent arguments from being overwritten with defaults at shutdown (LP: #1958284)
+    File: debian/patches/lp1958284-core-move-reset_arguments-to-the-end-of-main-s-finish.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e61052bd1f20bcc54e7417542c6d445cf5040f56
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 23 Mar 2022 09:09:10 -0400
 
 systemd (245.4-4ubuntu3.15) focal-security; urgency=medium
 
