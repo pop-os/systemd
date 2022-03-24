@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.16) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.16) focal; urgency=medium
 
   [ Dan Streetman ]
   * d/p/lp1946388-sd-journal-don-t-check-namespaces-if-we-have-no-name.patch:
