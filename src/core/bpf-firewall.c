@@ -145,6 +145,7 @@ static int add_instructions_for_ip_any(
 
 static int bpf_firewall_compile_bpf(
                 Unit *u,
+                const char *prog_name,
                 bool is_ingress,
                 BPFProgram **ret,
                 bool ip_allow_any,
@@ -216,7 +217,7 @@ static int bpf_firewall_compile_bpf(
                 return 0;
         }
 
-        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &p);
+        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, prog_name, &p);
         if (r < 0)
                 return r;
 
@@ -526,9 +527,10 @@ static int bpf_firewall_prepare_accounting_maps(Unit *u, bool enabled, int *fd_i
 }
 
 int bpf_firewall_compile(Unit *u) {
+        const char *ingress_name = NULL, *egress_name = NULL;
+        bool ip_allow_any = false, ip_deny_any = false;
         CGroupContext *cc;
         int r, supported;
-        bool ip_allow_any = false, ip_deny_any = false;
 
         assert(u);
 
@@ -550,6 +552,13 @@ int bpf_firewall_compile(Unit *u) {
                  * all, either. */
                 return log_unit_debug_errno(u, SYNTHETIC_ERRNO(EOPNOTSUPP),
                                             "BPF_F_ALLOW_MULTI is not supported on this manager, not doing BPF firewall on slice units.");
+
+        /* If BPF_F_ALLOW_MULTI flag is supported program name is also supported (both were added to v4.15
+         * kernel). */
+        if (supported == BPF_FIREWALL_SUPPORTED_WITH_MULTI) {
+                ingress_name = "sd_fw_ingress";
+                egress_name = "sd_fw_egress";
+        }
 
         /* Note that when we compile a new firewall we first flush out the access maps and the BPF programs themselves,
          * but we reuse the accounting maps. That way the firewall in effect always maps to the actual
@@ -584,11 +593,11 @@ int bpf_firewall_compile(Unit *u) {
         if (r < 0)
                 return log_unit_error_errno(u, r, "Preparation of eBPF accounting maps failed: %m");
 
-        r = bpf_firewall_compile_bpf(u, true, &u->ip_bpf_ingress, ip_allow_any, ip_deny_any);
+        r = bpf_firewall_compile_bpf(u, ingress_name, true, &u->ip_bpf_ingress, ip_allow_any, ip_deny_any);
         if (r < 0)
                 return log_unit_error_errno(u, r, "Compilation for ingress BPF program failed: %m");
 
-        r = bpf_firewall_compile_bpf(u, false, &u->ip_bpf_egress, ip_allow_any, ip_deny_any);
+        r = bpf_firewall_compile_bpf(u, egress_name, false, &u->ip_bpf_egress, ip_allow_any, ip_deny_any);
         if (r < 0)
                 return log_unit_error_errno(u, r, "Compilation for egress BPF program failed: %m");
 
@@ -596,15 +605,13 @@ int bpf_firewall_compile(Unit *u) {
 }
 
 static int load_bpf_progs_from_fs_to_set(Unit *u, char **filter_paths, Set **set) {
-        char **bpf_fs_path;
-
         set_clear(*set);
 
         STRV_FOREACH(bpf_fs_path, filter_paths) {
                 _cleanup_(bpf_program_freep) BPFProgram *prog = NULL;
                 int r;
 
-                r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &prog);
+                r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, NULL, &prog);
                 if (r < 0)
                         return log_unit_error_errno(u, r, "Can't allocate CGROUP SKB BPF program: %m");
 
@@ -825,7 +832,8 @@ int bpf_firewall_supported(void) {
                 return supported = BPF_FIREWALL_UNSUPPORTED;
         }
 
-        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &program);
+        /* prog_name is NULL since it is supported only starting from v4.15 kernel. */
+        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, NULL, &program);
         if (r < 0) {
                 bpf_firewall_unsupported_reason =
                         log_debug_errno(r, "Can't allocate CGROUP SKB BPF program, BPF firewalling is not supported: %m");
@@ -882,7 +890,9 @@ int bpf_firewall_supported(void) {
         /* So now we know that the BPF program is generally available, let's see if BPF_F_ALLOW_MULTI is also supported
          * (which was added in kernel 4.15). We use a similar logic as before, but this time we use the BPF_PROG_ATTACH
          * bpf() call and the BPF_F_ALLOW_MULTI flags value. Since the flags are checked early in the system call we'll
-         * get EINVAL if it's not supported, and EBADF as before if it is available. */
+         * get EINVAL if it's not supported, and EBADF as before if it is available.
+         * Use probe result as the indicator that program name is also supported since they both were
+         * added in kernel 4.15. */
 
         zero(attr);
         attr.attach_type = BPF_CGROUP_INET_EGRESS;
@@ -917,16 +927,17 @@ void emit_bpf_firewall_warning(Unit *u) {
         assert(u);
         assert(u->manager);
 
-        if (!warned && !MANAGER_IS_TEST_RUN(u->manager)) {
-                bool quiet = bpf_firewall_unsupported_reason == -EPERM && detect_container() > 0;
+        if (warned || MANAGER_IS_TEST_RUN(u->manager))
+                return;
 
-                log_unit_full_errno(u, quiet ? LOG_DEBUG : LOG_WARNING, bpf_firewall_unsupported_reason,
-                                    "unit configures an IP firewall, but %s.\n"
-                                    "(This warning is only shown for the first unit using IP firewalling.)",
-                                    getuid() != 0 ? "not running as root" :
-                                                    "the local system does not support BPF/cgroup firewalling");
-                warned = true;
-        }
+        bool quiet = ERRNO_IS_PRIVILEGE(bpf_firewall_unsupported_reason) && detect_container() > 0;
+
+        log_unit_full_errno(u, quiet ? LOG_DEBUG : LOG_WARNING, bpf_firewall_unsupported_reason,
+                            "unit configures an IP firewall, but %s.\n"
+                            "(This warning is only shown for the first unit using IP firewalling.)",
+                            getuid() != 0 ? "not running as root" :
+                            "the local system does not support BPF/cgroup firewalling");
+        warned = true;
 }
 
 void bpf_firewall_close(Unit *u) {

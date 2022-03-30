@@ -6,7 +6,6 @@
 # Gogo Gogsi <linux.hr@protonmail.com>, 2020, 2021.
 msgid ""
 msgstr ""
-"Project-Id-Version: systemd master\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2021-01-08 17:48+0100\n"
 "PO-Revision-Date: 2021-10-03 16:04+0000\n"
@@ -365,7 +364,8 @@ msgstr ""
 
 #: src/login/org.freedesktop.login1.policy:191
 msgid "Power off the system while an application is inhibiting this"
-msgstr "Isključi sustav kada je aplikacija zatražila sprječavanje isključivanja"
+msgstr ""
+"Isključi sustav kada je aplikacija zatražila sprječavanje isključivanja"
 
 #: src/login/org.freedesktop.login1.policy:192
 msgid ""
@@ -431,7 +431,8 @@ msgstr ""
 
 #: src/login/org.freedesktop.login1.policy:257
 msgid "Halt the system while an application is inhibiting this"
-msgstr "Zaustavi sustav kada je aplikacija zatražila sprječavanje zaustavljanja"
+msgstr ""
+"Zaustavi sustav kada je aplikacija zatražila sprječavanje zaustavljanja"
 
 #: src/login/org.freedesktop.login1.policy:258
 msgid ""
@@ -496,7 +497,8 @@ msgstr ""
 
 #: src/login/org.freedesktop.login1.policy:321
 msgid "Hibernate the system while an application is inhibiting this"
-msgstr "Hiberniraj sustav kada je aplikacija zatražila sprječavanje hibernacije"
+msgstr ""
+"Hiberniraj sustav kada je aplikacija zatražila sprječavanje hibernacije"
 
 #: src/login/org.freedesktop.login1.policy:322
 msgid ""

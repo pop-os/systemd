@@ -126,9 +126,6 @@ bool mount_point_is_api(const char *path) {
 }
 
 bool mount_point_ignore(const char *path) {
-
-        const char *i;
-
         /* These are API file systems that might be mounted by other software, we just list them here so that
          * we know that we should ignore them. */
         FOREACH_STRING(i,
@@ -246,8 +243,6 @@ static const char *join_with(const char *controller) {
                 "net_cls", "net_prio",
                 NULL
         };
-
-        const char *const *x, *const *y;
 
         assert(controller);
 
@@ -436,7 +431,6 @@ static int relabel_cgroup_filesystems(void) {
 
 static int relabel_extra(void) {
         _cleanup_strv_free_ char **files = NULL;
-        char **file;
         int r, c = 0;
 
         /* Support for relabelling additional files or directories after loading the policy. For this, code in the
@@ -518,7 +512,6 @@ int mount_setup(bool loaded_policy, bool leave_propagation) {
          * use the same label for all their files. */
         if (loaded_policy) {
                 usec_t before_relabel, after_relabel;
-                const char *i;
                 int n_extra;
 
                 before_relabel = now(CLOCK_MONOTONIC);

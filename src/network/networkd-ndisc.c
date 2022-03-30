@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <netinet/icmp6.h>
 #include <linux/if.h>
+#include <linux/if_arp.h>
 
 #include "sd-ndisc.h"
 
@@ -32,6 +33,15 @@ bool link_ipv6_accept_ra_enabled(Link *link) {
                 return false;
 
         if (link->flags & IFF_LOOPBACK)
+                return false;
+
+        if (link->iftype == ARPHRD_CAN)
+                return false;
+
+        if (link->hw_addr.length != ETH_ALEN && !streq_ptr(link->kind, "wwan"))
+                /* Currently, only interfaces whose MAC address length is ETH_ALEN are supported.
+                 * Note, wwan interfaces may be assigned MAC address slightly later.
+                 * Hence, let's wait for a while.*/
                 return false;
 
         if (!link->network)
@@ -193,13 +203,10 @@ static int ndisc_check_ready(Link *link) {
         return 0;
 }
 
-static int ndisc_route_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+static int ndisc_route_handler(sd_netlink *rtnl, sd_netlink_message *m, Request *req, Link *link, Route *route) {
         int r;
 
         assert(link);
-        assert(link->ndisc_messages > 0);
-
-        link->ndisc_messages--;
 
         r = route_configure_handler_internal(rtnl, m, link, "Could not set NDisc route");
         if (r <= 0)
@@ -244,13 +251,10 @@ static int ndisc_request_route(Route *in, Link *link, sd_ndisc_router *rt) {
                                   ndisc_route_handler, NULL);
 }
 
-static int ndisc_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+static int ndisc_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Request *req, Link *link, Address *address) {
         int r;
 
         assert(link);
-        assert(link->ndisc_messages > 0);
-
-        link->ndisc_messages--;
 
         r = address_configure_handler_internal(rtnl, m, link, "Could not set NDisc address");
         if (r <= 0)
@@ -312,7 +316,7 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         if (lifetime_sec == 0) /* not a default router */
                 return 0;
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -322,7 +326,7 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get gateway address from RA: %m");
 
-        if (link_get_ipv6_address(link, &gateway, NULL) >= 0) {
+        if (link_get_ipv6_address(link, &gateway, 0, NULL) >= 0) {
                 if (DEBUG_LOGGING) {
                         _cleanup_free_ char *buffer = NULL;
 
@@ -406,7 +410,7 @@ static int ndisc_router_process_autonomous_prefix(Link *link, sd_ndisc_router *r
         if (!link->network->ipv6_accept_ra_use_autonomous_prefix)
                 return 0;
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -506,7 +510,7 @@ static int ndisc_router_process_onlink_prefix(Link *link, sd_ndisc_router *rt) {
         if (lifetime_sec == 0)
                 return 0;
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -634,7 +638,7 @@ static int ndisc_router_process_route(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get gateway address from RA: %m");
 
-        if (link_get_ipv6_address(link, &gateway, NULL) >= 0) {
+        if (link_get_ipv6_address(link, &gateway, 0, NULL) >= 0) {
                 if (DEBUG_LOGGING) {
                         _cleanup_free_ char *buf = NULL;
 
@@ -648,7 +652,7 @@ static int ndisc_router_process_route(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get default router preference from RA: %m");
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -705,7 +709,7 @@ static int ndisc_router_process_rdnss(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get router address from RA: %m");
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -786,7 +790,6 @@ static int ndisc_router_process_dnssl(Link *link, sd_ndisc_router *rt) {
         struct in6_addr router;
         uint32_t lifetime_sec;
         bool updated = false;
-        char **j;
         int r;
 
         assert(link);
@@ -800,7 +803,7 @@ static int ndisc_router_process_dnssl(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get router address from RA: %m");
 
-        r = sd_ndisc_router_get_timestamp(rt, clock_boottime_or_monotonic(), &timestamp_usec);
+        r = sd_ndisc_router_get_timestamp(rt, CLOCK_BOOTTIME, &timestamp_usec);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get RA timestamp: %m");
 
@@ -1055,7 +1058,7 @@ static void ndisc_handler(sd_ndisc *nd, sd_ndisc_event_t event, sd_ndisc_router 
         }
 }
 
-int ndisc_configure(Link *link) {
+static int ndisc_configure(Link *link) {
         int r;
 
         assert(link);
@@ -1090,6 +1093,8 @@ int ndisc_configure(Link *link) {
 }
 
 int ndisc_start(Link *link) {
+        int r;
+
         assert(link);
 
         if (!link->ndisc || !link->dhcp6_client)
@@ -1103,7 +1108,55 @@ int ndisc_start(Link *link) {
 
         log_link_debug(link, "Discovering IPv6 routers");
 
-        return sd_ndisc_start(link->ndisc);
+        r = sd_ndisc_start(link->ndisc);
+        if (r < 0)
+                return r;
+
+        return 1;
+}
+
+static int ndisc_process_request(Request *req, Link *link, void *userdata) {
+        int r;
+
+        assert(link);
+
+        if (!IN_SET(link->state, LINK_STATE_CONFIGURING, LINK_STATE_CONFIGURED))
+                return 0;
+
+        if (link->hw_addr.length != ETH_ALEN || hw_addr_is_null(&link->hw_addr))
+                /* No MAC address is assigned to the hardware, or non-supported MAC address length. */
+                return 0;
+
+        r = ndisc_configure(link);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "Failed to configure IPv6 Router Discovery: %m");
+
+        r = ndisc_start(link);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "Failed to start IPv6 Router Discovery: %m");
+
+        log_link_debug(link, "IPv6 Router Discovery is configured%s.",
+                       r > 0 ? " and started" : "");
+        return 1;
+}
+
+int link_request_ndisc(Link *link) {
+        int r;
+
+        assert(link);
+
+        if (!link_ipv6_accept_ra_enabled(link))
+                return 0;
+
+        if (link->ndisc)
+                return 0;
+
+        r = link_queue_request(link, REQUEST_TYPE_NDISC, ndisc_process_request, NULL);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "Failed to request configuring of the IPv6 Router Discovery: %m");
+
+        log_link_debug(link, "Requested configuring of the IPv6 Router Discovery.");
+        return 0;
 }
 
 void ndisc_vacuum(Link *link) {
@@ -1115,7 +1168,7 @@ void ndisc_vacuum(Link *link) {
 
         /* Removes all RDNSS and DNSSL entries whose validity time has passed */
 
-        time_now = now(clock_boottime_or_monotonic());
+        time_now = now(CLOCK_BOOTTIME);
 
         SET_FOREACH(r, link->ndisc_rdnss)
                 if (r->lifetime_usec < time_now)

@@ -3,68 +3,8 @@
 #include <efi.h>
 #include <efilib.h>
 
+#include "ticks.h"
 #include "util.h"
-
-#ifdef __x86_64__
-UINT64 ticks_read(void) {
-        UINT64 a, d;
-        __asm__ volatile ("rdtsc" : "=a" (a), "=d" (d));
-        return (d << 32) | a;
-}
-#elif defined(__i386__)
-UINT64 ticks_read(void) {
-        UINT64 val;
-        __asm__ volatile ("rdtsc" : "=A" (val));
-        return val;
-}
-#elif defined(__aarch64__)
-UINT64 ticks_read(void) {
-        UINT64 val;
-        __asm__ volatile ("mrs %0, cntpct_el0" : "=r" (val));
-        return val;
-}
-#else
-UINT64 ticks_read(void) {
-        UINT64 val = 1;
-        return val;
-}
-#endif
-
-#if defined(__aarch64__)
-UINT64 ticks_freq(void) {
-        UINT64 freq;
-        __asm__ volatile ("mrs %0, cntfrq_el0": "=r" (freq));
-        return freq;
-}
-#else
-/* count TSC ticks during a millisecond delay */
-UINT64 ticks_freq(void) {
-        UINT64 ticks_start, ticks_end;
-
-        ticks_start = ticks_read();
-        BS->Stall(1000);
-        ticks_end = ticks_read();
-
-        return (ticks_end - ticks_start) * 1000UL;
-}
-#endif
-
-UINT64 time_usec(void) {
-        UINT64 ticks;
-        static UINT64 freq;
-
-        ticks = ticks_read();
-        if (ticks == 0)
-                return 0;
-
-        if (freq == 0) {
-                freq = ticks_freq();
-                if (freq == 0)
-                        return 0;
-        }
-
-        return 1000UL * 1000UL * ticks / freq;
-}
 
 EFI_STATUS parse_boolean(const CHAR8 *v, BOOLEAN *b) {
         assert(b);
@@ -435,11 +375,12 @@ CHAR8 *strchra(const CHAR8 *s, CHAR8 c) {
         return NULL;
 }
 
-EFI_STATUS file_read(EFI_FILE_HANDLE dir, const CHAR16 *name, UINTN off, UINTN size, CHAR8 **ret, UINTN *ret_size) {
-        _cleanup_(FileHandleClosep) EFI_FILE_HANDLE handle = NULL;
+EFI_STATUS file_read(EFI_FILE *dir, const CHAR16 *name, UINTN off, UINTN size, CHAR8 **ret, UINTN *ret_size) {
+        _cleanup_(file_closep) EFI_FILE *handle = NULL;
         _cleanup_freepool_ CHAR8 *buf = NULL;
         EFI_STATUS err;
 
+        assert(dir);
         assert(name);
         assert(ret);
 
@@ -454,7 +395,7 @@ EFI_STATUS file_read(EFI_FILE_HANDLE dir, const CHAR16 *name, UINTN off, UINTN s
                 if (EFI_ERROR(err))
                         return err;
 
-                size = info->FileSize+1;
+                size = info->FileSize;
         }
 
         if (off > 0) {
@@ -463,12 +404,16 @@ EFI_STATUS file_read(EFI_FILE_HANDLE dir, const CHAR16 *name, UINTN off, UINTN s
                         return err;
         }
 
-        buf = xallocate_pool(size + 1);
+        /* Allocate some extra bytes to guarantee the result is NUL-terminated for CHAR8 and CHAR16 strings. */
+        UINTN extra = size % sizeof(CHAR16) + sizeof(CHAR16);
+
+        buf = xallocate_pool(size + extra);
         err = handle->Read(handle, &size, buf);
         if (EFI_ERROR(err))
                 return err;
 
-        buf[size] = '\0';
+        /* Note that handle->Read() changes size to reflect the actually bytes read. */
+        ZeroMem(buf + size, extra);
 
         *ret = TAKE_PTR(buf);
         if (ret_size)
@@ -529,26 +474,22 @@ void sort_pointer_array(
                 return;
 
         for (UINTN i = 1; i < n_members; i++) {
-                BOOLEAN more = FALSE;
+                UINTN k;
+                void *entry = array[i];
 
-                for (UINTN k = 0; k < n_members - i; k++) {
-                        void *entry;
+                for (k = i; k > 0; k--) {
+                        if (compare(array[k - 1], entry) <= 0)
+                                break;
 
-                        if (compare(array[k], array[k+1]) <= 0)
-                                continue;
-
-                        entry = array[k];
-                        array[k] = array[k+1];
-                        array[k+1] = entry;
-                        more = TRUE;
+                        array[k] = array[k - 1];
                 }
-                if (!more)
-                        break;
+
+                array[k] = entry;
         }
 }
 
 EFI_STATUS get_file_info_harder(
-                EFI_FILE_HANDLE handle,
+                EFI_FILE *handle,
                 EFI_FILE_INFO **ret,
                 UINTN *ret_size) {
 
@@ -581,7 +522,7 @@ EFI_STATUS get_file_info_harder(
 }
 
 EFI_STATUS readdir_harder(
-                EFI_FILE_HANDLE handle,
+                EFI_FILE *handle,
                 EFI_FILE_INFO **buffer,
                 UINTN *buffer_size) {
 
@@ -704,11 +645,11 @@ CHAR16 **strv_free(CHAR16 **v) {
 }
 
 EFI_STATUS open_directory(
-                EFI_FILE_HANDLE root,
+                EFI_FILE *root,
                 const CHAR16 *path,
-                EFI_FILE_HANDLE *ret) {
+                EFI_FILE **ret) {
 
-        _cleanup_(FileHandleClosep) EFI_FILE_HANDLE dir = NULL;
+        _cleanup_(file_closep) EFI_FILE *dir = NULL;
         _cleanup_freepool_ EFI_FILE_INFO *file_info = NULL;
         EFI_STATUS err;
 
@@ -743,3 +684,71 @@ UINT64 get_os_indications_supported(void) {
 
         return osind;
 }
+
+#ifdef EFI_DEBUG
+__attribute__((noinline)) void debug_break(void) {
+        /* This is a poor programmer's breakpoint to wait until a debugger
+         * has attached to us. Just "set variable wait = 0" or "return" to continue. */
+        volatile BOOLEAN wait = TRUE;
+        while (wait)
+                /* Prefer asm based stalling so that gdb has a source location to present. */
+#if defined(__i386__) || defined(__x86_64__)
+                asm volatile("pause");
+#elif defined(__aarch64__)
+                asm volatile("wfi");
+#else
+                BS->Stall(5000);
+#endif
+}
+#endif
+
+#if defined(__i386__) || defined(__x86_64__)
+static inline UINT8 inb(UINT16 port) {
+        UINT8 value;
+        asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
+        return value;
+}
+
+static inline void outb(UINT16 port, UINT8 value) {
+        asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+void beep(UINTN beep_count) {
+        enum {
+                PITCH                = 500,
+                BEEP_DURATION_USEC   = 100 * 1000,
+                WAIT_DURATION_USEC   = 400 * 1000,
+
+                PIT_FREQUENCY        = 0x1234dd,
+                SPEAKER_CONTROL_PORT = 0x61,
+                SPEAKER_ON_MASK      = 0x03,
+                TIMER_PORT_MAGIC     = 0xB6,
+                TIMER_CONTROL_PORT   = 0x43,
+                TIMER_CONTROL2_PORT  = 0x42,
+        };
+
+        /* Set frequency. */
+        UINT32 counter = PIT_FREQUENCY / PITCH;
+        outb(TIMER_CONTROL_PORT, TIMER_PORT_MAGIC);
+        outb(TIMER_CONTROL2_PORT, counter & 0xFF);
+        outb(TIMER_CONTROL2_PORT, (counter >> 8) & 0xFF);
+
+        UINT8 value = inb(SPEAKER_CONTROL_PORT);
+
+        while (beep_count > 0) {
+                /* Turn speaker on. */
+                value |= SPEAKER_ON_MASK;
+                outb(SPEAKER_CONTROL_PORT, value);
+
+                BS->Stall(BEEP_DURATION_USEC);
+
+                /* Turn speaker off. */
+                value &= ~SPEAKER_ON_MASK;
+                outb(SPEAKER_CONTROL_PORT, value);
+
+                beep_count--;
+                if (beep_count > 0)
+                        BS->Stall(WAIT_DURATION_USEC);
+        }
+}
+#endif

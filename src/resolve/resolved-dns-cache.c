@@ -117,7 +117,7 @@ static void dns_cache_item_unlink_and_free(DnsCache *c, DnsCacheItem *i) {
 }
 
 static bool dns_cache_remove_by_rr(DnsCache *c, DnsResourceRecord *rr) {
-        DnsCacheItem *first, *i;
+        DnsCacheItem *first;
         int r;
 
         first = hashmap_get(c->by_key, rr->key);
@@ -135,7 +135,7 @@ static bool dns_cache_remove_by_rr(DnsCache *c, DnsResourceRecord *rr) {
 }
 
 static bool dns_cache_remove_by_key(DnsCache *c, DnsResourceKey *key) {
-        DnsCacheItem *first, *i, *n;
+        DnsCacheItem *first;
 
         assert(c);
         assert(key);
@@ -144,7 +144,7 @@ static bool dns_cache_remove_by_key(DnsCache *c, DnsResourceKey *key) {
         if (!first)
                 return false;
 
-        LIST_FOREACH_SAFE(by_key, i, n, first) {
+        LIST_FOREACH(by_key, i, first) {
                 prioq_remove(c->by_expiry, i, &i->prioq_idx);
                 dns_cache_item_free(i);
         }
@@ -214,7 +214,7 @@ void dns_cache_prune(DnsCache *c) {
                         break;
 
                 if (t <= 0)
-                        t = now(clock_boottime_or_monotonic());
+                        t = now(CLOCK_BOOTTIME);
 
                 if (i->until > t)
                         break;
@@ -301,12 +301,10 @@ static int dns_cache_link_item(DnsCache *c, DnsCacheItem *i) {
 }
 
 static DnsCacheItem* dns_cache_get(DnsCache *c, DnsResourceRecord *rr) {
-        DnsCacheItem *i;
-
         assert(c);
         assert(rr);
 
-        LIST_FOREACH(by_key, i, hashmap_get(c->by_key, rr->key))
+        LIST_FOREACH(by_key, i, (DnsCacheItem*) hashmap_get(c->by_key, rr->key))
                 if (i->rr && dns_resource_record_equal(i->rr, rr) > 0)
                         return i;
 
@@ -737,7 +735,7 @@ int dns_cache_put(
         /* Make some space for our new entries */
         dns_cache_make_space(c, cache_keys);
 
-        timestamp = now(clock_boottime_or_monotonic());
+        timestamp = now(CLOCK_BOOTTIME);
 
         /* Second, add in positive entries for all contained RRs */
         DNS_ANSWER_FOREACH_ITEM(item, answer) {
@@ -987,7 +985,7 @@ int dns_cache_lookup(
         unsigned n = 0;
         int r;
         bool nxdomain = false;
-        DnsCacheItem *j, *first, *nsec = NULL;
+        DnsCacheItem *first, *nsec = NULL;
         bool have_authenticated = false, have_non_authenticated = false, have_confidential = false, have_non_confidential = false;
         usec_t current = 0;
         int found_rcode = -1;
@@ -1018,7 +1016,7 @@ int dns_cache_lookup(
         if (FLAGS_SET(query_flags, SD_RESOLVED_CLAMP_TTL)) {
                 /* 'current' is always passed to answer_add_clamp_ttl(), but is only used conditionally.
                  * We'll do the same assert there to make sure that it was initialized properly. */
-                current = now(clock_boottime_or_monotonic());
+                current = now(CLOCK_BOOTTIME);
                 assert(current > 0);
         }
 
@@ -1223,7 +1221,7 @@ miss:
 }
 
 int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_family, const union in_addr_union *owner_address) {
-        DnsCacheItem *i, *first;
+        DnsCacheItem *first;
         bool same_owner = true;
 
         assert(cache);
@@ -1266,9 +1264,7 @@ int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p) {
         assert(cache);
         assert(p);
 
-        HASHMAP_FOREACH(i, cache->by_key) {
-                DnsCacheItem *j;
-
+        HASHMAP_FOREACH(i, cache->by_key)
                 LIST_FOREACH(by_key, j, i) {
                         if (!j->rr)
                                 continue;
@@ -1299,7 +1295,6 @@ int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p) {
 
                         ancount++;
                 }
-        }
 
         DNS_PACKET_HEADER(p)->ancount = htobe16(ancount);
 
@@ -1315,9 +1310,7 @@ void dns_cache_dump(DnsCache *cache, FILE *f) {
         if (!f)
                 f = stdout;
 
-        HASHMAP_FOREACH(i, cache->by_key) {
-                DnsCacheItem *j;
-
+        HASHMAP_FOREACH(i, cache->by_key)
                 LIST_FOREACH(by_key, j, i) {
 
                         fputc('\t', f);
@@ -1341,7 +1334,6 @@ void dns_cache_dump(DnsCache *cache, FILE *f) {
                                 fputc('\n', f);
                         }
                 }
-        }
 }
 
 bool dns_cache_is_empty(DnsCache *cache) {

@@ -426,6 +426,10 @@ sensor:modalias:acpi:KIOX000A*:dmi:bvnAmericanMegatrendsInc.:bvr5.11:bd03/20/201
 sensor:modalias:acpi:KIOX000A*:dmi:bvnAmericanMegatrendsInc.:bvr5.11:bd05/25/2017:*svnDefaultstring:pnDefaultstring:pvrDefaultstring:rvnAMICorporation:rnDefaultstring:rvrDefaultstring:cvnDefaultstring:ct3:cvrDefaultstring:*
  ACCEL_LOCATION=base
 
+# GPD Pocket 3
+sensor:modalias:acpi:MXC6655*:dmi:*:svnGPD:pnG1621-02:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
+
 #########################################
 # Hometech
 ########################################
@@ -745,6 +749,10 @@ sensor:modalias:acpi:SMO8500*:dmi:*:svnPEAQ:pnPEAQPMMC1010MD99187:*
 # Pipo
 #########################################
 sensor:modalias:acpi:KIOX000A*:dmi:*:svnPIPO:pnW2S:*
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+
+# Pipo W2Pro
+sensor:modalias:acpi:KIOX0008*:dmi:*svnPIPO:pnW2pro:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
 
 # Pipo W4

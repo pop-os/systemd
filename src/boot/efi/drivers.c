@@ -36,11 +36,11 @@ static EFI_STATUS load_one_driver(
 
         err = BS->HandleProtocol(image, &LoadedImageProtocol, (void **)&loaded_image);
         if (EFI_ERROR(err))
-                return log_error_status_stall(err, L"Failed to find protocol in driver image s: %r", fname, err);
+                return log_error_status_stall(err, L"Failed to find protocol in driver image %s: %r", fname, err);
 
         if (loaded_image->ImageCodeType != EfiBootServicesCode &&
             loaded_image->ImageCodeType != EfiRuntimeServicesCode)
-                return log_error_status_stall(EFI_INVALID_PARAMETER, L"Image %s is not a driver, refusing: %r", fname);
+                return log_error_status_stall(EFI_INVALID_PARAMETER, L"Image %s is not a driver, refusing.", fname);
 
         err = BS->StartImage(image, NULL, NULL);
         if (EFI_ERROR(err)) {
@@ -80,9 +80,9 @@ static EFI_STATUS reconnect(void) {
 EFI_STATUS load_drivers(
                 EFI_HANDLE parent_image,
                 EFI_LOADED_IMAGE *loaded_image,
-                EFI_FILE_HANDLE root_dir) {
+                EFI_FILE *root_dir) {
 
-        _cleanup_(FileHandleClosep) EFI_FILE_HANDLE drivers_dir = NULL;
+        _cleanup_(file_closep) EFI_FILE *drivers_dir = NULL;
         _cleanup_freepool_ EFI_FILE_INFO *dirent = NULL;
         UINTN dirent_size = 0, n_succeeded = 0;
         EFI_STATUS err;

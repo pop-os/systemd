@@ -93,7 +93,6 @@ static int get_machine_list(
         struct machine_info *machine_infos = NULL;
         _cleanup_strv_free_ char **m = NULL;
         _cleanup_free_ char *hn = NULL;
-        char **i;
         int c = 0, r;
 
         hn = gethostname_malloc();
@@ -219,7 +218,7 @@ static int output_machines_list(struct machine_info *machine_infos, unsigned n) 
         return 0;
 }
 
-int list_machines(int argc, char *argv[], void *userdata) {
+int verb_list_machines(int argc, char *argv[], void *userdata) {
         struct machine_info *machine_infos = NULL;
         sd_bus *bus;
         int r, rc;

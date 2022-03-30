@@ -11,11 +11,14 @@
 #include "conf-files.h"
 #include "conf-parser.h"
 #include "def.h"
+#include "dns-domain.h"
+#include "escape.h"
 #include "ether-addr-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "hostname-util.h"
 #include "in-addr-util.h"
 #include "log.h"
 #include "macro.h"
@@ -40,18 +43,18 @@ int config_item_table_lookup(
                 const void *table,
                 const char *section,
                 const char *lvalue,
-                ConfigParserCallback *func,
-                int *ltype,
-                void **data,
+                ConfigParserCallback *ret_func,
+                int *ret_ltype,
+                void **ret_data,
                 void *userdata) {
 
         const ConfigTableItem *t;
 
         assert(table);
         assert(lvalue);
-        assert(func);
-        assert(ltype);
-        assert(data);
+        assert(ret_func);
+        assert(ret_ltype);
+        assert(ret_data);
 
         for (t = table; t->lvalue; t++) {
 
@@ -61,12 +64,15 @@ int config_item_table_lookup(
                 if (!streq_ptr(section, t->section))
                         continue;
 
-                *func = t->parse;
-                *ltype = t->ltype;
-                *data = t->data;
+                *ret_func = t->parse;
+                *ret_ltype = t->ltype;
+                *ret_data = t->data;
                 return 1;
         }
 
+        *ret_func = NULL;
+        *ret_ltype = 0;
+        *ret_data = NULL;
         return 0;
 }
 
@@ -74,9 +80,9 @@ int config_item_perf_lookup(
                 const void *table,
                 const char *section,
                 const char *lvalue,
-                ConfigParserCallback *func,
-                int *ltype,
-                void **data,
+                ConfigParserCallback *ret_func,
+                int *ret_ltype,
+                void **ret_data,
                 void *userdata) {
 
         ConfigPerfItemLookup lookup = (ConfigPerfItemLookup) table;
@@ -84,9 +90,9 @@ int config_item_perf_lookup(
 
         assert(table);
         assert(lvalue);
-        assert(func);
-        assert(ltype);
-        assert(data);
+        assert(ret_func);
+        assert(ret_ltype);
+        assert(ret_data);
 
         if (section) {
                 const char *key;
@@ -95,12 +101,16 @@ int config_item_perf_lookup(
                 p = lookup(key, strlen(key));
         } else
                 p = lookup(lvalue, strlen(lvalue));
-        if (!p)
+        if (!p) {
+                *ret_func = NULL;
+                *ret_ltype = 0;
+                *ret_data = NULL;
                 return 0;
+        }
 
-        *func = p->parse;
-        *ltype = p->ltype;
-        *data = (uint8_t*) userdata + p->offset;
+        *ret_func = p->parse;
+        *ret_ltype = p->ltype;
+        *ret_data = (uint8_t*) userdata + p->offset;
         return 1;
 }
 
@@ -133,11 +143,11 @@ static int next_assignment(
         if (r < 0)
                 return r;
         if (r > 0) {
-                if (func)
-                        return func(unit, filename, line, section, section_line,
-                                    lvalue, ltype, rvalue, data, userdata);
+                if (!func)
+                        return 0;
 
-                return 0;
+                return func(unit, filename, line, section, section_line,
+                            lvalue, ltype, rvalue, data, userdata);
         }
 
         /* Warn about unknown non-extension fields. */
@@ -160,7 +170,7 @@ static int parse_line(
                 char **section,
                 unsigned *section_line,
                 bool *section_ignored,
-                char *l,
+                char *l, /* is modified */
                 void *userdata) {
 
         char *e;
@@ -171,18 +181,18 @@ static int parse_line(
         assert(l);
 
         l = strstrip(l);
-        if (!*l)
+        if (isempty(l))
                 return 0;
 
-        if (*l == '\n')
+        if (l[0] == '\n')
                 return 0;
 
         if (!utf8_is_valid(l))
                 return log_syntax_invalid_utf8(unit, LOG_WARNING, filename, line, l);
 
-        if (*l == '[') {
+        if (l[0] == '[') {
+                _cleanup_free_ char *n = NULL;
                 size_t k;
-                char *n;
 
                 k = strlen(l);
                 assert(k > 0);
@@ -194,15 +204,18 @@ static int parse_line(
                 if (!n)
                         return log_oom();
 
+                if (!string_is_safe(n))
+                        return log_syntax(unit, LOG_ERR, filename, line, SYNTHETIC_ERRNO(EBADMSG), "Bad characters in section header '%s'", l);
+
                 if (sections && !nulstr_contains(sections, n)) {
-                        bool ignore = flags & CONFIG_PARSE_RELAXED;
+                        bool ignore;
                         const char *t;
 
-                        ignore = ignore || startswith(n, "X-");
+                        ignore = (flags & CONFIG_PARSE_RELAXED) || startswith(n, "X-");
 
                         if (!ignore)
                                 NULSTR_FOREACH(t, sections)
-                                        if (streq_ptr(n, startswith(t, "-"))) {
+                                        if (streq_ptr(n, startswith(t, "-"))) { /* Ignore sections prefixed with "-" in valid section list */
                                                 ignore = true;
                                                 break;
                                         }
@@ -210,7 +223,6 @@ static int parse_line(
                         if (!ignore)
                                 log_syntax(unit, LOG_WARNING, filename, line, 0, "Unknown section '%s'. Ignoring.", n);
 
-                        free(n);
                         *section = mfree(*section);
                         *section_line = 0;
                         *section_ignored = true;
@@ -474,7 +486,6 @@ static int config_parse_many_files(
 
         _cleanup_hashmap_free_ Hashmap *stats_by_path = NULL;
         struct stat st;
-        char **fn;
         int r;
 
         if (ret_stats_by_path) {
@@ -573,6 +584,50 @@ int config_parse_many(
         return config_parse_many_files(conf_files, files, sections, lookup, table, flags, userdata, ret_stats_by_path);
 }
 
+static void config_section_hash_func(const ConfigSection *c, struct siphash *state) {
+        siphash24_compress_string(c->filename, state);
+        siphash24_compress(&c->line, sizeof(c->line), state);
+}
+
+static int config_section_compare_func(const ConfigSection *x, const ConfigSection *y) {
+        int r;
+
+        r = strcmp(x->filename, y->filename);
+        if (r != 0)
+                return r;
+
+        return CMP(x->line, y->line);
+}
+
+DEFINE_HASH_OPS(config_section_hash_ops, ConfigSection, config_section_hash_func, config_section_compare_func);
+
+int config_section_new(const char *filename, unsigned line, ConfigSection **s) {
+        ConfigSection *cs;
+
+        cs = malloc0(offsetof(ConfigSection, filename) + strlen(filename) + 1);
+        if (!cs)
+                return -ENOMEM;
+
+        strcpy(cs->filename, filename);
+        cs->line = line;
+
+        *s = TAKE_PTR(cs);
+
+        return 0;
+}
+
+unsigned hashmap_find_free_section_line(Hashmap *hashmap) {
+        ConfigSection *cs;
+        unsigned n = 0;
+        void *entry;
+
+        HASHMAP_FOREACH_KEY(entry, cs, hashmap)
+                if (n < cs->line)
+                        n = cs->line;
+
+        return n + 1;
+}
+
 #define DEFINE_PARSER(type, vartype, conv_func)                         \
         DEFINE_CONFIG_PARSE_PTR(config_parse_##type, conv_func, vartype, "Failed to parse " #type " value")
 
@@ -589,6 +644,7 @@ DEFINE_PARSER(nsec, nsec_t, parse_nsec);
 DEFINE_PARSER(sec, usec_t, parse_sec);
 DEFINE_PARSER(sec_def_infinity, usec_t, parse_sec_def_infinity);
 DEFINE_PARSER(mode, mode_t, parse_mode);
+DEFINE_PARSER(pid, pid_t, parse_pid);
 
 int config_parse_iec_size(
                 const char* unit,
@@ -819,14 +875,108 @@ int config_parse_string(
                 void *data,
                 void *userdata) {
 
-        char **s = data;
+        char **s = ASSERT_PTR(data);
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
+
+        if (isempty(rvalue)) {
+                *s = mfree(*s);
+                return 0;
+        }
+
+        if (FLAGS_SET(ltype, CONFIG_PARSE_STRING_SAFE) && !string_is_safe(rvalue)) {
+                _cleanup_free_ char *escaped = NULL;
+
+                escaped = cescape(rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Specified string contains unsafe characters, ignoring: %s", strna(escaped));
+                return 0;
+        }
+
+        if (FLAGS_SET(ltype, CONFIG_PARSE_STRING_ASCII) && !ascii_is_valid(rvalue)) {
+                _cleanup_free_ char *escaped = NULL;
+
+                escaped = cescape(rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Specified string contains invalid ASCII characters, ignoring: %s", strna(escaped));
+                return 0;
+        }
 
         return free_and_strdup_warn(s, empty_to_null(rvalue));
+}
+
+int config_parse_dns_name(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char **hostname = ASSERT_PTR(data);
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                *hostname = mfree(*hostname);
+                return 0;
+        }
+
+        r = dns_name_is_valid(rvalue);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to check validity of DNS domain name '%s', ignoring assignment: %m", rvalue);
+                return 0;
+        }
+        if (r == 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Specified invalid DNS domain name, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        return free_and_strdup_warn(hostname, rvalue);
+}
+
+int config_parse_hostname(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char **hostname = ASSERT_PTR(data);
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                *hostname = mfree(*hostname);
+                return 0;
+        }
+
+        if (!hostname_is_valid(rvalue, 0)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Specified invalid hostname, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        return config_parse_dns_name(unit, filename, line, section, section_line,
+                                     lvalue, ltype, rvalue, data, userdata);
 }
 
 int config_parse_path(

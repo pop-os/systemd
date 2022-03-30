@@ -16,6 +16,7 @@
 #include "device-private.h"
 #include "device-util.h"
 #include "dirent-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "sort-util.h"
 #include "static-destruct.h"
@@ -47,6 +48,8 @@ static const char *arg_export_prefix = NULL;
 static usec_t arg_wait_for_initialization_timeout = 0;
 
 static bool skip_attribute(const char *name) {
+        assert(name);
+
         /* Those are either displayed separately or should not be shown at all. */
         return STR_IN_SET(name,
                           "uevent",
@@ -66,6 +69,9 @@ typedef struct SysAttr {
 STATIC_DESTRUCTOR_REGISTER(arg_properties, strv_freep);
 
 static int sysattr_compare(const SysAttr *a, const SysAttr *b) {
+        assert(a);
+        assert(b);
+
         return strcmp(a->name, b->name);
 }
 
@@ -74,6 +80,8 @@ static int print_all_attributes(sd_device *device, bool is_parent) {
         const char *name, *value;
         size_t n_items = 0;
         int r;
+
+        assert(device);
 
         value = NULL;
         (void) sd_device_get_devpath(device, &value);
@@ -110,8 +118,8 @@ static int print_all_attributes(sd_device *device, bool is_parent) {
                         if (len > 0)
                                 continue;
 
-                } else if (r == -EPERM)
-                        value = "(write-only)";
+                } else if (ERRNO_IS_PRIVILEGE(r))
+                        value = "(not readable)";
                 else
                         continue;
 
@@ -139,6 +147,8 @@ static int print_device_chain(sd_device *device) {
         sd_device *child, *parent;
         int r;
 
+        assert(device);
+
         printf("\n"
                "Udevadm info starts with the device specified by the devpath and then\n"
                "walks up the chain of parent devices. It prints for every device\n"
@@ -163,6 +173,8 @@ static int print_device_chain(sd_device *device) {
 static int print_record(sd_device *device) {
         const char *str, *val;
         int i;
+
+        assert(device);
 
         (void) sd_device_get_devpath(device, &str);
         printf("P: %s\n", str);
@@ -189,6 +201,8 @@ static int print_record(sd_device *device) {
 
 static int stat_device(const char *name, bool export, const char *prefix) {
         struct stat statbuf;
+
+        assert(name);
 
         if (stat(name, &statbuf) != 0)
                 return -errno;
@@ -229,10 +243,10 @@ static int export_devices(void) {
 }
 
 static void cleanup_dir(DIR *dir, mode_t mask, int depth) {
+        assert(dir);
+
         if (depth <= 0)
                 return;
-
-        assert(dir);
 
         FOREACH_DIRENT_ALL(dent, dir, break) {
                 struct stat stats;
@@ -261,38 +275,27 @@ static void cleanup_dir(DIR *dir, mode_t mask, int depth) {
  * entries for devices in /run/udev/data (such as "b8:16"), and removes
  * all files except those that haven't been deleted in /run/udev/data
  * (i.e. they were skipped during db cleanup because of the db_persist flag).
- * Returns true if the directory is empty after cleanup.
  */
-static bool cleanup_dir_after_db_cleanup(DIR *dir, DIR *datadir) {
-        unsigned int kept = 0;
-
-        assert(dir && datadir);
+static void cleanup_dir_after_db_cleanup(DIR *dir, DIR *datadir) {
+        assert(dir);
+        assert(datadir);
 
         FOREACH_DIRENT_ALL(dent, dir, break) {
-                struct stat data_stats, link_stats;
-
                 if (dot_or_dot_dot(dent->d_name))
                         continue;
-                if (fstatat(dirfd(dir), dent->d_name, &link_stats, AT_SYMLINK_NOFOLLOW) < 0) {
-                        if (errno != ENOENT)
-                                kept++;
+
+                if (faccessat(dirfd(datadir), dent->d_name, F_OK, AT_SYMLINK_NOFOLLOW) >= 0)
+                        /* The corresponding udev database file still exists.
+                         * Assuming the parsistent flag is set for the database. */
                         continue;
-                }
 
-                if (fstatat(dirfd(datadir), dent->d_name, &data_stats, 0) < 0)
-                        (void) unlinkat(dirfd(dir), dent->d_name,
-                                        S_ISDIR(link_stats.st_mode) ? AT_REMOVEDIR : 0);
-                else
-                        /* The entry still exists under /run/udev/data */
-                        kept++;
+                (void) unlinkat(dirfd(dir), dent->d_name, 0);
         }
-
-        return kept == 0;
 }
 
 static void cleanup_dirs_after_db_cleanup(DIR *dir, DIR *datadir) {
-
-        assert(dir && datadir);
+        assert(dir);
+        assert(datadir);
 
         FOREACH_DIRENT_ALL(dent, dir, break) {
                 struct stat stats;
@@ -305,15 +308,17 @@ static void cleanup_dirs_after_db_cleanup(DIR *dir, DIR *datadir) {
                         _cleanup_closedir_ DIR *dir2 = NULL;
 
                         dir2 = fdopendir(openat(dirfd(dir), dent->d_name, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC));
-                        if (dir2 && cleanup_dir_after_db_cleanup(dir2, datadir))
-                                (void) unlinkat(dirfd(dir), dent->d_name, AT_REMOVEDIR);
+                        if (dir2)
+                                cleanup_dir_after_db_cleanup(dir2, datadir);
+
+                        (void) unlinkat(dirfd(dir), dent->d_name, AT_REMOVEDIR);
                 } else
                         (void) unlinkat(dirfd(dir), dent->d_name, 0);
         }
 }
 
 static void cleanup_db(void) {
-        _cleanup_closedir_ DIR *dir1 = NULL, *dir2 = NULL, *dir3 = NULL, *dir4 = NULL, *dir5 = NULL;
+        _cleanup_closedir_ DIR *dir1 = NULL, *dir2 = NULL, *dir3 = NULL, *dir4 = NULL;
 
         dir1 = opendir("/run/udev/data");
         if (dir1)
@@ -331,9 +336,8 @@ static void cleanup_db(void) {
         if (dir4)
                 cleanup_dir(dir4, 0, 2);
 
-        dir5 = opendir("/run/udev/watch");
-        if (dir5)
-                cleanup_dir_after_db_cleanup(dir5, dir1);
+        /* Do not remove /run/udev/watch. It will be handled by udevd well on restart.
+         * And should not be removed by external program when udevd is running. */
 }
 
 static int query_device(QueryType query, sd_device* device) {
@@ -399,10 +403,10 @@ static int query_device(QueryType query, sd_device* device) {
 
         case QUERY_ALL:
                 return print_record(device);
-        }
 
-        assert_not_reached();
-        return 0;
+        default:
+                assert_not_reached();
+        }
 }
 
 static int help(void) {
@@ -580,7 +584,6 @@ int info_main(int argc, char *argv[], void *userdata) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "-x/--export or -P/--export-prefix cannot be used with --value");
 
-        char **p;
         STRV_FOREACH(p, devices) {
                 _cleanup_(sd_device_unrefp) sd_device *device = NULL;
 

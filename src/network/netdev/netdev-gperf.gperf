@@ -27,6 +27,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #include "vxcan.h"
 #include "vxlan.h"
 #include "wireguard.h"
+#include "wlan.h"
 #include "xfrm.h"
 %}
 struct ConfigPerfItem;
@@ -68,8 +69,8 @@ IPVLAN.Mode,                              config_parse_ipvlan_mode,             
 IPVLAN.Flags,                             config_parse_ipvlan_flags,                 0,                             offsetof(IPVlan, flags)
 IPVTAP.Mode,                              config_parse_ipvlan_mode,                  0,                             offsetof(IPVlan, mode)
 IPVTAP.Flags,                             config_parse_ipvlan_flags,                 0,                             offsetof(IPVlan, flags)
-Tunnel.Local,                             config_parse_tunnel_address,               0,                             offsetof(Tunnel, local)
-Tunnel.Remote,                            config_parse_tunnel_address,               0,                             offsetof(Tunnel, remote)
+Tunnel.Local,                             config_parse_tunnel_local_address,         0,                             0
+Tunnel.Remote,                            config_parse_tunnel_remote_address,        0,                             0
 Tunnel.TOS,                               config_parse_unsigned,                     0,                             offsetof(Tunnel, tos)
 Tunnel.TTL,                               config_parse_unsigned,                     0,                             offsetof(Tunnel, ttl)
 Tunnel.Key,                               config_parse_tunnel_key,                   0,                             offsetof(Tunnel, key)
@@ -77,9 +78,9 @@ Tunnel.InputKey,                          config_parse_tunnel_key,              
 Tunnel.OutputKey,                         config_parse_tunnel_key,                   0,                             offsetof(Tunnel, okey)
 Tunnel.DiscoverPathMTU,                   config_parse_bool,                         0,                             offsetof(Tunnel, pmtudisc)
 Tunnel.Mode,                              config_parse_ip6tnl_mode,                  0,                             offsetof(Tunnel, ip6tnl_mode)
-Tunnel.IPv6FlowLabel,                     config_parse_ipv6_flowlabel,               0,                             offsetof(Tunnel, ipv6_flowlabel)
+Tunnel.IPv6FlowLabel,                     config_parse_ipv6_flowlabel,               0,                             0
 Tunnel.CopyDSCP,                          config_parse_bool,                         0,                             offsetof(Tunnel, copy_dscp)
-Tunnel.EncapsulationLimit,                config_parse_encap_limit,                  0,                             offsetof(Tunnel, encap_limit)
+Tunnel.EncapsulationLimit,                config_parse_encap_limit,                  0,                             0
 Tunnel.Independent,                       config_parse_bool,                         0,                             offsetof(Tunnel, independent)
 Tunnel.AssignToLoopback,                  config_parse_bool,                         0,                             offsetof(Tunnel, assign_to_loopback)
 Tunnel.AllowLocalRemote,                  config_parse_tristate,                     0,                             offsetof(Tunnel, allow_localremote)
@@ -91,6 +92,7 @@ Tunnel.IPv6RapidDeploymentPrefix,         config_parse_6rd_prefix,              
 Tunnel.ERSPANIndex,                       config_parse_uint32,                       0,                             offsetof(Tunnel, erspan_index)
 Tunnel.SerializeTunneledPackets,          config_parse_tristate,                     0,                             offsetof(Tunnel, gre_erspan_sequence)
 Tunnel.ISATAP,                            config_parse_tristate,                     0,                             offsetof(Tunnel, isatap)
+Tunnel.External,                          config_parse_bool,                         0,                             offsetof(Tunnel, external)
 FooOverUDP.Protocol,                      config_parse_ip_protocol,                  0,                             offsetof(FouTunnel, fou_protocol)
 FooOverUDP.Encapsulation,                 config_parse_fou_encap_type,               0,                             offsetof(FouTunnel, fou_encap_type)
 FooOverUDP.Port,                          config_parse_ip_port,                      0,                             offsetof(FouTunnel, port)
@@ -101,8 +103,8 @@ L2TP.TunnelId,                            config_parse_l2tp_tunnel_id,          
 L2TP.PeerTunnelId,                        config_parse_l2tp_tunnel_id,               0,                             offsetof(L2tpTunnel, peer_tunnel_id)
 L2TP.UDPSourcePort,                       config_parse_ip_port,                      0,                             offsetof(L2tpTunnel, l2tp_udp_sport)
 L2TP.UDPDestinationPort,                  config_parse_ip_port,                      0,                             offsetof(L2tpTunnel, l2tp_udp_dport)
-L2TP.Local,                               config_parse_l2tp_tunnel_address,          0,                             offsetof(L2tpTunnel, local)
-L2TP.Remote,                              config_parse_l2tp_tunnel_address,          0,                             offsetof(L2tpTunnel, remote)
+L2TP.Local,                               config_parse_l2tp_tunnel_local_address,    0,                             0
+L2TP.Remote,                              config_parse_l2tp_tunnel_remote_address,   0,                             0
 L2TP.EncapsulationType,                   config_parse_l2tp_encap_type,              0,                             offsetof(L2tpTunnel, l2tp_encap_type)
 L2TP.UDPCheckSum,                         config_parse_bool,                         0,                             offsetof(L2tpTunnel, udp_csum)
 L2TP.UDP6CheckSumRx,                      config_parse_bool,                         0,                             offsetof(L2tpTunnel, udp6_csum_rx)
@@ -177,14 +179,14 @@ Tun.OneQueue,                             config_parse_warn_compat,             
 Tun.MultiQueue,                           config_parse_bool,                         0,                             offsetof(TunTap, multi_queue)
 Tun.PacketInfo,                           config_parse_bool,                         0,                             offsetof(TunTap, packet_info)
 Tun.VNetHeader,                           config_parse_bool,                         0,                             offsetof(TunTap, vnet_hdr)
-Tun.User,                                 config_parse_string,                       0,                             offsetof(TunTap, user_name)
-Tun.Group,                                config_parse_string,                       0,                             offsetof(TunTap, group_name)
+Tun.User,                                 config_parse_string,                       CONFIG_PARSE_STRING_SAFE,      offsetof(TunTap, user_name)
+Tun.Group,                                config_parse_string,                       CONFIG_PARSE_STRING_SAFE,      offsetof(TunTap, group_name)
 Tap.OneQueue,                             config_parse_warn_compat,                  DISABLED_LEGACY,               0
 Tap.MultiQueue,                           config_parse_bool,                         0,                             offsetof(TunTap, multi_queue)
 Tap.PacketInfo,                           config_parse_bool,                         0,                             offsetof(TunTap, packet_info)
 Tap.VNetHeader,                           config_parse_bool,                         0,                             offsetof(TunTap, vnet_hdr)
-Tap.User,                                 config_parse_string,                       0,                             offsetof(TunTap, user_name)
-Tap.Group,                                config_parse_string,                       0,                             offsetof(TunTap, group_name)
+Tap.User,                                 config_parse_string,                       CONFIG_PARSE_STRING_SAFE,      offsetof(TunTap, user_name)
+Tap.Group,                                config_parse_string,                       CONFIG_PARSE_STRING_SAFE,      offsetof(TunTap, group_name)
 Bond.Mode,                                config_parse_bond_mode,                    0,                             offsetof(Bond, mode)
 Bond.TransmitHashPolicy,                  config_parse_bond_xmit_hash_policy,        0,                             offsetof(Bond, xmit_hash_policy)
 Bond.LACPTransmitRate,                    config_parse_bond_lacp_rate,               0,                             offsetof(Bond, lacp_rate)
@@ -257,3 +259,6 @@ BatmanAdvanced.RoutingAlgorithm,          config_parse_batadv_routing_algorithm,
 IPoIB.PartitionKey,                       config_parse_ipoib_pkey,                   0,                             offsetof(IPoIB, pkey)
 IPoIB.Mode,                               config_parse_ipoib_mode,                   0,                             offsetof(IPoIB, mode)
 IPoIB.IgnoreUserspaceMulticastGroups,     config_parse_tristate,                     0,                             offsetof(IPoIB, umcast)
+WLAN.PhysicalDevice,                      config_parse_wiphy,                        0,                             0
+WLAN.Type,                                config_parse_wlan_iftype,                  0,                             offsetof(WLan, iftype)
+WLAN.WDS,                                 config_parse_tristate,                     0,                             offsetof(WLan, wds)

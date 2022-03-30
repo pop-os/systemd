@@ -61,6 +61,13 @@ bool link_dhcp_enabled(Link *link, int family) {
         if (link->iftype == ARPHRD_CAN)
                 return false;
 
+        if (!IN_SET(link->hw_addr.length, ETH_ALEN, INFINIBAND_ALEN) &&
+            !streq_ptr(link->kind, "wwan"))
+                /* Currently, only interfaces whose MAC address length is ETH_ALEN or INFINIBAND_ALEN
+                 * are supported. Note, wwan interfaces may be assigned MAC address slightly later.
+                 * Hence, let's wait for a while.*/
+                return false;
+
         if (!link->network)
                 return false;
 
@@ -330,7 +337,7 @@ int config_parse_dhcp_or_ra_route_metric(
                 return 0;
         }
 
-        switch(ltype) {
+        switch (ltype) {
         case AF_INET:
                 network->dhcp_route_metric = metric;
                 network->dhcp_route_metric_set = true;
@@ -381,7 +388,7 @@ int config_parse_dhcp_use_dns(
                 return 0;
         }
 
-        switch(ltype) {
+        switch (ltype) {
         case AF_INET:
                 network->dhcp_use_dns = r;
                 network->dhcp_use_dns_set = true;
@@ -432,7 +439,7 @@ int config_parse_dhcp_use_domains(
                 return 0;
         }
 
-        switch(ltype) {
+        switch (ltype) {
         case AF_INET:
                 network->dhcp_use_domains = d;
                 network->dhcp_use_domains_set = true;
@@ -483,7 +490,7 @@ int config_parse_dhcp_use_ntp(
                 return 0;
         }
 
-        switch(ltype) {
+        switch (ltype) {
         case AF_INET:
                 network->dhcp_use_ntp = r;
                 network->dhcp_use_ntp_set = true;
@@ -535,7 +542,7 @@ int config_parse_dhcp_or_ra_route_table(
                 return 0;
         }
 
-        switch(ltype) {
+        switch (ltype) {
         case AF_INET:
                 network->dhcp_route_table = rt;
                 network->dhcp_route_table_set = true;
@@ -770,7 +777,7 @@ int config_parse_dhcp_send_option(
                 return 0;
         }
 
-        switch(type) {
+        switch (type) {
         case DHCP_OPTION_DATA_UINT8:{
                 r = safe_atou8(p, &uint8_data);
                 if (r < 0) {

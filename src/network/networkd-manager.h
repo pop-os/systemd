@@ -28,6 +28,8 @@ struct Manager {
         Hashmap *polkit_registry;
         int ethtool_fd;
 
+        KeepConfiguration keep_configuration;
+
         bool test_mode;
         bool enumerating;
         bool dirty;
@@ -81,6 +83,10 @@ struct Manager {
         /* Route table name */
         Hashmap *route_table_numbers_by_name;
         Hashmap *route_table_names_by_number;
+
+        /* Wiphy */
+        Hashmap *wiphy_by_index;
+        Hashmap *wiphy_by_name;
 
         /* For link speed meter */
         bool use_speed_meter;

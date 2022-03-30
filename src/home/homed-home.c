@@ -1185,14 +1185,18 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
         if (r < 0)
                 return r;
         if (r == 0) {
+                _cleanup_free_ char *joined = NULL;
                 const char *homework, *suffix, *unix_path;
 
                 /* Child */
 
                 suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
-                if (suffix)
-                        unix_path = strjoina("/run/systemd/home/notify.", suffix);
-                else
+                if (suffix) {
+                        joined = strjoin("/run/systemd/home/notify.", suffix);
+                        if (!joined)
+                                return log_oom();
+                        unix_path = joined;
+                } else
                         unix_path = "/run/systemd/home/notify";
 
                 if (setenv("NOTIFY_SOCKET", unix_path, 1) < 0) {
@@ -1448,7 +1452,7 @@ static int home_deactivate_internal(Home *h, bool force, sd_bus_error *error) {
         }
 
         /* Let's start a timer to retry deactivation in 15. We'll stop the timer once we manage to deactivate
-         * the home directory again, or we we start any other operation. */
+         * the home directory again, or we start any other operation. */
         home_start_retry_deactivate(h);
 
         return r;

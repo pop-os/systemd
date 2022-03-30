@@ -22,7 +22,6 @@ static struct ether_addr mac_addr = {
 };
 
 static bool verbose = false;
-static sd_event_source *test_hangcheck;
 static int test_fd[2];
 static sd_ndisc *test_timeout_nd;
 
@@ -166,13 +165,6 @@ static void router_dump(sd_ndisc_router *rt) {
         }
 }
 
-static int test_rs_hangcheck(sd_event_source *s, uint64_t usec,
-                             void *userdata) {
-        assert_se(false);
-
-        return 0;
-}
-
 int icmp6_bind_router_solicitation(int ifindex) {
         assert_se(ifindex == 42);
 
@@ -265,12 +257,9 @@ static void test_callback(sd_ndisc *nd, sd_ndisc_event_t event, sd_ndisc_router 
         sd_event_exit(e, 0);
 }
 
-static void test_rs(void) {
+TEST(rs) {
         sd_event *e;
         sd_ndisc *nd;
-
-        if (verbose)
-                printf("* %s\n", __func__);
 
         send_ra_function = send_ra;
 
@@ -285,10 +274,9 @@ static void test_rs(void) {
         assert_se(sd_ndisc_set_mac(nd, &mac_addr) >= 0);
         assert_se(sd_ndisc_set_callback(nd, test_callback, e) >= 0);
 
-        assert_se(sd_event_add_time_relative(
-                                  e, &test_hangcheck, clock_boottime_or_monotonic(),
-                                  30 * USEC_PER_SEC, 0,
-                                  test_rs_hangcheck, NULL) >= 0);
+        assert_se(sd_event_add_time_relative(e, NULL, CLOCK_BOOTTIME,
+                                             30 * USEC_PER_SEC, 0,
+                                             NULL, INT_TO_PTR(-ETIMEDOUT)) >= 0);
 
         assert_se(sd_ndisc_stop(nd) >= 0);
         assert_se(sd_ndisc_start(nd) >= 0);
@@ -297,9 +285,7 @@ static void test_rs(void) {
 
         assert_se(sd_ndisc_start(nd) >= 0);
 
-        sd_event_loop(e);
-
-        test_hangcheck = sd_event_source_unref(test_hangcheck);
+        assert_se(sd_event_loop(e) >= 0);
 
         nd = sd_ndisc_unref(nd);
         assert_se(!nd);
@@ -358,12 +344,9 @@ static int test_timeout_value(uint8_t flags) {
         return 0;
 }
 
-static void test_timeout(void) {
+TEST(timeout) {
         sd_event *e;
         sd_ndisc *nd;
-
-        if (verbose)
-                printf("* %s\n", __func__);
 
         send_ra_function = test_timeout_value;
 
@@ -379,28 +362,17 @@ static void test_timeout(void) {
         assert_se(sd_ndisc_set_ifindex(nd, 42) >= 0);
         assert_se(sd_ndisc_set_mac(nd, &mac_addr) >= 0);
 
-        assert_se(sd_event_add_time_relative(
-                                  e, &test_hangcheck, clock_boottime_or_monotonic(),
-                                  30 * USEC_PER_SEC, 0,
-                                  test_rs_hangcheck, NULL) >= 0);
+        assert_se(sd_event_add_time_relative(e, NULL, CLOCK_BOOTTIME,
+                                             30 * USEC_PER_SEC, 0,
+                                             NULL, INT_TO_PTR(-ETIMEDOUT)) >= 0);
 
         assert_se(sd_ndisc_start(nd) >= 0);
 
-        sd_event_loop(e);
-
-        test_hangcheck = sd_event_source_unref(test_hangcheck);
+        assert_se(sd_event_loop(e) >= 0);
 
         nd = sd_ndisc_unref(nd);
 
         sd_event_unref(e);
 }
 
-int main(int argc, char *argv[]) {
-
-        test_setup_logging(LOG_DEBUG);
-
-        test_rs();
-        test_timeout();
-
-        return 0;
-}
+DEFINE_TEST_MAIN(LOG_DEBUG);

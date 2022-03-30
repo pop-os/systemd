@@ -6,6 +6,7 @@
 #include "sd-daemon.h"
 
 #include "macro.h"
+#include "static-destruct.h"
 #include "util.h"
 
 static inline bool manager_errno_skip_test(int r) {
@@ -28,6 +29,8 @@ bool slow_tests_enabled(void);
 void test_setup_logging(int level);
 int log_tests_skipped(const char *message);
 int log_tests_skipped_errno(int r, const char *message);
+
+int write_tmpfile(char *pattern, const char *contents);
 
 bool have_namespaces(void);
 
@@ -109,15 +112,28 @@ static inline int run_test_table(void) {
         return r;
 }
 
-#define DEFINE_CUSTOM_TEST_MAIN(log_level, intro, outro) \
-        int main(int argc, char *argv[]) {               \
-                int _r = EXIT_SUCCESS;                   \
-                test_setup_logging(log_level);           \
-                save_argc_argv(argc, argv);              \
-                intro;                                   \
-                _r = run_test_table();                   \
-                outro;                                   \
-                return _r;                               \
+#define DEFINE_TEST_MAIN_FULL(log_level, intro, outro)    \
+        int main(int argc, char *argv[]) {                \
+                int (*_intro)(void) = intro;              \
+                int (*_outro)(void) = outro;              \
+                int _r, _q;                               \
+                test_setup_logging(log_level);            \
+                save_argc_argv(argc, argv);               \
+                _r = _intro ? _intro() : EXIT_SUCCESS;    \
+                if (_r == EXIT_SUCCESS)                   \
+                        _r = run_test_table();            \
+                _q = _outro ? _outro() : EXIT_SUCCESS;    \
+                static_destruct();                        \
+                if (_r < 0)                               \
+                        return EXIT_FAILURE;              \
+                if (_r != EXIT_SUCCESS)                   \
+                        return _r;                        \
+                if (_q < 0)                               \
+                        return EXIT_FAILURE;              \
+                return _q;                                \
         }
 
-#define DEFINE_TEST_MAIN(log_level) DEFINE_CUSTOM_TEST_MAIN(log_level, , )
+#define DEFINE_TEST_MAIN_WITH_INTRO(log_level, intro)   \
+        DEFINE_TEST_MAIN_FULL(log_level, intro, NULL)
+#define DEFINE_TEST_MAIN(log_level)                     \
+        DEFINE_TEST_MAIN_FULL(log_level, NULL, NULL)

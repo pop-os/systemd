@@ -19,7 +19,7 @@ Neighbor *neighbor_free(Neighbor *neighbor) {
                 hashmap_remove(neighbor->network->neighbors_by_section, neighbor->section);
         }
 
-        network_config_section_free(neighbor->section);
+        config_section_free(neighbor->section);
 
         if (neighbor->link)
                 set_remove(neighbor->link->neighbors, neighbor);
@@ -27,10 +27,10 @@ Neighbor *neighbor_free(Neighbor *neighbor) {
         return mfree(neighbor);
 }
 
-DEFINE_NETWORK_SECTION_FUNCTIONS(Neighbor, neighbor_free);
+DEFINE_SECTION_CLEANUP_FUNCTIONS(Neighbor, neighbor_free);
 
 static int neighbor_new_static(Network *network, const char *filename, unsigned section_line, Neighbor **ret) {
-        _cleanup_(network_config_section_freep) NetworkConfigSection *n = NULL;
+        _cleanup_(config_section_freep) ConfigSection *n = NULL;
         _cleanup_(neighbor_freep) Neighbor *neighbor = NULL;
         int r;
 
@@ -39,7 +39,7 @@ static int neighbor_new_static(Network *network, const char *filename, unsigned 
         assert(filename);
         assert(section_line > 0);
 
-        r = network_config_section_new(filename, section_line, &n);
+        r = config_section_new(filename, section_line, &n);
         if (r < 0)
                 return r;
 
@@ -60,7 +60,7 @@ static int neighbor_new_static(Network *network, const char *filename, unsigned 
                 .source = NETWORK_CONFIG_SOURCE_STATIC,
         };
 
-        r = hashmap_ensure_put(&network->neighbors_by_section, &network_config_hash_ops, neighbor->section, neighbor);
+        r = hashmap_ensure_put(&network->neighbors_by_section, &config_section_hash_ops, neighbor->section, neighbor);
         if (r < 0)
                 return r;
 
@@ -87,7 +87,7 @@ static int neighbor_dup(const Neighbor *neighbor, Neighbor **ret) {
         return 0;
 }
 
-void neighbor_hash_func(const Neighbor *neighbor, struct siphash *state) {
+static void neighbor_hash_func(const Neighbor *neighbor, struct siphash *state) {
         assert(neighbor);
 
         siphash24_compress(&neighbor->family, sizeof(neighbor->family), state);
@@ -106,7 +106,7 @@ void neighbor_hash_func(const Neighbor *neighbor, struct siphash *state) {
         hw_addr_hash_func(&neighbor->ll_addr, state);
 }
 
-int neighbor_compare_func(const Neighbor *a, const Neighbor *b) {
+static int neighbor_compare_func(const Neighbor *a, const Neighbor *b) {
         int r;
 
         r = CMP(a->family, b->family);
@@ -175,12 +175,26 @@ static void log_neighbor_debug(const Neighbor *neighbor, const char *str, const 
                        HW_ADDR_TO_STR(&neighbor->ll_addr), strna(dst));
 }
 
-static int neighbor_configure(
-                Neighbor *neighbor,
-                Link *link,
-                link_netlink_message_handler_t callback) {
+static int neighbor_configure_message(Neighbor *neighbor, Link *link, sd_netlink_message *req) {
+        int r;
 
-        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        r = sd_rtnl_message_neigh_set_state(req, NUD_PERMANENT);
+        if (r < 0)
+                return r;
+
+        r = netlink_message_append_hw_addr(req, NDA_LLADDR, &neighbor->ll_addr);
+        if (r < 0)
+                return r;
+
+        r = netlink_message_append_in_addr_union(req, NDA_DST, neighbor->family, &neighbor->in_addr);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+static int neighbor_configure(Neighbor *neighbor, Link *link, Request *req) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
         int r;
 
         assert(neighbor);
@@ -188,49 +202,45 @@ static int neighbor_configure(
         assert(link->ifindex > 0);
         assert(link->manager);
         assert(link->manager->rtnl);
-        assert(callback);
+        assert(req);
 
         log_neighbor_debug(neighbor, "Configuring", link);
 
-        r = sd_rtnl_message_new_neigh(link->manager->rtnl, &req, RTM_NEWNEIGH,
+        r = sd_rtnl_message_new_neigh(link->manager->rtnl, &m, RTM_NEWNEIGH,
                                       link->ifindex, neighbor->family);
         if (r < 0)
-                return log_link_error_errno(link, r, "Could not allocate RTM_NEWNEIGH message: %m");
+                return r;
 
-        r = sd_rtnl_message_neigh_set_state(req, NUD_PERMANENT);
+        r = neighbor_configure_message(neighbor, link, m);
         if (r < 0)
-                return log_link_error_errno(link, r, "Could not set state: %m");
+                return r;
 
-        r = netlink_message_append_hw_addr(req, NDA_LLADDR, &neighbor->ll_addr);
-        if (r < 0)
-                return log_link_error_errno(link, r, "Could not append NDA_LLADDR attribute: %m");
-
-        r = netlink_message_append_in_addr_union(req, NDA_DST, neighbor->family, &neighbor->in_addr);
-        if (r < 0)
-                return log_link_error_errno(link, r, "Could not append NDA_DST attribute: %m");
-
-        r = netlink_call_async(link->manager->rtnl, NULL, req, callback,
-                               link_netlink_destroy_callback, link);
-        if (r < 0)
-                return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
-
-        link_ref(link);
-
-        neighbor_enter_configuring(neighbor);
-        return r;
+        return request_call_netlink_async(link->manager->rtnl, m, req);
 }
 
-static int static_neighbor_configure_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+static int neighbor_process_request(Request *req, Link *link, Neighbor *neighbor) {
+        int r;
+
+        assert(req);
+        assert(link);
+        assert(neighbor);
+
+        if (!link_is_ready_to_configure(link, false))
+                return 0;
+
+        r = neighbor_configure(neighbor, link, req);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "Failed to configure neighbor: %m");
+
+        neighbor_enter_configuring(neighbor);
+        return 1;
+}
+
+static int static_neighbor_configure_handler(sd_netlink *rtnl, sd_netlink_message *m, Request *req, Link *link, Neighbor *neighbor) {
         int r;
 
         assert(m);
         assert(link);
-        assert(link->static_neighbor_messages > 0);
-
-        link->static_neighbor_messages--;
-
-        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
-                return 1;
 
         r = sd_netlink_message_get_errno(m);
         if (r < 0 && r != -EEXIST) {
@@ -248,13 +258,7 @@ static int static_neighbor_configure_handler(sd_netlink *rtnl, sd_netlink_messag
         return 1;
 }
 
-static int link_request_neighbor(
-                Link *link,
-                const Neighbor *neighbor,
-                unsigned *message_counter,
-                link_netlink_message_handler_t netlink_handler,
-                Request **ret) {
-
+static int link_request_neighbor(Link *link, const Neighbor *neighbor) {
         Neighbor *existing;
         int r;
 
@@ -278,8 +282,14 @@ static int link_request_neighbor(
                 existing->source = neighbor->source;
 
         log_neighbor_debug(existing, "Requesting", link);
-        r = link_queue_request(link, REQUEST_TYPE_NEIGHBOR, existing, false,
-                               message_counter, netlink_handler, ret);
+        r = link_queue_request_safe(link, REQUEST_TYPE_NEIGHBOR,
+                                    existing, NULL,
+                                    neighbor_hash_func,
+                                    neighbor_compare_func,
+                                    neighbor_process_request,
+                                    &link->static_neighbor_messages,
+                                    static_neighbor_configure_handler,
+                                    NULL);
         if (r <= 0)
                 return r;
 
@@ -298,8 +308,7 @@ int link_request_static_neighbors(Link *link) {
         link->static_neighbors_configured = false;
 
         HASHMAP_FOREACH(neighbor, link->network->neighbors_by_section) {
-                r = link_request_neighbor(link, neighbor, &link->static_neighbor_messages,
-                                          static_neighbor_configure_handler, NULL);
+                r = link_request_neighbor(link, neighbor);
                 if (r < 0)
                         return log_link_warning_errno(link, r, "Could not request neighbor: %m");
         }
@@ -406,13 +415,17 @@ int link_drop_foreign_neighbors(Link *link) {
         return r;
 }
 
-int link_drop_neighbors(Link *link) {
+int link_drop_managed_neighbors(Link *link) {
         Neighbor *neighbor;
         int k, r = 0;
 
         assert(link);
 
         SET_FOREACH(neighbor, link->neighbors) {
+                /* Do not touch nexthops managed by kernel or other tools. */
+                if (neighbor->source == NETWORK_CONFIG_SOURCE_FOREIGN)
+                        continue;
+
                 /* Ignore neighbors not assigned yet or already removing. */
                 if (!neighbor_exists(neighbor))
                         continue;
@@ -432,24 +445,6 @@ void link_foreignize_neighbors(Link *link) {
 
         SET_FOREACH(neighbor, link->neighbors)
                 neighbor->source = NETWORK_CONFIG_SOURCE_FOREIGN;
-}
-
-int request_process_neighbor(Request *req) {
-        int r;
-
-        assert(req);
-        assert(req->link);
-        assert(req->neighbor);
-        assert(req->type == REQUEST_TYPE_NEIGHBOR);
-
-        if (!link_is_ready_to_configure(req->link, false))
-                return 0;
-
-        r = neighbor_configure(req->neighbor, req->link, req->netlink_handler);
-        if (r < 0)
-                return r;
-
-        return 1;
 }
 
 int manager_rtnl_process_neighbor(sd_netlink *rtnl, sd_netlink_message *message, Manager *m) {

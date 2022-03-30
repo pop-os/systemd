@@ -253,6 +253,13 @@ So, if you want to do your own raw cgroups kernel level access, then allocate a
 scope unit, or a service unit (or just use the service unit you already have
 for your service code), and turn on delegation for it.
 
+The service manager sets the `user.delegate` extended attribute (readable via
+`getxattr(2)` and related calls) to the character `1` on cgroup directories
+where delegation is enabled (and removes it on those cgroups where it is
+not). This may be used by service programs to determine whether a cgroup tree
+was delegated to them. Note that this is only supported on kernels 5.6 and
+newer in combination with systemd 251 and newer.
+
 (OK, here's one caveat: if you turn on delegation for a service, and that
 service has `ExecStartPost=`, `ExecReload=`, `ExecStop=` or `ExecStopPost=`
 set, then these commands will be executed within the `.control/` sub-cgroup of
@@ -265,6 +272,15 @@ means that your service code should have moved itself further down the cgroup
 tree by the time it notifies the service manager about start-up readiness, so
 that the service's main cgroup is definitely an inner node by the time the
 service manager might start `ExecStartPost=`.)
+
+(Also note, if you intend to use "threaded" cgroups — as added in Linux 4.14 —,
+then you should do that *two* levels down from the main service cgroup your
+turned delegation on for. Why that? You need one level so that systemd can
+properly create the `.control` subgroup, as described above. But that one
+cannot be threaded, since that would mean `.control` has to be threaded too —
+this is a requirement of threaded cgroups: either a cgroup and all its siblings
+are threaded or none –, but systemd expects it to be a regular cgroup. Thus you
+have to nest a second cgroup beneath it which then can be threaded.)
 
 ## Three Scenarios
 
@@ -356,7 +372,7 @@ but of course that's between you and those other tenants, and systemd won't
 care. Replicating the cgroup hierarchies in those unsupported controllers would
 mean replicating the full cgroup paths in them, and hence the prefixing
 `.slice` components too, otherwise the hierarchies will start being orthogonal
-after all, and that's not really desirable. On more thing: systemd will clean
+after all, and that's not really desirable. One more thing: systemd will clean
 up after you in the hierarchies it manages: if your daemon goes down, its
 cgroups will be removed too. You basically get the guarantee that you start
 with a pristine cgroup sub-tree for your service or scope whenever it is

@@ -70,7 +70,6 @@ systemd_resolved_sources = files(
         'resolved-socket-graveyard.h',
         'resolved-varlink.c',
         'resolved-varlink.h',
-        'resolved.c',
 )
 
 resolvectl_sources = files(
@@ -176,40 +175,48 @@ custom_target(
 ############################################################
 
 tests += [
-        [['src/resolve/test-resolve-tables.c'],
+        [files('test-resolve-tables.c'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm]],
 
-        [['src/resolve/test-dns-packet.c'],
+        [files('test-dns-packet.c'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm]],
 
-        [['src/resolve/test-resolved-etc-hosts.c',
-          'src/resolve/resolved-etc-hosts.c',
-          'src/resolve/resolved-etc-hosts.h'],
+        [files('test-resolved-etc-hosts.c',
+               'resolved-etc-hosts.c',
+               'resolved-etc-hosts.h'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm]],
 
-        [['src/resolve/test-resolved-packet.c'],
+        [files('test-resolved-packet.c'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm]],
 
-        [['src/resolve/test-dnssec.c'],
+        [files('test-resolved-stream.c')
+         + basic_dns_sources + systemd_resolved_sources,
+         [libshared],
+         [lib_openssl_or_gcrypt,
+          libm]
+         + systemd_resolved_dependencies,
+         resolve_includes],
+
+        [files('test-dnssec.c'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm],
          [], 'HAVE_OPENSSL_OR_GCRYPT'],
 
-        [['src/resolve/test-dnssec-complex.c'],
+        [files('test-dnssec-complex.c'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
@@ -218,9 +225,18 @@ tests += [
 ]
 
 fuzzers += [
-        [['src/resolve/fuzz-dns-packet.c'],
+        [files('fuzz-dns-packet.c'),
+         [libsystemd_resolve_core,
+          libshared],
+         [lib_openssl_or_gcrypt,
+          libm]],
+        [files('fuzz-etc-hosts.c',
+          'resolved-etc-hosts.c',
+          'resolved-etc-hosts.h'),
          [libsystemd_resolve_core,
           libshared],
          [lib_openssl_or_gcrypt,
           libm]],
 ]
+
+systemd_resolved_sources += files('resolved.c')

@@ -284,9 +284,12 @@ following must be also be observed:
 4. The upper extension(s) image(s) must at least contain one matching unit file each,
    with the right name prefix and suffix (see above).
 
+5. As with the base/OS image, the upper extension(s) image(s) must be a plain
+   sub-directory, a btrfs subvolume or a raw disk image.
+
 ```
 # portablectl attach --extension foobar_0.7.23.raw debian-runtime_11.1.raw foobar
-# portablectl attach --extension barbaz_7.0.23.raw debian-runtime_11.1.raw barbaz
+# portablectl attach --extension barbaz_7.0.23/ debian-runtime_11.1.raw barbaz
 ```
 
 ## Execution Environment
@@ -331,3 +334,10 @@ behaviour, by setting the `ProtectSystem=strict` option. In this case writable
 service data may be placed on the host file system. Use `StateDirectory=` in
 the unit files to enable such behaviour and add a local data directory to the
 services copied onto the host.
+
+## Links
+
+[`portablectl(1)`](https://www.freedesktop.org/software/systemd/man/portablectl.html)<br>
+[`systemd-portabled.service(8)`](https://www.freedesktop.org/software/systemd/man/systemd-portabled.service.html)<br>
+[Walkthrough for Portable Services](https://0pointer.net/blog/walkthrough-for-portable-services.html)<br>
+[Repo with examples](https://github.com/systemd/portable-walkthrough)

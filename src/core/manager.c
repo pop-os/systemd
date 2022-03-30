@@ -39,6 +39,7 @@
 #include "dirent-util.h"
 #include "env-util.h"
 #include "escape.h"
+#include "event-util.h"
 #include "exec-util.h"
 #include "execute.h"
 #include "exit-status.h"
@@ -406,13 +407,8 @@ static int manager_setup_time_change(Manager *m) {
                 return 0;
 
         m->time_change_event_source = sd_event_source_disable_unref(m->time_change_event_source);
-        m->time_change_fd = safe_close(m->time_change_fd);
 
-        m->time_change_fd = time_change_fd();
-        if (m->time_change_fd < 0)
-                return log_error_errno(m->time_change_fd, "Failed to create timer change timer fd: %m");
-
-        r = sd_event_add_io(m->event, &m->time_change_event_source, m->time_change_fd, EPOLLIN, manager_dispatch_time_change_fd, m);
+        r = event_add_time_change(m->event, &m->time_change_event_source, manager_dispatch_time_change_fd, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to create time change event source: %m");
 
@@ -420,8 +416,6 @@ static int manager_setup_time_change(Manager *m) {
         r = sd_event_source_set_priority(m->time_change_event_source, SD_EVENT_PRIORITY_NORMAL-1);
         if (r < 0)
                 return log_error_errno(r, "Failed to set priority of time change event sources: %m");
-
-        (void) sd_event_source_set_description(m->time_change_event_source, "manager-time-change");
 
         log_debug("Set up TFD_TIMER_CANCEL_ON_SET timerfd.");
 
@@ -781,13 +775,13 @@ static int manager_setup_sigchld_event_source(Manager *m) {
         return 0;
 }
 
-int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager **_m) {
+int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager **_m) {
         _cleanup_(manager_freep) Manager *m = NULL;
         const char *e;
         int r;
 
         assert(_m);
-        assert(IN_SET(scope, UNIT_FILE_SYSTEM, UNIT_FILE_USER));
+        assert(IN_SET(scope, LOOKUP_SCOPE_SYSTEM, LOOKUP_SCOPE_USER));
 
         m = new(Manager, 1);
         if (!m)
@@ -813,13 +807,13 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
                 .watchdog_overridden[WATCHDOG_RUNTIME] = USEC_INFINITY,
                 .watchdog_overridden[WATCHDOG_REBOOT] = USEC_INFINITY,
                 .watchdog_overridden[WATCHDOG_KEXEC] = USEC_INFINITY,
+                .watchdog_overridden[WATCHDOG_PRETIMEOUT] = USEC_INFINITY,
 
                 .show_status_overridden = _SHOW_STATUS_INVALID,
 
                 .notify_fd = -1,
                 .cgroups_agent_fd = -1,
                 .signal_fd = -1,
-                .time_change_fd = -1,
                 .user_lookup_fds = { -1, -1 },
                 .private_listen_fd = -1,
                 .dev_autofs_fd = -1,
@@ -1221,7 +1215,6 @@ static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
                         is_bad = false;
         }
 
-        const UnitRef *ref;
         LIST_FOREACH(refs_by_target, ref, u->refs_by_target) {
                 unit_gc_sweep(ref->source, gc_marker);
 
@@ -1508,7 +1501,6 @@ Manager* manager_free(Manager *m) {
         safe_close(m->signal_fd);
         safe_close(m->notify_fd);
         safe_close(m->cgroups_agent_fd);
-        safe_close(m->time_change_fd);
         safe_close_pair(m->user_lookup_fds);
 
         manager_close_ask_password(m);
@@ -1540,6 +1532,9 @@ Manager* manager_free(Manager *m) {
         for (ExecDirectoryType dt = 0; dt < _EXEC_DIRECTORY_TYPE_MAX; dt++)
                 m->prefix[dt] = mfree(m->prefix[dt]);
         free(m->received_credentials);
+
+        free(m->watchdog_pretimeout_governor);
+        free(m->watchdog_pretimeout_governor_overridden);
 
 #if BPF_FRAMEWORK
         lsm_bpf_destroy(m->restrict_fs);
@@ -1705,7 +1700,7 @@ static void manager_preset_all(Manager *m) {
                 return;
 
         /* If this is the first boot, and we are in the host system, then preset everything */
-        r = unit_file_preset_all(UNIT_FILE_SYSTEM, 0, NULL, UNIT_FILE_PRESET_ENABLE_ONLY, NULL, 0);
+        r = unit_file_preset_all(LOOKUP_SCOPE_SYSTEM, 0, NULL, UNIT_FILE_PRESET_ENABLE_ONLY, NULL, 0);
         if (r < 0)
                 log_full_errno(r == -EEXIST ? LOG_NOTICE : LOG_WARNING, r,
                                "Failed to populate /etc with preset unit settings, ignoring: %m");
@@ -1756,11 +1751,11 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *roo
 
         /* If we are running in test mode, we still want to run the generators,
          * but we should not touch the real generator directories. */
-        r = lookup_paths_init(&m->lookup_paths, m->unit_file_scope,
-                              MANAGER_IS_TEST_RUN(m) ? LOOKUP_PATHS_TEMPORARY_GENERATED : 0,
-                              root);
+        r = lookup_paths_init_or_warn(&m->lookup_paths, m->unit_file_scope,
+                                      MANAGER_IS_TEST_RUN(m) ? LOOKUP_PATHS_TEMPORARY_GENERATED : 0,
+                                      root);
         if (r < 0)
-                return log_error_errno(r, "Failed to initialize path lookup table: %m");
+                return r;
 
         dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_GENERATORS_START));
         r = manager_run_environment_generators(m);
@@ -2649,9 +2644,7 @@ static int manager_dispatch_sigchld(sd_event_source *source, void *userdata) {
                          * We only do this for the cgroup the PID belonged to. */
                         (void) unit_check_oom(u1);
 
-                        /* This only logs for now. In the future when the interface for kills/notifications
-                         * is more stable we can extend service results table similar to how kernel oom kills
-                         * are managed. */
+                        /* We check if systemd-oomd performed a kill so that we log and notify appropriately */
                         (void) unit_check_oomd_kill(u1);
 
                         manager_invoke_sigchld_event(m, u1, &si);
@@ -2909,7 +2902,6 @@ static int manager_dispatch_time_change_fd(sd_event_source *source, int fd, uint
         Unit *u;
 
         assert(m);
-        assert(m->time_change_fd == fd);
 
         log_struct(LOG_DEBUG,
                    "MESSAGE_ID=" SD_MESSAGE_TIME_CHANGE_STR,
@@ -3232,31 +3224,80 @@ void manager_set_watchdog(Manager *m, WatchdogType t, usec_t timeout) {
         if (m->watchdog[t] == timeout)
                 return;
 
-        if (t == WATCHDOG_RUNTIME)
+        if (t == WATCHDOG_RUNTIME) {
                 if (!timestamp_is_set(m->watchdog_overridden[WATCHDOG_RUNTIME]))
                         (void) watchdog_setup(timeout);
+        } else if (t == WATCHDOG_PRETIMEOUT)
+                if (m->watchdog_overridden[WATCHDOG_PRETIMEOUT] == USEC_INFINITY)
+                        (void) watchdog_setup_pretimeout(timeout);
 
         m->watchdog[t] = timeout;
 }
 
-int manager_override_watchdog(Manager *m, WatchdogType t, usec_t timeout) {
+void manager_override_watchdog(Manager *m, WatchdogType t, usec_t timeout) {
+
+        assert(m);
+
+        if (MANAGER_IS_USER(m))
+                return;
+
+        if (m->watchdog_overridden[t] == timeout)
+                return;
+
+        if (t == WATCHDOG_RUNTIME) {
+                usec_t usec = timestamp_is_set(timeout) ? timeout : m->watchdog[t];
+
+                (void) watchdog_setup(usec);
+        } else if (t == WATCHDOG_PRETIMEOUT)
+                (void) watchdog_setup_pretimeout(timeout);
+
+        m->watchdog_overridden[t] = timeout;
+}
+
+int manager_set_watchdog_pretimeout_governor(Manager *m, const char *governor) {
+        _cleanup_free_ char *p = NULL;
+        int r;
 
         assert(m);
 
         if (MANAGER_IS_USER(m))
                 return 0;
 
-        if (m->watchdog_overridden[t] == timeout)
+        if (streq_ptr(m->watchdog_pretimeout_governor, governor))
                 return 0;
 
-        if (t == WATCHDOG_RUNTIME) {
-                usec_t usec = timestamp_is_set(timeout) ? timeout : m->watchdog[t];
+        p = strdup(governor);
+        if (!p)
+                return -ENOMEM;
 
-                (void) watchdog_setup(usec);
-        }
+        r = watchdog_setup_pretimeout_governor(governor);
+        if (r < 0)
+                return r;
 
-        m->watchdog_overridden[t] = timeout;
-        return 0;
+        return free_and_replace(m->watchdog_pretimeout_governor, p);
+}
+
+int manager_override_watchdog_pretimeout_governor(Manager *m, const char *governor) {
+        _cleanup_free_ char *p = NULL;
+        int r;
+
+        assert(m);
+
+        if (MANAGER_IS_USER(m))
+                return 0;
+
+        if (streq_ptr(m->watchdog_pretimeout_governor_overridden, governor))
+                return 0;
+
+        p = strdup(governor);
+        if (!p)
+                return -ENOMEM;
+
+        r = watchdog_setup_pretimeout_governor(governor);
+        if (r < 0)
+                return r;
+
+        return free_and_replace(m->watchdog_pretimeout_governor_overridden, p);
 }
 
 int manager_reload(Manager *m) {
@@ -3302,9 +3343,9 @@ int manager_reload(Manager *m) {
         m->uid_refs = hashmap_free(m->uid_refs);
         m->gid_refs = hashmap_free(m->gid_refs);
 
-        r = lookup_paths_init(&m->lookup_paths, m->unit_file_scope, 0, NULL);
+        r = lookup_paths_init_or_warn(&m->lookup_paths, m->unit_file_scope, 0, NULL);
         if (r < 0)
-                log_warning_errno(r, "Failed to initialize path lookup table, ignoring: %m");
+                return r;
 
         (void) manager_run_environment_generators(m);
         (void) manager_run_generators(m);
@@ -3582,7 +3623,6 @@ void manager_check_finished(Manager *m) {
 }
 
 static bool generator_path_any(const char* const* paths) {
-        char **path;
         bool found = false;
 
         /* Optimize by skipping the whole process by not creating output directories

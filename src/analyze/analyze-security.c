@@ -3,6 +3,7 @@
 #include <sys/utsname.h>
 
 #include "af-list.h"
+#include "analyze.h"
 #include "analyze-security.h"
 #include "analyze-verify.h"
 #include "bus-error.h"
@@ -11,6 +12,8 @@
 #include "bus-util.h"
 #include "copy.h"
 #include "env-util.h"
+#include "fd-util.h"
+#include "fileio.h"
 #include "format-table.h"
 #include "in-addr-prefix-util.h"
 #include "locale-util.h"
@@ -1902,7 +1905,7 @@ static int assess(const SecurityInfo *info,
                         name = info->id;
 
                 printf("\n%s %sOverall exposure level for %s%s: %s%" PRIu64 ".%" PRIu64 " %s%s %s\n",
-                       special_glyph(SPECIAL_GLYPH_ARROW),
+                       special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
                        ansi_highlight(),
                        name,
                        ansi_normal(),
@@ -2643,7 +2646,7 @@ static int offline_security_check(Unit *u,
 
 static int offline_security_checks(char **filenames,
                                    JsonVariant *policy,
-                                   UnitFileScope scope,
+                                   LookupScope scope,
                                    bool check_man,
                                    bool run_generators,
                                    unsigned threshold,
@@ -2663,7 +2666,6 @@ static int offline_security_checks(char **filenames,
         _cleanup_free_ char *var = NULL;
         int r, k;
         size_t count = 0;
-        char **filename;
 
         if (strv_isempty(filenames))
                 return 0;
@@ -2753,10 +2755,10 @@ static int offline_security_checks(char **filenames,
         return r;
 }
 
-int analyze_security(sd_bus *bus,
+static int analyze_security(sd_bus *bus,
                      char **units,
                      JsonVariant *policy,
-                     UnitFileScope scope,
+                     LookupScope scope,
                      bool check_man,
                      bool run_generators,
                      bool offline,
@@ -2786,7 +2788,6 @@ int analyze_security(sd_bus *bus,
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
                 _cleanup_strv_free_ char **list = NULL;
                 size_t n = 0;
-                char **i;
 
                 r = sd_bus_call_method(
                                 bus,
@@ -2838,9 +2839,7 @@ int analyze_security(sd_bus *bus,
                                 ret = r;
                 }
 
-        } else {
-                char **i;
-
+        } else
                 STRV_FOREACH(i, units) {
                         _cleanup_free_ char *mangled = NULL, *instance = NULL;
                         const char *name;
@@ -2872,7 +2871,6 @@ int analyze_security(sd_bus *bus,
                         if (r < 0 && ret >= 0)
                                 ret = r;
                 }
-        }
 
         if (overview_table) {
                 if (!FLAGS_SET(flags, ANALYZE_SECURITY_SHORT)) {
@@ -2885,4 +2883,52 @@ int analyze_security(sd_bus *bus,
                         return log_error_errno(r, "Failed to output table: %m");
         }
         return ret;
+}
+
+int verb_security(int argc, char *argv[], void *userdata) {
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        _cleanup_(json_variant_unrefp) JsonVariant *policy = NULL;
+        int r;
+        unsigned line, column;
+
+        if (!arg_offline) {
+                r = acquire_bus(&bus, NULL);
+                if (r < 0)
+                        return bus_log_connect_error(r, arg_transport);
+        }
+
+        pager_open(arg_pager_flags);
+
+        if (arg_security_policy) {
+                r = json_parse_file(/*f=*/ NULL, arg_security_policy, /*flags=*/ 0, &policy, &line, &column);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse '%s' at %u:%u: %m", arg_security_policy, line, column);
+        } else {
+                _cleanup_fclose_ FILE *f = NULL;
+                _cleanup_free_ char *pp = NULL;
+
+                r = search_and_fopen_nulstr("systemd-analyze-security.policy", "re", /*root=*/ NULL, CONF_PATHS_NULSTR("systemd"), &f, &pp);
+                if (r < 0 && r != -ENOENT)
+                        return r;
+
+                if (f) {
+                        r = json_parse_file(f, pp, /*flags=*/ 0, &policy, &line, &column);
+                        if (r < 0)
+                                return log_error_errno(r, "[%s:%u:%u] Failed to parse JSON policy: %m", pp, line, column);
+                }
+        }
+
+        return analyze_security(bus,
+                                strv_skip(argv, 1),
+                                policy,
+                                arg_scope,
+                                arg_man,
+                                arg_generators,
+                                arg_offline,
+                                arg_threshold,
+                                arg_root,
+                                arg_profile,
+                                arg_json_format_flags,
+                                arg_pager_flags,
+                                /*flags=*/ 0);
 }

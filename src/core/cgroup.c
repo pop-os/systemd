@@ -45,12 +45,6 @@
 
 #define CGROUP_CPU_QUOTA_DEFAULT_PERIOD_USEC ((usec_t) 100 * USEC_PER_MSEC)
 
-/* Special values for the bfq.weight attribute */
-#define CGROUP_BFQ_WEIGHT_INVALID UINT64_MAX
-#define CGROUP_BFQ_WEIGHT_MIN UINT64_C(1)
-#define CGROUP_BFQ_WEIGHT_MAX UINT64_C(1000)
-#define CGROUP_BFQ_WEIGHT_DEFAULT UINT64_C(100)
-
 /* Returns the log level to use when cgroup attribute writes fail. When an attribute is missing or we have access
  * problems we downgrade to LOG_DEBUG. This is supposed to be nice to container managers and kernels which want to mask
  * out specific attributes from us. */
@@ -420,17 +414,8 @@ static char *format_cgroup_memory_limit_comparison(char *buf, size_t l, Unit *u,
 
 void cgroup_context_dump(Unit *u, FILE* f, const char *prefix) {
         _cleanup_free_ char *disable_controllers_str = NULL, *cpuset_cpus = NULL, *cpuset_mems = NULL, *startup_cpuset_cpus = NULL, *startup_cpuset_mems = NULL;
-        CGroupIODeviceLimit *il;
-        CGroupIODeviceWeight *iw;
-        CGroupIODeviceLatency *l;
-        CGroupBlockIODeviceBandwidth *b;
-        CGroupBlockIODeviceWeight *w;
-        CGroupBPFForeignProgram *p;
-        CGroupDeviceAllow *a;
         CGroupContext *c;
-        CGroupSocketBindItem *bi;
         struct in_addr_prefix *iaai;
-        char **path;
 
         char cda[FORMAT_CGROUP_DIFF_MAX];
         char cdb[FORMAT_CGROUP_DIFF_MAX];
@@ -742,9 +727,44 @@ int cgroup_add_bpf_foreign_program(CGroupContext *c, uint32_t attach_type, const
 UNIT_DEFINE_ANCESTOR_MEMORY_LOOKUP(memory_low);
 UNIT_DEFINE_ANCESTOR_MEMORY_LOOKUP(memory_min);
 
+static void unit_set_xattr_graceful(Unit *u, const char *cgroup_path, const char *name, const void *data, size_t size) {
+        int r;
+
+        assert(u);
+        assert(name);
+
+        if (!cgroup_path) {
+                if (!u->cgroup_path)
+                        return;
+
+                cgroup_path = u->cgroup_path;
+        }
+
+        r = cg_set_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, name, data, size, 0);
+        if (r < 0)
+                log_unit_debug_errno(u, r, "Failed to set '%s' xattr on control group %s, ignoring: %m", name, empty_to_root(cgroup_path));
+}
+
+static void unit_remove_xattr_graceful(Unit *u, const char *cgroup_path, const char *name) {
+        int r;
+
+        assert(u);
+        assert(name);
+
+        if (!cgroup_path) {
+                if (!u->cgroup_path)
+                        return;
+
+                cgroup_path = u->cgroup_path;
+        }
+
+        r = cg_remove_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, name);
+        if (r < 0 && r != -ENODATA)
+                log_unit_debug_errno(u, r, "Failed to remove '%s' xattr flag on control group %s, ignoring: %m", name, empty_to_root(cgroup_path));
+}
+
 void cgroup_oomd_xattr_apply(Unit *u, const char *cgroup_path) {
         CGroupContext *c;
-        int r;
 
         assert(u);
 
@@ -752,59 +772,49 @@ void cgroup_oomd_xattr_apply(Unit *u, const char *cgroup_path) {
         if (!c)
                 return;
 
-        if (c->moom_preference == MANAGED_OOM_PREFERENCE_OMIT) {
-                r = cg_set_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, "user.oomd_omit", "1", 1, 0);
-                if (r < 0)
-                        log_unit_debug_errno(u, r, "Failed to set oomd_omit flag on control group %s, ignoring: %m", empty_to_root(cgroup_path));
-        }
+        if (c->moom_preference == MANAGED_OOM_PREFERENCE_OMIT)
+                unit_set_xattr_graceful(u, cgroup_path, "user.oomd_omit", "1", 1);
 
-        if (c->moom_preference == MANAGED_OOM_PREFERENCE_AVOID) {
-                r = cg_set_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, "user.oomd_avoid", "1", 1, 0);
-                if (r < 0)
-                        log_unit_debug_errno(u, r, "Failed to set oomd_avoid flag on control group %s, ignoring: %m", empty_to_root(cgroup_path));
-        }
+        if (c->moom_preference == MANAGED_OOM_PREFERENCE_AVOID)
+                unit_set_xattr_graceful(u, cgroup_path, "user.oomd_avoid", "1", 1);
 
-        if (c->moom_preference != MANAGED_OOM_PREFERENCE_AVOID) {
-                r = cg_remove_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, "user.oomd_avoid");
-                if (r < 0 && r != -ENODATA)
-                        log_unit_debug_errno(u, r, "Failed to remove oomd_avoid flag on control group %s, ignoring: %m", empty_to_root(cgroup_path));
-        }
+        if (c->moom_preference != MANAGED_OOM_PREFERENCE_AVOID)
+                unit_remove_xattr_graceful(u, cgroup_path, "user.oomd_avoid");
 
-        if (c->moom_preference != MANAGED_OOM_PREFERENCE_OMIT) {
-                r = cg_remove_xattr(SYSTEMD_CGROUP_CONTROLLER, cgroup_path, "user.oomd_omit");
-                if (r < 0 && r != -ENODATA)
-                        log_unit_debug_errno(u, r, "Failed to remove oomd_omit flag on control group %s, ignoring: %m", empty_to_root(cgroup_path));
-        }
+        if (c->moom_preference != MANAGED_OOM_PREFERENCE_OMIT)
+                unit_remove_xattr_graceful(u, cgroup_path, "user.oomd_omit");
 }
 
 static void cgroup_xattr_apply(Unit *u) {
-        int r;
+        bool b;
 
         assert(u);
 
         if (!MANAGER_IS_SYSTEM(u->manager))
                 return;
 
-        if (!sd_id128_is_null(u->invocation_id)) {
-                r = cg_set_xattr(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
-                                 "trusted.invocation_id",
-                                 SD_ID128_TO_STRING(u->invocation_id), 32,
-                                 0);
-                if (r < 0)
-                        log_unit_debug_errno(u, r, "Failed to set invocation ID on control group %s, ignoring: %m", empty_to_root(u->cgroup_path));
+        b = !sd_id128_is_null(u->invocation_id);
+        FOREACH_STRING(xn, "trusted.invocation_id", "user.invocation_id") {
+                if (b)
+                        unit_set_xattr_graceful(u, NULL, xn, SD_ID128_TO_STRING(u->invocation_id), 32);
+                else
+                        unit_remove_xattr_graceful(u, NULL, xn);
         }
 
-        if (unit_cgroup_delegate(u)) {
-                r = cg_set_xattr(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
-                                 "trusted.delegate",
-                                 "1", 1,
-                                 0);
-                if (r < 0)
-                        log_unit_debug_errno(u, r, "Failed to set delegate flag on control group %s, ignoring: %m", empty_to_root(u->cgroup_path));
-        } else {
-                r = cg_remove_xattr(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "trusted.delegate");
-                if (r < 0 && r != -ENODATA)
-                        log_unit_debug_errno(u, r, "Failed to remove delegate flag on control group %s, ignoring: %m", empty_to_root(u->cgroup_path));
+        /* Indicate on the cgroup whether delegation is on, via an xattr. This is best-effort, as old kernels
+         * didn't support xattrs on cgroups at all. Later they got support for setting 'trusted.*' xattrs,
+         * and even later 'user.*' xattrs. We started setting this field when 'trusted.*' was added, and
+         * given this is now pretty much API, let's continue to support that. But also set 'user.*' as well,
+         * since it is readable by any user, not just CAP_SYS_ADMIN. This hence comes with slightly weaker
+         * security (as users who got delegated cgroups could turn it off if they like), but this shouldn't
+         * be a big problem given this communicates delegation state to clients, but the manager never reads
+         * it. */
+        b = unit_cgroup_delegate(u);
+        FOREACH_STRING(xn, "trusted.delegate", "user.delegate") {
+                if (b)
+                        unit_set_xattr_graceful(u, NULL, xn, "1", 1);
+                else
+                        unit_remove_xattr_graceful(u, NULL, xn);
         }
 
         cgroup_oomd_xattr_apply(u, u->cgroup_path);
@@ -1053,6 +1063,26 @@ static uint64_t cgroup_weight_io_to_blkio(uint64_t io_weight) {
                      CGROUP_BLKIO_WEIGHT_MIN, CGROUP_BLKIO_WEIGHT_MAX);
 }
 
+static void set_bfq_weight(Unit *u, const char *controller, uint64_t io_weight) {
+        char buf[DECIMAL_STR_MAX(uint64_t)+STRLEN("\n")];
+        const char *p;
+        uint64_t bfq_weight;
+
+        /* FIXME: drop this function when distro kernels properly support BFQ through "io.weight"
+         * See also: https://github.com/systemd/systemd/pull/13335 and
+         * https://github.com/torvalds/linux/commit/65752aef0a407e1ef17ec78a7fc31ba4e0b360f9. */
+        p = strjoina(controller, ".bfq.weight");
+        /* Adjust to kernel range is 1..1000, the default is 100. */
+        bfq_weight = BFQ_WEIGHT(io_weight);
+
+        xsprintf(buf, "%" PRIu64 "\n", bfq_weight);
+
+        if (set_attribute_and_warn(u, controller, p, buf) >= 0 && io_weight != bfq_weight)
+                log_unit_debug(u, "%sIOWeight=%" PRIu64 " scaled to %s=%" PRIu64,
+                               streq(controller, "blkio") ? "Block" : "",
+                               io_weight, p, bfq_weight);
+}
+
 static void cgroup_apply_io_device_weight(Unit *u, const char *dev_path, uint64_t io_weight) {
         char buf[DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1];
         dev_t dev;
@@ -1179,7 +1209,6 @@ static int cgroup_apply_devices(Unit *u) {
         _cleanup_(bpf_program_freep) BPFProgram *prog = NULL;
         const char *path;
         CGroupContext *c;
-        CGroupDeviceAllow *a;
         CGroupDevicePolicy policy;
         int r;
 
@@ -1264,30 +1293,12 @@ static int cgroup_apply_devices(Unit *u) {
         return r;
 }
 
-/* Convert the normal io.weight value to io.bfq.weight */
-#define BFQ_WEIGHT(weight) \
-        (weight <= CGROUP_WEIGHT_DEFAULT ? \
-         CGROUP_BFQ_WEIGHT_DEFAULT - (CGROUP_WEIGHT_DEFAULT - weight) * (CGROUP_BFQ_WEIGHT_DEFAULT - CGROUP_BFQ_WEIGHT_MIN) / (CGROUP_WEIGHT_DEFAULT - CGROUP_WEIGHT_MIN) : \
-         CGROUP_BFQ_WEIGHT_DEFAULT + (weight - CGROUP_WEIGHT_DEFAULT) * (CGROUP_BFQ_WEIGHT_MAX - CGROUP_BFQ_WEIGHT_DEFAULT) / (CGROUP_WEIGHT_MAX - CGROUP_WEIGHT_DEFAULT))
-
-assert_cc(BFQ_WEIGHT(1) == 1);
-assert_cc(BFQ_WEIGHT(50) == 50);
-assert_cc(BFQ_WEIGHT(100) == 100);
-assert_cc(BFQ_WEIGHT(500) == 136);
-assert_cc(BFQ_WEIGHT(5000) == 545);
-assert_cc(BFQ_WEIGHT(10000) == 1000);
-
 static void set_io_weight(Unit *u, uint64_t weight) {
         char buf[STRLEN("default \n")+DECIMAL_STR_MAX(uint64_t)];
 
         assert(u);
 
-        /* FIXME: drop this when distro kernels properly support BFQ through "io.weight"
-         * See also: https://github.com/systemd/systemd/pull/13335 and
-         * https://github.com/torvalds/linux/commit/65752aef0a407e1ef17ec78a7fc31ba4e0b360f9.
-         * The range is 1..1000 apparently, and the default is 100. */
-        xsprintf(buf, "%" PRIu64 "\n", BFQ_WEIGHT(weight));
-        (void) set_attribute_and_warn(u, "io", "io.bfq.weight", buf);
+        set_bfq_weight(u, "io", weight);
 
         xsprintf(buf, "default %" PRIu64 "\n", weight);
         (void) set_attribute_and_warn(u, "io", "io.weight", buf);
@@ -1298,9 +1309,7 @@ static void set_blkio_weight(Unit *u, uint64_t weight) {
 
         assert(u);
 
-        /* FIXME: see comment in set_io_weight(). */
-        xsprintf(buf, "%" PRIu64 "\n", BFQ_WEIGHT(weight));
-        (void) set_attribute_and_warn(u, "blkio", "blkio.bfq.weight", buf);
+        set_bfq_weight(u, "blkio", weight);
 
         xsprintf(buf, "%" PRIu64 "\n", weight);
         (void) set_attribute_and_warn(u, "blkio", "blkio.weight", buf);
@@ -1420,10 +1429,6 @@ static void cgroup_context_apply(
                 set_io_weight(u, weight);
 
                 if (has_io) {
-                        CGroupIODeviceLatency *latency;
-                        CGroupIODeviceLimit *limit;
-                        CGroupIODeviceWeight *w;
-
                         LIST_FOREACH(device_weights, w, c->io_device_weights)
                                 cgroup_apply_io_device_weight(u, w->path, w->weight);
 
@@ -1434,9 +1439,6 @@ static void cgroup_context_apply(
                                 cgroup_apply_io_device_latency(u, latency->path, latency->target_usec);
 
                 } else if (has_blockio) {
-                        CGroupBlockIODeviceWeight *w;
-                        CGroupBlockIODeviceBandwidth *b;
-
                         LIST_FOREACH(device_weights, w, c->blockio_device_weights) {
                                 weight = cgroup_weight_blkio_to_io(w->weight);
 
@@ -1489,9 +1491,7 @@ static void cgroup_context_apply(
 
                         set_blkio_weight(u, weight);
 
-                        if (has_io) {
-                                CGroupIODeviceWeight *w;
-
+                        if (has_io)
                                 LIST_FOREACH(device_weights, w, c->io_device_weights) {
                                         weight = cgroup_weight_io_to_blkio(w->weight);
 
@@ -1500,32 +1500,24 @@ static void cgroup_context_apply(
 
                                         cgroup_apply_blkio_device_weight(u, w->path, weight);
                                 }
-                        } else if (has_blockio) {
-                                CGroupBlockIODeviceWeight *w;
-
+                        else if (has_blockio)
                                 LIST_FOREACH(device_weights, w, c->blockio_device_weights)
                                         cgroup_apply_blkio_device_weight(u, w->path, w->weight);
-                        }
                 }
 
                 /* The bandwidth limits are something that make sense to be applied to the host's root but not container
                  * roots, as there we want the container manager to handle it */
                 if (is_host_root || !is_local_root) {
-                        if (has_io) {
-                                CGroupIODeviceLimit *l;
-
+                        if (has_io)
                                 LIST_FOREACH(device_limits, l, c->io_device_limits) {
                                         log_cgroup_compat(u, "Applying IO{Read|Write}Bandwidth=%" PRIu64 " %" PRIu64 " as BlockIO{Read|Write}BandwidthMax= for %s",
                                                           l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX], l->path);
 
                                         cgroup_apply_blkio_device_limit(u, l->path, l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX]);
                                 }
-                        } else if (has_blockio) {
-                                CGroupBlockIODeviceBandwidth *b;
-
+                        else if (has_blockio)
                                 LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths)
                                         cgroup_apply_blkio_device_limit(u, b->path, b->rbps, b->wbps);
-                        }
                 }
         }
 
@@ -2140,7 +2132,6 @@ static int unit_update_cgroup(
         bool created, is_root_slice;
         CGroupMask migrate_mask = 0;
         _cleanup_free_ char *cgroup_full_path = NULL;
-        uint64_t cgroup_id = 0;
         int r;
 
         assert(u);
@@ -2160,11 +2151,14 @@ static int unit_update_cgroup(
         created = r;
 
         if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) > 0) {
+                uint64_t cgroup_id = 0;
+
                 r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, NULL, &cgroup_full_path);
                 if (r == 0) {
                         r = cg_path_get_cgroupid(cgroup_full_path, &cgroup_id);
                         if (r < 0)
-                                log_unit_warning_errno(u, r, "Failed to get cgroup ID on cgroup %s, ignoring: %m", cgroup_full_path);
+                                log_unit_full_errno(u, ERRNO_IS_NOT_SUPPORTED(r) ? LOG_DEBUG : LOG_WARNING, r,
+                                                    "Failed to get cgroup ID of cgroup %s, ignoring: %m", cgroup_full_path);
                 } else
                         log_unit_warning_errno(u, r, "Failed to get full cgroup path on cgroup %s, ignoring: %m", empty_to_root(u->cgroup_path));
 
@@ -2174,7 +2168,6 @@ static int unit_update_cgroup(
         /* Start watching it */
         (void) unit_watch_cgroup(u);
         (void) unit_watch_cgroup_memory(u);
-
 
         /* For v2 we preserve enabled controllers in delegated units, adjust others,
          * for v1 we figure out which controller hierarchies need migration. */
@@ -2964,6 +2957,10 @@ static int on_cgroup_empty_event(sd_event_source *s, void *userdata) {
                         log_debug_errno(r, "Failed to reenable cgroup empty event source, ignoring: %m");
         }
 
+        /* Update state based on OOM kills before we notify about cgroup empty event */
+        (void) unit_check_oom(u);
+        (void) unit_check_oomd_kill(u);
+
         unit_add_to_gc_queue(u);
 
         if (UNIT_VTABLE(u)->notify_cgroup_empty)
@@ -3043,7 +3040,7 @@ int unit_check_oomd_kill(Unit *u) {
         else if (r == 0)
                 return 0;
 
-        r = cg_get_xattr_malloc(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "user.oomd_kill", &value);
+        r = cg_get_xattr_malloc(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "user.oomd_ooms", &value);
         if (r < 0 && r != -ENODATA)
                 return r;
 
@@ -3059,11 +3056,25 @@ int unit_check_oomd_kill(Unit *u) {
         if (!increased)
                 return 0;
 
+        n = 0;
+        value = mfree(value);
+        r = cg_get_xattr_malloc(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "user.oomd_kill", &value);
+        if (r >= 0 && !isempty(value))
+                (void) safe_atou64(value, &n);
+
         if (n > 0)
                 log_unit_struct(u, LOG_NOTICE,
                                 "MESSAGE_ID=" SD_MESSAGE_UNIT_OOMD_KILL_STR,
                                 LOG_UNIT_INVOCATION_ID(u),
-                                LOG_UNIT_MESSAGE(u, "systemd-oomd killed %"PRIu64" process(es) in this unit.", n));
+                                LOG_UNIT_MESSAGE(u, "systemd-oomd killed %"PRIu64" process(es) in this unit.", n),
+                                "N_PROCESSES=%" PRIu64, n);
+        else
+                log_unit_struct(u, LOG_NOTICE,
+                                "MESSAGE_ID=" SD_MESSAGE_UNIT_OOMD_KILL_STR,
+                                LOG_UNIT_INVOCATION_ID(u),
+                                LOG_UNIT_MESSAGE(u, "systemd-oomd killed some process(es) in this unit."));
+
+        unit_notify_cgroup_oom(u, /* ManagedOOM= */ true);
 
         return 1;
 }
@@ -3099,8 +3110,7 @@ int unit_check_oom(Unit *u) {
                         LOG_UNIT_INVOCATION_ID(u),
                         LOG_UNIT_MESSAGE(u, "A process of this unit has been killed by the OOM killer."));
 
-        if (UNIT_VTABLE(u)->notify_cgroup_oom)
-                UNIT_VTABLE(u)->notify_cgroup_oom(u);
+        unit_notify_cgroup_oom(u, /* ManagedOOM= */ false);
 
         return 1;
 }
@@ -3217,7 +3227,6 @@ static int on_cgroup_inotify_event(sd_event_source *s, int fd, uint32_t revents,
 
         for (;;) {
                 union inotify_event_buffer buffer;
-                struct inotify_event *e;
                 ssize_t l;
 
                 l = read(fd, &buffer, sizeof(buffer));
@@ -3228,7 +3237,7 @@ static int on_cgroup_inotify_event(sd_event_source *s, int fd, uint32_t revents,
                         return log_error_errno(errno, "Failed to read control group inotify events: %m");
                 }
 
-                FOREACH_INOTIFY_EVENT(e, buffer, l) {
+                FOREACH_INOTIFY_EVENT_WARN(e, buffer, l) {
                         Unit *u;
 
                         if (e->wd < 0)

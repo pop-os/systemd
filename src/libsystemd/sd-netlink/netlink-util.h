@@ -59,12 +59,10 @@ static inline bool rtnl_message_type_is_routing_policy_rule(uint16_t type) {
         return IN_SET(type, RTM_NEWRULE, RTM_DELRULE, RTM_GETRULE);
 }
 
-static inline bool rtnl_message_type_is_qdisc(uint16_t type) {
-        return IN_SET(type, RTM_NEWQDISC, RTM_DELQDISC, RTM_GETQDISC);
-}
-
-static inline bool rtnl_message_type_is_tclass(uint16_t type) {
-        return IN_SET(type, RTM_NEWTCLASS, RTM_DELTCLASS, RTM_GETTCLASS);
+static inline bool rtnl_message_type_is_traffic_control(uint16_t type) {
+        return IN_SET(type,
+                      RTM_NEWQDISC, RTM_DELQDISC, RTM_GETQDISC,
+                      RTM_NEWTCLASS, RTM_DELTCLASS, RTM_GETTCLASS);
 }
 
 static inline bool rtnl_message_type_is_mdb(uint16_t type) {
@@ -96,6 +94,7 @@ int rtnl_get_link_info(
                 int ifindex,
                 unsigned short *ret_iftype,
                 unsigned *ret_flags,
+                char **ret_kind,
                 struct hw_addr_data *ret_hw_addr,
                 struct hw_addr_data *ret_permanent_hw_addr);
 

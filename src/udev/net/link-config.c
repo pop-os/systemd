@@ -22,6 +22,7 @@
 #include "log-link.h"
 #include "memory-util.h"
 #include "net-condition.h"
+#include "netif-sriov.h"
 #include "netif-util.h"
 #include "netlink-util.h"
 #include "parse-util.h"
@@ -60,18 +61,18 @@ static LinkConfig* link_config_free(LinkConfig *config) {
         free(config->wol_password_file);
         erase_and_free(config->wol_password);
 
+        ordered_hashmap_free_with_destructor(config->sr_iov_by_section, sr_iov_free);
+
         return mfree(config);
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(LinkConfig*, link_config_free);
 
 static void link_configs_free(LinkConfigContext *ctx) {
-        LinkConfig *config, *config_next;
-
         if (!ctx)
                 return;
 
-        LIST_FOREACH_SAFE(configs, config, config_next, ctx->configs)
+        LIST_FOREACH(configs, config, ctx->configs)
                 link_config_free(config);
 }
 
@@ -247,6 +248,8 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
                 .txqueuelen = UINT32_MAX,
                 .coalesce.use_adaptive_rx_coalesce = -1,
                 .coalesce.use_adaptive_tx_coalesce = -1,
+                .mdi = ETH_TP_MDI_INVALID,
+                .sr_iov_num_vfs = UINT32_MAX,
         };
 
         for (i = 0; i < ELEMENTSOF(config->features); i++)
@@ -257,7 +260,9 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
                         STRV_MAKE_CONST(filename),
                         (const char* const*) CONF_PATHS_STRV("systemd/network"),
                         dropin_dirname,
-                        "Match\0Link\0",
+                        "Match\0"
+                        "Link\0"
+                        "SR-IOV\0",
                         config_item_perf_lookup, link_config_gperf_lookup,
                         CONFIG_PARSE_WARN, config, NULL);
         if (r < 0)
@@ -282,6 +287,10 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
                             filename);
 
         r = link_adjust_wol_options(config);
+        if (r < 0)
+                return r;
+
+        r = sr_iov_drop_invalid_sections(config->sr_iov_num_vfs, config->sr_iov_by_section);
         if (r < 0)
                 return r;
 
@@ -315,7 +324,6 @@ static int device_unsigned_attribute(sd_device *device, const char *attr, unsign
 
 int link_config_load(LinkConfigContext *ctx) {
         _cleanup_strv_free_ char **files = NULL;
-        char **f;
         int r;
 
         link_configs_free(ctx);
@@ -350,6 +358,7 @@ Link *link_free(Link *link) {
                 return NULL;
 
         sd_device_unref(link->device);
+        free(link->kind);
         free(link->driver);
         return mfree(link);
 }
@@ -391,7 +400,8 @@ int link_new(LinkConfigContext *ctx, sd_netlink **rtnl, sd_device *device, Link 
         if (r < 0)
                 log_link_debug_errno(link, r, "Failed to get \"addr_assign_type\" attribute, ignoring: %m");
 
-        r = rtnl_get_link_info(rtnl, link->ifindex, &link->iftype, &link->flags, &link->hw_addr, &link->permanent_hw_addr);
+        r = rtnl_get_link_info(rtnl, link->ifindex, &link->iftype, &link->flags,
+                               &link->kind, &link->hw_addr, &link->permanent_hw_addr);
         if (r < 0)
                 return r;
 
@@ -410,7 +420,6 @@ int link_new(LinkConfigContext *ctx, sd_netlink **rtnl, sd_device *device, Link 
 }
 
 int link_get_config(LinkConfigContext *ctx, Link *link) {
-        LinkConfig *config;
         int r;
 
         assert(ctx);
@@ -428,6 +437,7 @@ int link_get_config(LinkConfigContext *ctx, Link *link) {
                                 &link->permanent_hw_addr,
                                 link->driver,
                                 link->iftype,
+                                link->kind,
                                 link->ifname,
                                 /* alternative_names = */ NULL,
                                 /* wlan_iftype = */ 0,
@@ -465,7 +475,7 @@ static int link_apply_ethtool_settings(Link *link, int *ethtool_fd) {
 
         r = ethtool_set_glinksettings(ethtool_fd, name,
                                       config->autonegotiation, config->advertise,
-                                      config->speed, config->duplex, config->port);
+                                      config->speed, config->duplex, config->port, config->mdi);
         if (r < 0) {
                 if (config->autonegotiation >= 0)
                         log_link_warning_errno(link, r, "Could not %s auto negotiation, ignoring: %m",
@@ -485,6 +495,10 @@ static int link_apply_ethtool_settings(Link *link, int *ethtool_fd) {
                 if (config->port >= 0)
                         log_link_warning_errno(link, r, "Could not set port to '%s', ignoring: %m",
                                                port_to_string(config->port));
+
+                if (config->mdi != ETH_TP_MDI_INVALID)
+                        log_link_warning_errno(link, r, "Could not set MDI-X to '%s', ignoring: %m",
+                                               mdi_to_string(config->mdi));
         }
 
         r = ethtool_set_wol(ethtool_fd, name, config->wol, config->wol_password);
@@ -604,10 +618,9 @@ static int link_generate_new_hw_addr(Link *link, struct hw_addr_data *ret) {
 
         if (link->config->mac_address_policy == MAC_ADDRESS_POLICY_RANDOM)
                 /* We require genuine randomness here, since we want to make sure we won't collide with other
-                 * systems booting up at the very same time. We do allow RDRAND however, since this is not
-                 * cryptographic key material. */
+                 * systems booting up at the very same time. */
                 for (;;) {
-                        r = genuine_random_bytes(p, len, RANDOM_ALLOW_RDRAND);
+                        r = genuine_random_bytes(p, len, 0);
                         if (r < 0)
                                 return log_link_warning_errno(link, r, "Failed to acquire random data to generate MAC address: %m");
 
@@ -816,7 +829,6 @@ static int link_apply_alternative_names(Link *link, sd_netlink **rtnl) {
         if (r < 0)
                 log_link_debug_errno(link, r, "Failed to get alternative names, ignoring: %m");
 
-        char **p;
         STRV_FOREACH(p, current_altnames)
                 strv_remove(altnames, *p);
 
@@ -826,6 +838,77 @@ static int link_apply_alternative_names(Link *link, sd_netlink **rtnl) {
         if (r < 0)
                 log_link_full_errno(link, r == -EOPNOTSUPP ? LOG_DEBUG : LOG_WARNING, r,
                                     "Could not set AlternativeName= or apply AlternativeNamesPolicy=, ignoring: %m");
+
+        return 0;
+}
+
+static int sr_iov_configure(Link *link, sd_netlink **rtnl, SRIOV *sr_iov) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        int r;
+
+        assert(link);
+        assert(rtnl);
+        assert(link->ifindex > 0);
+
+        if (!*rtnl) {
+                r = sd_netlink_open(rtnl);
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_rtnl_message_new_link(*rtnl, &req, RTM_SETLINK, link->ifindex);
+        if (r < 0)
+                return r;
+
+        r = sr_iov_set_netlink_message(sr_iov, req);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_call(*rtnl, req, 0, NULL);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+static int link_apply_sr_iov_config(Link *link, sd_netlink **rtnl) {
+        SRIOV *sr_iov;
+        uint32_t n;
+        int r;
+
+        assert(link);
+        assert(link->config);
+        assert(link->device);
+
+        r = sr_iov_set_num_vfs(link->device, link->config->sr_iov_num_vfs, link->config->sr_iov_by_section);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Failed to set the number of SR-IOV virtual functions, ignoring: %m");
+
+        if (ordered_hashmap_isempty(link->config->sr_iov_by_section))
+                return 0;
+
+        r = sr_iov_get_num_vfs(link->device, &n);
+        if (r < 0) {
+                log_link_warning_errno(link, r, "Failed to get the number of SR-IOV virtual functions, ignoring [SR-IOV] sections: %m");
+                return 0;
+        }
+        if (n == 0) {
+                log_link_warning(link, "No SR-IOV virtual function exists, ignoring [SR-IOV] sections: %m");
+                return 0;
+        }
+
+        ORDERED_HASHMAP_FOREACH(sr_iov, link->config->sr_iov_by_section) {
+                if (sr_iov->vf >= n) {
+                        log_link_warning(link, "SR-IOV virtual function %"PRIu32" does not exist, ignoring.", sr_iov->vf);
+                        continue;
+                }
+
+                r = sr_iov_configure(link, rtnl, sr_iov);
+                if (r < 0)
+                        log_link_warning_errno(link, r,
+                                               "Failed to configure SR-IOV virtual function %"PRIu32", ignoring: %m",
+                                               sr_iov->vf);
+        }
 
         return 0;
 }
@@ -858,6 +941,10 @@ int link_apply_config(LinkConfigContext *ctx, sd_netlink **rtnl, Link *link) {
                 return r;
 
         r = link_apply_alternative_names(link, rtnl);
+        if (r < 0)
+                return r;
+
+        r = link_apply_sr_iov_config(link, rtnl);
         if (r < 0)
                 return r;
 

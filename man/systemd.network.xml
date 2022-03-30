@@ -85,6 +85,7 @@
       <xi:include href="systemd.link.xml" xpointer="path" />
       <xi:include href="systemd.link.xml" xpointer="driver" />
       <xi:include href="systemd.link.xml" xpointer="type" />
+      <xi:include href="systemd.link.xml" xpointer="kind" />
       <xi:include href="systemd.link.xml" xpointer="property" />
 
       <varlistentry>
@@ -300,94 +301,7 @@
     </variablelist>
   </refsect1>
 
-  <refsect1>
-    <title>[SR-IOV] Section Options</title>
-    <para>The [SR-IOV] section accepts the following keys. Specify several [SR-IOV] sections to
-    configure several SR-IOVs. SR-IOV provides the ability to partition a single physical PCI resource
-    into virtual PCI functions which can then be injected into a VM. In the case of network VFs, SR-IOV
-    improves north-south network performance (that is, traffic with endpoints outside the host machine)
-    by allowing traffic to bypass the host machine’s network stack.</para>
-
-    <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>VirtualFunction=</varname></term>
-        <listitem>
-          <para>Specifies a Virtual Function (VF), lightweight PCIe function designed solely to move
-          data in and out. Takes an integer in the range 0…2147483646. This option is compulsory.
-          </para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>VLANId=</varname></term>
-        <listitem>
-          <para>Specifies VLAN ID of the virtual function. Takes an integer in the range 1…4095.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>QualityOfService=</varname></term>
-        <listitem>
-          <para>Specifies quality of service of the virtual function. Takes an integer in the range
-          1…4294967294.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>VLANProtocol=</varname></term>
-        <listitem>
-          <para>Specifies VLAN protocol of the virtual function. Takes <literal>802.1Q</literal> or
-          <literal>802.1ad</literal>.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>MACSpoofCheck=</varname></term>
-        <listitem>
-          <para>Takes a boolean. Controls the MAC spoof checking. When unset, the kernel's default will
-          be used.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>QueryReceiveSideScaling=</varname></term>
-        <listitem>
-          <para>Takes a boolean. Toggle the ability of querying the receive side scaling (RSS)
-          configuration of the virtual function (VF). The VF RSS information like RSS hash key may be
-          considered sensitive on some devices where this information is shared between VF and the
-          physical function (PF). When unset, the kernel's default will be used.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>Trust=</varname></term>
-        <listitem>
-          <para>Takes a boolean. Allows one to set trust mode of the virtual function (VF). When set, VF
-          users can set a specific feature which may impact security and/or performance. When unset,
-          the kernel's default will be used.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>LinkState=</varname></term>
-        <listitem>
-          <para>Allows one to set the link state of the virtual function (VF). Takes a boolean or a
-          special value <literal>auto</literal>. Setting to <literal>auto</literal> means a
-          reflection of the physical function (PF) link state, <literal>yes</literal> lets the VF to
-          communicate with other VFs on this host even if the PF link state is down,
-          <literal>no</literal> causes the hardware to drop any packets sent by the VF. When unset,
-          the kernel's default will be used.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>MACAddress=</varname></term>
-        <listitem>
-          <para>Specifies the MAC address for the virtual function.</para>
-        </listitem>
-      </varlistentry>
-    </variablelist>
-  </refsect1>
+  <xi:include href="systemd.link.xml" xpointer="sr-iov" />
 
   <refsect1>
     <title>[Network] Section Options</title>
@@ -910,12 +824,11 @@ Table=1234</programlisting></para>
       <varlistentry>
         <term><varname>DHCPPrefixDelegation=</varname></term>
         <listitem>
-          <para>Takes a boolean value. When enabled, requests subnet prefixes acquired by a DHCPv6
-          client, or by a DHCPv4 client through the 6RD option  configured on another link. By default,
-          an address within each delegated prefix will be assigned, and the prefixes will be announced
-          through IPv6 Router Advertisement when <varname>IPv6SendRA=</varname> is enabled. Such
-          default settings can be configured in the [DHCPPrefixDelegation] section. Defaults to
-          disabled.</para>
+          <para>Takes a boolean value. When enabled, requests subnet prefixes on another link via the DHCPv6
+          protocol or via the 6RD option in the DHCPv4 protocol. An address within each delegated prefix will
+          be assigned, and the prefixes will be announced through IPv6 Router Advertisement if
+          <varname>IPv6SendRA=</varname> is enabled. This behaviour can be configured in the
+          [DHCPPrefixDelegation] section. Defaults to disabled.</para>
         </listitem>
       </varlistentry>
 
@@ -956,7 +869,6 @@ Table=1234</programlisting></para>
         <term><varname>IPoIB=</varname></term>
         <term><varname>IPVLAN=</varname></term>
         <term><varname>IPVTAP=</varname></term>
-        <term><varname>L2TP=</varname></term>
         <term><varname>MACsec=</varname></term>
         <term><varname>MACVLAN=</varname></term>
         <term><varname>MACVTAP=</varname></term>
@@ -965,7 +877,7 @@ Table=1234</programlisting></para>
         <term><varname>VXLAN=</varname></term>
         <term><varname>Xfrm=</varname></term>
         <listitem>
-          <para>The name of an IPoIB, IPVLAN, IPVTAP, L2TP, MACsec, MACVLAN, MACVTAP, tunnel, VLAN,
+          <para>The name of an IPoIB, IPVLAN, IPVTAP, MACsec, MACVLAN, MACVTAP, tunnel, VLAN,
           VXLAN, or Xfrm to be created on the link. See
           <citerefentry><refentrytitle>systemd.netdev</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
           This option may be specified more than once.</para>
@@ -1031,8 +943,10 @@ Table=1234</programlisting></para>
           lease expires. This is contrary to the DHCP specification, but may be the best choice if,
           e.g., the root filesystem relies on this connection. The setting <literal>dhcp</literal>
           implies <literal>dhcp-on-stop</literal>, and <literal>yes</literal> implies
-          <literal>dhcp</literal> and <literal>static</literal>. Defaults to <literal>no</literal>.
-          </para>
+          <literal>dhcp</literal> and <literal>static</literal>. Defaults to
+          <literal>dhcp-on-stop</literal> when <command>systemd-networkd</command> is running in
+          initrd, <literal>yes</literal> when the root filesystem is a network filesystem, and
+          <literal>no</literal> otherwise.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -1131,7 +1045,8 @@ Table=1234</programlisting></para>
           Detection. See <ulink url="https://tools.ietf.org/html/rfc5227">RFC 5227</ulink>.
           When <literal>ipv6</literal>, performs IPv6 Duplicate Address Detection. See
           <ulink url="https://tools.ietf.org/html/rfc4862">RFC 4862</ulink>. Defaults to
-          <literal>ipv6</literal>.</para>
+          <literal>ipv4</literal> for IPv4 link-local addresses, <literal>ipv6</literal> for IPv6
+          addresses, and <literal>none</literal> otherwise.</para>
         </listitem>
       </varlistentry>
 
@@ -1547,9 +1462,9 @@ Table=1234</programlisting></para>
 
           <para>For IPv4 route, defaults to <literal>host</literal> if <varname>Type=</varname> is
           <literal>local</literal> or <literal>nat</literal>, and <literal>link</literal> if
-          <varname>Type=</varname> is <literal>broadcast</literal>, <literal>multicast</literal>, or
-          <literal>anycast</literal>. In other cases, defaults to <literal>global</literal>. The value
-          is not used for IPv6.</para>
+          <varname>Type=</varname> is <literal>broadcast</literal>, <literal>multicast</literal>,
+          <literal>anycast</literal>, or direct <literal>unicast</literal> routes. In other cases,
+          defaults to <literal>global</literal>. The value is not used for IPv6.</para>
         </listitem>
       </varlistentry>
 
@@ -2645,18 +2560,24 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
         <term><varname>DNS=</varname></term>
 
         <listitem><para><varname>EmitDNS=</varname> takes a boolean. Configures whether the DHCP leases
-        handed out to clients shall contain DNS server information. Defaults to <literal>yes</literal>.  The
-        DNS servers to pass to clients may be configured with the <varname>DNS=</varname> option, which takes
-        a list of IPv4 addresses. If the <varname>EmitDNS=</varname> option is enabled but no servers
-        configured, the servers are automatically propagated from an "uplink" interface that has appropriate
-        servers set. The "uplink" interface is determined by the default route of the system with the highest
-        priority. Note that this information is acquired at the time the lease is handed out, and does not
-        take uplink interfaces into account that acquire DNS server information at a later point. If no
-        suitable uplink interface is found the DNS server data from <filename>/etc/resolv.conf</filename> is
-        used. Also, note that the leases are not refreshed if the uplink network configuration changes. To
-        ensure clients regularly acquire the most current uplink DNS server information, it is thus advisable
-        to shorten the DHCP lease time via <varname>MaxLeaseTimeSec=</varname> described
-        above.</para></listitem>
+        handed out to clients shall contain DNS server information. Defaults to <literal>yes</literal>.
+        The DNS servers to pass to clients may be configured with the <varname>DNS=</varname> option,
+        which takes a list of IPv4 addresses, or special value <literal>_server_address</literal> which
+        will be converted to the address used by the DHCP server.</para>
+
+        <para>If the <varname>EmitDNS=</varname> option is enabled but no servers configured, the
+        servers are automatically propagated from an "uplink" interface that has appropriate servers
+        set. The "uplink" interface is determined by the default route of the system with the highest
+        priority. Note that this information is acquired at the time the lease is handed out, and does
+        not take uplink interfaces into account that acquire DNS server information at a later point.
+        If no suitable uplink interface is found the DNS server data from
+        <filename>/etc/resolv.conf</filename> is used. Also, note that the leases are not refreshed if
+        the uplink network configuration changes. To ensure clients regularly acquire the most current
+        uplink DNS server information, it is thus advisable to shorten the DHCP lease time via
+        <varname>MaxLeaseTimeSec=</varname> described above.</para>
+
+        <para>This setting can be specified multiple times. If an empty string is specified, then all
+        DNS servers specified earlier are cleared.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2703,6 +2624,42 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
         timezone is set, the system timezone of the local host is
         propagated, as determined by the
         <filename>/etc/localtime</filename> symlink.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>BootServerAddress=</varname></term>
+
+        <listitem>
+          <para>Takes an IPv4 address of the boot server used by e.g. PXE boot systems. When specified, this
+          address is sent in the <option>siaddr</option> field of the DHCP message header. See <ulink
+          url="https://www.rfc-editor.org/rfc/rfc2131.html">RFC 2131</ulink> for more details. Defaults to
+          unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>BootServerName=</varname></term>
+
+        <listitem>
+          <para>Takes a name of the boot server used by e.g. PXE boot systems. When specified, this name is
+          sent in the DHCP option 66 ("TFTP server name"). See <ulink
+          url="https://www.rfc-editor.org/rfc/rfc2132.html">RFC 2132</ulink> for more details. Defaults to
+          unset.</para>
+
+          <para>Note that typically setting one of <varname>BootServerName=</varname> or
+          <varname>BootServerAddress=</varname> is sufficient, but both can be set too, if desired.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>BootFilename=</varname></term>
+
+        <listitem>
+          <para>Takes a path or URL to a file loaded by e.g. a PXE boot loader. When specified, this path is
+          sent in the DHCP option 67 ("Bootfile name"). See <ulink
+          url="https://www.rfc-editor.org/rfc/rfc2132.html">RFC 2132</ulink> for more details. Defaults to
+          unset.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -3037,6 +2994,15 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
             <para>Takes a boolean. Configures whether traffic may be sent back out of the port on which it
             was received. When this flag is false, then the bridge will not forward traffic back out of the
             receiving port. When unset, the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Isolated=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Configures whether this port is isolated or not. Within a bridge,
+            isolated ports can only communicate with non-isolated ports. When set to true, this port can only
+            communicate with other ports whose Isolated setting is false.  When set to false, this port
+            can communicate with any other ports. When unset, the kernel's default will be used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -3746,7 +3712,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
             <varlistentry>
               <term><option>src-host</option></term>
               <listitem><para>
-                Flows are defined only by source address. Equivalnet to the <literal>srchost</literal>
+                Flows are defined only by source address. Equivalent to the <literal>srchost</literal>
                 option for <command>tc qdisc</command> command. See also
                 <citerefentry project='man-pages'><refentrytitle>tc-cake</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
               </para></listitem>
@@ -3754,8 +3720,8 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
             <varlistentry>
               <term><option>dst-host</option></term>
               <listitem><para>
-                Flows are defined only by destination address. Equivalnet to the
-                <literal>srchost</literal> option for <command>tc qdisc</command> command. See also
+                Flows are defined only by destination address. Equivalent to the
+                <literal>dsthost</literal> option for <command>tc qdisc</command> command. See also
                 <citerefentry project='man-pages'><refentrytitle>tc-cake</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
               </para></listitem>
             </varlistentry>
@@ -3780,7 +3746,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
               <term><option>dual-src-host</option></term>
               <listitem><para>
                 Flows are defined by the 5-tuple (see <literal>flows</literal> in the above), and
-                fairness is applied first over source addresses, then over individual flows. Equivalnet
+                fairness is applied first over source addresses, then over individual flows. Equivalent
                 to the <literal>dual-srchost</literal> option for <command>tc qdisc</command> command.
                 See also
                 <citerefentry project='man-pages'><refentrytitle>tc-cake</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
@@ -3791,7 +3757,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
               <listitem><para>
                 Flows are defined by the 5-tuple (see <literal>flows</literal> in the above), and
                 fairness is applied first over destination addresses, then over individual flows.
-                Equivalnet to the <literal>dual-dsthost</literal> option for
+                Equivalent to the <literal>dual-dsthost</literal> option for
                 <command>tc qdisc</command> command. See also
                 <citerefentry project='man-pages'><refentrytitle>tc-cake</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
               </para></listitem>
@@ -3801,7 +3767,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
               <listitem><para>
                 Flows are defined by the 5-tuple (see <literal>flows</literal>), and fairness is
                 applied over source and destination addresses, and also over individual flows.
-                Equivalnet to the <literal>triple-isolate</literal> option for
+                Equivalent to the <literal>triple-isolate</literal> option for
                 <command>tc qdisc</command> command. See also
                 <citerefentry project='man-pages'><refentrytitle>tc-cake</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
               </para></listitem>
@@ -4497,25 +4463,91 @@ DHCP=yes</programlisting>
     </example>
 
     <example>
-      <title>IPv6 Prefix Delegation</title>
+      <title>IPv6 Prefix Delegation (DHCPv6 PD)</title>
 
-      <programlisting># /etc/systemd/network/55-ipv6-pd-upstream.network
+      <programlisting># /etc/systemd/network/55-dhcpv6-pd-upstream.network
 [Match]
 Name=enp1s0
 
 [Network]
-DHCP=ipv6</programlisting>
+DHCP=ipv6
 
-      <programlisting># /etc/systemd/network/56-ipv6-pd-downstream.network
+# The below setting is optional, to also assign an address in the delegated prefix
+# to the upstream interface. If not necessary, then comment out the line below and
+# the [DHCPPrefixDelegation] section.
+DHCPPrefixDelegation=yes
+
+# If the upstream network provides Router Advertisement with Managed bit set,
+# then comment out the line below and WithoutRA= setting in the [DHCPv6] section.
+IPv6AcceptRA=no
+
+[DHCPv6]
+WithoutRA=solicit
+
+[DHCPPrefixDelegation]
+UplinkInterface=:self
+SubnetId=0
+Announce=no</programlisting>
+
+      <programlisting># /etc/systemd/network/55-dhcpv6-pd-downstream.network
 [Match]
 Name=enp2s0
 
 [Network]
+DHCPPrefixDelegation=yes
 IPv6SendRA=yes
-DHCPPrefixDelegation=yes</programlisting>
+
+# It is expected that the host is acting as a router. So, usually it is not
+# necessary to receive Router Advertisement from other hosts in the downstream network.
+IPv6AcceptRA=no
+
+[DHCPPrefixDelegation]
+UplinkInterface=enp1s0
+SubnetId=1
+Announce=yes</programlisting>
 
       <para>This will enable DHCPv6-PD on the interface enp1s0 as an upstream interface where the
       DHCPv6 client is running and enp2s0 as a downstream interface where the prefix is delegated to.
+      The delegated prefixes are distributed by IPv6 Router Advertisement on the downstream network.
+      </para>
+    </example>
+
+    <example>
+      <title>IPv6 Prefix Delegation (DHCPv4 6RD)</title>
+
+      <programlisting># /etc/systemd/network/55-dhcpv4-6rd-upstream.network
+[Match]
+Name=enp1s0
+
+[Network]
+DHCP=ipv4
+
+# When DHCPv4-6RD is used, the upstream network does not support IPv6.
+# Hence, it is not necessary to wait for Router Advertisement, which is enabled by default.
+IPv6AcceptRA=no
+
+[DHCPv4]
+Use6RD=yes</programlisting>
+
+      <programlisting># /etc/systemd/network/55-dhcpv4-6rd-downstream.network
+[Match]
+Name=enp2s0
+
+[Network]
+DHCPPrefixDelegation=yes
+IPv6SendRA=yes
+
+# It is expected that the host is acting as a router. So, usually it is not
+# necessary to receive Router Advertisement from other hosts in the downstream network.
+IPv6AcceptRA=no
+
+[DHCPPrefixDelegation]
+UplinkInterface=enp1s0
+SubnetId=1
+Announce=yes</programlisting>
+
+      <para>This will enable DHCPv4-6RD on the interface enp1s0 as an upstream interface where the
+      DHCPv4 client is running and enp2s0 as a downstream interface where the prefix is delegated to.
       The delegated prefixes are distributed by IPv6 Router Advertisement on the downstream network.
       </para>
     </example>

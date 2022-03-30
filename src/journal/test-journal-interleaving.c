@@ -8,9 +8,9 @@
 #include "alloc-util.h"
 #include "chattr-util.h"
 #include "io-util.h"
-#include "journald-file.h"
 #include "journal-vacuum.h"
 #include "log.h"
+#include "managed-journal-file.h"
 #include "parse-util.h"
 #include "rm-rf.h"
 #include "tests.h"
@@ -33,22 +33,22 @@ _noreturn_ static void log_assert_errno(const char *text, int error, const char 
                         log_assert_errno(#expr, -_r_, PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__); \
         } while (false)
 
-static JournaldFile *test_open(const char *name) {
+static ManagedJournalFile *test_open(const char *name) {
         _cleanup_(mmap_cache_unrefp) MMapCache *m = NULL;
-        JournaldFile *f;
+        ManagedJournalFile *f;
 
         m = mmap_cache_new();
         assert_se(m != NULL);
 
-        assert_ret(journald_file_open(-1, name, O_RDWR|O_CREAT, 0644, true, UINT64_MAX, false, NULL, m, NULL, NULL, &f));
+        assert_ret(managed_journal_file_open(-1, name, O_RDWR|O_CREAT, JOURNAL_COMPRESS, 0644, UINT64_MAX, NULL, m, NULL, NULL, &f));
         return f;
 }
 
-static void test_close(JournaldFile *f) {
-        (void) journald_file_close(f);
+static void test_close(ManagedJournalFile *f) {
+        (void) managed_journal_file_close(f);
 }
 
-static void append_number(JournaldFile *f, int n, uint64_t *seqnum) {
+static void append_number(ManagedJournalFile *f, int n, uint64_t *seqnum) {
         char *p;
         dual_timestamp ts;
         static dual_timestamp previous_ts = {};
@@ -70,7 +70,7 @@ static void append_number(JournaldFile *f, int n, uint64_t *seqnum) {
         free(p);
 }
 
-static void test_check_number (sd_journal *j, int n) {
+static void test_check_number(sd_journal *j, int n) {
         const void *d;
         _cleanup_free_ char *k;
         size_t l;
@@ -84,7 +84,7 @@ static void test_check_number (sd_journal *j, int n) {
         assert_se(n == x);
 }
 
-static void test_check_numbers_down (sd_journal *j, int count) {
+static void test_check_numbers_down(sd_journal *j, int count) {
         int i;
 
         for (i = 1; i <= count; i++) {
@@ -99,7 +99,7 @@ static void test_check_numbers_down (sd_journal *j, int count) {
 
 }
 
-static void test_check_numbers_up (sd_journal *j, int count) {
+static void test_check_numbers_up(sd_journal *j, int count) {
         for (int i = count; i >= 1; i--) {
                 int r;
                 test_check_number(j, i);
@@ -113,7 +113,7 @@ static void test_check_numbers_up (sd_journal *j, int count) {
 }
 
 static void setup_sequential(void) {
-        JournaldFile *one, *two;
+        ManagedJournalFile *one, *two;
         one = test_open("one.journal");
         two = test_open("two.journal");
         append_number(one, 1, NULL);
@@ -125,7 +125,7 @@ static void setup_sequential(void) {
 }
 
 static void setup_interleaved(void) {
-        JournaldFile *one, *two;
+        ManagedJournalFile *one, *two;
         one = test_open("one.journal");
         two = test_open("two.journal");
         append_number(one, 1, NULL);
@@ -145,7 +145,7 @@ static void mkdtemp_chdir_chattr(char *path) {
         (void) chattr_path(path, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
 }
 
-static void test_skip(void (*setup)(void)) {
+static void test_skip_one(void (*setup)(void)) {
         char t[] = "/var/tmp/journal-skip-XXXXXX";
         sd_journal *j;
         int r;
@@ -201,11 +201,15 @@ static void test_skip(void (*setup)(void)) {
         puts("------------------------------------------------------------");
 }
 
-static void test_sequence_numbers(void) {
+TEST(skip) {
+        test_skip_one(setup_sequential);
+        test_skip_one(setup_interleaved);
+}
 
+TEST(sequence_numbers) {
         _cleanup_(mmap_cache_unrefp) MMapCache *m = NULL;
         char t[] = "/var/tmp/journal-seq-XXXXXX";
-        JournaldFile *one, *two;
+        ManagedJournalFile *one, *two;
         uint64_t seqnum = 0;
         sd_id128_t seqnum_id;
 
@@ -214,8 +218,8 @@ static void test_sequence_numbers(void) {
 
         mkdtemp_chdir_chattr(t);
 
-        assert_se(journald_file_open(-1, "one.journal", O_RDWR|O_CREAT, 0644,
-                                     true, UINT64_MAX, false, NULL, m, NULL, NULL, &one) == 0);
+        assert_se(managed_journal_file_open(-1, "one.journal", O_RDWR|O_CREAT, JOURNAL_COMPRESS, 0644,
+                                            UINT64_MAX, NULL, m, NULL, NULL, &one) == 0);
 
         append_number(one, 1, &seqnum);
         printf("seqnum=%"PRIu64"\n", seqnum);
@@ -231,8 +235,8 @@ static void test_sequence_numbers(void) {
 
         memcpy(&seqnum_id, &one->file->header->seqnum_id, sizeof(sd_id128_t));
 
-        assert_se(journald_file_open(-1, "two.journal", O_RDWR|O_CREAT, 0644,
-                                     true, UINT64_MAX, false, NULL, m, NULL, one, &two) == 0);
+        assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR|O_CREAT, JOURNAL_COMPRESS, 0644,
+                                            UINT64_MAX, NULL, m, NULL, one, &two) == 0);
 
         assert_se(two->file->header->state == STATE_ONLINE);
         assert_se(!sd_id128_equal(two->file->header->file_id, one->file->header->file_id));
@@ -262,8 +266,8 @@ static void test_sequence_numbers(void) {
         /* restart server */
         seqnum = 0;
 
-        assert_se(journald_file_open(-1, "two.journal", O_RDWR, 0,
-                                     true, UINT64_MAX, false, NULL, m, NULL, NULL, &two) == 0);
+        assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
+                                            UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
 
         assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
 
@@ -287,19 +291,14 @@ static void test_sequence_numbers(void) {
         }
 }
 
-int main(int argc, char *argv[]) {
-        test_setup_logging(LOG_DEBUG);
-
-        /* journald_file_open requires a valid machine id */
+static int intro(void) {
+        /* managed_journal_file_open requires a valid machine id */
         if (access("/etc/machine-id", F_OK) != 0)
                 return log_tests_skipped("/etc/machine-id not found");
 
-        arg_keep = argc > 1;
+        arg_keep = saved_argc > 1;
 
-        test_skip(setup_sequential);
-        test_skip(setup_interleaved);
-
-        test_sequence_numbers();
-
-        return 0;
+        return EXIT_SUCCESS;
 }
+
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);

@@ -16,7 +16,6 @@ static int test_restrict_filesystems(Manager *m, const char *unit_name, const ch
         _cleanup_free_ char *exec_start = NULL;
         _cleanup_(unit_freep) Unit *u = NULL;
         ExecContext *ec = NULL;
-        char **allow_filesystem;
         int cld_code, r;
 
         assert_se(u = unit_new(m, sizeof(Service)));
@@ -51,13 +50,11 @@ static int test_restrict_filesystems(Manager *m, const char *unit_name, const ch
         }
 
         cld_code = SERVICE(u)->exec_command[SERVICE_EXEC_START]->exec_status.code;
-        if (cld_code != CLD_EXITED) {
+        if (cld_code != CLD_EXITED)
                 return log_error_errno(-SYNTHETIC_ERRNO(EBUSY), "ExecStart didn't exited, code='%s'", sigchld_code_to_string(cld_code));
-        }
 
-        if (SERVICE(u)->state != SERVICE_DEAD) {
+        if (SERVICE(u)->state != SERVICE_DEAD)
                 return log_error_errno(-SYNTHETIC_ERRNO(EBUSY), "Service is not dead");
-        }
 
         return 0;
 }
@@ -79,7 +76,7 @@ int main(int argc, char *argv[]) {
         (void) setrlimit_closest(RLIMIT_MEMLOCK, &rl);
 
         if (!can_memlock())
-                return log_tests_skipped("Can't use mlock(), skipping.");
+                return log_tests_skipped("Can't use mlock()");
 
         r = lsm_bpf_supported();
         if (r <= 0)
@@ -93,7 +90,7 @@ int main(int argc, char *argv[]) {
         assert_se(set_unit_path(unit_dir) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
 
-        assert_se(manager_new(UNIT_FILE_SYSTEM, MANAGER_TEST_RUN_BASIC, &m) >= 0);
+        assert_se(manager_new(LOOKUP_SCOPE_SYSTEM, MANAGER_TEST_RUN_BASIC, &m) >= 0);
         assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         /* We need to enable access to the filesystem where the binary is so we

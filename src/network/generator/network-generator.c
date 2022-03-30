@@ -47,7 +47,7 @@ static const char * const dracut_dhcp_type_table[_DHCP_TYPE_MAX] = {
         [DHCP_TYPE_OFF]     = "off",
         [DHCP_TYPE_ON]      = "on",
         [DHCP_TYPE_ANY]     = "any",
-        [DHCP_TYPE_DHCP]    = "dhcp",
+        [DHCP_TYPE_DHCP4]   = "dhcp",
         [DHCP_TYPE_DHCP6]   = "dhcp6",
         [DHCP_TYPE_AUTO6]   = "auto6",
         [DHCP_TYPE_EITHER6] = "either6",
@@ -62,7 +62,7 @@ static const char * const networkd_dhcp_type_table[_DHCP_TYPE_MAX] = {
         [DHCP_TYPE_OFF]     = "no",
         [DHCP_TYPE_ON]      = "yes",
         [DHCP_TYPE_ANY]     = "yes",
-        [DHCP_TYPE_DHCP]    = "ipv4",
+        [DHCP_TYPE_DHCP4]   = "ipv4",
         [DHCP_TYPE_DHCP6]   = "ipv6",
         [DHCP_TYPE_AUTO6]   = "no",   /* TODO: enable other setting? */
         [DHCP_TYPE_EITHER6] = "ipv6", /* TODO: enable other setting? */
@@ -1033,7 +1033,6 @@ int parse_cmdline_item(const char *key, const char *value, void *data) {
 
 int context_merge_networks(Context *context) {
         Network *all, *network;
-        Route *route;
         int r;
 
         assert(context);
@@ -1129,10 +1128,7 @@ static int route_dump(Route *route, FILE *f) {
 }
 
 void network_dump(Network *network, FILE *f) {
-        Address *address;
-        Route *route;
         const char *dhcp;
-        char **dns;
 
         assert(network);
         assert(f);

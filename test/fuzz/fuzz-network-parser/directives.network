@@ -2,6 +2,7 @@
 Cost=
 UseBPDU=
 HairPin=
+Isolated=
 UnicastFlood=
 FastLeave=
 Priority=
@@ -16,6 +17,7 @@ MulticastRouter=
 [Match]
 KernelVersion=
 Type=
+Kind=
 Driver=
 Architecture=
 Firmware=
@@ -407,6 +409,9 @@ RelayAgentCircuitId=
 RelayAgentRemoteId=
 ServerAddress=
 UplinkInterface=
+BootServerAddress=
+BootServerName=
+BootFilename=
 [DHCPServerStaticLease]
 MACAddress=
 Address=

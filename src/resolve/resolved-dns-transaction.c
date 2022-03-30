@@ -634,24 +634,19 @@ static int on_stream_complete(DnsStream *s, int error) {
                 }
         }
 
-        if (error != 0) {
-                DnsTransaction *t, *n;
-
-                LIST_FOREACH_SAFE(transactions_by_stream, t, n, s->transactions)
+        if (error != 0)
+                LIST_FOREACH(transactions_by_stream, t, s->transactions)
                         on_transaction_stream_error(t, error);
-        }
 
         return 0;
 }
 
-static int on_stream_packet(DnsStream *s) {
-        _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
+static int on_stream_packet(DnsStream *s, DnsPacket *p) {
         DnsTransaction *t;
 
         assert(s);
-
-        /* Take ownership of packet to be able to receive new packets */
-        assert_se(p = dns_stream_take_read_packet(s));
+        assert(s->manager);
+        assert(p);
 
         t = hashmap_get(s->manager->dns_transactions, UINT_TO_PTR(DNS_PACKET_ID(p)));
         if (t && t->stream == s) /* Validate that the stream we got this on actually is the stream the
@@ -754,7 +749,8 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
                 if (fd < 0)
                         return fd;
 
-                r = dns_stream_new(t->scope->manager, &s, type, t->scope->protocol, fd, &sa, stream_timeout_usec);
+                r = dns_stream_new(t->scope->manager, &s, type, t->scope->protocol, fd, &sa,
+                                   on_stream_packet, on_stream_complete, stream_timeout_usec);
                 if (r < 0)
                         return r;
 
@@ -776,9 +772,6 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
                         s->server = dns_server_ref(t->server);
                         t->server->stream = dns_stream_ref(s);
                 }
-
-                s->complete = on_stream_complete;
-                s->on_packet = on_stream_packet;
 
                 /* The interface index is difficult to determine if we are
                  * connecting to the local host, hence fill this in right away
@@ -1429,7 +1422,7 @@ static int on_dns_packet(sd_event_source *s, int fd, uint32_t revents, void *use
                  * next recvmsg(). Treat this like a lost packet. */
 
                 log_debug_errno(r, "Connection failure for DNS UDP packet: %m");
-                assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
+                assert_se(sd_event_now(t->scope->manager->event, CLOCK_BOOTTIME, &usec) >= 0);
                 dns_server_packet_lost(t->server, IPPROTO_UDP, t->current_feature_level);
 
                 dns_transaction_close_connection(t, /* use_graveyard = */ false);
@@ -1766,7 +1759,6 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
 static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
         bool add_known_answers = false;
-        DnsTransaction *other;
         DnsResourceKey *tkey;
         _cleanup_set_free_ Set *keys = NULL;
         unsigned qdcount;
@@ -1805,7 +1797,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
          * in our current scope, and see whether their timing constraints allow them to be sent.
          */
 
-        assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &ts) >= 0);
+        assert_se(sd_event_now(t->scope->manager->event, CLOCK_BOOTTIME, &ts) >= 0);
 
         LIST_FOREACH(transactions_by_scope, other, t->scope->transactions) {
 
@@ -1843,7 +1835,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
                 r = sd_event_add_time(
                                 other->scope->manager->event,
                                 &other->timeout_event_source,
-                                clock_boottime_or_monotonic(),
+                                CLOCK_BOOTTIME,
                                 ts, 0,
                                 on_transaction_timeout, other);
                 if (r < 0)
@@ -1945,7 +1937,7 @@ int dns_transaction_go(DnsTransaction *t) {
          * finished now. In the latter case, the transaction and query candidate objects must not be accessed.
          */
 
-        assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &ts) >= 0);
+        assert_se(sd_event_now(t->scope->manager->event, CLOCK_BOOTTIME, &ts) >= 0);
 
         r = dns_transaction_prepare(t, ts);
         if (r <= 0)
@@ -1989,7 +1981,7 @@ int dns_transaction_go(DnsTransaction *t) {
                 r = sd_event_add_time_relative(
                                 t->scope->manager->event,
                                 &t->timeout_event_source,
-                                clock_boottime_or_monotonic(),
+                                CLOCK_BOOTTIME,
                                 jitter, accuracy,
                                 on_transaction_timeout, t);
                 if (r < 0)
@@ -2079,7 +2071,7 @@ int dns_transaction_go(DnsTransaction *t) {
         r = sd_event_add_time(
                         t->scope->manager->event,
                         &t->timeout_event_source,
-                        clock_boottime_or_monotonic(),
+                        CLOCK_BOOTTIME,
                         ts, 0,
                         on_transaction_timeout, t);
         if (r < 0)

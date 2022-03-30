@@ -60,9 +60,9 @@ typedef enum StatusType {
 } StatusType;
 
 typedef enum OOMPolicy {
-        OOM_CONTINUE,          /* The kernel kills the process it wants to kill, and that's it */
-        OOM_STOP,              /* The kernel kills the process it wants to kill, and we stop the unit */
-        OOM_KILL,              /* The kernel kills the process it wants to kill, and all others in the unit, and we stop the unit */
+        OOM_CONTINUE,          /* The kernel or systemd-oomd kills the process it wants to kill, and that's it */
+        OOM_STOP,              /* The kernel or systemd-oomd kills the process it wants to kill, and we stop the unit */
+        OOM_KILL,              /* The kernel or systemd-oomd kills the process it wants to kill, and all others in the unit, and we stop the unit */
         _OOM_POLICY_MAX,
         _OOM_POLICY_INVALID = -EINVAL,
 } OOMPolicy;
@@ -118,6 +118,7 @@ typedef enum WatchdogType {
         WATCHDOG_RUNTIME,
         WATCHDOG_REBOOT,
         WATCHDOG_KEXEC,
+        WATCHDOG_PRETIMEOUT,
         _WATCHDOG_TYPE_MAX,
 } WatchdogType;
 
@@ -225,7 +226,6 @@ struct Manager {
 
         sd_event_source *sigchld_event_source;
 
-        int time_change_fd;
         sd_event_source *time_change_event_source;
 
         sd_event_source *timezone_change_event_source;
@@ -235,7 +235,7 @@ struct Manager {
         int user_lookup_fds[2];
         sd_event_source *user_lookup_event_source;
 
-        UnitFileScope unit_file_scope;
+        LookupScope unit_file_scope;
         LookupPaths lookup_paths;
         Hashmap *unit_id_map;
         Hashmap *unit_name_map;
@@ -247,6 +247,8 @@ struct Manager {
 
         usec_t watchdog[_WATCHDOG_TYPE_MAX];
         usec_t watchdog_overridden[_WATCHDOG_TYPE_MAX];
+        char *watchdog_pretimeout_governor;
+        char *watchdog_pretimeout_governor_overridden;
 
         dual_timestamp timestamps[_MANAGER_TIMESTAMP_MAX];
 
@@ -461,8 +463,8 @@ static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
         return m->default_timeout_abort_set ? m->default_timeout_abort_usec : m->default_timeout_stop_usec;
 }
 
-#define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == UNIT_FILE_SYSTEM)
-#define MANAGER_IS_USER(m) ((m)->unit_file_scope != UNIT_FILE_SYSTEM)
+#define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == LOOKUP_SCOPE_SYSTEM)
+#define MANAGER_IS_USER(m) ((m)->unit_file_scope != LOOKUP_SCOPE_SYSTEM)
 
 #define MANAGER_IS_RELOADING(m) ((m)->n_reloading > 0)
 
@@ -473,7 +475,7 @@ static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
 
 #define MANAGER_IS_TEST_RUN(m) ((m)->test_run_flags != 0)
 
-int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
+int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
 Manager* manager_free(Manager *m);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
 
@@ -573,7 +575,9 @@ ManagerTimestamp manager_timestamp_initrd_mangle(ManagerTimestamp s);
 
 usec_t manager_get_watchdog(Manager *m, WatchdogType t);
 void manager_set_watchdog(Manager *m, WatchdogType t, usec_t timeout);
-int manager_override_watchdog(Manager *m, WatchdogType t, usec_t timeout);
+void manager_override_watchdog(Manager *m, WatchdogType t, usec_t timeout);
+int manager_set_watchdog_pretimeout_governor(Manager *m, const char *governor);
+int manager_override_watchdog_pretimeout_governor(Manager *m, const char *governor);
 
 const char* oom_policy_to_string(OOMPolicy i) _const_;
 OOMPolicy oom_policy_from_string(const char *s) _pure_;

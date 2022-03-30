@@ -22,7 +22,7 @@
 #include "cgroup-util.h"
 #include "condition.h"
 #include "cpu-set-util.h"
-#include "efi-loader.h"
+#include "efi-api.h"
 #include "env-file.h"
 #include "env-util.h"
 #include "extract-word.h"
@@ -89,9 +89,7 @@ Condition* condition_free(Condition *c) {
 }
 
 Condition* condition_free_list_type(Condition *head, ConditionType type) {
-        Condition *c, *n;
-
-        LIST_FOREACH_SAFE(conditions, c, n, head)
+        LIST_FOREACH(conditions, c, head)
                 if (type < 0 || c->type == type) {
                         LIST_REMOVE(conditions, head, c);
                         condition_free(c);
@@ -787,7 +785,8 @@ static int condition_test_needs_update(Condition *c, char **env) {
         if (r < 0) {
                 log_debug_errno(r, "Failed to parse timestamp file '%s', using mtime: %m", p);
                 return true;
-        } else if (r == 0) {
+        }
+        if (isempty(timestamp_str)) {
                 log_debug("No data in timestamp file '%s', using mtime.", p);
                 return true;
         }
@@ -829,7 +828,6 @@ static int condition_test_first_boot(Condition *c, char **env) {
 
 static int condition_test_environment(Condition *c, char **env) {
         bool equal;
-        char **i;
 
         assert(c);
         assert(c->parameter);
@@ -1171,7 +1169,6 @@ bool condition_test_list(
                 condition_test_logger_t logger,
                 void *userdata) {
 
-        Condition *c;
         int triggered = -1;
 
         assert(!!logger == !!to_string);
@@ -1234,8 +1231,6 @@ void condition_dump(Condition *c, FILE *f, const char *prefix, condition_to_stri
 }
 
 void condition_dump_list(Condition *first, FILE *f, const char *prefix, condition_to_string_t to_string) {
-        Condition *c;
-
         LIST_FOREACH(conditions, c, first)
                 condition_dump(c, f, prefix, to_string);
 }

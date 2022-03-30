@@ -33,6 +33,7 @@
 #include "networkd-sriov.h"
 #include "parse-util.h"
 #include "path-lookup.h"
+#include "qdisc.h"
 #include "radv-internal.h"
 #include "set.h"
 #include "socket-util.h"
@@ -40,7 +41,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
-#include "tc.h"
+#include "tclass.h"
 #include "util.h"
 
 /* Let's assume that anything above this number is a user misconfiguration. */
@@ -124,6 +125,7 @@ int network_verify(Network *network) {
         int r;
 
         assert(network);
+        assert(network->manager);
         assert(network->filename);
 
         if (net_match_is_empty(&network->match) && !network->conditions)
@@ -248,10 +250,11 @@ int network_verify(Network *network) {
         }
 
         if (network->dhcp_critical >= 0) {
-                if (network->keep_configuration >= 0)
-                        log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
-                                    "Ignoring CriticalConnection=.", network->filename);
-                else if (network->dhcp_critical)
+                if (network->keep_configuration >= 0) {
+                        if (network->manager->keep_configuration < 0)
+                                log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
+                                            "Ignoring CriticalConnection=.", network->filename);
+                } else if (network->dhcp_critical)
                         /* CriticalConnection=yes also preserve foreign static configurations. */
                         network->keep_configuration = KEEP_CONFIGURATION_YES;
                 else
@@ -320,8 +323,11 @@ int network_verify(Network *network) {
         network_drop_invalid_prefixes(network);
         network_drop_invalid_route_prefixes(network);
         network_drop_invalid_routing_policy_rules(network);
-        network_drop_invalid_traffic_control(network);
-        network_drop_invalid_sr_iov(network);
+        network_drop_invalid_qdisc(network);
+        network_drop_invalid_tclass(network);
+        r = sr_iov_drop_invalid_sections(UINT32_MAX, network->sr_iov_by_section);
+        if (r < 0)
+                return r;
         network_drop_invalid_static_leases(network);
 
         network_adjust_dhcp_server(network);
@@ -384,7 +390,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .allmulticast = -1,
                 .promiscuous = -1,
 
-                .keep_configuration = _KEEP_CONFIGURATION_INVALID,
+                .keep_configuration = manager->keep_configuration,
 
                 .dhcp_duid.type = _DUID_TYPE_INVALID,
                 .dhcp_critical = -1,
@@ -433,6 +439,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
 
                 .use_bpdu = -1,
                 .hairpin = -1,
+                .isolated = -1,
                 .fast_leave = -1,
                 .allow_port_to_be_root = -1,
                 .unicast_flood = -1,
@@ -573,7 +580,6 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
 
 int network_load(Manager *manager, OrderedHashmap **networks) {
         _cleanup_strv_free_ char **files = NULL;
-        char **f;
         int r;
 
         assert(manager);
@@ -695,6 +701,8 @@ static Network *network_free(Network *network) {
 
         free(network->dhcp_server_relay_agent_circuit_id);
         free(network->dhcp_server_relay_agent_remote_id);
+        free(network->dhcp_server_boot_server_name);
+        free(network->dhcp_server_boot_filename);
 
         free(network->description);
         free(network->dhcp_vendor_class_identifier);
@@ -750,7 +758,8 @@ static Network *network_free(Network *network) {
         hashmap_free_with_destructor(network->rules_by_section, routing_policy_rule_free);
         hashmap_free_with_destructor(network->dhcp_static_leases_by_section, dhcp_static_lease_free);
         ordered_hashmap_free_with_destructor(network->sr_iov_by_section, sr_iov_free);
-        ordered_hashmap_free_with_destructor(network->tc_by_section, traffic_control_free);
+        hashmap_free_with_destructor(network->qdiscs_by_section, qdisc_free);
+        hashmap_free_with_destructor(network->tclasses_by_section, tclass_free);
 
         free(network->name);
 
@@ -862,7 +871,6 @@ int config_parse_stacked_netdev(
                       NETDEV_KIND_IPOIB,
                       NETDEV_KIND_IPVLAN,
                       NETDEV_KIND_IPVTAP,
-                      NETDEV_KIND_L2TP,
                       NETDEV_KIND_MACSEC,
                       NETDEV_KIND_MACVLAN,
                       NETDEV_KIND_MACVTAP,
@@ -972,52 +980,6 @@ int config_parse_domains(
                 if (r < 0)
                         return log_oom();
         }
-}
-
-int config_parse_hostname(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        char **hostname = data;
-        int r;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-        assert(data);
-
-        if (isempty(rvalue)) {
-                *hostname = mfree(*hostname);
-                return 0;
-        }
-
-        if (!hostname_is_valid(rvalue, 0)) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0,
-                           "Hostname is not valid, ignoring assignment: %s", rvalue);
-                return 0;
-        }
-
-        r = dns_name_is_valid(rvalue);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed to check validity of hostname '%s', ignoring assignment: %m", rvalue);
-                return 0;
-        }
-        if (r == 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0,
-                           "Hostname is not a valid DNS domain name, ignoring assignment: %s", rvalue);
-                return 0;
-        }
-
-        return free_and_strdup_warn(hostname, rvalue);
 }
 
 int config_parse_timezone(
@@ -1380,16 +1342,6 @@ static const char* const keep_configuration_table[_KEEP_CONFIGURATION_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(keep_configuration, KeepConfiguration, KEEP_CONFIGURATION_YES);
-
-static const char* const ipv6_link_local_address_gen_mode_table[_IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_MAX] = {
-        [IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_EUI64] = "eui64",
-        [IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_NONE] = "none",
-        [IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_STABLE_PRIVACY] = "stable-privacy",
-        [IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_RANDOM] = "random",
-};
-
-DEFINE_STRING_TABLE_LOOKUP(ipv6_link_local_address_gen_mode, IPv6LinkLocalAddressGenMode);
-DEFINE_CONFIG_PARSE_ENUM(config_parse_ipv6_link_local_address_gen_mode, ipv6_link_local_address_gen_mode, IPv6LinkLocalAddressGenMode, "Failed to parse IPv6 link local address generation mode");
 
 static const char* const activation_policy_table[_ACTIVATION_POLICY_MAX] = {
         [ACTIVATION_POLICY_UP] =          "up",

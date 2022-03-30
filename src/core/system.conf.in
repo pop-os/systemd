@@ -30,6 +30,8 @@
 #NUMAPolicy=default
 #NUMAMask=
 #RuntimeWatchdogSec=off
+#RuntimeWatchdogPreSec=off
+#RuntimeWatchdogPreGovernor=
 #RebootWatchdogSec=10min
 #KExecWatchdogSec=off
 #WatchdogDevice=
@@ -64,7 +66,7 @@
 #DefaultLimitNOFILE=1024:{{HIGH_RLIMIT_NOFILE}}
 #DefaultLimitAS=
 #DefaultLimitNPROC=
-#DefaultLimitMEMLOCK=
+#DefaultLimitMEMLOCK=8M
 #DefaultLimitLOCKS=
 #DefaultLimitSIGPENDING=
 #DefaultLimitMSGQUEUE=

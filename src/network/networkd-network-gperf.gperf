@@ -22,6 +22,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #include "networkd-dhcp6.h"
 #include "networkd-ipv4ll.h"
 #include "networkd-ipv6-proxy-ndp.h"
+#include "networkd-ipv6ll.h"
 #include "networkd-lldp-tx.h"
 #include "networkd-ndisc.h"
 #include "networkd-network.h"
@@ -51,6 +52,7 @@ Match.PermanentMACAddress,                   config_parse_hw_addrs,             
 Match.Path,                                  config_parse_match_strv,                                  0,                             offsetof(Network, match.path)
 Match.Driver,                                config_parse_match_strv,                                  0,                             offsetof(Network, match.driver)
 Match.Type,                                  config_parse_match_strv,                                  0,                             offsetof(Network, match.iftype)
+Match.Kind,                                  config_parse_match_strv,                                  0,                             offsetof(Network, match.kind)
 Match.WLANInterfaceType,                     config_parse_match_strv,                                  0,                             offsetof(Network, match.wlan_iftype)
 Match.SSID,                                  config_parse_match_strv,                                  0,                             offsetof(Network, match.ssid)
 Match.BSSID,                                 config_parse_ether_addrs,                                 0,                             offsetof(Network, match.bssid)
@@ -73,15 +75,15 @@ Link.Unmanaged,                              config_parse_bool,                 
 Link.ActivationPolicy,                       config_parse_activation_policy,                           0,                             offsetof(Network, activation_policy)
 Link.RequiredForOnline,                      config_parse_required_for_online,                         0,                             0
 Link.RequiredFamilyForOnline,                config_parse_required_family_for_online,                  0,                             offsetof(Network, required_family_for_online)
-SR-IOV.VirtualFunction,                      config_parse_sr_iov_uint32,                               0,                             0
-SR-IOV.VLANId,                               config_parse_sr_iov_uint32,                               0,                             0
-SR-IOV.QualityOfService,                     config_parse_sr_iov_uint32,                               0,                             0
-SR-IOV.VLANProtocol,                         config_parse_sr_iov_vlan_proto,                           0,                             0
-SR-IOV.MACSpoofCheck,                        config_parse_sr_iov_boolean,                              0,                             0
-SR-IOV.QueryReceiveSideScaling,              config_parse_sr_iov_boolean,                              0,                             0
-SR-IOV.Trust,                                config_parse_sr_iov_boolean,                              0,                             0
-SR-IOV.LinkState,                            config_parse_sr_iov_link_state,                           0,                             0
-SR-IOV.MACAddress,                           config_parse_sr_iov_mac,                                  0,                             0
+SR-IOV.VirtualFunction,                      config_parse_sr_iov_uint32,                               0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.VLANId,                               config_parse_sr_iov_uint32,                               0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.QualityOfService,                     config_parse_sr_iov_uint32,                               0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.VLANProtocol,                         config_parse_sr_iov_vlan_proto,                           0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.MACSpoofCheck,                        config_parse_sr_iov_boolean,                              0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.QueryReceiveSideScaling,              config_parse_sr_iov_boolean,                              0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.Trust,                                config_parse_sr_iov_boolean,                              0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.LinkState,                            config_parse_sr_iov_link_state,                           0,                             offsetof(Network, sr_iov_by_section)
+SR-IOV.MACAddress,                           config_parse_sr_iov_mac,                                  0,                             offsetof(Network, sr_iov_by_section)
 Network.Description,                         config_parse_string,                                      0,                             offsetof(Network, description)
 Network.KeepMaster,                          config_parse_bool,                                        0,                             offsetof(Network, keep_master)
 Network.BatmanAdvanced,                      config_parse_ifname,                                      0,                             offsetof(Network, batadv_name)
@@ -91,7 +93,7 @@ Network.VRF,                                 config_parse_ifname,               
 Network.IPoIB,                               config_parse_stacked_netdev,                              NETDEV_KIND_IPOIB,             offsetof(Network, stacked_netdev_names)
 Network.IPVLAN,                              config_parse_stacked_netdev,                              NETDEV_KIND_IPVLAN,            offsetof(Network, stacked_netdev_names)
 Network.IPVTAP,                              config_parse_stacked_netdev,                              NETDEV_KIND_IPVTAP,            offsetof(Network, stacked_netdev_names)
-Network.L2TP,                                config_parse_stacked_netdev,                              NETDEV_KIND_L2TP,              offsetof(Network, stacked_netdev_names)
+Network.L2TP,                                config_parse_warn_compat,                                 DISABLED_LEGACY,               0
 Network.MACsec,                              config_parse_stacked_netdev,                              NETDEV_KIND_MACSEC,            offsetof(Network, stacked_netdev_names)
 Network.MACVLAN,                             config_parse_stacked_netdev,                              NETDEV_KIND_MACVLAN,           offsetof(Network, stacked_netdev_names)
 Network.MACVTAP,                             config_parse_stacked_netdev,                              NETDEV_KIND_MACVTAP,           offsetof(Network, stacked_netdev_names)
@@ -220,7 +222,7 @@ DHCPv4.SendHostname,                         config_parse_bool,                 
 DHCPv4.Hostname,                             config_parse_hostname,                                    0,                             offsetof(Network, dhcp_hostname)
 DHCPv4.Label,                                config_parse_dhcp_label,                                  0,                             offsetof(Network, dhcp_label)
 DHCPv4.RequestBroadcast,                     config_parse_tristate,                                    0,                             offsetof(Network, dhcp_broadcast)
-DHCPv4.VendorClassIdentifier,                config_parse_string,                                      0,                             offsetof(Network, dhcp_vendor_class_identifier)
+DHCPv4.VendorClassIdentifier,                config_parse_string,                                      CONFIG_PARSE_STRING_SAFE,      offsetof(Network, dhcp_vendor_class_identifier)
 DHCPv4.MUDURL,                               config_parse_mud_url,                                     0,                             offsetof(Network, dhcp_mudurl)
 DHCPv4.MaxAttempts,                          config_parse_dhcp_max_attempts,                           0,                             0
 DHCPv4.UserClass,                            config_parse_dhcp_user_or_vendor_class,                   AF_INET,                       offsetof(Network, dhcp_user_class)
@@ -303,11 +305,15 @@ DHCPServer.PoolSize,                         config_parse_uint32,               
 DHCPServer.SendVendorOption,                 config_parse_dhcp_send_option,                            0,                             offsetof(Network, dhcp_server_send_vendor_options)
 DHCPServer.SendOption,                       config_parse_dhcp_send_option,                            0,                             offsetof(Network, dhcp_server_send_options)
 DHCPServer.BindToInterface,                  config_parse_bool,                                        0,                             offsetof(Network, dhcp_server_bind_to_interface)
+DHCPServer.BootServerAddress,                config_parse_in_addr_non_null,                            AF_INET,                       offsetof(Network, dhcp_server_boot_server_address)
+DHCPServer.BootServerName,                   config_parse_dns_name,                                    0,                             offsetof(Network, dhcp_server_boot_server_name)
+DHCPServer.BootFilename,                     config_parse_string,                                      CONFIG_PARSE_STRING_SAFE_AND_ASCII, offsetof(Network, dhcp_server_boot_filename)
 DHCPServerStaticLease.Address,               config_parse_dhcp_static_lease_address,                   0,                             0
 DHCPServerStaticLease.MACAddress,            config_parse_dhcp_static_lease_hwaddr,                    0,                             0
 Bridge.Cost,                                 config_parse_uint32,                                      0,                             offsetof(Network, cost)
 Bridge.UseBPDU,                              config_parse_tristate,                                    0,                             offsetof(Network, use_bpdu)
 Bridge.HairPin,                              config_parse_tristate,                                    0,                             offsetof(Network, hairpin)
+Bridge.Isolated,                             config_parse_tristate,                                    0,                             offsetof(Network, isolated)
 Bridge.FastLeave,                            config_parse_tristate,                                    0,                             offsetof(Network, fast_leave)
 Bridge.AllowPortToBeRoot,                    config_parse_tristate,                                    0,                             offsetof(Network, allow_port_to_be_root)
 Bridge.UnicastFlood,                         config_parse_tristate,                                    0,                             offsetof(Network, unicast_flood)
@@ -538,7 +544,7 @@ DHCP.SendHostname,                           config_parse_bool,                 
 DHCP.Hostname,                               config_parse_hostname,                                    0,                             offsetof(Network, dhcp_hostname)
 DHCP.RequestBroadcast,                       config_parse_tristate,                                    0,                             offsetof(Network, dhcp_broadcast)
 DHCP.CriticalConnection,                     config_parse_tristate,                                    0,                             offsetof(Network, dhcp_critical)
-DHCP.VendorClassIdentifier,                  config_parse_string,                                      0,                             offsetof(Network, dhcp_vendor_class_identifier)
+DHCP.VendorClassIdentifier,                  config_parse_string,                                      CONFIG_PARSE_STRING_SAFE,      offsetof(Network, dhcp_vendor_class_identifier)
 DHCP.UserClass,                              config_parse_dhcp_user_or_vendor_class,                   AF_INET,                       offsetof(Network, dhcp_user_class)
 DHCP.IAID,                                   config_parse_iaid,                                        AF_INET,                       0
 DHCP.DUIDType,                               config_parse_network_duid_type,                           0,                             0

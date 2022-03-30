@@ -105,6 +105,8 @@ shared_sources = files(
         'dns-domain.h',
         'dropin.c',
         'dropin.h',
+        'efi-api.c',
+        'efi-api.h',
         'efi-loader.c',
         'efi-loader.h',
         'elf-util.c',
@@ -125,6 +127,8 @@ shared_sources = files(
         'fdset.h',
         'fileio-label.c',
         'fileio-label.h',
+        'find-esp.c',
+        'find-esp.h',
         'firewall-util-nft.c',
         'firewall-util-private.h',
         'firewall-util.c',
@@ -176,8 +180,8 @@ shared_sources = files(
         'json.h',
         'kbd-util.c',
         'kbd-util.h',
-        'keyring-util.h',
         'keyring-util.c',
+        'keyring-util.h',
         'killall.c',
         'killall.h',
         'label.c',
@@ -224,6 +228,8 @@ shared_sources = files(
         'net-condition.h',
         'netif-naming-scheme.c',
         'netif-naming-scheme.h',
+        'netif-sriov.c',
+        'netif-sriov.h',
         'netif-util.c',
         'netif-util.h',
         'nscd-flush.h',
@@ -433,7 +439,7 @@ target2 = custom_target(
 shared_generated_gperf_headers = [target1, target2]
 shared_sources += shared_generated_gperf_headers
 
-libshared_name = 'systemd-shared-@0@'.format(meson.project_version())
+libshared_name = 'systemd-shared-@0@'.format(shared_lib_tag)
 
 libshared_deps = [threads,
                   libacl,
@@ -468,13 +474,13 @@ libshared_static = static_library(
 libshared = shared_library(
         libshared_name,
         include_directories : includes,
+        c_args : ['-fvisibility=default'],
         link_args : ['-shared',
                      '-Wl,--version-script=' + libshared_sym_path],
         link_whole : [libshared_static,
                       libbasic,
                       libbasic_gcrypt,
                       libsystemd_static],
-        c_args : ['-fvisibility=default'],
         dependencies : libshared_deps,
         install : true,
         install_dir : rootlibexecdir)

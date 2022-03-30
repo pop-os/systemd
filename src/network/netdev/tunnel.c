@@ -86,10 +86,68 @@ int dhcp4_pd_create_6rd_tunnel_name(Link *link, char **ret) {
         return 0;
 }
 
+static int dhcp4_pd_create_6rd_tunnel_message(
+                Link *link,
+                sd_netlink_message *m,
+                const struct in_addr *ipv4address,
+                uint8_t ipv4masklen,
+                const struct in6_addr *sixrd_prefix,
+                uint8_t sixrd_prefixlen) {
+        int r;
+
+        r = sd_netlink_message_append_string(m, IFLA_IFNAME, link->dhcp4_6rd_tunnel_name);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_open_container(m, IFLA_LINKINFO);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_open_container_union(m, IFLA_INFO_DATA, "sit");
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_in_addr(m, IFLA_IPTUN_LOCAL, ipv4address);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_u8(m, IFLA_IPTUN_TTL, 64);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_6RD_PREFIX, sixrd_prefix);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_u16(m, IFLA_IPTUN_6RD_PREFIXLEN, sixrd_prefixlen);
+        if (r < 0)
+                return r;
+
+        struct in_addr relay_prefix = *ipv4address;
+        (void) in4_addr_mask(&relay_prefix, ipv4masklen);
+        r = sd_netlink_message_append_u32(m, IFLA_IPTUN_6RD_RELAY_PREFIX, relay_prefix.s_addr);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_u16(m, IFLA_IPTUN_6RD_RELAY_PREFIXLEN, ipv4masklen);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_close_container(m);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_close_container(m);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
 int dhcp4_pd_create_6rd_tunnel(Link *link, link_netlink_message_handler_t callback) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
         uint8_t ipv4masklen, sixrd_prefixlen;
-        struct in_addr ipv4address, relay_prefix;
+        struct in_addr ipv4address;
         struct in6_addr sixrd_prefix;
         int r;
 
@@ -110,65 +168,38 @@ int dhcp4_pd_create_6rd_tunnel(Link *link, link_netlink_message_handler_t callba
 
         r = sd_rtnl_message_new_link(link->manager->rtnl, &m, RTM_NEWLINK, 0);
         if (r < 0)
-                return log_link_debug_errno(link, r, "Could not allocate RTM_NEWLINK message: %m");
+                return log_link_debug_errno(link, r, "Failed to create netlink message: %m");
 
-        r = sd_netlink_message_append_string(m, IFLA_IFNAME, link->dhcp4_6rd_tunnel_name);
+        r = dhcp4_pd_create_6rd_tunnel_message(link, m,
+                                               &ipv4address, ipv4masklen,
+                                               &sixrd_prefix, sixrd_prefixlen);
         if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IFNAME, attribute: %m");
-
-        r = sd_netlink_message_open_container(m, IFLA_LINKINFO);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_LINKINFO attribute: %m");
-
-        r = sd_netlink_message_open_container_union(m, IFLA_INFO_DATA, "sit");
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_INFO_DATA attribute: %m");
-
-        r = sd_netlink_message_append_in_addr(m, IFLA_IPTUN_LOCAL, &ipv4address);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_LOCAL attribute: %m");
-
-        r = sd_netlink_message_append_u8(m, IFLA_IPTUN_TTL, 64);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_TTL attribute: %m");
-
-        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_6RD_PREFIX, &sixrd_prefix);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_6RD_PREFIX attribute: %m");
-
-        r = sd_netlink_message_append_u16(m, IFLA_IPTUN_6RD_PREFIXLEN, sixrd_prefixlen);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_6RD_PREFIXLEN attribute: %m");
-
-        relay_prefix = ipv4address;
-        (void) in4_addr_mask(&relay_prefix, ipv4masklen);
-        r = sd_netlink_message_append_u32(m, IFLA_IPTUN_6RD_RELAY_PREFIX, relay_prefix.s_addr);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_6RD_RELAY_PREFIX attribute: %m");
-
-        r = sd_netlink_message_append_u16(m, IFLA_IPTUN_6RD_RELAY_PREFIXLEN, ipv4masklen);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_IPTUN_6RD_RELAY_PREFIXLEN attribute: %m");
-
-        r = sd_netlink_message_close_container(m);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_INFO_DATA attribute: %m");
-
-        r = sd_netlink_message_close_container(m);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Could not append IFLA_LINKINFO attribute: %m");
+                return log_link_debug_errno(link, r, "Failed to fill netlink message: %m");
 
         r = netlink_call_async(link->manager->rtnl, NULL, m, callback,
                                link_netlink_destroy_callback, link);
         if (r < 0)
-                return log_link_debug_errno(link, r, "Could not send rtnetlink message: %m");
+                return log_link_debug_errno(link, r, "Could not send netlink message: %m");
 
         link_ref(link);
 
         return 0;
 }
 
+static int tunnel_get_local_address(Tunnel *t, Link *link, union in_addr_union *ret) {
+        assert(t);
+
+        if (t->local_type < 0) {
+                if (ret)
+                        *ret = t->local;
+                return 0;
+        }
+
+        return link_get_local_address(link, t->local_type, t->family, NULL, ret);
+}
+
 static int netdev_ipip_sit_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
+        union in_addr_union local;
         Tunnel *t;
         int r;
 
@@ -182,54 +213,67 @@ static int netdev_ipip_sit_fill_message_create(NetDev *netdev, Link *link, sd_ne
 
         assert(t);
 
+        if (t->external) {
+                r = sd_netlink_message_append_flag(m, IFLA_IPTUN_COLLECT_METADATA);
+                if (r < 0)
+                        return r;
+
+                /* If external mode is enabled, then the following settings should not be appended. */
+                return 0;
+        }
+
         if (link || t->assign_to_loopback) {
                 r = sd_netlink_message_append_u32(m, IFLA_IPTUN_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_LINK attribute: %m");
+                        return r;
         }
 
-        r = sd_netlink_message_append_in_addr(m, IFLA_IPTUN_LOCAL, &t->local.in);
+        r = tunnel_get_local_address(t, link, &local);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_LOCAL attribute: %m");
+                return log_netdev_error_errno(netdev, r, "Could not find local address: %m");
+
+        r = sd_netlink_message_append_in_addr(m, IFLA_IPTUN_LOCAL, &local.in);
+        if (r < 0)
+                return r;
 
         r = sd_netlink_message_append_in_addr(m, IFLA_IPTUN_REMOTE, &t->remote.in);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_REMOTE attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_IPTUN_TTL, t->ttl);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_TTL attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_IPTUN_PMTUDISC, t->pmtudisc);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_PMTUDISC attribute: %m");
+                return r;
 
         if (t->fou_tunnel) {
                 r = sd_netlink_message_append_u16(m, IFLA_IPTUN_ENCAP_TYPE, t->fou_encap_type);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_ENCAP_TYPE attribute: %m");
+                        return r;
 
                 r = sd_netlink_message_append_u16(m, IFLA_IPTUN_ENCAP_SPORT, htobe16(t->encap_src_port));
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_ENCAP_SPORT attribute: %m");
+                        return r;
 
                 r = sd_netlink_message_append_u16(m, IFLA_IPTUN_ENCAP_DPORT, htobe16(t->fou_destination_port));
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_ENCAP_DPORT attribute: %m");
+                        return r;
         }
 
         if (netdev->kind == NETDEV_KIND_SIT) {
                 if (t->sixrd_prefixlen > 0) {
                         r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_6RD_PREFIX, &t->sixrd_prefix);
                         if (r < 0)
-                                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_6RD_PREFIX attribute: %m");
+                                return r;
 
                         /* u16 is deliberate here, even though we're passing a netmask that can never be >128. The kernel is
                          * expecting to receive the prefixlen as a u16.
                          */
                         r = sd_netlink_message_append_u16(m, IFLA_IPTUN_6RD_PREFIXLEN, t->sixrd_prefixlen);
                         if (r < 0)
-                                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_6RD_PREFIXLEN attribute: %m");
+                                return r;
                 }
 
                 if (t->isatap >= 0) {
@@ -239,14 +283,15 @@ static int netdev_ipip_sit_fill_message_create(NetDev *netdev, Link *link, sd_ne
 
                         r = sd_netlink_message_append_u16(m, IFLA_IPTUN_FLAGS, flags);
                         if (r < 0)
-                                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_FLAGS attribute: %m");
+                                return r;
                 }
         }
 
-        return r;
+        return 0;
 }
 
 static int netdev_gre_erspan_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
+        union in_addr_union local;
         uint32_t ikey = 0;
         uint32_t okey = 0;
         uint16_t iflags = 0;
@@ -273,37 +318,50 @@ static int netdev_gre_erspan_fill_message_create(NetDev *netdev, Link *link, sd_
 
         assert(t);
 
+        if (t->external) {
+                r = sd_netlink_message_append_flag(m, IFLA_GRE_COLLECT_METADATA);
+                if (r < 0)
+                        return r;
+
+                /* If external mode is enabled, then the following settings should not be appended. */
+                return 0;
+        }
+
         if (link || t->assign_to_loopback) {
                 r = sd_netlink_message_append_u32(m, IFLA_GRE_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_LINK attribute: %m");
+                        return r;
         }
 
         if (netdev->kind == NETDEV_KIND_ERSPAN) {
                 r = sd_netlink_message_append_u32(m, IFLA_GRE_ERSPAN_INDEX, t->erspan_index);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_ERSPAN_INDEX attribute: %m");
+                        return r;
         }
 
-        r = sd_netlink_message_append_in_addr(m, IFLA_GRE_LOCAL, &t->local.in);
+        r = tunnel_get_local_address(t, link, &local);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_LOCAL attribute: %m");
+                return log_netdev_error_errno(netdev, r, "Could not find local address: %m");
+
+        r = sd_netlink_message_append_in_addr(m, IFLA_GRE_LOCAL, &local.in);
+        if (r < 0)
+                return r;
 
         r = sd_netlink_message_append_in_addr(m, IFLA_GRE_REMOTE, &t->remote.in);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_REMOTE attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_GRE_TTL, t->ttl);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_TTL attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_GRE_TOS, t->tos);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_TOS attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_GRE_PMTUDISC, t->pmtudisc);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_PMTUDISC attribute: %m");
+                return r;
 
         if (t->key != 0) {
                 ikey = okey = htobe32(t->key);
@@ -331,38 +389,39 @@ static int netdev_gre_erspan_fill_message_create(NetDev *netdev, Link *link, sd_
 
         r = sd_netlink_message_append_u32(m, IFLA_GRE_IKEY, ikey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_IKEY attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u32(m, IFLA_GRE_OKEY, okey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_OKEY attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u16(m, IFLA_GRE_IFLAGS, iflags);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_IFLAGS attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u16(m, IFLA_GRE_OFLAGS, oflags);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_OFLAGS, attribute: %m");
+                return r;
 
         if (t->fou_tunnel) {
                 r = sd_netlink_message_append_u16(m, IFLA_GRE_ENCAP_TYPE, t->fou_encap_type);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_ENCAP_TYPE attribute: %m");
+                        return r;
 
                 r = sd_netlink_message_append_u16(m, IFLA_GRE_ENCAP_SPORT, htobe16(t->encap_src_port));
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_ENCAP_SPORT attribute: %m");
+                        return r;
 
                 r = sd_netlink_message_append_u16(m, IFLA_GRE_ENCAP_DPORT, htobe16(t->fou_destination_port));
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_ENCAP_DPORT attribute: %m");
+                        return r;
         }
 
-        return r;
+        return 0;
 }
 
 static int netdev_ip6gre_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
+        union in_addr_union local;
         uint32_t ikey = 0;
         uint32_t okey = 0;
         uint16_t iflags = 0;
@@ -380,33 +439,46 @@ static int netdev_ip6gre_fill_message_create(NetDev *netdev, Link *link, sd_netl
 
         assert(t);
 
+        if (t->external) {
+                r = sd_netlink_message_append_flag(m, IFLA_GRE_COLLECT_METADATA);
+                if (r < 0)
+                        return r;
+
+                /* If external mode is enabled, then the following settings should not be appended. */
+                return 0;
+        }
+
         if (link || t->assign_to_loopback) {
                 r = sd_netlink_message_append_u32(m, IFLA_GRE_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_LINK attribute: %m");
+                        return r;
         }
 
-        r = sd_netlink_message_append_in6_addr(m, IFLA_GRE_LOCAL, &t->local.in6);
+        r = tunnel_get_local_address(t, link, &local);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_LOCAL attribute: %m");
+                return log_netdev_error_errno(netdev, r, "Could not find local address: %m");
+
+        r = sd_netlink_message_append_in6_addr(m, IFLA_GRE_LOCAL, &local.in6);
+        if (r < 0)
+                return r;
 
         r = sd_netlink_message_append_in6_addr(m, IFLA_GRE_REMOTE, &t->remote.in6);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_REMOTE attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u8(m, IFLA_GRE_TTL, t->ttl);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_TTL attribute: %m");
+                return r;
 
         if (t->ipv6_flowlabel != _NETDEV_IPV6_FLOWLABEL_INVALID) {
                 r = sd_netlink_message_append_u32(m, IFLA_GRE_FLOWINFO, t->ipv6_flowlabel);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_FLOWINFO attribute: %m");
+                        return r;
         }
 
         r = sd_netlink_message_append_u32(m, IFLA_GRE_FLAGS, t->flags);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_FLAGS attribute: %m");
+                return r;
 
         if (t->key != 0) {
                 ikey = okey = htobe32(t->key);
@@ -426,24 +498,25 @@ static int netdev_ip6gre_fill_message_create(NetDev *netdev, Link *link, sd_netl
 
         r = sd_netlink_message_append_u32(m, IFLA_GRE_IKEY, ikey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_IKEY attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u32(m, IFLA_GRE_OKEY, okey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_OKEY attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u16(m, IFLA_GRE_IFLAGS, iflags);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_IFLAGS attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u16(m, IFLA_GRE_OFLAGS, oflags);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_GRE_OFLAGS, attribute: %m");
+                return r;
 
-        return r;
+        return 0;
 }
 
 static int netdev_vti_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
+        union in_addr_union local;
         uint32_t ikey, okey;
         Tunnel *t;
         int r;
@@ -461,7 +534,7 @@ static int netdev_vti_fill_message_create(NetDev *netdev, Link *link, sd_netlink
         if (link || t->assign_to_loopback) {
                 r = sd_netlink_message_append_u32(m, IFLA_VTI_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_VTI_LINK attribute: %m");
+                        return r;
         }
 
         if (t->key != 0)
@@ -473,24 +546,29 @@ static int netdev_vti_fill_message_create(NetDev *netdev, Link *link, sd_netlink
 
         r = sd_netlink_message_append_u32(m, IFLA_VTI_IKEY, ikey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_VTI_IKEY attribute: %m");
+                return r;
 
         r = sd_netlink_message_append_u32(m, IFLA_VTI_OKEY, okey);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_VTI_OKEY attribute: %m");
+                return r;
 
-        r = netlink_message_append_in_addr_union(m, IFLA_VTI_LOCAL, t->family, &t->local);
+        r = tunnel_get_local_address(t, link, &local);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_VTI_LOCAL attribute: %m");
+                return log_netdev_error_errno(netdev, r, "Could not find local address: %m");
+
+        r = netlink_message_append_in_addr_union(m, IFLA_VTI_LOCAL, t->family, &local);
+        if (r < 0)
+                return r;
 
         r = netlink_message_append_in_addr_union(m, IFLA_VTI_REMOTE, t->family, &t->remote);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_VTI_REMOTE attribute: %m");
+                return r;
 
-        return r;
+        return 0;
 }
 
 static int netdev_ip6tnl_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
+        union in_addr_union local;
         uint8_t proto;
         Tunnel *t;
         int r;
@@ -501,46 +579,6 @@ static int netdev_ip6tnl_fill_message_create(NetDev *netdev, Link *link, sd_netl
         t = IP6TNL(netdev);
 
         assert(t);
-
-        if (link || t->assign_to_loopback) {
-                r = sd_netlink_message_append_u32(m, IFLA_IPTUN_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
-                if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_LINK attribute: %m");
-        }
-
-        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_LOCAL, &t->local.in6);
-        if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_LOCAL attribute: %m");
-
-        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_REMOTE, &t->remote.in6);
-        if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_REMOTE attribute: %m");
-
-        r = sd_netlink_message_append_u8(m, IFLA_IPTUN_TTL, t->ttl);
-        if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_TTL attribute: %m");
-
-        if (t->ipv6_flowlabel != _NETDEV_IPV6_FLOWLABEL_INVALID) {
-                r = sd_netlink_message_append_u32(m, IFLA_IPTUN_FLOWINFO, t->ipv6_flowlabel);
-                if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_FLOWINFO attribute: %m");
-        }
-
-        if (t->copy_dscp)
-                t->flags |= IP6_TNL_F_RCV_DSCP_COPY;
-
-        if (t->allow_localremote >= 0)
-                SET_FLAG(t->flags, IP6_TNL_F_ALLOW_LOCAL_REMOTE, t->allow_localremote);
-
-        if (t->encap_limit != 0) {
-                r = sd_netlink_message_append_u8(m, IFLA_IPTUN_ENCAP_LIMIT, t->encap_limit);
-                if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_ENCAP_LIMIT attribute: %m");
-        }
-
-        r = sd_netlink_message_append_u32(m, IFLA_IPTUN_FLAGS, t->flags);
-        if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_FLAGS attribute: %m");
 
         switch (t->ip6tnl_mode) {
         case NETDEV_IP6_TNL_MODE_IP6IP6:
@@ -557,9 +595,77 @@ static int netdev_ip6tnl_fill_message_create(NetDev *netdev, Link *link, sd_netl
 
         r = sd_netlink_message_append_u8(m, IFLA_IPTUN_PROTO, proto);
         if (r < 0)
-                return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPTUN_PROTO attribute: %m");
+                return r;
 
-        return r;
+        if (t->external) {
+                r = sd_netlink_message_append_flag(m, IFLA_IPTUN_COLLECT_METADATA);
+                if (r < 0)
+                        return r;
+
+                /* If external mode is enabled, then the following settings should not be appended. */
+                return 0;
+        }
+
+        if (link || t->assign_to_loopback) {
+                r = sd_netlink_message_append_u32(m, IFLA_IPTUN_LINK, link ? link->ifindex : LOOPBACK_IFINDEX);
+                if (r < 0)
+                        return r;
+        }
+
+        r = tunnel_get_local_address(t, link, &local);
+        if (r < 0)
+                return log_netdev_error_errno(netdev, r, "Could not find local address: %m");
+
+        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_LOCAL, &local.in6);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_in6_addr(m, IFLA_IPTUN_REMOTE, &t->remote.in6);
+        if (r < 0)
+                return r;
+
+        r = sd_netlink_message_append_u8(m, IFLA_IPTUN_TTL, t->ttl);
+        if (r < 0)
+                return r;
+
+        if (t->ipv6_flowlabel != _NETDEV_IPV6_FLOWLABEL_INVALID) {
+                r = sd_netlink_message_append_u32(m, IFLA_IPTUN_FLOWINFO, t->ipv6_flowlabel);
+                if (r < 0)
+                        return r;
+        }
+
+        if (t->copy_dscp)
+                t->flags |= IP6_TNL_F_RCV_DSCP_COPY;
+
+        if (t->allow_localremote >= 0)
+                SET_FLAG(t->flags, IP6_TNL_F_ALLOW_LOCAL_REMOTE, t->allow_localremote);
+
+        r = sd_netlink_message_append_u32(m, IFLA_IPTUN_FLAGS, t->flags);
+        if (r < 0)
+                return r;
+
+        if (t->encap_limit != 0) {
+                r = sd_netlink_message_append_u8(m, IFLA_IPTUN_ENCAP_LIMIT, t->encap_limit);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
+static int netdev_tunnel_is_ready_to_create(NetDev *netdev, Link *link) {
+        Tunnel *t;
+
+        assert(netdev);
+
+        t = TUNNEL(netdev);
+
+        assert(t);
+
+        if (t->independent)
+                return true;
+
+        return tunnel_get_local_address(t, link, NULL) >= 0;
 }
 
 static int netdev_tunnel_verify(NetDev *netdev, const char *filename) {
@@ -571,6 +677,23 @@ static int netdev_tunnel_verify(NetDev *netdev, const char *filename) {
         t = TUNNEL(netdev);
 
         assert(t);
+
+        if (netdev->kind == NETDEV_KIND_IP6TNL &&
+            t->ip6tnl_mode == _NETDEV_IP6_TNL_MODE_INVALID)
+                return log_netdev_error_errno(netdev, SYNTHETIC_ERRNO(EINVAL),
+                                              "ip6tnl without mode configured in %s. Ignoring", filename);
+
+        if (t->external) {
+                if (IN_SET(netdev->kind, NETDEV_KIND_VTI, NETDEV_KIND_VTI6))
+                        log_netdev_debug(netdev, "vti/vti6 tunnel do not support external mode, ignoring.");
+                else {
+                        /* tunnel with external mode does not require underlying interface. */
+                        t->independent = true;
+
+                        /* tunnel with external mode does not require any settings checked below. */
+                        return 0;
+                }
+        }
 
         if (IN_SET(netdev->kind, NETDEV_KIND_VTI, NETDEV_KIND_IPIP, NETDEV_KIND_SIT, NETDEV_KIND_GRE) &&
             !IN_SET(t->family, AF_UNSPEC, AF_INET))
@@ -592,11 +715,6 @@ static int netdev_tunnel_verify(NetDev *netdev, const char *filename) {
                 return log_netdev_error_errno(netdev, SYNTHETIC_ERRNO(EINVAL),
                                               "ip6gretap tunnel without a remote IPv6 address configured in %s. Ignoring", filename);
 
-        if (netdev->kind == NETDEV_KIND_IP6TNL &&
-            t->ip6tnl_mode == _NETDEV_IP6_TNL_MODE_INVALID)
-                return log_netdev_error_errno(netdev, SYNTHETIC_ERRNO(EINVAL),
-                                              "ip6tnl without mode configured in %s. Ignoring", filename);
-
         if (t->fou_tunnel && t->fou_destination_port <= 0)
                 return log_netdev_error_errno(netdev, SYNTHETIC_ERRNO(EINVAL),
                                               "FooOverUDP missing port configured in %s. Ignoring", filename);
@@ -611,10 +729,15 @@ static int netdev_tunnel_verify(NetDev *netdev, const char *filename) {
         if (t->assign_to_loopback)
                 t->independent = true;
 
+        if (t->independent && t->local_type >= 0)
+                return log_netdev_error_errno(netdev, SYNTHETIC_ERRNO(EINVAL),
+                                              "The local address cannot be '%s' when Independent= or AssignToLoopback= is enabled, ignoring.",
+                                              strna(netdev_local_address_type_to_string(t->local_type)));
+
         return 0;
 }
 
-int config_parse_tunnel_address(
+int config_parse_tunnel_local_address(
                 const char *unit,
                 const char *filename,
                 unsigned line,
@@ -626,28 +749,82 @@ int config_parse_tunnel_address(
                 void *data,
                 void *userdata) {
 
+        union in_addr_union buffer = IN_ADDR_NULL;
+        NetDevLocalAddressType type;
         Tunnel *t = userdata;
-        union in_addr_union *addr = data, buffer;
         int r, f;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
+        assert(userdata);
 
-        /* This is used to parse addresses on both local and remote ends of the tunnel.
-         * Address families must match.
-         *
-         * "any" is a special value which means that the address is unspecified.
-         */
+        if (isempty(rvalue) || streq(rvalue, "any")) {
+                /* Unset the previous assignment. */
+                t->local = IN_ADDR_NULL;
+                t->local_type = _NETDEV_LOCAL_ADDRESS_TYPE_INVALID;
 
-        if (streq(rvalue, "any")) {
-                *addr = IN_ADDR_NULL;
+                /* If the remote address is not specified, also clear the address family. */
+                if (!in_addr_is_set(t->family, &t->remote))
+                        t->family = AF_UNSPEC;
+                return 0;
+        }
 
-                /* As a special case, if both the local and remote addresses are
-                 * unspecified, also clear the address family. */
-                if (!in_addr_is_set(t->family, &t->local) &&
-                    !in_addr_is_set(t->family, &t->remote))
+        type = netdev_local_address_type_from_string(rvalue);
+        if (IN_SET(type, NETDEV_LOCAL_ADDRESS_IPV4LL, NETDEV_LOCAL_ADDRESS_DHCP4))
+                f = AF_INET;
+        else if (IN_SET(type, NETDEV_LOCAL_ADDRESS_IPV6LL, NETDEV_LOCAL_ADDRESS_DHCP6, NETDEV_LOCAL_ADDRESS_SLAAC))
+                f = AF_INET6;
+        else {
+                type = _NETDEV_LOCAL_ADDRESS_TYPE_INVALID;
+                r = in_addr_from_string_auto(rvalue, &f, &buffer);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Tunnel address \"%s\" invalid, ignoring assignment: %m", rvalue);
+                        return 0;
+                }
+        }
+
+        if (t->family != AF_UNSPEC && t->family != f) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Address family does not match the previous assignment, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        t->family = f;
+        t->local = buffer;
+        t->local_type = type;
+        return 0;
+}
+
+int config_parse_tunnel_remote_address(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        union in_addr_union buffer;
+        Tunnel *t = userdata;
+        int r, f;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(userdata);
+
+        if (isempty(rvalue) || streq(rvalue, "any")) {
+                /* Unset the previous assignment. */
+                t->remote = IN_ADDR_NULL;
+
+                /* If the local address is not specified, also clear the address family. */
+                if (t->local_type == _NETDEV_LOCAL_ADDRESS_TYPE_INVALID &&
+                    !in_addr_is_set(t->family, &t->local))
                         t->family = AF_UNSPEC;
                 return 0;
         }
@@ -661,12 +838,12 @@ int config_parse_tunnel_address(
 
         if (t->family != AF_UNSPEC && t->family != f) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
-                           "Tunnel addresses incompatible, ignoring assignment: %s", rvalue);
+                           "Address family does not match the previous assignment, ignoring assignment: %s", rvalue);
                 return 0;
         }
 
         t->family = f;
-        *addr = buffer;
+        t->remote = buffer;
         return 0;
 }
 
@@ -682,15 +859,12 @@ int config_parse_tunnel_key(
                 void *data,
                 void *userdata) {
 
+        uint32_t *dest = ASSERT_PTR(data), k;
         union in_addr_union buffer;
-        Tunnel *t = userdata;
-        uint32_t k;
         int r;
 
         assert(filename);
-        assert(lvalue);
         assert(rvalue);
-        assert(data);
 
         r = in_addr_from_string(AF_INET, rvalue, &buffer);
         if (r < 0) {
@@ -703,13 +877,7 @@ int config_parse_tunnel_key(
         } else
                 k = be32toh(buffer.in.s_addr);
 
-        if (streq(lvalue, "Key"))
-                t->key = k;
-        else if (streq(lvalue, "InputKey"))
-                t->ikey = k;
-        else
-                t->okey = k;
-
+        *dest = k;
         return 0;
 }
 
@@ -725,32 +893,33 @@ int config_parse_ipv6_flowlabel(
                 void *data,
                 void *userdata) {
 
-        IPv6FlowLabel *ipv6_flowlabel = data;
-        Tunnel *t = userdata;
-        int k = 0;
-        int r;
+        Tunnel *t = ASSERT_PTR(userdata);
+        int k, r;
 
         assert(filename);
-        assert(lvalue);
         assert(rvalue);
-        assert(ipv6_flowlabel);
 
         if (streq(rvalue, "inherit")) {
-                *ipv6_flowlabel = IP6_FLOWINFO_FLOWLABEL;
+                t->ipv6_flowlabel = IP6_FLOWINFO_FLOWLABEL;
                 t->flags |= IP6_TNL_F_USE_ORIG_FLOWLABEL;
-        } else {
-                r = config_parse_int(unit, filename, line, section, section_line, lvalue, ltype, rvalue, &k, userdata);
-                if (r < 0)
-                        return r;
-
-                if (k > 0xFFFFF)
-                        log_syntax(unit, LOG_WARNING, filename, line, 0, "Failed to parse IPv6 flowlabel option, ignoring: %s", rvalue);
-                else {
-                        *ipv6_flowlabel = htobe32(k) & IP6_FLOWINFO_FLOWLABEL;
-                        t->flags &= ~IP6_TNL_F_USE_ORIG_FLOWLABEL;
-                }
+                return 0;
         }
 
+        r = safe_atoi(rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse tunnel IPv6 flowlabel, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        if (k > 0xFFFFF) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Invalid tunnel IPv6 flowlabel, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        t->ipv6_flowlabel = htobe32(k) & IP6_FLOWINFO_FLOWLABEL;
+        t->flags &= ~IP6_TNL_F_USE_ORIG_FLOWLABEL;
         return 0;
 }
 
@@ -766,31 +935,33 @@ int config_parse_encap_limit(
                 void *data,
                 void *userdata) {
 
-        Tunnel *t = userdata;
-        int k = 0;
-        int r;
+        Tunnel *t = ASSERT_PTR(userdata);
+        int k, r;
 
         assert(filename);
-        assert(lvalue);
         assert(rvalue);
 
-        if (streq(rvalue, "none"))
+        if (streq(rvalue, "none")) {
                 t->flags |= IP6_TNL_F_IGN_ENCAP_LIMIT;
-        else {
-                r = safe_atoi(rvalue, &k);
-                if (r < 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse Tunnel Encapsulation Limit option, ignoring: %s", rvalue);
-                        return 0;
-                }
-
-                if (k > 255 || k < 0)
-                        log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid Tunnel Encapsulation value, ignoring: %d", k);
-                else {
-                        t->encap_limit = k;
-                        t->flags &= ~IP6_TNL_F_IGN_ENCAP_LIMIT;
-                }
+                t->encap_limit = 0;
+                return 0;
         }
 
+        r = safe_atoi(rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse Tunnel Encapsulation Limit option, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        if (k > 255 || k < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Invalid Tunnel Encapsulation value, ignoring assignment: %d", k);
+                return 0;
+        }
+
+        t->encap_limit = k;
+        t->flags &= ~IP6_TNL_F_IGN_ENCAP_LIMIT;
         return 0;
 }
 
@@ -840,6 +1011,7 @@ static void netdev_tunnel_init(NetDev *netdev) {
 
         assert(t);
 
+        t->local_type = _NETDEV_LOCAL_ADDRESS_TYPE_INVALID;
         t->pmtudisc = true;
         t->fou_encap_type = NETDEV_FOO_OVER_UDP_ENCAP_DIRECT;
         t->isatap = -1;
@@ -859,6 +1031,7 @@ const NetDevVTable ipip_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_ipip_sit_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_TUNNEL,
 };
@@ -869,6 +1042,7 @@ const NetDevVTable sit_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_ipip_sit_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_SIT,
 };
@@ -879,6 +1053,7 @@ const NetDevVTable vti_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_vti_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_TUNNEL,
 };
@@ -889,6 +1064,7 @@ const NetDevVTable vti6_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_vti_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_TUNNEL6,
 };
@@ -899,6 +1075,7 @@ const NetDevVTable gre_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_gre_erspan_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_IPGRE,
 };
@@ -909,6 +1086,7 @@ const NetDevVTable gretap_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_gre_erspan_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_ETHER,
         .generate_mac = true,
@@ -920,6 +1098,7 @@ const NetDevVTable ip6gre_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_ip6gre_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_IP6GRE,
 };
@@ -930,6 +1109,7 @@ const NetDevVTable ip6gretap_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_ip6gre_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_ETHER,
         .generate_mac = true,
@@ -941,6 +1121,7 @@ const NetDevVTable ip6tnl_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_ip6tnl_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_TUNNEL6,
 };
@@ -951,6 +1132,7 @@ const NetDevVTable erspan_vtable = {
         .sections = NETDEV_COMMON_SECTIONS "Tunnel\0",
         .fill_message_create = netdev_gre_erspan_fill_message_create,
         .create_type = NETDEV_CREATE_STACKED,
+        .is_ready_to_create = netdev_tunnel_is_ready_to_create,
         .config_verify = netdev_tunnel_verify,
         .iftype = ARPHRD_ETHER,
         .generate_mac = true,

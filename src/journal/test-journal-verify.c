@@ -7,9 +7,9 @@
 #include "chattr-util.h"
 #include "fd-util.h"
 #include "io-util.h"
-#include "journald-file.h"
 #include "journal-verify.h"
 #include "log.h"
+#include "managed-journal-file.h"
 #include "mmap-cache.h"
 #include "rm-rf.h"
 #include "terminal-util.h"
@@ -46,7 +46,7 @@ static int raw_verify(const char *fn, const char *verification_key) {
         m = mmap_cache_new();
         assert_se(m != NULL);
 
-        r = journal_file_open(-1, fn, O_RDONLY, 0666, true, UINT64_MAX, !!verification_key, NULL, m, NULL, &f);
+        r = journal_file_open(-1, fn, O_RDONLY, JOURNAL_COMPRESS|(verification_key ? JOURNAL_SEAL : 0), 0666, UINT64_MAX, NULL, m, NULL, &f);
         if (r < 0)
                 return r;
 
@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
         char t[] = "/var/tmp/journal-XXXXXX";
         unsigned n;
         JournalFile *f;
-        JournaldFile *df;
+        ManagedJournalFile *df;
         const char *verification_key = argv[1];
         usec_t from = 0, to = 0, total = 0;
         struct stat st;
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
         m = mmap_cache_new();
         assert_se(m != NULL);
 
-        /* journald_file_open requires a valid machine id */
+        /* managed_journal_file_open requires a valid machine id */
         if (access("/etc/machine-id", F_OK) != 0)
                 return log_tests_skipped("/etc/machine-id not found");
 
@@ -82,7 +82,7 @@ int main(int argc, char *argv[]) {
 
         log_info("Generating...");
 
-        assert_se(journald_file_open(-1, "test.journal", O_RDWR|O_CREAT, 0666, true, UINT64_MAX, !!verification_key, NULL, m, NULL, NULL, &df) == 0);
+        assert_se(managed_journal_file_open(-1, "test.journal", O_RDWR|O_CREAT, JOURNAL_COMPRESS|(verification_key ? JOURNAL_SEAL : 0), 0666, UINT64_MAX, NULL, m, NULL, NULL, &df) == 0);
 
         for (n = 0; n < N_ENTRIES; n++) {
                 struct iovec iovec;
@@ -100,11 +100,11 @@ int main(int argc, char *argv[]) {
                 free(test);
         }
 
-        (void) journald_file_close(df);
+        (void) managed_journal_file_close(df);
 
         log_info("Verifying...");
 
-        assert_se(journal_file_open(-1, "test.journal", O_RDONLY, 0666, true, UINT64_MAX, !!verification_key, NULL, m, NULL, &f) == 0);
+        assert_se(journal_file_open(-1, "test.journal", O_RDONLY, JOURNAL_COMPRESS|(verification_key ? JOURNAL_SEAL: 0), 0666, UINT64_MAX, NULL, m, NULL, &f) == 0);
         /* journal_file_print_header(f); */
         journal_file_dump(f);
 

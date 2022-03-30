@@ -32,6 +32,7 @@ static char *arg_pkcs11_token_uri = NULL;
 static char *arg_fido2_device = NULL;
 static char *arg_tpm2_device = NULL;
 static uint32_t arg_tpm2_pcr_mask = UINT32_MAX;
+static bool arg_tpm2_pin = false;
 static char *arg_node = NULL;
 static int *arg_wipe_slots = NULL;
 static size_t arg_n_wipe_slots = 0;
@@ -100,6 +101,8 @@ static int help(void) {
                "                       Enroll a TPM2 device\n"
                "     --tpm2-pcrs=PCR1+PCR2+PCR3+…\n"
                "                       Specify TPM2 PCRs to seal against\n"
+               "     --tpm2-with-pin=BOOL\n"
+               "                       Whether to require entering a PIN to unlock the volume\n"
                "     --wipe-slot=SLOT1,SLOT2,…\n"
                "                       Wipe specified slots\n"
                "\nSee the %s for details.\n",
@@ -121,6 +124,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_FIDO2_DEVICE,
                 ARG_TPM2_DEVICE,
                 ARG_TPM2_PCRS,
+                ARG_TPM2_PIN,
                 ARG_WIPE_SLOT,
                 ARG_FIDO2_WITH_PIN,
                 ARG_FIDO2_WITH_UP,
@@ -139,6 +143,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "fido2-with-user-verification", required_argument, NULL, ARG_FIDO2_WITH_UV    },
                 { "tpm2-device",                  required_argument, NULL, ARG_TPM2_DEVICE      },
                 { "tpm2-pcrs",                    required_argument, NULL, ARG_TPM2_PCRS        },
+                { "tpm2-with-pin",                required_argument, NULL, ARG_TPM2_PIN         },
                 { "wipe-slot",                    required_argument, NULL, ARG_WIPE_SLOT        },
                 {}
         };
@@ -301,6 +306,14 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 }
 
+                case ARG_TPM2_PIN: {
+                        r = parse_boolean_argument("--tpm2-with-pin=", optarg, &arg_tpm2_pin);
+                        if (r < 0)
+                                return r;
+
+                        break;
+                }
+
                 case ARG_WIPE_SLOT: {
                         const char *p = optarg;
 
@@ -409,8 +422,8 @@ static int prepare_luks(
                 size_t *ret_volume_key_size) {
 
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
+        _cleanup_(erase_and_freep) char *envpw = NULL;
         _cleanup_(erase_and_freep) void *vk = NULL;
-        char *e = NULL;
         size_t vks;
         int r;
 
@@ -445,23 +458,17 @@ static int prepare_luks(
         if (!vk)
                 return log_oom();
 
-        e = getenv("PASSWORD");
-        if (e) {
-                _cleanup_(erase_and_freep) char *password = NULL;
-
-                password = strdup(e);
-                if (!password)
-                        return log_oom();
-
-                assert_se(unsetenv_erase("PASSWORD") >= 0);
-
+        r = getenv_steal_erase("PASSWORD", &envpw);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire password from environment: %m");
+        if (r > 0) {
                 r = crypt_volume_key_get(
                                 cd,
                                 CRYPT_ANY_SLOT,
                                 vk,
                                 &vks,
-                                password,
-                                strlen(password));
+                                envpw,
+                                strlen(envpw));
                 if (r < 0)
                         return log_error_errno(r, "Password from environment variable $PASSWORD did not work.");
         } else {
@@ -482,7 +489,6 @@ static int prepare_luks(
 
                 for (;;) {
                         _cleanup_strv_free_erase_ char **passwords = NULL;
-                        char **p;
 
                         if (--i == 0)
                                 return log_error_errno(SYNTHETIC_ERRNO(ENOKEY),
@@ -564,7 +570,7 @@ static int run(int argc, char *argv[]) {
                 break;
 
         case ENROLL_TPM2:
-                slot = enroll_tpm2(cd, vk, vks, arg_tpm2_device, arg_tpm2_pcr_mask);
+                slot = enroll_tpm2(cd, vk, vks, arg_tpm2_device, arg_tpm2_pcr_mask, arg_tpm2_pin);
                 break;
 
         case _ENROLL_TYPE_INVALID:

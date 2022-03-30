@@ -13,6 +13,7 @@
 #include "bus-polkit.h"
 #include "dirent-util.h"
 #include "dns-domain.h"
+#include "event-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "hostname-util.h"
@@ -338,27 +339,15 @@ static int on_clock_change(sd_event_source *source, int fd, uint32_t revents, vo
 }
 
 static int manager_clock_change_listen(Manager *m) {
-        _cleanup_close_ int fd = -1;
         int r;
 
         assert(m);
 
         m->clock_change_event_source = sd_event_source_disable_unref(m->clock_change_event_source);
 
-        fd = time_change_fd();
-        if (fd < 0)
-                return log_error_errno(fd, "Failed to allocate clock change timer fd: %m");
-
-        r = sd_event_add_io(m->event, &m->clock_change_event_source, fd, EPOLLIN, on_clock_change, m);
+        r = event_add_time_change(m->event, &m->clock_change_event_source, on_clock_change, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to create clock change event source: %m");
-
-        r = sd_event_source_set_io_fd_own(m->clock_change_event_source, true);
-        if (r < 0)
-                return log_error_errno(r, "Failed to pass ownership of clock fd to event source: %m");
-        TAKE_FD(fd);
-
-        (void) sd_event_source_set_description(m->clock_change_event_source, "clock-change");
 
         return 0;
 }
@@ -514,9 +503,7 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
         _cleanup_free_ char *buffer = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         Manager *m = userdata;
-        DnsServer *server;
         size_t size = 0;
-        DnsScope *scope;
         Link *l;
 
         assert(s);
@@ -816,7 +803,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         } else
                 return -EAFNOSUPPORT;
 
-        p->timestamp = now(clock_boottime_or_monotonic());
+        p->timestamp = now(CLOCK_BOOTTIME);
 
         CMSG_FOREACH(cmsg, &mh) {
 
@@ -1316,8 +1303,6 @@ DnsScope* manager_find_scope(Manager *m, DnsPacket *p) {
 }
 
 void manager_verify_all(Manager *m) {
-        DnsScope *s;
-
         assert(m);
 
         LIST_FOREACH(scopes, s, m->dns_scopes)
@@ -1349,7 +1334,6 @@ int manager_is_own_hostname(Manager *m, const char *name) {
 }
 
 int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
-        DnsServer *s;
         Link *l;
         int r;
 
@@ -1400,7 +1384,6 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
  *   > 0 or true: return only domains which are for routing only
  */
 int manager_compile_search_domains(Manager *m, OrderedSet **domains, int filter_route) {
-        DnsSearchDomain *d;
         Link *l;
         int r;
 
@@ -1512,8 +1495,6 @@ bool manager_routable(Manager *m) {
 }
 
 void manager_flush_caches(Manager *m, int log_level) {
-        DnsScope *scope;
-
         assert(m);
 
         LIST_FOREACH(scopes, scope, m->dns_scopes)
@@ -1619,35 +1600,28 @@ bool manager_next_dnssd_names(Manager *m) {
         return tried;
 }
 
-bool manager_server_address_is_stub(Manager *m, int family, const union in_addr_union *address, uint16_t port) {
+bool manager_server_is_stub(Manager *m, DnsServer *s) {
         DnsStubListenerExtra *l;
 
         assert(m);
-        assert(address);
+        assert(s);
 
         /* Safety check: we generally already skip the main stub when parsing configuration. But let's be
          * extra careful, and check here again */
-        if (family == AF_INET &&
-            address->in.s_addr == htobe32(INADDR_DNS_STUB) &&
-            port == 53)
+        if (s->family == AF_INET &&
+            s->address.in.s_addr == htobe32(INADDR_DNS_STUB) &&
+            dns_server_port(s) == 53)
                 return true;
 
         /* Main reason to call this is to check server data against the extra listeners, and filter things
          * out. */
         ORDERED_SET_FOREACH(l, m->dns_extra_stub_listeners)
-                if (family == l->family &&
-                    in_addr_equal(family, address, &l->address) &&
-                    port == dns_stub_listener_extra_port(l))
+                if (s->family == l->family &&
+                    in_addr_equal(s->family, &s->address, &l->address) &&
+                    dns_server_port(s) == dns_stub_listener_extra_port(l))
                         return true;
 
         return false;
-}
-
-bool manager_server_is_stub(Manager *m, DnsServer *s) {
-        assert(m);
-        assert(s);
-
-        return manager_server_address_is_stub(m, s->family, &s->address, dns_server_port(s));
 }
 
 int socket_disable_pmtud(int fd, int af) {

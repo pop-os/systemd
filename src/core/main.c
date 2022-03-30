@@ -6,7 +6,6 @@
 #include <linux/oom.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
-#include <sys/reboot.h>
 #include <unistd.h>
 #if HAVE_SECCOMP
 #include <seccomp.h>
@@ -33,6 +32,7 @@
 #include "clock-util.h"
 #include "conf-parser.h"
 #include "cpu-set-util.h"
+#include "crash-handler.h"
 #include "dbus-manager.h"
 #include "dbus.h"
 #include "def.h"
@@ -57,6 +57,7 @@
 #include "log.h"
 #include "loopback-setup.h"
 #include "machine-id-setup.h"
+#include "main.h"
 #include "manager.h"
 #include "manager-dump.h"
 #include "manager-serialize.h"
@@ -71,7 +72,6 @@
 #include "proc-cmdline.h"
 #include "process-util.h"
 #include "random-util.h"
-#include "raw-clone.h"
 #include "rlimit-util.h"
 #if HAVE_SECCOMP
 #include "seccomp-util.h"
@@ -116,10 +116,10 @@ static const char *arg_bus_introspect = NULL;
  * defaults are assigned in reset_arguments() below. */
 static char *arg_default_unit;
 static bool arg_system;
-static bool arg_dump_core;
-static int arg_crash_chvt;
-static bool arg_crash_shell;
-static bool arg_crash_reboot;
+bool arg_dump_core;
+int arg_crash_chvt;
+bool arg_crash_shell;
+bool arg_crash_reboot;
 static char *arg_confirm_spawn;
 static ShowStatus arg_show_status;
 static StatusUnitFormat arg_status_unit_format;
@@ -138,7 +138,9 @@ static unsigned arg_default_start_limit_burst;
 static usec_t arg_runtime_watchdog;
 static usec_t arg_reboot_watchdog;
 static usec_t arg_kexec_watchdog;
+static usec_t arg_pretimeout_watchdog;
 static char *arg_early_core_pattern;
+static char *arg_watchdog_pretimeout_governor;
 static char *arg_watchdog_device;
 static char **arg_default_environment;
 static char **arg_manager_environment;
@@ -201,142 +203,6 @@ static int manager_find_user_config_paths(char ***ret_files, char ***ret_dirs) {
         *ret_files = TAKE_PTR(files);
         *ret_dirs = TAKE_PTR(dirs);
         return 0;
-}
-
-_noreturn_ static void freeze_or_exit_or_reboot(void) {
-
-        /* If we are running in a container, let's prefer exiting, after all we can propagate an exit code to
-         * the container manager, and thus inform it that something went wrong. */
-        if (detect_container() > 0) {
-                log_emergency("Exiting PID 1...");
-                _exit(EXIT_EXCEPTION);
-        }
-
-        if (arg_crash_reboot) {
-                log_notice("Rebooting in 10s...");
-                (void) sleep(10);
-
-                log_notice("Rebooting now...");
-                (void) reboot(RB_AUTOBOOT);
-                log_emergency_errno(errno, "Failed to reboot: %m");
-        }
-
-        log_emergency("Freezing execution.");
-        sync();
-        freeze();
-}
-
-_noreturn_ static void crash(int sig) {
-        struct sigaction sa;
-        pid_t pid;
-
-        if (getpid_cached() != 1)
-                /* Pass this on immediately, if this is not PID 1 */
-                (void) raise(sig);
-        else if (!arg_dump_core)
-                log_emergency("Caught <%s>, not dumping core.", signal_to_string(sig));
-        else {
-                sa = (struct sigaction) {
-                        .sa_handler = nop_signal_handler,
-                        .sa_flags = SA_NOCLDSTOP|SA_RESTART,
-                };
-
-                /* We want to wait for the core process, hence let's enable SIGCHLD */
-                (void) sigaction(SIGCHLD, &sa, NULL);
-
-                pid = raw_clone(SIGCHLD);
-                if (pid < 0)
-                        log_emergency_errno(errno, "Caught <%s>, cannot fork for core dump: %m", signal_to_string(sig));
-                else if (pid == 0) {
-                        /* Enable default signal handler for core dump */
-
-                        sa = (struct sigaction) {
-                                .sa_handler = SIG_DFL,
-                        };
-                        (void) sigaction(sig, &sa, NULL);
-
-                        /* Don't limit the coredump size */
-                        (void) setrlimit(RLIMIT_CORE, &RLIMIT_MAKE_CONST(RLIM_INFINITY));
-
-                        /* Just to be sure... */
-                        (void) chdir("/");
-
-                        /* Raise the signal again */
-                        pid = raw_getpid();
-                        (void) kill(pid, sig); /* raise() would kill the parent */
-
-                        assert_not_reached();
-                        _exit(EXIT_EXCEPTION);
-                } else {
-                        siginfo_t status;
-                        int r;
-
-                        /* Order things nicely. */
-                        r = wait_for_terminate(pid, &status);
-                        if (r < 0)
-                                log_emergency_errno(r, "Caught <%s>, waitpid() failed: %m", signal_to_string(sig));
-                        else if (status.si_code != CLD_DUMPED) {
-                                const char *s = status.si_code == CLD_EXITED
-                                        ? exit_status_to_string(status.si_status, EXIT_STATUS_LIBC)
-                                        : signal_to_string(status.si_status);
-
-                                log_emergency("Caught <%s>, core dump failed (child "PID_FMT", code=%s, status=%i/%s).",
-                                              signal_to_string(sig),
-                                              pid,
-                                              sigchld_code_to_string(status.si_code),
-                                              status.si_status, strna(s));
-                        } else
-                                log_emergency("Caught <%s>, dumped core as pid "PID_FMT".",
-                                              signal_to_string(sig), pid);
-                }
-        }
-
-        if (arg_crash_chvt >= 0)
-                (void) chvt(arg_crash_chvt);
-
-        sa = (struct sigaction) {
-                .sa_handler = SIG_IGN,
-                .sa_flags = SA_NOCLDSTOP|SA_NOCLDWAIT|SA_RESTART,
-        };
-
-        /* Let the kernel reap children for us */
-        (void) sigaction(SIGCHLD, &sa, NULL);
-
-        if (arg_crash_shell) {
-                log_notice("Executing crash shell in 10s...");
-                (void) sleep(10);
-
-                pid = raw_clone(SIGCHLD);
-                if (pid < 0)
-                        log_emergency_errno(errno, "Failed to fork off crash shell: %m");
-                else if (pid == 0) {
-                        (void) setsid();
-                        (void) make_console_stdio();
-                        (void) rlimit_nofile_safe();
-                        (void) execle("/bin/sh", "/bin/sh", NULL, environ);
-
-                        log_emergency_errno(errno, "execle() failed: %m");
-                        _exit(EXIT_EXCEPTION);
-                } else {
-                        log_info("Spawned crash shell as PID "PID_FMT".", pid);
-                        (void) wait_for_terminate(pid, NULL);
-                }
-        }
-
-        freeze_or_exit_or_reboot();
-}
-
-static void install_crash_handler(void) {
-        static const struct sigaction sa = {
-                .sa_handler = crash,
-                .sa_flags = SA_NODEFER, /* So that we can raise the signal again from the signal handler */
-        };
-        int r;
-
-        /* We ignore the return value here, since, we don't mind if we cannot set up a crash handler */
-        r = sigaction_many(&sa, SIGNALS_CRASH_HANDLER);
-        if (r < 0)
-                log_debug_errno(r, "I had trouble setting up the crash handler, ignoring: %m");
 }
 
 static int console_setup(void) {
@@ -557,6 +423,37 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
                 arg_kexec_watchdog = arg_reboot_watchdog = arg_runtime_watchdog;
 
+        } else if (proc_cmdline_key_streq(key, "systemd.watchdog_pre_sec")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                if (streq(value, "default"))
+                        arg_pretimeout_watchdog = USEC_INFINITY;
+                else if (streq(value, "off"))
+                        arg_pretimeout_watchdog = 0;
+                else {
+                        r = parse_sec(value, &arg_pretimeout_watchdog);
+                        if (r < 0) {
+                                log_warning_errno(r, "Failed to parse systemd.watchdog_pre_sec= argument '%s', ignoring: %m", value);
+                                return 0;
+                        }
+                }
+
+        } else if (proc_cmdline_key_streq(key, "systemd.watchdog_pretimeout_governor")) {
+
+                if (proc_cmdline_value_missing(key, value) || isempty(value)) {
+                        arg_watchdog_pretimeout_governor = mfree(arg_watchdog_pretimeout_governor);
+                        return 0;
+                }
+
+                if (!string_is_safe(value)) {
+                        log_warning("Watchdog pretimeout governor '%s' is not valid, ignoring.", value);
+                        return 0;
+                }
+
+                return free_and_strdup_warn(&arg_watchdog_pretimeout_governor, value);
+
         } else if (proc_cmdline_key_streq(key, "systemd.clock_usec")) {
 
                 if (proc_cmdline_value_missing(key, value))
@@ -692,71 +589,73 @@ static int config_parse_oom_score_adjust(
 
 static int parse_config_file(void) {
         const ConfigTableItem items[] = {
-                { "Manager", "LogLevel",                     config_parse_level2,                0, NULL                                   },
-                { "Manager", "LogTarget",                    config_parse_target,                0, NULL                                   },
-                { "Manager", "LogColor",                     config_parse_color,                 0, NULL                                   },
-                { "Manager", "LogLocation",                  config_parse_location,              0, NULL                                   },
-                { "Manager", "LogTime",                      config_parse_time,                  0, NULL                                   },
-                { "Manager", "DumpCore",                     config_parse_bool,                  0, &arg_dump_core                         },
-                { "Manager", "CrashChVT", /* legacy */       config_parse_crash_chvt,            0, &arg_crash_chvt                        },
-                { "Manager", "CrashChangeVT",                config_parse_crash_chvt,            0, &arg_crash_chvt                        },
-                { "Manager", "CrashShell",                   config_parse_bool,                  0, &arg_crash_shell                       },
-                { "Manager", "CrashReboot",                  config_parse_bool,                  0, &arg_crash_reboot                      },
-                { "Manager", "ShowStatus",                   config_parse_show_status,           0, &arg_show_status                       },
-                { "Manager", "StatusUnitFormat",             config_parse_status_unit_format,    0, &arg_status_unit_format                },
-                { "Manager", "CPUAffinity",                  config_parse_cpu_affinity2,         0, &arg_cpu_affinity                      },
-                { "Manager", "NUMAPolicy",                   config_parse_numa_policy,           0, &arg_numa_policy.type                  },
-                { "Manager", "NUMAMask",                     config_parse_numa_mask,             0, &arg_numa_policy                       },
-                { "Manager", "JoinControllers",              config_parse_warn_compat,           DISABLED_CONFIGURATION, NULL              },
-                { "Manager", "RuntimeWatchdogSec",           config_parse_watchdog_sec,          0, &arg_runtime_watchdog                  },
-                { "Manager", "RebootWatchdogSec",            config_parse_watchdog_sec,          0, &arg_reboot_watchdog                   },
-                { "Manager", "ShutdownWatchdogSec",          config_parse_watchdog_sec,          0, &arg_reboot_watchdog                   }, /* obsolete alias */
-                { "Manager", "KExecWatchdogSec",             config_parse_watchdog_sec,          0, &arg_kexec_watchdog                    },
-                { "Manager", "WatchdogDevice",               config_parse_path,                  0, &arg_watchdog_device                   },
-                { "Manager", "CapabilityBoundingSet",        config_parse_capability_set,        0, &arg_capability_bounding_set           },
-                { "Manager", "NoNewPrivileges",              config_parse_bool,                  0, &arg_no_new_privs                      },
+                { "Manager", "LogLevel",                     config_parse_level2,                0,                        NULL                              },
+                { "Manager", "LogTarget",                    config_parse_target,                0,                        NULL                              },
+                { "Manager", "LogColor",                     config_parse_color,                 0,                        NULL                              },
+                { "Manager", "LogLocation",                  config_parse_location,              0,                        NULL                              },
+                { "Manager", "LogTime",                      config_parse_time,                  0,                        NULL                              },
+                { "Manager", "DumpCore",                     config_parse_bool,                  0,                        &arg_dump_core                    },
+                { "Manager", "CrashChVT", /* legacy */       config_parse_crash_chvt,            0,                        &arg_crash_chvt                   },
+                { "Manager", "CrashChangeVT",                config_parse_crash_chvt,            0,                        &arg_crash_chvt                   },
+                { "Manager", "CrashShell",                   config_parse_bool,                  0,                        &arg_crash_shell                  },
+                { "Manager", "CrashReboot",                  config_parse_bool,                  0,                        &arg_crash_reboot                 },
+                { "Manager", "ShowStatus",                   config_parse_show_status,           0,                        &arg_show_status                  },
+                { "Manager", "StatusUnitFormat",             config_parse_status_unit_format,    0,                        &arg_status_unit_format           },
+                { "Manager", "CPUAffinity",                  config_parse_cpu_affinity2,         0,                        &arg_cpu_affinity                 },
+                { "Manager", "NUMAPolicy",                   config_parse_numa_policy,           0,                        &arg_numa_policy.type             },
+                { "Manager", "NUMAMask",                     config_parse_numa_mask,             0,                        &arg_numa_policy                  },
+                { "Manager", "JoinControllers",              config_parse_warn_compat,           DISABLED_CONFIGURATION,   NULL                              },
+                { "Manager", "RuntimeWatchdogSec",           config_parse_watchdog_sec,          0,                        &arg_runtime_watchdog             },
+                { "Manager", "RuntimeWatchdogPreSec",        config_parse_watchdog_sec,          0,                        &arg_pretimeout_watchdog          },
+                { "Manager", "RebootWatchdogSec",            config_parse_watchdog_sec,          0,                        &arg_reboot_watchdog              },
+                { "Manager", "ShutdownWatchdogSec",          config_parse_watchdog_sec,          0,                        &arg_reboot_watchdog              }, /* obsolete alias */
+                { "Manager", "KExecWatchdogSec",             config_parse_watchdog_sec,          0,                        &arg_kexec_watchdog               },
+                { "Manager", "WatchdogDevice",               config_parse_path,                  0,                        &arg_watchdog_device              },
+                { "Manager", "RuntimeWatchdogPreGovernor",   config_parse_string,                CONFIG_PARSE_STRING_SAFE, &arg_watchdog_pretimeout_governor },
+                { "Manager", "CapabilityBoundingSet",        config_parse_capability_set,        0,                        &arg_capability_bounding_set      },
+                { "Manager", "NoNewPrivileges",              config_parse_bool,                  0,                        &arg_no_new_privs                 },
 #if HAVE_SECCOMP
-                { "Manager", "SystemCallArchitectures",      config_parse_syscall_archs,         0, &arg_syscall_archs                     },
+                { "Manager", "SystemCallArchitectures",      config_parse_syscall_archs,         0,                        &arg_syscall_archs                },
 #endif
-                { "Manager", "TimerSlackNSec",               config_parse_nsec,                  0, &arg_timer_slack_nsec                  },
-                { "Manager", "DefaultTimerAccuracySec",      config_parse_sec,                   0, &arg_default_timer_accuracy_usec       },
-                { "Manager", "DefaultStandardOutput",        config_parse_output_restricted,     0, &arg_default_std_output                },
-                { "Manager", "DefaultStandardError",         config_parse_output_restricted,     0, &arg_default_std_error                 },
-                { "Manager", "DefaultTimeoutStartSec",       config_parse_sec,                   0, &arg_default_timeout_start_usec        },
-                { "Manager", "DefaultTimeoutStopSec",        config_parse_sec,                   0, &arg_default_timeout_stop_usec         },
-                { "Manager", "DefaultTimeoutAbortSec",       config_parse_default_timeout_abort, 0, NULL                                   },
-                { "Manager", "DefaultRestartSec",            config_parse_sec,                   0, &arg_default_restart_usec              },
-                { "Manager", "DefaultStartLimitInterval",    config_parse_sec,                   0, &arg_default_start_limit_interval      }, /* obsolete alias */
-                { "Manager", "DefaultStartLimitIntervalSec", config_parse_sec,                   0, &arg_default_start_limit_interval      },
-                { "Manager", "DefaultStartLimitBurst",       config_parse_unsigned,              0, &arg_default_start_limit_burst         },
-                { "Manager", "DefaultEnvironment",           config_parse_environ,               0, &arg_default_environment               },
-                { "Manager", "ManagerEnvironment",           config_parse_environ,               0, &arg_manager_environment               },
-                { "Manager", "DefaultLimitCPU",              config_parse_rlimit,                RLIMIT_CPU, arg_default_rlimit            },
-                { "Manager", "DefaultLimitFSIZE",            config_parse_rlimit,                RLIMIT_FSIZE, arg_default_rlimit          },
-                { "Manager", "DefaultLimitDATA",             config_parse_rlimit,                RLIMIT_DATA, arg_default_rlimit           },
-                { "Manager", "DefaultLimitSTACK",            config_parse_rlimit,                RLIMIT_STACK, arg_default_rlimit          },
-                { "Manager", "DefaultLimitCORE",             config_parse_rlimit,                RLIMIT_CORE, arg_default_rlimit           },
-                { "Manager", "DefaultLimitRSS",              config_parse_rlimit,                RLIMIT_RSS, arg_default_rlimit            },
-                { "Manager", "DefaultLimitNOFILE",           config_parse_rlimit,                RLIMIT_NOFILE, arg_default_rlimit         },
-                { "Manager", "DefaultLimitAS",               config_parse_rlimit,                RLIMIT_AS, arg_default_rlimit             },
-                { "Manager", "DefaultLimitNPROC",            config_parse_rlimit,                RLIMIT_NPROC, arg_default_rlimit          },
-                { "Manager", "DefaultLimitMEMLOCK",          config_parse_rlimit,                RLIMIT_MEMLOCK, arg_default_rlimit        },
-                { "Manager", "DefaultLimitLOCKS",            config_parse_rlimit,                RLIMIT_LOCKS, arg_default_rlimit          },
-                { "Manager", "DefaultLimitSIGPENDING",       config_parse_rlimit,                RLIMIT_SIGPENDING, arg_default_rlimit     },
-                { "Manager", "DefaultLimitMSGQUEUE",         config_parse_rlimit,                RLIMIT_MSGQUEUE, arg_default_rlimit       },
-                { "Manager", "DefaultLimitNICE",             config_parse_rlimit,                RLIMIT_NICE, arg_default_rlimit           },
-                { "Manager", "DefaultLimitRTPRIO",           config_parse_rlimit,                RLIMIT_RTPRIO, arg_default_rlimit         },
-                { "Manager", "DefaultLimitRTTIME",           config_parse_rlimit,                RLIMIT_RTTIME, arg_default_rlimit         },
-                { "Manager", "DefaultCPUAccounting",         config_parse_tristate,              0, &arg_default_cpu_accounting            },
-                { "Manager", "DefaultIOAccounting",          config_parse_bool,                  0, &arg_default_io_accounting             },
-                { "Manager", "DefaultIPAccounting",          config_parse_bool,                  0, &arg_default_ip_accounting             },
-                { "Manager", "DefaultBlockIOAccounting",     config_parse_bool,                  0, &arg_default_blockio_accounting        },
-                { "Manager", "DefaultMemoryAccounting",      config_parse_bool,                  0, &arg_default_memory_accounting         },
-                { "Manager", "DefaultTasksAccounting",       config_parse_bool,                  0, &arg_default_tasks_accounting          },
-                { "Manager", "DefaultTasksMax",              config_parse_tasks_max,             0, &arg_default_tasks_max                 },
-                { "Manager", "CtrlAltDelBurstAction",        config_parse_emergency_action,      0, &arg_cad_burst_action                  },
-                { "Manager", "DefaultOOMPolicy",             config_parse_oom_policy,            0, &arg_default_oom_policy                },
-                { "Manager", "DefaultOOMScoreAdjust",        config_parse_oom_score_adjust,      0, NULL                                   },
+                { "Manager", "TimerSlackNSec",               config_parse_nsec,                  0,                        &arg_timer_slack_nsec             },
+                { "Manager", "DefaultTimerAccuracySec",      config_parse_sec,                   0,                        &arg_default_timer_accuracy_usec  },
+                { "Manager", "DefaultStandardOutput",        config_parse_output_restricted,     0,                        &arg_default_std_output           },
+                { "Manager", "DefaultStandardError",         config_parse_output_restricted,     0,                        &arg_default_std_error            },
+                { "Manager", "DefaultTimeoutStartSec",       config_parse_sec,                   0,                        &arg_default_timeout_start_usec   },
+                { "Manager", "DefaultTimeoutStopSec",        config_parse_sec,                   0,                        &arg_default_timeout_stop_usec    },
+                { "Manager", "DefaultTimeoutAbortSec",       config_parse_default_timeout_abort, 0,                        NULL                              },
+                { "Manager", "DefaultRestartSec",            config_parse_sec,                   0,                        &arg_default_restart_usec         },
+                { "Manager", "DefaultStartLimitInterval",    config_parse_sec,                   0,                        &arg_default_start_limit_interval }, /* obsolete alias */
+                { "Manager", "DefaultStartLimitIntervalSec", config_parse_sec,                   0,                        &arg_default_start_limit_interval },
+                { "Manager", "DefaultStartLimitBurst",       config_parse_unsigned,              0,                        &arg_default_start_limit_burst    },
+                { "Manager", "DefaultEnvironment",           config_parse_environ,               0,                        &arg_default_environment          },
+                { "Manager", "ManagerEnvironment",           config_parse_environ,               0,                        &arg_manager_environment          },
+                { "Manager", "DefaultLimitCPU",              config_parse_rlimit,                RLIMIT_CPU,               arg_default_rlimit                },
+                { "Manager", "DefaultLimitFSIZE",            config_parse_rlimit,                RLIMIT_FSIZE,             arg_default_rlimit                },
+                { "Manager", "DefaultLimitDATA",             config_parse_rlimit,                RLIMIT_DATA,              arg_default_rlimit                },
+                { "Manager", "DefaultLimitSTACK",            config_parse_rlimit,                RLIMIT_STACK,             arg_default_rlimit                },
+                { "Manager", "DefaultLimitCORE",             config_parse_rlimit,                RLIMIT_CORE,              arg_default_rlimit                },
+                { "Manager", "DefaultLimitRSS",              config_parse_rlimit,                RLIMIT_RSS,               arg_default_rlimit                },
+                { "Manager", "DefaultLimitNOFILE",           config_parse_rlimit,                RLIMIT_NOFILE,            arg_default_rlimit                },
+                { "Manager", "DefaultLimitAS",               config_parse_rlimit,                RLIMIT_AS,                arg_default_rlimit                },
+                { "Manager", "DefaultLimitNPROC",            config_parse_rlimit,                RLIMIT_NPROC,             arg_default_rlimit                },
+                { "Manager", "DefaultLimitMEMLOCK",          config_parse_rlimit,                RLIMIT_MEMLOCK,           arg_default_rlimit                },
+                { "Manager", "DefaultLimitLOCKS",            config_parse_rlimit,                RLIMIT_LOCKS,             arg_default_rlimit                },
+                { "Manager", "DefaultLimitSIGPENDING",       config_parse_rlimit,                RLIMIT_SIGPENDING,        arg_default_rlimit                },
+                { "Manager", "DefaultLimitMSGQUEUE",         config_parse_rlimit,                RLIMIT_MSGQUEUE,          arg_default_rlimit                },
+                { "Manager", "DefaultLimitNICE",             config_parse_rlimit,                RLIMIT_NICE,              arg_default_rlimit                },
+                { "Manager", "DefaultLimitRTPRIO",           config_parse_rlimit,                RLIMIT_RTPRIO,            arg_default_rlimit                },
+                { "Manager", "DefaultLimitRTTIME",           config_parse_rlimit,                RLIMIT_RTTIME,            arg_default_rlimit                },
+                { "Manager", "DefaultCPUAccounting",         config_parse_tristate,              0,                        &arg_default_cpu_accounting       },
+                { "Manager", "DefaultIOAccounting",          config_parse_bool,                  0,                        &arg_default_io_accounting        },
+                { "Manager", "DefaultIPAccounting",          config_parse_bool,                  0,                        &arg_default_ip_accounting        },
+                { "Manager", "DefaultBlockIOAccounting",     config_parse_bool,                  0,                        &arg_default_blockio_accounting   },
+                { "Manager", "DefaultMemoryAccounting",      config_parse_bool,                  0,                        &arg_default_memory_accounting    },
+                { "Manager", "DefaultTasksAccounting",       config_parse_bool,                  0,                        &arg_default_tasks_accounting     },
+                { "Manager", "DefaultTasksMax",              config_parse_tasks_max,             0,                        &arg_default_tasks_max            },
+                { "Manager", "CtrlAltDelBurstAction",        config_parse_emergency_action,      0,                        &arg_cad_burst_action             },
+                { "Manager", "DefaultOOMPolicy",             config_parse_oom_policy,            0,                        &arg_default_oom_policy           },
+                { "Manager", "DefaultOOMScoreAdjust",        config_parse_oom_score_adjust,      0,                        NULL                              },
                 {}
         };
 
@@ -837,6 +736,7 @@ static void set_manager_defaults(Manager *m) {
 }
 
 static void set_manager_settings(Manager *m) {
+        int r;
 
         assert(m);
 
@@ -851,6 +751,10 @@ static void set_manager_settings(Manager *m) {
         manager_set_watchdog(m, WATCHDOG_RUNTIME, arg_runtime_watchdog);
         manager_set_watchdog(m, WATCHDOG_REBOOT, arg_reboot_watchdog);
         manager_set_watchdog(m, WATCHDOG_KEXEC, arg_kexec_watchdog);
+        manager_set_watchdog(m, WATCHDOG_PRETIMEOUT, arg_pretimeout_watchdog);
+        r = manager_set_watchdog_pretimeout_governor(m, arg_watchdog_pretimeout_governor);
+        if (r < 0)
+                log_warning_errno(r, "Failed to set watchdog pretimeout governor to '%s', ignoring: %m", arg_watchdog_pretimeout_governor);
 
         manager_set_show_status(m, arg_show_status, "commandline");
         m->status_unit_format = arg_status_unit_format;
@@ -1314,7 +1218,7 @@ static void bump_file_max_and_nr_open(void) {
 #endif
 }
 
-static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
+static int bump_rlimit_nofile(const struct rlimit *saved_rlimit) {
         struct rlimit new_rlimit;
         int r, nr;
 
@@ -1343,7 +1247,7 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
         return 0;
 }
 
-static int bump_rlimit_memlock(struct rlimit *saved_rlimit) {
+static int bump_rlimit_memlock(const struct rlimit *saved_rlimit) {
         struct rlimit new_rlimit;
         uint64_t mm;
         int r;
@@ -1595,7 +1499,10 @@ static int become_shutdown(
                 watchdog_timer = arg_kexec_watchdog;
 
         /* If we reboot or kexec let's set the shutdown watchdog and tell the
-         * shutdown binary to repeatedly ping it */
+         * shutdown binary to repeatedly ping it.
+         * Disable the pretimeout watchdog, as we do not support it from the shutdown binary. */
+        (void) watchdog_setup_pretimeout(0);
+        (void) watchdog_setup_pretimeout_governor(NULL);
         r = watchdog_setup(watchdog_timer);
         watchdog_close(r < 0);
 
@@ -1664,8 +1571,6 @@ static void initialize_clock(void) {
 }
 
 static void apply_clock_update(void) {
-        struct timespec ts;
-
         /* This is called later than initialize_clock(), i.e. after we parsed configuration files/kernel
          * command line and such. */
 
@@ -1675,7 +1580,7 @@ static void apply_clock_update(void) {
         if (getpid_cached() != 1)
                 return;
 
-        if (clock_settime(CLOCK_REALTIME, timespec_store(&ts, arg_clock_usec)) < 0)
+        if (clock_settime(CLOCK_REALTIME, TIMESPEC_STORE(arg_clock_usec)) < 0)
                 log_error_errno(errno, "Failed to set system clock to time specified on kernel command line: %m");
         else
                 log_info("Set system clock to %s, as specified on the kernel command line.",
@@ -1751,11 +1656,11 @@ static void update_cpu_affinity(bool skip_setup) {
 
         assert(arg_cpu_affinity.allocated > 0);
 
-        mask = cpu_set_to_string(&arg_cpu_affinity);
-        log_debug("Setting CPU affinity to %s.", strnull(mask));
+        mask = cpu_set_to_range_string(&arg_cpu_affinity);
+        log_debug("Setting CPU affinity to {%s}.", strnull(mask));
 
         if (sched_setaffinity(0, arg_cpu_affinity.allocated, arg_cpu_affinity.set) < 0)
-                log_warning_errno(errno, "Failed to set CPU affinity: %m");
+                log_warning_errno(errno, "Failed to set CPU affinity, ignoring: %m");
 }
 
 static void update_numa_policy(bool skip_setup) {
@@ -1769,14 +1674,14 @@ static void update_numa_policy(bool skip_setup) {
         if (DEBUG_LOGGING) {
                 policy = mpol_to_string(numa_policy_get_type(&arg_numa_policy));
                 nodes = cpu_set_to_range_string(&arg_numa_policy.nodes);
-                log_debug("Setting NUMA policy to %s, with nodes %s.", strnull(policy), strnull(nodes));
+                log_debug("Setting NUMA policy to %s, with nodes {%s}.", strnull(policy), strnull(nodes));
         }
 
         r = apply_numa_policy(&arg_numa_policy);
         if (r == -EOPNOTSUPP)
                 log_debug_errno(r, "NUMA support not available, ignoring.");
         else if (r < 0)
-                log_warning_errno(r, "Failed to set NUMA memory policy: %m");
+                log_warning_errno(r, "Failed to set NUMA memory policy, ignoring: %m");
 }
 
 static void filter_args(
@@ -1824,7 +1729,8 @@ static void filter_args(
         }
 }
 
-static void do_reexecute(
+static int do_reexecute(
+                ManagerObjective objective,
                 int argc,
                 char* argv[],
                 const struct rlimit *saved_rlimit_nofile,
@@ -1838,6 +1744,7 @@ static void do_reexecute(
         const char **args;
         int r;
 
+        assert(IN_SET(objective, MANAGER_REEXECUTE, MANAGER_SWITCH_ROOT));
         assert(argc >= 0);
         assert(saved_rlimit_nofile);
         assert(saved_rlimit_memlock);
@@ -1901,6 +1808,12 @@ static void do_reexecute(
 
                 args[0] = SYSTEMD_BINARY_PATH;
                 (void) execv(args[0], (char* const*) args);
+
+                if (objective == MANAGER_REEXECUTE) {
+                        *ret_error_message = "Failed to execute our own binary";
+                        return log_error_errno(errno, "Failed to execute our own binary %s: %m", args[0]);
+                }
+
                 log_debug_errno(errno, "Failed to execute our own binary %s, trying fallback: %m", args[0]);
         }
 
@@ -1938,24 +1851,22 @@ static void do_reexecute(
                               ANSI_HIGHLIGHT_RED "  !!  " ANSI_NORMAL,
                               "Failed to execute /sbin/init");
 
+        *ret_error_message = "Failed to execute fallback shell";
         if (r == -ENOENT) {
                 log_warning("No /sbin/init, trying fallback");
 
                 args[0] = "/bin/sh";
                 args[1] = NULL;
                 (void) execve(args[0], (char* const*) args, saved_env);
-                log_error_errno(errno, "Failed to execute /bin/sh, giving up: %m");
+                return log_error_errno(errno, "Failed to execute /bin/sh, giving up: %m");
         } else
-                log_warning_errno(r, "Failed to execute /sbin/init, giving up: %m");
-
-        *ret_error_message = "Failed to execute fallback shell";
+                return log_error_errno(r, "Failed to execute /sbin/init, giving up: %m");
 }
 
 static int invoke_main_loop(
                 Manager *m,
                 const struct rlimit *saved_rlimit_nofile,
                 const struct rlimit *saved_rlimit_memlock,
-                bool *ret_reexecute,
                 int *ret_retval,                   /* Return parameters relevant for shutting down */
                 const char **ret_shutdown_verb,    /* … */
                 FDSet **ret_fds,                   /* Return parameters for reexecuting */
@@ -1968,7 +1879,6 @@ static int invoke_main_loop(
         assert(m);
         assert(saved_rlimit_nofile);
         assert(saved_rlimit_memlock);
-        assert(ret_reexecute);
         assert(ret_retval);
         assert(ret_shutdown_verb);
         assert(ret_fds);
@@ -1977,13 +1887,13 @@ static int invoke_main_loop(
         assert(ret_error_message);
 
         for (;;) {
-                r = manager_loop(m);
-                if (r < 0) {
+                int objective = manager_loop(m);
+                if (objective < 0) {
                         *ret_error_message = "Failed to run main loop";
-                        return log_emergency_errno(r, "Failed to run main loop: %m");
+                        return log_emergency_errno(objective, "Failed to run main loop: %m");
                 }
 
-                switch ((ManagerObjective) r) {
+                switch (objective) {
 
                 case MANAGER_RELOAD: {
                         LogTarget saved_log_target;
@@ -2010,17 +1920,15 @@ static int invoke_main_loop(
                         if (saved_log_target >= 0)
                                 manager_override_log_target(m, saved_log_target);
 
-                        r = manager_reload(m);
-                        if (r < 0)
+                        if (manager_reload(m) < 0)
                                 /* Reloading failed before the point of no return.
                                  * Let's continue running as if nothing happened. */
                                 m->objective = MANAGER_OK;
 
-                        break;
+                        continue;
                 }
 
                 case MANAGER_REEXECUTE:
-
                         r = prepare_reexecute(m, &arg_serialization, ret_fds, false);
                         if (r < 0) {
                                 *ret_error_message = "Failed to prepare for reexecution";
@@ -2029,12 +1937,11 @@ static int invoke_main_loop(
 
                         log_notice("Reexecuting.");
 
-                        *ret_reexecute = true;
                         *ret_retval = EXIT_SUCCESS;
                         *ret_shutdown_verb = NULL;
                         *ret_switch_root_dir = *ret_switch_root_init = NULL;
 
-                        return 0;
+                        return objective;
 
                 case MANAGER_SWITCH_ROOT:
                         if (!m->switch_root_init) {
@@ -2048,7 +1955,6 @@ static int invoke_main_loop(
 
                         log_notice("Switching root.");
 
-                        *ret_reexecute = true;
                         *ret_retval = EXIT_SUCCESS;
                         *ret_shutdown_verb = NULL;
 
@@ -2056,20 +1962,18 @@ static int invoke_main_loop(
                         *ret_switch_root_dir = TAKE_PTR(m->switch_root);
                         *ret_switch_root_init = TAKE_PTR(m->switch_root_init);
 
-                        return 0;
+                        return objective;
 
                 case MANAGER_EXIT:
-
                         if (MANAGER_IS_USER(m)) {
                                 log_debug("Exit.");
 
-                                *ret_reexecute = false;
                                 *ret_retval = m->return_value;
                                 *ret_shutdown_verb = NULL;
                                 *ret_fds = NULL;
                                 *ret_switch_root_dir = *ret_switch_root_init = NULL;
 
-                                return 0;
+                                return objective;
                         }
 
                         _fallthrough_;
@@ -2077,7 +1981,7 @@ static int invoke_main_loop(
                 case MANAGER_POWEROFF:
                 case MANAGER_HALT:
                 case MANAGER_KEXEC: {
-                        static const char * const table[_MANAGER_OBJECTIVE_MAX] = {
+                        static const char* const table[_MANAGER_OBJECTIVE_MAX] = {
                                 [MANAGER_EXIT]     = "exit",
                                 [MANAGER_REBOOT]   = "reboot",
                                 [MANAGER_POWEROFF] = "poweroff",
@@ -2087,13 +1991,12 @@ static int invoke_main_loop(
 
                         log_notice("Shutting down.");
 
-                        *ret_reexecute = false;
                         *ret_retval = m->return_value;
                         assert_se(*ret_shutdown_verb = table[m->objective]);
                         *ret_fds = NULL;
                         *ret_switch_root_dir = *ret_switch_root_init = NULL;
 
-                        return 0;
+                        return objective;
                 }
 
                 default:
@@ -2259,7 +2162,7 @@ static int initialize_runtime(
         if (!arg_system)
                 /* Become reaper of our children */
                 if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
-                        log_warning_errno(errno, "Failed to make us a subreaper: %m");
+                        log_warning_errno(errno, "Failed to make us a subreaper, ignoring: %m");
 
         /* Bump up RLIMIT_NOFILE for systemd itself */
         (void) bump_rlimit_nofile(saved_rlimit_nofile);
@@ -2405,11 +2308,17 @@ static void fallback_rlimit_memlock(const struct rlimit *saved_rlimit_memlock) {
                 return;
         }
 
+        if (arg_system)  {
+                /* Raise the default limit to 8M also on old kernels and in containers (8M is the kernel
+                 * default for this since kernel 5.16) */
+                rl->rlim_max = MAX(rl->rlim_max, (rlim_t) DEFAULT_RLIMIT_MEMLOCK);
+                rl->rlim_cur = MAX(rl->rlim_cur, (rlim_t) DEFAULT_RLIMIT_MEMLOCK);
+        }
+
         arg_default_rlimit[RLIMIT_MEMLOCK] = rl;
 }
 
 static void setenv_manager_environment(void) {
-        char **p;
         int r;
 
         STRV_FOREACH(p, arg_manager_environment) {
@@ -2450,8 +2359,10 @@ static void reset_arguments(void) {
         arg_runtime_watchdog = 0;
         arg_reboot_watchdog = 10 * USEC_PER_MINUTE;
         arg_kexec_watchdog = 0;
+        arg_pretimeout_watchdog = 0;
         arg_early_core_pattern = NULL;
         arg_watchdog_device = NULL;
+        arg_watchdog_pretimeout_governor = mfree(arg_watchdog_pretimeout_governor);
 
         arg_default_environment = strv_free(arg_default_environment);
         arg_manager_environment = strv_free(arg_manager_environment);
@@ -2709,15 +2620,18 @@ static int save_env(void) {
 }
 
 int main(int argc, char *argv[]) {
-
-        dual_timestamp initrd_timestamp = DUAL_TIMESTAMP_NULL, userspace_timestamp = DUAL_TIMESTAMP_NULL, kernel_timestamp = DUAL_TIMESTAMP_NULL,
-                security_start_timestamp = DUAL_TIMESTAMP_NULL, security_finish_timestamp = DUAL_TIMESTAMP_NULL;
+        dual_timestamp
+                initrd_timestamp = DUAL_TIMESTAMP_NULL,
+                userspace_timestamp = DUAL_TIMESTAMP_NULL,
+                kernel_timestamp = DUAL_TIMESTAMP_NULL,
+                security_start_timestamp = DUAL_TIMESTAMP_NULL,
+                security_finish_timestamp = DUAL_TIMESTAMP_NULL;
         struct rlimit saved_rlimit_nofile = RLIMIT_MAKE_CONST(0),
                 saved_rlimit_memlock = RLIMIT_MAKE_CONST(RLIM_INFINITY); /* The original rlimits we passed
                                                                           * in. Note we use different values
                                                                           * for the two that indicate whether
                                                                           * these fields are initialized! */
-        bool skip_setup, loaded_policy = false, queue_default_job = false, first_boot = false, reexecute = false;
+        bool skip_setup, loaded_policy = false, queue_default_job = false, first_boot = false;
         char *switch_root_dir = NULL, *switch_root_init = NULL;
         usec_t before_startup, after_startup;
         static char systemd[] = "systemd";
@@ -2725,6 +2639,8 @@ int main(int argc, char *argv[]) {
         int r, retval = EXIT_FAILURE;
         Manager *m = NULL;
         FDSet *fds = NULL;
+
+        assert_se(argc > 0 && !isempty(argv[0]));
 
         /* SysV compatibility: redirect init → telinit */
         redirect_telinit(argc, argv);
@@ -2969,7 +2885,7 @@ int main(int argc, char *argv[]) {
         if (r < 0)
                 goto finish;
 
-        r = manager_new(arg_system ? UNIT_FILE_SYSTEM : UNIT_FILE_USER,
+        r = manager_new(arg_system ? LOOKUP_SCOPE_SYSTEM : LOOKUP_SCOPE_USER,
                         arg_action == ACTION_TEST ? MANAGER_TEST_FULL : 0,
                         &m);
         if (r < 0) {
@@ -3021,16 +2937,23 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        (void) invoke_main_loop(m,
-                                &saved_rlimit_nofile,
-                                &saved_rlimit_memlock,
-                                &reexecute,
-                                &retval,
-                                &shutdown_verb,
-                                &fds,
-                                &switch_root_dir,
-                                &switch_root_init,
-                                &error_message);
+        r = invoke_main_loop(m,
+                             &saved_rlimit_nofile,
+                             &saved_rlimit_memlock,
+                             &retval,
+                             &shutdown_verb,
+                             &fds,
+                             &switch_root_dir,
+                             &switch_root_init,
+                             &error_message);
+        assert(r < 0 || IN_SET(r, MANAGER_EXIT,          /* MANAGER_OK is not expected here. */
+                                  MANAGER_RELOAD,
+                                  MANAGER_REEXECUTE,
+                                  MANAGER_REBOOT,
+                                  MANAGER_POWEROFF,
+                                  MANAGER_HALT,
+                                  MANAGER_KEXEC,
+                                  MANAGER_SWITCH_ROOT));
 
 finish:
         pager_close();
@@ -3043,14 +2966,15 @@ finish:
 
         mac_selinux_finish();
 
-        if (reexecute)
-                do_reexecute(argc, argv,
-                             &saved_rlimit_nofile,
-                             &saved_rlimit_memlock,
-                             fds,
-                             switch_root_dir,
-                             switch_root_init,
-                             &error_message); /* This only returns if reexecution failed */
+        if (IN_SET(r, MANAGER_REEXECUTE, MANAGER_SWITCH_ROOT))
+                r = do_reexecute(r,
+                                 argc, argv,
+                                 &saved_rlimit_nofile,
+                                 &saved_rlimit_memlock,
+                                 fds,
+                                 switch_root_dir,
+                                 switch_root_init,
+                                 &error_message); /* This only returns if reexecution failed */
 
         arg_serialization = safe_fclose(arg_serialization);
         fds = fdset_free(fds);
@@ -3076,7 +3000,9 @@ finish:
         __lsan_do_leak_check();
 #endif
 
-        if (shutdown_verb) {
+        /* Try to invoke the shutdown binary unless we already failed.
+         * If we failed above, we want to freeze after finishing cleanup. */
+        if (r >= 0 && shutdown_verb) {
                 r = become_shutdown(shutdown_verb, retval);
                 log_error_errno(r, "Failed to execute shutdown binary, %s: %m", getpid_cached() == 1 ? "freezing" : "quitting");
                 error_message = "Failed to execute shutdown binary";

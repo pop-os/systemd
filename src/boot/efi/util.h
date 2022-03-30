@@ -6,13 +6,6 @@
 
 #include "string-util-fundamental.h"
 
-/* This TPM PCR is where most Linux infrastructure extends the kernel command line into, and so do we. We also extend
- * any passed credentials here. */
-#define TPM_PCR_INDEX_KERNEL_PARAMETERS 8
-
-/* This TPM PCR is where most Linux infrastructure extends the initrd binary images into, and so do we. */
-#define TPM_PCR_INDEX_INITRD 4
-
 #define offsetof(type, member) __builtin_offsetof(type, member)
 
 #define UINTN_MAX (~(UINTN)0)
@@ -24,34 +17,22 @@
 #define UINT64_MAX ((UINT64) -1)
 #endif
 
-#define assert_alloc_ret(p)     \
-        ({                      \
-                void *_p = (p); \
-                assert(_p);     \
-                _p;             \
-        })
-
 #define xnew_alloc(type, n, alloc)                                           \
         ({                                                                   \
                 UINTN _alloc_size;                                           \
-                if (__builtin_mul_overflow(sizeof(type), (n), &_alloc_size)) \
-                        assert_not_reached();                                \
+                assert_se(!__builtin_mul_overflow(sizeof(type), (n), &_alloc_size)); \
                 (type *) alloc(_alloc_size);                                 \
         })
 
-#define xallocate_pool(size) assert_alloc_ret(AllocatePool(size))
-#define xallocate_zero_pool(size) assert_alloc_ret(AllocateZeroPool(size))
-#define xreallocate_pool(p, old_size, new_size) assert_alloc_ret(ReallocatePool((p), (old_size), (new_size)))
-#define xpool_print(fmt, ...) ((CHAR16 *) assert_alloc_ret(PoolPrint((fmt), ##__VA_ARGS__)))
-#define xstrdup(str) ((CHAR16 *) assert_alloc_ret(StrDuplicate(str)))
+#define xallocate_pool(size) ASSERT_SE_PTR(AllocatePool(size))
+#define xallocate_zero_pool(size) ASSERT_SE_PTR(AllocateZeroPool(size))
+#define xreallocate_pool(p, old_size, new_size) ASSERT_SE_PTR(ReallocatePool((p), (old_size), (new_size)))
+#define xpool_print(fmt, ...) ((CHAR16 *) ASSERT_SE_PTR(PoolPrint((fmt), ##__VA_ARGS__)))
+#define xstrdup(str) ((CHAR16 *) ASSERT_SE_PTR(StrDuplicate(str)))
 #define xnew(type, n) xnew_alloc(type, (n), xallocate_pool)
 #define xnew0(type, n) xnew_alloc(type, (n), xallocate_zero_pool)
 
 EFI_STATUS parse_boolean(const CHAR8 *v, BOOLEAN *b);
-
-UINT64 ticks_read(void);
-UINT64 ticks_freq(void);
-UINT64 time_usec(void);
 
 EFI_STATUS efivar_set(const EFI_GUID *vendor, const CHAR16 *name, const CHAR16 *value, UINT32 flags);
 EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const CHAR16 *name, const void *buf, UINTN size, UINT32 flags);
@@ -71,20 +52,20 @@ CHAR8 *strchra(const CHAR8 *s, CHAR8 c);
 CHAR16 *xstra_to_path(const CHAR8 *stra);
 CHAR16 *xstra_to_str(const CHAR8 *stra);
 
-EFI_STATUS file_read(EFI_FILE_HANDLE dir, const CHAR16 *name, UINTN off, UINTN size, CHAR8 **content, UINTN *content_size);
+EFI_STATUS file_read(EFI_FILE *dir, const CHAR16 *name, UINTN off, UINTN size, CHAR8 **content, UINTN *content_size);
 
-static inline void FreePoolp(void *p) {
+static inline void free_poolp(void *p) {
         void *q = *(void**) p;
 
         if (!q)
                 return;
 
-        FreePool(q);
+        (void) BS->FreePool(q);
 }
 
-#define _cleanup_freepool_ _cleanup_(FreePoolp)
+#define _cleanup_freepool_ _cleanup_(free_poolp)
 
-static inline void FileHandleClosep(EFI_FILE_HANDLE *handle) {
+static inline void file_closep(EFI_FILE **handle) {
         if (!*handle)
                 return;
 
@@ -117,9 +98,9 @@ void clear_screen(UINTN attr);
 typedef INTN (*compare_pointer_func_t)(const void *a, const void *b);
 void sort_pointer_array(void **array, UINTN n_members, compare_pointer_func_t compare);
 
-EFI_STATUS get_file_info_harder(EFI_FILE_HANDLE handle, EFI_FILE_INFO **ret, UINTN *ret_size);
+EFI_STATUS get_file_info_harder(EFI_FILE *handle, EFI_FILE_INFO **ret, UINTN *ret_size);
 
-EFI_STATUS readdir_harder(EFI_FILE_HANDLE handle, EFI_FILE_INFO **buffer, UINTN *buffer_size);
+EFI_STATUS readdir_harder(EFI_FILE *handle, EFI_FILE_INFO **buffer, UINTN *buffer_size);
 
 UINTN strnlena(const CHAR8 *p, UINTN maxlen);
 CHAR8 *xstrndup8(const CHAR8 *p, UINTN sz);
@@ -136,7 +117,7 @@ static inline void strv_freep(CHAR16 ***p) {
         strv_free(*p);
 }
 
-EFI_STATUS open_directory(EFI_FILE_HANDLE root_dir, const CHAR16 *path, EFI_FILE_HANDLE *ret);
+EFI_STATUS open_directory(EFI_FILE *root_dir, const CHAR16 *path, EFI_FILE **ret);
 
 /* Conversion between EFI_PHYSICAL_ADDRESS and pointers is not obvious. The former is always 64bit, even on
  * 32bit archs. And gcc complains if we cast a pointer to an integer of a different size. Hence let's do the
@@ -159,3 +140,19 @@ static inline void *PHYSICAL_ADDRESS_TO_POINTER(EFI_PHYSICAL_ADDRESS addr) {
 }
 
 UINT64 get_os_indications_supported(void);
+
+#ifdef EFI_DEBUG
+void debug_break(void);
+extern UINT8 _text, _data;
+/* Report the relocated position of text and data sections so that a debugger
+ * can attach to us. See debug-sd-boot.sh for how this can be done. */
+#  define debug_hook(identity) Print(identity L"@0x%x,0x%x\n", &_text, &_data)
+#else
+#  define debug_hook(identity)
+#endif
+
+#if defined(__i386__) || defined(__x86_64__)
+void beep(UINTN beep_count);
+#else
+static inline void beep(UINTN beep_count) {}
+#endif

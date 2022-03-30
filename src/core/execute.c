@@ -80,6 +80,7 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "random-util.h"
+#include "recurse-dir.h"
 #include "rlimit-util.h"
 #include "rm-rf.h"
 #if HAVE_SECCOMP
@@ -994,7 +995,6 @@ static int get_fixed_group(const ExecContext *c, const char **group, gid_t *gid)
 static int get_supplementary_groups(const ExecContext *c, const char *user,
                                     const char *group, gid_t gid,
                                     gid_t **supplementary_gids, int *ngids) {
-        char **i;
         int r, k = 0;
         int ngroups_max;
         bool keep_groups = false;
@@ -1186,7 +1186,6 @@ static int setup_pam(
         pam_handle_t *handle = NULL;
         sigset_t old_ss;
         int pam_code = PAM_SUCCESS, r;
-        char **nv;
         bool close_session = false;
         pid_t pam_pid = 0, parent_pid;
         int flags = 0;
@@ -2004,7 +2003,6 @@ static int build_environment(
 static int build_pass_environment(const ExecContext *c, char ***ret) {
         _cleanup_strv_free_ char **pass_env = NULL;
         size_t n_env = 0;
-        char **i;
 
         STRV_FOREACH(i, c->pass_environment) {
                 _cleanup_free_ char *x = NULL;
@@ -2056,6 +2054,9 @@ bool exec_needs_mount_namespace(
                 return true;
 
         if (context->n_extension_images > 0)
+                return true;
+
+        if (!strv_isempty(context->extension_directories))
                 return true;
 
         if (!IN_SET(context->mount_flags, 0, MS_SHARED))
@@ -2277,7 +2278,6 @@ static bool exec_directory_is_private(const ExecContext *context, ExecDirectoryT
 
 static int create_many_symlinks(const char *root, const char *source, char **symlinks) {
         _cleanup_free_ char *src_abs = NULL;
-        char **dst;
         int r;
 
         assert(source);
@@ -2595,6 +2595,168 @@ static int write_credential(
         return 0;
 }
 
+static int load_credential(
+                const ExecContext *context,
+                const ExecParameters *params,
+                ExecLoadCredential *lc,
+                const char *unit,
+                int read_dfd,
+                int write_dfd,
+                uid_t uid,
+                bool ownership_ok,
+                uint64_t *left) {
+
+        assert(context);
+        assert(lc);
+        assert(unit);
+        assert(write_dfd >= 0);
+        assert(left);
+
+        ReadFullFileFlags flags = READ_FULL_FILE_SECURE|READ_FULL_FILE_FAIL_WHEN_LARGER;
+        _cleanup_(erase_and_freep) char *data = NULL;
+        _cleanup_free_ char *j = NULL, *bindname = NULL;
+        bool missing_ok = true;
+        const char *source;
+        size_t size, add;
+        int r;
+
+        if (path_is_absolute(lc->path) || read_dfd >= 0) {
+                /* If this is an absolute path, read the data directly from it, and support AF_UNIX sockets */
+                source = lc->path;
+                flags |= READ_FULL_FILE_CONNECT_SOCKET;
+
+                /* Pass some minimal info about the unit and the credential name we are looking to acquire
+                 * via the source socket address in case we read off an AF_UNIX socket. */
+                if (asprintf(&bindname, "@%" PRIx64"/unit/%s/%s", random_u64(), unit, lc->id) < 0)
+                        return -ENOMEM;
+
+                missing_ok = false;
+
+        } else if (params->received_credentials) {
+                /* If this is a relative path, take it relative to the credentials we received
+                 * ourselves. We don't support the AF_UNIX stuff in this mode, since we are operating
+                 * on a credential store, i.e. this is guaranteed to be regular files. */
+                j = path_join(params->received_credentials, lc->path);
+                if (!j)
+                        return -ENOMEM;
+
+                source = j;
+        } else
+                source = NULL;
+
+        if (source)
+                r = read_full_file_full(
+                                read_dfd, source,
+                                UINT64_MAX,
+                                lc->encrypted ? CREDENTIAL_ENCRYPTED_SIZE_MAX : CREDENTIAL_SIZE_MAX,
+                                flags | (lc->encrypted ? READ_FULL_FILE_UNBASE64 : 0),
+                                bindname,
+                                &data, &size);
+        else
+                r = -ENOENT;
+
+        if (r == -ENOENT && (missing_ok || hashmap_contains(context->set_credentials, lc->id))) {
+                /* Make a missing inherited credential non-fatal, let's just continue. After all apps
+                 * will get clear errors if we don't pass such a missing credential on as they
+                 * themselves will get ENOENT when trying to read them, which should not be much
+                 * worse than when we handle the error here and make it fatal.
+                 *
+                 * Also, if the source file doesn't exist, but a fallback is set via SetCredentials=
+                 * we are fine, too. */
+                log_debug_errno(r, "Couldn't read inherited credential '%s', skipping: %m", lc->path);
+                return 0;
+        }
+        if (r < 0)
+                return log_debug_errno(r, "Failed to read credential '%s': %m", lc->path);
+
+        if (lc->encrypted) {
+                _cleanup_free_ void *plaintext = NULL;
+                size_t plaintext_size = 0;
+
+                r = decrypt_credential_and_warn(lc->id, now(CLOCK_REALTIME), NULL, data, size, &plaintext, &plaintext_size);
+                if (r < 0)
+                        return r;
+
+                free_and_replace(data, plaintext);
+                size = plaintext_size;
+        }
+
+        add = strlen(lc->id) + size;
+        if (add > *left)
+                return -E2BIG;
+
+        r = write_credential(write_dfd, lc->id, data, size, uid, ownership_ok);
+        if (r < 0)
+                return r;
+
+        *left -= add;
+        return 0;
+}
+
+struct load_cred_args {
+        Set *seen_creds;
+
+        const ExecContext *context;
+        const ExecParameters *params;
+        ExecLoadCredential *parent_local_credential;
+        const char *unit;
+        int dfd;
+        uid_t uid;
+        bool ownership_ok;
+        uint64_t *left;
+};
+
+static int load_cred_recurse_dir_cb(
+                RecurseDirEvent event,
+                const char *path,
+                int dir_fd,
+                int inode_fd,
+                const struct dirent *de,
+                const struct statx *sx,
+                void *userdata) {
+
+        _cleanup_free_ char *credname = NULL, *sub_id = NULL;
+        struct load_cred_args *args = userdata;
+        int r;
+
+        if (event != RECURSE_DIR_ENTRY)
+                return RECURSE_DIR_CONTINUE;
+
+        if (!IN_SET(de->d_type, DT_REG, DT_SOCK))
+                return RECURSE_DIR_CONTINUE;
+
+        credname = strreplace(path, "/", "_");
+        if (!credname)
+                return -ENOMEM;
+
+        sub_id = strjoin(args->parent_local_credential->id, "_", credname);
+        if (!sub_id)
+                return -ENOMEM;
+
+        if (!credential_name_valid(sub_id))
+                return -EINVAL;
+
+        if (set_contains(args->seen_creds, sub_id)) {
+                log_debug("Skipping credential with duplicated ID %s at %s", sub_id, path);
+                return RECURSE_DIR_CONTINUE;
+        }
+
+        r = set_put_strdup(&args->seen_creds, sub_id);
+        if (r < 0)
+                return r;
+
+        r = load_credential(args->context, args->params,
+                &(ExecLoadCredential) {
+                        .id = sub_id,
+                        .path = (char *) de->d_name,
+                        .encrypted = args->parent_local_credential->encrypted,
+                }, args->unit, dir_fd, args->dfd, args->uid, args->ownership_ok, args->left);
+        if (r < 0)
+                return r;
+
+        return RECURSE_DIR_CONTINUE;
+}
+
 static int acquire_credentials(
                 const ExecContext *context,
                 const ExecParameters *params,
@@ -2605,6 +2767,7 @@ static int acquire_credentials(
 
         uint64_t left = CREDENTIALS_TOTAL_SIZE_MAX;
         _cleanup_close_ int dfd = -1;
+        _cleanup_set_free_ Set *seen_creds = NULL;
         ExecLoadCredential *lc;
         ExecSetCredential *sc;
         int r;
@@ -2616,84 +2779,53 @@ static int acquire_credentials(
         if (dfd < 0)
                 return -errno;
 
+        seen_creds = set_new(&string_hash_ops_free);
+        if (!seen_creds)
+                return -ENOMEM;
+
         /* First, load credentials off disk (or acquire via AF_UNIX socket) */
         HASHMAP_FOREACH(lc, context->load_credentials) {
-                ReadFullFileFlags flags = READ_FULL_FILE_SECURE|READ_FULL_FILE_FAIL_WHEN_LARGER;
-                _cleanup_(erase_and_freep) char *data = NULL;
-                _cleanup_free_ char *j = NULL, *bindname = NULL;
-                bool missing_ok = true;
-                const char *source;
-                size_t size, add;
+                _cleanup_close_ int sub_fd = -1;
 
-                if (path_is_absolute(lc->path)) {
-                        /* If this is an absolute path, read the data directly from it, and support AF_UNIX sockets */
-                        source = lc->path;
-                        flags |= READ_FULL_FILE_CONNECT_SOCKET;
-
-                        /* Pass some minimal info about the unit and the credential name we are looking to acquire
-                         * via the source socket address in case we read off an AF_UNIX socket. */
-                        if (asprintf(&bindname, "@%" PRIx64"/unit/%s/%s", random_u64(), unit, lc->id) < 0)
-                                return -ENOMEM;
-
-                        missing_ok = false;
-
-                } else if (params->received_credentials) {
-                        /* If this is a relative path, take it relative to the credentials we received
-                         * ourselves. We don't support the AF_UNIX stuff in this mode, since we are operating
-                         * on a credential store, i.e. this is guaranteed to be regular files. */
-                        j = path_join(params->received_credentials, lc->path);
-                        if (!j)
-                                return -ENOMEM;
-
-                        source = j;
-                } else
-                        source = NULL;
-
-                if (source)
-                        r = read_full_file_full(
-                                        AT_FDCWD, source,
-                                        UINT64_MAX,
-                                        lc->encrypted ? CREDENTIAL_ENCRYPTED_SIZE_MAX : CREDENTIAL_SIZE_MAX,
-                                        flags | (lc->encrypted ? READ_FULL_FILE_UNBASE64 : 0),
-                                        bindname,
-                                        &data, &size);
-                else
-                        r = -ENOENT;
-                if (r == -ENOENT && (missing_ok || hashmap_contains(context->set_credentials, lc->id))) {
-                        /* Make a missing inherited credential non-fatal, let's just continue. After all apps
-                         * will get clear errors if we don't pass such a missing credential on as they
-                         * themselves will get ENOENT when trying to read them, which should not be much
-                         * worse than when we handle the error here and make it fatal.
-                         *
-                         * Also, if the source file doesn't exist, but a fallback is set via SetCredentials=
-                         * we are fine, too. */
-                        log_debug_errno(r, "Couldn't read inherited credential '%s', skipping: %m", lc->path);
+                /* Skip over credentials with unspecified paths. These are received by the
+                 * service manager via the $CREDENTIALS_DIRECTORY environment variable. */
+                if (!is_path(lc->path) && streq(lc->id, lc->path))
                         continue;
-                }
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to read credential '%s': %m", lc->path);
 
-                if (lc->encrypted) {
-                        _cleanup_free_ void *plaintext = NULL;
-                        size_t plaintext_size = 0;
+                sub_fd = open(lc->path, O_DIRECTORY|O_CLOEXEC|O_RDONLY);
+                if (sub_fd < 0 && errno != ENOTDIR)
+                        return -errno;
 
-                        r = decrypt_credential_and_warn(lc->id, now(CLOCK_REALTIME), NULL, data, size, &plaintext, &plaintext_size);
+                if (sub_fd < 0) {
+                        r = set_put_strdup(&seen_creds, lc->id);
+                        if (r < 0)
+                                return r;
+                        r = load_credential(context, params, lc, unit, -1, dfd, uid, ownership_ok, &left);
                         if (r < 0)
                                 return r;
 
-                        free_and_replace(data, plaintext);
-                        size = plaintext_size;
+                } else {
+                        r = recurse_dir(
+                                        sub_fd,
+                                        /* path= */ "",
+                                        /* statx_mask= */ 0,
+                                        /* n_depth_max= */ UINT_MAX,
+                                        RECURSE_DIR_IGNORE_DOT|RECURSE_DIR_ENSURE_TYPE,
+                                        load_cred_recurse_dir_cb,
+                                        &(struct load_cred_args) {
+                                                .seen_creds = seen_creds,
+                                                .context = context,
+                                                .params = params,
+                                                .parent_local_credential = lc,
+                                                .unit = unit,
+                                                .dfd = dfd,
+                                                .uid = uid,
+                                                .ownership_ok = ownership_ok,
+                                                .left = &left,
+                                        });
+                        if (r < 0)
+                                return r;
                 }
-
-                add = strlen(lc->id) + size;
-                if (add > left)
-                        return -E2BIG;
-
-                r = write_credential(dfd, lc->id, data, size, uid, ownership_ok);
-                if (r < 0)
-                        return r;
-
-                left -= add;
         }
 
         /* First we use the literally specified credentials. Note that they might be overridden again below,
@@ -2911,7 +3043,6 @@ static int setup_credentials(
                 uid_t uid) {
 
         _cleanup_free_ char *p = NULL, *q = NULL;
-        const char *i;
         int r;
 
         assert(context);
@@ -3216,7 +3347,6 @@ static int compile_symlinks(
         for (ExecDirectoryType dt = 0; dt < _EXEC_DIRECTORY_TYPE_MAX; dt++) {
                 for (size_t i = 0; i < context->directories[dt].n_items; i++) {
                         _cleanup_free_ char *private_path = NULL, *path = NULL;
-                        char **symlink;
 
                         STRV_FOREACH(symlink, context->directories[dt].items[i].symlinks) {
                                 _cleanup_free_ char *src_abs = NULL, *dst_abs = NULL;
@@ -3279,6 +3409,9 @@ static bool insist_on_sandboxing(
         if (context->dynamic_user)
                 return true;
 
+        if (context->n_extension_images > 0 || !strv_isempty(context->extension_directories))
+                return true;
+
         /* If there are any bind mounts set that don't map back onto themselves, fs namespacing becomes
          * essential. */
         for (size_t i = 0; i < n_bind_mounts; i++)
@@ -3302,7 +3435,8 @@ static int apply_mount_namespace(
         _cleanup_strv_free_ char **empty_directories = NULL, **symlinks = NULL;
         const char *tmp_dir = NULL, *var_tmp_dir = NULL;
         const char *root_dir = NULL, *root_image = NULL;
-        _cleanup_free_ char *creds_path = NULL, *incoming_dir = NULL, *propagate_dir = NULL;
+        _cleanup_free_ char *creds_path = NULL, *incoming_dir = NULL, *propagate_dir = NULL,
+                        *extension_dir = NULL;
         NamespaceInfo ns_info;
         bool needs_sandboxing;
         BindMount *bind_mounts = NULL;
@@ -3401,7 +3535,17 @@ static int apply_mount_namespace(
                         r = -ENOMEM;
                         goto finalize;
                 }
-        }
+
+                extension_dir = strdup("/run/systemd/unit-extensions");
+                if (!extension_dir) {
+                        r = -ENOMEM;
+                        goto finalize;
+                }
+        } else
+                if (asprintf(&extension_dir, "/run/user/" UID_FMT "/systemd/unit-extensions", geteuid()) < 0) {
+                        r = -ENOMEM;
+                        goto finalize;
+                }
 
         r = setup_namespace(root_dir, root_image, context->root_image_options,
                             &ns_info, context->read_write_paths,
@@ -3427,8 +3571,10 @@ static int apply_mount_namespace(
                             context->root_verity,
                             context->extension_images,
                             context->n_extension_images,
+                            context->extension_directories,
                             propagate_dir,
                             incoming_dir,
+                            extension_dir,
                             root_dir || root_image ? params->notify_socket : NULL,
                             error_path);
 
@@ -3915,6 +4061,10 @@ static int exec_child(
         assert(params);
         assert(exit_status);
 
+        /* Explicitly test for CVE-2021-4034 inspired invocations */
+        assert(command->path);
+        assert(!strv_isempty(command->argv));
+
         rename_process_from_path(command->path);
 
         /* We reset exactly these signals, since they are the only ones we set to SIG_IGN in the main
@@ -4109,6 +4259,12 @@ static int exec_child(
                 }
 
                 r = cg_attach_everywhere(params->cgroup_supported, p, 0, NULL, NULL);
+                if (r == -EUCLEAN) {
+                        *exit_status = EXIT_CGROUP;
+                        return log_unit_error_errno(unit, r, "Failed to attach process to cgroup %s "
+                                                    "because the cgroup or one of its parents or "
+                                                    "siblings is in the threaded mode: %m", p);
+                }
                 if (r < 0) {
                         *exit_status = EXIT_CGROUP;
                         return log_unit_error_errno(unit, r, "Failed to attach to cgroup %s: %m", p);
@@ -4312,12 +4468,9 @@ static int exec_child(
                 return log_oom();
         }
 
-        /* The PATH variable is set to the default path in params->environment.
-         * However, this is overridden if user specified fields have PATH set.
-         * The intention is to also override PATH if the user does
-         * not specify PATH and the user has specified ExecSearchPath
-         */
-
+        /* The $PATH variable is set to the default path in params->environment. However, this is overridden
+         * if user-specified fields have $PATH set. The intention is to also override $PATH if the unit does
+         * not specify PATH but the unit has ExecSearchPath. */
         if (!strv_isempty(context->exec_search_path)) {
                 _cleanup_free_ char *joined = NULL;
 
@@ -4354,22 +4507,26 @@ static int exec_child(
                 return log_unit_error_errno(unit, r, "Failed to set up kernel keyring: %m");
         }
 
-        /* We need sandboxing if the caller asked us to apply it and the command isn't explicitly excepted from it */
+        /* We need sandboxing if the caller asked us to apply it and the command isn't explicitly excepted
+         * from it. */
         needs_sandboxing = (params->flags & EXEC_APPLY_SANDBOXING) && !(command->flags & EXEC_COMMAND_FULLY_PRIVILEGED);
 
-        /* We need the ambient capability hack, if the caller asked us to apply it and the command is marked for it, and the kernel doesn't actually support ambient caps */
+        /* We need the ambient capability hack, if the caller asked us to apply it and the command is marked
+         * for it, and the kernel doesn't actually support ambient caps. */
         needs_ambient_hack = (params->flags & EXEC_APPLY_SANDBOXING) && (command->flags & EXEC_COMMAND_AMBIENT_MAGIC) && !ambient_capabilities_supported();
 
-        /* We need setresuid() if the caller asked us to apply sandboxing and the command isn't explicitly excepted from either whole sandboxing or just setresuid() itself, and the ambient hack is not desired */
+        /* We need setresuid() if the caller asked us to apply sandboxing and the command isn't explicitly
+         * excepted from either whole sandboxing or just setresuid() itself, and the ambient hack is not
+         * desired. */
         if (needs_ambient_hack)
                 needs_setuid = false;
         else
                 needs_setuid = (params->flags & EXEC_APPLY_SANDBOXING) && !(command->flags & (EXEC_COMMAND_FULLY_PRIVILEGED|EXEC_COMMAND_NO_SETUID));
 
         if (needs_sandboxing) {
-                /* MAC enablement checks need to be done before a new mount ns is created, as they rely on /sys being
-                 * present. The actual MAC context application will happen later, as late as possible, to avoid
-                 * impacting our own code paths. */
+                /* MAC enablement checks need to be done before a new mount ns is created, as they rely on
+                 * /sys being present. The actual MAC context application will happen later, as late as
+                 * possible, to avoid impacting our own code paths. */
 
 #if HAVE_SELINUX
                 use_selinux = mac_selinux_use();
@@ -5105,6 +5262,7 @@ void exec_context_done(ExecContext *c) {
         c->root_hash_sig_path = mfree(c->root_hash_sig_path);
         c->root_verity = mfree(c->root_verity);
         c->extension_images = mount_image_free_many(c->extension_images, &c->n_extension_images);
+        c->extension_directories = strv_free(c->extension_directories);
         c->tty_path = mfree(c->tty_path);
         c->syslog_identifier = mfree(c->syslog_identifier);
         c->user = mfree(c->user);
@@ -5185,7 +5343,6 @@ int exec_context_destroy_runtime_directory(const ExecContext *c, const char *run
                  * service next. */
                 (void) rm_rf(p, REMOVE_ROOT);
 
-                char **symlink;
                 STRV_FOREACH(symlink, c->directories[EXEC_DIRECTORY_RUNTIME].items[i].symlinks) {
                         _cleanup_free_ char *symlink_abs = NULL;
 
@@ -5259,12 +5416,9 @@ void exec_command_reset_status_array(ExecCommand *c, size_t n) {
 }
 
 void exec_command_reset_status_list_array(ExecCommand **c, size_t n) {
-        for (size_t i = 0; i < n; i++) {
-                ExecCommand *z;
-
+        for (size_t i = 0; i < n; i++)
                 LIST_FOREACH(command, z, c[i])
                         exec_status_reset(&z->exec_status);
-        }
 }
 
 typedef struct InvalidEnvInfo {
@@ -5357,20 +5511,17 @@ static int exec_context_named_iofds(
         return targets == 0 ? 0 : -ENOENT;
 }
 
-static int exec_context_load_environment(const Unit *unit, const ExecContext *c, char ***l) {
-        char **i, **r = NULL;
+static int exec_context_load_environment(const Unit *unit, const ExecContext *c, char ***ret) {
+        _cleanup_strv_free_ char **v = NULL;
+        int r;
 
         assert(c);
-        assert(l);
+        assert(ret);
 
         STRV_FOREACH(i, c->environment_files) {
-                char *fn;
-                int k;
-                bool ignore = false;
-                char **p;
                 _cleanup_globfree_ glob_t pglob = {};
-
-                fn = *i;
+                bool ignore = false;
+                char *fn = *i;
 
                 if (fn[0] == '-') {
                         ignore = true;
@@ -5380,33 +5531,30 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                 if (!path_is_absolute(fn)) {
                         if (ignore)
                                 continue;
-
-                        strv_free(r);
                         return -EINVAL;
                 }
 
                 /* Filename supports globbing, take all matching files */
-                k = safe_glob(fn, 0, &pglob);
-                if (k < 0) {
+                r = safe_glob(fn, 0, &pglob);
+                if (r < 0) {
                         if (ignore)
                                 continue;
-
-                        strv_free(r);
-                        return k;
+                        return r;
                 }
 
                 /* When we don't match anything, -ENOENT should be returned */
                 assert(pglob.gl_pathc > 0);
 
                 for (unsigned n = 0; n < pglob.gl_pathc; n++) {
-                        k = load_env_file(NULL, pglob.gl_pathv[n], &p);
-                        if (k < 0) {
+                        _cleanup_strv_free_ char **p = NULL;
+
+                        r = load_env_file(NULL, pglob.gl_pathv[n], &p);
+                        if (r < 0) {
                                 if (ignore)
                                         continue;
-
-                                strv_free(r);
-                                return k;
+                                return r;
                         }
+
                         /* Log invalid environment variables with filename */
                         if (p) {
                                 InvalidEnvInfo info = {
@@ -5417,23 +5565,19 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                                 p = strv_env_clean_with_callback(p, invalid_env, &info);
                         }
 
-                        if (!r)
-                                r = p;
+                        if (!v)
+                                v = TAKE_PTR(p);
                         else {
-                                char **m;
-
-                                m = strv_env_merge(r, p);
-                                strv_free(r);
-                                strv_free(p);
+                                char **m = strv_env_merge(v, p);
                                 if (!m)
                                         return -ENOMEM;
 
-                                r = m;
+                                strv_free_and_replace(v, m);
                         }
                 }
         }
 
-        *l = r;
+        *ret = TAKE_PTR(v);
 
         return 0;
 }
@@ -5475,8 +5619,6 @@ bool exec_context_may_touch_console(const ExecContext *ec) {
 }
 
 static void strv_fprintf(FILE *f, char **l) {
-        char **g;
-
         assert(f);
 
         STRV_FOREACH(g, l)
@@ -5496,7 +5638,6 @@ static void strv_dump(FILE* f, const char *prefix, const char *name, char **strv
 }
 
 void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
-        char **e, **d;
         int r;
 
         assert(c);
@@ -5558,8 +5699,6 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 fprintf(f, "%sRootImage: %s\n", prefix, c->root_image);
 
         if (c->root_image_options) {
-                MountOptions *o;
-
                 fprintf(f, "%sRootImageOptions:", prefix);
                 LIST_FOREACH(mount_options, o, c->root_image_options)
                         if (!isempty(o->options))
@@ -5928,9 +6067,11 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
         }
 
 #if HAVE_LIBBPF
-        if (exec_context_restrict_filesystems_set(c))
-                SET_FOREACH(e, c->restrict_filesystems)
-                        fprintf(f, "%sRestrictFileSystems: %s\n", prefix, *e);
+        if (exec_context_restrict_filesystems_set(c)) {
+                char *fs;
+                SET_FOREACH(fs, c->restrict_filesystems)
+                        fprintf(f, "%sRestrictFileSystems: %s\n", prefix, fs);
+        }
 #endif
 
         if (c->network_namespace_path)
@@ -5956,8 +6097,6 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
         }
 
         for (size_t i = 0; i < c->n_mount_images; i++) {
-                MountOptions *o;
-
                 fprintf(f, "%sMountImages: %s%s:%s", prefix,
                         c->mount_images[i].ignore_enoent ? "-": "",
                         c->mount_images[i].source,
@@ -5970,8 +6109,6 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
         }
 
         for (size_t i = 0; i < c->n_extension_images; i++) {
-                MountOptions *o;
-
                 fprintf(f, "%sExtensionImages: %s%s", prefix,
                         c->extension_images[i].ignore_enoent ? "-": "",
                         c->extension_images[i].source);
@@ -5981,6 +6118,8 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                                 strempty(o->options));
                 fprintf(f, "\n");
         }
+
+        strv_dump(f, prefix, "ExtensionDirectories", c->extension_directories);
 }
 
 bool exec_context_maintains_privileges(const ExecContext *c) {
@@ -6121,7 +6260,6 @@ int exec_context_get_clean_directories(
                                         return r;
                         }
 
-                        char **symlink;
                         STRV_FOREACH(symlink, c->directories[t].items[i].symlinks) {
                                 j = path_join(prefix[t], *symlink);
                                 if (!j)
@@ -6236,8 +6374,8 @@ void exec_command_dump_list(ExecCommand *c, FILE *f, const char *prefix) {
 
         prefix = strempty(prefix);
 
-        LIST_FOREACH(command, c, c)
-                exec_command_dump(c, f, prefix);
+        LIST_FOREACH(command, i, c)
+                exec_command_dump(i, f, prefix);
 }
 
 void exec_command_append_list(ExecCommand **l, ExecCommand *e) {

@@ -88,6 +88,7 @@ endif
 
 test_fstab_generator_sh = find_program('test-fstab-generator.sh')
 test_network_generator_conversion_sh = find_program('test-network-generator-conversion.sh')
+test_systemctl_enable_sh = find_program('test-systemctl-enable.sh')
 test_systemd_tmpfiles_py = find_program('test-systemd-tmpfiles.py')
 hwdb_test_sh = find_program('hwdb-test.sh')
 
@@ -112,16 +113,6 @@ if want_tests != 'false'
         test('rule-syntax-check',
              rule_syntax_check_py,
              args : all_rules)
-endif
-
-############################################################
-
-if conf.get('HAVE_SYSV_COMPAT') == 1
-        sysv_generator_test_py = find_program('sysv-generator-test.py')
-        if want_tests != 'false'
-                test('sysv-generator-test',
-                     sysv_generator_test_py)
-        endif
 endif
 
 ############################################################
@@ -163,17 +154,35 @@ endif
 
 ############################################################
 
+rpm = find_program('rpm', required : false)
+rpmspec = find_program('rpmspec', required : false)
+test_rpm_macros = find_program('test-rpm-macros.sh')
+
+if rpm.found() and rpmspec.found()
+        if want_tests != 'false'
+                test('test-rpm-macros',
+                     test_rpm_macros,
+                     args : [project_build_root])
+        endif
+else
+      message('Skipping test-rpm-macros since rpm and/or rpmspec are not available')
+endif
+
+############################################################
+
 if want_tests != 'false' and dmi_arches.contains(host_machine.cpu_family())
         udev_dmi_memory_id_test = find_program('udev-dmi-memory-id-test.sh')
 
-        if git.found()
+        if git.found() and fs.exists(project_source_root / '.git')
                 out = run_command(
                         env, '-u', 'GIT_WORK_TREE',
                         git, '--git-dir=@0@/.git'.format(project_source_root),
-                        'ls-files', ':/test/dmidecode-dumps/*.bin')
+                        'ls-files', ':/test/dmidecode-dumps/*.bin',
+                        check: true)
         else
                 out = run_command(
-                        sh, '-c', 'ls @0@/test/dmidecode-dumps/*.bin'.format(project_source_root))
+                        sh, '-c', 'cd "@0@"; echo test/dmidecode-dumps/*.bin'.format(project_source_root),
+                        check: true)
         endif
 
         foreach p : out.stdout().split()
@@ -182,9 +191,10 @@ if want_tests != 'false' and dmi_arches.contains(host_machine.cpu_family())
 
                 test(name,
                      udev_dmi_memory_id_test,
-                     args : [udev_prog_paths['dmi_memory_id'],
+                     args : [udev_prog_paths['dmi_memory_id'].full_path(),
                              source,
-                             source + '.txt'])
+                             source + '.txt'],
+                     depends : udev_prog_paths['dmi_memory_id'])
         endforeach
 endif
 

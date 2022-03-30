@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
         assert_se(set_unit_path(unit_dir) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
 
-        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &p);
+        r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, "sd_trivial", &p);
         assert_se(r == 0);
 
         r = bpf_program_add_instructions(p, exit_insn, ELEMENTSOF(exit_insn));
@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
 
         /* The simple tests succeeded. Now let's try full unit-based use-case. */
 
-        assert_se(manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m) >= 0);
+        assert_se(manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_BASIC, &m) >= 0);
         assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         assert_se(u = unit_new(m, sizeof(Service)));

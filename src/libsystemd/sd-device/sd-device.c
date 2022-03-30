@@ -152,7 +152,9 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
         if (verify) {
                 r = chase_symlinks(_syspath, NULL, 0, &syspath, NULL);
                 if (r == -ENOENT)
-                        return -ENODEV; /* the device does not exist (any more?) */
+                         /* the device does not exist (any more?) */
+                        return log_debug_errno(SYNTHETIC_ERRNO(ENODEV),
+                                               "sd-device: Failed to chase symlinks in \"%s\".", _syspath);
                 if (r < 0)
                         return log_debug_errno(r, "sd-device: Failed to get target of '%s': %m", _syspath);
 
@@ -173,7 +175,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
 
                         new_syspath = path_join("/sys", p);
                         if (!new_syspath)
-                                return -ENOMEM;
+                                return log_oom_debug();
 
                         free_and_replace(syspath, new_syspath);
                         path_simplify(syspath);
@@ -186,31 +188,35 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                         path = strjoina(syspath, "/uevent");
                         if (access(path, F_OK) < 0) {
                                 if (errno == ENOENT)
-                                        /* this is not a valid device */
-                                        return -ENODEV;
+                                        /* This is not a valid device.
+                                         * Note, this condition is quite often satisfied when
+                                         * enumerating devices or finding a parent device.
+                                         * Hence, use log_trace_errno() here. */
+                                        return log_trace_errno(SYNTHETIC_ERRNO(ENODEV),
+                                                               "sd-device: the uevent file \"%s\" does not exist.", path);
 
                                 return log_debug_errno(errno, "sd-device: cannot access uevent file for %s: %m", syspath);
                         }
                 } else {
                         /* everything else just needs to be a directory */
                         if (!is_dir(syspath, false))
-                                return -ENODEV;
+                                return log_debug_errno(SYNTHETIC_ERRNO(ENODEV),
+                                                       "sd-device: the syspath \"%s\" is not a directory.", syspath);
                 }
         } else {
                 syspath = strdup(_syspath);
                 if (!syspath)
-                        return -ENOMEM;
+                        return log_oom_debug();
         }
 
         devpath = syspath + STRLEN("/sys");
 
         if (devpath[0] != '/')
-                /* '/sys' alone is not a valid device path */
-                return -ENODEV;
+                return log_debug_errno(SYNTHETIC_ERRNO(ENODEV), "sd-device: \"/sys\" alone is not a valid device path.");
 
         r = device_add_property_internal(device, "DEVPATH", devpath);
         if (r < 0)
-                return r;
+                return log_debug_errno(r, "sd-device: Failed to add \"DEVPATH\" property for device \"%s\": %m", syspath);
 
         free_and_replace(device->syspath, syspath);
         device->devpath = devpath;
@@ -241,6 +247,10 @@ _public_ int sd_device_new_from_devnum(sd_device **ret, char type, dev_t devnum)
 
         assert_return(ret, -EINVAL);
         assert_return(IN_SET(type, 'b', 'c'), -EINVAL);
+
+        if (devnum == 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(ENODEV),
+                                       "sd-device: Attempted to allocate device by zero major/minor, refusing.");
 
         /* use /sys/dev/{block,char}/<maj>:<min> link */
         xsprintf(id, "%u:%u", major(devnum), minor(devnum));
@@ -322,7 +332,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
                 const char *subsystem,
                 const char *sysname) {
 
-        const char *s;
         char *name;
         int r;
 
@@ -331,7 +340,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
         assert_return(path_is_normalized(sysname), -EINVAL);
 
         if (streq(subsystem, "subsystem")) {
-
                 FOREACH_STRING(s, "/sys/subsystem/", "/sys/bus/", "/sys/class/") {
                         r = device_strjoin_new(s, sysname, NULL, NULL, ret);
                         if (r < 0)
@@ -341,7 +349,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
                 }
 
         } else  if (streq(subsystem, "module")) {
-
                 r = device_strjoin_new("/sys/module/", sysname, NULL, NULL, ret);
                 if (r < 0)
                         return r;
@@ -353,9 +360,8 @@ _public_ int sd_device_new_from_subsystem_sysname(
 
                 sep = strchr(sysname, ':');
                 if (sep && sep[1] != '\0') { /* Require ":" and something non-empty after that. */
-                        const char *subsys;
 
-                        subsys = memdupa_suffix0(sysname, sep - sysname);
+                        const char *subsys = memdupa_suffix0(sysname, sep - sysname);
                         sep++;
 
                         FOREACH_STRING(s, "/sys/subsystem/", "/sys/bus/") {
@@ -804,32 +810,26 @@ int device_set_subsystem(sd_device *device, const char *subsystem) {
 
 int device_set_drivers_subsystem(sd_device *device) {
         _cleanup_free_ char *subsystem = NULL;
-        const char *syspath, *drivers, *p;
+        const char *devpath, *drivers, *p;
         int r;
 
         assert(device);
 
-        r = sd_device_get_syspath(device, &syspath);
+        r = sd_device_get_devpath(device, &devpath);
         if (r < 0)
                 return r;
 
-        drivers = strstr(syspath, "/drivers/");
+        drivers = strstr(devpath, "/drivers/");
         if (!drivers)
                 return -EINVAL;
 
-        for (p = drivers - 1; p >= syspath; p--)
-                if (*p == '/')
-                        break;
-
-        if (p <= syspath)
-                /* syspath does not start with /sys/ ?? */
-                return -EINVAL;
-        p++;
-        if (p >= drivers)
-                /* refuse duplicated slashes */
+        r = path_find_last_component(devpath, false, &drivers, &p);
+        if (r < 0)
+                return r;
+        if (r == 0)
                 return -EINVAL;
 
-        subsystem = strndup(p, drivers - p);
+        subsystem = strndup(p, r);
         if (!subsystem)
                 return -ENOMEM;
 
@@ -1419,7 +1419,7 @@ int device_read_db_internal_filename(sd_device *device, const char *filename) {
 
         device->db_loaded = true;
 
-        for (size_t i = 0; i < db_len; i++) {
+        for (size_t i = 0; i < db_len; i++)
                 switch (state) {
                 case PRE_KEY:
                         if (!strchr(NEWLINE, db[i])) {
@@ -1467,7 +1467,6 @@ int device_read_db_internal_filename(sd_device *device, const char *filename) {
                 default:
                         return log_device_debug_errno(device, SYNTHETIC_ERRNO(EINVAL), "sd-device: invalid db syntax.");
                 }
-        }
 
         return 0;
 }
@@ -2189,7 +2188,7 @@ _public_ int sd_device_trigger_with_uuid(
         if (r < 0)
                 return r;
 
-        j = strjoina(s, " ", ID128_TO_UUID_STRING(u));
+        j = strjoina(s, " ", SD_ID128_TO_UUID_STRING(u));
 
         r = sd_device_set_sysattr_value(device, "uevent", j);
         if (r < 0)

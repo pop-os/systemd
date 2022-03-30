@@ -23,6 +23,10 @@
 #include "user-util.h"
 #include "util.h"
 
+static char *runtime_dir = NULL;
+
+STATIC_DESTRUCTOR_REGISTER(runtime_dir, rm_rf_physical_and_freep);
+
 static void test_unit_name_is_valid_one(const char *name, UnitNameFlags flags, bool expected) {
         log_info("%s ( %s%s%s ): %s",
                  name,
@@ -224,7 +228,7 @@ TEST_RET(unit_printf, .sd_booted = true) {
         assert_se(get_home_dir(&home) >= 0);
         assert_se(get_shell(&shell) >= 0);
 
-        r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r))
                 return log_tests_skipped_errno(r, "manager_new");
         assert_se(r == 0);
@@ -844,15 +848,12 @@ TEST(unit_name_prefix_equal) {
         assert_se(!unit_name_prefix_equal("a", "a"));
 }
 
-DEFINE_CUSTOM_TEST_MAIN(
-        LOG_INFO,
+static int intro(void) {
+        if (enter_cgroup_subroot(NULL) == -ENOMEDIUM)
+                return log_tests_skipped("cgroupfs not available");
 
-        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
-        ({
-                if (enter_cgroup_subroot(NULL) == -ENOMEDIUM)
-                        return log_tests_skipped("cgroupfs not available");
+        assert_se(runtime_dir = setup_fake_runtime_dir());
+        return EXIT_SUCCESS;
+}
 
-                assert_se(runtime_dir = setup_fake_runtime_dir());
-        }),
-
-        /* no outro */);
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);

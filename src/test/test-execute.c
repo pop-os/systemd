@@ -190,19 +190,15 @@ static bool check_user_has_group_with_same_name(const char *name) {
 }
 
 static bool is_inaccessible_available(void) {
-        const char *p;
-
         FOREACH_STRING(p,
-                "/run/systemd/inaccessible/reg",
-                "/run/systemd/inaccessible/dir",
-                "/run/systemd/inaccessible/chr",
-                "/run/systemd/inaccessible/blk",
-                "/run/systemd/inaccessible/fifo",
-                "/run/systemd/inaccessible/sock"
-        ) {
+                       "/run/systemd/inaccessible/reg",
+                       "/run/systemd/inaccessible/dir",
+                       "/run/systemd/inaccessible/chr",
+                       "/run/systemd/inaccessible/blk",
+                       "/run/systemd/inaccessible/fifo",
+                       "/run/systemd/inaccessible/sock")
                 if (access(p, F_OK) < 0)
                         return false;
-        }
 
         return true;
 }
@@ -610,7 +606,6 @@ static int find_libraries(const char *exec, char ***ret) {
         _cleanup_strv_free_ char **v = NULL;
         assert_se(strv_split_newlines_full(&v, result, 0) >= 0);
 
-        char **q;
         STRV_FOREACH(q, v) {
                 _cleanup_free_ char *word = NULL;
                 const char *p = *q;
@@ -678,7 +673,6 @@ static void test_exec_mount_apivfs(Manager *m) {
         assert_se(strextend(&data, "BindReadOnlyPaths=", fullpath_touch, "\n"));
         assert_se(strextend(&data, "BindReadOnlyPaths=", fullpath_test, "\n"));
 
-        char **p;
         STRV_FOREACH(p, libraries)
                 assert_se(strextend(&data, "BindReadOnlyPaths=", *p, "\n"));
 
@@ -1086,6 +1080,7 @@ static void test_exec_specifier(Manager *m) {
         test(m, "exec-specifier.service", 0, CLD_EXITED);
         test(m, "exec-specifier@foo-bar.service", 0, CLD_EXITED);
         test(m, "exec-specifier-interpolation.service", 0, CLD_EXITED);
+        test(m, "exec-specifier-credentials-dir.service", 0, CLD_EXITED);
 }
 
 static void test_exec_standardinput(Manager *m) {
@@ -1122,7 +1117,7 @@ typedef struct test_entry {
 
 #define entry(x) {x, #x}
 
-static int run_tests(UnitFileScope scope, const test_entry tests[], char **patterns) {
+static int run_tests(LookupScope scope, const test_entry tests[], char **patterns) {
         _cleanup_(manager_freep) Manager *m = NULL;
         int r;
 
@@ -1244,11 +1239,11 @@ int main(int argc, char *argv[]) {
         assert_se(unsetenv("VAR2") == 0);
         assert_se(unsetenv("VAR3") == 0);
 
-        r = run_tests(UNIT_FILE_USER, user_tests, argv + 1);
+        r = run_tests(LOOKUP_SCOPE_USER, user_tests, argv + 1);
         if (r != 0)
                 return r;
 
-        r = run_tests(UNIT_FILE_SYSTEM, system_tests, argv + 1);
+        r = run_tests(LOOKUP_SCOPE_SYSTEM, system_tests, argv + 1);
         if (r != 0)
                 return r;
 
@@ -1270,11 +1265,11 @@ int main(int argc, char *argv[]) {
 
         can_unshare = false;
 
-        r = run_tests(UNIT_FILE_USER, user_tests, argv + 1);
+        r = run_tests(LOOKUP_SCOPE_USER, user_tests, argv + 1);
         if (r != 0)
                 return r;
 
-        return run_tests(UNIT_FILE_SYSTEM, system_tests, argv + 1);
+        return run_tests(LOOKUP_SCOPE_SYSTEM, system_tests, argv + 1);
 #else
         return 0;
 #endif

@@ -54,6 +54,7 @@ static int manager_new(Manager **ret) {
         *m = (Manager) {
                 .console_active_fd = -1,
                 .reserve_vt_fd = -1,
+                .enable_wall_messages = true,
                 .idle_action_not_before_usec = now(CLOCK_MONOTONIC),
         };
 
@@ -167,7 +168,6 @@ static Manager* manager_unref(Manager *m) {
         strv_free(m->kill_only_users);
         strv_free(m->kill_exclude_users);
 
-        free(m->scheduled_shutdown_type);
         free(m->scheduled_shutdown_tty);
         free(m->wall_message);
         free(m->action_job);
@@ -685,7 +685,7 @@ static int manager_connect_bus(Manager *m) {
 
 static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo *si, void *data) {
         Manager *m = data;
-        Session *active, *iter;
+        Session *active;
 
         /*
          * We got a VT-switch signal and we have to acknowledge it immediately.
@@ -732,16 +732,14 @@ static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo
                 return 0;
         }
 
-        if (active->vtfd >= 0) {
+        if (active->vtfd >= 0)
                 session_leave_vt(active);
-        } else {
-                LIST_FOREACH(sessions_by_seat, iter, m->seat0->sessions) {
+        else
+                LIST_FOREACH(sessions_by_seat, iter, m->seat0->sessions)
                         if (iter->vtnr == active->vtnr && iter->vtfd >= 0) {
                                 session_leave_vt(iter);
                                 break;
                         }
-                }
-        }
 
         return 0;
 }
@@ -1089,6 +1087,8 @@ static int manager_startup(Manager *m) {
         r = manager_enumerate_buttons(m);
         if (r < 0)
                 log_warning_errno(r, "Button enumeration failed: %m");
+
+        manager_load_scheduled_shutdown(m);
 
         /* Remove stale objects before we start them */
         manager_gc(m, false);

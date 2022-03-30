@@ -31,13 +31,13 @@ static int netdev_ipvlan_fill_message_create(NetDev *netdev, Link *link, sd_netl
         if (m->mode != _NETDEV_IPVLAN_MODE_INVALID) {
                 r = sd_netlink_message_append_u16(req, IFLA_IPVLAN_MODE, m->mode);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPVLAN_MODE attribute: %m");
+                        return r;
         }
 
         if (m->flags != _NETDEV_IPVLAN_FLAGS_INVALID) {
                 r = sd_netlink_message_append_u16(req, IFLA_IPVLAN_FLAGS, m->flags);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_IPVLAN_FLAGS attribute: %m");
+                        return r;
         }
 
         return 0;
@@ -80,16 +80,13 @@ const NetDevVTable ipvtap_vtable = {
 };
 
 IPVlanMode link_get_ipvlan_mode(Link *link) {
-        NetDev *netdev;
+        IPVlan *ipvlan;
 
-        if (!streq_ptr(link->kind, "ipvlan"))
+        assert(link);
+
+        ipvlan = IPVLAN(link->netdev);
+        if (!ipvlan)
                 return _NETDEV_IPVLAN_MODE_INVALID;
 
-        if (netdev_get(link->manager, link->ifname, &netdev) < 0)
-                return _NETDEV_IPVLAN_MODE_INVALID;
-
-        if (netdev->kind != NETDEV_KIND_IPVLAN)
-                return _NETDEV_IPVLAN_MODE_INVALID;
-
-        return IPVLAN(netdev)->mode;
+        return ipvlan->mode;
 }

@@ -232,6 +232,16 @@ spaces from its value. The following keys are known:
   other installed operating systems. This ID shall be formatted as 32 lower
   case hexadecimal characters (i.e. without any UUID formatting). This key is
   optional. Example: `4098b3f648d74c13b1f04ccfba7798e8`.
+* `sort-key` shall contain a short string used for sorting entries on
+  display. This can be defined freely though should typically be initialized
+  from `IMAGE_ID=` or `ID=` from `/etc/os-release` of the relevant entry,
+  possibly suffixed. This field is optional. If set, it is used as primary
+  sorting key for the entries on display (lexicographically increasing). It
+  does not have to be unique (and usually is not). If non-unique the the
+  `machine-id` (lexicographically increasing) and `version` (lexicographically
+  decreasing, i.e. newest version first) fields described above are used as
+  secondary/ternary sorting keys. If this field is not set entries are
+  typically sorted by the `.conf` file name of the entry.
 * `linux` refers to the Linux kernel to spawn and shall be a path relative to
   `$BOOT`. It is recommended that every distribution creates a machine id and
   version specific subdirectory below `$BOOT` and places its kernels and
@@ -269,8 +279,9 @@ key and is otherwise not valid. Here's an example for a complete drop-in file:
 
     # /boot/loader/entries/6a9857a393724b7a981ebb5b8495b9ea-3.8.0-2.fc19.x86_64.conf
     title        Fedora 19 (Rawhide)
-    version      3.8.0-2.fc19.x86_64
+    sort-key     fedora
     machine-id   6a9857a393724b7a981ebb5b8495b9ea
+    version      3.8.0-2.fc19.x86_64
     options      root=UUID=6d3376e4-fc93-4509-95ec-a21d68011da2
     architecture x64
     linux        /6a9857a393724b7a981ebb5b8495b9ea/3.8.0-2.fc19.x86_64/linux
@@ -297,6 +308,18 @@ configuration, using its own specific device path language, and this is out of
 focus for this specification. More specifically, on non-EFI systems
 configuration snippets following this specification cannot be used to spawn
 other operating systems (such as Windows).
+
+Unfortunately, there are implementations of boot loading infrastructure that
+are also using the /loader/entries/ directory, but place files in them that are
+not valid by this specification. In order to minimize confusion a boot loader
+implementation may place a file /loader/entries.srel next to the
+/loader/entries/ directory containing the ASCII string "type1" (suffixed
+with a UNIX newline). Tools that need to determine whether an existing
+directory implements the semantics described here may check for this file and
+contents: if it exists and contains the mentioned string, it shall assume a
+standards compliant implementation is in place. If it exists but contains a
+different string it shall assume non-standard semantics are implemented. If the
+file does not exist no assumptions should be made.
 
 ### Type #2 EFI Unified Kernel Images
 
@@ -358,10 +381,10 @@ simply reads all files `$BOOT/loader/entries/*.conf`, and populates its boot
 menu with this. On EFI, it then extends this with any unified kernel images
 found in `$BOOT/EFI/Linux/*.efi`. It may also add additional entries, for
 example a "Reboot into firmware" option. Optionally it may sort the menu based
-on the `machine-id` and `version` fields, and possibly others. It uses the file
-name to identify specific items, for example in case it supports storing away
-default entry information somewhere. A boot loader should generally not modify
-these files.
+on the `sort-key`, `machine-id` and `version` fields, and possibly others. It
+uses the file name to identify specific items, for example in case it supports
+storing away default entry information somewhere. A boot loader should
+generally not modify these files.
 
 For "Boot Loader Specification Entries" (Type #1), the _kernel package
 installer_ installs the kernel and initrd images to `$BOOT` (it is recommended
@@ -417,6 +440,6 @@ There are a couple of items that are out of focus for this specification:
 [GUID Partition Table](https://en.wikipedia.org/wiki/GUID_Partition_Table)<br>
 [Boot Loader Interface](https://systemd.io/BOOT_LOADER_INTERFACE)<br>
 [Discoverable Partitions Specification](https://systemd.io/DISCOVERABLE_PARTITIONS)<br>
-[systemd-boot(7)](https://www.freedesktop.org/software/systemd/man/systemd-boot.html)<br>
-[bootctl(1)](https://www.freedesktop.org/software/systemd/man/bootctl.html)<br>
-[systemd-gpt-auto-generator(8)](https://www.freedesktop.org/software/systemd/man/systemd-gpt-auto-generator.html)
+[`systemd-boot(7)`](https://www.freedesktop.org/software/systemd/man/systemd-boot.html)<br>
+[`bootctl(1)`](https://www.freedesktop.org/software/systemd/man/bootctl.html)<br>
+[`systemd-gpt-auto-generator(8)`](https://www.freedesktop.org/software/systemd/man/systemd-gpt-auto-generator.html)
