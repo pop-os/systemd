@@ -18,6 +18,30 @@
 #include "tests.h"
 #include "tmpfile-util.h"
 
+TEST(null_or_empty_path) {
+        assert_se(null_or_empty_path("/dev/null") == 1);
+        assert_se(null_or_empty_path("/dev/tty") == 1);  /* We assume that any character device is "empty", bleh. */
+        assert_se(null_or_empty_path("../../../../../../../../../../../../../../../../../../../../dev/null") == 1);
+        assert_se(null_or_empty_path("/proc/self/exe") == 0);
+        assert_se(null_or_empty_path("/nosuchfileordir") == -ENOENT);
+}
+
+TEST(null_or_empty_path_with_root) {
+        assert_se(null_or_empty_path_with_root("/dev/null", NULL) == 1);
+        assert_se(null_or_empty_path_with_root("/dev/null", "/") == 1);
+        assert_se(null_or_empty_path_with_root("/dev/null", "/.././../") == 1);
+        assert_se(null_or_empty_path_with_root("/dev/null", "/.././..") == 1);
+        assert_se(null_or_empty_path_with_root("../../../../../../../../../../../../../../../../../../../../dev/null", NULL) == 1);
+        assert_se(null_or_empty_path_with_root("../../../../../../../../../../../../../../../../../../../../dev/null", "/") == 1);
+        assert_se(null_or_empty_path_with_root("/proc/self/exe", NULL) == 0);
+        assert_se(null_or_empty_path_with_root("/proc/self/exe", "/") == 0);
+        assert_se(null_or_empty_path_with_root("/nosuchfileordir", NULL) == -ENOENT);
+        assert_se(null_or_empty_path_with_root("/nosuchfileordir", "/.././../") == -ENOENT);
+        assert_se(null_or_empty_path_with_root("/nosuchfileordir", "/.././..") == -ENOENT);
+        assert_se(null_or_empty_path_with_root("/foobar/barbar/dev/null", "/foobar/barbar") == 1);
+        assert_se(null_or_empty_path_with_root("/foobar/barbar/dev/null", "/foobar/barbar/") == 1);
+}
+
 TEST(files_same) {
         _cleanup_close_ int fd = -1;
         char name[] = "/tmp/test-files_same.XXXXXX";
@@ -67,7 +91,6 @@ TEST(path_is_fs_type) {
 }
 
 TEST(path_is_temporary_fs) {
-        const char *s;
         int r;
 
         FOREACH_STRING(s, "/", "/run", "/sys", "/sys/", "/proc", "/i-dont-exist", "/var", "/var/lib") {
@@ -85,7 +108,6 @@ TEST(path_is_temporary_fs) {
 }
 
 TEST(path_is_read_only_fs) {
-        const char *s;
         int r;
 
         FOREACH_STRING(s, "/", "/run", "/sys", "/sys/", "/proc", "/i-dont-exist", "/var", "/var/lib") {
@@ -236,4 +258,9 @@ TEST(dir_is_empty) {
         assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) > 0);
 }
 
-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, log_show_color(true), /* no outro */);
+static int intro(void) {
+        log_show_color(true);
+        return EXIT_SUCCESS;
+}
+
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);

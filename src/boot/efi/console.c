@@ -12,7 +12,7 @@
 #define VERTICAL_MAX_OK 1080
 #define VIEWPORT_RATIO 10
 
-static inline void EventClosep(EFI_EVENT *event) {
+static inline void event_closep(EFI_EVENT *event) {
         if (!*event)
                 return;
 
@@ -32,7 +32,7 @@ static inline void EventClosep(EFI_EVENT *event) {
  * Also, multiple input protocols can be backed by the same device, but they can be out of
  * sync. Falling back on a different protocol can end up with double input.
  *
- * Therefore, we will perferrably use TextInputEx for ConIn if that is available. Additionally,
+ * Therefore, we will preferably use TextInputEx for ConIn if that is available. Additionally,
  * we look for the first TextInputEx device the firmware gives us as a fallback option. It
  * will replace ConInEx permanently if it ever reports a key press.
  * Lastly, a timer event allows us to provide a input timeout without having to call into
@@ -42,7 +42,7 @@ EFI_STATUS console_key_read(UINT64 *key, UINT64 timeout_usec) {
         static BOOLEAN checked = FALSE;
         UINTN index;
         EFI_STATUS err;
-        _cleanup_(EventClosep) EFI_EVENT timer = NULL;
+        _cleanup_(event_closep) EFI_EVENT timer = NULL;
 
         assert(key);
 
@@ -181,19 +181,32 @@ static EFI_STATUS change_mode(INT64 mode) {
         return err;
 }
 
-static INT64 get_auto_mode(void) {
-        EFI_GRAPHICS_OUTPUT_PROTOCOL *GraphicsOutput;
+EFI_STATUS query_screen_resolution(UINT32 *ret_w, UINT32 *ret_h) {
         EFI_STATUS err;
+        EFI_GRAPHICS_OUTPUT_PROTOCOL *go;
 
-        err = LibLocateProtocol(&GraphicsOutputProtocol, (void **)&GraphicsOutput);
-        if (!EFI_ERROR(err) && GraphicsOutput->Mode && GraphicsOutput->Mode->Info) {
-                EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *Info = GraphicsOutput->Mode->Info;
+        err = LibLocateProtocol(&GraphicsOutputProtocol, (void **) &go);
+        if (EFI_ERROR(err))
+                return err;
+
+        if (!go->Mode || !go->Mode->Info)
+                return EFI_DEVICE_ERROR;
+
+        *ret_w = go->Mode->Info->HorizontalResolution;
+        *ret_h = go->Mode->Info->VerticalResolution;
+        return EFI_SUCCESS;
+}
+
+static INT64 get_auto_mode(void) {
+        UINT32 screen_width, screen_height;
+
+        if (!EFI_ERROR(query_screen_resolution(&screen_width, &screen_height))) {
                 BOOLEAN keep = FALSE;
 
                 /* Start verifying if we are in a resolution larger than Full HD
                  * (1920x1080). If we're not, assume we're in a good mode and do not
                  * try to change it. */
-                if (Info->HorizontalResolution <= HORIZONTAL_MAX_OK && Info->VerticalResolution <= VERTICAL_MAX_OK)
+                if (screen_width <= HORIZONTAL_MAX_OK && screen_height <= VERTICAL_MAX_OK)
                         keep = TRUE;
                 /* For larger resolutions, calculate the ratio of the total screen
                  * area to the text viewport area. If it's less than 10 times bigger,
@@ -201,7 +214,7 @@ static INT64 get_auto_mode(void) {
                 else {
                         UINT64 text_area;
                         UINTN x_max, y_max;
-                        UINT64 screen_area = (UINT64)Info->HorizontalResolution * (UINT64)Info->VerticalResolution;
+                        UINT64 screen_area = (UINT64)screen_width * (UINT64)screen_height;
 
                         console_query_mode(&x_max, &y_max);
                         text_area = SYSTEM_FONT_WIDTH * SYSTEM_FONT_HEIGHT * (UINT64)x_max * (UINT64)y_max;

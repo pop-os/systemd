@@ -59,7 +59,7 @@ static int send_passwords(const char *socket_name, char **passwords) {
         union sockaddr_union sa;
         socklen_t sa_len;
         size_t packet_length = 1;
-        char **p, *d;
+        char *d;
         ssize_t n;
         int r;
 
@@ -174,16 +174,16 @@ static int process_one_password_file(const char *filename) {
         _cleanup_free_ char *socket_name = NULL, *message = NULL;
         bool accept_cached = false, echo = false, silent = false;
         uint64_t not_after = 0;
-        unsigned pid = 0;
+        pid_t pid = 0;
 
         const ConfigTableItem items[] = {
-                { "Ask", "Socket",       config_parse_string,   0, &socket_name   },
-                { "Ask", "NotAfter",     config_parse_uint64,   0, &not_after     },
-                { "Ask", "Message",      config_parse_string,   0, &message       },
-                { "Ask", "PID",          config_parse_unsigned, 0, &pid           },
-                { "Ask", "AcceptCached", config_parse_bool,     0, &accept_cached },
-                { "Ask", "Echo",         config_parse_bool,     0, &echo          },
-                { "Ask", "Silent",       config_parse_bool,     0, &silent        },
+                { "Ask", "Socket",       config_parse_string, CONFIG_PARSE_STRING_SAFE, &socket_name   },
+                { "Ask", "NotAfter",     config_parse_uint64, 0,                        &not_after     },
+                { "Ask", "Message",      config_parse_string, 0,                        &message       },
+                { "Ask", "PID",          config_parse_pid,    0,                        &pid           },
+                { "Ask", "AcceptCached", config_parse_bool,   0,                        &accept_cached },
+                { "Ask", "Echo",         config_parse_bool,   0,                        &echo          },
+                { "Ask", "Silent",       config_parse_bool,   0,                        &silent        },
                 {}
         };
 
@@ -212,14 +212,14 @@ static int process_one_password_file(const char *filename) {
 
         switch (arg_action) {
         case ACTION_LIST:
-                printf("'%s' (PID %u)\n", strna(message), pid);
+                printf("'%s' (PID " PID_FMT ")\n", strna(message), pid);
                 return 0;
 
         case ACTION_WALL: {
                  _cleanup_free_ char *wall = NULL;
 
                  if (asprintf(&wall,
-                              "Password entry required for \'%s\' (PID %u).\r\n"
+                              "Password entry required for \'%s\' (PID " PID_FMT ").\r\n"
                               "Please enter password with the systemd-tty-ask-password-agent tool.",
                               strna(message),
                               pid) < 0)
@@ -235,7 +235,7 @@ static int process_one_password_file(const char *filename) {
 
                 if (access(socket_name, W_OK) < 0) {
                         if (arg_action == ACTION_QUERY)
-                                log_info("Not querying '%s' (PID %u), lacking privileges.", strna(message), pid);
+                                log_info("Not querying '%s' (PID " PID_FMT "), lacking privileges.", strna(message), pid);
 
                         return 0;
                 }
@@ -554,8 +554,6 @@ static int ask_on_this_console(const char *tty, pid_t *ret_pid, char **arguments
         if (r < 0)
                 return r;
         if (r == 0) {
-                char **i;
-
                 assert_se(prctl(PR_SET_PDEATHSIG, SIGHUP) >= 0);
 
                 STRV_FOREACH(i, arguments) {
@@ -581,8 +579,6 @@ static int ask_on_this_console(const char *tty, pid_t *ret_pid, char **arguments
 }
 
 static void terminate_agents(Set *pids) {
-        struct timespec ts;
-        siginfo_t status = {};
         sigset_t set;
         void *p;
         int r, signum;
@@ -599,11 +595,10 @@ static void terminate_agents(Set *pids) {
          */
         assert_se(sigemptyset(&set) >= 0);
         assert_se(sigaddset(&set, SIGCHLD) >= 0);
-        timespec_store(&ts, 50 * USEC_PER_MSEC);
 
         while (!set_isempty(pids)) {
+                siginfo_t status = {};
 
-                zero(status);
                 r = waitid(P_ALL, 0, &status, WEXITED|WNOHANG);
                 if (r < 0 && errno == EINTR)
                         continue;
@@ -613,7 +608,7 @@ static void terminate_agents(Set *pids) {
                         continue;
                 }
 
-                signum = sigtimedwait(&set, NULL, &ts);
+                signum = sigtimedwait(&set, NULL, TIMESPEC_STORE(50 * USEC_PER_MSEC));
                 if (signum < 0) {
                         if (errno != EAGAIN)
                                 log_error_errno(errno, "sigtimedwait() failed: %m");
@@ -635,7 +630,6 @@ static int ask_on_consoles(char *argv[]) {
         _cleanup_set_free_ Set *pids = NULL;
         _cleanup_strv_free_ char **consoles = NULL, **arguments = NULL;
         siginfo_t status = {};
-        char **tty;
         pid_t pid;
         int r;
 

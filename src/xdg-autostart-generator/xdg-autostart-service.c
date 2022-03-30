@@ -288,22 +288,22 @@ static int xdg_config_item_table_lookup(
                 const void *table,
                 const char *section,
                 const char *lvalue,
-                ConfigParserCallback *func,
-                int *ltype,
-                void **data,
+                ConfigParserCallback *ret_func,
+                int *ret_ltype,
+                void **ret_data,
                 void *userdata) {
 
         assert(lvalue);
 
         /* Ignore any keys with [] as those are translations. */
         if (strchr(lvalue, '[')) {
-                *func = NULL;
-                *ltype = 0;
-                *data = NULL;
+                *ret_func = NULL;
+                *ret_ltype = 0;
+                *ret_data = NULL;
                 return 1;
         }
 
-        return config_item_table_lookup(table, section, lvalue, func, ltype, data, userdata);
+        return config_item_table_lookup(table, section, lvalue, ret_func, ret_ltype, ret_data, userdata);
 }
 
 XdgAutostartService *xdg_autostart_service_parse_desktop(const char *path) {
@@ -396,7 +396,7 @@ int xdg_autostart_format_exec_start(
 
         first_arg = true;
         for (i = n = 0; exec_split[i]; i++) {
-                _cleanup_free_ char *c = NULL, *raw = NULL, *p = NULL, *escaped = NULL, *quoted = NULL;
+                _cleanup_free_ char *c = NULL, *raw = NULL, *percent = NULL;
                 ssize_t l;
 
                 l = cunescape(exec_split[i], 0, &c);
@@ -412,11 +412,7 @@ int xdg_autostart_format_exec_start(
                         if (r < 0)
                                 return log_info_errno(r, "Exec binary '%s' does not exist: %m", c);
 
-                        escaped = cescape(executable);
-                        if (!escaped)
-                                return log_oom();
-
-                        free_and_replace(exec_split[n++], escaped);
+                        free_and_replace(exec_split[n++], executable);
                         continue;
                 }
 
@@ -445,23 +441,16 @@ int xdg_autostart_format_exec_start(
                 raw = strreplace(c, "%%", "%");
                 if (!raw)
                         return log_oom();
-                p = strreplace(raw, "%", "%%");
-                if (!p)
-                        return log_oom();
-                escaped = cescape(p);
-                if (!escaped)
+                percent = strreplace(raw, "%", "%%");
+                if (!percent)
                         return log_oom();
 
-                quoted = strjoin("\"", escaped, "\"");
-                if (!quoted)
-                        return log_oom();
-
-                free_and_replace(exec_split[n++], quoted);
+                free_and_replace(exec_split[n++], percent);
         }
         for (; exec_split[n]; n++)
                 exec_split[n] = mfree(exec_split[n]);
 
-        res = strv_join(exec_split, " ");
+        res = quote_command_line(exec_split, SHELL_ESCAPE_EMPTY);
         if (!res)
                 return log_oom();
 
@@ -470,6 +459,7 @@ int xdg_autostart_format_exec_start(
 }
 
 static int xdg_autostart_generate_desktop_condition(
+                const XdgAutostartService *service,
                 FILE *f,
                 const char *test_binary,
                 const char *condition) {
@@ -483,7 +473,8 @@ static int xdg_autostart_generate_desktop_condition(
                 r = find_executable(test_binary, &gnome_autostart_condition_path);
                 if (r < 0) {
                         log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
-                                       "%s not found: %m", test_binary);
+                                       "%s: ExecCondition executable %s not found, unit will not be started automatically: %m",
+                                       service->path, test_binary);
                         fprintf(f, "# ExecCondition using %s skipped due to missing binary.\n", test_binary);
                         return 0;
                 }
@@ -491,6 +482,9 @@ static int xdg_autostart_generate_desktop_condition(
                 e_autostart_condition = cescape(condition);
                 if (!e_autostart_condition)
                         return log_oom();
+
+                log_debug("%s: ExecCondition converted to %s --condition \"%s\"…",
+                          service->path, gnome_autostart_condition_path, e_autostart_condition);
 
                 fprintf(f,
                          "ExecCondition=%s --condition \"%s\"\n",
@@ -502,7 +496,7 @@ static int xdg_autostart_generate_desktop_condition(
 }
 
 int xdg_autostart_service_generate_unit(
-                XdgAutostartService *service,
+                const XdgAutostartService *service,
                 const char *dest) {
 
         _cleanup_free_ char *path_escaped = NULL, *exec_start = NULL, *unit = NULL;
@@ -513,23 +507,23 @@ int xdg_autostart_service_generate_unit(
 
         /* Nothing to do for hidden services. */
         if (service->hidden) {
-                log_debug("Not generating service for XDG autostart %s, it is hidden.", service->name);
+                log_debug("%s: not generating unit, entry is hidden.", service->path);
                 return 0;
         }
 
         if (service->systemd_skip) {
-                log_debug("Not generating service for XDG autostart %s, should be skipped by generator.", service->name);
+                log_debug("%s: not generating unit, marked as skipped by generator.", service->path);
                 return 0;
         }
 
         /* Nothing to do if type is not Application. */
         if (!streq_ptr(service->type, "Application")) {
-                log_debug("Not generating service for XDG autostart %s, only Type=Application is supported.", service->name);
+                log_debug("%s: not generating unit, Type=%s is not supported.", service->path, service->type);
                 return 0;
         }
 
         if (!service->exec_string) {
-                log_warning("Not generating service for XDG autostart %s, it is has no Exec= line.", service->name);
+                log_warning("%s: not generating unit, no Exec= line.", service->path);
                 return 0;
         }
 
@@ -539,24 +533,21 @@ int xdg_autostart_service_generate_unit(
                 r = find_executable(service->try_exec, NULL);
                 if (r < 0) {
                         log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
-                                       "Not generating service for XDG autostart %s, could not find TryExec= binary %s: %m",
-                                       service->name, service->try_exec);
+                                       "%s: not generating unit, could not find TryExec= binary %s: %m",
+                                       service->path, service->try_exec);
                         return 0;
                 }
         }
 
         r = xdg_autostart_format_exec_start(service->exec_string, &exec_start);
         if (r < 0) {
-                log_warning_errno(r,
-                                  "Not generating service for XDG autostart %s, error parsing Exec= line: %m",
-                                  service->name);
+                log_warning_errno(r, "%s: not generating unit, error parsing Exec= line: %m", service->path);
                 return 0;
         }
 
         if (service->gnome_autostart_phase) {
                 /* There is no explicit value for the "Application" phase. */
-                log_debug("Not generating service for XDG autostart %s, startup phases are not supported.",
-                          service->name);
+                log_debug("%s: not generating unit, startup phases are not supported.", service->path);
                 return 0;
         }
 
@@ -570,7 +561,7 @@ int xdg_autostart_service_generate_unit(
 
         f = fopen(unit, "wxe");
         if (!f)
-                return log_error_errno(errno, "Failed to create unit file %s: %m", unit);
+                return log_error_errno(errno, "%s: failed to create unit file %s: %m", service->path, unit);
 
         fprintf(f,
                 "# Automatically generated by systemd-xdg-autostart-generator\n\n"
@@ -635,19 +626,18 @@ int xdg_autostart_service_generate_unit(
                         e_not_show_in);
         }
 
-        r = xdg_autostart_generate_desktop_condition(f,
+        r = xdg_autostart_generate_desktop_condition(service, f,
                                                      "gnome-systemd-autostart-condition",
                                                      service->autostart_condition);
         if (r < 0)
                 return r;
 
-        r = xdg_autostart_generate_desktop_condition(f,
+        r = xdg_autostart_generate_desktop_condition(service, f,
                                                      "kde-systemd-start-condition",
                                                      service->kde_autostart_condition);
         if (r < 0)
                 return r;
 
-        (void) generator_add_symlink(dest, "xdg-desktop-autostart.target", "wants", service->name);
-
-        return 0;
+        log_debug("%s: symlinking %s in xdg-desktop-autostart.target/.wants…", service->path, service->name);
+        return generator_add_symlink(dest, "xdg-desktop-autostart.target", "wants", service->name);
 }

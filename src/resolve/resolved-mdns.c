@@ -203,7 +203,6 @@ static bool mdns_should_reply_using_unicast(DnsPacket *p) {
 }
 
 static bool sender_on_local_subnet(DnsScope *s, DnsPacket *p) {
-        LinkAddress *a;
         int r;
 
         /* Check whether the sender is on a local subnet. */
@@ -359,7 +358,6 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
 
         if (dns_packet_validate_reply(p) > 0) {
                 DnsResourceRecord *rr;
-                DnsTransaction *t;
 
                 log_debug("Got mDNS reply packet");
 
@@ -494,6 +492,8 @@ int manager_mdns_ipv4_fd(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv4: Failed to create event source: %m");
 
+        (void) sd_event_source_set_description(m->mdns_ipv4_event_source, "mdns-ipv4");
+
         return m->mdns_ipv4_fd = TAKE_FD(s);
 }
 
@@ -518,7 +518,7 @@ int manager_mdns_ipv6_fd(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to set IPV6_UNICAST_HOPS: %m");
 
-        /* RFC 4795, section 2.5 recommends setting the TTL of UDP packets to 255. */
+        /* RFC 6762, section 11 recommends setting the TTL of UDP packets to 255. */
         r = setsockopt_int(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, 255);
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to set IPV6_MULTICAST_HOPS: %m");
@@ -566,6 +566,8 @@ int manager_mdns_ipv6_fd(Manager *m) {
         r = sd_event_add_io(m->event, &m->mdns_ipv6_event_source, s, EPOLLIN, on_mdns_packet, m);
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to create event source: %m");
+
+        (void) sd_event_source_set_description(m->mdns_ipv6_event_source, "mdns-ipv6");
 
         return m->mdns_ipv6_fd = TAKE_FD(s);
 }

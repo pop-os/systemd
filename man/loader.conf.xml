@@ -23,6 +23,7 @@
   <refsynopsisdiv>
     <para><filename><replaceable>ESP</replaceable>/loader/loader.conf</filename>,
     <filename><replaceable>ESP</replaceable>/loader/entries/*.conf</filename>
+    <filename><replaceable>XBOOTLDR</replaceable>/loader/entries/*.conf</filename>
     </para>
   </refsynopsisdiv>
 
@@ -30,15 +31,19 @@
     <title>Description</title>
 
     <para>
-    <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-    will read <filename><replaceable>ESP</replaceable>/loader/loader.conf</filename> and any files with the
+    <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry> will
+    read <filename><replaceable>ESP</replaceable>/loader/loader.conf</filename>, and any files with the
     <literal>.conf</literal> extension under
-    <filename><replaceable>ESP</replaceable>/loader/entries/</filename> on the EFI system partition (ESP).
+    <filename><replaceable>ESP</replaceable>/loader/entries/</filename> on the EFI system partition (ESP),
+    and <filename><replaceable>XBOOTLDR</replaceable>/loader/entries/</filename> on the extended boot loader
+    partition (XBOOTLDR) as defined by <ulink url="https://systemd.io/BOOT_LOADER_SPECIFICATION">Boot Loader
+    Specification</ulink>.
     </para>
 
-    <para>Each configuration file must consist of an option name, followed by
-    whitespace, and the option value. <literal>#</literal> may be used to start
-    a comment line. Empty and comment lines are ignored.</para>
+    <para>Each of these configuration files must consist of series of newline (i.e. ASCII code 10) separated
+    lines, each consisting of an option name, followed by whitespace, and the option
+    value. <literal>#</literal> may be used to start a comment line. Empty and comment lines are ignored. The
+    files use UTF-8 encoding.</para>
 
     <para>Boolean arguments may be written as
     <literal>yes</literal>/<literal>y</literal>/<literal>true</literal>/<literal>t</literal>/<literal>on</literal>/<literal>1</literal> or
@@ -49,7 +54,14 @@
   <refsect1>
     <title>Options</title>
 
-    <para>The following configuration options in <filename>loader.conf</filename> are understood:</para>
+    <para>The configuration options supported by
+    <filename><replaceable>ESP</replaceable>/loader/entries/*.conf</filename> and
+    <filename><replaceable>XBOOTLDR</replaceable>/loader/entries/*.conf</filename> files are defined as part
+    of the <ulink url="https://systemd.io/BOOT_LOADER_SPECIFICATION">Boot Loader
+    Specification</ulink>.</para>
+
+    <para>The following configuration are supported by the <filename>loader.conf</filename> configuration
+    file:</para>
 
     <variablelist>
       <varlistentry>
@@ -194,6 +206,38 @@
         <listitem><para>A boolean controlling the presence of the "Reboot into firmware" entry
         (enabled by default). If this is disabled, the firmware interface may still be reached
         by using the <keycap>f</keycap> key.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term>beep</term>
+
+        <listitem><para>Beep n times when the n-th entry in the boot menu is shown (default disabled).
+        Currently, only x86 is supported, where it uses the PC speaker.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term>reboot-for-bitlocker</term>
+
+        <listitem><para>Caveat: This feature is experimental, and is likely to be changed (or removed in its
+        current form) in a future version of systemd.</para>
+
+        <para>Work around BitLocker requiring a recovery key when the boot loader was
+        updated (disabled by default).</para>
+
+        <para>Try to detect BitLocker encrypted drives along with an active TPM. If both are found
+        and Windows Boot Manager is selected in the boot menu, set the <literal>BootNext</literal>
+        EFI variable and restart the system. The firmware will then start Windows Boot Manager
+        directly, leaving the TPM PCRs in expected states so that Windows can unseal the encryption
+        key. This allows systemd-boot to be updated without having to provide the recovery key for
+        BitLocker drive unlocking.</para>
+
+        <para>Note that the PCRs that Windows uses can be configured with the
+        <literal>Configure TPM platform validation profile for native UEFI firmware configurations</literal>
+        group policy under <literal>Computer Configuration\Administrative Templates\Windows Components\BitLocker Drive Encryption</literal>.
+        When secure boot is enabled, changing this to PCRs <literal>0,2,7,11</literal> should be safe.
+        The TPM key protector needs to be removed and then added back for the PCRs on an already
+        encrypted drive to change. If PCR 4 is not measured, this setting can be disabled to speed
+        up booting into Windows.</para></listitem>
       </varlistentry>
 
       <varlistentry>

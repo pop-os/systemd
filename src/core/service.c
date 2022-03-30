@@ -43,6 +43,8 @@
 #include "utf8.h"
 #include "util.h"
 
+#define service_spawn(...) service_spawn_internal(__func__, __VA_ARGS__)
+
 static const UnitActiveState state_translation_table[_SERVICE_STATE_MAX] = {
         [SERVICE_DEAD] = UNIT_INACTIVE,
         [SERVICE_CONDITION] = UNIT_ACTIVATING,
@@ -208,7 +210,7 @@ static void service_start_watchdog(Service *s) {
         assert(s);
 
         watchdog_usec = service_get_watchdog_usec(s);
-        if (IN_SET(watchdog_usec, 0, USEC_INFINITY)) {
+        if (!timestamp_is_set(watchdog_usec)) {
                 service_stop_watchdog(s);
                 return;
         }
@@ -279,7 +281,7 @@ static void service_extend_timeout(Service *s, usec_t extend_timeout_usec) {
 
         assert(s);
 
-        if (IN_SET(extend_timeout_usec, 0, USEC_INFINITY))
+        if (!timestamp_is_set(extend_timeout_usec))
                 return;
 
         extended = usec_add(now(CLOCK_MONOTONIC), extend_timeout_usec);
@@ -432,8 +434,8 @@ static int service_add_fd_store(Service *s, int fd, const char *name, bool do_po
                                  * Use this errno rather than E[NM]FILE to distinguish from
                                  * the case where systemd itself hits the file limit. */
 
-        LIST_FOREACH(fd_store, fs, s->fd_store) {
-                r = same_fd(fs->fd, fd);
+        LIST_FOREACH(fd_store, i, s->fd_store) {
+                r = same_fd(i->fd, fd);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -502,12 +504,10 @@ static int service_add_fd_store_set(Service *s, FDSet *fds, const char *name, bo
 }
 
 static void service_remove_fd_store(Service *s, const char *name) {
-        ServiceFDStore *fs, *n;
-
         assert(s);
         assert(name);
 
-        LIST_FOREACH_SAFE(fd_store, fs, n, s->fd_store) {
+        LIST_FOREACH(fd_store, fs, s->fd_store) {
                 if (!streq(fs->fdname, name))
                         continue;
 
@@ -565,9 +565,7 @@ static int service_verify(Service *s) {
         assert(s);
         assert(UNIT(s)->load_state == UNIT_LOADED);
 
-        for (ServiceExecCommand c = 0; c < _SERVICE_EXEC_COMMAND_MAX; c++) {
-                ExecCommand *command;
-
+        for (ServiceExecCommand c = 0; c < _SERVICE_EXEC_COMMAND_MAX; c++)
                 LIST_FOREACH(command, command, s->exec_command[c]) {
                         if (!path_is_absolute(command->path) && !filename_is_valid(command->path))
                                 return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC),
@@ -579,7 +577,6 @@ static int service_verify(Service *s) {
                                                             "Service has an empty argv in %s=. Refusing.",
                                                             service_exec_command_to_string(c));
                 }
-        }
 
         if (!s->exec_command[SERVICE_EXEC_START] && !s->exec_command[SERVICE_EXEC_STOP] &&
             UNIT(s)->success_action == EMERGENCY_ACTION_NONE)
@@ -625,6 +622,9 @@ static int service_verify(Service *s) {
 
         if (s->runtime_max_usec == USEC_INFINITY && s->runtime_rand_extra_usec != 0)
                 log_unit_warning(UNIT(s), "Service has RuntimeRandomizedExtraSec= setting, but no RuntimeMaxSec=. Ignoring.");
+
+        if (s->exit_type == SERVICE_EXIT_CGROUP && cg_unified() < CGROUP_UNIFIED_SYSTEMD)
+                log_unit_warning(UNIT(s), "Service has ExitType=cgroup set, but we are running with legacy cgroups v1, which might not work correctly. Continuing.");
 
         return 0;
 }
@@ -1329,7 +1329,6 @@ static int service_collect_fds(
         }
 
         if (s->n_fd_store > 0) {
-                ServiceFDStore *fs;
                 size_t n_fds;
                 char **nl;
                 int *t;
@@ -1444,7 +1443,40 @@ static bool service_exec_needs_notify_socket(Service *s, ExecFlags flags) {
         return s->notify_access != NOTIFY_NONE;
 }
 
-static int service_spawn(
+static Service *service_get_triggering_service(Service *s) {
+        Unit *candidate = NULL, *other;
+
+        assert(s);
+
+        /* Return the service which triggered service 's', this means dependency
+         * types which include the UNIT_ATOM_ON_{FAILURE,SUCCESS}_OF atoms.
+         *
+         * N.B. if there are multiple services which could trigger 's' via OnFailure=
+         * or OnSuccess= then we return NULL. This is since we don't know from which
+         * one to propagate the exit status. */
+
+        UNIT_FOREACH_DEPENDENCY(other, UNIT(s), UNIT_ATOM_ON_FAILURE_OF) {
+                if (candidate)
+                        goto have_other;
+                candidate = other;
+        }
+
+        UNIT_FOREACH_DEPENDENCY(other, UNIT(s), UNIT_ATOM_ON_SUCCESS_OF) {
+                if (candidate)
+                        goto have_other;
+                candidate = other;
+        }
+
+        return SERVICE(candidate);
+
+ have_other:
+        log_unit_warning(UNIT(s), "multiple trigger source candidates for exit status propagation (%s, %s), skipping.",
+                         candidate->id, other->id);
+        return NULL;
+}
+
+static int service_spawn_internal(
+                const char *caller,
                 Service *s,
                 ExecCommand *c,
                 usec_t timeout,
@@ -1464,9 +1496,12 @@ static int service_spawn(
         pid_t pid;
         int r;
 
+        assert(caller);
         assert(s);
         assert(c);
         assert(ret_pid);
+
+        log_unit_debug(UNIT(s), "Will spawn child (%s): %s", caller, c->path);
 
         r = unit_prepare_exec(UNIT(s)); /* This realizes the cgroup, among other things */
         if (r < 0)
@@ -1508,7 +1543,7 @@ static int service_spawn(
         if (r < 0)
                 return r;
 
-        our_env = new0(char*, 10);
+        our_env = new0(char*, 12);
         if (!our_env)
                 return -ENOMEM;
 
@@ -1565,20 +1600,43 @@ static int service_spawn(
                 }
         }
 
+        Service *env_source = NULL;
+        const char *monitor_prefix;
         if (flags & EXEC_SETENV_RESULT) {
-                if (asprintf(our_env + n_env++, "SERVICE_RESULT=%s", service_result_to_string(s->result)) < 0)
+                env_source = s;
+                monitor_prefix = "";
+        } else if (flags & EXEC_SETENV_MONITOR_RESULT) {
+                env_source = service_get_triggering_service(s);
+                monitor_prefix = "MONITOR_";
+        }
+
+        if (env_source) {
+                if (asprintf(our_env + n_env++, "%sSERVICE_RESULT=%s", monitor_prefix, service_result_to_string(env_source->result)) < 0)
                         return -ENOMEM;
 
-                if (s->main_exec_status.pid > 0 &&
-                    dual_timestamp_is_set(&s->main_exec_status.exit_timestamp)) {
-                        if (asprintf(our_env + n_env++, "EXIT_CODE=%s", sigchld_code_to_string(s->main_exec_status.code)) < 0)
+                if (env_source->main_exec_status.pid > 0 &&
+                    dual_timestamp_is_set(&env_source->main_exec_status.exit_timestamp)) {
+                        if (asprintf(our_env + n_env++, "%sEXIT_CODE=%s", monitor_prefix, sigchld_code_to_string(env_source->main_exec_status.code)) < 0)
                                 return -ENOMEM;
 
-                        if (s->main_exec_status.code == CLD_EXITED)
-                                r = asprintf(our_env + n_env++, "EXIT_STATUS=%i", s->main_exec_status.status);
+                        if (env_source->main_exec_status.code == CLD_EXITED)
+                                r = asprintf(our_env + n_env++, "%sEXIT_STATUS=%i", monitor_prefix, env_source->main_exec_status.status);
                         else
-                                r = asprintf(our_env + n_env++, "EXIT_STATUS=%s", signal_to_string(s->main_exec_status.status));
+                                r = asprintf(our_env + n_env++, "%sEXIT_STATUS=%s", monitor_prefix, signal_to_string(env_source->main_exec_status.status));
+
                         if (r < 0)
+                                return -ENOMEM;
+                }
+
+                if (env_source != s) {
+                        if (!sd_id128_is_null(UNIT(env_source)->invocation_id)) {
+                                r = asprintf(our_env + n_env++, "%sINVOCATION_ID=" SD_ID128_FORMAT_STR,
+                                             monitor_prefix, SD_ID128_FORMAT_VAL(UNIT(env_source)->invocation_id));
+                                if (r < 0)
+                                        return -ENOMEM;
+                        }
+
+                        if (asprintf(our_env + n_env++, "%sUNIT=%s", monitor_prefix, UNIT(env_source)->id) < 0)
                                 return -ENOMEM;
                 }
         }
@@ -1706,7 +1764,7 @@ static bool service_shall_restart(Service *s, const char **reason) {
                 return false;
 
         case SERVICE_RESTART_ALWAYS:
-                return true;
+                return s->result != SERVICE_SKIP_CONDITION;
 
         case SERVICE_RESTART_ON_SUCCESS:
                 return s->result == SERVICE_SUCCESS;
@@ -2168,7 +2226,7 @@ static void service_enter_start(Service *s) {
         r = service_spawn(s,
                           c,
                           timeout,
-                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_WRITE_CREDENTIALS,
+                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_WRITE_CREDENTIALS|EXEC_SETENV_MONITOR_RESULT,
                           &pid);
         if (r < 0)
                 goto fail;
@@ -2226,7 +2284,7 @@ static void service_enter_start_pre(Service *s) {
                 r = service_spawn(s,
                                   s->control_command,
                                   s->timeout_start_usec,
-                                  EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_IS_CONTROL|EXEC_APPLY_TTY_STDIN,
+                                  EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_IS_CONTROL|EXEC_APPLY_TTY_STDIN|EXEC_SETENV_MONITOR_RESULT,
                                   &s->control_pid);
                 if (r < 0)
                         goto fail;
@@ -2395,6 +2453,7 @@ static void service_run_next_control(Service *s) {
                           EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_IS_CONTROL|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_CONDITION, SERVICE_EXEC_START_PRE, SERVICE_EXEC_STOP_POST) ? EXEC_APPLY_TTY_STDIN : 0)|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_STOP, SERVICE_EXEC_STOP_POST) ? EXEC_SETENV_RESULT : 0)|
+                          (IN_SET(s->control_command_id, SERVICE_EXEC_START_PRE, SERVICE_EXEC_START) ? EXEC_SETENV_MONITOR_RESULT : 0)|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_START_POST, SERVICE_EXEC_RELOAD, SERVICE_EXEC_STOP, SERVICE_EXEC_STOP_POST) ? EXEC_CONTROL_CGROUP : 0),
                           &s->control_pid);
         if (r < 0)
@@ -2431,7 +2490,7 @@ static void service_run_next_main(Service *s) {
         r = service_spawn(s,
                           s->main_command,
                           s->timeout_start_usec,
-                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG,
+                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_SETENV_MONITOR_RESULT,
                           &pid);
         if (r < 0)
                 goto fail;
@@ -2591,7 +2650,6 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
         ServiceExecCommand id;
         size_t length = 0;
         unsigned idx;
-        char **arg;
 
         assert(s);
         assert(f);
@@ -2647,7 +2705,6 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
 
 static int service_serialize(Unit *u, FILE *f, FDSet *fds) {
         Service *s = SERVICE(u);
-        ServiceFDStore *fs;
         int r;
 
         assert(u);
@@ -3347,10 +3404,13 @@ static void service_notify_cgroup_empty_event(Unit *u) {
         }
 }
 
-static void service_notify_cgroup_oom_event(Unit *u) {
+static void service_notify_cgroup_oom_event(Unit *u, bool managed_oom) {
         Service *s = SERVICE(u);
 
-        log_unit_debug(u, "Process of control group was killed by the OOM killer.");
+        if (managed_oom)
+                log_unit_debug(u, "Process(es) of control group were killed by systemd-oomd.");
+        else
+                log_unit_debug(u, "Process of control group was killed by the OOM killer.");
 
         if (s->oom_policy == OOM_CONTINUE)
                 return;
@@ -4027,7 +4087,6 @@ static void service_notify_message(
         Service *s = SERVICE(u);
         bool notify_dbus = false;
         const char *e;
-        char * const *i;
         int r;
 
         assert(u);
@@ -4186,7 +4245,7 @@ static void service_notify_message(
         /* Process FD store messages. Either FDSTOREREMOVE=1 for removal, or FDSTORE=1 for addition. In both cases,
          * process FDNAME= for picking the file descriptor name to use. Note that FDNAME= is required when removing
          * fds, but optional when pushing in new fds, for compatibility reasons. */
-        if (strv_find(tags, "FDSTOREREMOVE=1")) {
+        if (strv_contains(tags, "FDSTOREREMOVE=1")) {
                 const char *name;
 
                 name = strv_find_startswith(tags, "FDNAME=");
@@ -4195,7 +4254,7 @@ static void service_notify_message(
                 else
                         service_remove_fd_store(s, name);
 
-        } else if (strv_find(tags, "FDSTORE=1")) {
+        } else if (strv_contains(tags, "FDSTORE=1")) {
                 const char *name;
 
                 name = strv_find_startswith(tags, "FDNAME=");
@@ -4582,7 +4641,7 @@ static const char* const service_type_table[_SERVICE_TYPE_MAX] = {
 DEFINE_STRING_TABLE_LOOKUP(service_type, ServiceType);
 
 static const char* const service_exit_type_table[_SERVICE_EXIT_TYPE_MAX] = {
-        [SERVICE_EXIT_MAIN] = "main",
+        [SERVICE_EXIT_MAIN]   = "main",
         [SERVICE_EXIT_CGROUP] = "cgroup",
 };
 

@@ -258,7 +258,6 @@ TEST(timezone_is_valid) {
 TEST(get_timezones) {
         _cleanup_strv_free_ char **zones = NULL;
         int r;
-        char **zone;
 
         r = get_timezones(&zones);
         assert_se(r == 0);
@@ -321,6 +320,11 @@ TEST(format_timestamp) {
                 x = random_u64_range(2147483600 * USEC_PER_SEC) + 1;
 
                 assert_se(format_timestamp(buf, sizeof(buf), x));
+                log_debug("%s", buf);
+                assert_se(parse_timestamp(buf, &y) >= 0);
+                assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
+
+                assert_se(format_timestamp_style(buf, sizeof(buf), x, TIMESTAMP_UNIX));
                 log_debug("%s", buf);
                 assert_se(parse_timestamp(buf, &y) >= 0);
                 assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
@@ -518,25 +522,25 @@ TEST(usec_shift_clock) {
 
         rt = now(CLOCK_REALTIME);
         mn = now(CLOCK_MONOTONIC);
-        bt = now(clock_boottime_or_monotonic());
+        bt = now(CLOCK_BOOTTIME);
 
         assert_se(usec_shift_clock(USEC_INFINITY, CLOCK_REALTIME, CLOCK_MONOTONIC) == USEC_INFINITY);
 
         assert_similar(usec_shift_clock(rt + USEC_PER_HOUR, CLOCK_REALTIME, CLOCK_MONOTONIC), mn + USEC_PER_HOUR);
-        assert_similar(usec_shift_clock(rt + 2*USEC_PER_HOUR, CLOCK_REALTIME, clock_boottime_or_monotonic()), bt + 2*USEC_PER_HOUR);
+        assert_similar(usec_shift_clock(rt + 2*USEC_PER_HOUR, CLOCK_REALTIME, CLOCK_BOOTTIME), bt + 2*USEC_PER_HOUR);
         assert_se(usec_shift_clock(rt + 3*USEC_PER_HOUR, CLOCK_REALTIME, CLOCK_REALTIME_ALARM) == rt + 3*USEC_PER_HOUR);
 
         assert_similar(usec_shift_clock(mn + 4*USEC_PER_HOUR, CLOCK_MONOTONIC, CLOCK_REALTIME_ALARM), rt + 4*USEC_PER_HOUR);
-        assert_similar(usec_shift_clock(mn + 5*USEC_PER_HOUR, CLOCK_MONOTONIC, clock_boottime_or_monotonic()), bt + 5*USEC_PER_HOUR);
+        assert_similar(usec_shift_clock(mn + 5*USEC_PER_HOUR, CLOCK_MONOTONIC, CLOCK_BOOTTIME), bt + 5*USEC_PER_HOUR);
         assert_se(usec_shift_clock(mn + 6*USEC_PER_HOUR, CLOCK_MONOTONIC, CLOCK_MONOTONIC) == mn + 6*USEC_PER_HOUR);
 
-        assert_similar(usec_shift_clock(bt + 7*USEC_PER_HOUR, clock_boottime_or_monotonic(), CLOCK_MONOTONIC), mn + 7*USEC_PER_HOUR);
-        assert_similar(usec_shift_clock(bt + 8*USEC_PER_HOUR, clock_boottime_or_monotonic(), CLOCK_REALTIME_ALARM), rt + 8*USEC_PER_HOUR);
-        assert_se(usec_shift_clock(bt + 9*USEC_PER_HOUR, clock_boottime_or_monotonic(), clock_boottime_or_monotonic()) == bt + 9*USEC_PER_HOUR);
+        assert_similar(usec_shift_clock(bt + 7*USEC_PER_HOUR, CLOCK_BOOTTIME, CLOCK_MONOTONIC), mn + 7*USEC_PER_HOUR);
+        assert_similar(usec_shift_clock(bt + 8*USEC_PER_HOUR, CLOCK_BOOTTIME, CLOCK_REALTIME_ALARM), rt + 8*USEC_PER_HOUR);
+        assert_se(usec_shift_clock(bt + 9*USEC_PER_HOUR, CLOCK_BOOTTIME, CLOCK_BOOTTIME) == bt + 9*USEC_PER_HOUR);
 
         if (mn > USEC_PER_MINUTE) {
                 assert_similar(usec_shift_clock(rt - 30 * USEC_PER_SEC, CLOCK_REALTIME_ALARM, CLOCK_MONOTONIC), mn - 30 * USEC_PER_SEC);
-                assert_similar(usec_shift_clock(rt - 50 * USEC_PER_SEC, CLOCK_REALTIME, clock_boottime_or_monotonic()), bt - 50 * USEC_PER_SEC);
+                assert_similar(usec_shift_clock(rt - 50 * USEC_PER_SEC, CLOCK_REALTIME, CLOCK_BOOTTIME), bt - 50 * USEC_PER_SEC);
         }
 }
 
@@ -588,13 +592,13 @@ TEST(map_clock_usec) {
         }
 }
 
-static void setup_test(void) {
+static int intro(void) {
         log_info("realtime=" USEC_FMT "\n"
                  "monotonic=" USEC_FMT "\n"
                  "boottime=" USEC_FMT "\n",
                  now(CLOCK_REALTIME),
                  now(CLOCK_MONOTONIC),
-                 now(clock_boottime_or_monotonic()));
+                 now(CLOCK_BOOTTIME));
 
         /* Ensure time_t is signed */
         assert_cc((time_t) -1 < (time_t) 1);
@@ -603,6 +607,8 @@ static void setup_test(void) {
         uintmax_t x = TIME_T_MAX;
         x++;
         assert_se((time_t) x < 0);
+
+        return EXIT_SUCCESS;
 }
 
-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, setup_test(), /* no outro */);
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);

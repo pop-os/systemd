@@ -12,12 +12,11 @@
 typedef struct Link Link;
 typedef struct Manager Manager;
 typedef struct Network Network;
-typedef struct Request Request;
 
 typedef struct RoutingPolicyRule {
         Manager *manager;
         Network *network;
-        NetworkConfigSection *section;
+        ConfigSection *section;
         NetworkConfigSource source;
         NetworkConfigState state;
 
@@ -58,20 +57,16 @@ const char *fr_act_type_full_to_string(int t) _const_;
 
 RoutingPolicyRule *routing_policy_rule_free(RoutingPolicyRule *rule);
 
-void routing_policy_rule_hash_func(const RoutingPolicyRule *rule, struct siphash *state);
-int routing_policy_rule_compare_func(const RoutingPolicyRule *a, const RoutingPolicyRule *b);
-
 void network_drop_invalid_routing_policy_rules(Network *network);
 
 int link_request_static_routing_policy_rules(Link *link);
-int request_process_routing_policy_rule(Request *req);
 
 int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
 int manager_drop_routing_policy_rules_internal(Manager *m, bool foreign, const Link *except);
 static inline int manager_drop_foreign_routing_policy_rules(Manager *m) {
         return manager_drop_routing_policy_rules_internal(m, true, NULL);
 }
-static inline int link_drop_routing_policy_rules(Link *link) {
+static inline int link_drop_managed_routing_policy_rules(Link *link) {
         assert(link);
         return manager_drop_routing_policy_rules_internal(link->manager, false, link);
 }

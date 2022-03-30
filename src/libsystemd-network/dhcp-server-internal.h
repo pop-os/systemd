@@ -26,7 +26,7 @@ typedef enum DHCPRawOption {
 
 typedef struct DHCPClientId {
         size_t length;
-        void *data;
+        uint8_t *data;
 } DHCPClientId;
 
 typedef struct DHCPLease {
@@ -34,6 +34,8 @@ typedef struct DHCPLease {
 
         DHCPClientId client_id;
 
+        uint8_t htype; /* e.g. ARPHRD_ETHER */
+        uint8_t hlen;  /* e.g. ETH_ALEN */
         be32_t address;
         be32_t gateway;
         uint8_t chaddr[16];
@@ -63,6 +65,9 @@ struct sd_dhcp_server {
         char *timezone;
 
         DHCPServerData servers[_SD_DHCP_LEASE_SERVER_TYPE_MAX];
+        struct in_addr boot_server_address;
+        char *boot_server_name;
+        char *boot_filename;
 
         OrderedSet *extra_options;
         OrderedSet *vendor_options;

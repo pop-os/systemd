@@ -57,6 +57,9 @@ bool link_radv_enabled(Link *link) {
         if (!link_may_have_ipv6ll(link))
                 return false;
 
+        if (link->hw_addr.length != ETH_ALEN)
+                return false;
+
         return link->network->router_prefix_delegation;
 }
 
@@ -69,16 +72,16 @@ Prefix *prefix_free(Prefix *prefix) {
                 hashmap_remove(prefix->network->prefixes_by_section, prefix->section);
         }
 
-        network_config_section_free(prefix->section);
+        config_section_free(prefix->section);
         set_free(prefix->tokens);
 
         return mfree(prefix);
 }
 
-DEFINE_NETWORK_SECTION_FUNCTIONS(Prefix, prefix_free);
+DEFINE_SECTION_CLEANUP_FUNCTIONS(Prefix, prefix_free);
 
 static int prefix_new_static(Network *network, const char *filename, unsigned section_line, Prefix **ret) {
-        _cleanup_(network_config_section_freep) NetworkConfigSection *n = NULL;
+        _cleanup_(config_section_freep) ConfigSection *n = NULL;
         _cleanup_(prefix_freep) Prefix *prefix = NULL;
         int r;
 
@@ -87,7 +90,7 @@ static int prefix_new_static(Network *network, const char *filename, unsigned se
         assert(filename);
         assert(section_line > 0);
 
-        r = network_config_section_new(filename, section_line, &n);
+        r = config_section_new(filename, section_line, &n);
         if (r < 0)
                 return r;
 
@@ -111,7 +114,7 @@ static int prefix_new_static(Network *network, const char *filename, unsigned se
                 .address_auto_configuration = true,
         };
 
-        r = hashmap_ensure_put(&network->prefixes_by_section, &network_config_hash_ops, prefix->section, prefix);
+        r = hashmap_ensure_put(&network->prefixes_by_section, &config_section_hash_ops, prefix->section, prefix);
         if (r < 0)
                 return r;
 
@@ -128,15 +131,15 @@ RoutePrefix *route_prefix_free(RoutePrefix *prefix) {
                 hashmap_remove(prefix->network->route_prefixes_by_section, prefix->section);
         }
 
-        network_config_section_free(prefix->section);
+        config_section_free(prefix->section);
 
         return mfree(prefix);
 }
 
-DEFINE_NETWORK_SECTION_FUNCTIONS(RoutePrefix, route_prefix_free);
+DEFINE_SECTION_CLEANUP_FUNCTIONS(RoutePrefix, route_prefix_free);
 
 static int route_prefix_new_static(Network *network, const char *filename, unsigned section_line, RoutePrefix **ret) {
-        _cleanup_(network_config_section_freep) NetworkConfigSection *n = NULL;
+        _cleanup_(config_section_freep) ConfigSection *n = NULL;
         _cleanup_(route_prefix_freep) RoutePrefix *prefix = NULL;
         int r;
 
@@ -145,7 +148,7 @@ static int route_prefix_new_static(Network *network, const char *filename, unsig
         assert(filename);
         assert(section_line > 0);
 
-        r = network_config_section_new(filename, section_line, &n);
+        r = config_section_new(filename, section_line, &n);
         if (r < 0)
                 return r;
 
@@ -166,7 +169,7 @@ static int route_prefix_new_static(Network *network, const char *filename, unsig
                 .lifetime = RADV_DEFAULT_VALID_LIFETIME_USEC,
         };
 
-        r = hashmap_ensure_put(&network->route_prefixes_by_section, &network_config_hash_ops, prefix->section, prefix);
+        r = hashmap_ensure_put(&network->route_prefixes_by_section, &config_section_hash_ops, prefix->section, prefix);
         if (r < 0)
                 return r;
 
@@ -547,6 +550,9 @@ static int radv_is_ready_to_configure(Link *link) {
         if (in6_addr_is_null(&link->ipv6ll_address))
                 return false;
 
+        if (link->hw_addr.length != ETH_ALEN || hw_addr_is_null(&link->hw_addr))
+                return false;
+
         if (link->network->router_emit_dns && !link->network->router_dns) {
                 _cleanup_free_ struct in6_addr *dns = NULL;
                 size_t n_dns;
@@ -576,15 +582,10 @@ static int radv_is_ready_to_configure(Link *link) {
         return true;
 }
 
-int request_process_radv(Request *req) {
-        Link *link;
+static int radv_process_request(Request *req, Link *link, void *userdata) {
         int r;
 
-        assert(req);
-        assert(req->link);
-        assert(req->type == REQUEST_TYPE_RADV);
-
-        link = req->link;
+        assert(link);
 
         r = radv_is_ready_to_configure(link);
         if (r <= 0)
@@ -616,7 +617,7 @@ int link_request_radv(Link *link) {
         if (link->radv)
                 return 0;
 
-        r = link_queue_request(link, REQUEST_TYPE_RADV, NULL, false, NULL, NULL, NULL);
+        r = link_queue_request(link, REQUEST_TYPE_RADV, radv_process_request, NULL);
         if (r < 0)
                 return log_link_warning_errno(link, r, "Failed to request configuring of the IPv6 Router Advertisement engine: %m");
 

@@ -18,11 +18,17 @@ typedef struct Manager Manager;
 typedef struct Network Network;
 typedef struct Request Request;
 typedef int (*address_ready_callback_t)(Address *address);
+typedef int (*address_netlink_handler_t)(
+                sd_netlink *rtnl,
+                sd_netlink_message *m,
+                Request *req,
+                Link *link,
+                Address *address);
 
 struct Address {
         Link *link;
         Network *network;
-        NetworkConfigSection *section;
+        ConfigSection *section;
         NetworkConfigSource source;
         NetworkConfigState state;
         union in_addr_union provider; /* DHCP server or router address */
@@ -47,6 +53,9 @@ struct Address {
 
         bool scope_set:1;
         bool ip_masquerade_done:1;
+
+        /* duplicate_address_detection is only used by static or IPv4 dynamic addresses.
+         * To control DAD for IPv6 dynamic addresses, set IFA_F_NODAD to flags. */
         AddressFamily duplicate_address_detection;
         sd_ipv4acd *acd;
 
@@ -70,18 +79,26 @@ int address_configure_handler_internal(sd_netlink *rtnl, sd_netlink_message *m, 
 int address_remove(Address *address);
 int address_dup(const Address *src, Address **ret);
 bool address_is_ready(const Address *a);
-void address_set_broadcast(Address *a);
+void address_set_broadcast(Address *a, Link *link);
 
-DEFINE_NETWORK_SECTION_FUNCTIONS(Address, address_free);
+DEFINE_SECTION_CLEANUP_FUNCTIONS(Address, address_free);
 
-int link_drop_addresses(Link *link);
+int link_drop_managed_addresses(Link *link);
 int link_drop_foreign_addresses(Link *link);
 int link_drop_ipv6ll_addresses(Link *link);
 void link_foreignize_addresses(Link *link);
 bool link_address_is_dynamic(const Link *link, const Address *address);
-int link_get_ipv6_address(Link *link, const struct in6_addr *address, Address **ret);
-int link_get_ipv4_address(Link *link, const struct in_addr *address, unsigned char prefixlen, Address **ret);
-int manager_has_address(Manager *manager, int family, const union in_addr_union *address, bool check_ready);
+int link_get_address(Link *link, int family, const union in_addr_union *address, unsigned char prefixlen, Address **ret);
+static inline int link_get_ipv6_address(Link *link, const struct in6_addr *address, unsigned char prefixlen, Address **ret) {
+        assert(address);
+        return link_get_address(link, AF_INET6, &(union in_addr_union) { .in6 = *address }, prefixlen, ret);
+}
+static inline int link_get_ipv4_address(Link *link, const struct in_addr *address, unsigned char prefixlen, Address **ret) {
+        assert(address);
+        return link_get_address(link, AF_INET, &(union in_addr_union) { .in = *address }, prefixlen, ret);
+}
+int manager_get_address(Manager *manager, int family, const union in_addr_union *address, unsigned char prefixlen, Address **ret);
+bool manager_has_address(Manager *manager, int family, const union in_addr_union *address, bool check_ready);
 
 void address_cancel_request(Address *address);
 int link_request_address(
@@ -89,17 +106,15 @@ int link_request_address(
                 Address *address,
                 bool consume_object,
                 unsigned *message_counter,
-                link_netlink_message_handler_t netlink_handler,
+                address_netlink_handler_t netlink_handler,
                 Request **ret);
 int link_request_static_address(Link *link, Address *address, bool consume);
 int link_request_static_addresses(Link *link);
-int request_process_address(Request *req);
 
 int manager_rtnl_process_address(sd_netlink *nl, sd_netlink_message *message, Manager *m);
 
 int network_drop_invalid_addresses(Network *network);
 
-void address_hash_func(const Address *a, struct siphash *state);
 int address_compare_func(const Address *a1, const Address *a2);
 
 DEFINE_NETWORK_CONFIG_STATE_FUNCTIONS(Address, address);

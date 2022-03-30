@@ -941,15 +941,12 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
                         r = dns_packet_append_raw_string(p, NULL, 0, NULL);
                         if (r < 0)
                                 goto fail;
-                } else {
-                        DnsTxtItem *i;
-
+                } else
                         LIST_FOREACH(items, i, rr->txt.items) {
                                 r = dns_packet_append_raw_string(p, i->data, i->length, NULL);
                                 if (r < 0)
                                         goto fail;
                         }
-                }
 
                 r = 0;
                 break;
@@ -2505,7 +2502,7 @@ int dns_packet_patch_ttls(DnsPacket *p, usec_t timestamp) {
         usec_t k;
         int r;
 
-        k = now(clock_boottime_or_monotonic());
+        k = now(CLOCK_BOOTTIME);
         assert(k >= timestamp);
         k -= timestamp;
 

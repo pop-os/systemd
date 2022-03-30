@@ -201,24 +201,25 @@ static int acquire_existing_password(
                 AskPasswordFlags flags) {
 
         _cleanup_(strv_free_erasep) char **password = NULL;
+        _cleanup_(erase_and_freep) char *envpw = NULL;
         _cleanup_free_ char *question = NULL;
-        char *e;
         int r;
 
         assert(user_name);
         assert(hr);
 
-        e = getenv("PASSWORD");
-        if (e) {
+        r = getenv_steal_erase("PASSWORD", &envpw);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire password from environment: %m");
+        if (r > 0) {
                 /* People really shouldn't use environment variables for passing passwords. We support this
                  * only for testing purposes, and do not document the behaviour, so that people won't
                  * actually use this outside of testing. */
 
-                r = user_record_set_password(hr, STRV_MAKE(e), true);
+                r = user_record_set_password(hr, STRV_MAKE(envpw), true);
                 if (r < 0)
                         return log_error_errno(r, "Failed to store password: %m");
 
-                assert_se(unsetenv_erase("PASSWORD") >= 0);
                 return 1;
         }
 
@@ -261,24 +262,25 @@ static int acquire_recovery_key(
                 AskPasswordFlags flags) {
 
         _cleanup_(strv_free_erasep) char **recovery_key = NULL;
+        _cleanup_(erase_and_freep) char *envpw = NULL;
         _cleanup_free_ char *question = NULL;
-        char *e;
         int r;
 
         assert(user_name);
         assert(hr);
 
-        e = getenv("RECOVERY_KEY");
-        if (e) {
+        r = getenv_steal_erase("PASSWORD", &envpw);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire password from environment: %m");
+        if (r > 0) {
                 /* People really shouldn't use environment variables for passing secrets. We support this
                  * only for testing purposes, and do not document the behaviour, so that people won't
                  * actually use this outside of testing. */
 
-                r = user_record_set_password(hr, STRV_MAKE(e), true); /* recovery keys are stored in the record exactly like regular passwords! */
+                r = user_record_set_password(hr, STRV_MAKE(envpw), true); /* recovery keys are stored in the record exactly like regular passwords! */
                 if (r < 0)
                         return log_error_errno(r, "Failed to store recovery key: %m");
 
-                assert_se(unsetenv_erase("RECOVERY_KEY") >= 0);
                 return 1;
         }
 
@@ -318,20 +320,21 @@ static int acquire_token_pin(
                 AskPasswordFlags flags) {
 
         _cleanup_(strv_free_erasep) char **pin = NULL;
+        _cleanup_(erase_and_freep) char *envpin = NULL;
         _cleanup_free_ char *question = NULL;
-        char *e;
         int r;
 
         assert(user_name);
         assert(hr);
 
-        e = getenv("PIN");
-        if (e) {
-                r = user_record_set_token_pin(hr, STRV_MAKE(e), false);
+        r = getenv_steal_erase("PIN", &envpin);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire PIN from environment: %m");
+        if (r > 0) {
+                r = user_record_set_token_pin(hr, STRV_MAKE(envpin), false);
                 if (r < 0)
                         return log_error_errno(r, "Failed to store token PIN: %m");
 
-                assert_se(unsetenv_erase("PIN") >= 0);
                 return 1;
         }
 
@@ -554,7 +557,6 @@ static int acquire_passed_secrets(const char *user_name, UserRecord **ret) {
 static int activate_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r, ret = 0;
-        char **i;
 
         r = acquire_bus(&bus);
         if (r < 0)
@@ -603,7 +605,6 @@ static int activate_home(int argc, char *argv[], void *userdata) {
 static int deactivate_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r, ret = 0;
-        char **i;
 
         r = acquire_bus(&bus);
         if (r < 0)
@@ -690,7 +691,7 @@ static int inspect_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(strv_freep) char **mangled_list = NULL;
         int r, ret = 0;
-        char **items, **i;
+        char **items;
 
         pager_open(arg_pager_flags);
 
@@ -774,7 +775,7 @@ static int authenticate_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(strv_freep) char **mangled_list = NULL;
         int r, ret = 0;
-        char **i, **items;
+        char **items;
 
         items = mangle_user_list(strv_skip(argv, 1), &mangled_list);
         if (!items)
@@ -1084,7 +1085,6 @@ static int add_disposition(JsonVariant **v) {
 static int acquire_new_home_record(UserRecord **ret) {
         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
         _cleanup_(user_record_unrefp) UserRecord *hr = NULL;
-        char **i;
         int r;
 
         assert(ret);
@@ -1150,33 +1150,25 @@ static int acquire_new_password(
                 bool suggest,
                 char **ret) {
 
+        _cleanup_(erase_and_freep) char *envpw = NULL;
         unsigned i = 5;
-        char *e;
         int r;
 
         assert(user_name);
         assert(hr);
 
-        e = getenv("NEWPASSWORD");
-        if (e) {
-                _cleanup_(erase_and_freep) char *copy = NULL;
-
+        r = getenv_steal_erase("NEWPASSWORD", &envpw);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire password from environment: %m");
+        if (r > 0) {
                 /* As above, this is not for use, just for testing */
 
-                if (ret) {
-                        copy = strdup(e);
-                        if (!copy)
-                                return log_oom();
-                }
-
-                r = user_record_set_password(hr, STRV_MAKE(e), /* prepend = */ true);
+                r = user_record_set_password(hr, STRV_MAKE(envpw), /* prepend = */ true);
                 if (r < 0)
                         return log_error_errno(r, "Failed to store password: %m");
 
-                assert_se(unsetenv_erase("NEWPASSWORD") >= 0);
-
                 if (ret)
-                        *ret = TAKE_PTR(copy);
+                        *ret = TAKE_PTR(envpw);
 
                 return 0;
         }
@@ -1375,7 +1367,6 @@ static int create_home(int argc, char *argv[], void *userdata) {
 static int remove_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r, ret = 0;
-        char **i;
 
         r = acquire_bus(&bus);
         if (r < 0)
@@ -1413,7 +1404,6 @@ static int acquire_updated_home_record(
 
         _cleanup_(json_variant_unrefp) JsonVariant *json = NULL;
         _cleanup_(user_record_unrefp) UserRecord *hr = NULL;
-        char **i;
         int r;
 
         assert(ret);
@@ -1863,7 +1853,6 @@ static int resize_home(int argc, char *argv[], void *userdata) {
 static int lock_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r, ret = 0;
-        char **i;
 
         r = acquire_bus(&bus);
         if (r < 0)
@@ -1895,7 +1884,6 @@ static int lock_home(int argc, char *argv[], void *userdata) {
 static int unlock_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r, ret = 0;
-        char **i;
 
         r = acquire_bus(&bus);
         if (r < 0)
@@ -2961,8 +2949,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_DISK_SIZE:
                         if (isempty(optarg)) {
-                                const char *prop;
-
                                 FOREACH_STRING(prop, "diskSize", "diskSizeRelative", "rebalanceWeight") {
                                         r = drop_from_identity(prop);
                                         if (r < 0)
@@ -3464,9 +3450,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 }
 
-                case ARG_PKCS11_TOKEN_URI: {
-                        const char *p;
-
+                case ARG_PKCS11_TOKEN_URI:
                         if (streq(optarg, "list"))
                                 return pkcs11_list_tokens();
 
@@ -3500,11 +3484,8 @@ static int parse_argv(int argc, char *argv[]) {
 
                         strv_uniq(arg_pkcs11_token_uri);
                         break;
-                }
 
-                case ARG_FIDO2_DEVICE: {
-                        const char *p;
-
+                case ARG_FIDO2_DEVICE:
                         if (streq(optarg, "list"))
                                 return fido2_list_devices();
 
@@ -3534,7 +3515,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                         strv_uniq(arg_fido2_device);
                         break;
-                }
 
                 case ARG_FIDO2_WITH_PIN: {
                         bool lock_with_pin;
@@ -3569,9 +3549,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 }
 
-                case ARG_RECOVERY_KEY: {
-                        const char *p;
-
+                case ARG_RECOVERY_KEY:
                         r = parse_boolean(optarg);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --recovery-key= argument: %s", optarg);
@@ -3585,7 +3563,6 @@ static int parse_argv(int argc, char *argv[]) {
                         }
 
                         break;
-                }
 
                 case ARG_AUTO_RESIZE_MODE:
                         if (isempty(optarg)) {

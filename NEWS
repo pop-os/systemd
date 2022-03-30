@@ -1,5 +1,452 @@
 systemd System and Service Manager
 
+CHANGES WITH 251:
+
+        Backwards-incompatible changes:
+
+        * The minimum kernel version required has been bumped from 3.13 to 3.15,
+          and CLOCK_BOOTTIME is now assumed to always exist.
+
+        * In v250, a systemd-networkd feature that automatically configures
+          routes to addresses specified in AllowedIPs= was added and enabled by
+          default. However, this causes network connectivity issues in many
+          existing setups. Hence, it has been disabled by default since
+          systemd-stable 250.3. The feature can still be used by explicitly
+          configuring RouteTable= setting in .netdev files.
+
+        * Jobs started via StartUnitWithFlags() will no longer return 'skipped'
+          when a Condition*= check does not succeed, restoring the JobRemoved
+          signal to the behaviour it had before v250.
+
+        * The org.freedesktop.portable1 methods GetMetadataWithExtensions() and
+          GetImageMetadataWithExtensions() have been fixed to provide an extra
+          return parameter, containing the actual extension release metadata.
+          The current implementation was judged to be broken and unusable, and
+          thus the usual procedure of adding a new set of methods was skipped,
+          and backward compatibility broken instead on the assumption that
+          nobody can be affected given the current state of this interface.
+
+        * All kernels supported by systemd mix RDRAND (or similar) into the
+          entropy pool at early boot. This means that on those systems, even if
+          /dev/urandom is not yet initialized, it still returns bytes that that
+          are at least as high quality as RDRAND. For that reason, we no longer
+          have reason to invoke RDRAND from systemd itself, which has
+          historically been a source of bugs. Furthermore, kernels ≥5.6 provide
+          the getrandom(GRND_INSECURE) interface for returning random bytes
+          before the entropy pool is initialized without warning into kmsg,
+          which is what we attempt to use if available. systemd's direct usage
+          of RDRAND has been removed. x86 systems ≥Broadwell that are running
+          an older kernel may experience kmsg warnings that were not seen with
+          250. For newer kernels, non-x86 systems, or older x86 systems, there
+          should be no visible changes.
+
+        * sd-boot will now measure the kernel command line into TPM PCR 12
+          rather than PCR 8. This improves usefulness of the measurements on
+          systems where sd-boot is chainloaded from Grub. Grub measures all
+          commands its executes into PCR 8, which makes it very hard to use
+          reasonably, hence separate ourselves from that and use PCR 12
+          instead, which is what certain Ubuntu editions already do. To retain
+          compatibility with systems running older systemd systems a new meson
+          option 'efi-tpm-pcr-compat' has been added (which defaults to false).
+          If enabled, the measurement is done twice: into the new-style PCR 12
+          *and* the old-style PCR 8. It's strongly advised to migrate all users
+          to PCR 12 for this purpose in the long run, as we intend to remove
+          this compatibility feature in two year's time.
+
+        * busctl capture now writes output in the newer pcapng format instead
+          of pcap.
+
+        * An udev rule that imported hwdb matches for USB devices with
+          lowercase hexadecimal vendor/product ID digits was added in systemd
+          250. This has been reverted, since uppercase hexadecimal digits are
+          supposed to be used, and we already had a rule that with the
+          appropriate match.
+
+          Users might need to adjust their local hwdb entries.
+
+        * arch_prctl(2) has been moved to the @default set in the syscall filters
+          (as exposed via the SystemCallFilter= setting in service unit files).
+          It is apparently used by the linker now.
+
+        Changes in the Boot Loader Specification, kernel-install and sd-boot:
+
+        * kernel-install's and bootctl's Boot Loader Specification Type #1
+          entry generation logic has been reworked. The user may now pick
+          explicitly by which "token" string to name the installation's boot
+          entries, via the new /etc/kernel/entry-token file or the new
+          --entry-token= switch to bootctl. By default — as before — the
+          entries are named after the local machine ID. However, in "golden
+          image" environments, where the machine ID shall be initialized on
+          first boot (as opposed to at installation time before first boot) the
+          machine ID will not be available at build time. In this case the
+          --entry-token= switch to bootctl (or the /etc/kernel/entry-token
+          file) may be used to override the "token" for the entries, for
+          example the IMAGE_ID= or ID= fields from /etc/os-release. This will
+          make the OS images independent of any machine ID, and ensure that the
+          images will not carry any identifiable information before first boot,
+          but on the other hand means that multiple parallel installations of
+          the very same image on the same disk cannot be supported.
+
+          Summary: if you are building golden images that shall acquire
+          identity information exclusively on first boot, make sure to both
+          remove /etc/machine-id *and* to write /etc/kernel/entry-token to the
+          value of the IMAGE_ID= or ID= field of /etc/os-release or another
+          suitable identifier before deploying the image.
+
+        * The Boot Loader Specification has been extended with
+          /loader/entries.srel file located in the EFI System Partition (ESP)
+          that disambiguates the format of the entries in the /loader/entries/
+          directory (in order to discern them from incompatible uses of this
+          directory by other projects). For entries that follow the
+          Specification, the string "type1" is stored in this file.
+
+          bootctl will now write this file automatically when installing the
+          systemd-boot boot loader.
+
+        * kernel-install supports a new initrd_generator= setting in
+          /etc/kernel/install.conf, that is exported as
+          $KERNEL_INSTALL_INITRD_GENERATOR to kernel-install plugins. This
+          allows choosing different initrd generators.
+
+        * kernel-install will now create a "staging area" (an initially-empty
+          directory to gather files for a Boot Loader Specification Type #1
+          entry). The path to this directory is exported as
+          $KERNEL_INSTALL_STAGING_AREA to kernel-install plugins, which should
+          drop files there instead of writing them directly to the final
+          location. kernel-install will move them when all files have been
+          prepared successfully.
+
+        * New option sort-key= has been added to the Boot Loader Specification
+          to override the sorting order of the entries in the boot menu. It is
+          read by sd-boot and bootctl, and will be written by kernel-install,
+          with the default value of IMAGE_ID= or ID= fields from
+          os-release. Together, this means that on multiboot installations,
+          entries should be grouped and sorted in a predictable way.
+
+        * The sort order of boot entries has been updated: entries which have
+          the new field sort-key= are sorted by it first, and all entries
+          without it are ordered later. After that, entries are sorted by
+          version so that newest entries are towards the beginning of the list.
+
+        * The kernel-install tool gained a new 'inspect' verb which shows the
+          paths and other settings used.
+
+        * sd-boot can now optionally beep when the menu is shown and menu
+          entries are selected, which can be useful on machines without a
+          working display. (Controllable via a loader.conf setting.)
+
+        * The --make-machine-id-directory= switch to bootctl has been replaced
+          by --make-entry-directory=, given that the entry directory is not
+          necessarily named after the machine ID, but after some other suitable
+          ID as selected via --entry-token= described above. The old name of
+          the option is still understood to maximize compatibility.
+
+        * 'bootctl list' gained support for a new --json= switch to output boot
+          menu entries in JSON format.
+
+        Changes in systemd-homed:
+
+        * Starting with v250 systemd-homed uses UID/GID mapping on the mounts
+          of activated home directories it manages (if the kernel and selected
+          file systems support it). So far it mapped three UID ranges: the
+          range from 0…60000, the user's own UID, and the range 60514…65534,
+          leaving everything else unmapped (in other words, the 16bit UID range
+          is mapped almost fully, with the exception of the UID subrange used
+          for systemd-homed users, with one exception: the user's own UID).
+          Unmapped UIDs may not be used for file ownership in the home
+          directory — any chown() attempts with them will fail. With this
+          release a fourth range is added to these mappings:
+          524288…1879048191. This range is the UID range intended for container
+          uses, see:
+
+                  https://systemd.io/UIDS-GIDS
+
+          This range may be used for container managers that place container OS
+          trees in the home directory (which is a questionable approach, for
+          quota, permission, SUID handling and network file system
+          compatibility reasons, but nonetheless apparently commonplace). Note
+          that this mapping is mapped 1:1 in a pass-through fashion, i.e. the
+          UID assignments from the range are not managed or mapped by
+          `systemd-homed`, and must be managed with other mechanisms, in the
+          context of the local system.
+
+          Typically, a better approach to user namespacing in relevant
+          container managers would be to leave container OS trees on disk at
+          UID offset 0, but then map them to a dynamically allocated runtime
+          UID range via another UID mount map at container invocation
+          time. That way user namespace UID ranges become strictly a runtime
+          concept, and do not leak into persistent file systems, persistent
+          user databases or persistent configuration, thus greatly simplifying
+          handling, and improving compatibility with home directories intended
+          to be portable like the ones managed by systemd-homed.
+
+        Changes in shared libraries:
+
+        * A new libsystemd-core-<version>.so private shared library is
+          installed under /usr/lib/systemd/system, mirroring the existing
+          libsystemd-shared-<version>.so library. This allows the total
+          installation size to be reduced by binary code reuse.
+
+        * The <version> tag used in the name of libsystemd-shared.so and
+          libsystemd-core.so can be configured via the meson option
+          'shared-lib-tag'. Distributions may build subsequent versions of the
+          systemd package with unique tags (e.g. the full package version),
+          thus allowing multiple installations of those shared libraries to be
+          available at the same time. This is intended to fix an issue where
+          programs that link to those libraries would fail to execute because
+          they were installed earlier or later than the appropriate version of
+          the library.
+
+        * The sd-id128 API gained a new call sd_id128_to_uuid_string() that is
+          similar to sd_id128_to_string() but formats the ID in RFC 4122 UUID
+          format instead of simple series of hex characters.
+
+        Changes in PID1, systemctl, and systemd-oomd:
+
+        * A new set of service monitor environment variables will be passed to
+          OnFailure=/OnSuccess= handlers, but only if exactly one unit lists the
+          handler unit as OnFailure=/OnSuccess=. The variables are:
+          $MONITOR_SERVICE_RESULT, $MONITOR_EXIT_CODE, $MONITOR_EXIT_STATUS,
+          $MONITOR_INVOCATION_ID and $MONITOR_UNIT. For cases when a single
+          handler needs to watch multiple units, use a templated handler.
+
+        * A new ExtensionDirectories= setting in service unit files allows
+          system extensions to be loaded from a directory. (It is similar to
+          ExtensionImages=, but takes paths to directories, instead of
+          disk image files.)
+
+          'portablectl attach --extension=' now also accepts directory paths.
+
+        * The user.delegate and user.invocation_id extended attributes on
+          cgroups are used in addition to trusted.delegate and
+          trusted.invocation_id. The latter pair requires privileges to set,
+          but the former doesn't and can be also set by the unprivileged user
+          manager.
+
+          (Only supported on kernels ≥5.6.)
+
+        * Units that were killed by systemd-oomd will now have a service result
+          of 'oom-kill'. The number of times a service was killed is tallied
+          in the 'user.oomd_ooms' extended attribute.
+
+          The OOMPolicy= unit file setting is now also honoured by
+          systemd-oomd.
+
+        * In unit files the new %y/%Y specifiers can be used to refer to
+          normalized unit file path, which is particularly useful for symlinked
+          unit files.
+
+          The new %R specifier resolves to the pretty hostname
+          (i.e. PRETTY_HOSTNAME= from /etc/machine-info).
+
+          The new %d specifier resolves to the credentials directory of a
+          service (same as $CREDENTIALS_DIRECTORY).
+
+        * The RootDirectory=, MountAPIVFS=, ExtensionDirectories=,
+          *Capabilities*=, ProtectHome=, *Directory=, TemporaryFileSystem=,
+          PrivateTmp=, PrivateDevices=, PrivateNetwork=, NetworkNamespacePath=,
+          PrivateIPC=, IPCNamespacePath=, PrivateUsers=, ProtectClock=,
+          ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
+          MountFlags= service settings now also work in unprivileged user
+          services, i.e. those run by the user's --user service manager, as long
+          as user namespaces are enabled on the system.
+
+        * Services with Restart=always and a failing ExecCondition= will no
+          longer be restarted, to bring ExecCondition= behaviour in line with
+          Condition*= settings.
+
+        * LoadCredential= now accepts a directory as the argument; all files
+          from the directory will be loaded as credentials.
+
+        * A new D-Bus property ControlGroupId is now exposed on service units,
+          that encapsulates the service's numeric cgroup ID that newer kernels
+          assign to each cgroup.
+
+        * PID 1 gained support for configuring the "pre-timeout" of watchdog
+          devices and the associated governor, via the new
+          RuntimeWatchdogPreSec= and RuntimeWatchdogPreGovernor= configuration
+          options in /etc/systemd/system.conf.
+
+        * systemctl's --timestamp= option gained a new choice "unix", to show
+          timestamp as unix times, i.e. seconds since 1970, Jan 1st.
+
+        * 'systemctl enable' and similar commands will now create relative
+          symlinks in .wants/ and .requires/ and for aliases. Most of the time
+          systemd itself doesn't care, but absolute symlinks were causing wrong
+          behaviour in case of aliases to linked unit files. The change was
+          necessary to fix this aspect. Absolute links are interpreted as
+          before, and it is still possible to create them via other means.
+
+        Changes in systemd-journald:
+
+        * The journal JSON export format has been added to listed of stable
+          interfaces (https://systemd.io/PORTABILITY_AND_STABILITY/).
+
+        * journalctl --list-boots now supports JSON output and the --reverse option.
+
+        * Under docs/: JOURNAL_EXPORT_FORMATS was imported from the wiki and
+          updated, BUILDING_IMAGES is new:
+
+          https://systemd.io/JOURNAL_EXPORT_FORMATS
+          https://systemd.io/BUILDING_IMAGES
+
+        Changes in udev:
+
+        * Two new hwdb files have been added. One lists "handhelds" (PDAs,
+          calculators, etc.), the other AV production devices (DJ tables,
+          keypads, etc.) that should accessible to the seat owner user by
+          default.
+
+        * udevadm trigger gained a new --prioritized-subsystem= option to
+          process certain subsystems (and all their parent devices) earlier.
+
+          systemd-udev-trigger.service now uses this new option to trigger
+          block and TPM devices first, hopefully making the boot a bit faster.
+
+        * udevadm trigger now implements --type=all, --initialized-match,
+          --initialized-nomatch to trigger both subsystems and devices, only
+          already-initialized devices, and only devices which haven't been
+          initialized yet, respectively.
+
+        * .link files gained support for setting MDI/MID-X on a link.
+
+        * .link files gained support for [Match] Firmware= setting to match on
+          the device firmware description string. By mistake, it was previously
+          only supported in .network files.
+
+        * .link files gained support for [Link] SR-IOVVirtualFunctions= setting
+          and [SR-IOV] section to configure SR-IOV virtual functions.
+
+        Changes in systemd-networkd:
+
+        * The default scope for unicast routes configured through [Route]
+          section is changed to "link", to make the behavior consistent with
+          "ip route" command. The manual configuration of [Route] Scope= is
+          still honored.
+
+        * A new unit systemd-networkd-wait-online@<interface>.service has been
+          added that can be used to wait for a specific network interface to be
+          up.
+
+        * systemd-networkd gained a new [Bridge] Isolated=true|false setting
+          that configures the eponymous kernel attribute on the bridge.
+
+        * .netdev files now can be used to create virtual WLAN devices, and
+          configure various settings on them, via the [WLAN] section.
+
+        * .link/.network files gained support for [Match] Kind= setting to match
+          on device kind ("bond", "bridge", "gre", "tun", "veth", etc.)
+
+          This value is also shown by 'networkctl status'.
+
+        * The Local= setting in .netdev files for various virtual network
+          devices gained support for specifying, in addition to the network
+          address, the name of a local interface which must have the specified
+          address.
+
+        * systemd-networkd gained a new [Tunnel] External= setting in .netdev
+          files, to configure tunnels in external mode (a.k.a. collect metadata
+          mode).
+
+        * [Network] L2TP= setting was removed. Please use interface specifier in
+          Local= setting in .netdev files of corresponding L2TP interface.
+
+        * New [DHCPServer] BootServerName=, BootServerAddress=, and
+          BootFilename= settings can be used to configure the server address,
+          server name, and file name sent in the DHCP packet (e.g. to configure
+          PXE boot).
+
+        Changes in systemd-resolved:
+
+        * systemd-resolved is started earlier (in sysinit.target), so it
+          available earlier and will also be started in the initrd if installed
+          there.
+
+        Changes in disk encryption:
+
+        * systemd-cryptenroll can now control whether to require the user to
+          enter a PIN when using TPM-based unlocking of a volume via the new
+          --tpm2-with-pin= option.
+
+          Option tpm2-pin= can be used in /etc/crypttab.
+
+        * When unlocking devices via TPM, TPM2 parameter encryption is now
+          used, to ensure that communication between CPU and discrete TPM chips
+          cannot be eavesdropped to acquire disk encryption keys.
+
+        Changes in systemd-hostnamed:
+
+        * HARDWARE_VENDOR= and HARDWARE_MODEL= can be set in /etc/machine-info
+          to override the values gleaned from the hwdb.
+
+        * A ID_CHASSIS property can be set in the hwdb (for the DMI device
+          /sys/class/dmi/id) to override the chassis that is reported by
+          hostnamed.
+
+        * hostnamed's D-Bus interface gained a new method GetHardwareSerial()
+          for reading the hardware serial number, as reportd by DMI.
+
+        Changes in other components:
+
+        * /etc/locale.conf is now populated through tmpfiles.d factory /etc/
+          handling with the values that were configured during systemd build
+          (if /etc/locale.conf has not been created through some other
+          mechanism). This means that /etc/locale.conf should always have
+          reasonable contents and we avoid a potential mismatch in defaults.
+
+        * The userdbctl tool will now show UID range information as part of the
+          list of known users.
+
+        * A new build-time configuration setting default-user-shell= can be
+          used to set the default shell for user records and nspawn shell
+          invocations (instead of of the default /bin/bash).
+
+        Experimental features:
+
+        * sd-boot gained a new *experimental* setting "reboot-for-bitlocker" in
+          loader.conf that implements booting Microsoft Windows from the
+          sd-boot in a way that first reboots the system, to reset the TPM
+          PCRs. This improves compatibility with BitLocker's TPM use, as the
+          PCRs will only record the Windows boot process, and not sd-boot
+          itself, thus retaining the PCR measurements not involving sd-boot.
+          Note that this feature is experimental for now, and is likely going
+          to be generalized and renamed in a future release, without retaining
+          compatibility with the current implementation.
+
+        * A new systemd-sysupdate component has been added that automatically
+          discovers, downloads, and installs A/B-style updates for the host
+          installation itself, or container images, portable service images,
+          and other assets. See the new systemd-sysupdate man page for updates.
+
+        Contributions from: 4piu, Adam Williamson, adrian5, Albert Brox,
+        AlexCatze, Alfonso Sánchez-Beato, Alvin Šipraga, Andrea Pappacoda,
+        Andy Chi, Anita Zhang, Antonio Alvarez Feijoo,
+        Arfrever Frehtes Taifersar Arahesis, ash, Bastien Nocera, Be,
+        bearhoney, Benjamin Berg, Christian Brauner, Clyde Byrd III,
+        Curtis Klein, Daan De Meyer, Danilo Krummrich, David, David Bond,
+        Davide Cavalca, David Tardon, dependabot[bot], Donald Chan,
+        Dorian Clay, Eduard Tolosa, Erik Sjölund, Evgeny Vereshchagin,
+        Federico Ceratto, Franck Bui, Frantisek Sumsal, Gaël PORTAY,
+        Georges Basile Stavracas Neto, Goffredo Baroncelli, Grigori Goronzy,
+        Hans de Goede, Heiko Becker, Hugo Carvalho, James Hilliard,
+        Jan Janssen, Jason A. Donenfeld, Joan Bruguera, Joerie de Gram,
+        Josh Triplett, Julia Kartseva, ksa678491784, Lan Tian, Laura Barcziova,
+        Lennart Poettering, Leviticoh, licunlong, Lidong Zhong, lincoln auster,
+        Lubomir Rintel, Luca Boccassi, Luca BRUNO, Ludwig Nussel,
+        Marcel Hellwig, march1993, Marco Scardovi, Markus Weippert,
+        Martin Wilck, Matija Skala, Matthias Lisin, Matt Walton, Max Gautier,
+        Michael Biebl, Michael Olbrich, Michal Koutný, Mike Gilbert,
+        Morten Linderud, Nishal Kulkarni, Noel Kuntze, Peter Hutterer,
+        Peter Morrow, Pigmy-penguin, prumian, Richard Neill,
+        Rike-Benjamin Schuppner, Romain Naour, Ruben Kerkhof, Ryan Hendrickson,
+        Santa Wiryaman, Seth Falco, Stephen Hemminger, tawefogo,
+        Temuri Doghonadze, Thomas Batten, Thomas Haller, Tobias Stoeckmann,
+        Tyson Whitehead, Vishal Chillara Srinivas, Vivien Didelot, Weblate,
+        Xiaotian Wu, yangmingtai, YmrDtnJu, Yonathan Randolph, Yu Watanabe,
+        Zbigniew Jędrzejewski-Szmek, наб
+
+        — Warsaw, 2022-03---
+
 CHANGES WITH 250:
 
         * Support for encrypted and authenticated credentials has been added.
@@ -100,9 +547,9 @@ CHANGES WITH 250:
           time-out for the boot.
 
         * A new setting DefaultOOMScoreAdjust= is now supported in
-          /etc/systemd/system.conf + /etc/systemd/user.conf that may be used to
-          set the default process OOM score adjustment value for processes
-          forked off the service manager. For per-user service managers this
+          /etc/systemd/system.conf and /etc/systemd/user.conf. It may be used
+          to set the default process OOM score adjustment value for processes
+          started by the service manager. For per-user service managers this
           now defaults to 100, but for per-system service managers is left as
           is. This means that by default now services forked off the user
           service manager are more likely to be killed by the OOM killer than
@@ -145,7 +592,7 @@ CHANGES WITH 250:
           ProtectKernelLogs=yes can now be used.
 
         * The default maximum numbers of inodes have been raised from 64k to 1M
-          for /dev, and from 400k to 1M for /tmp.
+          for /dev/, and from 400k to 1M for /tmp/.
 
         * The per-user service manager learnt support for communicating with
           systemd-oomd to acquire OOM kill information.
@@ -271,36 +718,6 @@ CHANGES WITH 250:
           monotonic clock even without RTC hardware and with some robustness
           against abnormal system shutdown.
 
-        * .network files gained a new UplinkInterface in the [IPv6SendRA]
-          section, for automatically propagating DNS settings from other
-          interfaces.
-
-        * The static lease DHCP server logic in systemd-networkd may now serve
-          IP addresses outside of the configured IP pool range for the server.
-
-        * CAN support in systemd-networkd gained four new settings Loopback=,
-          OneShot=, PresumeAck=, ClassicDataLengthCode= for tweaking CAN
-          control modes. It gained a number of further settings for tweaking
-          CAN timing quanta.
-
-        * The [CAN] section in .network file gained new TimeQuantaNSec=,
-          PropagationSegment=, PhaseBufferSegment1=, PhaseBufferSegment2=,
-          SyncJumpWidth=, DataTimeQuantaNSec=, DataPropagationSegment=,
-          DataPhaseBufferSegment1=, DataPhaseBufferSegment2=, and
-          DataSyncJumpWidth= settings to control bit-timing processed by the
-          CAN interface.
-
-        * DHCPv4 client support in systemd-networkd learnt a new Label= option
-          for configuring the address label to apply to configure IPv4
-          addresses.
-
-        * The various systemd-udevd "ethtool" buffer settings now understand
-          the special value "max" to configure the buffers to the maximum the
-          hardware supports.
-
-        * systemd-udevd's .link files may now configure a large variety of
-          NIC coalescing settings, plus more hardware offload settings.
-
         * systemd-analyze verify gained support for a pair of new --image= +
           --root= switches for verifying units below a specific root
           directory/image instead of on the host.
@@ -331,7 +748,7 @@ CHANGES WITH 250:
           non-essential output. It's honored by the "dot", "syscall-filter",
           "filesystems" commands.
 
-        * systemd-analyze security gained a --profile option that can be used
+        * systemd-analyze security gained a --profile= option that can be used
           to take into account a portable profile when analyzing portable
           services, since a lot of the security-related settings are enabled
           through them.
@@ -341,39 +758,32 @@ CHANGES WITH 250:
           including the build-id and other info described on:
           https://systemd.io/COREDUMP_PACKAGE_METADATA/
 
+        * .network files gained a new UplinkInterface= in the [IPv6SendRA]
+          section, for automatically propagating DNS settings from other
+          interfaces.
+
+        * The static lease DHCP server logic in systemd-networkd may now serve
+          IP addresses outside of the configured IP pool range for the server.
+
+        * CAN support in systemd-networkd gained four new settings Loopback=,
+          OneShot=, PresumeAck=, ClassicDataLengthCode= for tweaking CAN
+          control modes. It gained a number of further settings for tweaking
+          CAN timing quanta.
+
+        * The [CAN] section in .network file gained new TimeQuantaNSec=,
+          PropagationSegment=, PhaseBufferSegment1=, PhaseBufferSegment2=,
+          SyncJumpWidth=, DataTimeQuantaNSec=, DataPropagationSegment=,
+          DataPhaseBufferSegment1=, DataPhaseBufferSegment2=, and
+          DataSyncJumpWidth= settings to control bit-timing processed by the
+          CAN interface.
+
+        * DHCPv4 client support in systemd-networkd learnt a new Label= option
+          for configuring the address label to apply to configure IPv4
+          addresses.
+
         * The [IPv6AcceptRA] section of .network files gained support for a new
           UseMTU= setting that may be used to control whether to apply the
           announced MTU settings to the local interface.
-
-        * systemd-networkd now ships with new default .network files:
-          80-container-vb.network which matches host-side network bridge device
-          created by systemd-nspawn's --network-bridge or --network-zone
-          switch, and 80-6rd-tunnel.network which matches automatically created
-          sit tunnel with 6rd prefix when the DHCP 6RD option is received.
-
-        * systemd-networkd and systemd-udevd now support IP over InfiniBand
-          interfaces. The Kind= setting in .netdev file accepts "ipoib". And
-          systemd.netdev files gained the [IPoIB] section.
-
-        * systemd-networkd and systemd-udevd now support net.ifname-policy=
-          option on the kernel command-line. This is implemented through the
-          systemd-network-generator service that automatically generates
-          appropriate .link, .network, and .netdev files.
-
-        * systemd-networkd's handling of Endpoint= resolution for WireGuard
-          interfaces has been improved.
-
-        * systemd-networkd will now automatically configure routes to addresses
-          specified in AllowedIPs=. This feature can be controlled via RouteTable=
-          and RouteMetric= settings in [WireGuard] or [WireGuardPeer] sections.
-
-        * systemd-networkd will now once again automatically generate persistent
-          MAC addresses for batadv and bridge interfaces. Users can disable this
-          by using MACAddress=none in .netdev files.
-
-        * .link files gained a new WakeOnLanPassword= setting in the [Link]
-          section that allows to specify a WoL "SecureOn" password on hardware
-          that supports this.
 
         * The [DHCPv4] section in .network file gained a new Use6RD= boolean
           setting to control whether the DHCPv4 client request and process the
@@ -395,16 +805,11 @@ CHANGES WITH 250:
           whether to use the relevant fields from the IPv6 Router Advertisement
           records.
 
-        * The ForceDHCPv6PDOtherInformation= setting in the [DHCPv6] section is
-          now deprecated. Please use the WithoutRA= and UseDelegatedPrefix=
+        * The ForceDHCPv6PDOtherInformation= setting in the [DHCPv6] section
+          has been removed. Please use the WithoutRA= and UseDelegatedPrefix=
           settings in the [DHCPv6] section and the DHCPv6Client= setting in the
           [IPv6AcceptRA] section to control when the DHCPv6 client is started
           and how the delegated prefixes are handled by the DHCPv6 client.
-
-        * The [CAKE] section of .network files gained various new settings
-          AutoRateIngress=, CompensationMode=, FlowIsolationMode=, NAT=,
-          MPUBytes=, PriorityQueueingPreset=, FirewallMark=, Wash=, SplitGSO=,
-          and UseRawPacketSize= for configuring CAKE.
 
         * The IPv6Token= section in the [Network] section is deprecated, and
           the [IPv6AcceptRA] section gained the Token= setting for its
@@ -424,6 +829,49 @@ CHANGES WITH 250:
 
         * The [DHCPServer] section of .network file gained a new Router=
           setting to specify the router address.
+
+        * The [CAKE] section of .network files gained various new settings
+          AutoRateIngress=, CompensationMode=, FlowIsolationMode=, NAT=,
+          MPUBytes=, PriorityQueueingPreset=, FirewallMark=, Wash=, SplitGSO=,
+          and UseRawPacketSize= for configuring CAKE.
+
+        * systemd-networkd now ships with new default .network files:
+          80-container-vb.network which matches host-side network bridge device
+          created by systemd-nspawn's --network-bridge or --network-zone
+          switch, and 80-6rd-tunnel.network which matches automatically created
+          sit tunnel with 6rd prefix when the DHCP 6RD option is received.
+
+        * systemd-networkd's handling of Endpoint= resolution for WireGuard
+          interfaces has been improved.
+
+        * systemd-networkd will now automatically configure routes to addresses
+          specified in AllowedIPs=. This feature can be controlled via
+          RouteTable= and RouteMetric= settings in [WireGuard] or
+          [WireGuardPeer] sections.
+
+        * systemd-networkd will now once again automatically generate persistent
+          MAC addresses for batadv and bridge interfaces. Users can disable this
+          by using MACAddress=none in .netdev files.
+
+        * systemd-networkd and systemd-udevd now support IP over InfiniBand
+          interfaces. The Kind= setting in .netdev file accepts "ipoib". And
+          systemd.netdev files gained the [IPoIB] section.
+
+        * systemd-networkd and systemd-udevd now support net.ifname-policy=
+          option on the kernel command-line. This is implemented through the
+          systemd-network-generator service that automatically generates
+          appropriate .link, .network, and .netdev files.
+
+        * The various systemd-udevd "ethtool" buffer settings now understand
+          the special value "max" to configure the buffers to the maximum the
+          hardware supports.
+
+        * systemd-udevd's .link files may now configure a large variety of
+          NIC coalescing settings, plus more hardware offload settings.
+
+        * .link files gained a new WakeOnLanPassword= setting in the [Link]
+          section that allows to specify a WoL "SecureOn" password on hardware
+          that supports this.
 
         * systemd-nspawn's --setenv= switch now supports an additional syntax:
           if only a variable name is specified (i.e. without being suffixed by
@@ -522,15 +970,13 @@ CHANGES WITH 250:
           may be used to set the boot menu time-out of the boot loader (for all
           or just the subsequent boot).
 
-        * bootctl and kernel-install will now read KERNEL_INSTALL_MACHINE_ID
-          and KERNEL_INSTALL_LAYOUT from kernel/install.conf. The first
-          variable specifies the machine-id to use for installation. It would
-          previously be used if set in the environment, and now it'll also be
-          read automatically from the config file. The second variable is new.
-          When set, it specifies the layout to use for installation directories
-          on the boot partition, so that tools don't need to guess it based on
-          the already-existing directories. The only value that is defined
-          natively is "bls", corresponding to the layout specified in
+        * bootctl and kernel-install will now read variables
+          KERNEL_INSTALL_LAYOUT= from /etc/machine-info and layout= from
+          /etc/kernel/install.conf. When set, it specifies the layout to use
+          for installation directories on the boot partition, so that tools
+          don't need to guess it based on the already-existing directories. The
+          only value that is defined natively is "bls", corresponding to the
+          layout specified in
           https://systemd.io/BOOT_LOADER_SPECIFICATION/. Plugins for
           kernel-install that implement a different layout can declare other
           values for this variable.
@@ -12359,7 +12805,7 @@ CHANGES WITH 197:
           based on a calendar time specification such as "Thu,Fri
           2013-*-1,5 11:12:13" which refers to 11:12:13 of the first
           or fifth day of any month of the year 2013, given that it is
-          a thursday or friday. This brings timer event support
+          a Thursday or a Friday. This brings timer event support
           considerably closer to cron's capabilities. For details on
           the supported calendar time specification language see
           systemd.time(7).

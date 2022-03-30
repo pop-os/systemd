@@ -207,6 +207,8 @@ TEST(protect_kernel_logs) {
                                     NULL,
                                     NULL,
                                     NULL,
+                                    NULL,
+                                    NULL,
                                     NULL);
                 assert_se(r == 0);
 
@@ -220,10 +222,11 @@ TEST(protect_kernel_logs) {
         assert_se(wait_for_terminate_and_check("ns-kernellogs", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
-DEFINE_CUSTOM_TEST_MAIN(
-        LOG_INFO,
-        ({
-                if (!have_namespaces())
-                        return log_tests_skipped("Don't have namespace support");
-        }),
-        /* no outro */);
+static int intro(void) {
+        if (!have_namespaces())
+                return log_tests_skipped("Don't have namespace support");
+
+        return EXIT_SUCCESS;
+}
+
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);

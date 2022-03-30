@@ -71,24 +71,36 @@ portablectl list | grep -q -F "No images."
 portablectl "${ARGS[@]}" attach --now --runtime --extension /usr/share/app0.raw /usr/share/minimal_0.raw app0
 
 systemctl is-active app0.service
+status="$(portablectl is-attached --extension app0 minimal_0)"
+[[ "${status}" == "running-runtime" ]]
 
 portablectl "${ARGS[@]}" reattach --now --runtime --extension /usr/share/app0.raw /usr/share/minimal_1.raw app0
 
 systemctl is-active app0.service
+status="$(portablectl is-attached --extension app0 minimal_1)"
+[[ "${status}" == "running-runtime" ]]
 
 portablectl detach --now --runtime --extension /usr/share/app0.raw /usr/share/minimal_1.raw app0
 
 portablectl "${ARGS[@]}" attach --now --runtime --extension /usr/share/app1.raw /usr/share/minimal_0.raw app1
 
 systemctl is-active app1.service
+status="$(portablectl is-attached --extension app1 minimal_0)"
+[[ "${status}" == "running-runtime" ]]
+
+# Ensure that adding or removing a version to the image doesn't break reattaching
+cp /usr/share/app1.raw /tmp/app1_2.raw
+portablectl "${ARGS[@]}" reattach --now --runtime --extension /tmp/app1_2.raw /usr/share/minimal_1.raw app1
+
+systemctl is-active app1.service
+status="$(portablectl is-attached --extension app1_2 minimal_1)"
+[[ "${status}" == "running-runtime" ]]
 
 portablectl "${ARGS[@]}" reattach --now --runtime --extension /usr/share/app1.raw /usr/share/minimal_1.raw app1
 
 systemctl is-active app1.service
-
-portablectl inspect --cat --extension /usr/share/app1.raw /usr/share/minimal_1.raw app1 | grep -F "MARKER=2"
-portablectl inspect --cat --extension /usr/share/app1.raw /usr/share/minimal_1.raw app1 | grep -F "PORTABLE_PREFIXES=app1"
-portablectl inspect --cat --extension /usr/share/app1.raw /usr/share/minimal_1.raw app1 | grep -F "ExecStart=/opt/script1.sh"
+status="$(portablectl is-attached --extension app1 minimal_1)"
+[[ "${status}" == "running-runtime" ]]
 
 portablectl detach --now --runtime --extension /usr/share/app1.raw /usr/share/minimal_1.raw app1
 
@@ -100,7 +112,8 @@ grep -q -F baz "${state_directory}/app1/foo"
 
 # portablectl also works with directory paths rather than images
 
-mkdir /tmp/rootdir /tmp/app1 /tmp/overlay /tmp/os-release-fix /tmp/os-release-fix/etc
+mkdir /tmp/rootdir /tmp/app0 /tmp/app1 /tmp/overlay /tmp/os-release-fix /tmp/os-release-fix/etc
+mount /usr/share/app0.raw /tmp/app0
 mount /usr/share/app1.raw /tmp/app1
 mount /usr/share/minimal_0.raw /tmp/rootdir
 
@@ -121,7 +134,22 @@ systemctl is-active app1.service
 portablectl detach --now --runtime overlay app1
 
 umount /tmp/overlay
+
+portablectl "${ARGS[@]}" attach --copy=symlink --now --runtime --extension /tmp/app0 --extension /tmp/app1 /tmp/rootdir app0 app1
+
+systemctl is-active app0.service
+systemctl is-active app1.service
+
+portablectl inspect --cat --extension app0 --extension app1 rootdir app0 app1 | grep -q -f /tmp/rootdir/usr/lib/os-release
+portablectl inspect --cat --extension app0 --extension app1 rootdir app0 app1 | grep -q -f /tmp/app0/usr/lib/extension-release.d/extension-release.app0
+portablectl inspect --cat --extension app0 --extension app1 rootdir app0 app1 | grep -q -f /tmp/app1/usr/lib/extension-release.d/extension-release.app2
+portablectl inspect --cat --extension app0 --extension app1 rootdir app0 app1 | grep -q -f /tmp/app1/usr/lib/systemd/system/app1.service
+portablectl inspect --cat --extension app0 --extension app1 rootdir app0 app1 | grep -q -f /tmp/app0/usr/lib/systemd/system/app0.service
+
+portablectl detach --now --runtime --extension /tmp/app0 --extension /tmp/app1 /tmp/rootdir app0 app1
+
 umount /tmp/rootdir
+umount /tmp/app0
 umount /tmp/app1
 
 echo OK >/testok

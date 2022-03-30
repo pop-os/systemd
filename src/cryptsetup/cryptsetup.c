@@ -17,7 +17,7 @@
 #include "cryptsetup-tpm2.h"
 #include "cryptsetup-util.h"
 #include "device-util.h"
-#include "efi-loader.h"
+#include "efi-api.h"
 #include "env-util.h"
 #include "escape.h"
 #include "fileio.h"
@@ -82,6 +82,7 @@ static char *arg_fido2_rp_id = NULL;
 static char *arg_tpm2_device = NULL;
 static bool arg_tpm2_device_auto = false;
 static uint32_t arg_tpm2_pcr_mask = UINT32_MAX;
+static bool arg_tpm2_pin = false;
 static bool arg_headless = false;
 static usec_t arg_token_timeout_usec = 30*USEC_PER_SEC;
 
@@ -387,6 +388,16 @@ static int parse_one_option(const char *option) {
                                 arg_tpm2_pcr_mask |= mask;
                 }
 
+        } else if ((val = startswith(option, "tpm2-pin="))) {
+
+                r = parse_boolean(val);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to parse %s, ignoring: %m", option);
+                        return 0;
+                }
+
+                arg_tpm2_pin = r;
+
         } else if ((val = startswith(option, "try-empty-password="))) {
 
                 r = parse_boolean(val);
@@ -562,7 +573,7 @@ static int get_password(
 
         _cleanup_free_ char *friendly = NULL, *text = NULL, *disk_path = NULL;
         _cleanup_strv_free_erase_ char **passwords = NULL;
-        char **p, *id;
+        char *id;
         int r = 0;
         AskPasswordFlags flags = arg_ask_password_flags | ASK_PASSWORD_PUSH_CACHE;
 
@@ -818,20 +829,19 @@ static bool libcryptsetup_plugins_support(void) {
 
 #if HAVE_LIBCRYPTSETUP_PLUGINS
 static int acquire_pins_from_env_variable(char ***ret_pins) {
-        char *e;
+        _cleanup_(erase_and_freep) char *envpin = NULL;
         _cleanup_strv_free_erase_ char **pins = NULL;
+        int r;
 
         assert(ret_pins);
 
-        e = getenv("PIN");
-        if (e) {
-                pins = strv_new(e);
+        r = getenv_steal_erase("PIN", &envpin);
+        if (r < 0)
+                return log_error_errno(r, "Failed to acquire PIN from environment: %m");
+        if (r > 0) {
+                pins = strv_new(envpin);
                 if (!pins)
                         return log_oom();
-
-                string_erase(e);
-                if (unsetenv("PIN") < 0)
-                        return log_error_errno(errno, "Failed to unset $PIN: %m");
         }
 
         *ret_pins = TAKE_PTR(pins);
@@ -851,7 +861,6 @@ static int attach_luks2_by_fido2(
 #if HAVE_LIBCRYPTSETUP_PLUGINS
         AskPasswordFlags flags = ASK_PASSWORD_PUSH_CACHE | ASK_PASSWORD_ACCEPT_CACHED;
         _cleanup_strv_free_erase_ char **pins = NULL;
-        char **p;
         int r;
 
         r = crypt_activate_by_token_pin(cd, name, "systemd-fido2", CRYPT_ANY_TOKEN, NULL, 0, usrptr, activation_flags);
@@ -1176,7 +1185,7 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
                 /* Before using this key as passphrase we base64 encode it. Why? For compatibility
                  * with homed's PKCS#11 hookup: there we want to use the key we acquired through
                  * PKCS#11 for other authentication/decryption mechanisms too, and some of them do
-                 * not not take arbitrary binary blobs, but require NUL-terminated strings — most
+                 * not take arbitrary binary blobs, but require NUL-terminated strings — most
                  * importantly UNIX password hashes. Hence, for compatibility we want to use a string
                  * without embedded NUL here too, and that's easiest to generate from a binary blob
                  * via base64 encoding. */
@@ -1302,9 +1311,15 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                         key_file, arg_keyfile_size, arg_keyfile_offset,
                                         key_data, key_data_size,
                                         NULL, 0, /* we don't know the policy hash */
+                                        arg_tpm2_pin,
+                                        until,
+                                        arg_headless,
+                                        arg_ask_password_flags,
                                         &decrypted_key, &decrypted_key_size);
                         if (r >= 0)
                                 break;
+                        if (IN_SET(r, -EACCES, -ENOLCK))
+                                return log_error_errno(SYNTHETIC_ERRNO(EAGAIN), "TPM2 PIN unlock failed, falling back to traditional unlocking.");
                         if (ERRNO_IS_NOT_SUPPORTED(r)) /* TPM2 support not compiled in? */
                                 return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN), "TPM2 support not available, falling back to traditional unlocking.");
                         if (r != -EAGAIN) /* EAGAIN means: no tpm2 chip found */
@@ -1336,6 +1351,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                         for (;;) {
                                 uint32_t pcr_mask;
                                 uint16_t pcr_bank, primary_alg;
+                                TPM2Flags tpm2_flags;
 
                                 r = find_tpm2_auto_data(
                                                 cd,
@@ -1347,7 +1363,8 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                                 &blob, &blob_size,
                                                 &policy_hash, &policy_hash_size,
                                                 &keyslot,
-                                                &token);
+                                                &token,
+                                                &tpm2_flags);
                                 if (r == -ENXIO)
                                         /* No further TPM2 tokens found in the LUKS2 header. */
                                         return log_debug_errno(SYNTHETIC_ERRNO(EAGAIN),
@@ -1370,7 +1387,13 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
                                                 NULL, 0, 0, /* no key file */
                                                 blob, blob_size,
                                                 policy_hash, policy_hash_size,
+                                                tpm2_flags,
+                                                until,
+                                                arg_headless,
+                                                arg_ask_password_flags,
                                                 &decrypted_key, &decrypted_key_size);
+                                if (IN_SET(r, -EACCES, -ENOLCK))
+                                        return log_error_errno(SYNTHETIC_ERRNO(EAGAIN), "TPM2 PIN unlock failed, falling back to traditional unlocking.");
                                 if (r != -EPERM)
                                         break;
 
@@ -1391,7 +1414,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
 
                         if (is_efi_boot() && !efi_has_tpm2())
                                 return log_notice_errno(SYNTHETIC_ERRNO(EAGAIN),
-                                                        "No TPM2 hardware discovered and EFI bios indicates no support for it either, assuming TPM2-less system, falling back to traditional unocking.");
+                                                        "No TPM2 hardware discovered and EFI firmware does not see it either, falling back to traditional unlocking.");
 
                         r = make_tpm2_device_monitor(&event, &monitor);
                         if (r < 0)
@@ -1523,7 +1546,6 @@ static int attach_luks_or_plain_or_bitlk_by_passphrase(
                 uint32_t flags,
                 bool pass_volume_key) {
 
-        char **p;
         int r;
 
         assert(cd);
@@ -1639,7 +1661,7 @@ static int help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s attach VOLUME SOURCEDEVICE [PASSWORD] [OPTIONS]\n"
+        printf("%s attach VOLUME SOURCEDEVICE [KEY-FILE] [OPTIONS]\n"
                "%s detach VOLUME\n\n"
                "Attaches or detaches an encrypted block device.\n"
                "\nSee the %s for details.\n",
@@ -1721,7 +1743,7 @@ static int run(int argc, char *argv[]) {
                 unsigned tries;
                 usec_t until;
 
-                /* Arguments: systemd-cryptsetup attach VOLUME SOURCE-DEVICE [PASSWORD] [OPTIONS] */
+                /* Arguments: systemd-cryptsetup attach VOLUME SOURCE-DEVICE [KEY-FILE] [OPTIONS] */
 
                 if (argc < 4)
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "attach requires at least two arguments.");

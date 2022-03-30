@@ -105,7 +105,7 @@ endforeach
 
 ############################################################
 
-have_lxml = run_command(xml_helper_py).returncode() == 0
+have_lxml = run_command(xml_helper_py, check: false).returncode() == 0
 if not have_lxml
         message('python-lxml not available, not making man page indices')
 endif
@@ -226,14 +226,14 @@ update_dbus_docs = custom_target(
 if conf.get('BUILD_MODE_DEVELOPER') == 1
         test('dbus-docs-fresh',
              update_dbus_docs_py,
-             args : ['--build-dir', project_build_root, '--test', dbus_docs])
+             args : ['--build-dir', project_build_root, '--test', dbus_docs],
+             depends : dbus_programs)
 endif
 
 update_man_rules = custom_target(
         'update-man-rules',
         output : 'update-man-rules',
-        command : [sh, '-c',
-                   'cd @0@ && '.format(project_build_root) +
-                   'python3 @0@/tools/update-man-rules.py $(find @0@ -wholename "*/man/*.xml") >t && '.format(project_source_root) +
-                   'mv t @0@/rules/meson.build'.format(meson.current_source_dir())],
+        command : [update_man_rules_py,
+                   '@0@/man/*.xml'.format(project_source_root),
+                   '@0@/rules/meson.build'.format(meson.current_source_dir())],
         depends : custom_entities_ent)

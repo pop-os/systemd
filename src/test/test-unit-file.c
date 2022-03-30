@@ -8,20 +8,20 @@
 #include "unit-file.h"
 
 TEST(unit_validate_alias_symlink_and_warn) {
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a.service", "/other/b.service") == 0);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a.service", "/other/b.socket") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a.service", "/other/b.foobar") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@.service", "/other/b@.service") == 0);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@.service", "/other/b@.socket") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@XXX.service", "/other/b@YYY.service") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@XXX.service", "/other/b@YYY.socket") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@.service", "/other/b@YYY.service") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@XXX.service", "/other/b@XXX.service") == 0);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@XXX.service", "/other/b@.service") == 0);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@.service", "/other/b.service") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a.service", "/other/b@.service") == -EXDEV);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a@.slice", "/other/b.slice") == -EINVAL);
-        assert_se(unit_validate_alias_symlink_and_warn("/path/a.slice", "/other/b.slice") == -EINVAL);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a.service", "/other/b.service") == 0);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a.service", "/other/b.socket") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a.service", "/other/b.foobar") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@.service", "/other/b@.service") == 0);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@.service", "/other/b@.socket") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@XXX.service", "/other/b@YYY.service") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@XXX.service", "/other/b@YYY.socket") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@.service", "/other/b@YYY.service") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@XXX.service", "/other/b@XXX.service") == 0);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@XXX.service", "/other/b@.service") == 0);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@.service", "/other/b.service") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a.service", "/other/b@.service") == -EXDEV);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a@.slice", "/other/b.slice") == -EINVAL);
+        assert_se(unit_validate_alias_symlink_or_warn(LOG_INFO, "/path/a.slice", "/other/b.slice") == -EINVAL);
 }
 
 TEST(unit_file_build_name_map) {
@@ -35,7 +35,7 @@ TEST(unit_file_build_name_map) {
 
         ids = strv_skip(saved_argv, 1);
 
-        assert_se(lookup_paths_init(&lp, UNIT_FILE_SYSTEM, 0, NULL) >= 0);
+        assert_se(lookup_paths_init(&lp, LOOKUP_SCOPE_SYSTEM, 0, NULL) >= 0);
 
         assert_se(unit_file_build_name_map(&lp, &mtime, &unit_ids, &unit_names, NULL) == 1);
 
@@ -55,7 +55,6 @@ TEST(unit_file_build_name_map) {
         if (r == 0)
                 log_debug("Cache rebuild skipped based on mtime.");
 
-        char **id;
         STRV_FOREACH(id, ids) {
                  const char *fragment, *name;
                  _cleanup_set_free_free_ Set *names = NULL;
@@ -102,4 +101,9 @@ TEST(runlevel_to_target) {
         assert_se(streq_ptr(runlevel_to_target("rd.rescue"), SPECIAL_RESCUE_TARGET));
 }
 
-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, log_show_color(true), /* no outro */);
+static int intro(void) {
+        log_show_color(true);
+        return EXIT_SUCCESS;
+}
+
+DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);

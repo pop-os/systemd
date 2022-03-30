@@ -63,7 +63,6 @@ static int list_dependencies_one(
                 unsigned branches) {
 
         _cleanup_strv_free_ char **deps = NULL;
-        char **c;
         int r;
 
         assert(bus);
@@ -136,9 +135,9 @@ static int list_dependencies_one(
         return 0;
 }
 
-int list_dependencies(int argc, char *argv[], void *userdata) {
+int verb_list_dependencies(int argc, char *argv[], void *userdata) {
         _cleanup_strv_free_ char **units = NULL, **done = NULL;
-        char **u, **patterns;
+        char **patterns;
         sd_bus *bus;
         int r;
 

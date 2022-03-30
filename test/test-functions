@@ -141,6 +141,7 @@ BASICTOOLS=(
     echo
     env
     false
+    flock
     getconf
     getent
     getfacl
@@ -1070,6 +1071,9 @@ install_compiled_systemd() {
     if get_bool "$IS_BUILT_WITH_COVERAGE"; then
         mkdir -p "${initdir}/${BUILD_DIR:?}/"
         rsync -am --include='*/' --include='*.gcno' --exclude='*' "${BUILD_DIR:?}/" "${initdir}/${BUILD_DIR:?}/"
+        # Set effective & default ACLs for the build dir so unprivileged
+        # processes can write gcda files with coverage stats
+        setfacl -R -m 'd:o:rwX' -m 'o:rwX' "${initdir}/${BUILD_DIR:?}/"
     fi
 }
 
@@ -1154,17 +1158,38 @@ install_systemd() {
 
     # enable debug logging in PID1
     echo LogLevel=debug >>"$initdir/etc/systemd/system.conf"
+    if [[ -n "$TEST_SYSTEMD_LOG_LEVEL" ]]; then
+        echo DefaultEnvironment=SYSTEMD_LOG_LEVEL="$TEST_SYSTEMD_LOG_LEVEL" >>"$initdir/etc/systemd/system.conf"
+    fi
     # store coredumps in journal
     echo Storage=journal >>"$initdir/etc/systemd/coredump.conf"
     # Propagate SYSTEMD_UNIT_PATH to user systemd managers
     mkdir "$initdir/etc/systemd/system/user@.service.d/"
     echo -e "[Service]\nPassEnvironment=SYSTEMD_UNIT_PATH\n" >"$initdir/etc/systemd/system/user@.service.d/override.conf"
 
-    # When built with gcov, disable ProtectSystem= and ProtectHome in the test
-    # images, since it prevents gcov to write the coverage reports (*.gcda files)
+    # When built with gcov, disable ProtectSystem= and ProtectHome= in the test
+    # images, since it prevents gcov to write the coverage reports (*.gcda
+    # files)
     if get_bool "$IS_BUILT_WITH_COVERAGE"; then
         mkdir -p "$initdir/etc/systemd/system/service.d/"
-        echo -e "[Service]\nProtectSystem=no\nProtectHome=no\n" >"$initdir/etc/systemd/system/service.d/gcov-override.conf"
+        echo -e "[Service]\nProtectSystem=no\nProtectHome=no\n" >"$initdir/etc/systemd/system/service.d/99-gcov-override.conf"
+        # Similarly, set ReadWritePaths= to the $BUILD_DIR in the test image
+        # to make the coverage work with units utilizing DynamicUser=yes. Do
+        # this only for services from TEST-20, as setting this system-wide
+        # has many undesirable side-effects
+        mkdir -p "$initdir/etc/systemd/system/test20-.service.d/"
+        echo -e "[Service]\nReadWritePaths=${BUILD_DIR:?}\n" >"$initdir/etc/systemd/system/test20-.service.d/99-gcov-rwpaths-override.conf"
+    fi
+
+    # If we're built with -Dportabled=false, tests with systemd-analyze
+    # --profile will fail. Since we need just the profile (text) files, let's
+    # copy them into the image if they don't exist there.
+    local portable_dir="${initdir:?}${ROOTLIBDIR:?}/portable"
+    if [[ ! -d "$portable_dir/profile/strict" ]]; then
+        dinfo "Couldn't find portable profiles in the test image"
+        dinfo "Copying them directly from the source tree"
+        mkdir -p "$portable_dir"
+        cp -frv "${SOURCE_DIR:?}/src/portable/profile" "$portable_dir"
     fi
 }
 
@@ -1189,7 +1214,7 @@ install_missing_libraries() {
     local lib path
     # A number of dependencies is now optional via dlopen, so the install
     # script will not pick them up, since it looks at linkage.
-    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu libfido2 libbpf libelf libdw; do
+    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu tss2-tcti-device libfido2 libbpf libelf libdw; do
         ddebug "Searching for $lib via pkg-config"
         if pkg-config --exists "$lib"; then
                 path="$(pkg-config --variable=libdir "$lib")"
@@ -1253,7 +1278,7 @@ create_empty_image() {
     LOOPDEV=$(losetup --show -P -f "$IMAGE_PUBLIC")
     [ -b "$LOOPDEV" ] || return 1
     sfdisk "$LOOPDEV" <<EOF
-,$((size - 50))M
+,$((size - 50))M,L,*
 ,
 EOF
 
@@ -1371,6 +1396,20 @@ check_coverage_reports() {
     else
         lcov --directory "${root}/${BUILD_DIR:?}" --capture --output-file "${dest}"
         lcov --remove "${dest}" -o "${dest}" '/usr/include/*' '/usr/lib/*'
+    fi
+
+    # If the test logs contain lines like:
+    #
+    # ...systemd-resolved[735885]: profiling:/systemd-meson-build/src/shared/libsystemd-shared-250.a.p/base-filesystem.c.gcda:Cannot open
+    #
+    # it means we're possibly missing some coverage since gcov can't write the stats,
+    # usually due to the sandbox being too restrictive (e.g. ProtectSystem=yes,
+    # ProtectHome=yes) or the $BUILD_DIR being inaccessible to non-root users - see
+    # `setfacl` stuff in install_compiled_systemd().
+
+    if "${JOURNALCTL:?}" -q --no-pager -D "${root:?}/var/log/journal" --grep "profiling:.+?gcda:[Cc]annot open"; then
+        derror "Detected possibly missing coverage, check the journal"
+        return 1
     fi
 
     return 0
@@ -1899,6 +1938,8 @@ has_user_dbus_socket() {
     fi
 }
 
+setup_nspawn_root_hook() { :;}
+
 setup_nspawn_root() {
     if [ -z "${initdir}" ]; then
         dfatal "\$initdir not defined"
@@ -1911,6 +1952,8 @@ setup_nspawn_root() {
         ddebug "cp -ar $initdir $TESTDIR/unprivileged-nspawn-root"
         cp -ar "$initdir" "$TESTDIR/unprivileged-nspawn-root"
     fi
+
+    setup_nspawn_root_hook
 }
 
 setup_basic_dirs() {
@@ -1947,11 +1990,9 @@ inst_libs() {
 
     while read -r line; do
         [[ "$line" = 'not a dynamic executable' ]] && break
-        # Skip a harmless error when running the tests on a system with a significantly
-        # older systemd version (ldd tries to resolve the unprefixed RPATH for libsystemd.so.0,
-        # which is in this case older than the already installed libsystemd.so.0 in $initdir).
-        # The issue is triggered by installing test dependencies in install_missing_libraries().
-        [[ "$line" =~ libsystemd.so.*:\ version\ .*\ not\ found ]] && continue
+        # Ignore errors about our own stuff missing. This is most likely caused
+        # by ldd attempting to use the unprefixed RPATH.
+        [[ "$line" =~ libsystemd.*\ not\ found ]] && continue
 
         if [[ "$line" =~ $so_regex ]]; then
             file="${BASH_REMATCH[1]}"
@@ -1998,6 +2039,24 @@ import_initdir() {
     initdir="${TESTDIR:?}/root"
     mkdir -p "$initdir"
     export initdir
+}
+
+get_cgroup_hierarchy() {
+    case "$(stat -c '%T' -f /sys/fs/cgroup)" in
+        cgroup2fs)
+            echo "unified"
+            ;;
+        tmpfs)
+            if [[ -d /sys/fs/cgroup/unified && "$(stat -c '%T' -f /sys/fs/cgroup/unified)" == cgroup2fs ]]; then
+                echo "hybrid"
+            else
+                echo "legacy"
+            fi
+            ;;
+        *)
+            dfatal "Failed to determine host's cgroup hierarchy"
+            exit 1
+    esac
 }
 
 ## @brief Converts numeric logging level to the first letter of level name.
@@ -2324,7 +2383,7 @@ inst_binary() {
     # In certain cases we might attempt to install a binary which is already
     # present in the test image, yet it's missing from the host system.
     # In such cases, let's check if the binary indeed exists in the image
-    # before doing any other chcecks. If it does, immediately return with
+    # before doing any other checks. If it does, immediately return with
     # success.
     if [[ $# -eq 1 ]]; then
         for path in "" bin sbin usr/bin usr/sbin; do
@@ -2342,6 +2401,10 @@ inst_binary() {
     # I love bash!
     while read -r line; do
         [[ "$line" = 'not a dynamic executable' ]] && break
+
+        # Ignore errors about our own stuff missing. This is most likely caused
+        # by ldd attempting to use the unprefixed RPATH.
+        [[ "$line" =~ libsystemd.*\ not\ found ]] && continue
 
         if [[ "$line" =~ $so_regex ]]; then
             file="${BASH_REMATCH[1]}"

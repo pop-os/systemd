@@ -7,6 +7,7 @@
 #include "condition.h"
 #include "conf-parser.h"
 #include "ethtool-util.h"
+#include "hashmap.h"
 #include "list.h"
 #include "net-condition.h"
 #include "netif-naming-scheme.h"
@@ -31,6 +32,7 @@ typedef struct Link {
         sd_device *device;
         sd_device_action_t action;
 
+        char *kind;
         char *driver;
         uint16_t iftype;
         uint32_t flags;
@@ -75,6 +77,10 @@ struct LinkConfig {
         int tx_flow_control;
         int autoneg_flow_control;
         netdev_coalesce_param coalesce;
+        uint8_t mdi;
+
+        uint32_t sr_iov_num_vfs;
+        OrderedHashmap *sr_iov_by_section;
 
         LIST_FIELDS(LinkConfig, configs);
 };

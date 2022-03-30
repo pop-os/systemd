@@ -265,6 +265,42 @@ static int property_get_runtime_watchdog(
         return sd_bus_message_append(reply, "t", manager_get_watchdog(m, WATCHDOG_RUNTIME));
 }
 
+static int property_get_pretimeout_watchdog(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = userdata;
+
+        assert(m);
+        assert(bus);
+        assert(reply);
+
+        return sd_bus_message_append(reply, "t", manager_get_watchdog(m, WATCHDOG_PRETIMEOUT));
+}
+
+static int property_get_pretimeout_watchdog_governor(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = userdata;
+
+        assert(m);
+        assert(bus);
+        assert(reply);
+
+        return sd_bus_message_append(reply, "s", m->watchdog_pretimeout_governor);
+}
+
 static int property_get_reboot_watchdog(
                 sd_bus *bus,
                 const char *path,
@@ -314,7 +350,8 @@ static int property_set_watchdog(Manager *m, WatchdogType type, sd_bus_message *
         if (r < 0)
                 return r;
 
-        return manager_override_watchdog(m, type, timeout);
+        manager_override_watchdog(m, type, timeout);
+        return 0;
 }
 
 static int property_set_runtime_watchdog(
@@ -327,6 +364,42 @@ static int property_set_runtime_watchdog(
                 sd_bus_error *error) {
 
         return property_set_watchdog(userdata, WATCHDOG_RUNTIME, value);
+}
+
+static int property_set_pretimeout_watchdog(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *value,
+                void *userdata,
+                sd_bus_error *error) {
+
+        return property_set_watchdog(userdata, WATCHDOG_PRETIMEOUT, value);
+}
+
+static int property_set_pretimeout_watchdog_governor(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *value,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = userdata;
+        char *governor;
+        int r;
+
+        assert(m);
+
+        r = sd_bus_message_read(value, "s", &governor);
+        if (r < 0)
+                return r;
+        if (!string_is_safe(governor))
+                return -EINVAL;
+
+        return manager_override_watchdog_pretimeout_governor(m, governor);
 }
 
 static int property_set_reboot_watchdog(
@@ -817,7 +890,6 @@ static int method_list_units_by_names(sd_bus_message *message, void *userdata, s
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         int r;
-        char **unit;
         _cleanup_strv_free_ char **units = NULL;
 
         assert(message);
@@ -2216,7 +2288,7 @@ fail:
 static int method_enable_unit_files_generic(
                 sd_bus_message *message,
                 Manager *m,
-                int (*call)(UnitFileScope scope, UnitFileFlags flags, const char *root_dir, char *files[], UnitFileChange **changes, size_t *n_changes),
+                int (*call)(LookupScope scope, UnitFileFlags flags, const char *root_dir, char *files[], UnitFileChange **changes, size_t *n_changes),
                 bool carries_install_info,
                 sd_bus_error *error) {
 
@@ -2280,7 +2352,7 @@ static int method_link_unit_files(sd_bus_message *message, void *userdata, sd_bu
         return method_enable_unit_files_generic(message, userdata, unit_file_link, false, error);
 }
 
-static int unit_file_preset_without_mode(UnitFileScope scope, UnitFileFlags flags, const char *root_dir, char **files, UnitFileChange **changes, size_t *n_changes) {
+static int unit_file_preset_without_mode(LookupScope scope, UnitFileFlags flags, const char *root_dir, char **files, UnitFileChange **changes, size_t *n_changes) {
         return unit_file_preset(scope, flags, root_dir, files, UNIT_FILE_PRESET_FULL, changes, n_changes);
 }
 
@@ -2340,7 +2412,7 @@ static int method_preset_unit_files_with_mode(sd_bus_message *message, void *use
 static int method_disable_unit_files_generic(
                 sd_bus_message *message,
                 Manager *m,
-                int (*call)(UnitFileScope scope, UnitFileFlags flags, const char *root_dir, char *files[], UnitFileChange **changes, size_t *n_changes),
+                int (*call)(LookupScope scope, UnitFileFlags flags, const char *root_dir, char *files[], UnitFileChange **changes, size_t *n_changes),
                 sd_bus_error *error) {
 
         _cleanup_strv_free_ char **l = NULL;
@@ -2566,7 +2638,7 @@ static int method_get_unit_file_links(sd_bus_message *message, void *userdata, s
         flags = UNIT_FILE_DRY_RUN |
                 (runtime ? UNIT_FILE_RUNTIME : 0);
 
-        r = unit_file_disable(UNIT_FILE_SYSTEM, flags, NULL, p, &changes, &n_changes);
+        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, flags, NULL, p, &changes, &n_changes);
         if (r < 0)
                 return log_error_errno(r, "Failed to get file links for %s: %m", name);
 
@@ -2637,6 +2709,16 @@ static int method_set_show_status(sd_bus_message *message, void *userdata, sd_bu
         assert(m);
         assert(message);
 
+        r = mac_selinux_access_check(message, "reload", error);
+        if (r < 0)
+                return r;
+
+        r = bus_verify_set_environment_async(m, message, error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+
         r = sd_bus_message_read(message, "s", &t);
         if (r < 0)
                 return r;
@@ -2695,6 +2777,8 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultStandardOutput", "s", bus_property_get_exec_output, offsetof(Manager, default_std_output), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultStandardError", "s", bus_property_get_exec_output, offsetof(Manager, default_std_error), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_WRITABLE_PROPERTY("RuntimeWatchdogUSec", "t", property_get_runtime_watchdog, property_set_runtime_watchdog, 0, 0),
+        SD_BUS_WRITABLE_PROPERTY("RuntimeWatchdogPreUSec", "t", property_get_pretimeout_watchdog, property_set_pretimeout_watchdog, 0, 0),
+        SD_BUS_WRITABLE_PROPERTY("RuntimeWatchdogPreGovernor", "s", property_get_pretimeout_watchdog_governor, property_set_pretimeout_watchdog_governor, 0, 0),
         SD_BUS_WRITABLE_PROPERTY("RebootWatchdogUSec", "t", property_get_reboot_watchdog, property_set_reboot_watchdog, 0, 0),
         /* The following item is an obsolete alias */
         SD_BUS_WRITABLE_PROPERTY("ShutdownWatchdogUSec", "t", property_get_reboot_watchdog, property_set_reboot_watchdog, 0, SD_BUS_VTABLE_HIDDEN),
@@ -3025,7 +3109,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
                                  SD_BUS_PARAM(mode),
                                  NULL,,
                                  method_set_show_status,
-                                 SD_BUS_VTABLE_CAPABILITY(CAP_SYS_ADMIN)),
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_NAMES("ListUnits",
                                  NULL,,
                                  "a(ssssssouso)",

@@ -237,7 +237,6 @@ static int write_dependency(
 
         _cleanup_strv_free_ char **names = NULL, **units = NULL;
         _cleanup_free_ char *res = NULL;
-        char **s;
         int r;
 
         assert(f);
@@ -518,8 +517,6 @@ static int add_mount(
                         if (r < 0)
                                 return r;
                 } else {
-                        char **s;
-
                         STRV_FOREACH(s, wanted_by) {
                                 r = generator_add_symlink(dest, *s, "wants", name);
                                 if (r < 0)
@@ -721,7 +718,7 @@ static int sysroot_is_nfsroot(void) {
                 if (!sep)
                         return -EINVAL;
 
-                a = strndupa(arg_root_what + 1, sep - arg_root_what - 1);
+                a = strndupa_safe(arg_root_what + 1, sep - arg_root_what - 1);
 
                 r = in_addr_from_string(AF_INET6, a, &u);
                 if (r < 0)
@@ -733,7 +730,7 @@ static int sysroot_is_nfsroot(void) {
         /* IPv4 address */
         sep = strchr(arg_root_what, ':');
         if (sep) {
-                a = strndupa(arg_root_what, sep - arg_root_what);
+                a = strndupa_safe(arg_root_what, sep - arg_root_what);
 
                 if (in_addr_from_string(AF_INET, a, &u) >= 0)
                         return true;

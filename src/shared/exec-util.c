@@ -91,7 +91,6 @@ static int do_execute(
 
         _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
         _cleanup_strv_free_ char **paths = NULL;
-        char **path, **e;
         int r;
         bool parallel_execution;
 
@@ -254,7 +253,7 @@ int execute_directories(
 }
 
 static int gather_environment_generate(int fd, void *arg) {
-        char ***env = arg, **x, **y;
+        char ***env = arg;
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_strv_free_ char **new = NULL;
         int r;
@@ -369,7 +368,6 @@ static int gather_environment_consume(int fd, void *arg) {
 
 int exec_command_flags_from_strv(char **ex_opts, ExecCommandFlags *flags) {
         ExecCommandFlags ex_flag, ret_flags = 0;
-        char **opt;
 
         assert(flags);
 
@@ -449,7 +447,16 @@ ExecCommandFlags exec_command_flags_from_string(const char *s) {
 }
 
 int fexecve_or_execve(int executable_fd, const char *executable, char *const argv[], char *const envp[]) {
+        /* Refuse invalid fds, regardless if fexecve() use is enabled or not */
+        if (executable_fd < 0)
+                return -EBADF;
+
+        /* Block any attempts on exploiting Linux' liberal argv[] handling, i.e. CVE-2021-4034 and suchlike */
+        if (isempty(executable) || strv_isempty(argv))
+                return -EINVAL;
+
 #if ENABLE_FEXECVE
+
         execveat(executable_fd, "", argv, envp, AT_EMPTY_PATH);
 
         if (IN_SET(errno, ENOSYS, ENOENT) || ERRNO_IS_PRIVILEGE(errno))

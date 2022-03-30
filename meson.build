@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 project('systemd', 'c',
-        version : '250',
+        version : '251',
         license : 'LGPLv2+',
         default_options: [
-                'c_std=gnu99',
+                'c_std=gnu11',
                 'prefix=/usr',
                 'sysconfdir=/etc',
                 'localstatedir=/var',
@@ -13,8 +13,8 @@ project('systemd', 'c',
         meson_version : '>= 0.53.2',
        )
 
-libsystemd_version = '0.33.0'
-libudev_version = '1.7.3'
+libsystemd_version = '0.34.0'
+libudev_version = '1.7.4'
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_URL', 'https://www.freedesktop.org/wiki/Software/systemd')
@@ -40,8 +40,12 @@ if want_ossfuzz and want_libfuzzer
         error('only one of oss-fuzz or llvm-fuzz can be specified')
 endif
 
-skip_deps = want_ossfuzz or want_libfuzzer
+skip_deps = want_ossfuzz or get_option('skip-deps')
 fuzzer_build = want_ossfuzz or want_libfuzzer
+
+# Create a title-less summary section early, so it ends up first in the output.
+# More items are added later after they have been detected.
+summary({'build mode' : get_option('mode')})
 
 #####################################################################
 
@@ -187,21 +191,6 @@ if docdir == ''
         docdir = datadir / 'doc/systemd'
 endif
 
-dbuspolicydir = get_option('dbuspolicydir')
-if dbuspolicydir == ''
-        dbuspolicydir = datadir / 'dbus-1/system.d'
-endif
-
-dbussessionservicedir = get_option('dbussessionservicedir')
-if dbussessionservicedir == ''
-        dbussessionservicedir = datadir / 'dbus-1/services'
-endif
-
-dbussystemservicedir = get_option('dbussystemservicedir')
-if dbussystemservicedir == ''
-        dbussystemservicedir = datadir / 'dbus-1/system-services'
-endif
-
 pamlibdir = get_option('pamlibdir')
 if pamlibdir == ''
         pamlibdir = rootlibdir / 'security'
@@ -261,7 +250,6 @@ conf.set_quoted('SYSTEMD_LANGUAGE_FALLBACK_MAP',              pkgdatadir / 'lang
 conf.set_quoted('SYSTEMD_MAKEFS_PATH',                        rootlibexecdir / 'systemd-makefs')
 conf.set_quoted('SYSTEMD_PULL_PATH',                          rootlibexecdir / 'systemd-pull')
 conf.set_quoted('SYSTEMD_SHUTDOWN_BINARY_PATH',               rootlibexecdir / 'systemd-shutdown')
-conf.set_quoted('SYSTEMD_STDIO_BRIDGE_BINARY_PATH',           bindir / 'systemd-stdio-bridge')
 conf.set_quoted('SYSTEMD_TEST_DATA',                          testsdir / 'testdata')
 conf.set_quoted('SYSTEMD_TTY_ASK_PASSWORD_AGENT_BINARY_PATH', rootbindir / 'systemd-tty-ask-password-agent')
 conf.set_quoted('SYSTEMD_UPDATE_HELPER_PATH',                 rootlibexecdir / 'systemd-update-helper')
@@ -373,7 +361,7 @@ possible_common_cc_flags = [
         '-Wno-string-plus-int',  # clang
 ]
 
-# Disable -Wmaybe-unitialized when compiling with -Os/-O1/-O3/etc. There are
+# Disable -Wmaybe-uninitialized when compiling with -Os/-O1/-O3/etc. There are
 # too many false positives with gcc >= 8. Effectively, we only test with -O0
 # and -O2; this should be enough to catch most important cases without too much
 # busywork. See https://github.com/systemd/systemd/pull/19226.
@@ -595,6 +583,11 @@ endif
 
 versiondep = declare_dependency(sources: version_h)
 
+shared_lib_tag = get_option('shared-lib-tag')
+if shared_lib_tag == ''
+        shared_lib_tag = meson.project_version()
+endif
+
 sh = find_program('sh')
 echo = find_program('echo')
 sed = find_program('sed')
@@ -606,10 +599,8 @@ env = find_program('env')
 perl = find_program('perl', required : false)
 rsync = find_program('rsync', required : false)
 meson_make_symlink = project_source_root + '/tools/meson-make-symlink.sh'
-test_efi_create_disk_sh = find_program('test/test-efi-create-disk.sh')
 
 mkdir_p = 'mkdir -p $DESTDIR/@0@'
-splash_bmp = files('test/splash.bmp')
 
 # If -Dxxx-path option is found, use that. Otherwise, check in $PATH,
 # /usr/sbin, /sbin, and fall back to the default from middle column.
@@ -647,7 +638,8 @@ endif
 
 ############################################################
 
-if run_command('python3', '-c', 'import jinja2', check : false).returncode() != 0
+python = find_program('python3')
+if run_command(python, '-c', 'import jinja2', check : false).returncode() != 0
         error('python3 jinja2 missing')
 endif
 
@@ -767,6 +759,10 @@ endif
 conf.set('TIME_EPOCH', time_epoch)
 
 conf.set('CLOCK_VALID_RANGE_USEC_MAX', get_option('clock-valid-range-usec-max'))
+
+default_user_shell = get_option('default-user-shell')
+conf.set_quoted('DEFAULT_USER_SHELL',      default_user_shell)
+conf.set_quoted('DEFAULT_USER_SHELL_NAME', fs.name(default_user_shell))
 
 foreach tuple : [['system-alloc-uid-min', 'SYS_UID_MIN', 1],  # Also see login.defs(5).
                  ['system-uid-max',       'SYS_UID_MAX', 999],
@@ -991,29 +987,66 @@ bpf_framework_required = want_bpf_framework == 'true'
 libbpf = dependency('libbpf', required : bpf_framework_required, version : '>= 0.2')
 conf.set10('HAVE_LIBBPF', libbpf.found())
 
-if want_bpf_framework == 'false'
+if want_bpf_framework == 'false' or not libbpf.found()
         conf.set10('BPF_FRAMEWORK', 0)
 else
         # Support 'versioned' clang/llvm-strip binaries, as seen on Debian/Ubuntu
         # (like clang-10/llvm-strip-10)
-        clang_bin = cc.get_id() == 'clang' ? cc.cmd_array()[0] : 'clang'
-        if meson.is_cross_build() or clang_bin.contains('afl-clang') or clang_bin.contains('hfuzz-clang')
-                clang_bin = 'clang'
-        endif
-        clang = find_program(clang_bin, required : bpf_framework_required)
-        if not meson.is_cross_build() and clang.found()
-                llvm_strip_bin = run_command(clang, '--print-prog-name', 'llvm-strip',
-                                             check : true).stdout().strip()
+        if meson.is_cross_build() or cc.get_id() != 'clang' or cc.cmd_array()[0].contains('afl-clang') or cc.cmd_array()[0].contains('hfuzz-clang')
+                r = find_program('clang', required : bpf_framework_required, version : '>= 10.0.0')
+                clang_found = r.found()
+                if clang_found
+                        if meson.version().version_compare('>= 0.55')
+                                clang = [r.full_path()]
+                        else
+                                clang = [r.path()]
+                        endif
+                endif
+                # Assume that the required flags are supported by the found clang.
+                clang_supports_flags = clang_found
         else
-                llvm_strip_bin = 'llvm-strip'
+                clang_found = true
+                clang = cc.cmd_array()
+                clang_supports_flags = cc.has_argument('-Wno-compare-distinct-pointer-types')
         endif
-        llvm_strip = find_program(llvm_strip_bin, required : bpf_framework_required)
+
+        if clang_found
+                # Check if 'clang -target bpf' is supported.
+                clang_supports_bpf = run_command(clang, '-target', 'bpf', '--print-supported-cpus', check : false).returncode() == 0
+        else
+                clang_supports_bpf = false
+        endif
 
         # Debian installs this in /usr/sbin/ which is not in $PATH.
         # We check for 'bpftool' first, honouring $PATH, and in /usr/sbin/ for Debian.
-        bpftool = find_program('bpftool', '/usr/sbin/bpftool', required : bpf_framework_required)
+        # We use 'bpftool gen' subcommand, it was added by 985ead416df39d6fe8e89580cc1db6aa273e0175 (v5.6).
+        bpftool = find_program('bpftool',
+                               '/usr/sbin/bpftool',
+                               required : false,
+                               version : '>= 5.13.0')
 
-        deps_found = libbpf.found() and clang.found() and llvm_strip.found() and bpftool.found()
+        if bpftool.found()
+                bpftool_strip = true
+        else
+                bpftool_strip = false
+                bpftool = find_program('bpftool',
+                                       '/usr/sbin/bpftool',
+                                       required : bpf_framework_required,
+                                       version : '>= 5.6.0')
+        endif
+
+        if not bpftool_strip
+                if not meson.is_cross_build() and clang_found
+                        llvm_strip_bin = run_command(clang, '--print-prog-name', 'llvm-strip',
+                                                     check : true).stdout().strip()
+                else
+                        llvm_strip_bin = 'llvm-strip'
+                endif
+                llvm_strip = find_program(llvm_strip_bin, required : bpf_framework_required, version : '>= 10.0.0')
+        endif
+
+        deps_found = clang_found and clang_supports_bpf and clang_supports_flags and (bpftool_strip or llvm_strip.found()) and bpftool.found()
+
         # Can build BPF program from source code in restricted C
         conf.set10('BPF_FRAMEWORK', deps_found)
 endif
@@ -1473,6 +1506,59 @@ else
 endif
 conf.set10('HAVE_DBUS', have)
 
+dbusdatadir = datadir / 'dbus-1'
+if conf.get('HAVE_DBUS') == 1
+        dbusdatadir = libdbus.get_variable(pkgconfig: 'datadir', default_value: datadir) / 'dbus-1'
+endif
+
+dbuspolicydir = get_option('dbuspolicydir')
+if dbuspolicydir == ''
+        dbuspolicydir = dbusdatadir / 'system.d'
+endif
+
+dbussessionservicedir = get_option('dbussessionservicedir')
+if dbussessionservicedir == ''
+        dbussessionservicedir = dbusdatadir / 'services'
+        if conf.get('HAVE_DBUS') == 1
+                dbussessionservicedir = libdbus.get_variable(pkgconfig: 'session_bus_services_dir', default_value: dbussessionservicedir)
+        endif
+endif
+
+dbussystemservicedir = get_option('dbussystemservicedir')
+if dbussystemservicedir == ''
+        dbussystemservicedir = dbusdatadir / 'system-services'
+        if conf.get('HAVE_DBUS') == 1
+                dbussystemservicedir = libdbus.get_variable(pkgconfig: 'system_bus_services_dir', default_value: dbussystemservicedir)
+        endif
+endif
+
+dbus_interfaces_dir = get_option('dbus-interfaces-dir')
+if dbus_interfaces_dir == '' or dbus_interfaces_dir == 'yes'
+        if meson.is_cross_build() and dbus_interfaces_dir != 'yes'
+                dbus_interfaces_dir = 'no'
+                warning('Exporting D-Bus interface XML files is disabled during cross build. Pass path or "yes" to force enable.')
+        else
+                dbus_interfaces_dir = dbusdatadir / 'interfaces'
+                if conf.get('HAVE_DBUS') == 1
+                        dbus_interfaces_dir = libdbus.get_variable(pkgconfig: 'interfaces_dir', default_value: dbus_interfaces_dir)
+                endif
+        endif
+endif
+if dbus_interfaces_dir == dbusdatadir / 'interfaces' or dbus_interfaces_dir == 'no'
+        dbus_interfaces_dir_name = 'interfaces'
+        dbus_interfaces_dir_parent = dbusdatadir
+else
+        elements = dbus_interfaces_dir.split('/')
+        dbus_interfaces_dir_name = elements[-1]
+        dbus_interfaces_dir_parent = '/'
+        foreach elem : elements
+                if elem == dbus_interfaces_dir_name and dbus_interfaces_dir == dbus_interfaces_dir_parent / dbus_interfaces_dir_name
+                        break
+                endif
+                dbus_interfaces_dir_parent = dbus_interfaces_dir_parent / elem
+        endforeach
+endif
+
 # We support one or the other. If gcrypt is available, we assume it's there to
 # be used, and use it in preference.
 opt = get_option('cryptolib')
@@ -1562,6 +1648,18 @@ endif
 conf.set('DEFAULT_DNSSEC_MODE',
          'DNSSEC_' + default_dnssec.underscorify().to_upper())
 conf.set_quoted('DEFAULT_DNSSEC_MODE_STR', default_dnssec)
+
+want_sysupdate = get_option('sysupdate')
+if want_sysupdate != 'false'
+        have = (conf.get('HAVE_OPENSSL') == 1 and
+                conf.get('HAVE_LIBFDISK') == 1)
+        if want_sysupdate == 'true' and not have
+                error('sysupdate support was requested, but dependencies are not available')
+        endif
+else
+        have = false
+endif
+conf.set10('ENABLE_SYSUPDATE', have)
 
 want_importd = get_option('importd')
 if want_importd != 'false'
@@ -1694,6 +1792,7 @@ conf.set10('SYSTEMD_SLOW_TESTS_DEFAULT', slow_tests)
 
 tests = []
 fuzzers = []
+catalogs = []
 
 ############################################################
 
@@ -1709,6 +1808,7 @@ make_directive_index_py = find_program('tools/make-directive-index.py')
 make_man_index_py = find_program('tools/make-man-index.py')
 meson_render_jinja2 = find_program('tools/meson-render-jinja2.py')
 update_dbus_docs_py = find_program('tools/update-dbus-docs.py')
+update_man_rules_py = find_program('tools/update-man-rules.py')
 update_hwdb_sh = find_program('tools/update-hwdb.sh')
 update_hwdb_autosuspend_sh = find_program('tools/update-hwdb-autosuspend.sh')
 update_syscall_tables_sh = find_program('tools/update-syscall-tables.sh')
@@ -1731,17 +1831,6 @@ public_programs = []
 
 # D-Bus introspection XML export
 dbus_programs = []
-dbus_interfaces_dir = get_option('dbus-interfaces-dir')
-if dbus_interfaces_dir == ''
-        if not meson.is_cross_build()
-                dbus_interfaces_dir = datadir / 'dbus-1'
-        else
-                message('D-Bus interfaces export is disabled during cross build. Pass path or yes to force enable.')
-                dbus_interfaces_dir = 'no'
-        endif
-elif dbus_interfaces_dir == 'yes'
-        dbus_interfaces_dir = datadir / 'dbus-1'
-endif
 
 basic_includes = include_directories(
         'src/basic',
@@ -1935,6 +2024,7 @@ subdir('src/rpm')
 subdir('src/shutdown')
 subdir('src/sysext')
 subdir('src/systemctl')
+subdir('src/sysupdate')
 subdir('src/timedate')
 subdir('src/timesync')
 subdir('src/tmpfiles')
@@ -2012,7 +2102,8 @@ foreach tuple : [['myhostname', 'ENABLE_NSS_MYHOSTNAME'],
                         test('dlopen-nss_' + module,
                              test_dlopen,
                              # path to dlopen must include a slash
-                             args : nss.full_path())
+                             args : nss.full_path(),
+                             depends : nss)
                 endif
         endif
 endforeach
@@ -2026,12 +2117,7 @@ dbus_programs += executable(
         link_with : [libcore,
                      libshared],
         dependencies : [versiondep,
-                        threads,
-                        librt,
-                        libseccomp,
-                        libselinux,
-                        libmount,
-                        libblkid],
+                        libseccomp],
         install_rpath : rootlibexecdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -2047,12 +2133,7 @@ public_programs += executable(
         link_with : [libcore,
                      libshared],
         dependencies : [versiondep,
-                        threads,
-                        librt,
-                        libseccomp,
-                        libselinux,
-                        libmount,
-                        libblkid],
+                        libseccomp],
         install_rpath : rootlibexecdir,
         install : conf.get('ENABLE_ANALYZE'))
 
@@ -2136,7 +2217,8 @@ if want_tests != 'false'
         test('test-fstab-generator',
              test_fstab_generator_sh,
              # https://github.com/mesonbuild/meson/issues/2681
-             args : exe.full_path())
+             args : exe.full_path(),
+             depends : exe)
 endif
 
 if conf.get('ENABLE_ENVIRONMENT_D') == 1
@@ -2287,7 +2369,8 @@ if conf.get('ENABLE_LOGIND') == 1
                         test('dlopen-pam_systemd',
                              test_dlopen,
                              # path to dlopen must include a slash
-                             args : pam_systemd.full_path())
+                             args : pam_systemd.full_path(),
+                             depends : pam_systemd)
                 endif
         endif
 
@@ -2367,7 +2450,7 @@ public_programs += executable(
         install_rpath : rootlibexecdir,
         install : true)
 
-public_programs += executable(
+systemctl = executable(
         'systemctl',
         systemctl_sources,
         include_directories : includes,
@@ -2381,6 +2464,7 @@ public_programs += executable(
         install_rpath : rootlibexecdir,
         install : true,
         install_dir : rootbindir)
+public_programs += systemctl
 
 if conf.get('ENABLE_PORTABLED') == 1
         dbus_programs += executable(
@@ -2626,7 +2710,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
 endif
 
 if conf.get('HAVE_SYSV_COMPAT') == 1
-        executable(
+        exe = executable(
                 'systemd-sysv-generator',
                 'src/sysv-generator/sysv-generator.c',
                 include_directories : includes,
@@ -2634,6 +2718,13 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : systemgeneratordir)
+
+        sysv_generator_test_py = find_program('test/sysv-generator-test.py')
+        if want_tests != 'false'
+                test('sysv-generator-test',
+                     sysv_generator_test_py,
+                     depends : exe)
+        endif
 
         executable(
                 'systemd-rc-local-generator',
@@ -2961,8 +3052,7 @@ if conf.get('ENABLE_OOMD') == 1
                 link_with : [libshared],
                 dependencies : [],
                 install_rpath : rootlibexecdir,
-                install : true,
-                install_dir : rootbindir)
+                install : true)
 endif
 
 if conf.get('ENABLE_BINFMT') == 1
@@ -3002,6 +3092,22 @@ if conf.get('ENABLE_REPART') == 1
                      test_repart_sh,
                      args : exe.full_path())
         endif
+endif
+
+if conf.get('ENABLE_SYSUPDATE') == 1
+        exe = executable(
+                'systemd-sysupdate',
+                systemd_sysupdate_sources,
+                include_directories : includes,
+                link_with : [libshared],
+                dependencies : [threads,
+                                libblkid,
+                                libfdisk,
+                                libopenssl],
+                install_rpath : rootlibexecdir,
+                install : true,
+                install_dir : rootlibexecdir)
+        public_programs += exe
 endif
 
 if conf.get('ENABLE_VCONSOLE') == 1
@@ -3177,13 +3283,22 @@ executable(
         install : true,
         install_dir : rootlibexecdir)
 
-public_programs += executable(
+systemd_id128 = executable(
         'systemd-id128',
         'src/id128/id128.c',
         include_directories : includes,
         link_with : [libshared],
         install_rpath : rootlibexecdir,
         install : true)
+public_programs += systemd_id128
+
+if want_tests != 'false'
+        test('test-systemctl-enable',
+             test_systemctl_enable_sh,
+             # https://github.com/mesonbuild/meson/issues/2681
+             args : [systemctl.full_path(),
+                     systemd_id128.full_path()])
+endif
 
 public_programs += executable(
         'systemd-path',
@@ -3279,6 +3394,7 @@ public_programs += executable(
         busctl_sources,
         include_directories : includes,
         link_with : [libshared],
+        dependencies : [versiondep],
         install_rpath : rootlibexecdir,
         install : true)
 
@@ -3518,7 +3634,8 @@ if want_tests != 'false'
         test('test-network-generator-conversion',
              test_network_generator_conversion_sh,
              # https://github.com/mesonbuild/meson/issues/2681
-             args : exe.full_path())
+             args : exe.full_path(),
+             depends : exe)
 endif
 
 executable(
@@ -3532,13 +3649,14 @@ executable(
 
 ############################################################
 
-custom_target(
+runtest_env = custom_target(
         'systemd-runtest.env',
         output : 'systemd-runtest.env',
         command : [sh, '-c',
                    '{ echo SYSTEMD_TEST_DATA=@0@; echo SYSTEMD_CATALOG_DIR=@1@; } >@OUTPUT@'.format(
                            project_source_root / 'test',
                            project_build_root / 'catalog')],
+        depends : catalogs,
         build_by_default : true)
 
 test_cflags = ['-DTEST_CODE=1']
@@ -3562,7 +3680,8 @@ foreach tuple : tests
         parallel = tuple.length() > 7 ? tuple[7] : true
         timeout = 30
 
-        name = sources[0].split('/')[-1].split('.')[0]
+        # FIXME: Use fs.stem() with meson >= 0.54.0
+        name = '@0@'.format(sources[0]).split('/')[-1].split('.')[0]
         if type.startswith('timeout=')
                 timeout = type.split('=')[1].to_int()
                 type = ''
@@ -3580,7 +3699,8 @@ foreach tuple : tests
                         build_by_default : want_tests != 'false',
                         install_rpath : rootlibexecdir,
                         install : install_tests,
-                        install_dir : testsdir / type)
+                        install_dir : testsdir / type,
+                        link_depends : runtest_env)
 
                 if type == 'manual'
                         message('@0@ is a manual test'.format(name))
@@ -3672,7 +3792,8 @@ foreach tuple : fuzzers
                 sources += 'src/fuzz/fuzz-main.c'
         endif
 
-        name = sources[0].split('/')[-1].split('.')[0]
+        # FIXME: Use fs.stem() with meson >= 0.54.0
+        name = '@0@'.format(sources[0]).split('/')[-1].split('.')[0]
 
         exe = executable(
                 name,
@@ -3722,6 +3843,7 @@ subdir('docs/var-log')
 
 install_subdir('factory/etc',
                install_dir : factorydir)
+subdir('factory/templates')
 
 if install_sysconfdir
         install_data('xorg/50-systemd-user.sh',
@@ -3771,7 +3893,8 @@ foreach exec : public_programs
         if want_tests != 'false'
                 test('check-help-' + name,
                      check_help,
-                     args : exec.full_path())
+                     args : exec.full_path(),
+                     depends: exec)
         endif
 endforeach
 
@@ -3848,7 +3971,7 @@ if git.found()
                         command : [env, 'etags', '-o', '@0@/TAGS'.format(project_source_root)] + all_files)
                 run_target(
                         'ctags',
-                        command : [env, 'ctags', '-o', '@0@/tags'.format(project_source_root)] + all_files)
+                        command : [env, 'ctags', '--tag-relative=never', '-o', '@0@/tags'.format(project_source_root)] + all_files)
         endif
 endif
 
@@ -3892,9 +4015,9 @@ alias_target('update-man-rules', update_man_rules)
 if not meson.is_cross_build()
         custom_target(
                 'export-dbus-interfaces',
-                output : 'interfaces',
+                output : dbus_interfaces_dir_name,
                 install : dbus_interfaces_dir != 'no',
-                install_dir : dbus_interfaces_dir,
+                install_dir : dbus_interfaces_dir_parent,
                 command : [export_dbus_interfaces_py, '@OUTPUT@', dbus_programs])
 endif
 
@@ -3904,7 +4027,6 @@ alt_time_epoch = run_command('date', '-Is', '-u', '-d', '@@0@'.format(time_epoch
                              check : true).stdout().strip()
 
 summary({
-        'build mode' :                      get_option('mode'),
         'split /usr' :                      split_usr,
         'split bin-sbin' :                  split_bin,
         'prefix directory' :                prefixdir,
@@ -3923,8 +4045,10 @@ summary({
         'D-Bus policy directory' :          dbuspolicydir,
         'D-Bus session directory' :         dbussessionservicedir,
         'D-Bus system directory' :          dbussystemservicedir,
+        'D-Bus interfaces directory' :      dbus_interfaces_dir,
         'bash completions directory' :      bashcompletiondir,
         'zsh completions directory' :       zshcompletiondir,
+        'private shared lib version tag' :  shared_lib_tag,
         'extra start script' :              get_option('rc-local'),
         'debug shell' :                     '@0@ @ @1@'.format(get_option('debug-shell'),
                                                                get_option('debug-tty')),
@@ -3961,17 +4085,6 @@ summary({
 # CFLAGS:   ${OUR_CFLAGS} ${CFLAGS}
 # CPPFLAGS: ${OUR_CPPFLAGS} ${CPPFLAGS}
 # LDFLAGS:  ${OUR_LDFLAGS} ${LDFLAGS}
-
-if conf.get('ENABLE_EFI') == 1 and conf.get('HAVE_GNU_EFI') == 1
-        summary({
-                'EFI machine type' :                efi_arch[0],
-                'EFI CC' :                          '@0@'.format(' '.join(efi_cc)),
-                'EFI LD' :                          efi_ld,
-                'EFI lds' :                         efi_lds,
-                'EFI crt0' :                        efi_crt0,
-                'EFI include directory' :           efi_incdir},
-                section : 'Extensible Firmware Interface')
-endif
 
 found = []
 missing = []
@@ -4049,6 +4162,7 @@ foreach tuple : [
         ['rfkill'],
         ['sysext'],
         ['systemd-analyze',       conf.get('ENABLE_ANALYZE') == 1],
+        ['sysupdate'],
         ['sysusers'],
         ['timedated'],
         ['timesyncd'],

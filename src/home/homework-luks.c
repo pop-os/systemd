@@ -28,6 +28,7 @@
 #include "filesystems.h"
 #include "fs-util.h"
 #include "fsck-util.h"
+#include "gpt.h"
 #include "home-util.h"
 #include "homework-luks.h"
 #include "homework-mount.h"
@@ -303,7 +304,6 @@ static int luks_try_passwords(
                 size_t *volume_key_size,
                 key_serial_t *ret_key_serial) {
 
-        char **pp;
         int r;
 
         assert(h);
@@ -495,7 +495,7 @@ static int acquire_open_luks_device(
                 return r;
 
         r = sym_crypt_init_by_name(&cd, setup->dm_name);
-        if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT) && graceful)
+        if ((ERRNO_IS_DEVICE_ABSENT(r) || r == -EINVAL) && graceful)
                 return 0;
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", setup->dm_name);
@@ -703,7 +703,7 @@ static int luks_validate(
                 if (!pp)
                         return errno > 0 ? -errno : -EIO;
 
-                if (!streq_ptr(blkid_partition_get_type_string(pp), "773f91ef-66d4-49b5-bd83-d683bf40ad16"))
+                if (id128_equal_string(blkid_partition_get_type_string(pp), GPT_USER_HOME) <= 0)
                         continue;
 
                 if (!streq_ptr(blkid_partition_get_name(pp), label))
@@ -1150,44 +1150,33 @@ static int lock_image_fd(int image_fd, const char *ip) {
          * image file, and send it to our parent. homed will keep it open to ensure no other instance of
          * homed (across the network or such) will also mount the file. */
 
+        assert(image_fd >= 0);
+        assert(ip);
+
         r = getenv_bool("SYSTEMD_LUKS_LOCK");
         if (r == -ENXIO)
                 return 0;
         if (r < 0)
                 return log_error_errno(r, "Failed to parse $SYSTEMD_LUKS_LOCK environment variable: %m");
-        if (r > 0) {
-                struct stat st;
+        if (r == 0)
+                return 0;
 
-                if (fstat(image_fd, &st) < 0)
-                        return log_error_errno(errno, "Failed to stat image file: %m");
-                if (S_ISBLK(st.st_mode)) {
-                        /* Locking block devices doesn't really make sense, as this might interfere with
-                         * udev's workings, and these locks aren't network propagated anyway, hence not what
-                         * we are after here. */
-                        log_debug("Not locking image file '%s', since it's a block device.", ip);
-                        return 0;
-                }
-                r = stat_verify_regular(&st);
-                if (r < 0)
-                        return log_error_errno(r, "Image file to lock is not a regular file: %m");
+        if (flock(image_fd, LOCK_EX|LOCK_NB) < 0) {
 
-                if (flock(image_fd, LOCK_EX|LOCK_NB) < 0) {
+                if (errno == EAGAIN)
+                        log_error_errno(errno, "Image file '%s' already locked, can't use.", ip);
+                else
+                        log_error_errno(errno, "Failed to lock image file '%s': %m", ip);
 
-                        if (errno == EWOULDBLOCK)
-                                log_error_errno(errno, "Image file '%s' already locked, can't use.", ip);
-                        else
-                                log_error_errno(errno, "Failed to lock image file '%s': %m", ip);
-
-                        return errno != EWOULDBLOCK ? -errno : -EADDRINUSE; /* Make error recognizable */
-                }
-
-                log_info("Successfully locked image file '%s'.", ip);
-
-                /* Now send it to our parent to keep safe while the home dir is active */
-                r = sd_pid_notify_with_fds(0, false, "SYSTEMD_LUKS_LOCK_FD=1", &image_fd, 1);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to send LUKS lock fd to parent, ignoring: %m");
+                return errno != EAGAIN ? -errno : -EADDRINUSE; /* Make error recognizable */
         }
+
+        log_info("Successfully locked image file '%s'.", ip);
+
+        /* Now send it to our parent to keep safe while the home dir is active */
+        r = sd_pid_notify_with_fds(0, false, "SYSTEMD_LUKS_LOCK_FD=1", &image_fd, 1);
+        if (r < 0)
+                log_warning_errno(r, "Failed to send LUKS lock fd to parent, ignoring: %m");
 
         return 0;
 }
@@ -1202,6 +1191,8 @@ static int open_image_file(
         const char *ip;
         int r;
 
+        assert(h || force_image_path);
+
         ip = force_image_path ?: user_record_image_path(h);
 
         image_fd = open(ip, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
@@ -1215,9 +1206,14 @@ static int open_image_file(
                                 S_ISDIR(st.st_mode) ? SYNTHETIC_ERRNO(EISDIR) : SYNTHETIC_ERRNO(EBADFD),
                                 "Image file %s is not a regular file or block device: %m", ip);
 
-        r = lock_image_fd(image_fd, ip);
-        if (r < 0)
-                return r;
+        /* Locking block devices doesn't really make sense, as this might interfere with
+         * udev's workings, and these locks aren't network propagated anyway, hence not what
+         * we are after here. */
+        if (S_ISREG(st.st_mode)) {
+                r = lock_image_fd(image_fd, ip);
+                if (r < 0)
+                        return r;
+        }
 
         if (ret_stat)
                 *ret_stat = st;
@@ -1635,7 +1631,7 @@ int home_deactivate_luks(UserRecord *h, HomeSetup *setup) {
                 cryptsetup_enable_logging(setup->crypt_device);
 
                 r = sym_crypt_deactivate_by_name(setup->crypt_device, setup->dm_name, 0);
-                if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT)) {
+                if (ERRNO_IS_DEVICE_ABSENT(r) || r == -EINVAL) {
                         log_debug_errno(r, "LUKS device %s is already detached.", setup->dm_node);
                         we_detached = false;
                 } else if (r < 0)
@@ -1721,7 +1717,6 @@ static int luks_format(
         _cleanup_free_ char *text = NULL;
         size_t volume_key_size;
         int slot = 0, r;
-        char **pp;
 
         assert(node);
         assert(dm_name);
@@ -1762,7 +1757,7 @@ static int luks_format(
                         CRYPT_LUKS2,
                         user_record_luks_cipher(hr),
                         user_record_luks_cipher_mode(hr),
-                        ID128_TO_UUID_STRING(uuid),
+                        SD_ID128_TO_UUID_STRING(uuid),
                         volume_key,
                         volume_key_size,
                         &(struct crypt_params_luks2) {
@@ -1858,7 +1853,7 @@ static int make_partition_table(
         if (!t)
                 return log_oom();
 
-        r = fdisk_parttype_set_typestr(t, "773f91ef-66d4-49b5-bd83-d683bf40ad16");
+        r = fdisk_parttype_set_typestr(t, GPT_USER_HOME_STR);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize partition type: %m");
 
@@ -1917,7 +1912,7 @@ static int make_partition_table(
         if (r < 0)
                 return log_error_errno(r, "Failed to set partition name: %m");
 
-        r = fdisk_partition_set_uuid(p, ID128_TO_UUID_STRING(uuid));
+        r = fdisk_partition_set_uuid(p, SD_ID128_TO_UUID_STRING(uuid));
         if (r < 0)
                 return log_error_errno(r, "Failed to set partition UUID: %m");
 
@@ -2203,12 +2198,10 @@ int home_create_luks(
 
                 /* Let's place the home directory on a real device, i.e. an USB stick or such */
 
-                setup->image_fd = open(ip, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
+                setup->image_fd = open_image_file(h, ip, &st);
                 if (setup->image_fd < 0)
-                        return log_error_errno(errno, "Failed to open device %s: %m", ip);
+                        return setup->image_fd;
 
-                if (fstat(setup->image_fd, &st) < 0)
-                        return log_error_errno(errno, "Failed to stat device %s: %m", ip);
                 if (!S_ISBLK(st.st_mode))
                         return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK), "Device is not a block device, refusing.");
 
@@ -2745,7 +2738,7 @@ static int ask_cb(struct fdisk_context *c, struct fdisk_ask *ask, void *userdata
                 if (!result)
                         return log_oom();
 
-                fdisk_ask_string_set_result(ask, id128_to_uuid_string(*(sd_id128_t*) userdata, result));
+                fdisk_ask_string_set_result(ask, sd_id128_to_uuid_string(*(sd_id128_t*) userdata, result));
                 break;
 
         default:
@@ -3664,7 +3657,6 @@ static int luks_try_resume(
                 const char *dm_name,
                 char **password) {
 
-        char **pp;
         int r;
 
         assert(cd);

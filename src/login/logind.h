@@ -68,21 +68,15 @@ struct Manager {
         usec_t inhibit_delay_max;
         usec_t user_stop_delay;
 
-        /* If an action is currently being executed or is delayed,
-         * this is != 0 and encodes what is being done */
-        InhibitWhat action_what;
+        /* If a shutdown/suspend was delayed due to an inhibitor this contains the action we are supposed to
+         * start after the delay is over */
+        const HandleActionData *delayed_action;
 
-        /* If a shutdown/suspend was delayed due to an inhibitor this
-           contains the unit name we are supposed to start after the
-           delay is over */
-        const char *action_unit;
-
-        /* If a shutdown/suspend is currently executed, then this is
-         * the job of it */
+        /* If a shutdown/suspend is currently executed, then this is the job of it */
         char *action_job;
         sd_event_source *inhibit_timeout_source;
 
-        char *scheduled_shutdown_type;
+        const HandleActionData *scheduled_shutdown_action;
         usec_t scheduled_shutdown_timeout;
         sd_event_source *scheduled_shutdown_timeout_source;
         uid_t scheduled_shutdown_uid;
@@ -91,7 +85,7 @@ struct Manager {
         bool unlink_nologin;
 
         char *wall_message;
-        unsigned enable_wall_messages;
+        bool enable_wall_messages;
         sd_event_source *wall_message_timeout_source;
 
         bool shutdown_dry_run;

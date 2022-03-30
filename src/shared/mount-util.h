@@ -94,7 +94,7 @@ int mount_option_mangle(
                 char **ret_remaining_options);
 
 int mode_to_inaccessible_node(const char *runtime_dir, mode_t mode, char **dest);
-int mount_flags_to_string(long unsigned flags, char **ret);
+int mount_flags_to_string(unsigned long flags, char **ret);
 
 /* Useful for usage with _cleanup_(), unmounts, removes a directory and frees the pointer */
 static inline char* umount_and_rmdir_and_free(char *p) {
@@ -112,7 +112,18 @@ int mount_image_in_namespace(pid_t target, const char *propagate_path, const cha
 
 int make_mount_point(const char *path);
 
-int remount_idmap(const char *p, uid_t uid_shift, uid_t uid_range);
+typedef enum RemountIdmapFlags {
+        /* Include a mapping from UID_MAPPED_ROOT (i.e. UID 2^31-2) on the backing fs to UID 0 on the
+         * uidmapped fs. This is useful to ensure that the host root user can safely add inodes to the
+         * uidmapped fs (which otherwise wouldn't work as the host root user is not defined on the uidmapped
+         * mount and any attempts to create inodes will then be refused with EOVERFLOW). The idea is that
+         * these inodes are quickly re-chown()ed to more suitable UIDs/GIDs. Any code that intends to be able
+         * to add inodes to file systems mapped this way should set this flag, but given it comes with
+         * certain security implications defaults to off, and requires explicit opt-in. */
+        REMOUNT_IDMAP_HOST_ROOT = 1 << 0,
+} RemountIdmapFlags;
+
+int remount_idmap(const char *p, uid_t uid_shift, uid_t uid_range, RemountIdmapFlags flags);
 
 /* Creates a mount point (not parents) based on the source path or stat - ie, a file or a directory */
 int make_mount_point_inode_from_stat(const struct stat *st, const char *dest, mode_t mode);

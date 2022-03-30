@@ -43,6 +43,11 @@ All tools:
   debugging, in order to test generators and other code against specific kernel
   command lines.
 
+* `$SYSTEMD_OS_RELEASE` — if set, use this path instead of `/etc/os-release` or
+  `/usr/lib/os-release`. When operating under some root (e.g. `systemctl
+  --root=…`), the path is taken relative to the outside root. Only useful for
+  debugging.
+
 * `$SYSTEMD_FSTAB` — if set, use this path instead of `/etc/fstab`. Only useful
   for debugging.
 
@@ -96,9 +101,6 @@ All tools:
   Takes a prefix such as `$6$` or `$y$`. (Note that this is only honoured on
   systems built with libxcrypt and is ignored on systems using glibc's
   original, internal `crypt()` implementation.)
-
-* `$SYSTEMD_RDRAND=0` — if set, the RDRAND instruction will never be used,
-  even if the CPU supports it.
 
 * `$SYSTEMD_SECCOMP=0` — if set, seccomp filters will not be enforced, even if
   support for it is compiled in and available in the kernel.
@@ -321,7 +323,7 @@ fuzzers:
 * `$SYSTEMD_FUZZ_RUNS` — The number of times execution should be repeated in
   manual invocations.
 
-Note that is may be also useful to set `$SYSTEMD_LOG_LEVEL`, since all logging
+Note that it may be also useful to set `$SYSTEMD_LOG_LEVEL`, since all logging
 is suppressed by default.
 
 `systemd-importd`:

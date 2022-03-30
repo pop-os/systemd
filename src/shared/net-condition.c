@@ -22,6 +22,7 @@ void net_match_clear(NetMatch *match) {
         match->path = strv_free(match->path);
         match->driver = strv_free(match->driver);
         match->iftype = strv_free(match->iftype);
+        match->kind = strv_free(match->kind);
         match->ifname = strv_free(match->ifname);
         match->property = strv_free(match->property);
         match->wlan_iftype = strv_free(match->wlan_iftype);
@@ -38,6 +39,7 @@ bool net_match_is_empty(const NetMatch *match) {
                 strv_isempty(match->path) &&
                 strv_isempty(match->driver) &&
                 strv_isempty(match->iftype) &&
+                strv_isempty(match->kind) &&
                 strv_isempty(match->ifname) &&
                 strv_isempty(match->property) &&
                 strv_isempty(match->wlan_iftype) &&
@@ -46,7 +48,6 @@ bool net_match_is_empty(const NetMatch *match) {
 }
 
 static bool net_condition_test_strv(char * const *patterns, const char *string) {
-        char * const *p;
         bool match = false, has_positive_rule = false;
 
         if (strv_isempty(patterns))
@@ -77,7 +78,6 @@ static bool net_condition_test_ifname(char * const *patterns, const char *ifname
         if (net_condition_test_strv(patterns, ifname))
                 return true;
 
-        char * const *p;
         STRV_FOREACH(p, alternative_names)
                 if (net_condition_test_strv(patterns, *p))
                         return true;
@@ -86,8 +86,6 @@ static bool net_condition_test_ifname(char * const *patterns, const char *ifname
 }
 
 static int net_condition_test_property(char * const *match_property, sd_device *device) {
-        char * const *p;
-
         if (strv_isempty(match_property))
                 return true;
 
@@ -126,6 +124,7 @@ int net_match_config(
                 const struct hw_addr_data *permanent_hw_addr,
                 const char *driver,
                 unsigned short iftype,
+                const char *kind,
                 const char *ifname,
                 char * const *alternative_names,
                 enum nl80211_iftype wlan_iftype,
@@ -158,6 +157,9 @@ int net_match_config(
                 return false;
 
         if (!net_condition_test_strv(match->iftype, iftype_str))
+                return false;
+
+        if (!net_condition_test_strv(match->kind, kind))
                 return false;
 
         if (!net_condition_test_ifname(match->ifname, ifname, alternative_names))

@@ -48,8 +48,14 @@
 #include "uid-alloc-range.h"
 #include "user-util.h"
 
-/* The maximum size up to which we process coredumps */
-#define PROCESS_SIZE_MAX ((uint64_t) (2LLU*1024LLU*1024LLU*1024LLU))
+/* The maximum size up to which we process coredumps. We use 1G on 32bit systems, and 32G on 64bit systems */
+#if __SIZEOF_POINTER__ == 4
+#define PROCESS_SIZE_MAX ((uint64_t) (1LLU*1024LLU*1024LLU*1024LLU))
+#elif __SIZEOF_POINTER__ == 8
+#define PROCESS_SIZE_MAX ((uint64_t) (32LLU*1024LLU*1024LLU*1024LLU))
+#else
+#error "Unexpected pointer size"
+#endif
 
 /* The maximum size up to which we leave the coredump around on disk */
 #define EXTERNAL_SIZE_MAX PROCESS_SIZE_MAX
@@ -701,10 +707,10 @@ static int get_mount_namespace_leader(pid_t pid, pid_t *ret) {
  * Returns a negative number on errors.
  */
 static int get_process_container_parent_cmdline(pid_t pid, char** cmdline) {
-        int r = 0;
         pid_t container_pid;
         const char *proc_root_path;
         struct stat root_stat, proc_root_stat;
+        int r;
 
         /* To compare inodes of / and /proc/[pid]/root */
         if (stat("/", &root_stat) < 0)
@@ -715,7 +721,7 @@ static int get_process_container_parent_cmdline(pid_t pid, char** cmdline) {
                 return -errno;
 
         /* The process uses system root. */
-        if (proc_root_stat.st_ino == root_stat.st_ino) {
+        if (stat_inode_same(&proc_root_stat, &root_stat)) {
                 *cmdline = NULL;
                 return 0;
         }
@@ -772,6 +778,7 @@ static int submit_coredump(
         bool truncated = false;
         JsonVariant *module_json;
         int r;
+
         assert(context);
         assert(iovw);
         assert(input_fd >= 0);
@@ -793,10 +800,9 @@ static int submit_coredump(
         r = maybe_remove_external_coredump(filename, coredump_node_fd >= 0 ? coredump_compressed_size : coredump_size);
         if (r < 0)
                 return r;
-        if (r == 0) {
+        if (r == 0)
                 (void) iovw_put_string_field(iovw, "COREDUMP_FILENAME=", filename);
-
-        } else if (arg_storage == COREDUMP_STORAGE_EXTERNAL)
+        else if (arg_storage == COREDUMP_STORAGE_EXTERNAL)
                 log_info("The core will not be stored: size %"PRIu64" is greater than %"PRIu64" (the configured maximum)",
                          coredump_node_fd >= 0 ? coredump_compressed_size : coredump_size, arg_external_size_max);
 

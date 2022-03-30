@@ -63,6 +63,20 @@ static const BaseFilesystem table[] = {
                          "usr/lib64\0",                "ld-linux-x86-64.so.2" },
 #  define KNOW_LIB64_DIRS 1
 #elif defined(__ia64__)
+#elif defined(__loongarch64)
+#  define KNOW_LIB64_DIRS 1
+#  if defined(__loongarch_double_float)
+        { "lib64",    0, "usr/lib/"LIB_ARCH_TUPLE"\0"
+                         "usr/lib64\0",                "ld-linux-loongarch-lp64d.so.1" },
+#  elif defined(__loongarch_single_float)
+        { "lib64",    0, "usr/lib/"LIB_ARCH_TUPLE"\0"
+                         "usr/lib64\0",                "ld-linux-loongarch-lp64f.so.1" },
+#  elif defined(__loongarch_soft_float)
+        { "lib64",    0, "usr/lib/"LIB_ARCH_TUPLE"\0"
+                         "usr/lib64\0",                "ld-linux-loongarch-lp64s.so.1" },
+#  else
+#    error "Unknown LoongArch ABI"
+#  endif
 #elif defined(__m68k__)
         /* No link needed. */
 #  define KNOW_LIB64_DIRS 1
@@ -176,7 +190,7 @@ int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
                         return -errno;
                 }
 
-                if (uid != UID_INVALID || gid != UID_INVALID)
+                if (uid_is_valid(uid) || gid_is_valid(gid))
                         if (fchownat(fd, table[i].dir, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
                                 return log_error_errno(errno, "Failed to chown directory at %s/%s: %m", root, table[i].dir);
         }

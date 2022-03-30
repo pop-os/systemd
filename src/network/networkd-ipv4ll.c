@@ -34,7 +34,7 @@ static int address_new_from_ipv4ll(Link *link, Address **ret) {
         address->prefixlen = 16;
         address->scope = RT_SCOPE_LINK;
         address->route_metric = IPV4LL_ROUTE_METRIC;
-        address_set_broadcast(address);
+        address_set_broadcast(address, link);
 
         *ret = TAKE_PTR(address);
         return 0;
@@ -70,7 +70,7 @@ static int ipv4ll_address_lost(Link *link) {
         return address_remove(existing);
 }
 
-static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Request *req, Link *link, Address *address) {
         int r;
 
         assert(link);
@@ -117,7 +117,7 @@ static void ipv4ll_handler(sd_ipv4ll *ll, int event, void *userdata) {
         if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
                 return;
 
-        switch(event) {
+        switch (event) {
                 case SD_IPV4LL_EVENT_STOP:
                         r = ipv4ll_address_lost(link);
                         if (r < 0) {

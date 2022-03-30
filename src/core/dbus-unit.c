@@ -273,7 +273,7 @@ static int property_get_conditions(
                 sd_bus_error *error) {
 
         const char *(*to_string)(ConditionType type) = NULL;
-        Condition **list = userdata, *c;
+        Condition **list = userdata;
         int r;
 
         assert(bus);
@@ -736,7 +736,7 @@ int bus_unit_method_clean(sd_bus_message *message, void *userdata, sd_bus_error 
 
         r = unit_clean(u, mask);
         if (r == -EOPNOTSUPP)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Unit '%s' does not supporting cleaning.", u->id);
+                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Unit '%s' does not support cleaning.", u->id);
         if (r == -EUNATCH)
                 return sd_bus_error_set(error, BUS_ERROR_NOTHING_TO_CLEAN, "No matching resources found.");
         if (r == -EBUSY)
@@ -1584,6 +1584,7 @@ const sd_bus_vtable bus_unit_cgroup_vtable[] = {
         SD_BUS_VTABLE_START(0),
         SD_BUS_PROPERTY("Slice", "s", property_get_slice, 0, 0),
         SD_BUS_PROPERTY("ControlGroup", "s", property_get_cgroup, 0, 0),
+        SD_BUS_PROPERTY("ControlGroupId", "t", NULL, offsetof(Unit, cgroup_id), 0),
         SD_BUS_PROPERTY("MemoryCurrent", "t", property_get_current_memory, 0, 0),
         SD_BUS_PROPERTY("MemoryAvailable", "t", property_get_available_memory, 0, 0),
         SD_BUS_PROPERTY("CPUUsageNSec", "t", property_get_cpu_usage, 0, 0),
@@ -2241,16 +2242,14 @@ static int bus_unit_set_transient_property(
 
         if (streq(name, "Documentation")) {
                 _cleanup_strv_free_ char **l = NULL;
-                char **p;
 
                 r = sd_bus_message_read_strv(message, &l);
                 if (r < 0)
                         return r;
 
-                STRV_FOREACH(p, l) {
+                STRV_FOREACH(p, l)
                         if (!documentation_url_is_valid(*p))
                                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid URL in %s: %s", name, *p);
-                }
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         if (strv_isempty(l)) {
@@ -2306,7 +2305,6 @@ static int bus_unit_set_transient_property(
 
         } else if (streq(name, "RequiresMountsFor")) {
                 _cleanup_strv_free_ char **l = NULL;
-                char **p;
 
                 r = sd_bus_message_read_strv(message, &l);
                 if (r < 0)

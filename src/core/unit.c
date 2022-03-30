@@ -375,6 +375,20 @@ int unit_set_description(Unit *u, const char *description) {
         return 0;
 }
 
+static bool unit_success_failure_handler_has_jobs(Unit *unit) {
+        Unit *other;
+
+        UNIT_FOREACH_DEPENDENCY(other, unit, UNIT_ATOM_ON_SUCCESS)
+                if (other->job || other->nop_job)
+                        return true;
+
+        UNIT_FOREACH_DEPENDENCY(other, unit, UNIT_ATOM_ON_FAILURE)
+                if (other->job || other->nop_job)
+                        return true;
+
+        return false;
+}
+
 bool unit_may_gc(Unit *u) {
         UnitActiveState state;
         int r;
@@ -389,10 +403,7 @@ bool unit_may_gc(Unit *u) {
          * in unit_gc_sweep(), but using markers to properly collect dependency loops.
          */
 
-        if (u->job)
-                return false;
-
-        if (u->nop_job)
+        if (u->job || u->nop_job)
                 return false;
 
         state = unit_active_state(u);
@@ -426,6 +437,10 @@ bool unit_may_gc(Unit *u) {
         default:
                 assert_not_reached();
         }
+
+        /* Check if any OnFailure= or on Success= jobs may be pending */
+        if (unit_success_failure_handler_has_jobs(u))
+                return false;
 
         if (u->cgroup_path) {
                 /* If the unit has a cgroup, then check whether there's anything in it. If so, we should stay
@@ -568,8 +583,6 @@ static void unit_clear_dependencies(Unit *u) {
 }
 
 static void unit_remove_transient(Unit *u) {
-        char **i;
-
         assert(u);
 
         if (!u->transient)
@@ -2210,7 +2223,7 @@ void unit_start_on_failure(
                 UnitDependencyAtom atom,
                 JobMode job_mode) {
 
-        bool logged = false;
+        int n_jobs = -1;
         Unit *other;
         int r;
 
@@ -2223,9 +2236,9 @@ void unit_start_on_failure(
         UNIT_FOREACH_DEPENDENCY(other, u, atom) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
 
-                if (!logged) {
+                if (n_jobs < 0) {
                         log_unit_info(u, "Triggering %s dependencies.", dependency_name);
-                        logged = true;
+                        n_jobs = 0;
                 }
 
                 r = manager_add_job(u->manager, JOB_START, other, job_mode, NULL, &error, NULL);
@@ -2233,10 +2246,12 @@ void unit_start_on_failure(
                         log_unit_warning_errno(
                                         u, r, "Failed to enqueue %s job, ignoring: %s",
                                         dependency_name, bus_error_message(&error, r));
+                n_jobs ++;
         }
 
-        if (logged)
-                log_unit_debug(u, "Triggering %s dependencies done.", dependency_name);
+        if (n_jobs >= 0)
+                log_unit_debug(u, "Triggering %s dependencies done (%u %s).",
+                               dependency_name, n_jobs, n_jobs == 1 ? "job" : "jobs");
 }
 
 void unit_trigger_notify(Unit *u) {
@@ -3009,37 +3024,37 @@ int unit_add_dependency(
                 UnitDependencyMask mask) {
 
         static const UnitDependency inverse_table[_UNIT_DEPENDENCY_MAX] = {
-                [UNIT_REQUIRES] = UNIT_REQUIRED_BY,
-                [UNIT_REQUISITE] = UNIT_REQUISITE_OF,
-                [UNIT_WANTS] = UNIT_WANTED_BY,
-                [UNIT_BINDS_TO] = UNIT_BOUND_BY,
-                [UNIT_PART_OF] = UNIT_CONSISTS_OF,
-                [UNIT_UPHOLDS] = UNIT_UPHELD_BY,
-                [UNIT_REQUIRED_BY] = UNIT_REQUIRES,
-                [UNIT_REQUISITE_OF] = UNIT_REQUISITE,
-                [UNIT_WANTED_BY] = UNIT_WANTS,
-                [UNIT_BOUND_BY] = UNIT_BINDS_TO,
-                [UNIT_CONSISTS_OF] = UNIT_PART_OF,
-                [UNIT_UPHELD_BY] = UNIT_UPHOLDS,
-                [UNIT_CONFLICTS] = UNIT_CONFLICTED_BY,
-                [UNIT_CONFLICTED_BY] = UNIT_CONFLICTS,
-                [UNIT_BEFORE] = UNIT_AFTER,
-                [UNIT_AFTER] = UNIT_BEFORE,
-                [UNIT_ON_SUCCESS] = UNIT_ON_SUCCESS_OF,
-                [UNIT_ON_SUCCESS_OF] = UNIT_ON_SUCCESS,
-                [UNIT_ON_FAILURE] = UNIT_ON_FAILURE_OF,
-                [UNIT_ON_FAILURE_OF] = UNIT_ON_FAILURE,
-                [UNIT_TRIGGERS] = UNIT_TRIGGERED_BY,
-                [UNIT_TRIGGERED_BY] = UNIT_TRIGGERS,
-                [UNIT_PROPAGATES_RELOAD_TO] = UNIT_RELOAD_PROPAGATED_FROM,
+                [UNIT_REQUIRES]               = UNIT_REQUIRED_BY,
+                [UNIT_REQUISITE]              = UNIT_REQUISITE_OF,
+                [UNIT_WANTS]                  = UNIT_WANTED_BY,
+                [UNIT_BINDS_TO]               = UNIT_BOUND_BY,
+                [UNIT_PART_OF]                = UNIT_CONSISTS_OF,
+                [UNIT_UPHOLDS]                = UNIT_UPHELD_BY,
+                [UNIT_REQUIRED_BY]            = UNIT_REQUIRES,
+                [UNIT_REQUISITE_OF]           = UNIT_REQUISITE,
+                [UNIT_WANTED_BY]              = UNIT_WANTS,
+                [UNIT_BOUND_BY]               = UNIT_BINDS_TO,
+                [UNIT_CONSISTS_OF]            = UNIT_PART_OF,
+                [UNIT_UPHELD_BY]              = UNIT_UPHOLDS,
+                [UNIT_CONFLICTS]              = UNIT_CONFLICTED_BY,
+                [UNIT_CONFLICTED_BY]          = UNIT_CONFLICTS,
+                [UNIT_BEFORE]                 = UNIT_AFTER,
+                [UNIT_AFTER]                  = UNIT_BEFORE,
+                [UNIT_ON_SUCCESS]             = UNIT_ON_SUCCESS_OF,
+                [UNIT_ON_SUCCESS_OF]          = UNIT_ON_SUCCESS,
+                [UNIT_ON_FAILURE]             = UNIT_ON_FAILURE_OF,
+                [UNIT_ON_FAILURE_OF]          = UNIT_ON_FAILURE,
+                [UNIT_TRIGGERS]               = UNIT_TRIGGERED_BY,
+                [UNIT_TRIGGERED_BY]           = UNIT_TRIGGERS,
+                [UNIT_PROPAGATES_RELOAD_TO]   = UNIT_RELOAD_PROPAGATED_FROM,
                 [UNIT_RELOAD_PROPAGATED_FROM] = UNIT_PROPAGATES_RELOAD_TO,
-                [UNIT_PROPAGATES_STOP_TO] = UNIT_STOP_PROPAGATED_FROM,
-                [UNIT_STOP_PROPAGATED_FROM] = UNIT_PROPAGATES_STOP_TO,
-                [UNIT_JOINS_NAMESPACE_OF] = UNIT_JOINS_NAMESPACE_OF, /* symmetric! 👓 */
-                [UNIT_REFERENCES] = UNIT_REFERENCED_BY,
-                [UNIT_REFERENCED_BY] = UNIT_REFERENCES,
-                [UNIT_IN_SLICE] = UNIT_SLICE_OF,
-                [UNIT_SLICE_OF] = UNIT_IN_SLICE,
+                [UNIT_PROPAGATES_STOP_TO]     = UNIT_STOP_PROPAGATED_FROM,
+                [UNIT_STOP_PROPAGATED_FROM]   = UNIT_PROPAGATES_STOP_TO,
+                [UNIT_JOINS_NAMESPACE_OF]     = UNIT_JOINS_NAMESPACE_OF, /* symmetric! 👓 */
+                [UNIT_REFERENCES]             = UNIT_REFERENCED_BY,
+                [UNIT_REFERENCED_BY]          = UNIT_REFERENCES,
+                [UNIT_IN_SLICE]               = UNIT_SLICE_OF,
+                [UNIT_SLICE_OF]               = UNIT_IN_SLICE,
         };
         Unit *original_u = u, *original_other = other;
         UnitDependencyAtom a;
@@ -3603,7 +3618,6 @@ int unit_add_blockdev_dependency(Unit *u, const char *what, UnitDependencyMask m
 
 int unit_coldplug(Unit *u) {
         int r = 0, q;
-        char **i;
 
         assert(u);
 
@@ -3676,7 +3690,6 @@ static bool fragment_mtime_newer(const char *path, usec_t mtime, bool path_maske
 
 bool unit_need_daemon_reload(Unit *u) {
         _cleanup_strv_free_ char **t = NULL;
-        char **path;
 
         assert(u);
 
@@ -3786,6 +3799,13 @@ int unit_kill(Unit *u, KillWho w, int signo, sd_bus_error *error) {
                 return -EOPNOTSUPP;
 
         return UNIT_VTABLE(u)->kill(u, w, signo, error);
+}
+
+void unit_notify_cgroup_oom(Unit *u, bool managed_oom) {
+        assert(u);
+
+        if (UNIT_VTABLE(u)->notify_cgroup_oom)
+                UNIT_VTABLE(u)->notify_cgroup_oom(u, managed_oom);
 }
 
 static Set *unit_pid_set(pid_t main_pid, pid_t control_pid) {
@@ -4113,7 +4133,6 @@ int unit_patch_contexts(Unit *u) {
 
                 if ((ec->root_image || !LIST_IS_EMPTY(ec->mount_images)) &&
                     (cc->device_policy != CGROUP_DEVICE_POLICY_AUTO || cc->device_allow)) {
-                        const char *p;
 
                         /* When RootImage= or MountImages= is specified, the following devices are touched. */
                         FOREACH_STRING(p, "/dev/loop-control", "/dev/mapper/control") {
@@ -4261,7 +4280,6 @@ char* unit_escape_setting(const char *s, UnitWriteFlags flags, char **buf) {
 char* unit_concat_strv(char **l, UnitWriteFlags flags) {
         _cleanup_free_ char *result = NULL;
         size_t n = 0;
-        char **i;
 
         /* Takes a list of strings, escapes them, and concatenates them. This may be used to format command lines in a
          * way suitable for ExecStart= stanzas */
@@ -5062,7 +5080,6 @@ int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid) {
                 return r;
         if (r == 0) {
                 int ret = EXIT_SUCCESS;
-                char **i;
 
                 STRV_FOREACH(i, paths) {
                         r = rm_rf(*i, REMOVE_ROOT|REMOVE_PHYSICAL|REMOVE_MISSING_OK);
@@ -5852,7 +5869,7 @@ int unit_thaw_vtable_common(Unit *u) {
 }
 
 Condition *unit_find_failed_condition(Unit *u) {
-        Condition *c, *failed_trigger = NULL;
+        Condition *failed_trigger = NULL;
         bool has_succeeded_trigger = false;
 
         if (u->condition_result)

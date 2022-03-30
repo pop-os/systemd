@@ -43,11 +43,7 @@ if not cc.has_header_symbol('efi.h', 'EFI_IMAGE_MACHINE_X64',
         subdir_done()
 endif
 
-objcopy = find_program('objcopy')
-efi_cc = get_option('efi-cc')
-if efi_cc.length() == 0
-        efi_cc = cc.cmd_array()
-endif
+objcopy = run_command(cc.cmd_array(), '-print-prog-name=objcopy', check: true).stdout().strip()
 
 efi_ld = get_option('efi-ld')
 if efi_ld == 'auto'
@@ -61,8 +57,11 @@ endif
 efi_libdir = ''
 foreach dir : [get_option('efi-libdir'),
                '/usr/lib/gnuefi' / efi_arch[0],
-               run_command('realpath', '-e',
-                        '/usr/lib' / run_command(efi_cc, '-print-multi-os-directory').stdout().strip()).stdout().strip()]
+               run_command(
+                        'realpath', '-e',
+                        '/usr/lib' / run_command(cc.cmd_array(), '-print-multi-os-directory', check: false).stdout().strip(),
+                        check: false
+               ).stdout().strip()]
         if dir != '' and fs.is_dir(dir)
                 efi_libdir = dir
                 break
@@ -105,6 +104,7 @@ conf.set_quoted('EFI_MACHINE_TYPE_NAME', efi_arch[0])
 efi_conf = configuration_data()
 efi_conf.set_quoted('EFI_MACHINE_TYPE_NAME', efi_arch[0])
 efi_conf.set10('ENABLE_TPM', get_option('tpm'))
+efi_conf.set10('EFI_TPM_PCR_COMPAT', get_option('efi-tpm-pcr-compat'))
 
 foreach ctype : ['color-normal', 'color-entry', 'color-highlight', 'color-edit']
         c = get_option('efi-' + ctype).split(',')
@@ -129,8 +129,7 @@ elif get_option('sbat-distro') != ''
                 value = get_option(sbatvar[0])
                 if (value == '' or value == 'auto') and not meson.is_cross_build()
                         cmd = 'if [ -e /etc/os-release ]; then . /etc/os-release; else . /usr/lib/os-release; fi; echo $@0@'.format(sbatvar[1])
-                        value = run_command(sh, '-c', cmd).stdout().strip()
-                        message('@0@ (from @1@): @2@'.format(sbatvar[0], sbatvar[1], value))
+                        value = run_command(sh, '-c', cmd, check: true).stdout().strip()
                 endif
                 if value == ''
                         error('Required @0@ option not set and autodetection failed'.format(sbatvar[0]))
@@ -147,8 +146,11 @@ elif get_option('sbat-distro') != ''
         pkgver = get_option('sbat-distro-version')
         if pkgver == ''
                 efi_conf.set('SBAT_DISTRO_VERSION', 'GIT_VERSION')
+                # This is determined during build, not configuration, so we can't display it yet.
+                sbat_distro_version_display = '(git version)'
         else
                 efi_conf.set_quoted('SBAT_DISTRO_VERSION', pkgver)
+                sbat_distro_version_display = pkgver
         endif
 endif
 
@@ -255,20 +257,14 @@ else
 endif
 
 if efi_arch[1] == 'arm'
-        # On arm, the compiler (correctly) gives us the following warning:
-        #    libgcc.a(_popcountsi2.o) uses 4-byte wchar_t yet the output is to
-        #    use 2-byte wchar_t; use of wchar_t values across objects may fail
-        #
-        # libgcc does not have any occurrences of wchar_t in its sources or the
-        # documentation, so it's safe to assume that we can ignore this warning.
-        #
-        # So far, this only happens with arm due to popcount even though x86 and
-        # x86_64 also have to rely on libgcc's popcount. Therefore, we only disable
-        # this for arm to make sure this doesn't mask other issues in the future.
-        efi_ldflags += ['-Wl,--no-warn-mismatch']
+        # On arm, the compiler (correctly) warns about wchar_t size mismatch. This
+        # is because libgcc is not compiled with -fshort-wchar, but it does not
+        # have any occurrences of wchar_t in its sources or the documentation, so
+        # it is safe to assume that we can ignore this warning.
+        efi_ldflags += ['-Wl,--no-wchar-size-warning']
 endif
 
-if run_command('grep', '-q', '__CTOR_LIST__', efi_lds).returncode() == 0
+if run_command('grep', '-q', '__CTOR_LIST__', efi_lds, check: false).returncode() == 0
         # fedora has a patched gnu-efi that adds support for ELF constructors.
         # If ld is called by gcc something about these symbols breaks, resulting
         # in sd-boot freezing when gnu-efi runs the constructors. Force defining
@@ -285,10 +281,27 @@ if run_command('grep', '-q', '__CTOR_LIST__', efi_lds).returncode() == 0
         ]
 endif
 
-efi_cc_version = run_command(efi_cc, '--version').stdout().split('\n')[0]
-if efi_cc_version.contains('clang') and efi_cc_version.split('.')[0].split(' ')[-1].to_int() <= 10
+if cc.get_id() == 'clang' and cc.version().split('.')[0].to_int() <= 10
         # clang <= 10 doesn't pass -T to the linker and then even complains about it being unused
         efi_ldflags += ['-Wl,-T,' + efi_lds, '-Wno-unused-command-line-argument']
+endif
+
+summary({
+        'EFI machine type' :                efi_arch[0],
+        'EFI LD' :                          efi_ld,
+        'EFI lds' :                         efi_lds,
+        'EFI crt0' :                        efi_crt0,
+        'EFI include directory' :           efi_incdir},
+        section : 'Extensible Firmware Interface')
+
+if efi_conf.get('SBAT_DISTRO', '') != ''
+        summary({
+                'SBAT distro':              efi_conf.get('SBAT_DISTRO'),
+                'SBAT distro generation':   efi_conf.get('SBAT_DISTRO_GENERATION'),
+                'SBAT distro version':      sbat_distro_version_display,
+                'SBAT distro summary':      efi_conf.get('SBAT_DISTRO_SUMMARY'),
+                'SBAT distro URL':          efi_conf.get('SBAT_DISTRO_URL')},
+                section : 'Extensible Firmware Interface')
 endif
 
 ############################################################
@@ -301,13 +314,16 @@ efi_headers = files(
         'disk.h',
         'drivers.h',
         'graphics.h',
+        'initrd.h',
         'linux.h',
         'measure.h',
         'missing_efi.h',
         'pe.h',
         'random-seed.h',
+        'secure-boot.h',
         'shim.h',
         'splash.h',
+        'ticks.h',
         'util.h',
         'xbootldr.h',
 )
@@ -320,6 +336,7 @@ common_sources = files(
         'measure.c',
         'pe.c',
         'secure-boot.c',
+        'ticks.c',
         'util.c',
 )
 
@@ -349,11 +366,14 @@ endif
 if efi_arch[1] in ['ia32', 'x86_64', 'arm', 'aarch64']
         systemd_boot_sources += files('bcd.c')
         tests += [
-                [['src/boot/efi/test-bcd.c'],
+                [files('test-bcd.c'),
                  [],
                  [libzstd],
                  [],
                  'HAVE_ZSTD'],
+        ]
+        fuzzers += [
+                [files('fuzz-bcd.c')],
         ]
 endif
 
@@ -364,7 +384,7 @@ foreach file : fundamental_source_paths + common_sources + systemd_boot_sources 
         o_file = custom_target('@0@.o'.format(file).split('/')[-1],
                                input : file,
                                output : '@0@.o'.format(file).split('/')[-1],
-                               command : [efi_cc, '-c', '@INPUT@', '-o', '@OUTPUT@', efi_cflags],
+                               command : [cc.cmd_array(), '-c', '@INPUT@', '-o', '@OUTPUT@', efi_cflags],
                                depend_files : efi_headers + fundamental_headers)
         if (fundamental_source_paths + common_sources + systemd_boot_sources).contains(file)
                 systemd_boot_objects += o_file
@@ -374,25 +394,27 @@ foreach file : fundamental_source_paths + common_sources + systemd_boot_sources 
         endif
 endforeach
 
-systemd_boot_efi_name = 'systemd-boot@0@.efi'.format(efi_arch[0])
-stub_elf_name = 'linux@0@.elf.stub'.format(efi_arch[0])
-stub_efi_name = 'linux@0@.efi.stub'.format(efi_arch[0])
-
-efi_stubs = []
-foreach tuple : [['systemd_boot.so', systemd_boot_efi_name, systemd_boot_objects, false],
-                 [stub_elf_name, stub_efi_name, stub_objects, true]]
-        so = custom_target(
-                tuple[0],
-                input : tuple[2],
-                output : tuple[0],
-                command : [efi_cc, '-o', '@OUTPUT@', efi_ldflags, efi_cflags, tuple[2], '-lefi', '-lgnuefi', '-lgcc'],
-                install : tuple[3],
+foreach tuple : [['systemd-boot@0@.@1@', systemd_boot_objects, false],
+                 ['linux@0@.@1@.stub', stub_objects, true]]
+        elf = custom_target(
+                tuple[0].format(efi_arch[0], 'elf'),
+                input : tuple[1],
+                output : tuple[0].format(efi_arch[0], 'elf'),
+                command : [cc.cmd_array(),
+                           '-o', '@OUTPUT@',
+                           efi_cflags,
+                           efi_ldflags,
+                           '@INPUT@',
+                           '-lefi',
+                           '-lgnuefi',
+                           '-lgcc'],
+                install : tuple[2],
                 install_dir : bootlibdir)
 
-        stub = custom_target(
-                tuple[1],
-                input : so,
-                output : tuple[1],
+        custom_target(
+                tuple[0].format(efi_arch[0], 'efi'),
+                input : elf,
+                output : tuple[0].format(efi_arch[0], 'efi'),
                 command : [objcopy,
                            '-j', '.bss*',
                            '-j', '.data',
@@ -409,14 +431,4 @@ foreach tuple : [['systemd_boot.so', systemd_boot_efi_name, systemd_boot_objects
                            '@INPUT@', '@OUTPUT@'],
                 install : true,
                 install_dir : bootlibdir)
-
-        efi_stubs += [[so, stub]]
 endforeach
-
-############################################################
-
-test_efi_disk_img = custom_target(
-        'test-efi-disk.img',
-        input : [efi_stubs[0][0], efi_stubs[1][1]],
-        output : 'test-efi-disk.img',
-        command : [test_efi_create_disk_sh, '@OUTPUT@','@INPUT@', splash_bmp])
