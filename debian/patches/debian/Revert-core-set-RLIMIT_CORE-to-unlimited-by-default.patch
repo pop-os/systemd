@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 21 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 57aedb9..52281f1 100644
+index f39c7b0..38940ac 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1710,24 +1710,6 @@ static void cmdline_take_random_seed(void) {
+@@ -1615,24 +1615,6 @@ static void cmdline_take_random_seed(void) {
                     "This functionality should not be used outside of testing environments.");
  }
  
@@ -47,7 +47,7 @@ index 57aedb9..52281f1 100644
  static void initialize_core_pattern(bool skip_setup) {
          int r;
  
-@@ -2832,8 +2814,6 @@ int main(int argc, char *argv[]) {
+@@ -2748,8 +2730,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  

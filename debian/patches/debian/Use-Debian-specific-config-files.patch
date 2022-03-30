@@ -11,15 +11,15 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c    |  34 ++++++--
  src/core/locale-setup.c  |  21 +++++
- src/locale/keymap-util.c | 215 +++++++++++++++++++++++------------------------
+ src/locale/keymap-util.c | 201 ++++++++++++++++++++++-------------------------
  src/timedate/timedated.c |  21 ++++-
- 4 files changed, 171 insertions(+), 120 deletions(-)
+ 4 files changed, 164 insertions(+), 113 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index b659d69..5e75b85 100644
+index ad4a189..b9c448e 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1496,19 +1496,43 @@ int get_timezone(char **ret) {
+@@ -1474,19 +1474,43 @@ int get_timezone(char **ret) {
          const char *e;
          char *z;
          int r;
@@ -101,7 +101,7 @@ index 59ddb9c..25cf884 100644
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index 10d2ed7..479771a 100644
+index 9759f46..4eb48bb 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -91,6 +91,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
@@ -134,7 +134,7 @@ index 10d2ed7..479771a 100644
                                     "LANG",              &c->locale[VARIABLE_LANG],
                                     "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
                                     "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
-@@ -195,8 +200,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
+@@ -190,8 +195,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
  }
  
  int x11_read_data(Context *c, sd_bus_message *m) {
@@ -143,7 +143,7 @@ index 10d2ed7..479771a 100644
          struct stat st;
          usec_t t;
          int r;
-@@ -210,7 +213,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -205,7 +208,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                  c->x11_cache = sd_bus_message_ref(m);
          }
  
@@ -152,14 +152,19 @@ index 10d2ed7..479771a 100644
                  if (errno != ENOENT)
                          return -errno;
  
-@@ -227,60 +230,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -222,60 +225,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
          c->x11_mtime = t;
          context_free_x11(c);
  
 -        f = fopen("/etc/X11/xorg.conf.d/00-keyboard.conf", "re");
 -        if (!f)
 -                return -errno;
--
++        r = parse_env_file(NULL, "/etc/default/keyboard",
++                           "XKBMODEL",          &c->x11_model,
++                           "XKBLAYOUT",         &c->x11_layout,
++                           "XKBVARIANT",        &c->x11_variant,
++                           "XKBOPTIONS",        &c->x11_options);
+ 
 -        for (;;) {
 -                _cleanup_free_ char *line = NULL;
 -                char *l;
@@ -210,18 +215,12 @@ index 10d2ed7..479771a 100644
 -                } else if (in_section && first_word(l, "EndSection"))
 -                        in_section = false;
 -        }
-+        r = parse_env_file(NULL, "/etc/default/keyboard",
-+                           "XKBMODEL",          &c->x11_model,
-+                           "XKBLAYOUT",         &c->x11_layout,
-+                           "XKBVARIANT",        &c->x11_variant,
-+                           "XKBOPTIONS",        &c->x11_options);
-+
 +        if (r < 0)
 +                return r;
  
          return 0;
  }
-@@ -289,9 +246,19 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -284,9 +241,19 @@ int locale_write_data(Context *c, char ***settings) {
          _cleanup_strv_free_ char **l = NULL;
          struct stat st;
          int r;
@@ -241,7 +240,7 @@ index 10d2ed7..479771a 100644
          for (LocaleVariable p = 0; p < _VARIABLE_LC_MAX; p++)
                  if (!isempty(c->locale[p])) {
                          r = strv_env_assign(&l, locale_variable_to_string(p), c->locale[p]);
-@@ -300,20 +267,20 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -295,20 +262,20 @@ int locale_write_data(Context *c, char ***settings) {
                  }
  
          if (strv_isempty(l)) {
@@ -265,7 +264,7 @@ index 10d2ed7..479771a 100644
                  c->locale_mtime = timespec_load(&st.st_mtim);
  
          return 0;
-@@ -355,69 +322,93 @@ int vconsole_write_data(Context *c) {
+@@ -350,68 +317,92 @@ int vconsole_write_data(Context *c) {
  }
  
  int x11_write_data(Context *c) {
@@ -284,6 +283,7 @@ index 10d2ed7..479771a 100644
 +                return r;
  
 -                if (unlink("/etc/X11/xorg.conf.d/00-keyboard.conf") < 0)
+-                        return errno == ENOENT ? 0 : -errno;
 +        /* This could perhaps be done more elegantly using an array
 +         * like we do for the locale, instead of struct
 +         */
@@ -294,14 +294,22 @@ index 10d2ed7..479771a 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
-+
+ 
+-                c->vc_mtime = USEC_INFINITY;
+-                return 0;
 +                r = strv_env_replace_consume(&l, t);
 +                if (r < 0) {
 +                        strv_free(l);
 +                        return r;
 +                }
-+        }
-+
+         }
+ 
+-        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
+-        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
+-        if (r < 0)
+-                return r;
+-
+-        (void) fchmod(fileno(f), 0644);
 +        if (isempty(c->x11_model)) {
 +                l = strv_env_unset(l, "XKBMODEL");
 +        } else {
@@ -309,14 +317,22 @@ index 10d2ed7..479771a 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
-+
+ 
+-        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
+-              "# probably wise not to edit this file manually. Use localectl(1) to\n"
+-              "# instruct systemd-localed to update it.\n"
+-              "Section \"InputClass\"\n"
+-              "        Identifier \"system-keyboard\"\n"
+-              "        MatchIsKeyboard \"on\"\n", f);
 +                r = strv_env_replace_consume(&l, t);
 +                if (r < 0) {
 +                        strv_free(l);
 +                        return r;
 +                }
 +        }
-+
+ 
+-        if (!isempty(c->x11_layout))
+-                fprintf(f, "        Option \"XkbLayout\" \"%s\"\n", c->x11_layout);
 +        if (isempty(c->x11_variant)) {
 +                l = strv_env_unset(l, "XKBVARIANT");
 +        } else {
@@ -324,14 +340,18 @@ index 10d2ed7..479771a 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
-+
+ 
+-        if (!isempty(c->x11_model))
+-                fprintf(f, "        Option \"XkbModel\" \"%s\"\n", c->x11_model);
 +                r = strv_env_replace_consume(&l, t);
 +                if (r < 0) {
 +                        strv_free(l);
 +                        return r;
 +                }
 +        }
-+
+ 
+-        if (!isempty(c->x11_variant))
+-                fprintf(f, "        Option \"XkbVariant\" \"%s\"\n", c->x11_variant);
 +        if (isempty(c->x11_options)) {
 +                l = strv_env_unset(l, "XKBOPTIONS");
 +        } else {
@@ -339,81 +359,53 @@ index 10d2ed7..479771a 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
-+
+ 
+-        if (!isempty(c->x11_options))
+-                fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
 +                r = strv_env_replace_consume(&l, t);
 +                if (r < 0) {
 +                        strv_free(l);
 +                        return r;
 +                }
 +        }
-+
+ 
+-        fputs("EndSection\n", f);
 +        if (strv_isempty(l)) {
 +                strv_free(l);
-+
-+                if (unlink("/etc/default/keyboard") < 0)
-                         return errno == ENOENT ? 0 : -errno;
  
-                 c->vc_mtime = USEC_INFINITY;
-                 return 0;
-         }
- 
--        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
--        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
--        if (r < 0)
--                return r;
-+        r = write_env_file("/etc/default/keyboard", l);
-+        strv_free(l);
- 
--        (void) fchmod(fileno(f), 0644);
--
--        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
--              "# probably wise not to edit this file manually. Use localectl(1) to\n"
--              "# instruct systemd-localed to update it.\n"
--              "Section \"InputClass\"\n"
--              "        Identifier \"system-keyboard\"\n"
--              "        MatchIsKeyboard \"on\"\n", f);
--
--        if (!isempty(c->x11_layout))
--                fprintf(f, "        Option \"XkbLayout\" \"%s\"\n", c->x11_layout);
--
--        if (!isempty(c->x11_model))
--                fprintf(f, "        Option \"XkbModel\" \"%s\"\n", c->x11_model);
--
--        if (!isempty(c->x11_variant))
--                fprintf(f, "        Option \"XkbVariant\" \"%s\"\n", c->x11_variant);
--
--        if (!isempty(c->x11_options))
--                fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
--
--        fputs("EndSection\n", f);
--
 -        r = fflush_sync_and_check(f);
 -        if (r < 0)
 -                goto fail;
--
++                if (unlink("/etc/default/keyboard") < 0)
++                        return errno == ENOENT ? 0 : -errno;
+ 
 -        if (rename(temp_path, "/etc/X11/xorg.conf.d/00-keyboard.conf") < 0) {
 -                r = -errno;
 -                goto fail;
--        }
--
++                c->vc_mtime = USEC_INFINITY;
++                return 0;
+         }
+ 
 -        if (stat("/etc/X11/xorg.conf.d/00-keyboard.conf", &st) >= 0)
-+        if (r >= 0 && stat("/etc/default/keyboard", &st) >= 0)
-                 c->x11_mtime = timespec_load(&st.st_mtim);
+-                c->x11_mtime = timespec_load(&st.st_mtim);
++        r = write_env_file("/etc/default/keyboard", l);
++        strv_free(l);
  
 -        return 0;
 -
 -fail:
 -        if (temp_path)
 -                (void) unlink(temp_path);
--
++        if (r >= 0 && stat("/etc/default/keyboard", &st) >= 0)
++                c->x11_mtime = timespec_load(&st.st_mtim);
+ 
          return r;
  }
- 
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 66b4542..2083c9d 100644
+index c28615c..55f7945 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -293,6 +293,8 @@ static int context_read_data(Context *c) {
+@@ -296,6 +296,8 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
@@ -422,7 +414,7 @@ index 66b4542..2083c9d 100644
  
          assert(c);
  
-@@ -306,9 +308,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -309,9 +311,12 @@ static int context_write_data_timezone(Context *c) {
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
                          if (unlink("/etc/localtime") < 0 && errno != ENOENT)
@@ -437,7 +429,7 @@ index 66b4542..2083c9d 100644
                  }
  
                  source = "../usr/share/zoneinfo/UTC";
-@@ -320,7 +325,17 @@ static int context_write_data_timezone(Context *c) {
+@@ -323,7 +328,17 @@ static int context_write_data_timezone(Context *c) {
                  source = p;
          }
  

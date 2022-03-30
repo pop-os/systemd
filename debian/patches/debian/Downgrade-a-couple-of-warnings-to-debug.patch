@@ -16,7 +16,7 @@ Closes: #981407
  3 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index 92a5281..932da8c 100644
+index e0dc47e..8ed9924 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -522,6 +522,7 @@ static int patch_var_run(
@@ -38,10 +38,10 @@ index 92a5281..932da8c 100644
                     "please update the unit file accordingly.", lvalue, *path, z);
  
 diff --git a/src/sysv-generator/sysv-generator.c b/src/sysv-generator/sysv-generator.c
-index e997654..860569b 100644
+index 14ae873..aa9e94b 100644
 --- a/src/sysv-generator/sysv-generator.c
 +++ b/src/sysv-generator/sysv-generator.c
-@@ -762,7 +762,7 @@ static int enumerate_sysv(const LookupPaths *lp, Hashmap *all_services) {
+@@ -760,7 +760,7 @@ static int enumerate_sysv(const LookupPaths *lp, Hashmap *all_services) {
                          if (!fpath)
                                  return log_oom();
  
@@ -51,10 +51,10 @@ index e997654..860569b 100644
                                      "Please update package to include a native systemd unit file, in order to make it more safe and robust.", fpath);
  
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index fcab51c..030599c 100644
+index 023207b..aef45b9 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
-@@ -2792,6 +2792,7 @@ static int specifier_expansion_from_arg(Item *i) {
+@@ -2760,6 +2760,7 @@ static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *
  static int patch_var_run(const char *fname, unsigned line, char **path) {
          const char *k;
          char *n;
@@ -62,7 +62,7 @@ index fcab51c..030599c 100644
  
          assert(path);
          assert(*path);
-@@ -2817,7 +2818,8 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
+@@ -2785,7 +2786,8 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
          /* Also log about this briefly. We do so at LOG_NOTICE level, as we fixed up the situation automatically, hence
           * there's no immediate need for action by the user. However, in the interest of making things less confusing
           * to the user, let's still inform the user that these snippets should really be updated. */
