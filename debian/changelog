@@ -1,3 +1,9 @@
+systemd (251~rc1-1) UNRELEASED; urgency=medium
+
+  * New upstream version 251~rc1
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 30 Mar 2022 21:44:32 +0200
+
 systemd (250.4-1) unstable; urgency=medium
 
   [ Dimitri John Ledkov ]
