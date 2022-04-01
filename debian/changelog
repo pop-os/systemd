@@ -1,3 +1,9 @@
+systemd (248.3-1ubuntu8.5) impish; urgency=medium
+
+  * debian/tests/boot-and-services: Ignore failed snap mount units in test_no_failed (LP: #1967576)
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 01 Apr 2022 16:39:25 -0400
+
 systemd (248.3-1ubuntu8.4) impish; urgency=medium
 
   [ Lukas Märdian ]
