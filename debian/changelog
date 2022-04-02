@@ -1,8 +1,17 @@
-systemd (251~rc1-1) UNRELEASED; urgency=medium
+systemd (251~rc1-1) experimental; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 251~rc1
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Install shell completions for oomctl in systemd-oomd
 
- -- Michael Biebl <biebl@debian.org>  Wed, 30 Mar 2022 21:44:32 +0200
+  [ Luca Boccassi ]
+  * Ignore libsystemd-core in dh_makeshlibs
+  * Ignore libsystemd-core in dh_shlibdeps
+  * Add libsystemd-core to shlibs.local.in
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 02 Apr 2022 09:57:22 +0200
 
 systemd (250.4-1) unstable; urgency=medium
 
