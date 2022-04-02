@@ -1,3 +1,29 @@
+systemd (251~rc1-2) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Revert "Ignore libsystemd-core in dh_shlibdeps"
+    This reverts commit c1d5ad5ac989376aa8100dea9ad9d7af0f0408d9.
+    We need the shlibs dependencies of libsystemd-shared and
+    libsystemd-core.
+  * Adjust library search path for dh_shlibdeps.
+    libsystemd-core uses libsystemd-shared but doesn't have RUNPATH or
+    RPATH set. So tell dh_shlibdeps where it can find the library.
+
+  [ Luca Boccassi ]
+  * autopkgtest: update unit-config test for new relative symlinking.
+    Required by https://github.com/systemd/systemd/pull/22649
+  * autopkgtest: install libnss packages for unit-tests suite.
+    Required to enable nss tests:
+    https://github.com/systemd/systemd/issues/21975
+  * autopkgtest: install libnss packages for upstream suite.
+    Required to enable nss tests:
+    https://github.com/systemd/systemd/issues/21975
+  * autopkgtest: install python3-pexpect and screen for upstream suite.
+    Required for new test:
+    https://github.com/systemd/systemd/pull/21838
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 02 Apr 2022 13:44:14 +0200
+
 systemd (251~rc1-1) experimental; urgency=medium
 
   [ Michael Biebl ]
