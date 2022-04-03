@@ -195,6 +195,9 @@ override_dh_install:
 	rm -f debian/tmp/sbin/resolvconf
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
+	# do not create a potentially broken /etc/resolv.conf symlink
+	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1007018
+	rm -f debian/tmp/usr/lib/tmpfiles.d/systemd-resolve.conf
 
 	dh_install
 
