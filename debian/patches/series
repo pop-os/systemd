@@ -78,3 +78,4 @@ lp1955997-add-a-allowlist-to-unblock-intel-hid-on-HP-mach.patch
 pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+lp1966179-add-more-hp-dmi-to-unblock-intel-hid-event.patch
