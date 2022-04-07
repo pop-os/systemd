@@ -523,6 +523,14 @@ def pre_boot_setup():
     subprocess.check_call(['systemctl', 'set-default', 'graphical.target'],
                           stderr=subprocess.STDOUT)
 
+    # This test installs network-manager, which seems to cause
+    # systemd-networkd-wait-online to be stuck as they conflict,
+    # so systemctl start network-online.target ran by autopkgtest
+    # gets stuck, at least in Debian Bullseye images.
+    # https://salsa.debian.org/ci-team/autopkgtest/-/blob/debian/5.21/virt/autopkgtest-virt-lxc#L131
+    subprocess.check_call(['systemctl', 'disable', 'systemd-networkd.service'],
+                          stderr=subprocess.STDOUT)
+
     # create a few temporary files to ensure that they get cleaned up on boot
     os.close(os.open('/tmp/newfile.test',
                      os.O_CREAT | os.O_EXCL | os.O_WRONLY))
