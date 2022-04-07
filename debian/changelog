@@ -1,3 +1,14 @@
+systemd (249.11-0ubuntu3) jammy; urgency=medium
+
+  * oomd: calculate 'used' memory with MemAvailable instead of MemFree (LP: #1966381)
+    File: debian/patches/lp1966381-oomd-calculate-used-memory-with-MemAvailable-instead-of-M.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=15fc4c53d726e1dcae7296a9306cfd453fd1a046
+  * hwdb: remove the tablet pad entry for the UC-Logic 1060N (LP: #1926860)
+    File: debian/patches/lp1926860-hwdb-remove-the-tablet-pad-entry-for-the-UC-Logic-1060N.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7bf31946a52e55f9f6ea4ecfa30e311685b20997
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Thu, 07 Apr 2022 15:28:15 -0400
+
 systemd (249.11-0ubuntu2) jammy; urgency=medium
 
   * Fix calculator key on HP Omen, using upstream 6f2353a & 7092021 (LP: #1929345)
