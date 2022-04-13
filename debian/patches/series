@@ -86,3 +86,4 @@ lp1929345/hwdb-Add-force-release-for-HP-Omen-15-calculator-key.-205.patch
 lp1929345/hwdb-Force-release-calculator-key-on-all-HP-OMEN-laptops.patch
 lp1966381-oomd-calculate-used-memory-with-MemAvailable-instead-of-M.patch
 lp1926860-hwdb-remove-the-tablet-pad-entry-for-the-UC-Logic-1060N.patch
+hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
