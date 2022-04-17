@@ -180,6 +180,10 @@ Depends: systemd-tests,
   tpm2-tools,
   openssl,
   bsdutils,
+  knot,
+  knot-dnsutils,
+  bind9-dnsutils,
+  bind9-host,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
