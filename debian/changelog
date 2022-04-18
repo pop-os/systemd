@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Mon, 18 Apr 2022 14:12:36 -0600
+
 systemd (249.11-0ubuntu3) jammy; urgency=medium
 
   * oomd: calculate 'used' memory with MemAvailable instead of MemFree (LP: #1966381)
