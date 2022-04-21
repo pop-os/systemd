@@ -1,3 +1,20 @@
+systemd (248.3-1ubuntu8.6) impish; urgency=medium
+
+  [ Andy Chi ]
+  * Add mic mute key support for HP Elite x360 series (LP: #1967038)
+    Author: Andy Chi
+    File: debian/patches/hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=04be3b1aabca6af865e6bfb2e4c7e7684b624ad9
+
+  [ Jeremy Szu ]
+  * Add more hp dmi to unblock intel-hid event (LP: #1966179)
+    Also, add HP EliteBook 630/830 13 inch dmi string to intel-hid allowlist
+    Author: Jeremy Szu
+    File: debian/patches/lp1966179-add-more-hp-dmi-to-unblock-intel-hid-event.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2ca44e12f37ecb44b96701c54a784924a62dcfc0
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 21 Apr 2022 14:41:45 +0200
+
 systemd (248.3-1ubuntu8.5) impish; urgency=medium
 
   * debian/tests/boot-and-services: Ignore failed snap mount units in test_no_failed (LP: #1967576)
