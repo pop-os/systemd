@@ -1,3 +1,13 @@
+systemd (249.11-0ubuntu3.1) UNRELEASED; urgency=medium
+
+  [ Andy Chi ]
+  * Add mic mute key support for HP Elite x360 series (LP: #1967038)
+    Author: Andy Chi
+    File: debian/patches/hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=45e809103de9c356c75b692d35089e8770602617
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 21 Apr 2022 14:14:26 +0200
+
 systemd (249.11-0ubuntu3) jammy; urgency=medium
 
   * oomd: calculate 'used' memory with MemAvailable instead of MemFree (LP: #1966381)
