@@ -1,3 +1,20 @@
+systemd (245.4-4ubuntu3.17) focal; urgency=medium
+
+  [ Andy Chi ]
+  * Add mic mute key support for HP Elite x360 series (LP: #1967038)
+    Author: Andy Chi
+    File: debian/patches/hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=09cd12b399725d9c766f5a3c979ff6983812c783
+
+  [ Jeremy Szu ]
+  * Add more hp dmi to unblock intel-hid event (LP: #1966179)
+    Also, add HP EliteBook 630/830 13 inch dmi string to intel-hid allowlist
+    Author: Jeremy Szu
+    File: debian/patches/lp1966179-add-more-hp-dmi-to-unblock-intel-hid-event.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7e05409f3f812086c530f5eb49fa381413df6065
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 21 Apr 2022 14:54:39 +0200
+
 systemd (245.4-4ubuntu3.16) focal; urgency=medium
 
   [ Dan Streetman ]
