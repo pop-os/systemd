@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.1) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.1) jammy; urgency=medium
 
   [ Andy Chi ]
   * Add mic mute key support for HP Elite x360 series (LP: #1967038)
