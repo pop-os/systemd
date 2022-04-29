@@ -175,3 +175,4 @@ lp1958284-core-move-reset_arguments-to-the-end-of-main-s-finish.patch
 pid1-set-SYSTEMD_NSS_DYNAMIC_BYPASS-1-env-var-for-dbus-da.patch
 hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
 lp1966179-add-more-hp-dmi-to-unblock-intel-hid-event.patch
+lp1959475-core-make-sure-we-don-t-get-confused-when-setting-TERM-fo.patch
