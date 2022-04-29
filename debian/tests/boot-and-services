@@ -56,6 +56,8 @@ class ServicesTest(unittest.TestCase):
         failed = [f for f in failed if 'console-setup' not in f]
         # cpi.service fails on s390x
         failed = [f for f in failed if 'cpi.service' not in f]
+        # https://bugs.debian.org/969568
+        failed = [f for f in failed if 'rng-tools-debian.service' not in f]
         # https://bugs.debian.org/926138
         if is_container:
             failed = [f for f in failed if 'e2scrub_reap.service' not in f]
