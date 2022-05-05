@@ -16,7 +16,7 @@ Closes: #981407
  3 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index e0dc47e..8ed9924 100644
+index 74c4133..34680cb 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -522,6 +522,7 @@ static int patch_var_run(
@@ -51,7 +51,7 @@ index 14ae873..aa9e94b 100644
                                      "Please update package to include a native systemd unit file, in order to make it more safe and robust.", fpath);
  
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index 023207b..aef45b9 100644
+index 94973c2..0d27daa 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
 @@ -2760,6 +2760,7 @@ static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *

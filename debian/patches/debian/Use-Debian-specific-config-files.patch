@@ -69,10 +69,10 @@ index ad4a189..b9c448e 100644
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 59ddb9c..25cf884 100644
+index 716febb..9818602 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
-@@ -58,6 +58,27 @@ int locale_setup(char ***environment) {
+@@ -57,6 +57,27 @@ int locale_setup(char ***environment) {
                          log_warning_errno(r, "Failed to read /etc/locale.conf: %m");
          }
  
@@ -97,7 +97,7 @@ index 59ddb9c..25cf884 100644
 +                        log_warning_errno(r, "Failed to read /etc/default/locale: %m");
 +        }
 +
-         for (i = 0; i < _VARIABLE_LC_MAX; i++) {
+         for (LocaleVariable i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
@@ -402,7 +402,7 @@ index 9759f46..4eb48bb 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index c28615c..55f7945 100644
+index 9ca5d37..7b09a4c 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -296,6 +296,8 @@ static int context_read_data(Context *c) {
