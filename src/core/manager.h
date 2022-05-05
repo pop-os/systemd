@@ -438,7 +438,8 @@ struct Manager {
 
         /* Prefixes of e.g. RuntimeDirectory= */
         char *prefix[_EXEC_DIRECTORY_TYPE_MAX];
-        char *received_credentials;
+        char *received_credentials_directory;
+        char *received_encrypted_credentials_directory;
 
         /* Used in the SIGCHLD and sd_notify() message invocation logic to avoid that we dispatch the same event
          * multiple times on the same unit. */
@@ -551,7 +552,7 @@ int manager_ref_uid(Manager *m, uid_t uid, bool clean_ipc);
 void manager_unref_gid(Manager *m, gid_t gid, bool destroy_now);
 int manager_ref_gid(Manager *m, gid_t gid, bool clean_ipc);
 
-char *manager_taint_string(Manager *m);
+char* manager_taint_string(const Manager *m);
 
 void manager_ref_console(Manager *m);
 void manager_unref_console(Manager *m);

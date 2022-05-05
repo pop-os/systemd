@@ -289,7 +289,6 @@ conf.set_quoted('STATUS_UNIT_FORMAT_DEFAULT_STR',             status_unit_format
 
 cc = meson.get_compiler('c')
 pkgconfig = import('pkgconfig')
-check_compilation_sh = find_program('tools/check-compilation.sh')
 meson_build_sh = find_program('tools/meson-build.sh')
 
 want_tests = get_option('tests')
@@ -361,12 +360,18 @@ possible_common_cc_flags = [
         '-Wno-string-plus-int',  # clang
 ]
 
+c_args = get_option('c_args')
+
 # Disable -Wmaybe-uninitialized when compiling with -Os/-O1/-O3/etc. There are
 # too many false positives with gcc >= 8. Effectively, we only test with -O0
 # and -O2; this should be enough to catch most important cases without too much
 # busywork. See https://github.com/systemd/systemd/pull/19226.
 if cc.get_id() == 'gcc' and (not '02'.contains(get_option('optimization')) or
-                             cc.version().version_compare('<10'))
+                             cc.version().version_compare('<10') or
+                             '-Os' in c_args or
+                             '-O1' in c_args or
+                             '-O3' in c_args or
+                             '-Og' in c_args)
         possible_common_cc_flags += '-Wno-maybe-uninitialized'
 endif
 
@@ -1452,6 +1457,26 @@ conf.set10('HAVE_ZSTD', have_zstd)
 
 conf.set10('HAVE_COMPRESSION', have_xz or have_lz4 or have_zstd)
 
+compression = get_option('default-compression')
+if compression == 'auto'
+        if have_zstd
+                compression = 'zstd'
+        elif have_lz4
+                compression = 'lz4'
+        elif have_xz
+                compression = 'xz'
+        else
+                compression = 'none'
+        endif
+elif compression == 'zstd' and not have_zstd
+        error('default-compression=zstd requires zstd')
+elif compression == 'lz4' and not have_lz4
+        error('default-compression=lz4 requires lz4')
+elif compression == 'xz' and not have_xz
+        error('default-compression=xz requires xz')
+endif
+conf.set('DEFAULT_COMPRESSION', 'COMPRESSION_@0@'.format(compression.to_upper()))
+
 want_xkbcommon = get_option('xkbcommon')
 if want_xkbcommon != 'false' and not skip_deps
         libxkbcommon = dependency('xkbcommon',
@@ -1675,6 +1700,9 @@ else
 endif
 conf.set10('ENABLE_IMPORTD', have)
 
+want_kernel_install = get_option('kernel-install')
+conf.set10('ENABLE_KERNEL_INSTALL', want_kernel_install)
+
 want_homed = get_option('homed')
 if want_homed != 'false'
         have = (conf.get('HAVE_OPENSSL') == 1 and
@@ -1817,11 +1845,19 @@ export_dbus_interfaces_py = find_program('tools/dbus_exporter.py')
 
 ############################################################
 
+if get_option('b_coverage')
+        add_project_arguments('-include', 'src/basic/coverage.h', language : 'c')
+endif
+
+############################################################
+
 config_h = configure_file(
         output : 'config.h',
         configuration : conf)
 
 add_project_arguments('-include', 'config.h', language : 'c')
+
+jinja2_cmdline = [meson_render_jinja2, config_h, version_h]
 
 ############################################################
 
@@ -1868,15 +1904,14 @@ libsystemd = shared_library(
         link_args : ['-shared',
                      '-Wl,--version-script=' + libsystemd_sym_path],
         link_with : [libbasic,
-                     libbasic_gcrypt],
+                     libbasic_gcrypt,
+                     libbasic_compress],
         link_whole : [libsystemd_static],
         dependencies : [threads,
-                        librt,
-                        libxz,
-                        libzstd,
-                        liblz4],
+                        librt],
         link_depends : libsystemd_sym,
         install : true,
+        install_tag: 'libsystemd',
         install_dir : rootlibdir)
 
 install_libsystemd_static = static_library(
@@ -1884,11 +1919,13 @@ install_libsystemd_static = static_library(
         libsystemd_sources,
         basic_sources,
         basic_gcrypt_sources,
+        basic_compress_sources,
         fundamental_sources,
         disable_mempool_c,
         include_directories : libsystemd_includes,
         build_by_default : static_libsystemd != 'false',
         install : static_libsystemd != 'false',
+        install_tag: 'libsystemd',
         install_dir : rootlibdir,
         pic : static_libsystemd_pic,
         dependencies : [threads,
@@ -1916,6 +1953,7 @@ libudev = shared_library(
         dependencies : [threads],
         link_depends : libudev_sym,
         install : true,
+        install_tag: 'libudev',
         install_dir : rootlibdir)
 
 install_libudev_static = static_library(
@@ -1929,6 +1967,7 @@ install_libudev_static = static_library(
         include_directories : includes,
         build_by_default : static_libudev != 'false',
         install : static_libudev != 'false',
+        install_tag: 'libudev',
         install_dir : rootlibdir,
         link_depends : libudev_sym,
         dependencies : libshared_deps + [libmount],
@@ -2110,7 +2149,7 @@ endforeach
 
 ############################################################
 
-dbus_programs += executable(
+exe = executable(
         'systemd',
         systemd_sources,
         include_directories : includes,
@@ -2121,6 +2160,8 @@ dbus_programs += executable(
         install_rpath : rootlibexecdir,
         install : true,
         install_dir : rootlibexecdir)
+dbus_programs += exe
+public_programs += exe
 
 meson.add_install_script(meson_make_symlink,
                          rootlibexecdir / 'systemd',
@@ -2677,7 +2718,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 install : true,
                 install_dir : systemgeneratordir)
 
-        executable(
+        public_programs += executable(
                 'systemd-cryptenroll',
                 systemd_cryptenroll_sources,
                 include_directories : includes,
@@ -2996,7 +3037,8 @@ if conf.get('ENABLE_COREDUMP') == 1
                 'systemd-coredump',
                 systemd_coredump_sources,
                 include_directories : includes,
-                link_with : [libshared],
+                link_with : [libshared,
+                             libbasic_compress],
                 dependencies : [threads,
                                 libacl,
                                 libxz,
@@ -3010,7 +3052,8 @@ if conf.get('ENABLE_COREDUMP') == 1
                 'coredumpctl',
                 coredumpctl_sources,
                 include_directories : includes,
-                link_with : [libshared],
+                link_with : [libshared,
+                             libbasic_compress],
                 dependencies : [threads,
                                 libxz,
                                 liblz4,
@@ -3073,27 +3116,6 @@ if conf.get('ENABLE_BINFMT') == 1
         endif
 endif
 
-if conf.get('ENABLE_REPART') == 1
-        exe = executable(
-                'systemd-repart',
-                systemd_repart_sources,
-                include_directories : includes,
-                link_with : [libshared],
-                dependencies : [threads,
-                                libblkid,
-                                libfdisk],
-                install_rpath : rootlibexecdir,
-                install : true,
-                install_dir : rootbindir)
-        public_programs += exe
-
-        if want_tests != 'false'
-                test('test-repart',
-                     test_repart_sh,
-                     args : exe.full_path())
-        endif
-endif
-
 if conf.get('ENABLE_SYSUPDATE') == 1
         exe = executable(
                 'systemd-sysupdate',
@@ -3133,7 +3155,7 @@ if conf.get('ENABLE_RANDOMSEED') == 1
 endif
 
 if conf.get('ENABLE_FIRSTBOOT') == 1
-        executable(
+        public_programs += executable(
                 'systemd-firstboot',
                 'src/firstboot/firstboot.c',
                 include_directories : includes,
@@ -3459,7 +3481,7 @@ if conf.get('ENABLE_TMPFILES') == 1
         endif
 
         if have_standalone_binaries
-                public_programs += executable(
+                exe = executable(
                         'systemd-tmpfiles.standalone',
                         systemd_tmpfiles_sources,
                         include_directories : includes,
@@ -3471,6 +3493,14 @@ if conf.get('ENABLE_TMPFILES') == 1
                         dependencies : [libacl],
                         install : true,
                         install_dir : rootbindir)
+                public_programs += exe
+
+                if want_tests != 'false'
+                        test('test-systemd-tmpfiles.standalone',
+                             test_systemd_tmpfiles_py,
+                             # https://github.com/mesonbuild/meson/issues/2681
+                             args : exe.full_path())
+                endif
         endif
 endif
 
@@ -3488,6 +3518,7 @@ if conf.get('ENABLE_HWDB') == 1
         if want_tests != 'false'
                 test('hwdb-test',
                      hwdb_test_sh,
+                     suite : 'dist-check',
                      args : [systemd_hwdb.full_path()],
                      timeout : 90)
         endif
@@ -3514,7 +3545,7 @@ public_programs += executable(
         install : true,
         install_dir : rootlibexecdir)
 
-public_programs += executable(
+udevadm = executable(
         'udevadm',
         udevadm_sources,
         include_directories : includes,
@@ -3528,6 +3559,28 @@ public_programs += executable(
         install_rpath : udev_rpath,
         install : true,
         install_dir : rootbindir)
+public_programs += udevadm
+
+if conf.get('ENABLE_REPART') == 1
+        exe = executable(
+                'systemd-repart',
+                systemd_repart_sources,
+                include_directories : includes,
+                link_with : [libshared],
+                dependencies : [threads,
+                                libblkid,
+                                libfdisk],
+                install_rpath : rootlibexecdir,
+                install : true,
+                install_dir : rootbindir)
+        public_programs += exe
+
+        if want_tests != 'false'
+                test('test-repart',
+                     test_repart_sh,
+                     args : [exe.full_path(), udevadm.full_path()])
+        endif
+endif
 
 executable(
         'systemd-shutdown',
@@ -3601,7 +3654,7 @@ if conf.get('ENABLE_NETWORKD') == 1
                 install : true,
                 install_dir : rootlibexecdir)
 
-        executable(
+        public_programs += executable(
                 'systemd-networkd-wait-online',
                 systemd_networkd_wait_online_sources,
                 include_directories : includes,
@@ -3647,6 +3700,15 @@ executable(
         install : true,
         install_dir : rootlibexecdir)
 
+public_programs += custom_target(
+        'kernel-install',
+        input : kernel_install_in,
+        output : 'kernel-install',
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
+        install : want_kernel_install,
+        install_mode : 'rwxr-xr-x',
+        install_dir : bindir)
+
 ############################################################
 
 runtest_env = custom_target(
@@ -3664,7 +3726,7 @@ test_cflags = ['-DTEST_CODE=1']
 # bunch of _cleanup_ variables in tests, to ensure valgrind is triggered if we
 # use the variable unexpectedly. This triggers a lot of maybe-uninitialized
 # false positives when the combination of -O2 and -flto is used. Suppress them.
-if '-O2' in get_option('c_args') and '-flto=auto' in get_option('c_args')
+if '-O2' in c_args and '-flto=auto' in c_args
         test_cflags += cc.first_supported_argument('-Wno-maybe-uninitialized')
 endif
 
@@ -3817,6 +3879,7 @@ foreach tuple : fuzzers
                         if b == name
                                 test('@0@_@1@'.format(b, c),
                                      exe,
+                                     suite : 'fuzzers',
                                      args : [project_source_root / p])
                         endif
                 endforeach
@@ -3879,6 +3942,7 @@ jekyll = find_program('jekyll', required : false)
 if get_option('mode') == 'developer' and want_tests != 'false' and jekyll.found()
         test('github-pages',
              jekyll,
+             suite : 'dist-check',
              args : ['build',
                      '--source', project_source_root / 'docs',
                      '--destination', project_build_root / '_site'])
@@ -3887,13 +3951,22 @@ endif
 ############################################################
 
 check_help = find_program('tools/check-help.sh')
+check_version = find_program('tools/check-version.sh')
 
 foreach exec : public_programs
         name = exec.full_path().split('/')[-1]
         if want_tests != 'false'
                 test('check-help-' + name,
                      check_help,
+                     suite : 'dist-check',
                      args : exec.full_path(),
+                     depends: exec)
+
+                test('check-version-' + name,
+                     check_version,
+                     suite : 'dist-check',
+                     args : [exec.full_path(),
+                             meson.project_version()],
                      depends: exec)
         endif
 endforeach
@@ -3905,6 +3978,7 @@ check_directives_sh = find_program('tools/check-directives.sh')
 if want_tests != 'false'
         test('check-directives',
              check_directives_sh,
+             suite : 'dist-check',
              args : [project_source_root, project_build_root])
 endif
 
@@ -3944,6 +4018,7 @@ foreach tuple : sanitizers
                         if fuzz_tests
                                 test('@0@_@1@_@2@'.format(b, c, sanitizer),
                                      env,
+                                     suite : 'fuzz+san',
                                      env : ['UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1'],
                                      timeout : 60,
                                      args : [exe.full_path(),
@@ -4066,6 +4141,7 @@ summary({
         'nobody user name' :                nobody_user,
         'nobody group name' :               nobody_group,
         'fallback hostname' :               get_option('fallback-hostname'),
+        'default compression method' :      compression,
         'default DNSSEC mode' :             default_dnssec,
         'default DNS-over-TLS mode' :       default_dns_over_tls,
         'default mDNS mode' :               default_mdns,
@@ -4143,7 +4219,7 @@ foreach tuple : [
         ['hwdb'],
         ['importd'],
         ['initrd'],
-        ['kernel-install',        get_option('kernel-install')],
+        ['kernel-install'],
         ['localed'],
         ['logind'],
         ['machined'],
@@ -4203,6 +4279,7 @@ foreach tuple : [
         ['link-boot-shared',      get_option('link-boot-shared')],
         ['fexecve'],
         ['standalone-binaries',   get_option('standalone-binaries')],
+        ['coverage',              get_option('b_coverage')],
 ]
 
         if tuple.length() >= 2

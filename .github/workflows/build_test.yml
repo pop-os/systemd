@@ -27,12 +27,12 @@ jobs:
         env:
           - { COMPILER: "gcc",   COMPILER_VERSION: "10", LINKER: "bfd",  CRYPTOLIB: "gcrypt"  }
           - { COMPILER: "gcc",   COMPILER_VERSION: "11", LINKER: "gold", CRYPTOLIB: "openssl" }
-          - { COMPILER: "clang", COMPILER_VERSION: "11", LINKER: "bfd",  CRYPTOLIB: "auto"    }
           - { COMPILER: "clang", COMPILER_VERSION: "12", LINKER: "gold", CRYPTOLIB: "gcrypt"  }
           - { COMPILER: "clang", COMPILER_VERSION: "13", LINKER: "lld",  CRYPTOLIB: "openssl" }
+          - { COMPILER: "clang", COMPILER_VERSION: "14", LINKER: "bfd",  CRYPTOLIB: "auto"    }
     env: ${{ matrix.env }}
     steps:
       - name: Repository checkout
-        uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
+        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b
       - name: ${{ format('Build check ({0}-{1}-{2}-{3})', env.COMPILER, env.COMPILER_VERSION, env.LINKER, env.CRYPTOLIB) }}
         run: sudo -E .github/workflows/build_test.sh

@@ -100,7 +100,7 @@ typedef struct SecurityInfo {
 
         bool delegate;
         char *device_policy;
-        bool device_allow_non_empty;
+        char **device_allow;
 
         Set *system_call_architectures;
 
@@ -168,6 +168,7 @@ static SecurityInfo *security_info_free(SecurityInfo *i) {
         free(i->notify_access);
 
         free(i->device_policy);
+        strv_free(i->device_allow);
 
         strv_free(i->supplementary_groups);
         set_free(i->system_call_architectures);
@@ -530,6 +531,8 @@ static int assess_restrict_namespaces(
         return 0;
 }
 
+#if HAVE_SECCOMP
+
 static int assess_system_call_architectures(
                 const struct security_assessor *a,
                 const SecurityInfo *info,
@@ -564,8 +567,6 @@ static int assess_system_call_architectures(
         return 0;
 }
 
-#if HAVE_SECCOMP
-
 static bool syscall_names_in_filter(Hashmap *s, bool allow_list, const SyscallFilterSet *f, const char **ret_offending_syscall) {
         const char *syscall;
 
@@ -587,7 +588,7 @@ static bool syscall_names_in_filter(Hashmap *s, bool allow_list, const SyscallFi
                 if (id < 0)
                         continue;
 
-                if (hashmap_contains(s, syscall) == allow_list) {
+                if (hashmap_contains(s, syscall) != allow_list) {
                         log_debug("Offending syscall filter item: %s", syscall);
                         if (ret_offending_syscall)
                                 *ret_offending_syscall = syscall;
@@ -720,8 +721,14 @@ static int assess_device_allow(
 
         if (STRPTR_IN_SET(info->device_policy, "strict", "closed")) {
 
-                if (info->device_allow_non_empty) {
-                        d = strdup("Service has a device ACL with some special devices");
+                if (!strv_isempty(info->device_allow)) {
+                        _cleanup_free_ char *join = NULL;
+
+                        join = strv_join(info->device_allow, " ");
+                        if (!join)
+                                return log_oom();
+
+                        d = strjoin("Service has a device ACL with some special devices: ", join);
                         b = 5;
                 } else {
                         d = strdup("Service has a minimal device ACL");
@@ -1476,6 +1483,7 @@ static const struct security_assessor security_assessor_table[] = {
                 .assess = assess_bool,
                 .offset = offsetof(SecurityInfo, restrict_address_family_other),
         },
+#if HAVE_SECCOMP
         {
                 .id = "SystemCallArchitectures=",
                 .json_field = "SystemCallArchitectures",
@@ -1484,7 +1492,6 @@ static const struct security_assessor security_assessor_table[] = {
                 .range = 10,
                 .assess = assess_system_call_architectures,
         },
-#if HAVE_SECCOMP
         {
                 .id = "SystemCallFilter=~@swap",
                 .json_field = "SystemCallFilter_swap",
@@ -2259,7 +2266,6 @@ static int property_read_device_allow(
                 void *userdata) {
 
         SecurityInfo *info = userdata;
-        size_t n = 0;
         int r;
 
         assert(bus);
@@ -2279,10 +2285,10 @@ static int property_read_device_allow(
                 if (r == 0)
                         break;
 
-                n++;
+                r = strv_extendf(&info->device_allow, "%s:%s", name, policy);
+                if (r < 0)
+                        return r;
         }
-
-        info->device_allow_non_empty = n > 0;
 
         return sd_bus_message_exit_container(m);
 }
@@ -2571,11 +2577,20 @@ static int get_security_info(Unit *u, ExecContext *c, CGroupContext *g, Security
                                 return log_oom();
                 }
                 info->_umask = c->umask;
-                if (c->syscall_archs) {
-                        info->system_call_architectures = set_copy(c->syscall_archs);
-                        if (!info->system_call_architectures)
+
+#if HAVE_SECCOMP
+                SET_FOREACH(key, c->syscall_archs) {
+                        const char *name;
+
+                        name = seccomp_arch_to_string(PTR_TO_UINT32(key) - 1);
+                        if (!name)
+                                continue;
+
+                        if (set_put_strdup(&info->system_call_architectures, name) < 0)
                                 return log_oom();
                 }
+#endif
+
                 info->system_call_filter_allow_list = c->syscall_allow_list;
                 if (c->syscall_filter) {
                         info->system_call_filter = hashmap_copy(c->syscall_filter);
@@ -2613,7 +2628,13 @@ static int get_security_info(Unit *u, ExecContext *c, CGroupContext *g, Security
 
                 info->ip_filters_custom_ingress = !strv_isempty(g->ip_filters_ingress);
                 info->ip_filters_custom_egress = !strv_isempty(g->ip_filters_egress);
-                info->device_allow_non_empty = !LIST_IS_EMPTY(g->device_allow);
+
+                LIST_FOREACH(device_allow, a, g->device_allow)
+                        if (strv_extendf(&info->device_allow,
+                                         "%s:%s%s%s",
+                                         a->path,
+                                         a->r ? "r" : "", a->w ? "w" : "", a->m ? "m" : "") < 0)
+                                return log_oom();
         }
 
         *ret_info = TAKE_PTR(info);

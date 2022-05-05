@@ -3,11 +3,6 @@
 # The lookup keys are composed in:
 #   60-evdev.rules
 #
-# Note: The format of the "evdev:" prefix match key is a contract between the
-# rules file and the hardware data, it might change in later revisions to
-# support more or better matches, it is not necessarily expected to be a stable
-# ABI.
-#
 # Match string formats:
 # evdev:<modalias>
 # evdev:name:<device name>:dmi:<dmi string>
@@ -628,6 +623,17 @@ evdev:input:b0003v258Ap001E*
  EVDEV_ABS_01=::15
  EVDEV_ABS_35=::15
  EVDEV_ABS_36=::15
+
+#########################################
+# Positivo-Vaio
+#########################################
+
+# Vaio FE14
+evdev:name:SYNA3602:00 0911:5288 Touchpad:dmi:*svnPositivoBahia-VAIO:pnVJFE41F11*
+ EVDEV_ABS_00=::28
+ EVDEV_ABS_01=::27
+ EVDEV_ABS_35=::28
+ EVDEV_ABS_36=::27
 
 #########################################
 # Razer

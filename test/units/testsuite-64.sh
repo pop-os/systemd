@@ -41,149 +41,6 @@ helper_check_device_symlinks() {(
     done < <(find "${paths[@]}" -type l)
 )}
 
-# Wait for a specific device link to appear
-# Arguments:
-#   $1 - device path
-#   $2 - number of retries (default: 10)
-helper_wait_for_dev() {
-    local dev="${1:?}"
-    local ntries="${2:-10}"
-    local i
-
-    for ((i = 0; i < ntries; i++)); do
-        test ! -e "$dev" || return 0
-        sleep .2
-    done
-
-    return 1
-}
-
-# Wrapper around `helper_wait_for_lvm_activate()` and `helper_wait_for_pvscan()`
-# functions to cover differences between pre and post lvm 2.03.14, which introduced
-# a new way of vgroup autoactivation
-# See: https://sourceware.org/git/?p=lvm2.git;a=commit;h=67722b312390cdab29c076c912e14bd739c5c0f6
-# Arguments:
-#   $1 - device path (for helper_wait_for_pvscan())
-#   $2 - volume group name (for helper_wait_for_lvm_activate())
-#   $3 - number of retries (default: 10)
-helper_wait_for_vgroup() {
-    local dev="${1:?}"
-    local vgroup="${2:?}"
-    local ntries="${3:-10}"
-
-    if ! systemctl -q list-unit-files lvm2-pvscan@.service >/dev/null; then
-        helper_wait_for_lvm_activate "$vgroup" "$ntries"
-    else
-        helper_wait_for_pvscan "$dev" "$ntries"
-    fi
-}
-
-# Wait for the lvm-activate-$vgroup.service of a specific $vgroup to finish
-# Arguments:
-#   $1 - volume group name
-#   $2 - number of retries (default: 10)
-helper_wait_for_lvm_activate() {
-    local vgroup="${1:?}"
-    local ntries="${2:-10}"
-    local i lvm_activate_svc
-
-    lvm_activate_svc="lvm-activate-$vgroup.service"
-    for ((i = 0; i < ntries; i++)); do
-        if systemctl -q is-active "$lvm_activate_svc"; then
-            # Since the service is started via `systemd-run --no-block`, we need
-            # to wait until it finishes, otherwise we might continue while
-            # `vgchange` is still running
-            if [[ "$(systemctl show -P SubState "$lvm_activate_svc")" == exited ]]; then
-                return 0
-            fi
-        else
-            # Since lvm 2.03.15 the lvm-activate transient unit no longer remains
-            # after finishing, so we have to treat non-existent units as a success
-            # as well
-            # See: https://sourceware.org/git/?p=lvm2.git;a=commit;h=fbd8b0cf43dc67f51f86f060dce748f446985855
-            if [[ "$(systemctl show -P LoadState "$lvm_activate_svc")" == not-found ]]; then
-                return 0
-            fi
-        fi
-
-        sleep .5
-    done
-
-    return 1
-}
-
-# Wait for the lvm2-pvscan@.service of a specific device to finish
-# Arguments:
-#   $1 - device path
-#   $2 - number of retries (default: 10)
-helper_wait_for_pvscan() {
-    local dev="${1:?}"
-    local ntries="${2:-10}"
-    local MAJOR MINOR i pvscan_svc real_dev
-
-    # Sanity check we got a valid block device (or a symlink to it)
-    real_dev="$(readlink -f "$dev")"
-    if [[ ! -b "$real_dev" ]]; then
-        echo >&2 "ERROR: '$dev ($real_dev) is not a valid block device'"
-        return 1
-    fi
-
-    # Get major and minor numbers from the udev database
-    # (udevadm returns MAJOR= and MINOR= expressions, so let's pull them into
-    # the current environment via `source` for easier parsing)
-    #
-    # shellcheck source=/dev/null
-    source <(udevadm info -q property "$real_dev" | grep -E "(MAJOR|MINOR)=")
-    # Sanity check if we got correct major and minor numbers
-    test -e "/sys/dev/block/$MAJOR:$MINOR/"
-
-    # Wait n_tries*0.5 seconds until the respective lvm2-pvscan service becomes
-    # active (i.e. it got executed and finished)
-    pvscan_svc="lvm2-pvscan@$MAJOR:$MINOR.service"
-    for ((i = 0; i < ntries; i++)); do
-        ! systemctl -q is-active "$pvscan_svc" || return 0
-        sleep .5
-    done
-
-    return 1
-}
-
-# Generate an `flock` command line for a device list
-#
-# This is useful mainly for mkfs.btrfs, which doesn't hold the lock on each
-# device for the entire duration of mkfs.btrfs, causing weird races between udev
-# and mkfs.btrfs. This function creates an array of chained flock calls to take
-# the lock of all involved devices, which can be then used in combination with
-# mkfs.btrfs to mitigate the issue.
-#
-# For example, calling:
-#   helper_generate_flock_cmdline my_array /dev/loop1 /dev/loop2 /dev/loop3
-#
-# will result in "${my_array[@]}" containing:
-#   flock -x /dev/loop1 flock -x /dev/loop2 flock -x /dev/loop3
-#
-# Note: the array will be CLEARED before the first assignment
-#
-# Arguments:
-#   $1    - NAME of an array in which the commands/argument will be stored
-#   $2-$n - path to devices
-helper_generate_flock_cmdline() {
-    # Create a name reference to the array passed as the first argument
-    # (requires bash 4.3+)
-    local -n cmd_array="${1:?}"
-    shift
-
-    if [[ $# -eq 0 ]]; then
-        echo >&2 "Missing argument(s): device path(s)"
-        return 1
-    fi
-
-    cmd_array=()
-    for dev in "$@"; do
-        cmd_array+=("flock" "-x" "$dev")
-    done
-}
-
 testcase_megasas2_basic() {
     lsblk -S
     [[ "$(lsblk --scsi --noheadings | wc -l)" -ge 128 ]]
@@ -252,9 +109,7 @@ EOF
         "/dev/disk/by-label/failover_vol"
         "/dev/disk/by-uuid/deadbeef-dead-dead-beef-111111111111"
     )
-    for link in "${part_links[@]}"; do
-        test -e "$link"
-    done
+    udevadm wait --settle --timeout=30 "${part_links[@]}"
 
     # Choose a random symlink to the failover data partition each time, for
     # a better coverage
@@ -285,9 +140,7 @@ EOF
         echo -n "$expected" >"$mpoint/test"
 
         # Make sure all symlinks are still valid
-        for link in "${part_links[@]}"; do
-            test -e "$link"
-        done
+        udevadm wait --settle --timeout=30 "${part_links[@]}"
     done
 
     multipath -l "$path"
@@ -315,7 +168,7 @@ $(printf 'name="test%d", size=2M\n' {1..50})
 EOF
 
     # Initial partition table
-    sfdisk -q -X gpt "$blockdev" <"$partscript"
+    udevadm lock --device="$blockdev" sfdisk -q -X gpt "$blockdev" <"$partscript"
 
     # Delete the partitions, immediately recreate them, wait for udev to settle
     # down, and then check if we have any dangling symlinks in /dev/disk/. Rinse
@@ -324,11 +177,11 @@ EOF
     # On unpatched udev versions the delete-recreate cycle may trigger a race
     # leading to dead symlinks in /dev/disk/
     for i in {1..100}; do
-        sfdisk -q --delete "$blockdev"
-        sfdisk -q -X gpt "$blockdev" <"$partscript"
+        udevadm lock --device="$blockdev" sfdisk -q --delete "$blockdev"
+        udevadm lock --device="$blockdev" sfdisk -q -X gpt "$blockdev" <"$partscript"
 
         if ((i % 10 == 0)); then
-            udevadm settle
+            udevadm wait --settle --timeout=30 "$blockdev"
             helper_check_device_symlinks
         fi
     done
@@ -356,27 +209,19 @@ testcase_lvm_basic() {
     lvm lvcreate -y -L 4M "$vgroup" -n mypart1
     lvm lvcreate -y -L 8M "$vgroup" -n mypart2
     lvm lvs
-    udevadm settle
-    test -e "/dev/$vgroup/mypart1"
-    test -e "/dev/$vgroup/mypart2"
+    udevadm wait --settle --timeout=30 "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2"
     mkfs.ext4 -L mylvpart1 "/dev/$vgroup/mypart1"
-    udevadm settle
-    test -e "/dev/disk/by-label/mylvpart1"
+    udevadm wait --settle --timeout=30 "/dev/disk/by-label/mylvpart1"
     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
 
     # Disable the VG and check symlinks...
     lvm vgchange -an "$vgroup"
-    udevadm settle
-    test ! -e "/dev/$vgroup"
-    test ! -e "/dev/disk/by-label/mylvpart1"
+    udevadm wait --settle --timeout=30 --removed "/dev/$vgroup" "/dev/disk/by-label/mylvpart1"
     helper_check_device_symlinks "/dev/disk"
 
     # reenable the VG and check the symlinks again if all LVs are properly activated
     lvm vgchange -ay "$vgroup"
-    udevadm settle
-    test -e "/dev/$vgroup/mypart1"
-    test -e "/dev/$vgroup/mypart2"
-    test -e "/dev/disk/by-label/mylvpart1"
+    udevadm wait --settle --timeout=30 "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2" "/dev/disk/by-label/mylvpart1"
     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
 
     # Same as above, but now with more "stress"
@@ -385,19 +230,15 @@ testcase_lvm_basic() {
         lvm vgchange -ay "$vgroup"
 
         if ((i % 5 == 0)); then
-            udevadm settle
-            test -e "/dev/$vgroup/mypart1"
-            test -e "/dev/$vgroup/mypart2"
-            test -e "/dev/disk/by-label/mylvpart1"
+            udevadm wait --settle --timeout=30 "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2" "/dev/disk/by-label/mylvpart1"
             helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
         fi
     done
 
     # Remove the first LV
     lvm lvremove -y "$vgroup/mypart1"
-    udevadm settle
-    test ! -e "/dev/$vgroup/mypart1"
-    test -e "/dev/$vgroup/mypart2"
+    udevadm wait --settle --timeout=30 --removed "/dev/$vgroup/mypart1"
+    udevadm wait --timeout=0 "/dev/$vgroup/mypart2"
     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
 
     # Create & remove LVs in a loop, i.e. with more "stress"
@@ -413,9 +254,8 @@ testcase_lvm_basic() {
         # 3) On every 4th iteration settle udev and check if all partitions are
         #    indeed gone, and if all symlinks are still valid
         if ((i % 4 == 0)); then
-            udevadm settle
             for part in {0..15}; do
-                test ! -e "/dev/$vgroup/looppart$part"
+                udevadm wait --settle --timeout=30 --removed "/dev/$vgroup/looppart$part"
             done
             helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
         fi
@@ -424,7 +264,6 @@ testcase_lvm_basic() {
 
 testcase_btrfs_basic() {
     local dev_stub i label mpoint uuid
-    local flock_cmd=()
     local devices=(
         /dev/disk/by-id/ata-foobar_deadbeefbtrfs{0..3}
     )
@@ -434,18 +273,15 @@ testcase_btrfs_basic() {
     echo "Single device: default settings"
     uuid="deadbeef-dead-dead-beef-000000000000"
     label="btrfs_root"
-    helper_generate_flock_cmdline flock_cmd "${devices[0]}"
-    "${flock_cmd[@]}" mkfs.btrfs -L "$label" -U "$uuid" "${devices[0]}"
-    udevadm settle
+    udevadm lock --device="${devices[0]}" mkfs.btrfs -L "$label" -U "$uuid" "${devices[0]}"
+    udevadm wait --settle --timeout=30 "${devices[0]}" "/dev/disk/by-uuid/$uuid" "/dev/disk/by-label/$label"
     btrfs filesystem show
-    test -e "/dev/disk/by-uuid/$uuid"
-    test -e "/dev/disk/by-label/$label"
     helper_check_device_symlinks
 
     echo "Multiple devices: using partitions, data: single, metadata: raid1"
     uuid="deadbeef-dead-dead-beef-000000000001"
     label="btrfs_mpart"
-    sfdisk --wipe=always "${devices[0]}" <<EOF
+    udevadm lock --device="${devices[0]}" sfdisk --wipe=always "${devices[0]}" <<EOF
 label: gpt
 
 name="diskpart1", size=85M
@@ -453,26 +289,25 @@ name="diskpart2", size=85M
 name="diskpart3", size=85M
 name="diskpart4", size=85M
 EOF
-    udevadm settle
-    # We need to flock only the device itself, not its partitions
-    helper_generate_flock_cmdline flock_cmd "${devices[0]}"
-    "${flock_cmd[@]}" mkfs.btrfs -d single -m raid1 -L "$label" -U "$uuid" /dev/disk/by-partlabel/diskpart{1..4}
-    udevadm settle
+    udevadm wait --settle --timeout=30 /dev/disk/by-partlabel/diskpart{1..4}
+    udevadm lock --device="${devices[0]}" mkfs.btrfs -d single -m raid1 -L "$label" -U "$uuid" /dev/disk/by-partlabel/diskpart{1..4}
+    udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/$uuid" "/dev/disk/by-label/$label"
     btrfs filesystem show
-    test -e "/dev/disk/by-uuid/$uuid"
-    test -e "/dev/disk/by-label/$label"
     helper_check_device_symlinks
     wipefs -a -f "${devices[0]}"
+    udevadm wait --settle --timeout=30 --removed /dev/disk/by-partlabel/diskpart{1..4}
 
     echo "Multiple devices: using disks, data: raid10, metadata: raid10, mixed mode"
     uuid="deadbeef-dead-dead-beef-000000000002"
     label="btrfs_mdisk"
-    helper_generate_flock_cmdline flock_cmd "${devices[@]}"
-    "${flock_cmd[@]}" mkfs.btrfs -M -d raid10 -m raid10 -L "$label" -U "$uuid" "${devices[@]}"
-    udevadm settle
+    udevadm lock \
+            --device=/dev/disk/by-id/ata-foobar_deadbeefbtrfs0 \
+            --device=/dev/disk/by-id/ata-foobar_deadbeefbtrfs1 \
+            --device=/dev/disk/by-id/ata-foobar_deadbeefbtrfs2 \
+            --device=/dev/disk/by-id/ata-foobar_deadbeefbtrfs3 \
+            mkfs.btrfs -M -d raid10 -m raid10 -L "$label" -U "$uuid" "${devices[@]}"
+    udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/$uuid" "/dev/disk/by-label/$label"
     btrfs filesystem show
-    test -e "/dev/disk/by-uuid/$uuid"
-    test -e "/dev/disk/by-label/$label"
     helper_check_device_symlinks
 
     echo "Multiple devices: using LUKS encrypted disks, data: raid1, metadata: raid1, mixed mode"
@@ -492,9 +327,7 @@ EOF
         cryptsetup luksFormat -q \
             --use-urandom --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
             --uuid "deadbeef-dead-dead-beef-11111111111$i" --label "encdisk$i" "${devices[$i]}" /etc/btrfs_keyfile
-        udevadm settle
-        test -e "/dev/disk/by-uuid/deadbeef-dead-dead-beef-11111111111$i"
-        test -e "/dev/disk/by-label/encdisk$i"
+        udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/deadbeef-dead-dead-beef-11111111111$i" "/dev/disk/by-label/encdisk$i"
         # Add the device into /etc/crypttab, reload systemd, and then activate
         # the device so we can create a filesystem on it later
         echo "encbtrfs$i UUID=deadbeef-dead-dead-beef-11111111111$i /etc/btrfs_keyfile luks,noearly" >>/etc/crypttab
@@ -505,12 +338,14 @@ EOF
     # Check if we have all necessary DM devices
     ls -l /dev/mapper/encbtrfs{0..3}
     # Create a multi-device btrfs filesystem on the LUKS devices
-    helper_generate_flock_cmdline flock_cmd /dev/mapper/encbtrfs{0..3}
-    "${flock_cmd[@]}" mkfs.btrfs -M -d raid1 -m raid1 -L "$label" -U "$uuid" /dev/mapper/encbtrfs{0..3}
-    udevadm settle
+    udevadm lock \
+            --device=/dev/mapper/encbtrfs0 \
+            --device=/dev/mapper/encbtrfs1 \
+            --device=/dev/mapper/encbtrfs2 \
+            --device=/dev/mapper/encbtrfs3 \
+            mkfs.btrfs -M -d raid1 -m raid1 -L "$label" -U "$uuid" /dev/mapper/encbtrfs{0..3}
+    udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/$uuid" "/dev/disk/by-label/$label"
     btrfs filesystem show
-    test -e "/dev/disk/by-uuid/$uuid"
-    test -e "/dev/disk/by-label/$label"
     helper_check_device_symlinks
     # Mount it and write some data to it we can compare later
     mount -t btrfs /dev/mapper/encbtrfs0 "$mpoint"
@@ -518,7 +353,7 @@ EOF
     # "Deconstruct" the btrfs device and check if we're in a sane state (symlink-wise)
     umount "$mpoint"
     systemctl stop systemd-cryptsetup@encbtrfs{0..3}
-    test ! -e "/dev/disk/by-uuid/$uuid"
+    udevadm wait --settle --timeout=30 --removed "/dev/disk/by-uuid/$uuid"
     helper_check_device_symlinks
     # Add the mount point to /etc/fstab and check if the device can be put together
     # automagically. The source device is the DM name of the first LUKS device
@@ -533,9 +368,8 @@ EOF
     # Start the corresponding mount unit and check if the btrfs device was reconstructed
     # correctly
     systemctl start "${mpoint##*/}.mount"
+    udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/$uuid" "/dev/disk/by-label/$label"
     btrfs filesystem show
-    test -e "/dev/disk/by-uuid/$uuid"
-    test -e "/dev/disk/by-label/$label"
     helper_check_device_symlinks
     grep "hello there" "$mpoint/test"
     # Cleanup
@@ -583,15 +417,7 @@ testcase_iscsi_lvm() {
     # Configure the iSCSI initiator
     iscsiadm --mode discoverydb --type sendtargets --portal "$target_ip" --discover
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --login
-    udevadm settle
-    # Check if all device symlinks are valid and if all expected device symlinks exist
-    for link in "${expected_symlinks[@]}"; do
-        # We need to do some active waiting anyway, as it may take kernel a bit
-        # to attach the newly connected SCSI devices
-        helper_wait_for_dev "$link"
-        test -e "$link"
-    done
-    udevadm settle
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
     helper_check_device_symlinks
     # Cleanup
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --logout
@@ -606,7 +432,7 @@ testcase_iscsi_lvm() {
     expected_symlinks=()
     # Use the first device as it's configured with larger capacity
     mkfs.ext4 -L iscsi_store "${devices[0]}"
-    udevadm settle
+    udevadm wait --settle --timeout=30 "${devices[0]}"
     mount "${devices[0]}" "$mpoint"
     for i in {1..4}; do
         dd if=/dev/zero of="$mpoint/lun$i.img" bs=1M count=32
@@ -626,15 +452,7 @@ testcase_iscsi_lvm() {
     # Configure the iSCSI initiator
     iscsiadm --mode discoverydb --type sendtargets --portal "$target_ip" --discover
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --login
-    udevadm settle
-    # Check if all device symlinks are valid and if all expected device symlinks exist
-    for link in "${expected_symlinks[@]}"; do
-        # We need to do some active waiting anyway, as it may take kernel a bit
-        # to attach the newly connected SCSI devices
-        helper_wait_for_dev "$link"
-        test -e "$link"
-    done
-    udevadm settle
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
     helper_check_device_symlinks
     # Add all iSCSI devices into a LVM volume group, create two logical volumes,
     # and check if necessary symlinks exist (and are valid)
@@ -646,39 +464,22 @@ testcase_iscsi_lvm() {
     lvm lvcreate -y -L 4M "$vgroup" -n mypart1
     lvm lvcreate -y -L 8M "$vgroup" -n mypart2
     lvm lvs
-    udevadm settle
-    test -e "/dev/$vgroup/mypart1"
-    test -e "/dev/$vgroup/mypart2"
+    udevadm wait --settle --timeout=30 "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2"
     mkfs.ext4 -L mylvpart1 "/dev/$vgroup/mypart1"
-    udevadm settle
-    test -e "/dev/disk/by-label/mylvpart1"
+    udevadm wait --settle --timeout=30 "/dev/disk/by-label/mylvpart1"
     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
     # Disconnect the iSCSI devices and check all the symlinks
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --logout
     # "Reset" the DM state, since we yanked the backing storage from under the LVM,
     # so the currently active VGs/LVs are invalid
     dmsetup remove_all --deferred
-    udevadm settle
     # The LVM and iSCSI related symlinks should be gone
-    test ! -e "/dev/$vgroup"
-    test ! -e "/dev/disk/by-label/mylvpart1"
-    for link in "${expected_symlinks[@]}"; do
-        test ! -e "$link"
-    done
+    udevadm wait --settle --timeout=30 --removed "/dev/$vgroup" "/dev/disk/by-label/mylvpart1" "${expected_symlinks[@]}"
     helper_check_device_symlinks "/dev/disk"
     # Reconnect the iSCSI devices and check if everything get detected correctly
     iscsiadm --mode discoverydb --type sendtargets --portal "$target_ip" --discover
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --login
-    udevadm settle
-    for link in "${expected_symlinks[@]}"; do
-        helper_wait_for_dev "$link"
-        helper_wait_for_vgroup "$link" "$vgroup"
-        test -e "$link"
-    done
-    udevadm settle
-    test -e "/dev/$vgroup/mypart1"
-    test -e "/dev/$vgroup/mypart2"
-    test -e "/dev/disk/by-label/mylvpart1"
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}" "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2" "/dev/disk/by-label/mylvpart1"
     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
     # Cleanup
     iscsiadm --mode node --targetname "$target_name" --portal "$target_ip:$target_port" --logout
@@ -688,7 +489,7 @@ testcase_iscsi_lvm() {
 }
 
 testcase_long_sysfs_path() {
-    local link logfile mpoint
+    local cursor link logfile mpoint
     local expected_symlinks=(
         "/dev/disk/by-label/data_vol"
         "/dev/disk/by-label/swap_vol"
@@ -699,13 +500,17 @@ testcase_long_sysfs_path() {
         "/dev/disk/by-uuid/deadbeef-dead-dead-beef-222222222222"
     )
 
+    # Create a cursor file to skip messages generated by udevd in initrd, as it
+    # might not be the same up-to-date version as we currently run (hence generating
+    # messages we check for later and making the test fail)
+    cursor="$(mktemp)"
+    journalctl --cursor-file="${cursor:?}" -n0 -q
+
     # Make sure the test device is connected and show its "wonderful" path
     stat /sys/block/vda
     readlink -f /sys/block/vda/dev
 
-    for link in "${expected_symlinks[@]}"; do
-        test -e "$link"
-    done
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
 
     # Try to mount the data partition manually (using its label)
     mpoint="$(mktemp -d /logsysfsXXX)"
@@ -716,6 +521,7 @@ testcase_long_sysfs_path() {
     echo "UUID=deadbeef-dead-dead-beef-222222222222 $mpoint ext4 defaults 0 0" >>/etc/fstab
     systemctl daemon-reload
     mount "$mpoint"
+    systemctl status "$mpoint"
     test -e "$mpoint/test"
     umount "$mpoint"
 
@@ -726,13 +532,188 @@ testcase_long_sysfs_path() {
     udevadm settle
 
     logfile="$(mktemp)"
-    journalctl -b -q --no-pager -o short-monotonic -p info --grep "Device path.*vda.?' too long to fit into unit name"
+    # Check state of affairs after https://github.com/systemd/systemd/pull/22759
+    # Note: can't use `--cursor-file` here, since we don't want to update the cursor
+    #       after using it
+    [[ "$(journalctl --after-cursor="$(<"$cursor")" -q --no-pager -o short-monotonic -p info --grep "Device path.*vda.?' too long to fit into unit name" | wc -l)" -eq 0 ]]
+    [[ "$(journalctl --after-cursor="$(<"$cursor")" -q --no-pager -o short-monotonic --grep "Unit name .*vda.?\.device\" too long, falling back to hashed unit name" | wc -l)" -gt 0 ]]
+    # Check if the respective "hashed" units exist and are active (plugged)
+    systemctl status --no-pager "$(readlink -f /sys/block/vda/vda1)"
+    systemctl status --no-pager "$(readlink -f /sys/block/vda/vda2)"
     # Make sure we don't unnecessarily spam the log
-    journalctl -b -q --no-pager -o short-monotonic -p info --grep "/sys/devices/.+/vda[0-9]?" _PID=1 + UNIT=systemd-udevd.service | tee "$logfile"
+    { journalctl -b -q --no-pager -o short-monotonic -p info --grep "/sys/devices/.+/vda[0-9]?" _PID=1 + UNIT=systemd-udevd.service || :;} | tee "$logfile"
     [[ "$(wc -l <"$logfile")" -lt 10 ]]
 
     : >/etc/fstab
-    rm -fr "${logfile:?}" "${mpoint:?}"
+    rm -fr "${cursor:?}" "${logfile:?}" "${mpoint:?}"
+}
+
+testcase_mdadm_basic() {
+    local i part_name raid_name raid_dev uuid
+    local expected_symlinks=()
+    local devices=(
+        /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..4}
+    )
+
+    ls -l "${devices[@]}"
+
+    echo "Mirror raid (RAID 1)"
+    raid_name="mdmirror"
+    raid_dev="/dev/md/$raid_name"
+    part_name="${raid_name}_part"
+    uuid="aaaaaaaa:bbbbbbbb:cccccccc:00000001"
+    expected_symlinks=(
+        "$raid_dev"
+        "/dev/disk/by-id/md-name-H:$raid_name"
+        "/dev/disk/by-id/md-uuid-$uuid"
+        "/dev/disk/by-label/$part_name" # ext4 partition
+    )
+    # Create a simple RAID 1 with an ext4 filesystem
+    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..1} -v -f --level=1 --raid-devices=2
+    udevadm wait --settle --timeout=30 "$raid_dev"
+    mkfs.ext4 -L "$part_name" "$raid_dev"
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    for i in {0..9}; do
+        echo "Disassemble - reassemble loop, iteration #$i"
+        mdadm -v --stop "$raid_dev"
+        udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+        mdadm --assemble "$raid_dev" --name "$raid_name" -v
+        udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    done
+    helper_check_device_symlinks
+    # Cleanup
+    mdadm -v --stop "$raid_dev"
+    udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+
+    echo "Parity raid (RAID 5)"
+    raid_name="mdparity"
+    raid_dev="/dev/md/$raid_name"
+    part_name="${raid_name}_part"
+    uuid="aaaaaaaa:bbbbbbbb:cccccccc:00000101"
+    expected_symlinks=(
+        "$raid_dev"
+        "/dev/disk/by-id/md-name-H:$raid_name"
+        "/dev/disk/by-id/md-uuid-$uuid"
+        "/dev/disk/by-label/$part_name" # ext4 partition
+    )
+    # Create a simple RAID 5 with an ext4 filesystem
+    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..2} -v -f --level=5 --raid-devices=3
+    udevadm wait --settle --timeout=30 "$raid_dev"
+    mkfs.ext4 -L "$part_name" "$raid_dev"
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    for i in {0..9}; do
+        echo "Disassemble - reassemble loop, iteration #$i"
+        mdadm -v --stop "$raid_dev"
+        udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+        mdadm --assemble "$raid_dev" --name "$raid_name" -v
+        udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    done
+    helper_check_device_symlinks
+    # Cleanup
+    mdadm -v --stop "$raid_dev"
+    udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+
+    echo "Mirror + parity raid (RAID 10) + multiple partitions"
+    raid_name="mdmirpar"
+    raid_dev="/dev/md/$raid_name"
+    part_name="${raid_name}_part"
+    uuid="aaaaaaaa:bbbbbbbb:cccccccc:00001010"
+    expected_symlinks=(
+        "$raid_dev"
+        "/dev/disk/by-id/md-name-H:$raid_name"
+        "/dev/disk/by-id/md-uuid-$uuid"
+        "/dev/disk/by-label/$part_name" # ext4 partition
+        # Partitions
+        "${raid_dev}1"
+        "${raid_dev}2"
+        "${raid_dev}3"
+        "/dev/disk/by-id/md-name-H:$raid_name-part1"
+        "/dev/disk/by-id/md-name-H:$raid_name-part2"
+        "/dev/disk/by-id/md-name-H:$raid_name-part3"
+        "/dev/disk/by-id/md-uuid-$uuid-part1"
+        "/dev/disk/by-id/md-uuid-$uuid-part2"
+        "/dev/disk/by-id/md-uuid-$uuid-part3"
+    )
+    # Create a simple RAID 10 with an ext4 filesystem
+    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..3} -v -f --level=10 --raid-devices=4
+    udevadm wait --settle --timeout=30 "$raid_dev"
+    # Partition the raid device
+    # Here, 'udevadm lock' is meaningless, as udevd does not lock MD devices.
+    sfdisk --wipe=always "$raid_dev" <<EOF
+label: gpt
+
+uuid="deadbeef-dead-dead-beef-111111111111", name="mdpart1", size=8M
+uuid="deadbeef-dead-dead-beef-222222222222", name="mdpart2", size=32M
+uuid="deadbeef-dead-dead-beef-333333333333", name="mdpart3", size=16M
+EOF
+    udevadm wait --settle --timeout=30 "/dev/disk/by-id/md-uuid-$uuid-part2"
+    mkfs.ext4 -L "$part_name" "/dev/disk/by-id/md-uuid-$uuid-part2"
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    for i in {0..9}; do
+        echo "Disassemble - reassemble loop, iteration #$i"
+        mdadm -v --stop "$raid_dev"
+        udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+        mdadm --assemble "$raid_dev" --name "$raid_name" -v
+        udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    done
+    helper_check_device_symlinks
+    # Cleanup
+    mdadm -v --stop "$raid_dev"
+    # Check if all expected symlinks were removed after the cleanup
+    udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+}
+
+testcase_mdadm_lvm() {
+    local part_name raid_name raid_dev uuid vgroup
+    local expected_symlinks=()
+    local devices=(
+        /dev/disk/by-id/ata-foobar_deadbeefmdadmlvm{0..4}
+    )
+
+    ls -l "${devices[@]}"
+
+    raid_name="mdlvm"
+    raid_dev="/dev/md/$raid_name"
+    part_name="${raid_name}_part"
+    vgroup="${raid_name}_vg"
+    uuid="aaaaaaaa:bbbbbbbb:ffffffff:00001010"
+    expected_symlinks=(
+        "$raid_dev"
+        "/dev/$vgroup/mypart1"          # LVM partition
+        "/dev/$vgroup/mypart2"          # LVM partition
+        "/dev/disk/by-id/md-name-H:$raid_name"
+        "/dev/disk/by-id/md-uuid-$uuid"
+        "/dev/disk/by-label/$part_name" # ext4 partition
+    )
+    # Create a RAID 10 with LVM + ext4
+    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadmlvm{0..3} -v -f --level=10 --raid-devices=4
+    udevadm wait --settle --timeout=30 "$raid_dev"
+    # Create an LVM on the MD
+    lvm pvcreate -y "$raid_dev"
+    lvm pvs
+    lvm vgcreate "$vgroup" -y "$raid_dev"
+    lvm vgs
+    lvm vgchange -ay "$vgroup"
+    lvm lvcreate -y -L 4M "$vgroup" -n mypart1
+    lvm lvcreate -y -L 8M "$vgroup" -n mypart2
+    lvm lvs
+    udevadm wait --settle --timeout=30 "/dev/$vgroup/mypart1" "/dev/$vgroup/mypart2"
+    mkfs.ext4 -L "$part_name" "/dev/$vgroup/mypart2"
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    # Disassemble the array
+    lvm vgchange -an "$vgroup"
+    mdadm -v --stop "$raid_dev"
+    udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
+    helper_check_device_symlinks
+    # Reassemble it and check if all required symlinks exist
+    mdadm --assemble "$raid_dev" --name "$raid_name" -v
+    udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+    helper_check_device_symlinks
+    # Cleanup
+    lvm vgchange -an "$vgroup"
+    mdadm -v --stop "$raid_dev"
+    # Check if all expected symlinks were removed after the cleanup
+    udevadm wait --settle --timeout=30 --removed "${expected_symlinks[@]}"
 }
 
 : >/failed

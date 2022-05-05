@@ -111,21 +111,24 @@ static void flush_progress(void) {
         } while (0)
 
 static int hash_payload(JournalFile *f, Object *o, uint64_t offset, const uint8_t *src, uint64_t size, uint64_t *res_hash) {
-        int compression, r;
+        Compression c;
+        int r;
 
         assert(o);
         assert(src);
         assert(res_hash);
 
-        compression = o->object.flags & OBJECT_COMPRESSION_MASK;
-        if (compression) {
+        c = COMPRESSION_FROM_OBJECT(o);
+        if (c < 0)
+                return -EBADMSG;
+        if (c != COMPRESSION_NONE) {
                 _cleanup_free_ void *b = NULL;
                 size_t b_size;
 
-                r = decompress_blob(compression, src, size, &b, &b_size, 0);
+                r = decompress_blob(c, src, size, &b, &b_size, 0);
                 if (r < 0) {
                         error_errno(offset, r, "%s decompression failed: %m",
-                                    object_compressed_to_string(compression));
+                                    compression_to_string(c));
                         return r;
                 }
 
@@ -145,7 +148,7 @@ static int journal_file_object_verify(JournalFile *f, uint64_t offset, Object *o
          * possible field values. It does not follow any references to
          * other objects. */
 
-        if ((o->object.flags & OBJECT_COMPRESSED_XZ) &&
+        if ((o->object.flags & _OBJECT_COMPRESSED_MASK) != 0 &&
             o->object.type != OBJECT_DATA) {
                 error(offset,
                       "Found compressed object of type %s that isn't of type data, which is not allowed.",
@@ -839,7 +842,7 @@ int journal_file_verify(
 #else
                 return -EOPNOTSUPP;
 #endif
-        } else if (f->seal)
+        } else if (JOURNAL_HEADER_SEALED(f->header))
                 return -ENOKEY;
 
         r = var_tmp_dir(&tmp_dir);
@@ -1127,7 +1130,7 @@ int journal_file_verify(
                         }
 
 #if HAVE_GCRYPT
-                        if (f->seal) {
+                        if (JOURNAL_HEADER_SEALED(f->header)) {
                                 uint64_t q, rt;
 
                                 debug(p, "Checking tag %"PRIu64"...", le64toh(o->tag.seqnum));

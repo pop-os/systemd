@@ -524,7 +524,7 @@
     symlink <emphasis>target</emphasis> is within the unit load path becomes an alias: the source name and
     the target file name must satisfy specific constraints listed above in the discussion of aliases, but the
     symlink target doesn't have to exist, and in fact the symlink target path is not used, except to check
-    whether the target is within the unit load path. In constrast, a symlink which goes outside of the unit
+    whether the target is within the unit load path. In contrast, a symlink which goes outside of the unit
     load path signifies a linked unit file. The symlink is followed when loading the file, but the
     destination name is otherwise unused (and may even not be a valid unit file name). For example, symlinks
     <filename index='false'>/etc/systemd/system/alias1.service</filename> → <filename index='false'>service1.service</filename>,
@@ -2097,7 +2097,7 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
           <row>
             <!-- We do not use the common definition from standard-specifiers.xml here since we want a
                  slightly more verbose explanation here, referring to the reload cycle. -->
-            <entry><literal>%R</literal></entry>
+            <entry><literal>%q</literal></entry>
             <entry>Pretty host name</entry>
             <entry>The pretty hostname of the running system at the point in time the unit configuration is loaded, as read from the <varname>PRETTY_HOSTNAME=</varname> field of <filename>/etc/machine-info</filename>. If not set, resolves to the short hostname. See <citerefentry><refentrytitle>machine-info</refentrytitle><manvolnum>5</manvolnum></citerefentry> for more information.</entry>
           </row>

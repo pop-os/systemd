@@ -6,6 +6,7 @@
 #include <linux/oom.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #if HAVE_SECCOMP
 #include <seccomp.h>
@@ -50,6 +51,7 @@
 #include "hexdecoct.h"
 #include "hostname-setup.h"
 #include "ima-setup.h"
+#include "import-creds.h"
 #include "killall.h"
 #include "kmod-setup.h"
 #include "limits-util.h"
@@ -1074,9 +1076,8 @@ static int help(void) {
                "  -h --help                      Show this help\n"
                "     --version                   Show version\n"
                "     --test                      Determine initial transaction, dump it and exit\n"
-               "     --system                    In combination with --test: operate as system service manager\n"
-               "     --user                      In combination with --test: operate as per-user service manager\n"
-               "     --no-pager                  Do not pipe output into a pager\n"
+               "     --system                    Combined with --test: operate in system mode\n"
+               "     --user                      Combined with --test: operate in user mode\n"
                "     --dump-configuration-items  Dump understood unit configuration items\n"
                "     --dump-bus-properties       Dump exposed bus properties\n"
                "     --bus-introspect=PATH       Write XML introspection data\n"
@@ -1086,14 +1087,17 @@ static int help(void) {
                "     --crash-reboot[=BOOL]       Reboot on crash\n"
                "     --crash-shell[=BOOL]        Run shell on crash\n"
                "     --confirm-spawn[=BOOL]      Ask for confirmation when spawning processes\n"
-               "     --show-status[=BOOL]        Show status updates on the console during bootup\n"
-               "     --log-target=TARGET         Set log target (console, journal, kmsg, journal-or-kmsg, null)\n"
-               "     --log-level=LEVEL           Set log level (debug, info, notice, warning, err, crit, alert, emerg)\n"
+               "     --show-status[=BOOL]        Show status updates on the console during boot\n"
+               "     --log-target=TARGET         Set log target (console, journal, kmsg,\n"
+               "                                                 journal-or-kmsg, null)\n"
+               "     --log-level=LEVEL           Set log level (debug, info, notice, warning,\n"
+               "                                                err, crit, alert, emerg)\n"
                "     --log-color[=BOOL]          Highlight important log messages\n"
                "     --log-location[=BOOL]       Include code location in log messages\n"
                "     --log-time[=BOOL]           Prefix log messages with current time\n"
                "     --default-standard-output=  Set default standard output for services\n"
                "     --default-standard-error=   Set default standard error output for services\n"
+               "     --no-pager                  Do not pipe output into a pager\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                ansi_highlight(),
@@ -1286,7 +1290,7 @@ static void test_usr(void) {
 
         /* Check that /usr is either on the same file system as / or mounted already. */
 
-        if (dir_is_empty("/usr") <= 0)
+        if (dir_is_empty("/usr", /* ignore_hidden_or_backup= */ false) <= 0)
                 return;
 
         log_warning("/usr appears to be on its own filesystem and is not already mounted. This is not a supported setup. "
@@ -2009,6 +2013,7 @@ static void log_execution_mode(bool *ret_first_boot) {
         assert(ret_first_boot);
 
         if (arg_system) {
+                struct utsname uts;
                 int v;
 
                 log_info("systemd " GIT_VERSION " running in %ssystem mode (%s)",
@@ -2046,6 +2051,14 @@ static void log_execution_mode(bool *ret_first_boot) {
                                 log_debug("Detected initialized system, this is not the first boot.");
                         }
                 }
+
+                assert_se(uname(&uts) >= 0);
+
+                if (strverscmp_improved(uts.release, KERNEL_BASELINE_VERSION) < 0)
+                        log_warning("Warning! Reported kernel version %s is older than systemd's required baseline kernel version %s. "
+                                    "Your mileage may vary.", uts.release, KERNEL_BASELINE_VERSION);
+                else
+                        log_debug("Kernel version %s, our baseline is %s", uts.release, KERNEL_BASELINE_VERSION);
         } else {
                 if (DEBUG_LOGGING) {
                         _cleanup_free_ char *t = NULL;
@@ -2167,6 +2180,10 @@ static int initialize_runtime(
         /* Bump up RLIMIT_NOFILE for systemd itself */
         (void) bump_rlimit_nofile(saved_rlimit_nofile);
         (void) bump_rlimit_memlock(saved_rlimit_memlock);
+
+        /* Pull credentials from various sources into a common credential directory */
+        if (arg_system && !skip_setup)
+                (void) import_credentials();
 
         return 0;
 }
@@ -2767,7 +2784,7 @@ int main(int argc, char *argv[]) {
 
                 /* Load the kernel modules early. */
                 if (!skip_setup)
-                        kmod_setup();
+                        (void) kmod_setup();
 
                 /* Mount /proc, /sys and friends, so that /proc/cmdline and /proc/$PID/fd is available. */
                 r = mount_setup(loaded_policy, skip_setup);

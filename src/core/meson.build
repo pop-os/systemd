@@ -73,6 +73,8 @@ libcore_sources = '''
         generator-setup.h
         ima-setup.c
         ima-setup.h
+        import-creds.c
+        import-creds.h
         job.c
         job.h
         kill.c
@@ -151,7 +153,7 @@ load_fragment_gperf_gperf = custom_target(
         'load-fragment-gperf.gperf',
         input : 'load-fragment-gperf.gperf.in',
         output: 'load-fragment-gperf.gperf',
-        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'])
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'])
 
 load_fragment_gperf_c = custom_target(
         'load-fragment-gperf.c',
@@ -217,7 +219,7 @@ foreach item : in_files
                 file,
                 input : file + '.in',
                 output: file,
-                command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
+                command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
                 install : (dir == pkgsysconfdir) ? install_sysconfdir_samples : (dir != 'no'),
                 install_dir : dir)
 endforeach

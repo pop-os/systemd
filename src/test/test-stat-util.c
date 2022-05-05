@@ -149,113 +149,41 @@ TEST(fd_is_ns) {
         assert_se(IN_SET(fd_is_ns(fd, CLONE_NEWNET), 1, -EUCLEAN));
 }
 
-TEST(device_major_minor_valid) {
-        /* on glibc dev_t is 64bit, even though in the kernel it is only 32bit */
-        assert_cc(sizeof(dev_t) == sizeof(uint64_t));
-
-        assert_se(DEVICE_MAJOR_VALID(0U));
-        assert_se(DEVICE_MINOR_VALID(0U));
-
-        assert_se(DEVICE_MAJOR_VALID(1U));
-        assert_se(DEVICE_MINOR_VALID(1U));
-
-        assert_se(!DEVICE_MAJOR_VALID(-1U));
-        assert_se(!DEVICE_MINOR_VALID(-1U));
-
-        assert_se(DEVICE_MAJOR_VALID(1U << 10));
-        assert_se(DEVICE_MINOR_VALID(1U << 10));
-
-        assert_se(DEVICE_MAJOR_VALID((1U << 12) - 1));
-        assert_se(DEVICE_MINOR_VALID((1U << 20) - 1));
-
-        assert_se(!DEVICE_MAJOR_VALID((1U << 12)));
-        assert_se(!DEVICE_MINOR_VALID((1U << 20)));
-
-        assert_se(!DEVICE_MAJOR_VALID(1U << 25));
-        assert_se(!DEVICE_MINOR_VALID(1U << 25));
-
-        assert_se(!DEVICE_MAJOR_VALID(UINT32_MAX));
-        assert_se(!DEVICE_MINOR_VALID(UINT32_MAX));
-
-        assert_se(!DEVICE_MAJOR_VALID(UINT64_MAX));
-        assert_se(!DEVICE_MINOR_VALID(UINT64_MAX));
-
-        assert_se(DEVICE_MAJOR_VALID(major(0)));
-        assert_se(DEVICE_MINOR_VALID(minor(0)));
-}
-
-static void test_device_path_make_canonical_one(const char *path) {
-        _cleanup_free_ char *resolved = NULL, *raw = NULL;
-        struct stat st;
-        dev_t devno;
-        mode_t mode;
-        int r;
-
-        log_debug("> %s", path);
-
-        if (stat(path, &st) < 0) {
-                assert_se(errno == ENOENT);
-                log_notice("Path %s not found, skipping test", path);
-                return;
-        }
-
-        r = device_path_make_canonical(st.st_mode, st.st_rdev, &resolved);
-        if (r == -ENOENT) {
-                /* maybe /dev/char/x:y and /dev/block/x:y are missing in this test environment, because we
-                 * run in a container or so? */
-                log_notice("Device %s cannot be resolved, skipping test", path);
-                return;
-        }
-
-        assert_se(r >= 0);
-        assert_se(path_equal(path, resolved));
-
-        assert_se(device_path_make_major_minor(st.st_mode, st.st_rdev, &raw) >= 0);
-        assert_se(device_path_parse_major_minor(raw, &mode, &devno) >= 0);
-
-        assert_se(st.st_rdev == devno);
-        assert_se((st.st_mode & S_IFMT) == (mode & S_IFMT));
-}
-
-TEST(device_path_make_canonical) {
-        test_device_path_make_canonical_one("/dev/null");
-        test_device_path_make_canonical_one("/dev/zero");
-        test_device_path_make_canonical_one("/dev/full");
-        test_device_path_make_canonical_one("/dev/random");
-        test_device_path_make_canonical_one("/dev/urandom");
-        test_device_path_make_canonical_one("/dev/tty");
-
-        if (is_device_node("/run/systemd/inaccessible/blk") > 0) {
-                test_device_path_make_canonical_one("/run/systemd/inaccessible/chr");
-                test_device_path_make_canonical_one("/run/systemd/inaccessible/blk");
-        }
-}
-
 TEST(dir_is_empty) {
         _cleanup_(rm_rf_physical_and_freep) char *empty_dir = NULL;
-        _cleanup_free_ char *j = NULL, *jj = NULL;
+        _cleanup_free_ char *j = NULL, *jj = NULL, *jjj = NULL;
 
-        assert_se(dir_is_empty_at(AT_FDCWD, "/proc") == 0);
-        assert_se(dir_is_empty_at(AT_FDCWD, "/icertainlydontexistdoi") == -ENOENT);
+        assert_se(dir_is_empty_at(AT_FDCWD, "/proc", /* ignore_hidden_or_backup= */ true) == 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, "/icertainlydontexistdoi", /* ignore_hidden_or_backup= */ true) == -ENOENT);
 
         assert_se(mkdtemp_malloc("/tmp/emptyXXXXXX", &empty_dir) >= 0);
-        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) > 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) > 0);
 
         j = path_join(empty_dir, "zzz");
         assert_se(j);
         assert_se(touch(j) >= 0);
 
-        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) == 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) == 0);
 
         jj = path_join(empty_dir, "ppp");
         assert_se(jj);
         assert_se(touch(jj) >= 0);
 
-        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) == 0);
+        jjj = path_join(empty_dir, ".qqq");
+        assert_se(jjj);
+        assert_se(touch(jjj) >= 0);
+
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) == 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ false) == 0);
         assert_se(unlink(j) >= 0);
-        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) == 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) == 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ false) == 0);
         assert_se(unlink(jj) >= 0);
-        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir) > 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) > 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ false) == 0);
+        assert_se(unlink(jjj) >= 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ true) > 0);
+        assert_se(dir_is_empty_at(AT_FDCWD, empty_dir, /* ignore_hidden_or_backup= */ false) > 0);
 }
 
 static int intro(void) {

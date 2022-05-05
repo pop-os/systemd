@@ -22,6 +22,7 @@
 
 #include "alloc-util.h"
 #include "def.h"
+#include "devnum-util.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -1276,6 +1277,11 @@ ColorMode get_color_mode(void) {
                 else if (getenv("NO_COLOR"))
                         /* We only check for the presence of the variable; value is ignored. */
                         cached_color_mode = COLOR_OFF;
+
+                else if (STRPTR_IN_SET(getenv("COLORTERM"),
+                                       "truecolor",
+                                       "24bit"))
+                        cached_color_mode = COLOR_24BIT;
 
                 else if (getpid_cached() == 1)
                         /* PID1 outputs to the console without holding it open all the time.

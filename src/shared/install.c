@@ -330,7 +330,7 @@ void unit_file_dump_changes(int r, const char *verb, const UnitFileChange *chang
         for (size_t i = 0; i < n_changes; i++) {
                 assert(verb || changes[i].type_or_errno >= 0);
 
-                switch(changes[i].type_or_errno) {
+                switch (changes[i].type_or_errno) {
                 case UNIT_FILE_SYMLINK:
                         if (!quiet)
                                 log_info("Created symlink %s %s %s.",
@@ -1899,7 +1899,7 @@ static int install_info_symlink_alias(
                 if (!alias_path)
                         return -ENOMEM;
 
-                q = create_symlink(lp, info->name, alias_path, force, changes, n_changes);
+                q = create_symlink(lp, info->path, alias_path, force, changes, n_changes);
                 r = r < 0 ? r : q;
         }
 
@@ -1968,7 +1968,7 @@ static int install_info_symlink_wants(
         }
 
         STRV_FOREACH(s, list) {
-                _cleanup_free_ char *dst = NULL;
+                _cleanup_free_ char *path = NULL, *dst = NULL;
 
                 q = install_name_printf(scope, info, *s, &dst);
                 if (q < 0) {
@@ -1998,15 +1998,11 @@ static int install_info_symlink_wants(
                         continue;
                 }
 
-                _cleanup_free_ char *path = strjoin(config_path, "/", dst, suffix, n);
+                path = strjoin(config_path, "/", dst, suffix, n);
                 if (!path)
                         return -ENOMEM;
 
-                _cleanup_free_ char *target = strjoin("../", info->name);
-                if (!target)
-                        return -ENOMEM;
-
-                q = create_symlink(lp, target, path, true, changes, n_changes);
+                q = create_symlink(lp, info->path, path, true, changes, n_changes);
                 if (r == 0)
                         r = q;
 
@@ -2797,9 +2793,9 @@ static int normalize_linked_files(
 
         /* This is similar to normalize_filenames()/normalize_names() in src/systemctl/,
          * but operates on real unit names. For each argument we we look up the actual path
-         * where the unit is found. This way linked units can be reenabled successfully. */
+         * where the unit is found. This way linked units can be re-enabled successfully. */
 
-        _cleanup_free_ char **files = NULL, **names = NULL;
+        _cleanup_strv_free_ char **files = NULL, **names = NULL;
         int r;
 
         STRV_FOREACH(a, names_or_paths) {
@@ -2825,7 +2821,7 @@ static int normalize_linked_files(
                         return r;
 
                 const char *p = NULL;
-                if (i && i->path)
+                if (i && i->path && i->root)
                         /* Use startswith here, because we know that paths are normalized, and
                          * path_startswith() would give us a relative path, but we need an absolute path
                          * relative to i->root.
@@ -2914,7 +2910,7 @@ int unit_file_set_default(
                 return r;
 
         new_path = strjoina(lp.persistent_config, "/" SPECIAL_DEFAULT_TARGET);
-        return create_symlink(&lp, info->name, new_path, flags & UNIT_FILE_FORCE, changes, n_changes);
+        return create_symlink(&lp, info->path, new_path, flags & UNIT_FILE_FORCE, changes, n_changes);
 }
 
 int unit_file_get_default(

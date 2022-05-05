@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
-want_kernel_install = get_option('kernel-install')
+kernel_install_in = files('kernel-install.in')
 
 if want_kernel_install
-        install_data('kernel-install',
-                     install_mode : 'rwxr-xr-x',
-                     install_dir : bindir)
-
         install_data('50-depmod.install',
                      '90-loaderentry.install',
                      install_mode : 'rwxr-xr-x',

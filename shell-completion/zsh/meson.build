@@ -9,7 +9,7 @@ custom_target(
         '_systemctl',
         input : '_systemctl.in',
         output : '_systemctl',
-        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
         install : zshcompletiondir != 'no',
         install_dir : zshcompletiondir)
 
@@ -22,7 +22,7 @@ items = [['_busctl',                   ''],
          ['_systemd-path',             ''],
          ['_systemd-run',              ''],
          ['_udevadm',                  ''],
-         ['_kernel-install',           ''],
+         ['_kernel-install',           'ENABLE_KERNEL_INSTALL'],
          ['_sd_hosts_or_user_at_host', ''],
          ['_sd_outputmodes',           ''],
          ['_sd_unit_files',            ''],

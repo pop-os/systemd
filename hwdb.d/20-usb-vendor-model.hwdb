@@ -10178,6 +10178,24 @@ usb:v0482p06B4*
 usb:v0483*
  ID_VENDOR_FROM_DATABASE=STMicroelectronics
 
+usb:v0483p0102*
+ ID_MODEL_FROM_DATABASE=Remote NDIS Network device with Android debug (ADB)
+
+usb:v0483p0103*
+ ID_MODEL_FROM_DATABASE=Remote NDIS Network device
+
+usb:v0483p0104*
+ ID_MODEL_FROM_DATABASE=MTP device with Android debug (ADB)
+
+usb:v0483p0105*
+ ID_MODEL_FROM_DATABASE=MTP device
+
+usb:v0483p0106*
+ ID_MODEL_FROM_DATABASE=PTP device with Android debug (ADB)
+
+usb:v0483p0107*
+ ID_MODEL_FROM_DATABASE=PTP device
+
 usb:v0483p0137*
  ID_MODEL_FROM_DATABASE=BeWAN ADSL USB ST (blue or green)
 
@@ -44831,6 +44849,18 @@ usb:v0E25*
 usb:v0E26*
  ID_VENDOR_FROM_DATABASE=J-Phone East Co., Ltd
 
+usb:v0E2E*
+ ID_VENDOR_FROM_DATABASE=Brady Worldwide, Inc.
+
+usb:v0E2Ep000B*
+ ID_MODEL_FROM_DATABASE=BMP 51
+
+usb:v0E2Ep000C*
+ ID_MODEL_FROM_DATABASE=BMP 61
+
+usb:v0E2Ep000D*
+ ID_MODEL_FROM_DATABASE=BMP 41
+
 usb:v0E30*
  ID_VENDOR_FROM_DATABASE=HeartMath LLC
 
@@ -66909,7 +66939,7 @@ usb:v2A19p5442*
  ID_MODEL_FROM_DATABASE=TimVideos' HDMI2USB Opsis (FX2) - HDMI/DVI Capture Device
 
 usb:v2A1D*
- ID_VENDOR_FROM_DATABASE=Oxford Nanopore Technologies, Ltd
+ ID_VENDOR_FROM_DATABASE=Oxford Nanopore Technologies plc
 
 usb:v2A1Dp0000*
  ID_MODEL_FROM_DATABASE=MinION
@@ -66928,6 +66958,12 @@ usb:v2A1Dp0020*
 
 usb:v2A1Dp0021*
  ID_MODEL_FROM_DATABASE=GridION
+
+usb:v2A1Dp0120*
+ ID_MODEL_FROM_DATABASE=GridION Mk1 Bay
+
+usb:v2A1Dp0121*
+ ID_MODEL_FROM_DATABASE=GridION Mk1 Bay
 
 usb:v2A37*
  ID_VENDOR_FROM_DATABASE=RTD Embedded Technologies, Inc.

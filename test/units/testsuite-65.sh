@@ -68,6 +68,7 @@ rm /tmp/testfile2.service
 cat <<EOF >/tmp/testfile.service
 [Service]
 ExecStart = echo hello
+DeviceAllow=/dev/sda
 EOF
 
 # Prevent regression from #13380 and #20859 where we can't verify hidden files
@@ -93,6 +94,9 @@ set +e
 systemd-analyze security --threshold=90 --offline=true /tmp/testfile.service \
     && { echo 'unexpected success'; exit 1; }
 set -e
+
+# Ensure we print the list of ACLs, see https://github.com/systemd/systemd/issues/23185
+systemd-analyze security --offline=true /tmp/testfile.service | grep -q -F "/dev/sda"
 
 rm /tmp/testfile.service
 
@@ -575,14 +579,14 @@ systemd-analyze security --threshold=90 --offline=true \
                            --root=/tmp/img/ testfile.service
 
 # The strict profile adds a lot of sanboxing options
-systemd-analyze security --threshold=20 --offline=true \
+systemd-analyze security --threshold=25 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --profile=strict \
                            --root=/tmp/img/ testfile.service
 
 set +e
 # The trusted profile doesn't add any sanboxing options
-systemd-analyze security --threshold=20 --offline=true \
+systemd-analyze security --threshold=25 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --profile=/usr/lib/systemd/portable/profile/trusted/service.conf \
                            --root=/tmp/img/ testfile.service \
@@ -599,6 +603,8 @@ rm /tmp/img/usr/lib/systemd/system/testfile.service
 if systemd-analyze --version | grep -q -F "+ELFUTILS"; then
     systemd-analyze inspect-elf --json=short /lib/systemd/systemd | grep -q -F '"elfType":"executable"'
 fi
+
+systemd-analyze --threshold=90 security systemd-journald.service
 
 systemd-analyze log-level info
 

@@ -18,6 +18,7 @@
 #include "alloc-util.h"
 #include "blockdev-util.h"
 #include "device-util.h"
+#include "devnum-util.h"
 #include "env-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -62,9 +63,7 @@ static int get_current_uevent_seqnum(uint64_t *ret) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to read current uevent sequence number: %m");
 
-        truncate_nl(p);
-
-        r = safe_atou64(p, ret);
+        r = safe_atou64(strstrip(p), ret);
         if (r < 0)
                 return log_debug_errno(r, "Failed to parse current uevent sequence number: %s", p);
 
@@ -73,7 +72,7 @@ static int get_current_uevent_seqnum(uint64_t *ret) {
 
 static int device_has_block_children(sd_device *d) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        const char *main_sn, *main_ss;
+        const char *main_ss, *main_dt;
         sd_device *q;
         int r;
 
@@ -82,15 +81,18 @@ static int device_has_block_children(sd_device *d) {
         /* Checks if the specified device currently has block device children (i.e. partition block
          * devices). */
 
-        r = sd_device_get_sysname(d, &main_sn);
-        if (r < 0)
-                return r;
-
         r = sd_device_get_subsystem(d, &main_ss);
         if (r < 0)
                 return r;
 
         if (!streq(main_ss, "block"))
+                return -EINVAL;
+
+        r = sd_device_get_devtype(d, &main_dt);
+        if (r < 0)
+                return r;
+
+        if (!streq(main_dt, "disk")) /* Refuse invocation on partition block device, insist on "whole" device */
                 return -EINVAL;
 
         r = sd_device_enumerator_new(&e);
@@ -106,47 +108,34 @@ static int device_has_block_children(sd_device *d) {
                 return r;
 
         FOREACH_DEVICE(e, q) {
-                const char *ss, *sn;
+                const char *ss, *dt;
 
                 r = sd_device_get_subsystem(q, &ss);
-                if (r < 0)
+                if (r < 0) {
+                        log_device_debug_errno(q, r, "Failed to get subsystem of child, ignoring: %m");
                         continue;
+                }
 
-                if (!streq(ss, "block"))
+                if (!streq(ss, "block")) {
+                        log_device_debug(q, "Skipping child that is not a block device (subsystem=%s).", ss);
                         continue;
+                }
 
-                r = sd_device_get_sysname(q, &sn);
-                if (r < 0)
+                r = sd_device_get_devtype(q, &dt);
+                if (r < 0) {
+                        log_device_debug_errno(q, r, "Failed to get devtype of child, ignoring: %m");
                         continue;
+                }
 
-                if (streq(sn, main_sn))
+                if (!streq(dt, "partition")) {
+                        log_device_debug(q, "Skipping non-partition child (devtype=%s).", dt);
                         continue;
+                }
 
-                return 1; /* we have block device children */
+                return true; /* we have block device children */
         }
 
-        return 0;
-}
-
-static int loop_get_diskseq(int fd, uint64_t *ret_diskseq) {
-        uint64_t diskseq;
-
-        assert(fd >= 0);
-        assert(ret_diskseq);
-
-        if (ioctl(fd, BLKGETDISKSEQ, &diskseq) < 0) {
-                /* Note that the kernel is weird: non-existing ioctls currently return EINVAL
-                 * rather than ENOTTY on loopback block devices. They should fix that in the kernel,
-                 * but in the meantime we accept both here. */
-                if (!ERRNO_IS_NOT_SUPPORTED(errno) && errno != EINVAL)
-                        return -errno;
-
-                return -EOPNOTSUPP;
-        }
-
-        *ret_diskseq = diskseq;
-
-        return 0;
+        return false;
 }
 
 static int loop_configure(
@@ -453,7 +442,7 @@ static int loop_device_make_internal(
                         if (copy < 0)
                                 return copy;
 
-                        r = loop_get_diskseq(copy, &diskseq);
+                        r = fd_get_diskseq(copy, &diskseq);
                         if (r < 0 && r != -EOPNOTSUPP)
                                 return r;
 
@@ -526,6 +515,17 @@ static int loop_device_make_internal(
         for (unsigned n_attempts = 0;;) {
                 _cleanup_close_ int loop = -1;
 
+                /* Let's take a lock on the control device first. On a busy system, where many programs
+                 * attempt to allocate a loopback device at the same time, we might otherwise keep looping
+                 * around relatively heavy operations: asking for a free loopback device, then opening it,
+                 * validating it, attaching something to it. Let's serialize this whole operation, to make
+                 * unnecessary busywork less likely. Note that this is just something we do to optimize our
+                 * own code (and whoever else decides to use LOCK_EX locks for this), taking this lock is not
+                 * necessary, it just means it's less likely we have to iterate through this loop again and
+                 * again if our own code races against our own code. */
+                if (flock(control, LOCK_EX) < 0)
+                        return -errno;
+
                 nr = ioctl(control, LOOP_CTL_GET_FREE);
                 if (nr < 0)
                         return -errno;
@@ -537,7 +537,7 @@ static int loop_device_make_internal(
                 if (loop < 0) {
                         /* Somebody might've gotten the same number from the kernel, used the device,
                          * and called LOOP_CTL_REMOVE on it. Let's retry with a new number. */
-                        if (!IN_SET(errno, ENOENT, ENXIO))
+                        if (!ERRNO_IS_DEVICE_ABSENT(errno))
                                 return -errno;
                 } else {
                         r = loop_configure(loop, nr, &config, &try_loop_configure, &seqnum, &timestamp);
@@ -554,9 +554,17 @@ static int loop_device_make_internal(
                                 return r;
                 }
 
+                /* OK, this didn't work, let's try again a bit later, but first release the lock on the
+                 * control device */
+                if (flock(control, LOCK_UN) < 0)
+                        return -errno;
+
                 if (++n_attempts >= 64) /* Give up eventually */
                         return -EBUSY;
 
+                /* Now close the loop device explicitly. This will release any lock acquired by
+                 * attach_empty_file() or similar, while we sleep below. */
+                loop = safe_close(loop);
                 loopdev = mfree(loopdev);
 
                 /* Wait some random time, to make collision less likely. Let's pick a random time in the
@@ -592,7 +600,7 @@ static int loop_device_make_internal(
         assert(S_ISBLK(st.st_mode));
 
         uint64_t diskseq = 0;
-        r = loop_get_diskseq(loop_with_fd, &diskseq);
+        r = fd_get_diskseq(loop_with_fd, &diskseq);
         if (r < 0 && r != -EOPNOTSUPP)
                 return r;
 
@@ -608,6 +616,12 @@ static int loop_device_make_internal(
                 .uevent_seqnum_not_before = seqnum,
                 .timestamp_not_before = timestamp,
         };
+
+        log_debug("Successfully acquired %s, devno=%u:%u, nr=%i, diskseq=%" PRIu64,
+                  d->node,
+                  major(d->devno), minor(d->devno),
+                  d->nr,
+                  d->diskseq);
 
         *ret = d;
         return d->fd;
@@ -863,7 +877,7 @@ static int resize_partition(int partition_fd, uint64_t offset, uint64_t size) {
         r = read_one_line_file(sysfs, &buffer);
         if (r < 0)
                 return r;
-        r = parse_dev(buffer, &devno);
+        r = parse_devnum(buffer, &devno);
         if (r < 0)
                 return r;
 
