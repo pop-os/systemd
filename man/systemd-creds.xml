@@ -41,6 +41,9 @@
     <varname>SetCredentialEncrypted=</varname> settings, see
     <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
     details.</para>
+
+    <para>For further information see <ulink url="https://systemd.io/CREDENTIALS">System and Service
+    Credentials</ulink> documentation.</para>
   </refsect1>
 
   <refsect1>
@@ -90,7 +93,7 @@
         <term><command>encrypt</command> <replaceable>input|-</replaceable> <replaceable>output|-</replaceable></term>
 
         <listitem><para>Loads the specified (unencrypted plaintext) input credential file, encrypts it and
-        writes the (encrypted ciphertext) version to the specified output credential file. The resulting file
+        writes the (encrypted ciphertext) output to the specified target credential file. The resulting file
         may be referenced in the <varname>LoadCredentialEncrypted=</varname> setting in unit files, or its
         contents used literally in <varname>SetCredentialEncrypted=</varname> settings.</para>
 
@@ -102,8 +105,8 @@
         output path is specified as <literal>-</literal> the credential name cannot be derived from the file
         system path, and thus should be specified explicitly via the <option>--name=</option> switch.</para>
 
-        <para>The credential data is encrypted symmetrically with one of the following encryption
-        keys:</para>
+        <para>The credential data is encrypted and authenticated symmetrically with one of the following
+        encryption keys:</para>
 
         <orderedlist>
           <listitem><para>A secret key automatically derived from the system's TPM2 chip. This encryption key
@@ -145,8 +148,8 @@
         <optional><replaceable>output|-</replaceable></optional></term>
 
         <listitem><para>Undoes the effect of the <command>encrypt</command> operation: loads the specified
-        (encrypted ciphertext) input credential file, decrypts it and writes the (decrypted plaintext)
-        version to the specified output credential file.</para>
+        (encrypted ciphertext) input credential file, decrypts and authenticates it and writes the (decrypted
+        plaintext) output to the specified target credential file.</para>
 
         <para>Takes one or two file system paths. The file name part of the input path is compared with the
         credential name embedded in the encrypted file. If it does not match decryption fails. This is done
@@ -161,6 +164,20 @@
         <para>Decrypting credentials requires access to the original TPM2 chip and/or credentials host key,
         see above. Information about which keys are required is embedded in the encrypted credential data,
         and thus decryption is entirely automatic.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><command>has-tpm2</command></term>
+
+        <listitem><para>Reports whether the system is equipped with a TPM2 device usable for protecting
+        credentials. If the a TPM2 device has been discovered, is supported, and is being used by firmware,
+        by the OS kernel drivers and by userspace (i.e. systemd) this prints <literal>yes</literal> and exits
+        with exit status zero. If no such device is discovered/supported/used, prints
+        <literal>no</literal>. Otherwise prints <literal>partial</literal>. In either of these two cases
+        exits with non-zero exit status. It also shows three lines indicating separately whether drivers,
+        firmware and the system discovered/support/use TPM2.</para>
+
+        <para>Combine with <option>--quiet</option> to suppress the output.</para></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="help" />
@@ -263,23 +280,32 @@
         <term><option>-H</option></term>
         <term><option>-T</option></term>
 
-        <listitem><para>When specified with the <command>encrypt</command> command controls the encryption
-        key to use. Takes one of <literal>host</literal>, <literal>tpm2</literal>,
-        <literal>host+tpm2</literal> or <literal>auto</literal>. See above for details on the three key
-        types. If set to <literal>auto</literal> (which is the default) the TPM2 key is used if a TPM2 device
-        is found and not running in a container. The host key is used if
-        <filename>/var/lib/systemd/</filename> is on persistent media. This means on typical systems the
-        encryption is by default bound to both the TPM2 chip and the OS installation, and both need to be
-        available to decrypt the credential again. If <literal>auto</literal> is selected but neither TPM2 is
-        available (or running in container) nor <filename>/var/lib/systemd/</filename> is on persistent
-        media, encryption will fail.</para>
+        <listitem><para>When specified with the <command>encrypt</command> command controls the
+        encryption/signature key to use. Takes one of <literal>host</literal>, <literal>tpm2</literal>,
+        <literal>host+tpm2</literal>, <literal>tpm2-absent</literal>, <literal>auto</literal>,
+        <literal>auto-initrd</literal>. See above for details on the three key types. If set to
+        <literal>auto</literal> (which is the default) the TPM2 key is used if a TPM2 device is found and not
+        running in a container. The host key is used if <filename>/var/lib/systemd/</filename> is on
+        persistent media. This means on typical systems the encryption is by default bound to both the TPM2
+        chip and the OS installation, and both need to be available to decrypt the credential again. If
+        <literal>auto</literal> is selected but neither TPM2 is available (or running in container) nor
+        <filename>/var/lib/systemd/</filename> is on persistent media, encryption will fail. If set to
+        <literal>tpm2-absent</literal> a fixed zero length key is used (thus, in this mode no confidentiality
+        nor authenticity are provided!). This logic is useful to cover for systems that lack a TPM2 chip but
+        where credentials shall be generated. Note that decryption of such credentials is refused on systems
+        that have a TPM2 chip and where UEFI SecureBoot is enabled (this is done so that such a locked down
+        system cannot be tricked into loading a credential generated this way that lacks authentication
+        information). If set to <literal>auto-initrd</literal> a TPM2 key is used if a TPM2 is found. If not
+        a fixed zero length key is used, equivalent to <literal>tpm2-absent</literal> mode. This option is
+        particularly useful to generate credentials files that are encrypted/authenticated against TPM2 where
+        available but still work on systems lacking support for this.</para>
 
         <para>The <option>-H</option> switch is a shortcut for <option>--with-key=host</option>. Similar,
         <option>-T</option> is a shortcut for <option>--with-key=tpm2</option>.</para>
 
         <para>When encrypting credentials that shall be used in the initial RAM disk (initrd) where
         <filename>/var/lib/systemd/</filename> is typically not available make sure to use
-        <option>--with-key=tpm2</option> mode, to disable binding against the host secret.</para>
+        <option>--with-key=auto-initrd</option> mode, to disable binding against the host secret.</para>
 
         <para>This switch has no effect on the <command>decrypt</command> command, as information on which
         key to use for decryption is included in the encrypted credential already.</para></listitem>
@@ -305,6 +331,14 @@
         <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>.</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--quiet</option></term>
+        <term><option>-q</option></term>
+
+        <listitem><para>When used with <command>has-tpm2</command> suppresses the output, and only returns an
+        exit status indicating support for TPM2.</para></listitem>
+      </varlistentry>
+
       <xi:include href="standard-options.xml" xpointer="no-pager" />
       <xi:include href="standard-options.xml" xpointer="no-legend" />
       <xi:include href="standard-options.xml" xpointer="json" />
@@ -315,6 +349,12 @@
     <title>Exit status</title>
 
     <para>On success, 0 is returned.</para>
+
+    <para>In case of the <command>has-tpm2</command> command returns 0 if a TPM2 device is discovered,
+    supported and used by firmware, driver, and userspace (i.e. systemd). Otherwise returns the OR
+    combination of the value 1 (in case firmware support is missing), 2 (in case driver support is missing)
+    and 4 (in case userspace support is missing). If no TPM2 support is available at all, value 7 is hence
+    returned.</para>
   </refsect1>
 
   <refsect1>

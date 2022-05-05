@@ -2595,10 +2595,48 @@ static int write_credential(
         return 0;
 }
 
+static char **credential_search_path(
+                const ExecParameters *params,
+                bool encrypted) {
+
+        _cleanup_strv_free_ char **l = NULL;
+
+        assert(params);
+
+        /* Assemble a search path to find credentials in. We'll look in /etc/credstore/ (and similar
+         * directories in /usr/lib/ + /run/) for all types of credentials. If we are looking for encrypted
+         * credentials, also look in /etc/credstore.encrypted/ (and similar dirs). */
+
+        if (encrypted) {
+                if (strv_extend(&l, params->received_encrypted_credentials_directory) < 0)
+                        return NULL;
+
+                if (strv_extend_strv(&l, CONF_PATHS_STRV("credstore.encrypted"), /* filter_duplicates= */ true) < 0)
+                        return NULL;
+        }
+
+        if (params->received_credentials_directory)
+                if (strv_extend(&l, params->received_credentials_directory) < 0)
+                        return NULL;
+
+        if (strv_extend_strv(&l, CONF_PATHS_STRV("credstore"), /* filter_duplicates= */ true) < 0)
+                return NULL;
+
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *t = strv_join(l, ":");
+
+                log_debug("Credential search path is: %s", t);
+        }
+
+        return TAKE_PTR(l);
+}
+
 static int load_credential(
                 const ExecContext *context,
                 const ExecParameters *params,
-                ExecLoadCredential *lc,
+                const char *id,
+                const char *path,
+                bool encrypted,
                 const char *unit,
                 int read_dfd,
                 int write_dfd,
@@ -2606,56 +2644,100 @@ static int load_credential(
                 bool ownership_ok,
                 uint64_t *left) {
 
+        ReadFullFileFlags flags = READ_FULL_FILE_SECURE|READ_FULL_FILE_FAIL_WHEN_LARGER;
+        _cleanup_strv_free_ char **search_path = NULL;
+        _cleanup_(erase_and_freep) char *data = NULL;
+        _cleanup_free_ char *bindname = NULL;
+        const char *source = NULL;
+        bool missing_ok = true;
+        size_t size, add, maxsz;
+        int r;
+
         assert(context);
-        assert(lc);
+        assert(params);
+        assert(id);
+        assert(path);
         assert(unit);
         assert(write_dfd >= 0);
         assert(left);
 
-        ReadFullFileFlags flags = READ_FULL_FILE_SECURE|READ_FULL_FILE_FAIL_WHEN_LARGER;
-        _cleanup_(erase_and_freep) char *data = NULL;
-        _cleanup_free_ char *j = NULL, *bindname = NULL;
-        bool missing_ok = true;
-        const char *source;
-        size_t size, add;
-        int r;
+        if (read_dfd >= 0) {
+                /* If a directory fd is specified, then read the file directly from that dir. In this case we
+                 * won't do AF_UNIX stuff (we simply don't want to recursively iterate down a tree of AF_UNIX
+                 * IPC sockets). It's OK if a file vanishes here in the time we enumerate it and intend to
+                 * open it. */
 
-        if (path_is_absolute(lc->path) || read_dfd >= 0) {
-                /* If this is an absolute path, read the data directly from it, and support AF_UNIX sockets */
-                source = lc->path;
+                if (!filename_is_valid(path)) /* safety check */
+                        return -EINVAL;
+
+                missing_ok = true;
+                source = path;
+
+        } else if (path_is_absolute(path)) {
+                /* If this is an absolute path, read the data directly from it, and support AF_UNIX
+                 * sockets */
+
+                if (!path_is_valid(path)) /* safety check */
+                        return -EINVAL;
+
                 flags |= READ_FULL_FILE_CONNECT_SOCKET;
 
                 /* Pass some minimal info about the unit and the credential name we are looking to acquire
                  * via the source socket address in case we read off an AF_UNIX socket. */
-                if (asprintf(&bindname, "@%" PRIx64"/unit/%s/%s", random_u64(), unit, lc->id) < 0)
+                if (asprintf(&bindname, "@%" PRIx64"/unit/%s/%s", random_u64(), unit, id) < 0)
                         return -ENOMEM;
 
                 missing_ok = false;
+                source = path;
 
-        } else if (params->received_credentials) {
-                /* If this is a relative path, take it relative to the credentials we received
-                 * ourselves. We don't support the AF_UNIX stuff in this mode, since we are operating
-                 * on a credential store, i.e. this is guaranteed to be regular files. */
-                j = path_join(params->received_credentials, lc->path);
-                if (!j)
+        } else if (credential_name_valid(path)) {
+                /* If this is a relative path, take it as credential name relative to the credentials
+                 * directory we received ourselves. We don't support the AF_UNIX stuff in this mode, since we
+                 * are operating on a credential store, i.e. this is guaranteed to be regular files. */
+
+                search_path = credential_search_path(params, encrypted);
+                if (!search_path)
                         return -ENOMEM;
 
-                source = j;
+                missing_ok = true;
         } else
                 source = NULL;
 
-        if (source)
+        if (encrypted)
+                flags |= READ_FULL_FILE_UNBASE64;
+
+        maxsz = encrypted ? CREDENTIAL_ENCRYPTED_SIZE_MAX : CREDENTIAL_SIZE_MAX;
+
+        if (search_path) {
+                STRV_FOREACH(d, search_path) {
+                        _cleanup_free_ char *j = NULL;
+
+                        j = path_join(*d, path);
+                        if (!j)
+                                return -ENOMEM;
+
+                        r = read_full_file_full(
+                                        AT_FDCWD, j, /* path is absolute, hence pass AT_FDCWD as nop dir fd here */
+                                        UINT64_MAX,
+                                        maxsz,
+                                        flags,
+                                        NULL,
+                                        &data, &size);
+                        if (r != -ENOENT)
+                                break;
+                }
+        } else if (source)
                 r = read_full_file_full(
                                 read_dfd, source,
                                 UINT64_MAX,
-                                lc->encrypted ? CREDENTIAL_ENCRYPTED_SIZE_MAX : CREDENTIAL_SIZE_MAX,
-                                flags | (lc->encrypted ? READ_FULL_FILE_UNBASE64 : 0),
+                                maxsz,
+                                flags,
                                 bindname,
                                 &data, &size);
         else
                 r = -ENOENT;
 
-        if (r == -ENOENT && (missing_ok || hashmap_contains(context->set_credentials, lc->id))) {
+        if (r == -ENOENT && (missing_ok || hashmap_contains(context->set_credentials, id))) {
                 /* Make a missing inherited credential non-fatal, let's just continue. After all apps
                  * will get clear errors if we don't pass such a missing credential on as they
                  * themselves will get ENOENT when trying to read them, which should not be much
@@ -2663,17 +2745,17 @@ static int load_credential(
                  *
                  * Also, if the source file doesn't exist, but a fallback is set via SetCredentials=
                  * we are fine, too. */
-                log_debug_errno(r, "Couldn't read inherited credential '%s', skipping: %m", lc->path);
+                log_debug_errno(r, "Couldn't read inherited credential '%s', skipping: %m", path);
                 return 0;
         }
         if (r < 0)
-                return log_debug_errno(r, "Failed to read credential '%s': %m", lc->path);
+                return log_debug_errno(r, "Failed to read credential '%s': %m", path);
 
-        if (lc->encrypted) {
+        if (encrypted) {
                 _cleanup_free_ void *plaintext = NULL;
                 size_t plaintext_size = 0;
 
-                r = decrypt_credential_and_warn(lc->id, now(CLOCK_REALTIME), NULL, data, size, &plaintext, &plaintext_size);
+                r = decrypt_credential_and_warn(id, now(CLOCK_REALTIME), NULL, data, size, &plaintext, &plaintext_size);
                 if (r < 0)
                         return r;
 
@@ -2681,24 +2763,22 @@ static int load_credential(
                 size = plaintext_size;
         }
 
-        add = strlen(lc->id) + size;
+        add = strlen(id) + size;
         if (add > *left)
                 return -E2BIG;
 
-        r = write_credential(write_dfd, lc->id, data, size, uid, ownership_ok);
+        r = write_credential(write_dfd, id, data, size, uid, ownership_ok);
         if (r < 0)
-                return r;
+                return log_debug_errno(r, "Failed to write credential '%s': %m", id);
 
         *left -= add;
         return 0;
 }
 
 struct load_cred_args {
-        Set *seen_creds;
-
         const ExecContext *context;
         const ExecParameters *params;
-        ExecLoadCredential *parent_local_credential;
+        bool encrypted;
         const char *unit;
         int dfd;
         uid_t uid;
@@ -2715,8 +2795,8 @@ static int load_cred_recurse_dir_cb(
                 const struct statx *sx,
                 void *userdata) {
 
-        _cleanup_free_ char *credname = NULL, *sub_id = NULL;
-        struct load_cred_args *args = userdata;
+        struct load_cred_args *args = ASSERT_PTR(userdata);
+        _cleanup_free_ char *sub_id = NULL;
         int r;
 
         if (event != RECURSE_DIR_ENTRY)
@@ -2725,32 +2805,32 @@ static int load_cred_recurse_dir_cb(
         if (!IN_SET(de->d_type, DT_REG, DT_SOCK))
                 return RECURSE_DIR_CONTINUE;
 
-        credname = strreplace(path, "/", "_");
-        if (!credname)
-                return -ENOMEM;
-
-        sub_id = strjoin(args->parent_local_credential->id, "_", credname);
+        sub_id = strreplace(path, "/", "_");
         if (!sub_id)
                 return -ENOMEM;
 
         if (!credential_name_valid(sub_id))
-                return -EINVAL;
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Credential would get ID %s, which is not valid, refusing", sub_id);
 
-        if (set_contains(args->seen_creds, sub_id)) {
+        if (faccessat(args->dfd, sub_id, F_OK, AT_SYMLINK_NOFOLLOW) >= 0) {
                 log_debug("Skipping credential with duplicated ID %s at %s", sub_id, path);
                 return RECURSE_DIR_CONTINUE;
         }
+        if (errno != ENOENT)
+                return log_debug_errno(errno, "Failed to test if credential %s exists: %m", sub_id);
 
-        r = set_put_strdup(&args->seen_creds, sub_id);
-        if (r < 0)
-                return r;
-
-        r = load_credential(args->context, args->params,
-                &(ExecLoadCredential) {
-                        .id = sub_id,
-                        .path = (char *) de->d_name,
-                        .encrypted = args->parent_local_credential->encrypted,
-                }, args->unit, dir_fd, args->dfd, args->uid, args->ownership_ok, args->left);
+        r = load_credential(
+                        args->context,
+                        args->params,
+                        sub_id,
+                        de->d_name,
+                        args->encrypted,
+                        args->unit,
+                        dir_fd,
+                        args->dfd,
+                        args->uid,
+                        args->ownership_ok,
+                        args->left);
         if (r < 0)
                 return r;
 
@@ -2767,7 +2847,6 @@ static int acquire_credentials(
 
         uint64_t left = CREDENTIALS_TOTAL_SIZE_MAX;
         _cleanup_close_ int dfd = -1;
-        _cleanup_set_free_ Set *seen_creds = NULL;
         ExecLoadCredential *lc;
         ExecSetCredential *sc;
         int r;
@@ -2779,62 +2858,71 @@ static int acquire_credentials(
         if (dfd < 0)
                 return -errno;
 
-        seen_creds = set_new(&string_hash_ops_free);
-        if (!seen_creds)
-                return -ENOMEM;
-
         /* First, load credentials off disk (or acquire via AF_UNIX socket) */
         HASHMAP_FOREACH(lc, context->load_credentials) {
                 _cleanup_close_ int sub_fd = -1;
 
-                /* Skip over credentials with unspecified paths. These are received by the
-                 * service manager via the $CREDENTIALS_DIRECTORY environment variable. */
-                if (!is_path(lc->path) && streq(lc->id, lc->path))
-                        continue;
+                /* If this is an absolute path, then try to open it as a directory. If that works, then we'll
+                 * recurse into it. If it is an absolute path but it isn't a directory, then we'll open it as
+                 * a regular file. Finally, if it's a relative path we will use it as a credential name to
+                 * propagate a credential passed to us from further up. */
 
-                sub_fd = open(lc->path, O_DIRECTORY|O_CLOEXEC|O_RDONLY);
-                if (sub_fd < 0 && errno != ENOTDIR)
-                        return -errno;
+                if (path_is_absolute(lc->path)) {
+                        sub_fd = open(lc->path, O_DIRECTORY|O_CLOEXEC|O_RDONLY);
+                        if (sub_fd < 0 && !IN_SET(errno,
+                                                  ENOTDIR,  /* Not a directory */
+                                                  ENOENT))  /* Doesn't exist? */
+                                return log_debug_errno(errno, "Failed to open '%s': %m", lc->path);
+                }
 
-                if (sub_fd < 0) {
-                        r = set_put_strdup(&seen_creds, lc->id);
-                        if (r < 0)
-                                return r;
-                        r = load_credential(context, params, lc, unit, -1, dfd, uid, ownership_ok, &left);
-                        if (r < 0)
-                                return r;
-
-                } else {
+                if (sub_fd < 0)
+                        /* Regular file (incl. a credential passed in from higher up) */
+                        r = load_credential(
+                                        context,
+                                        params,
+                                        lc->id,
+                                        lc->path,
+                                        lc->encrypted,
+                                        unit,
+                                        -1,
+                                        dfd,
+                                        uid,
+                                        ownership_ok,
+                                        &left);
+                else
+                        /* Directory */
                         r = recurse_dir(
                                         sub_fd,
-                                        /* path= */ "",
+                                        /* path= */ lc->id, /* recurse_dir() will suffix the subdir paths from here to the top-level id */
                                         /* statx_mask= */ 0,
                                         /* n_depth_max= */ UINT_MAX,
-                                        RECURSE_DIR_IGNORE_DOT|RECURSE_DIR_ENSURE_TYPE,
+                                        RECURSE_DIR_SORT|RECURSE_DIR_IGNORE_DOT|RECURSE_DIR_ENSURE_TYPE,
                                         load_cred_recurse_dir_cb,
                                         &(struct load_cred_args) {
-                                                .seen_creds = seen_creds,
                                                 .context = context,
                                                 .params = params,
-                                                .parent_local_credential = lc,
+                                                .encrypted = lc->encrypted,
                                                 .unit = unit,
                                                 .dfd = dfd,
                                                 .uid = uid,
                                                 .ownership_ok = ownership_ok,
                                                 .left = &left,
                                         });
-                        if (r < 0)
-                                return r;
-                }
+                if (r < 0)
+                        return r;
         }
 
-        /* First we use the literally specified credentials. Note that they might be overridden again below,
-         * and thus act as a "default" if the same credential is specified multiple times */
+        /* Second, we add in literally specified credentials. If the credentials already exist, we'll not add
+         * them, so that they can act as a "default" if the same credential is specified multiple times. */
         HASHMAP_FOREACH(sc, context->set_credentials) {
                 _cleanup_(erase_and_freep) void *plaintext = NULL;
                 const char *data;
                 size_t size, add;
 
+                /* Note that we check ahead of time here instead of relying on O_EXCL|O_CREAT later to return
+                 * EEXIST if the credential already exists. That's because the TPM2-based decryption is kinda
+                 * slow and involved, hence it's nice to be able to skip that if the credential already
+                 * exists anyway. */
                 if (faccessat(dfd, sc->id, F_OK, AT_SYMLINK_NOFOLLOW) >= 0)
                         continue;
                 if (errno != ENOENT)
@@ -2858,7 +2946,6 @@ static int acquire_credentials(
                 r = write_credential(dfd, sc->id, data, size, uid, ownership_ok);
                 if (r < 0)
                         return r;
-
 
                 left -= add;
         }
@@ -6002,11 +6089,6 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 prefix, yes_no(c->lock_personality));
 
         if (c->syscall_filter) {
-#if HAVE_SECCOMP
-                void *id, *val;
-                bool first = true;
-#endif
-
                 fprintf(f,
                         "%sSystemCallFilter: ",
                         prefix);
@@ -6015,6 +6097,8 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                         fputc('~', f);
 
 #if HAVE_SECCOMP
+                void *id, *val;
+                bool first = true;
                 HASHMAP_FOREACH_KEY(val, id, c->syscall_filter) {
                         _cleanup_free_ char *name = NULL;
                         const char *errno_name = NULL;
@@ -6042,15 +6126,12 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
         }
 
         if (c->syscall_archs) {
-#if HAVE_SECCOMP
-                void *id;
-#endif
-
                 fprintf(f,
                         "%sSystemCallArchitectures:",
                         prefix);
 
 #if HAVE_SECCOMP
+                void *id;
                 SET_FOREACH(id, c->syscall_archs)
                         fprintf(f, " %s", strna(seccomp_arch_to_string(PTR_TO_UINT32(id) - 1)));
 #endif
@@ -6080,14 +6161,10 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                         prefix, c->network_namespace_path);
 
         if (c->syscall_errno > 0) {
-#if HAVE_SECCOMP
-                const char *errno_name;
-#endif
-
                 fprintf(f, "%sSystemCallErrorNumber: ", prefix);
 
 #if HAVE_SECCOMP
-                errno_name = seccomp_errno_or_action_to_string(c->syscall_errno);
+                const char *errno_name = seccomp_errno_or_action_to_string(c->syscall_errno);
                 if (errno_name)
                         fputs(errno_name, f);
                 else

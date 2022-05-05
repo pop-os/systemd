@@ -5,12 +5,13 @@ enable_tmpfiles = conf.get('ENABLE_TMPFILES') == 1
 files = [['README',               ''],
          ['home.conf',            ''],
          ['journal-nocow.conf',   ''],
+         ['portables.conf',       'ENABLE_PORTABLED'],
+         ['systemd-network.conf', 'ENABLE_NETWORKD'],
          ['systemd-nologin.conf', 'HAVE_PAM'],
          ['systemd-nspawn.conf',  'ENABLE_MACHINED'],
+         ['systemd-pstore.conf',  'ENABLE_PSTORE'],
          ['systemd-resolve.conf', 'ENABLE_RESOLVE'],
          ['systemd-tmp.conf',     ''],
-         ['portables.conf',       'ENABLE_PORTABLED'],
-         ['systemd-pstore.conf',  'ENABLE_PSTORE'],
          ['tmp.conf',             ''],
          ['x11.conf',             ''],
         ]
@@ -41,7 +42,7 @@ foreach pair : in_files
                         pair[0],
                         input : pair[0] + '.in',
                         output: pair[0],
-                        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
+                        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
                         install : enable_tmpfiles,
                         install_dir : tmpfilesdir)
         else

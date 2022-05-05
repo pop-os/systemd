@@ -14,7 +14,7 @@ custom_target(
         'systemctl',
         input : 'systemctl.in',
         output : 'systemctl',
-        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'],
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
         install : bashcompletiondir != 'no',
         install_dir : bashcompletiondir)
 
@@ -31,7 +31,7 @@ items = [['busctl',              ''],
          ['systemd-path',        ''],
          ['systemd-run',         ''],
          ['udevadm',             ''],
-         ['kernel-install',      ''],
+         ['kernel-install',      'ENABLE_KERNEL_INSTALL'],
          ['bootctl',             'HAVE_GNU_EFI'],
          ['coredumpctl',         'ENABLE_COREDUMP'],
          ['homectl',             'ENABLE_HOMED'],

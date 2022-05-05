@@ -56,6 +56,12 @@ tests += [
           libblkid],
          core_includes],
 
+        [files('test-manager.c'),
+         [libcore,
+          libshared],
+         [],
+         core_includes],
+
         [files('test-emergency-action.c'),
          [libcore,
           libshared],
@@ -166,6 +172,16 @@ tests += [
 
         [files('test-recurse-dir.c')],
 
+        [files('test-compress.c'),
+         [libshared,
+          libbasic_compress]],
+
+        [files('test-compress-benchmark.c'),
+         [libshared,
+          libbasic_compress],
+         [],
+         [], '', 'timeout=90'],
+
         [files('test-data-fd-util.c')],
 
         [files('test-static-destruct.c')],
@@ -238,6 +254,8 @@ tests += [
 
         [files('test-stat-util.c')],
 
+        [files('test-devnum-util.c')],
+
         [files('test-os-util.c')],
 
         [files('test-libcrypt-util.c'),
@@ -255,7 +273,7 @@ tests += [
 
         [files('test-parse-argument.c')],
 
-        [files('test-parse-socket-bind-item.c')],
+        [files('test-parse-helpers.c')],
 
         [files('test-parse-util.c')],
 

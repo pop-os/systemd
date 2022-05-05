@@ -119,7 +119,6 @@ int readlinkat_malloc(int fd, const char *p, char **ret) {
         size_t l = PATH_MAX;
 
         assert(p);
-        assert(ret);
 
         for (;;) {
                 _cleanup_free_ char *c = NULL;
@@ -135,7 +134,10 @@ int readlinkat_malloc(int fd, const char *p, char **ret) {
 
                 if ((size_t) n < l) {
                         c[n] = 0;
-                        *ret = TAKE_PTR(c);
+
+                        if (ret)
+                                *ret = TAKE_PTR(c);
+
                         return 0;
                 }
 
@@ -153,24 +155,23 @@ int readlink_malloc(const char *p, char **ret) {
 }
 
 int readlink_value(const char *p, char **ret) {
-        _cleanup_free_ char *link = NULL;
-        char *value;
+        _cleanup_free_ char *link = NULL, *name = NULL;
         int r;
+
+        assert(p);
+        assert(ret);
 
         r = readlink_malloc(p, &link);
         if (r < 0)
                 return r;
 
-        value = basename(link);
-        if (!value)
-                return -ENOENT;
+        r = path_extract_filename(link, &name);
+        if (r < 0)
+                return r;
+        if (r == O_DIRECTORY)
+                return -EINVAL;
 
-        value = strdup(value);
-        if (!value)
-                return -ENOMEM;
-
-        *ret = value;
-
+        *ret = TAKE_PTR(name);
         return 0;
 }
 

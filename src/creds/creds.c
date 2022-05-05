@@ -40,7 +40,7 @@ static bool arg_legend = true;
 static bool arg_system = false;
 static TranscodeMode arg_transcode = TRANSCODE_OFF;
 static int arg_newline = -1;
-static sd_id128_t arg_with_key = SD_ID128_NULL;
+static sd_id128_t arg_with_key = _CRED_AUTO;
 static const char *arg_tpm2_device = NULL;
 static uint32_t arg_tpm2_pcr_mask = UINT32_MAX;
 static const char *arg_name = NULL;
@@ -48,6 +48,7 @@ static bool arg_name_any = false;
 static usec_t arg_timestamp = USEC_INFINITY;
 static usec_t arg_not_after = USEC_INFINITY;
 static bool arg_pretty = false;
+static bool arg_quiet = false;
 
 static const char* transcode_mode_table[_TRANSCODE_MAX] = {
         [TRANSCODE_OFF] = "off",
@@ -59,63 +60,76 @@ static const char* transcode_mode_table[_TRANSCODE_MAX] = {
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(transcode_mode, TranscodeMode);
 
-static int open_credential_directory(DIR **ret) {
-        _cleanup_free_ char *j = NULL;
+static int open_credential_directory(
+                bool encrypted,
+                DIR **ret_dir,
+                const char **ret_prefix) {
+
         const char *p;
         DIR *d;
         int r;
 
-        if (arg_system) {
-                _cleanup_free_ char *cd = NULL;
+        assert(ret_dir);
 
-                r = getenv_for_pid(1, "CREDENTIALS_DIRECTORY", &cd);
+        if (arg_system)
+                /* PID 1 ensures that system credentials are always accessible under the same fixed path. It
+                 * will create symlinks if necessary to guarantee that. */
+                p = encrypted ?
+                        ENCRYPTED_SYSTEM_CREDENTIALS_DIRECTORY :
+                        SYSTEM_CREDENTIALS_DIRECTORY;
+        else {
+                /* Otherwise take the dirs from the env vars we got passed */
+                r = (encrypted ? get_encrypted_credentials_dir : get_credentials_dir)(&p);
+                if (r == -ENXIO) /* No environment variable? */
+                        goto not_found;
                 if (r < 0)
-                        return r;
-                if (!cd)
-                        return -ENXIO;
-
-                if (!path_is_absolute(cd) || !path_is_normalized(cd))
-                        return -EINVAL;
-
-                j = path_join("/proc/1/root", cd);
-                if (!j)
-                        return -ENOMEM;
-
-                p = j;
-        } else {
-                r = get_credentials_dir(&p);
-                if (r < 0)
-                        return r;
+                        return log_error_errno(r, "Failed to get credentials directory: %m");
         }
 
         d = opendir(p);
-        if (!d)
-                return -errno;
+        if (!d) {
+                /* No such dir? Then no creds where passed. (We conditionalize this on arg_system, since for
+                 * the per-service case a non-existing path would indicate an issue since the env var would
+                 * be set incorrectly in that case.) */
+                if (arg_system && errno == ENOENT)
+                        goto not_found;
 
-        *ret = d;
+                return log_error_errno(errno, "Failed to open credentials directory '%s': %m", p);
+        }
+
+        *ret_dir = d;
+
+        if (ret_prefix)
+                *ret_prefix = p;
+
+        return 1;
+
+not_found:
+        *ret_dir = NULL;
+
+        if (ret_prefix)
+                *ret_prefix = NULL;
+
         return 0;
 }
 
-static int verb_list(int argc, char **argv, void *userdata) {
-        _cleanup_(table_unrefp) Table *t = NULL;
+static int add_credentials_to_table(Table *t, bool encrypted) {
         _cleanup_(closedirp) DIR *d = NULL;
+        const char *prefix;
         int r;
 
-        r = open_credential_directory(&d);
-        if (r == -ENXIO)
-                return log_error_errno(r, "No credentials received. (i.e. $CREDENTIALS_PATH not set or pointing to empty directory.)");
+        assert(t);
+
+        r = open_credential_directory(encrypted, &d, &prefix);
         if (r < 0)
-                return log_error_errno(r, "Failed to open credentials directory: %m");
-
-        t = table_new("name", "secure", "size");
-        if (!t)
-                return log_oom();
-
-        (void) table_set_align_percent(t, table_get_cell(t, 0, 2), 100);
+                return r;
+        if (!d)
+                return 0; /* No creds dir set */
 
         for (;;) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_free_ char *j = NULL;
                 const char *secure, *secure_color = NULL;
+                _cleanup_close_ int fd = -1;
                 struct dirent *de;
                 struct stat st;
 
@@ -148,7 +162,10 @@ static int verb_list(int argc, char **argv, void *userdata) {
                 if (!S_ISREG(st.st_mode))
                         continue;
 
-                if ((st.st_mode & 0377) != 0) {
+                if (encrypted) {
+                        secure = "encrypted";
+                        secure_color = ansi_highlight_green();
+                } else if ((st.st_mode & 0377) != 0) {
                         secure = "insecure"; /* Anything that is accessible more than read-only to its owner is insecure */
                         secure_color = ansi_highlight_red();
                 } else {
@@ -160,14 +177,47 @@ static int verb_list(int argc, char **argv, void *userdata) {
                         secure_color = r ? ansi_highlight_green() : ansi_highlight_yellow4();
                 }
 
+                j = path_join(prefix, de->d_name);
+                if (!j)
+                        return log_oom();
+
                 r = table_add_many(
                                 t,
                                 TABLE_STRING, de->d_name,
                                 TABLE_STRING, secure,
                                 TABLE_SET_COLOR, secure_color,
-                                TABLE_SIZE, (uint64_t) st.st_size);
+                                TABLE_SIZE, (uint64_t) st.st_size,
+                                TABLE_STRING, j);
                 if (r < 0)
                         return table_log_add_error(r);
+        }
+
+        return 1; /* Creds dir set */
+}
+
+static int verb_list(int argc, char **argv, void *userdata) {
+        _cleanup_(table_unrefp) Table *t = NULL;
+        int r, q;
+
+        t = table_new("name", "secure", "size", "path");
+        if (!t)
+                return log_oom();
+
+        (void) table_set_align_percent(t, table_get_cell(t, 0, 2), 100);
+
+        r = add_credentials_to_table(t, /* encrypted= */ true);
+        if (r < 0)
+                return r;
+
+        q = add_credentials_to_table(t, /* encrypted= */ false);
+        if (q < 0)
+                return q;
+
+        if (r == 0 && q == 0) {
+                if (arg_system)
+                        return log_error_errno(SYNTHETIC_ERRNO(ENXIO), "No credentials passed to system.");
+
+                return log_error_errno(SYNTHETIC_ERRNO(ENXIO), "No credentials passed. (i.e. $CREDENTIALS_DIRECTORY not set.)");
         }
 
         if ((arg_json_format_flags & JSON_FORMAT_OFF) && table_get_rows(t) <= 1) {
@@ -309,18 +359,15 @@ static int write_blob(FILE *f, const void *data, size_t size) {
 }
 
 static int verb_cat(int argc, char **argv, void *userdata) {
-        _cleanup_(closedirp) DIR *d = NULL;
+        usec_t timestamp;
         int r, ret = 0;
 
-        r = open_credential_directory(&d);
-        if (r == -ENXIO)
-                return log_error_errno(r, "No credentials passed.");
-        if (r < 0)
-                return log_error_errno(r, "Failed to open credentials directory: %m");
+        timestamp = arg_timestamp != USEC_INFINITY ? arg_timestamp : now(CLOCK_REALTIME);
 
         STRV_FOREACH(cn, strv_skip(argv, 1)) {
                 _cleanup_(erase_and_freep) void *data = NULL;
                 size_t size = 0;
+                int encrypted;
 
                 if (!credential_name_valid(*cn)) {
                         log_error("Credential name '%s' is not valid.", *cn);
@@ -329,17 +376,56 @@ static int verb_cat(int argc, char **argv, void *userdata) {
                         continue;
                 }
 
-                r = read_full_file_full(
-                                dirfd(d), *cn,
-                                UINT64_MAX, SIZE_MAX,
-                                READ_FULL_FILE_SECURE|READ_FULL_FILE_WARN_WORLD_READABLE,
-                                NULL,
-                                (char**) &data, &size);
-                if (r < 0) {
+                /* Look both in regular and in encrypted credentials */
+                for (encrypted = 0; encrypted < 2; encrypted++) {
+                        _cleanup_(closedirp) DIR *d = NULL;
+
+                        r = open_credential_directory(encrypted, &d, NULL);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to open credentials directory: %m");
+                        if (!d) /* Not set */
+                                continue;
+
+                        r = read_full_file_full(
+                                        dirfd(d), *cn,
+                                        UINT64_MAX, SIZE_MAX,
+                                        READ_FULL_FILE_SECURE|READ_FULL_FILE_WARN_WORLD_READABLE,
+                                        NULL,
+                                        (char**) &data, &size);
+                        if (r == -ENOENT) /* Not found */
+                                continue;
+                        if (r >= 0) /* Found */
+                                break;
+
                         log_error_errno(r, "Failed to read credential '%s': %m", *cn);
                         if (ret >= 0)
                                 ret = r;
+                }
+
+                if (encrypted >= 2) { /* Found nowhere */
+                        log_error_errno(SYNTHETIC_ERRNO(ENOENT), "Credential '%s' not set.", *cn);
+                        if (ret >= 0)
+                                ret = -ENOENT;
+
                         continue;
+                }
+
+                if (encrypted) {
+                        _cleanup_(erase_and_freep) void *plaintext = NULL;
+                        size_t plaintext_size;
+
+                        r = decrypt_credential_and_warn(
+                                        *cn,
+                                        timestamp,
+                                        arg_tpm2_device,
+                                        data, size,
+                                        &plaintext, &plaintext_size);
+                        if (r < 0)
+                                return r;
+
+                        erase_and_free(data);
+                        data = TAKE_PTR(plaintext);
+                        size = plaintext_size;
                 }
 
                 r = write_blob(stdout, data, size);
@@ -525,6 +611,34 @@ static int verb_setup(int argc, char **argv, void *userdata) {
         return EXIT_SUCCESS;
 }
 
+static int verb_has_tpm2(int argc, char **argv, void *userdata) {
+        Tpm2Support s;
+
+        s = tpm2_support();
+
+        if (!arg_quiet) {
+                if (s == TPM2_SUPPORT_FULL)
+                        puts("yes");
+                else if (s == TPM2_SUPPORT_NONE)
+                        puts("no");
+                else
+                        puts("partial");
+
+                printf("%sfirmware\n"
+                       "%sdriver\n"
+                       "%ssystem\n",
+                       plus_minus(s & TPM2_SUPPORT_FIRMWARE),
+                       plus_minus(s & TPM2_SUPPORT_DRIVER),
+                       plus_minus(s & TPM2_SUPPORT_SYSTEM));
+        }
+
+        /* Return inverted bit flags. So that TPM2_SUPPORT_FULL becomes EXIT_SUCCESS and the other values
+         * become some reasonable values 1…7. i.e. the flags we return here tell what is missing rather than
+         * what is there, acknowledging the fact that for process exit statuses it is customary to return
+         * zero (EXIT_FAILURE) when all is good, instead of all being bad. */
+        return ~s & TPM2_SUPPORT_FULL;
+}
+
 static int verb_help(int argc, char **argv, void *userdata) {
         _cleanup_free_ char *link = NULL;
         int r;
@@ -543,6 +657,7 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "                          ciphertext credential file\n"
                "  decrypt INPUT [OUTPUT]  Decrypt ciphertext credential file and write to\n"
                "                          plaintext credential file\n"
+               "  has-tpm2                Report whether TPM2 support is available\n"
                "  -h --help               Show this help\n"
                "     --version            Show package version\n"
                "\n%3$sOptions:%4$s\n"
@@ -560,7 +675,7 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "     --timestamp=TIME     Include specified timestamp in encrypted credential\n"
                "     --not-after=TIME     Include specified invalidation time in encrypted\n"
                "                          credential\n"
-               "     --with-key=host|tpm2|host+tpm2|auto\n"
+               "     --with-key=host|tpm2|host+tpm2|tpm2-absent|auto|auto-initrd\n"
                "                          Which keys to encrypt with\n"
                "  -H                      Shortcut for --with-key=host\n"
                "  -T                      Shortcut for --with-key=tpm2\n"
@@ -568,6 +683,7 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "                          Pick TPM2 device\n"
                "     --tpm2-pcrs=PCR1+PCR2+PCR3+…\n"
                "                          Specify TPM2 PCRs to seal against\n"
+               "  -q --quiet              Suppress output for 'has-tpm2' verb\n"
                "\nSee the %2$s for details.\n"
                , program_invocation_short_name
                , link
@@ -612,6 +728,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "name",        required_argument, NULL, ARG_NAME        },
                 { "timestamp",   required_argument, NULL, ARG_TIMESTAMP   },
                 { "not-after",   required_argument, NULL, ARG_NOT_AFTER   },
+                { "quiet",       no_argument,       NULL, 'q'             },
                 {}
         };
 
@@ -620,7 +737,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hHTp", options, NULL)) >= 0) {
+        while ((c = getopt_long(argc, argv, "hHTpq", options, NULL)) >= 0) {
 
                 switch (c) {
 
@@ -684,13 +801,17 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_WITH_KEY:
                         if (isempty(optarg) || streq(optarg, "auto"))
-                                arg_with_key = SD_ID128_NULL;
+                                arg_with_key = _CRED_AUTO;
+                        else if (streq(optarg, "auto-initrd"))
+                                arg_with_key = _CRED_AUTO_INITRD;
                         else if (streq(optarg, "host"))
                                 arg_with_key = CRED_AES256_GCM_BY_HOST;
                         else if (streq(optarg, "tpm2"))
                                 arg_with_key = CRED_AES256_GCM_BY_TPM2_HMAC;
                         else if (STR_IN_SET(optarg, "host+tpm2", "tpm2+host"))
                                 arg_with_key = CRED_AES256_GCM_BY_HOST_AND_TPM2_HMAC;
+                        else if (streq(optarg, "tpm2-absent"))
+                                arg_with_key = CRED_AES256_GCM_BY_TPM2_ABSENT;
                         else
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown key type: %s", optarg);
 
@@ -757,6 +878,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case 'q':
+                        arg_quiet = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -774,12 +899,13 @@ static int parse_argv(int argc, char *argv[]) {
 static int creds_main(int argc, char *argv[]) {
 
         static const Verb verbs[] = {
-                { "list",    VERB_ANY, 1,        VERB_DEFAULT, verb_list    },
-                { "cat",     2,        VERB_ANY, 0,            verb_cat     },
-                { "encrypt", 3,        3,        0,            verb_encrypt },
-                { "decrypt", 2,        3,        0,            verb_decrypt },
-                { "setup",   VERB_ANY, 1,        0,            verb_setup   },
-                { "help",    VERB_ANY, 1,        0,            verb_help    },
+                { "list",     VERB_ANY, 1,        VERB_DEFAULT, verb_list     },
+                { "cat",      2,        VERB_ANY, 0,            verb_cat      },
+                { "encrypt",  3,        3,        0,            verb_encrypt  },
+                { "decrypt",  2,        3,        0,            verb_decrypt  },
+                { "setup",    VERB_ANY, 1,        0,            verb_setup    },
+                { "help",     VERB_ANY, 1,        0,            verb_help     },
+                { "has-tpm2", VERB_ANY, 1,        0,            verb_has_tpm2 },
                 {}
         };
 

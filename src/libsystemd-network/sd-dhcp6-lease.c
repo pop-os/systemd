@@ -338,7 +338,7 @@ int dhcp6_lease_add_ntp(sd_dhcp6_lease *lease, const uint8_t *optval, size_t opt
                 if (r < 0)
                         return r;
 
-                switch(subopt) {
+                switch (subopt) {
                 case DHCP6_NTP_SUBOPTION_SRV_ADDR:
                 case DHCP6_NTP_SUBOPTION_MC_ADDR:
                         if (sublen != 16)
@@ -570,14 +570,14 @@ static int dhcp6_lease_parse_message(
 
                         break;
 
-                case SD_DHCP6_OPTION_DNS_SERVERS:
+                case SD_DHCP6_OPTION_DNS_SERVER:
                         r = dhcp6_lease_add_dns(lease, optval, optlen);
                         if (r < 0)
                                 log_dhcp6_client_errno(client, r, "Failed to parse DNS server option, ignoring: %m");
 
                         break;
 
-                case SD_DHCP6_OPTION_DOMAIN_LIST:
+                case SD_DHCP6_OPTION_DOMAIN:
                         r = dhcp6_lease_add_domains(lease, optval, optlen);
                         if (r < 0)
                                 log_dhcp6_client_errno(client, r, "Failed to parse domain list option, ignoring: %m");
@@ -591,7 +591,7 @@ static int dhcp6_lease_parse_message(
 
                         break;
 
-                case SD_DHCP6_OPTION_SNTP_SERVERS:
+                case SD_DHCP6_OPTION_SNTP_SERVER:
                         r = dhcp6_lease_add_sntp(lease, optval, optlen);
                         if (r < 0)
                                 log_dhcp6_client_errno(client, r, "Failed to parse SNTP server option, ignoring: %m");

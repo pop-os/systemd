@@ -5,12 +5,12 @@
 
 #include "bpf-devices.h"
 #include "bpf-program.h"
+#include "devnum-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "nulstr-util.h"
 #include "parse-util.h"
 #include "path-util.h"
-#include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 
@@ -22,7 +22,7 @@ static int bpf_access_type(const char *acc) {
         assert(acc);
 
         for (; *acc; acc++)
-                switch(*acc) {
+                switch (*acc) {
                 case 'r':
                         r |= BPF_DEVCG_ACC_READ;
                         break;

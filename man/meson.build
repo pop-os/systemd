@@ -30,7 +30,7 @@ custom_entities_ent = custom_target(
         'custom-entities.ent',
         input : 'custom-entities.ent.in',
         output : 'custom-entities.ent',
-        command : [meson_render_jinja2, config_h, '@INPUT@', '@OUTPUT@'])
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'])
 
 man_pages = []
 html_pages = []
@@ -226,6 +226,7 @@ update_dbus_docs = custom_target(
 if conf.get('BUILD_MODE_DEVELOPER') == 1
         test('dbus-docs-fresh',
              update_dbus_docs_py,
+             suite : 'dist-check',
              args : ['--build-dir', project_build_root, '--test', dbus_docs],
              depends : dbus_programs)
 endif

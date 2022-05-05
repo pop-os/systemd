@@ -493,7 +493,6 @@ static int next_for_match(
 
         int r;
         uint64_t np = 0;
-        Object *n;
 
         assert(j);
         assert(m);
@@ -569,12 +568,12 @@ static int next_for_match(
 
         assert(np > 0);
 
-        r = journal_file_move_to_object(f, OBJECT_ENTRY, np, &n);
-        if (r < 0)
-                return r;
+        if (ret) {
+                r = journal_file_move_to_object(f, OBJECT_ENTRY, np, ret);
+                if (r < 0)
+                        return r;
+        }
 
-        if (ret)
-                *ret = n;
         if (offset)
                 *offset = np;
 
@@ -633,7 +632,6 @@ static int find_location_for_match(
 
         } else if (m->type == MATCH_OR_TERM) {
                 uint64_t np = 0;
-                Object *n;
 
                 /* Find the earliest match */
 
@@ -652,12 +650,12 @@ static int find_location_for_match(
                 if (np == 0)
                         return 0;
 
-                r = journal_file_move_to_object(f, OBJECT_ENTRY, np, &n);
-                if (r < 0)
-                        return r;
+                if (ret) {
+                        r = journal_file_move_to_object(f, OBJECT_ENTRY, np, ret);
+                        if (r < 0)
+                                return r;
+                }
 
-                if (ret)
-                        *ret = n;
                 if (offset)
                         *offset = np;
 
@@ -2298,7 +2296,7 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
                 Object *d;
                 uint64_t p, l;
                 size_t t;
-                int compression;
+                Compression c;
 
                 p = le64toh(o->entry.items[i].object_offset);
                 r = journal_file_move_to_object(f, OBJECT_DATA, p, &d);
@@ -2311,24 +2309,28 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
 
                 l = le64toh(d->object.size) - offsetof(Object, data.payload);
 
-                compression = d->object.flags & OBJECT_COMPRESSION_MASK;
-                if (compression) {
+                c = COMPRESSION_FROM_OBJECT(d);
+                if (c < 0)
+                        return -EPROTONOSUPPORT;
+                if (c != COMPRESSION_NONE) {
 #if HAVE_COMPRESSION
-                        r = decompress_startswith(compression,
-                                                  d->data.payload, l,
-                                                  &f->compress_buffer,
-                                                  field, field_length, '=');
+                        r = decompress_startswith(
+                                        c,
+                                        d->data.payload, l,
+                                        &f->compress_buffer,
+                                        field, field_length, '=');
                         if (r < 0)
                                 log_debug_errno(r, "Cannot decompress %s object of length %"PRIu64" at offset "OFSfmt": %m",
-                                                object_compressed_to_string(compression), l, p);
+                                                compression_to_string(c), l, p);
                         else if (r > 0) {
 
                                 size_t rsize;
 
-                                r = decompress_blob(compression,
-                                                    d->data.payload, l,
-                                                    &f->compress_buffer, &rsize,
-                                                    j->data_threshold);
+                                r = decompress_blob(
+                                                c,
+                                                d->data.payload, l,
+                                                &f->compress_buffer, &rsize,
+                                                j->data_threshold);
                                 if (r < 0)
                                         return r;
 
@@ -2366,9 +2368,9 @@ static int return_data(
                 const void **ret_data,
                 size_t *ret_size) {
 
-        size_t t;
+        Compression c;
         uint64_t l;
-        int compression;
+        size_t t;
 
         assert(j);
         assert(f);
@@ -2383,14 +2385,16 @@ static int return_data(
         if ((uint64_t) t != l)
                 return -E2BIG;
 
-        compression = o->object.flags & OBJECT_COMPRESSION_MASK;
-        if (compression) {
+        c = COMPRESSION_FROM_OBJECT(o);
+        if (c < 0)
+                return -EPROTONOSUPPORT;
+        if (c != COMPRESSION_NONE) {
 #if HAVE_COMPRESSION
                 size_t rsize;
                 int r;
 
                 r = decompress_blob(
-                                compression,
+                                c,
                                 o->data.payload, l,
                                 &f->compress_buffer, &rsize,
                                 j->data_threshold);

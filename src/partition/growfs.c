@@ -14,6 +14,7 @@
 #include "btrfs-util.h"
 #include "cryptsetup-util.h"
 #include "device-nodes.h"
+#include "devnum-util.h"
 #include "dissect-image.h"
 #include "escape.h"
 #include "fd-util.h"
@@ -165,7 +166,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argv);
 
         while ((c = getopt_long(argc, argv, "hn", options, NULL)) >= 0)
-                switch(c) {
+                switch (c) {
                 case 'h':
                         return help();
 

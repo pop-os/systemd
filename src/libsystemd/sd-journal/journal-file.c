@@ -191,7 +191,7 @@ static int journal_file_set_online(JournalFile *f) {
 
         assert(f);
 
-        if (!f->writable)
+        if (!journal_file_writable(f))
                 return -EPERM;
 
         if (f->fd < 0 || !f->header)
@@ -285,24 +285,38 @@ JournalFile* journal_file_close(JournalFile *f) {
         return mfree(f);
 }
 
-static int journal_file_init_header(JournalFile *f, JournalFile *template) {
+static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags, JournalFile *template) {
         Header h = {};
         ssize_t k;
+        bool keyed_hash, seal = false;
         int r;
 
         assert(f);
+
+        /* We turn on keyed hashes by default, but provide an environment variable to turn them off, if
+         * people really want that */
+        r = getenv_bool("SYSTEMD_JOURNAL_KEYED_HASH");
+        if (r < 0) {
+                if (r != -ENXIO)
+                        log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_KEYED_HASH environment variable, ignoring: %m");
+                keyed_hash = true;
+        } else
+                keyed_hash = r;
+
+#if HAVE_GCRYPT
+        /* Try to load the FSPRG state, and if we can't, then just don't do sealing */
+        seal = FLAGS_SET(file_flags, JOURNAL_SEAL) && journal_file_fss_load(f) >= 0;
+#endif
 
         memcpy(h.signature, HEADER_SIGNATURE, 8);
         h.header_size = htole64(ALIGN64(sizeof(h)));
 
         h.incompatible_flags |= htole32(
-                f->compress_xz * HEADER_INCOMPATIBLE_COMPRESSED_XZ |
-                f->compress_lz4 * HEADER_INCOMPATIBLE_COMPRESSED_LZ4 |
-                f->compress_zstd * HEADER_INCOMPATIBLE_COMPRESSED_ZSTD |
-                f->keyed_hash * HEADER_INCOMPATIBLE_KEYED_HASH);
+                        FLAGS_SET(file_flags, JOURNAL_COMPRESS) *
+                        COMPRESSION_TO_HEADER_INCOMPATIBLE_FLAG(DEFAULT_COMPRESSION) |
+                        keyed_hash * HEADER_INCOMPATIBLE_KEYED_HASH);
 
-        h.compatible_flags = htole32(
-                f->seal * HEADER_COMPATIBLE_SEALED);
+        h.compatible_flags = htole32(seal * HEADER_COMPATIBLE_SEALED);
 
         r = sd_id128_randomize(&h.file_id);
         if (r < 0)
@@ -409,7 +423,7 @@ static int journal_file_verify_header(JournalFile *f) {
                 return -EPROTONOSUPPORT;
 
         /* When open for writing we refuse to open files with compatible flags, too. */
-        if (f->writable && warn_wrong_flags(f, true))
+        if (journal_file_writable(f) && warn_wrong_flags(f, true))
                 return -EPROTONOSUPPORT;
 
         if (f->header->state >= _STATE_MAX)
@@ -438,7 +452,7 @@ static int journal_file_verify_header(JournalFile *f) {
             !VALID64(le64toh(f->header->entry_array_offset)))
                 return -ENODATA;
 
-        if (f->writable) {
+        if (journal_file_writable(f)) {
                 sd_id128_t machine_id;
                 uint8_t state;
                 int r;
@@ -474,14 +488,6 @@ static int journal_file_verify_header(JournalFile *f) {
                                                "Journal file %s is from the future, refusing to append new data to it that'd be older.",
                                                f->path);
         }
-
-        f->compress_xz = JOURNAL_HEADER_COMPRESSED_XZ(f->header);
-        f->compress_lz4 = JOURNAL_HEADER_COMPRESSED_LZ4(f->header);
-        f->compress_zstd = JOURNAL_HEADER_COMPRESSED_ZSTD(f->header);
-
-        f->seal = JOURNAL_HEADER_SEALED(f->header);
-
-        f->keyed_hash = JOURNAL_HEADER_KEYED_HASH(f->header);
 
         return 0;
 }
@@ -1240,7 +1246,7 @@ static int next_hash_offset(
                 (*depth)++;
 
                 /* If the depth of this hash chain is larger than all others we have seen so far, record it */
-                if (header_max_depth && f->writable)
+                if (header_max_depth && journal_file_writable(f))
                         *header_max_depth = htole64(MAX(*depth, le64toh(*header_max_depth)));
         }
 
@@ -1372,6 +1378,7 @@ int journal_file_find_data_object_with_hash(
         p = le64toh(f->data_hash_table[h].head_hash_offset);
 
         while (p > 0) {
+                Compression c;
                 Object *o;
 
                 r = journal_file_move_to_object(f, OBJECT_DATA, p, &o);
@@ -1381,7 +1388,10 @@ int journal_file_find_data_object_with_hash(
                 if (le64toh(o->data.hash) != hash)
                         goto next;
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK) {
+                c = COMPRESSION_FROM_OBJECT(o);
+                if (c < 0)
+                        return -EPROTONOSUPPORT;
+                if (c != COMPRESSION_NONE) {
 #if HAVE_COMPRESSION
                         uint64_t l;
                         size_t rsize = 0;
@@ -1392,8 +1402,7 @@ int journal_file_find_data_object_with_hash(
 
                         l -= offsetof(Object, data.payload);
 
-                        r = decompress_blob(o->object.flags & OBJECT_COMPRESSION_MASK,
-                                            o->data.payload, l, &f->compress_buffer, &rsize, 0);
+                        r = decompress_blob(c, o->data.payload, l, &f->compress_buffer, &rsize, 0);
                         if (r < 0)
                                 return r;
 
@@ -1584,16 +1593,15 @@ static int journal_file_append_data(
                 size_t rsize = 0;
 
                 compression = compress_blob(data, size, o->data.payload, size - 1, &rsize);
-
-                if (compression >= 0) {
+                if (compression > COMPRESSION_NONE) {
                         o->object.size = htole64(offsetof(Object, data.payload) + rsize);
-                        o->object.flags |= compression;
+                        o->object.flags |= COMPRESSION_TO_OBJECT_FLAG(compression);
 
                         log_debug("Compressed data object %"PRIu64" -> %zu using %s",
-                                  size, rsize, object_compressed_to_string(compression));
+                                  size, rsize, compression_to_string(compression));
                 } else
                         /* Compression didn't work, we don't really care why, let's continue without compression */
-                        compression = 0;
+                        compression = COMPRESSION_NONE;
         }
 #endif
 
@@ -2355,6 +2363,19 @@ static int generic_array_bisect(
                 Object **ret,
                 uint64_t *ret_offset,
                 uint64_t *ret_idx) {
+
+        /* Given an entry array chain, this function finds the object "closest" to the given needle in the
+         * chain, taking into account the provided direction. A function can be provided to determine how
+         * an object is matched against the given needle.
+         *
+         * Given a journal file, the offset of an object and the needle, the test_object() function should
+         * return TEST_LEFT if the needle is located earlier in the entry array chain, TEST_RIGHT if the
+         * needle is located later in the entry array chain and TEST_FOUND if the object matches the needle.
+         * If test_object() returns TEST_FOUND for a specific object, that object's information will be used
+         * to populate the return values of this function. If test_object() never returns TEST_FOUND, the
+         * return values are populated with the details of one of the objects closest to the needle. If the
+         * direction is DIRECTION_UP, the earlier object is used. Otherwise, the later object is used.
+         */
 
         uint64_t a, p, t = 0, i = 0, last_p = 0, last_index = UINT64_MAX;
         bool subtract_one = false;
@@ -3143,6 +3164,7 @@ void journal_file_dump(JournalFile *f) {
         p = le64toh(READ_NOW(f->header->header_size));
         while (p != 0) {
                 const char *s;
+                Compression c;
 
                 r = journal_file_move_to_object(f, OBJECT_UNUSED, p, &o);
                 if (r < 0)
@@ -3180,9 +3202,10 @@ void journal_file_dump(JournalFile *f) {
                         break;
                 }
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK)
+                c = COMPRESSION_FROM_OBJECT(o);
+                if (c > COMPRESSION_NONE)
                         printf("Flags: %s\n",
-                               object_compressed_to_string(o->object.flags & OBJECT_COMPRESSION_MASK));
+                               compression_to_string(c));
 
                 if (p == le64toh(f->header->tail_object_offset))
                         p = 0;
@@ -3318,6 +3341,84 @@ static int journal_file_warn_btrfs(JournalFile *f) {
         return 1;
 }
 
+static void journal_default_metrics(JournalMetrics *m, int fd) {
+        struct statvfs ss;
+        uint64_t fs_size = 0;
+
+        assert(m);
+        assert(fd >= 0);
+
+        if (fstatvfs(fd, &ss) >= 0)
+                fs_size = ss.f_frsize * ss.f_blocks;
+        else
+                log_debug_errno(errno, "Failed to determine disk size: %m");
+
+        if (m->max_use == UINT64_MAX) {
+
+                if (fs_size > 0)
+                        m->max_use = CLAMP(PAGE_ALIGN(fs_size / 10), /* 10% of file system size */
+                                           MAX_USE_LOWER, MAX_USE_UPPER);
+                else
+                        m->max_use = MAX_USE_LOWER;
+        } else {
+                m->max_use = PAGE_ALIGN(m->max_use);
+
+                if (m->max_use != 0 && m->max_use < JOURNAL_FILE_SIZE_MIN*2)
+                        m->max_use = JOURNAL_FILE_SIZE_MIN*2;
+        }
+
+        if (m->min_use == UINT64_MAX) {
+                if (fs_size > 0)
+                        m->min_use = CLAMP(PAGE_ALIGN(fs_size / 50), /* 2% of file system size */
+                                           MIN_USE_LOW, MIN_USE_HIGH);
+                else
+                        m->min_use = MIN_USE_LOW;
+        }
+
+        if (m->min_use > m->max_use)
+                m->min_use = m->max_use;
+
+        if (m->max_size == UINT64_MAX)
+                m->max_size = MIN(PAGE_ALIGN(m->max_use / 8), /* 8 chunks */
+                                  MAX_SIZE_UPPER);
+        else
+                m->max_size = PAGE_ALIGN(m->max_size);
+
+        if (m->max_size != 0) {
+                if (m->max_size < JOURNAL_FILE_SIZE_MIN)
+                        m->max_size = JOURNAL_FILE_SIZE_MIN;
+
+                if (m->max_use != 0 && m->max_size*2 > m->max_use)
+                        m->max_use = m->max_size*2;
+        }
+
+        if (m->min_size == UINT64_MAX)
+                m->min_size = JOURNAL_FILE_SIZE_MIN;
+        else
+                m->min_size = CLAMP(PAGE_ALIGN(m->min_size),
+                                    JOURNAL_FILE_SIZE_MIN,
+                                    m->max_size ?: UINT64_MAX);
+
+        if (m->keep_free == UINT64_MAX) {
+                if (fs_size > 0)
+                        m->keep_free = MIN(PAGE_ALIGN(fs_size / 20), /* 5% of file system size */
+                                           KEEP_FREE_UPPER);
+                else
+                        m->keep_free = DEFAULT_KEEP_FREE;
+        }
+
+        if (m->n_max_files == UINT64_MAX)
+                m->n_max_files = DEFAULT_N_MAX_FILES;
+
+        log_debug("Fixed min_use=%s max_use=%s max_size=%s min_size=%s keep_free=%s n_max_files=%" PRIu64,
+                  FORMAT_BYTES(m->min_use),
+                  FORMAT_BYTES(m->max_use),
+                  FORMAT_BYTES(m->max_size),
+                  FORMAT_BYTES(m->min_size),
+                  FORMAT_BYTES(m->keep_free),
+                  m->n_max_files);
+}
+
 int journal_file_open(
                 int fd,
                 const char *fname,
@@ -3355,53 +3456,11 @@ int journal_file_open(
         *f = (JournalFile) {
                 .fd = fd,
                 .mode = mode,
-
                 .open_flags = open_flags,
-                .writable = (open_flags & O_ACCMODE) != O_RDONLY,
-
-#if HAVE_ZSTD
-                .compress_zstd = FLAGS_SET(file_flags, JOURNAL_COMPRESS),
-#elif HAVE_LZ4
-                .compress_lz4 = FLAGS_SET(file_flags, JOURNAL_COMPRESS),
-#elif HAVE_XZ
-                .compress_xz = FLAGS_SET(file_flags, JOURNAL_COMPRESS),
-#endif
                 .compress_threshold_bytes = compress_threshold_bytes == UINT64_MAX ?
                                             DEFAULT_COMPRESS_THRESHOLD :
                                             MAX(MIN_COMPRESS_THRESHOLD, compress_threshold_bytes),
-#if HAVE_GCRYPT
-                .seal = FLAGS_SET(file_flags, JOURNAL_SEAL),
-#endif
         };
-
-        /* We turn on keyed hashes by default, but provide an environment variable to turn them off, if
-         * people really want that */
-        r = getenv_bool("SYSTEMD_JOURNAL_KEYED_HASH");
-        if (r < 0) {
-                if (r != -ENXIO)
-                        log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_KEYED_HASH environment variable, ignoring: %m");
-                f->keyed_hash = true;
-        } else
-                f->keyed_hash = r;
-
-        if (DEBUG_LOGGING) {
-                static int last_seal = -1, last_compress = -1, last_keyed_hash = -1;
-                static uint64_t last_bytes = UINT64_MAX;
-
-                if (last_seal != f->seal ||
-                    last_keyed_hash != f->keyed_hash ||
-                    last_compress != JOURNAL_FILE_COMPRESS(f) ||
-                    last_bytes != f->compress_threshold_bytes) {
-
-                        log_debug("Journal effective settings seal=%s keyed_hash=%s compress=%s compress_threshold_bytes=%s",
-                                  yes_no(f->seal), yes_no(f->keyed_hash), yes_no(JOURNAL_FILE_COMPRESS(f)),
-                                  FORMAT_BYTES(f->compress_threshold_bytes));
-                        last_seal = f->seal;
-                        last_keyed_hash = f->keyed_hash;
-                        last_compress = JOURNAL_FILE_COMPRESS(f);
-                        last_bytes = f->compress_threshold_bytes;
-                }
-        }
 
         if (fname) {
                 f->path = strdup(fname);
@@ -3454,7 +3513,7 @@ int journal_file_open(
                         goto fail;
 
                 /* If we just got the fd passed in, we don't really know if we created the file anew */
-                newly_created = f->last_stat.st_size == 0 && f->writable;
+                newly_created = f->last_stat.st_size == 0 && journal_file_writable(f);
         }
 
         f->cache_fd = mmap_cache_add_fd(mmap_cache, f->fd, prot_from_flags(open_flags));
@@ -3473,17 +3532,7 @@ int journal_file_open(
                  * solely on mtime/atime/ctime of the file. */
                 (void) fd_setcrtime(f->fd, 0);
 
-#if HAVE_GCRYPT
-                /* Try to load the FSPRG state, and if we can't, then
-                 * just don't do sealing */
-                if (f->seal) {
-                        r = journal_file_fss_load(f);
-                        if (r < 0)
-                                f->seal = false;
-                }
-#endif
-
-                r = journal_file_init_header(f, template);
+                r = journal_file_init_header(f, file_flags, template);
                 if (r < 0)
                         goto fail;
 
@@ -3517,14 +3566,14 @@ int journal_file_open(
         }
 
 #if HAVE_GCRYPT
-        if (!newly_created && f->writable) {
+        if (!newly_created && journal_file_writable(f) && JOURNAL_HEADER_SEALED(f->header)) {
                 r = journal_file_fss_load(f);
                 if (r < 0)
                         goto fail;
         }
 #endif
 
-        if (f->writable) {
+        if (journal_file_writable(f)) {
                 if (metrics) {
                         journal_default_metrics(metrics, f->fd);
                         f->metrics = *metrics;
@@ -3576,6 +3625,25 @@ int journal_file_open(
         /* The file is opened now successfully, thus we take possession of any passed in fd. */
         f->close_fd = true;
 
+        if (DEBUG_LOGGING) {
+                static int last_seal = -1, last_compress = -1, last_keyed_hash = -1;
+                static uint64_t last_bytes = UINT64_MAX;
+
+                if (last_seal != JOURNAL_HEADER_SEALED(f->header) ||
+                    last_keyed_hash != JOURNAL_HEADER_KEYED_HASH(f->header) ||
+                    last_compress != JOURNAL_FILE_COMPRESS(f) ||
+                    last_bytes != f->compress_threshold_bytes) {
+
+                        log_debug("Journal effective settings seal=%s keyed_hash=%s compress=%s compress_threshold_bytes=%s",
+                                  yes_no(JOURNAL_HEADER_SEALED(f->header)), yes_no(JOURNAL_HEADER_KEYED_HASH(f->header)),
+                                  yes_no(JOURNAL_FILE_COMPRESS(f)), FORMAT_BYTES(f->compress_threshold_bytes));
+                        last_seal = JOURNAL_HEADER_SEALED(f->header);
+                        last_keyed_hash = JOURNAL_HEADER_KEYED_HASH(f->header);
+                        last_compress = JOURNAL_FILE_COMPRESS(f);
+                        last_bytes = f->compress_threshold_bytes;
+                }
+        }
+
         *ret = f;
         return 0;
 
@@ -3585,6 +3653,9 @@ fail:
 
         (void) journal_file_close(f);
 
+        if (newly_created && fd < 0)
+                (void) unlink(fname);
+
         return r;
 }
 
@@ -3593,7 +3664,7 @@ int journal_file_archive(JournalFile *f, char **ret_previous_path) {
 
         assert(f);
 
-        if (!f->writable)
+        if (!journal_file_writable(f))
                 return -EINVAL;
 
         /* Is this a journal file that was passed to us as fd? If so, we synthesized a path name for it, and we refuse
@@ -3673,7 +3744,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
         assert(o);
         assert(p);
 
-        if (!to->writable)
+        if (!journal_file_writable(to))
                 return -EPERM;
 
         ts = (dual_timestamp) {
@@ -3686,6 +3757,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
         items = newa(EntryItem, n);
 
         for (uint64_t i = 0; i < n; i++) {
+                Compression c;
                 uint64_t l, h;
                 size_t t;
                 void *data;
@@ -3708,12 +3780,15 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                 if ((uint64_t) t != l)
                         return -E2BIG;
 
-                if (o->object.flags & OBJECT_COMPRESSION_MASK) {
+                c = COMPRESSION_FROM_OBJECT(o);
+                if (c < 0)
+                        return -EPROTONOSUPPORT;
+                if (c != COMPRESSION_NONE) {
 #if HAVE_COMPRESSION
                         size_t rsize = 0;
 
                         r = decompress_blob(
-                                        o->object.flags & OBJECT_COMPRESSION_MASK,
+                                        c,
                                         o->data.payload, l,
                                         &from->compress_buffer, &rsize,
                                         0);
@@ -3771,84 +3846,6 @@ void journal_reset_metrics(JournalMetrics *m) {
                 .keep_free = UINT64_MAX,
                 .n_max_files = UINT64_MAX,
         };
-}
-
-void journal_default_metrics(JournalMetrics *m, int fd) {
-        struct statvfs ss;
-        uint64_t fs_size = 0;
-
-        assert(m);
-        assert(fd >= 0);
-
-        if (fstatvfs(fd, &ss) >= 0)
-                fs_size = ss.f_frsize * ss.f_blocks;
-        else
-                log_debug_errno(errno, "Failed to determine disk size: %m");
-
-        if (m->max_use == UINT64_MAX) {
-
-                if (fs_size > 0)
-                        m->max_use = CLAMP(PAGE_ALIGN(fs_size / 10), /* 10% of file system size */
-                                           MAX_USE_LOWER, MAX_USE_UPPER);
-                else
-                        m->max_use = MAX_USE_LOWER;
-        } else {
-                m->max_use = PAGE_ALIGN(m->max_use);
-
-                if (m->max_use != 0 && m->max_use < JOURNAL_FILE_SIZE_MIN*2)
-                        m->max_use = JOURNAL_FILE_SIZE_MIN*2;
-        }
-
-        if (m->min_use == UINT64_MAX) {
-                if (fs_size > 0)
-                        m->min_use = CLAMP(PAGE_ALIGN(fs_size / 50), /* 2% of file system size */
-                                           MIN_USE_LOW, MIN_USE_HIGH);
-                else
-                        m->min_use = MIN_USE_LOW;
-        }
-
-        if (m->min_use > m->max_use)
-                m->min_use = m->max_use;
-
-        if (m->max_size == UINT64_MAX)
-                m->max_size = MIN(PAGE_ALIGN(m->max_use / 8), /* 8 chunks */
-                                  MAX_SIZE_UPPER);
-        else
-                m->max_size = PAGE_ALIGN(m->max_size);
-
-        if (m->max_size != 0) {
-                if (m->max_size < JOURNAL_FILE_SIZE_MIN)
-                        m->max_size = JOURNAL_FILE_SIZE_MIN;
-
-                if (m->max_use != 0 && m->max_size*2 > m->max_use)
-                        m->max_use = m->max_size*2;
-        }
-
-        if (m->min_size == UINT64_MAX)
-                m->min_size = JOURNAL_FILE_SIZE_MIN;
-        else
-                m->min_size = CLAMP(PAGE_ALIGN(m->min_size),
-                                    JOURNAL_FILE_SIZE_MIN,
-                                    m->max_size ?: UINT64_MAX);
-
-        if (m->keep_free == UINT64_MAX) {
-                if (fs_size > 0)
-                        m->keep_free = MIN(PAGE_ALIGN(fs_size / 20), /* 5% of file system size */
-                                           KEEP_FREE_UPPER);
-                else
-                        m->keep_free = DEFAULT_KEEP_FREE;
-        }
-
-        if (m->n_max_files == UINT64_MAX)
-                m->n_max_files = DEFAULT_N_MAX_FILES;
-
-        log_debug("Fixed min_use=%s max_use=%s max_size=%s min_size=%s keep_free=%s n_max_files=%" PRIu64,
-                  FORMAT_BYTES(m->min_use),
-                  FORMAT_BYTES(m->max_use),
-                  FORMAT_BYTES(m->max_size),
-                  FORMAT_BYTES(m->min_size),
-                  FORMAT_BYTES(m->keep_free),
-                  m->n_max_files);
 }
 
 int journal_file_get_cutoff_realtime_usec(JournalFile *f, usec_t *from, usec_t *to) {

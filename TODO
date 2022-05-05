@@ -31,6 +31,7 @@ External:
 * zsh shell completion:
   - <command> <verb> -<TAB> should complete options, but currently does not
   - systemctl add-wants,add-requires
+  - systemctl reboot --boot-loader-entry=
 
 * systemctl status should know about 'systemd-analyze calendar ... --iterations='
 * If timer has just OnInactiveSec=..., it should fire after a specified time
@@ -78,9 +79,227 @@ Janitorial Clean-ups:
 
 Features:
 
+* tmpfiles: for f/F/w lines, if the argument columns is left unspecified, look
+  for a service credential named after the file path to write to, and load
+  contents to write from there. Usecase: provision arbitrary files from
+  credentials. Example use: with a line like "f /root/.ssh/authorized-keys
+  0644 root root" in a tmpfiles.d/ snippet add
+  LoadCredential=root.ssh.authorized-keys via drop-in to
+  systemd-tmpfiles.service, and then provision an SSH access key through
+  nspawn's --load-credential=, through qemu's fw_cfg, or via systemd-stub's
+  credntial pick-up. The latter is particularly interesting to implement SSH
+  access to an initrd.
+
+* systemd-homed: when initializing, look for a credential sysemd.homed.register
+  or so with JSON user records to automatically register if not registered yet.
+  Usecase: deploy a system, and add an account one can directly log into.
+
+* add a proper concept of a "developer" mode, i.e. where cryptographic
+  protections of the root OS are weakened after interactive confirmation, to
+  allow hackers to allow their own stuff. idea: allow entering developer mode
+  only via explicit choice in boot menu: i.e. add explicit boot menu item for
+  it. when developer mode is entered generate a key pair in the TPM2, and add
+  the public part of it automatically to keychain of valid code signature keys
+  on subsequent boots. Then provide a tool to sign code with the key in the
+  TPM2. Ensure that boot menu item is only way to enter developer mode, by
+  binding it to locality/PCRs so that that keys cannot be generated otherwise.
+
+* services: add support for cryptographically unlocking per-service directories
+  via TPM2. Specifically, for StateDirectory= (and related dirs) use fscrypt to
+  set up the directory so that it can only be accessed if host and app are in
+  order.
+
+* TPM2: add auth policy for signed PCR values to make updates easy. i.e. do
+  what tpm2_policyauthorize tool does.  To be truly useful scheme needs to be a
+  bit more elaborate though: policy probably must take some nvram based
+  generation counter into account that can only monotonically increase and can
+  be used to invalidate old PCR signatures. Otherwise people could downgrade to
+  old signed PCR sets whenever they want. Usecase: encrypt the rootfs with LUKS
+  with a key that can only be unlocked via a pristine pre-built Fedora
+  kernel+initrd.
+
+* update HACKING.md to suggest developing systemd with the ideas from:
+  https://0pointer.net/blog/testing-my-system-code-in-usr-without-modifying-usr.html
+  https://0pointer.net/blog/running-an-container-off-the-host-usr.html
+
+* add a clear concept how the initrd can make up credentials on their own to
+  pass to the system when transitioning into the host OS. usecase: things like
+  cloud-init/ignitation and similar can parameterize the host with data they
+  acquire.
+
+* Add ConditionCredentialExists= or so, that allows conditionalizing services
+  depending on whether a specific system credential is set. Usecase: a service
+  similar to the ssh keygen service that installs any SSH host key supplied via
+  system credentials into /etc/ssh.
+
+* drop support for kernels that lack ambient capabilities support (i.e. make
+  4.3 new baseline). Then drop support for "!!" modifier for ExecStart= which
+  is only supported for such old kernels
+
+* sd-event: compat wd reuse in inotify code: keep a set of removed watch
+  descriptors, and clear this set piecemeal when we see the IN_IGNORED event
+  for it, or when read() returns EAGAIN or on IN_Q_OVERFLOW. Then, whenever we
+  see an inotify wd event check against this set, and if it is contained ignore
+  the event. (to be fully correct this would have to count the occurrences, in
+  case the same wd is reused multiple times before we start processing
+  IN_IGNORED again)
+
+* sd-stub: set efi var indicating stub features, i.e. whether they pick up
+  creds, sysexts and so on. similar to existing variable of sd-boot
+
+* sd-stub: set efi vars declaring TPM PCRs we measured creds/cmdline + sysext
+  into (even if we hardcode them)
+
+* systemd-fstab-generator: support addition mount specifications via kernel
+  cmdline. Usecase: invoke a VM, and mount a host homedir into it via
+  virtio-fs.
+
+* for vendor-built signed initrds:
+  - make sysext run in the initrd
+  - sysext should pick up sysext images from /.extra/ in the initrd, and insist
+    on verification if in secureboot mode
+  - kernel-install should be able to install pre-built unified kernel images in
+    type #2 drop-in dir in the ESP.
+  - kernel-install should be able install encrypted creds automatically for
+    machine id, root pw, rootfs uuid, resume partition uuid, and place next to
+    EFI kernel, for sd-stub to pick them up. These creds should be locked to
+    the TPM, and bind to the right PCR the kernel is measured to.
+  - kernel-install should be able to pick up initrd sysexts automatically and
+    place them next to EFI kernel, for sd-stub to pick them up.
+  - systemd-fstab-generator should look for rootfs device to mount in creds
+  - pid 1 should look for machine ID in creds
+  - systemd-resume-generator should look for resume partition uuid in creds
+  - sd-stub: automatically pick up microcode from ESP (/loader/microcode/*)
+    and synthesize initrd from it, and measure it. Signing is not necessary, as
+    microcode does that on its own. Pass as first initrd to kernel.
+  - sd-stub should measure the kernel/initrd/… into a separate PCR, so that we
+    have one PCR we can bind the encrypted creds to that is not effected by
+    anything else but what we drop in via kernel-install, i.e. by earlier EFI
+    code running (i.e. like PCR 4)
+
+* Add a new service type very similar to Type=notify, that goes one step
+  further and extends the protocol to cover reloads. Specifically, SIGHUP will
+  become the official way to reload, and daemon has to respond with sd_notify()
+  to report when it starts reloading, and when it is complete reloading. Care
+  must be taken to remove races from this model. I.e. PID 1 needs to take
+  CLOCK_MONOTONIC, then send SIGHUP, then wait for at least one RELOADING=1
+  message that comes with a newer timestamp, then wait for a READY=1 message.
+  while we are at it, also maybe extend the logic to require handling of some
+  specific SIGRT signal for setting debug log level, that carries the level via
+  the sigqueue() data parameter. With that we extended with minimal logic the
+  service runtime logic quite substantially.
+
+* firstboot: maybe just default to C.UTF-8 locale if nothing is set, so that we
+  don't query this unnecessarily in entirely uninitialized
+  containers. (i.e. containers with empty /etc).
+
+* beef up sd_notify() to support AV_VSOCK in $NOTIFY_SOCKET, so that VM
+  managers can get ready notifications from VMs, just like container managers
+  from their payload. Also pick up address from qemu/fw_cfg if set there.
+  (which has benefits, given SecureBoot and kernel cmdline are not necessarily
+  friends.)
+
+* mirroring this: maybe support binding to AV_VSOCK in Type=notify services,
+  then passing $NOTIFY_SOCKET and $NOTIFY_GUESTCID with PID1's cid (typically
+  fixed to "2", i.e. the official host cid) and the expected guest cid, for the
+  two sides of the channel. The latter env var could then be used in an
+  appropriate qemu cmdline. That way qemu payloads could talk sd_notify()
+  directly to host service manager.
+
+* maybe write a tool that binds an AF_VFSOCK socket, then invokes qemu,
+  extending the command line to enable vsock on the VM, and using fw_cfg to
+  configure socket address.
+
+* sd-boot: rework random seed handling following recent kernel changes: always
+  pass seed to kernel, but credit only if secure boot is used
+
+* sd-boot: hash data from GetNextHighMonotonicCount() into updated random seed,
+  so that we might even open up up the random seed logic to non-SecureBoot
+  systems?
+
+* sd-boot: also include the hyperv "vm generation id" in the random seed hash,
+  to cover nicely for machine clones. It's found in the ACPI tables, which
+  should be easily accessible from UEFI.
+
+* sd-boot: add menu item for shutdown? or hotkey?
+
+* sd-device has an API to create an sd_device object from a device id, but has
+  no api to query the device id
+
+* sd-device should return the devnum type (i.e. 'b' or 'c') via some API for an
+  sd_device object, so that data passed into sd_device_new_from_devnum() can
+  also be queried.
+
+* sd-event: optionally, if per-event source rate limit is hit, downgrade
+  priority, but leave enabled, and once ratelimit window is over, upgrade
+  priority again. That way we can combat event source starvation without
+  stopping processing events from one source entirely.
+
+* sd-event: similar to existing inotify support add fanotify support (given
+  that apparently new features in this area are only going to be added to the
+  latter).
+
+* sd-event: add 1st class event source for clock changes
+
+* sd-event: add 1st class event source for timezone changes
+
+* support uefi/http boots with sd-boot: instead of looking for dropin files in
+  /loader/entries/ dir, look for a file /loader/entries/SHA256SUMS and use that
+  as directory manifest. The file would be a standard directory listing as
+  generated by GNU sha256sums.
+
+* sd-boot: maybe add support for embedding the various auxiliary resources we
+  look for right in the sd-boot binary. i.e. take inspiration from sd-stub
+  logic: allow combining sd-boot via objcopy with kernels to enumerate, .conf
+  files, drivers, keys to enroll and so on. Then, add whatever we find that way
+  to the menu. Usecase: allow building a single PE image you can boot into via
+  UEFI HTTP boot.
+
+* maybe add a new UEFI stub binary "sd-http". It works similar to sd-stub, but
+  all it does is download a file from a http server, and execute it, after
+  optionally checking its hash sum. idea would be: combine this "sd-http" stub
+  binary with some minimal info about an URL + hash sum, plus .osrel data, and
+  drop it into the unified kernel dir in the ESP. And bam you have something
+  that is tiny, feels a lot like a unified kernel, but all it does is chainload
+  the real kernel. benefit: downloading these stubs would be tiny and quick,
+  hence cheap for enumeration.
+
+* initialize machine ID from systemd credential picked up from the ESP via
+  sd-stub, so that machine ID is stable even on systems where unified kernels
+  are used, and hence kernel cmdline cannot be modified locally
+
+* in gpt-auto-generator: check partition uuids against such uuids supplied via
+  sd-stub credentials. That way, we can support parallel OS installations with
+  pre-built kernels.
+
+* sysext: measure all activated sysext into a TPM PCR
+
+* maybe add a "syscfg" concept, that is almost entirely identical to "sysext",
+  but operates on /etc/ instead of /usr/ and /opt/. Use case would be: trusted,
+  authenticated, atomic, additive configuration management primitive: drop in a
+  configuration bundle, and activate it, so that it is instantly visible,
+  comprehensively.
+
+* systemd-dissect: show available versions inside of a disk image, i.e. if
+  multiple versions are around of the same resource, show which ones. (in other
+  words: show partition labels).
+
+* systemd-nspawn: make boot assessment do something sensible in a
+  container. i.e send an sd_notify() from payload to container manager once
+  boot-up is completed successfully, and use that in nspawn for dealing with
+  boot counting, implemented in the partition table labels and directory names.
+
+* maybe add a generator that reads /proc/cmdline, looks for
+  systemd.pull-raw-portable=, systemd-pull-raw-sysext= and similar switches
+  that take an URL as parameter. It then generates service units for
+  systemd-pull calls that download these URLs if not installed yet. usecase:
+  invoke a VM or nspawn container in a way it automatically deploys/runs these
+  images as OS payloads. i.e. have a generic OS image you can point to any
+  payload you like, which is then downloaded, securely verified and run.
+
 * improve scope units to support creation by pidfd instead of by PID
 
-* deprecate cgroupsv1 (i.e. taint system with it, print log message at boot)
+* deprecate cgroupsv1 further (print log message at boot)
 
 * systemd-dissect: add --cat switch for dumping files such as /etc/os-release
 
@@ -196,7 +415,8 @@ Features:
   credential logic and drops them into /run where nss-systemd can pick them up,
   similar to /run/host/userdb/. Usecase: drop a root user JSON record there,
   and use it in the initrd to log in as root with locally selected password,
-  for debugging purposes.
+  for debugging purposes. Other usecase: boot into qemu with regular user
+  mounted from host. maybe put this in systemd-user-sessions.service?
 
 * drop dependency on libcap, replace by direct syscalls based on
   CapabilityQuintet we already have. (This likely allows us drop drop libcap
@@ -210,10 +430,6 @@ Features:
   of dracut's shutdown logic. Should probably support sysexts too. Care needs
   to be taken that the resulting logic ends up in RAM, i.e. is copied out of
   on-disk storage.
-
-* sd-stub: automatically pick up microcode from ESP and synthesize initrd from
-  it, and measure it. Signing is not necessary, as microcode does that on its
-  own. Pass as first initrd to kernel.
 
 * userdbd: implement an additional varlink service socket that provides the
   host user db in restricted form, then allow this to be bind mounted into
@@ -302,11 +518,6 @@ Features:
   https://github.com/dvdhrm/docs/blob/master/drm-howto/modeset.c for an example
   for doing that.
 
-* pass systemd-detect-virt result to generators as env var. Modifying behaviour
-  based on whether we are virtualized or not is a pretty common thing, hence
-  maybe just pass that info along for free in an env var. We cache the result
-  anyway, so it's basically free.
-
 * introduce /dev/disk/root/* symlinks that allow referencing partitions on the
   disk the rootfs is on in a reasonably secure way. (or maybe: add
   /dev/gpt-auto-{home,srv,boot,…} similar in style to /dev/gpt-auto-root as we
@@ -319,6 +530,13 @@ Features:
   system paths at service startup time and pass them to the service process via
   our usual socket activation protocol. If passed path refers to AF_UNIX
   socket: connect() to it.
+
+* Similar, ConnectStream= which takes IP addresses and connects to them.
+
+* Similar, Load= which takes literal data in text or base64 format, and puts it
+  into a memfd, and passes that. This enables some fun stuff, such as embedding
+  bash scripts in unit files, by combining Load= with ExecStart=/bin/bash
+  /proc/self/fd/3
 
 * add a ConnectSocket= setting to service unit files, that may reference a
   socket unit, and which will connect to the socket defined therein, and pass
@@ -338,14 +556,7 @@ Features:
 
 * expose MS_NOSYMFOLLOW in various places
 
-* make LoadCredential= automatically find credentials in /etc/creds,
-  /run/creds, … and so on, if path component is unqualified
-
-* teach LoadCredential=/LoadCredentialEncrypted= to load credentials from
-  kernel cmdline, maybe: LoadCredentialEncrypted=foobar:proc-cmdline:foobar
-
 * credentials system:
-  - acquire from kernel command line
   - acquire from EFI variable?
   - acquire via via ask-password?
   - acquire creds via keyring?
@@ -589,9 +800,6 @@ Features:
 
 * Move RestrictAddressFamily= to the new cgroup create socket
 
-* support the bind/connect/sendmsg cgroup stuff for sandboxing, and possibly
-  patching around
-
 * maybe implicitly attach monotonic+realtime timestamps to outgoing messages in
   log.c and sd-journal-send
 
@@ -711,8 +919,6 @@ Features:
   creating them when starting up. That way, we could declare that
   systemd-journald writes to /var/log/journal, which could be useful when we
   doing disk usage calculations and so on.
-
-* taint systemd if there are fewer than 65536 users assigned (userns) to the system.
 
 * deprecate RootDirectoryStartOnly= in favour of a new ExecStart= prefix char
 
@@ -1158,10 +1364,12 @@ Features:
 * bootctl,sd-boot: actually honour the "architecture" key
 
 * bootctl:
+  - show whether UEFI audit mode is available
   - teach it to prepare an ESP wholesale, i.e. with mkfs.vfat invocation
   - teach it to copy in unified kernel images and maybe type #1 boot loader spec entries from host
   - make it operate on loopback files, dissecting enough to find ESP to operate on
   - bootspec: properly support boot attempt counters when parsing entry file names
+  - support --quiet in is-installed, update
 
 * kernel-install:
   - optionally, support generating type #2 entries instead of type #1, including signing them
@@ -1360,7 +1568,7 @@ Features:
   specified, synthesize a definition automatically if we can: enlarge last
   partition on disk, but only if it is marked for growing and not read-only.
 
-* systemd-repart: read LUKS encryption key from $CREDENTIALS_PATH
+* systemd-repart: read LUKS encryption key from $CREDENTIALS_DIRECTORY
 
 * systemd-repart: add a switch to factory reset the partition table without
   immediately applying the new configuration again. i.e. --factory-reset=leave

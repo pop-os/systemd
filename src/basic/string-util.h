@@ -10,17 +10,18 @@
 #include "string-util-fundamental.h"
 
 /* What is interpreted as whitespace? */
-#define WHITESPACE        " \t\n\r"
-#define NEWLINE           "\n\r"
-#define QUOTES            "\"\'"
-#define COMMENTS          "#;"
-#define GLOB_CHARS        "*?["
-#define DIGITS            "0123456789"
-#define LOWERCASE_LETTERS "abcdefghijklmnopqrstuvwxyz"
-#define UPPERCASE_LETTERS "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-#define LETTERS           LOWERCASE_LETTERS UPPERCASE_LETTERS
-#define ALPHANUMERICAL    LETTERS DIGITS
-#define HEXDIGITS         DIGITS "abcdefABCDEF"
+#define WHITESPACE          " \t\n\r"
+#define NEWLINE             "\n\r"
+#define QUOTES              "\"\'"
+#define COMMENTS            "#;"
+#define GLOB_CHARS          "*?["
+#define DIGITS              "0123456789"
+#define LOWERCASE_LETTERS   "abcdefghijklmnopqrstuvwxyz"
+#define UPPERCASE_LETTERS   "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#define LETTERS             LOWERCASE_LETTERS UPPERCASE_LETTERS
+#define ALPHANUMERICAL      LETTERS DIGITS
+#define HEXDIGITS           DIGITS "abcdefABCDEF"
+#define LOWERCASE_HEXDIGITS DIGITS "abcdef"
 
 static inline char* strstr_ptr(const char *haystack, const char *needle) {
         if (!haystack || !needle)
@@ -232,3 +233,7 @@ static inline int string_contains_word(const char *string, const char *separator
 }
 
 bool streq_skip_trailing_chars(const char *s1, const char *s2, const char *ok);
+
+char *string_replace_char(char *str, char old_char, char new_char);
+
+size_t strspn_from_end(const char *str, const char *accept);

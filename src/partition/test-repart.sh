@@ -6,7 +6,9 @@ set -o pipefail
 [[ -e /dev/loop-control ]] || exit 77
 
 repart="${1:?}"
+udevadm="${2:?}"
 test -x "$repart"
+test -x "$udevadm"
 
 PATH=$PATH:/sbin:/usr/sbin
 
@@ -20,7 +22,7 @@ SEED=e2a40bf9-73f1-4278-9160-49c031e7aef8
 
 echo "### Testing systemd-repart --empty=create ###"
 
-"$repart" "$D/zzz" --empty=create --size=1G --seed="$SEED"
+"$repart" "$D/zzz" --empty=create --size=1G --seed="$SEED" --no-pager
 
 sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/empty"
 
@@ -56,7 +58,7 @@ SizeMaxBytes=64M
 PaddingMinBytes=92M
 EOF
 
-"$repart" "$D/zzz" --dry-run=no --seed="$SEED" --definitions="$D/definitions"
+"$repart" "$D/zzz" --dry-run=no --seed="$SEED" --definitions="$D/definitions" --no-pager
 
 sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/populated"
 
@@ -91,7 +93,7 @@ EOF
 echo "Label=ignored_label" >>"$D/definitions/home.conf"
 echo "UUID=b0b1b2b3b4b5b6b7b8b9babbbcbdbebf" >>"$D/definitions/home.conf"
 
-"$repart" "$D/zzz" --dry-run=no --seed="$SEED" --definitions="$D/definitions"
+"$repart" "$D/zzz" --dry-run=no --seed="$SEED" --definitions="$D/definitions" --no-pager
 
 sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/populated2"
 
@@ -111,7 +113,7 @@ EOF
 
 echo "### Resizing to 2G ###"
 
-"$repart" "$D/zzz" --size=2G --dry-run=no --seed="$SEED" --definitions="$D/definitions"
+"$repart" "$D/zzz" --size=2G --dry-run=no --seed="$SEED" --definitions="$D/definitions" --no-pager
 
 sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/populated3"
 
@@ -141,7 +143,7 @@ UUID=2a1d97e1d0a346cca26eadc643926617
 CopyBlocks=$D/block-copy
 EOF
 
-"$repart" "$D/zzz" --size=3G --dry-run=no --seed="$SEED" --definitions="$D/definitions"
+"$repart" "$D/zzz" --size=3G --dry-run=no --seed="$SEED" --definitions="$D/definitions" --no-pager
 
 sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/populated4"
 
@@ -178,7 +180,7 @@ CopyFiles=$D/definitions:/def
 SizeMinBytes=48M
 EOF
 
-    "$repart" "$D/zzz" --size=auto --dry-run=no --seed="$SEED" --definitions="$D/definitions"
+    "$repart" "$D/zzz" --size=auto --dry-run=no --seed="$SEED" --definitions="$D/definitions" --no-pager
 
     sfdisk -d "$D/zzz" | grep -v -e 'sector-size' -e '^$' >"$D/populated5"
 
@@ -199,10 +201,7 @@ $D/zzz7 : start=     6291416, size=       98304, type=0FC63DAF-8483-4772-8E79-3D
 EOF
 
     LOOP="$(losetup -P --show --find "$D/zzz")"
-    while : ; do
-        test -e "$LOOP" && break
-        sleep .2
-    done
+    "${udevadm:?}" wait --timeout 60 --settle "${LOOP:?}"
 
     VOLUME="test-repart-$RANDOM"
 

@@ -39,8 +39,8 @@
 struct LinkConfigContext {
         LIST_HEAD(LinkConfig, configs);
         int ethtool_fd;
-        bool enable_name_policy;
         usec_t network_dirs_ts_usec;
+        Hashmap *stats_by_path;
 };
 
 static LinkConfig* link_config_free(LinkConfig *config) {
@@ -72,6 +72,8 @@ static void link_configs_free(LinkConfigContext *ctx) {
         if (!ctx)
                 return;
 
+        ctx->stats_by_path = hashmap_free(ctx->stats_by_path);
+
         LIST_FOREACH(configs, config, ctx->configs)
                 link_config_free(config);
 }
@@ -97,7 +99,6 @@ int link_config_ctx_new(LinkConfigContext **ret) {
 
         *ctx = (LinkConfigContext) {
                 .ethtool_fd = -1,
-                .enable_name_policy = true,
         };
 
         *ret = TAKE_PTR(ctx);
@@ -209,6 +210,7 @@ static int link_adjust_wol_options(LinkConfig *config) {
 
 int link_load_one(LinkConfigContext *ctx, const char *filename) {
         _cleanup_(link_config_freep) LinkConfig *config = NULL;
+        _cleanup_hashmap_free_ Hashmap *stats_by_path = NULL;
         _cleanup_free_ char *name = NULL;
         const char *dropin_dirname;
         size_t i;
@@ -218,10 +220,8 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
         assert(filename);
 
         r = null_or_empty_path(filename);
-        if (r == -ENOENT)
-                return 0;
         if (r < 0)
-                return r;
+                return log_warning_errno(r, "Failed to check if \"%s\" is empty: %m", filename);
         if (r > 0) {
                 log_debug("Skipping empty file: %s", filename);
                 return 0;
@@ -229,11 +229,11 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
 
         name = strdup(filename);
         if (!name)
-                return -ENOMEM;
+                return log_oom();
 
         config = new(LinkConfig, 1);
         if (!config)
-                return -ENOMEM;
+                return log_oom();
 
         *config = (LinkConfig) {
                 .filename = TAKE_PTR(name),
@@ -258,15 +258,22 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
         dropin_dirname = strjoina(basename(filename), ".d");
         r = config_parse_many(
                         STRV_MAKE_CONST(filename),
-                        (const char* const*) CONF_PATHS_STRV("systemd/network"),
+                        NETWORK_DIRS,
                         dropin_dirname,
                         "Match\0"
                         "Link\0"
                         "SR-IOV\0",
                         config_item_perf_lookup, link_config_gperf_lookup,
-                        CONFIG_PARSE_WARN, config, NULL);
+                        CONFIG_PARSE_WARN, config, &stats_by_path);
         if (r < 0)
-                return r;
+                return r; /* config_parse_many() logs internally. */
+
+        if (ctx->stats_by_path) {
+                r = hashmap_move(ctx->stats_by_path, stats_by_path);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to save stats of '%s' and its drop-in configs, ignoring: %m", filename);
+        } else
+                ctx->stats_by_path = TAKE_PTR(stats_by_path);
 
         if (net_match_is_empty(&config->match) && !config->conditions) {
                 log_warning("%s: No valid settings found in the [Match] section, ignoring file. "
@@ -288,22 +295,16 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
 
         r = link_adjust_wol_options(config);
         if (r < 0)
-                return r;
+                return r; /* link_adjust_wol_options() logs internally. */
 
         r = sr_iov_drop_invalid_sections(config->sr_iov_num_vfs, config->sr_iov_by_section);
         if (r < 0)
-                return r;
+                return r; /* sr_iov_drop_invalid_sections() logs internally. */
 
-        log_debug("Parsed configuration file %s", filename);
+        log_debug("Parsed configuration file \"%s\"", filename);
 
         LIST_PREPEND(configs, ctx->configs, TAKE_PTR(config));
         return 0;
-}
-
-static bool enable_name_policy(void) {
-        bool b;
-
-        return proc_cmdline_get_bool("net.ifnames", &b) <= 0 || b;
 }
 
 static int device_unsigned_attribute(sd_device *device, const char *attr, unsigned *type) {
@@ -326,31 +327,33 @@ int link_config_load(LinkConfigContext *ctx) {
         _cleanup_strv_free_ char **files = NULL;
         int r;
 
+        assert(ctx);
+
         link_configs_free(ctx);
-
-        if (!enable_name_policy()) {
-                ctx->enable_name_policy = false;
-                log_info("Network interface NamePolicy= disabled on kernel command line, ignoring.");
-        }
-
-        /* update timestamp */
-        paths_check_timestamp(NETWORK_DIRS, &ctx->network_dirs_ts_usec, true);
 
         r = conf_files_list_strv(&files, ".link", NULL, 0, NETWORK_DIRS);
         if (r < 0)
                 return log_error_errno(r, "failed to enumerate link files: %m");
 
-        STRV_FOREACH_BACKWARDS(f, files) {
-                r = link_load_one(ctx, *f);
-                if (r < 0)
-                        log_error_errno(r, "Failed to load %s, ignoring: %m", *f);
-        }
+        STRV_FOREACH_BACKWARDS(f, files)
+                (void) link_load_one(ctx, *f);
 
         return 0;
 }
 
 bool link_config_should_reload(LinkConfigContext *ctx) {
-        return paths_check_timestamp(NETWORK_DIRS, &ctx->network_dirs_ts_usec, false);
+        _cleanup_hashmap_free_ Hashmap *stats_by_path = NULL;
+        int r;
+
+        assert(ctx);
+
+        r = config_get_stats_by_path(".link", NULL, 0, NETWORK_DIRS, &stats_by_path);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to get stats of .link files: %m");
+                return true;
+        }
+
+        return !stats_by_path_equal(ctx->stats_by_path, stats_by_path);
 }
 
 Link *link_free(Link *link) {
@@ -691,7 +694,27 @@ static int link_apply_rtnl_settings(Link *link, sd_netlink **rtnl) {
         return 0;
 }
 
-static int link_generate_new_name(Link *link, bool enable_name_policy) {
+static bool enable_name_policy(void) {
+        static int cached = -1;
+        bool b;
+        int r;
+
+        if (cached >= 0)
+                return cached;
+
+        r = proc_cmdline_get_bool("net.ifnames", &b);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse net.ifnames= kernel command line option, ignoring: %m");
+        if (r <= 0)
+                return (cached = true);
+
+        if (!b)
+                log_info("Network interface NamePolicy= disabled on kernel command line.");
+
+        return (cached = b);
+}
+
+static int link_generate_new_name(Link *link) {
         LinkConfig *config;
         sd_device *device;
 
@@ -714,7 +737,7 @@ static int link_generate_new_name(Link *link, bool enable_name_policy) {
                 goto no_rename;
         }
 
-        if (enable_name_policy && config->name_policy)
+        if (enable_name_policy() && config->name_policy)
                 for (NamePolicy *policy = config->name_policy; *policy != _NAMEPOLICY_INVALID; policy++) {
                         const char *new_name = NULL;
 
@@ -936,7 +959,7 @@ int link_apply_config(LinkConfigContext *ctx, sd_netlink **rtnl, Link *link) {
         if (r < 0)
                 return r;
 
-        r = link_generate_new_name(link, ctx->enable_name_policy);
+        r = link_generate_new_name(link);
         if (r < 0)
                 return r;
 

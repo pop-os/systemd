@@ -4776,7 +4776,7 @@ void unit_warn_if_dir_nonempty(Unit *u, const char* where) {
         if (!unit_log_level_test(u, LOG_NOTICE))
                 return;
 
-        r = dir_is_empty(where);
+        r = dir_is_empty(where, /* ignore_hidden_or_backup= */ false);
         if (r > 0 || r == -ENOTDIR)
                 return;
         if (r < 0) {
@@ -5032,7 +5032,8 @@ int unit_set_exec_params(Unit *u, ExecParameters *p) {
         p->cgroup_path = u->cgroup_path;
         SET_FLAG(p->flags, EXEC_CGROUP_DELEGATE, unit_cgroup_delegate(u));
 
-        p->received_credentials = u->manager->received_credentials;
+        p->received_credentials_directory = u->manager->received_credentials_directory;
+        p->received_encrypted_credentials_directory = u->manager->received_encrypted_credentials_directory;
 
         return 0;
 }

@@ -846,6 +846,14 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         runtime, and are generally more expressive. For example, <varname>MemoryMax=</varname> is a more
         powerful (and working) replacement for <varname>LimitRSS=</varname>.</para>
 
+        <para>Note that <varname>LimitNPROC=</varname> will limit the number of processes from one (real) UID and
+        not the number of processes started (forked) by the service. Therefore the limit is cumulative for all
+        processes running under the same UID. Please also note that the <varname>LimitNPROC=</varname> will not be
+        enforced if the service is running as root (and not dropping privileges). Due to these limitations,
+        <varname>TasksMax=</varname> (see <citerefentry><refentrytitle>systemd.resource-control</refentrytitle>
+        <manvolnum>5</manvolnum></citerefentry>) is typically a better choice than <varname>LimitNPROC=</varname>.
+        </para>
+
         <para>Resource limits not configured explicitly for a unit default to the value configured in the various
         <varname>DefaultLimitCPU=</varname>, <varname>DefaultLimitFSIZE=</varname>, … options available in
         <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>, and –
@@ -2820,11 +2828,13 @@ SystemCallErrorNumber=EPERM</programlisting>
 
         <programlisting>…
 StandardInput=data
-StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy4KSWNrIGtpZWtl \
-                  LCBzdGF1bmUsIHd1bmRyZSBtaXIsCnVmZiBlZW1hbCBqZWh0IHNlIHVmZiBkaWUgVMO8ci4KTmFu \
-                  dSwgZGVuayBpY2ssIGljayBkZW5rIG5hbnUhCkpldHogaXNzZSB1ZmYsIGVyc2NodCB3YXIgc2Ug \
-                  enUhCkljayBqZWhlIHJhdXMgdW5kIGJsaWNrZSDigJQKdW5kIHdlciBzdGVodCBkcmF1w59lbj8g \
-                  SWNrZSEK
+StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZXMgYW5kIHNvIGRv \
+                  IEkKQSBmdWxsIGNvbW1pdG1lbnQncyB3aGF0IEnigLJtIHRoaW5raW5nIG9mCllvdSB3b3VsZG4n \
+                  dCBnZXQgdGhpcyBmcm9tIGFueSBvdGhlciBndXkKSSBqdXN0IHdhbm5hIHRlbGwgeW91IGhvdyBJ \
+                  J20gZmVlbGluZwpHb3R0YSBtYWtlIHlvdSB1bmRlcnN0YW5kCgpOZXZlciBnb25uYSBnaXZlIHlv \
+                  dSB1cApOZXZlciBnb25uYSBsZXQgeW91IGRvd24KTmV2ZXIgZ29ubmEgcnVuIGFyb3VuZCBhbmQg \
+                  ZGVzZXJ0IHlvdQpOZXZlciBnb25uYSBtYWtlIHlvdSBjcnkKTmV2ZXIgZ29ubmEgc2F5IGdvb2Ri \
+                  eWUKTmV2ZXIgZ29ubmEgdGVsbCBhIGxpZSBhbmQgaHVydCB5b3UK
 …</programlisting></listitem>
       </varlistentry>
 
@@ -3039,33 +3049,45 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         is absolute it is opened as regular file and the credential data is read from it. If the absolute
         path refers to an <constant>AF_UNIX</constant> stream socket in the file system a connection is made
         to it (only once at unit start-up) and the credential data read from the connection, providing an
-        easy IPC integration point for dynamically providing credentials from other services. If the
-        specified path is not absolute and itself qualifies as valid credential identifier it is understood
-        to refer to a credential that the service manager itself received via the
-        <varname>$CREDENTIALS_DIRECTORY</varname> environment variable, which may be used to propagate
-        credentials from an invoking environment (e.g. a container manager that invoked the service manager)
-        into a service. The contents of the file/socket may be arbitrary binary or textual data, including
-        newline characters and <constant>NUL</constant> bytes. If the file system path is omitted it is
-        chosen identical to the credential name, i.e. this is a terse way do declare credentials to inherit
-        from the service manager into a service. This option may be used multiple times, each time defining
-        an additional credential to pass to the unit. Alternatively, if the path is a directory, every file
-        in that directory will be loaded as a separate credential. The ID for each credential will be the
+        easy IPC integration point for dynamically transferring credentials from other services.</para>
+
+        <para>If the specified path is not absolute and itself qualifies as valid credential identifier it is
+        attempted to find a credential that the service manager itself received under the specified name —
+        which may be used to propagate credentials from an invoking environment (e.g. a container manager
+        that invoked the service manager) into a service. If no matching system credential is found, the
+        directories <filename>/etc/credstore/</filename>, <filename>/run/credstore/</filename> and
+        <filename>/usr/lib/credstore/</filename> are searched for files under the credential's name — which
+        hence are recommended locations for credential data on disk. If
+        <varname>LoadCredentialEncrypted=</varname> is used <filename>/run/credstore.encrypted/</filename>,
+        <filename>/etc/credstore.encrypted/</filename>, and
+        <filename>/usr/lib/credstore.encrypted/</filename> are searched as well.</para>
+
+        <para>If the file system path is omitted it is chosen identical to the credential name, i.e. this is
+        a terse way to declare credentials to inherit from the service manager into a service. This option
+        may be used multiple times, each time defining an additional credential to pass to the unit.</para>
+
+        <para>If an absolute path referring to a directory is specified, every file in that directory
+        (recursively) will be loaded as a separate credential. The ID for each credential will be the
         provided ID suffixed with <literal>_$FILENAME</literal> (e.g., <literal>Key_file1</literal>). When
         loading from a directory, symlinks will be ignored.</para>
 
+        <para>The contents of the file/socket may be arbitrary binary or textual data, including newline
+        characters and <constant>NUL</constant> bytes.</para>
+
         <para>The <varname>LoadCredentialEncrypted=</varname> setting is identical to
-        <varname>LoadCredential=</varname>, except that the credential data is decrypted before being passed
-        on to the executed processes. Specifically, the referenced path should refer to a file or socket with
-        an encrypted credential, as implemented by
+        <varname>LoadCredential=</varname>, except that the credential data is decrypted and authenticated
+        before being passed on to the executed processes. Specifically, the referenced path should refer to a
+        file or socket with an encrypted credential, as implemented by
         <citerefentry><refentrytitle>systemd-creds</refentrytitle><manvolnum>1</manvolnum></citerefentry>. This
-        credential is loaded, decrypted and then passed to the application in decrypted plaintext form, in
-        the same way a regular credential specified via <varname>LoadCredential=</varname> would be. A
-        credential configured this way may encrypted with a secret key derived from the system's TPM2
-        security chip, or with a secret key stored in
-        <filename>/var/lib/systemd/credentials.secret</filename>, or with both. Using encrypted credentials
-        improves security as credentials are not stored in plaintext and only decrypted into plaintext the
-        moment a service requiring them is started. Moreover, credentials may be bound to the local hardware
-        and installations, so that they cannot easily be analyzed offline.</para>
+        credential is loaded, decrypted, authenticated and then passed to the application in plaintext form,
+        in the same way a regular credential specified via <varname>LoadCredential=</varname> would be. A
+        credential configured this way may be symmetrically encrypted/authenticated with a secret key derived
+        from the system's TPM2 security chip, or with a secret key stored in
+        <filename>/var/lib/systemd/credentials.secret</filename>, or with both. Using encrypted and
+        authenticated credentials improves security as credentials are not stored in plaintext and only
+        authenticated and decrypted into plaintext the moment a service requiring them is started. Moreover,
+        credentials may be bound to the local hardware and installations, so that they cannot easily be
+        analyzed offline, or be generated externally.</para>
 
         <para>The credential files/IPC sockets must be accessible to the service manager, but don't have to
         be directly accessible to the unit's processes: the credential data is read and copied into separate,
@@ -3076,9 +3098,22 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
 
         <para>In order to reference the path a credential may be read from within a
         <varname>ExecStart=</varname> command line use <literal>${CREDENTIALS_DIRECTORY}/mycred</literal>,
-        e.g. <literal>ExecStart=cat ${CREDENTIALS_DIRECTORY}/mycred</literal>.</para>
+        e.g. <literal>ExecStart=cat ${CREDENTIALS_DIRECTORY}/mycred</literal>. In order to reference the path
+        a credential may be read from within a <varname>Environment=</varname> line use
+        <literal>%d/mycred</literal>, e.g. <literal>Environment=MYCREDPATH=%d/mycred</literal>.</para>
 
         <para>Currently, an accumulated credential size limit of 1 MB per unit is enforced.</para>
+
+        <para>The service manager itself may receive system credentials that can be propagated to services
+        from a hosting container manager or VM hypervisor. See the <ulink
+        url="https://systemd.io/CONTAINER_INTERFACE">Container Interface</ulink> documentation for details
+        about the former. For the latter, use the <command>qemu</command> <literal>fw_cfg</literal> node
+        <literal>opt/io.systemd.credentials/</literal>. Example qemu switch: <literal>-fw_cfg
+        name=opt/io.systemd.credentials/mycred,string=supersecret</literal>. They may also be specified on
+        the kernel command line using the <literal>systemd.set_credential=</literal> switch (see
+        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>)
+        and from the UEFI firmware environment via
+        <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>.</para>
 
         <para>If referencing an <constant>AF_UNIX</constant> stream socket to connect to, the connection will
         originate from an abstract namespace socket, that includes information about the unit and the
@@ -3093,7 +3128,10 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         ID requested. Example: <literal>\0adf9d86b6eda275e/unit/foobar.service/credx</literal> in case the
         credential <literal>credx</literal> is requested for a unit <literal>foobar.service</literal>. This
         functionality is useful for using a single listening socket to serve credentials to multiple
-        consumers.</para></listitem>
+        consumers.</para>
+
+        <para>For further information see <ulink url="https://systemd.io/CREDENTIALS">System and Service
+        Credentials</ulink> documentation.</para></listitem>
       </varlistentry>
 
       <varlistentry>

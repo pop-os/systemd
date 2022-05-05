@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include <sys/reboot.h>
 #include <sys/timerfd.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -81,6 +82,7 @@
 #include "terminal-util.h"
 #include "time-util.h"
 #include "transaction.h"
+#include "uid-range.h"
 #include "umask-util.h"
 #include "unit-name.h"
 #include "user-util.h"
@@ -775,9 +777,37 @@ static int manager_setup_sigchld_event_source(Manager *m) {
         return 0;
 }
 
+static int manager_find_credentials_dirs(Manager *m) {
+        const char *e;
+        int r;
+
+        assert(m);
+
+        r = get_credentials_dir(&e);
+        if (r < 0) {
+                if (r != -ENXIO)
+                        log_debug_errno(r, "Failed to determine credentials directory, ignoring: %m");
+        } else {
+                m->received_credentials_directory = strdup(e);
+                if (!m->received_credentials_directory)
+                        return -ENOMEM;
+        }
+
+        r = get_encrypted_credentials_dir(&e);
+        if (r < 0) {
+                if (r != -ENXIO)
+                        log_debug_errno(r, "Failed to determine encrypted credentials directory, ignoring: %m");
+        } else {
+                m->received_encrypted_credentials_directory = strdup(e);
+                if (!m->received_encrypted_credentials_directory)
+                        return -ENOMEM;
+        }
+
+        return 0;
+}
+
 int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager **_m) {
         _cleanup_(manager_freep) Manager *m = NULL;
-        const char *e;
         int r;
 
         assert(_m);
@@ -881,12 +911,9 @@ int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager *
         if (r < 0)
                 return r;
 
-        r = get_credentials_dir(&e);
-        if (r >= 0) {
-                m->received_credentials = strdup(e);
-                if (!m->received_credentials)
-                        return -ENOMEM;
-        }
+        r = manager_find_credentials_dirs(m);
+        if (r < 0)
+                return r;
 
         r = sd_event_default(&m->event);
         if (r < 0)
@@ -949,7 +976,7 @@ int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager *
 
         m->taint_usr =
                 !in_initrd() &&
-                dir_is_empty("/usr") > 0;
+                dir_is_empty("/usr", /* ignore_hidden_or_backup= */ false) > 0;
 
         /* Note that we do not set up the notify fd here. We do that after deserialization,
          * since they might have gotten serialized across the reexec. */
@@ -1531,7 +1558,8 @@ Manager* manager_free(Manager *m) {
 
         for (ExecDirectoryType dt = 0; dt < _EXEC_DIRECTORY_TYPE_MAX; dt++)
                 m->prefix[dt] = mfree(m->prefix[dt]);
-        free(m->received_credentials);
+        free(m->received_credentials_directory);
+        free(m->received_encrypted_credentials_directory);
 
         free(m->watchdog_pretimeout_governor);
         free(m->watchdog_pretimeout_governor_overridden);
@@ -3663,9 +3691,67 @@ static int manager_run_environment_generators(Manager *m) {
         return r;
 }
 
+static int build_generator_environment(Manager *m, char ***ret) {
+        _cleanup_strv_free_ char **nl = NULL;
+        Virtualization v;
+        int r;
+
+        assert(m);
+        assert(ret);
+
+        /* Generators oftentimes want to know some basic facts about the environment they run in, in order to
+         * adjust generated units to that. Let's pass down some bits of information that are easy for us to
+         * determine (but a bit harder for generator scripts to determine), as environment variables. */
+
+        nl = strv_copy(m->transient_environment);
+        if (!nl)
+                return -ENOMEM;
+
+        r = strv_env_assign(&nl, "SYSTEMD_SCOPE", MANAGER_IS_SYSTEM(m) ? "system" : "user");
+        if (r < 0)
+                return r;
+
+        if (MANAGER_IS_SYSTEM(m)) {
+                /* Note that $SYSTEMD_IN_INITRD may be used to override the initrd detection in much of our
+                 * codebase. This is hence more than purely informational. It will shortcut detection of the
+                 * initrd state if generators invoke our own tools. But that's OK, as it would come to the
+                 * same results (hopefully). */
+                r = strv_env_assign(&nl, "SYSTEMD_IN_INITRD", one_zero(in_initrd()));
+                if (r < 0)
+                        return r;
+
+                if (m->first_boot >= 0) {
+                        r = strv_env_assign(&nl, "SYSTEMD_FIRST_BOOT", one_zero(m->first_boot));
+                        if (r < 0)
+                                return r;
+                }
+        }
+
+        v = detect_virtualization();
+        if (v < 0)
+                log_debug_errno(v, "Failed to detect virtualization, ignoring: %m");
+        else if (v > 0) {
+                const char *s;
+
+                s = strjoina(VIRTUALIZATION_IS_VM(v) ? "vm:" :
+                             VIRTUALIZATION_IS_CONTAINER(v) ? "container:" : ":",
+                             virtualization_to_string(v));
+
+                r = strv_env_assign(&nl, "SYSTEMD_VIRTUALIZATION", s);
+                if (r < 0)
+                        return r;
+        }
+
+        r = strv_env_assign(&nl, "SYSTEMD_ARCHITECTURE", architecture_to_string(uname_architecture()));
+        if (r < 0)
+                return r;
+
+        *ret = TAKE_PTR(nl);
+        return 0;
+}
+
 static int manager_run_generators(Manager *m) {
-        _cleanup_strv_free_ char **paths = NULL;
-        const char *argv[5];
+        _cleanup_strv_free_ char **paths = NULL, **ge = NULL;
         int r;
 
         assert(m);
@@ -3686,16 +3772,28 @@ static int manager_run_generators(Manager *m) {
                 goto finish;
         }
 
-        argv[0] = NULL; /* Leave this empty, execute_directory() will fill something in */
-        argv[1] = m->lookup_paths.generator;
-        argv[2] = m->lookup_paths.generator_early;
-        argv[3] = m->lookup_paths.generator_late;
-        argv[4] = NULL;
+        const char *argv[] = {
+                NULL, /* Leave this empty, execute_directory() will fill something in */
+                m->lookup_paths.generator,
+                m->lookup_paths.generator_early,
+                m->lookup_paths.generator_late,
+                NULL,
+        };
+
+        r = build_generator_environment(m, &ge);
+        if (r < 0) {
+                log_error_errno(r, "Failed to build generator environment: %m");
+                goto finish;
+        }
 
         RUN_WITH_UMASK(0022)
-                (void) execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC, NULL, NULL,
-                                           (char**) argv, m->transient_environment,
-                                           EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS | EXEC_DIR_SET_SYSTEMD_EXEC_PID);
+                (void) execute_directories(
+                                (const char* const*) paths,
+                                DEFAULT_TIMEOUT_USEC,
+                                /* callbacks= */ NULL, /* callback_args= */ NULL,
+                                (char**) argv,
+                                ge,
+                                EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS | EXEC_DIR_SET_SYSTEMD_EXEC_PID);
 
         r = 0;
 
@@ -4349,60 +4447,77 @@ int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t re
         return 0;
 }
 
-char *manager_taint_string(Manager *m) {
-        _cleanup_free_ char *destination = NULL, *overflowuid = NULL, *overflowgid = NULL;
-        char *buf, *e;
+static int short_uid_range(const char *path) {
+        _cleanup_free_ UidRange *p = NULL;
+        size_t n = 0;
         int r;
 
-        /* Returns a "taint string", e.g. "local-hwclock:var-run-bad".
-         * Only things that are detected at runtime should be tagged
-         * here. For stuff that is set during compilation, emit a warning
-         * in the configuration phase. */
+        assert(path);
+
+        /* Taint systemd if we the UID range assigned to this environment doesn't at least cover 0…65534,
+         * i.e. from root to nobody. */
+
+        r = uid_range_load_userns(&p, &n, path);
+        if (ERRNO_IS_NOT_SUPPORTED(r))
+                return false;
+        if (r < 0)
+                return log_debug_errno(r, "Failed to load %s: %m", path);
+
+        return !uid_range_covers(p, n, 0, 65535);
+}
+
+char* manager_taint_string(const Manager *m) {
+        /* Returns a "taint string", e.g. "local-hwclock:var-run-bad". Only things that are detected at
+         * runtime should be tagged here. For stuff that is known during compilation, emit a warning in the
+         * configuration phase. */
 
         assert(m);
 
-        buf = new(char, sizeof("split-usr:"
-                               "cgroups-missing:"
-                               "cgrousv1:"
-                               "local-hwclock:"
-                               "var-run-bad:"
-                               "overflowuid-not-65534:"
-                               "overflowgid-not-65534:"));
-        if (!buf)
-                return NULL;
-
-        e = buf;
-        buf[0] = 0;
+        const char* stage[12] = {};
+        size_t n = 0;
 
         if (m->taint_usr)
-                e = stpcpy(e, "split-usr:");
+                stage[n++] = "split-usr";
+
+        _cleanup_free_ char *usrbin = NULL;
+        if (readlink_malloc("/bin", &usrbin) < 0 || !PATH_IN_SET(usrbin, "usr/bin", "/usr/bin"))
+                stage[n++] = "unmerged-usr";
 
         if (access("/proc/cgroups", F_OK) < 0)
-                e = stpcpy(e, "cgroups-missing:");
+                stage[n++] = "cgroups-missing";
 
         if (cg_all_unified() == 0)
-                e = stpcpy(e, "cgroupsv1:");
+                stage[n++] = "cgroupsv1";
 
         if (clock_is_localtime(NULL) > 0)
-                e = stpcpy(e, "local-hwclock:");
+                stage[n++] = "local-hwclock";
 
-        r = readlink_malloc("/var/run", &destination);
-        if (r < 0 || !PATH_IN_SET(destination, "../run", "/run"))
-                e = stpcpy(e, "var-run-bad:");
+        _cleanup_free_ char *destination = NULL;
+        if (readlink_malloc("/var/run", &destination) < 0 ||
+            !PATH_IN_SET(destination, "../run", "/run"))
+                stage[n++] = "var-run-bad";
 
-        r = read_one_line_file("/proc/sys/kernel/overflowuid", &overflowuid);
-        if (r >= 0 && !streq(overflowuid, "65534"))
-                e = stpcpy(e, "overflowuid-not-65534:");
+        _cleanup_free_ char *overflowuid = NULL, *overflowgid = NULL;
+        if (read_one_line_file("/proc/sys/kernel/overflowuid", &overflowuid) >= 0 &&
+            !streq(overflowuid, "65534"))
+                stage[n++] = "overflowuid-not-65534";
+        if (read_one_line_file("/proc/sys/kernel/overflowgid", &overflowgid) >= 0 &&
+            !streq(overflowgid, "65534"))
+                stage[n++] = "overflowgid-not-65534";
 
-        r = read_one_line_file("/proc/sys/kernel/overflowgid", &overflowgid);
-        if (r >= 0 && !streq(overflowgid, "65534"))
-                e = stpcpy(e, "overflowgid-not-65534:");
+        struct utsname uts;
+        assert_se(uname(&uts) >= 0);
+        if (strverscmp_improved(uts.release, KERNEL_BASELINE_VERSION) < 0)
+                stage[n++] = "old-kernel";
 
-        /* remove the last ':' */
-        if (e != buf)
-                e[-1] = 0;
+        if (short_uid_range("/proc/self/uid_map") > 0)
+                stage[n++] = "short-uid-range";
+        if (short_uid_range("/proc/self/gid_map") > 0)
+                stage[n++] = "short-gid-range";
 
-        return buf;
+        assert(n < ELEMENTSOF(stage) - 1);  /* One extra for NULL terminator */
+
+        return strv_join((char**) stage, ":");
 }
 
 void manager_ref_console(Manager *m) {

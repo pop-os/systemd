@@ -23,8 +23,7 @@
 #include "main-func.h"
 #include "mkdir.h"
 #include "parse-argument.h"
-#include "parse-util.h"
-#include "path-util.h"
+#include "parse-helpers.h"
 #include "pretty-print.h"
 #include "process-util.h"
 #include "rlimit-util.h"
@@ -668,7 +667,7 @@ static int parse_argv(int argc, char *argv[]) {
         opterr = 0;
 
         while ((c = getopt_long(argc, argv, "hu:mM:D:", options, NULL)) >= 0)
-                switch(c) {
+                switch (c) {
                 case 'h':
                         return help();
 
