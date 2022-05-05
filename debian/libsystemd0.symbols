@@ -338,6 +338,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_enumerator_add_match_sysattr@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_sysname@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_tag@LIBSYSTEMD_240 240
+ sd_device_enumerator_add_nomatch_sysname@LIBSYSTEMD_251 251~rc2
  sd_device_enumerator_allow_uninitialized@LIBSYSTEMD_240 240
  sd_device_enumerator_get_device_first@LIBSYSTEMD_240 240
  sd_device_enumerator_get_device_next@LIBSYSTEMD_240 240
@@ -396,12 +397,15 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_monitor_stop@LIBSYSTEMD_240 240
  sd_device_monitor_unref@LIBSYSTEMD_240 240
  sd_device_new_from_device_id@LIBSYSTEMD_240 240
+ sd_device_new_from_devname@LIBSYSTEMD_251 251~rc2
  sd_device_new_from_devnum@LIBSYSTEMD_240 240
  sd_device_new_from_ifindex@LIBSYSTEMD_249 249
  sd_device_new_from_ifname@LIBSYSTEMD_249 249
+ sd_device_new_from_path@LIBSYSTEMD_251 251~rc2
  sd_device_new_from_stat_rdev@LIBSYSTEMD_248 248
  sd_device_new_from_subsystem_sysname@LIBSYSTEMD_240 240
  sd_device_new_from_syspath@LIBSYSTEMD_240 240
+ sd_device_open@LIBSYSTEMD_251 251~rc2
  sd_device_ref@LIBSYSTEMD_240 240
  sd_device_set_sysattr_value@LIBSYSTEMD_240 240
  sd_device_set_sysattr_valuef@LIBSYSTEMD_247 247
