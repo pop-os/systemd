@@ -1,3 +1,16 @@
+systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
+
+  * core: make sure we don't get confused when setting TERM for a tty fd
+    (LP: #1959475)
+    File: debian/patches/lp1959475-core-make-sure-we-don-t-get-confused-when-setting-TERM-fo.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b10c6853050dde26665caf3b15444d768d2bc498
+  * shared/calendarspec: when mktime() moves us backwards, jump forward
+    (LP: #1966800)
+    File: debian/patches/lp1966800-shared-calendarspec-when-mktime-moves-us-backwards-jump-f.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1f063541e44f6ff1a6904676d4264a2e49a09594
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 29 Apr 2022 15:03:31 -0400
+
 systemd (245.4-4ubuntu3.17) focal; urgency=medium
 
   [ Andy Chi ]
