@@ -1,3 +1,9 @@
+systemd (251~rc2-2) experimental; urgency=medium
+
+  * sd-device: always translate sysname to sysfs filename
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 11 May 2022 15:26:49 +0200
+
 systemd (251~rc2-1) experimental; urgency=medium
 
   * New upstream version 251~rc2
