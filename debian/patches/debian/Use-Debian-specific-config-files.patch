@@ -15,11 +15,9 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  src/timedate/timedated.c |  21 ++++-
  4 files changed, 164 insertions(+), 113 deletions(-)
 
-diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index ad4a189..b9c448e 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1474,19 +1474,43 @@ int get_timezone(char **ret) {
+@@ -1477,19 +1477,43 @@
          const char *e;
          char *z;
          int r;
@@ -68,11 +66,9 @@ index ad4a189..b9c448e 100644
  
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
-diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 716febb..9818602 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
-@@ -57,6 +57,27 @@ int locale_setup(char ***environment) {
+@@ -57,6 +57,27 @@
                          log_warning_errno(r, "Failed to read /etc/locale.conf: %m");
          }
  
@@ -100,11 +96,9 @@ index 716febb..9818602 100644
          for (LocaleVariable i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
  
-diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index 9759f46..4eb48bb 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
-@@ -91,6 +91,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
+@@ -91,6 +91,7 @@
  int locale_read_data(Context *c, sd_bus_message *m) {
          struct stat st;
          int r;
@@ -112,7 +106,7 @@ index 9759f46..4eb48bb 100644
  
          /* Do not try to re-read the file within single bus operation. */
          if (m) {
-@@ -101,7 +102,11 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+@@ -101,7 +102,11 @@
                  c->locale_cache = sd_bus_message_ref(m);
          }
  
@@ -125,7 +119,7 @@ index 9759f46..4eb48bb 100644
          if (r < 0 && errno != ENOENT)
                  return -errno;
  
-@@ -116,7 +121,7 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+@@ -116,7 +121,7 @@
                  c->locale_mtime = t;
                  context_free_locale(c);
  
@@ -134,7 +128,7 @@ index 9759f46..4eb48bb 100644
                                     "LANG",              &c->locale[VARIABLE_LANG],
                                     "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
                                     "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
-@@ -190,8 +195,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
+@@ -190,8 +195,6 @@
  }
  
  int x11_read_data(Context *c, sd_bus_message *m) {
@@ -143,7 +137,7 @@ index 9759f46..4eb48bb 100644
          struct stat st;
          usec_t t;
          int r;
-@@ -205,7 +208,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -205,7 +208,7 @@
                  c->x11_cache = sd_bus_message_ref(m);
          }
  
@@ -152,19 +146,14 @@ index 9759f46..4eb48bb 100644
                  if (errno != ENOENT)
                          return -errno;
  
-@@ -222,60 +225,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -222,60 +225,14 @@
          c->x11_mtime = t;
          context_free_x11(c);
  
 -        f = fopen("/etc/X11/xorg.conf.d/00-keyboard.conf", "re");
 -        if (!f)
 -                return -errno;
-+        r = parse_env_file(NULL, "/etc/default/keyboard",
-+                           "XKBMODEL",          &c->x11_model,
-+                           "XKBLAYOUT",         &c->x11_layout,
-+                           "XKBVARIANT",        &c->x11_variant,
-+                           "XKBOPTIONS",        &c->x11_options);
- 
+-
 -        for (;;) {
 -                _cleanup_free_ char *line = NULL;
 -                char *l;
@@ -208,7 +197,12 @@ index 9759f46..4eb48bb 100644
 -                        r = strv_split_full(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
 -                        if (r < 0)
 -                                return -ENOMEM;
--
++        r = parse_env_file(NULL, "/etc/default/keyboard",
++                           "XKBMODEL",          &c->x11_model,
++                           "XKBLAYOUT",         &c->x11_layout,
++                           "XKBVARIANT",        &c->x11_variant,
++                           "XKBOPTIONS",        &c->x11_options);
+ 
 -                        if (strv_length(a) == 2 && streq(a[1], "InputClass"))
 -                                in_section = true;
 -
@@ -220,7 +214,7 @@ index 9759f46..4eb48bb 100644
  
          return 0;
  }
-@@ -284,9 +241,19 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -284,9 +241,19 @@
          _cleanup_strv_free_ char **l = NULL;
          struct stat st;
          int r;
@@ -240,7 +234,7 @@ index 9759f46..4eb48bb 100644
          for (LocaleVariable p = 0; p < _VARIABLE_LC_MAX; p++)
                  if (!isempty(c->locale[p])) {
                          r = strv_env_assign(&l, locale_variable_to_string(p), c->locale[p]);
-@@ -295,20 +262,20 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -295,20 +262,20 @@
                  }
  
          if (strv_isempty(l)) {
@@ -264,7 +258,7 @@ index 9759f46..4eb48bb 100644
                  c->locale_mtime = timespec_load(&st.st_mtim);
  
          return 0;
-@@ -350,68 +317,92 @@ int vconsole_write_data(Context *c) {
+@@ -350,68 +317,92 @@
  }
  
  int x11_write_data(Context *c) {
@@ -401,11 +395,9 @@ index 9759f46..4eb48bb 100644
  
          return r;
  }
-diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 9ca5d37..7b09a4c 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -296,6 +296,8 @@ static int context_read_data(Context *c) {
+@@ -296,6 +296,8 @@
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
@@ -414,7 +406,7 @@ index 9ca5d37..7b09a4c 100644
  
          assert(c);
  
-@@ -309,9 +311,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -309,9 +311,12 @@
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
                          if (unlink("/etc/localtime") < 0 && errno != ENOENT)
@@ -429,7 +421,7 @@ index 9ca5d37..7b09a4c 100644
                  }
  
                  source = "../usr/share/zoneinfo/UTC";
-@@ -323,7 +328,17 @@ static int context_write_data_timezone(Context *c) {
+@@ -323,7 +328,17 @@
                  source = p;
          }
  

@@ -14,11 +14,9 @@ Fixes: #17575
  src/systemctl/systemctl-compat-halt.c | 6 ++++--
  1 file changed, 4 insertions(+), 2 deletions(-)
 
-diff --git a/src/systemctl/systemctl-compat-halt.c b/src/systemctl/systemctl-compat-halt.c
-index 8a0e4e6..7eeec9a 100644
 --- a/src/systemctl/systemctl-compat-halt.c
 +++ b/src/systemctl/systemctl-compat-halt.c
-@@ -148,9 +148,11 @@ int halt_main(void) {
+@@ -148,9 +148,11 @@
  
          if (arg_force == 0) {
                  /* always try logind first */
