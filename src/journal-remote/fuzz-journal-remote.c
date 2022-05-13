@@ -24,7 +24,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         _cleanup_(journal_remote_server_destroy) RemoteServer s = {};
         int r;
 
-        if (size <= 2)
+        if (outside_size_range(size, 3, 65536))
                 return 0;
 
         if (!getenv("SYSTEMD_LOG_LEVEL"))
@@ -66,7 +66,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         r = sd_journal_open_files(&j, (const char**) STRV_MAKE(name), 0);
         if (r < 0) {
                 log_error_errno(r, "sd_journal_open_files([\"%s\"]) failed: %m", name);
-                assert_se(IN_SET(r, -ENOMEM, -EMFILE, -ENFILE));
+                assert_se(IN_SET(r, -ENOMEM, -EMFILE, -ENFILE, -ENODATA));
                 return r;
         }
 

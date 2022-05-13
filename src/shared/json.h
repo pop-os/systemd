@@ -82,6 +82,14 @@ JsonVariant *json_variant_ref(JsonVariant *v);
 JsonVariant *json_variant_unref(JsonVariant *v);
 void json_variant_unref_many(JsonVariant **array, size_t n);
 
+#define JSON_VARIANT_REPLACE(v, q)        \
+        do {                              \
+                typeof(v)* _v = &(v);     \
+                typeof(q) _q = (q);       \
+                json_variant_unref(*_v);  \
+                *_v = _q;                 \
+        } while(0)
+
 DEFINE_TRIVIAL_CLEANUP_FUNC(JsonVariant *, json_variant_unref);
 
 const char *json_variant_string(JsonVariant *v);
@@ -331,9 +339,9 @@ typedef enum JsonDispatchFlags {
         JSON_SAFE       = 1 << 3, /* Don't accept "unsafe" strings in json_dispatch_string() + json_dispatch_string() */
         JSON_RELAX      = 1 << 4, /* Use relaxed user name checking in json_dispatch_user_group_name */
 
-        /* The following two may be passed into log_json() in addition to the three above */
-        JSON_DEBUG      = 1 << 4, /* Indicates that this log message is a debug message */
-        JSON_WARNING    = 1 << 5, /* Indicates that this log message is a warning message */
+        /* The following two may be passed into log_json() in addition to those above */
+        JSON_DEBUG      = 1 << 5, /* Indicates that this log message is a debug message */
+        JSON_WARNING    = 1 << 6, /* Indicates that this log message is a warning message */
 } JsonDispatchFlags;
 
 typedef int (*JsonDispatchCallback)(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);

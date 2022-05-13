@@ -33,6 +33,13 @@ conf.set_quoted('RELATIVE_SOURCE_PATH', relative_source_path)
 
 conf.set10('BUILD_MODE_DEVELOPER', get_option('mode') == 'developer',
            description : 'tailor build to development or release builds')
+verification = get_option('log-message-verification')
+if verification == 'auto'
+        verification = conf.get('BUILD_MODE_DEVELOPER') == 1
+else
+        verification = verification == 'true'
+endif
+conf.set10('LOG_MESSAGE_VERIFICATION', verification)
 
 want_ossfuzz = get_option('oss-fuzz')
 want_libfuzzer = get_option('llvm-fuzz')
@@ -42,6 +49,11 @@ endif
 
 skip_deps = want_ossfuzz or get_option('skip-deps')
 fuzzer_build = want_ossfuzz or want_libfuzzer
+
+# If we're building *not* for actual fuzzing, allow input samples of any size
+# (for testing and for reproduction of issues discovered with previously-higher
+# limits).
+conf.set10('FUZZ_USE_SIZE_LIMIT', fuzzer_build)
 
 # Create a title-less summary section early, so it ends up first in the output.
 # More items are added later after they have been detected.
@@ -2068,7 +2080,6 @@ subdir('src/timedate')
 subdir('src/timesync')
 subdir('src/tmpfiles')
 subdir('src/userdb')
-subdir('src/vconsole')
 subdir('src/xdg-autostart-generator')
 
 subdir('src/systemd')
