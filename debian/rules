@@ -138,6 +138,9 @@ CONFFLAGS += \
 endif
 
 override_dh_auto_configure:
+	# breaks armhf/armel build
+	# https://github.com/systemd/systemd/commit/72db29beb50c55021d84c0b99b59643d7f43a084
+	rm -f test/fuzz/fuzz-ndisc-rs/oss-fuzz-10734
 	dh_auto_configure --builddirectory=build-deb \
 		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
 
