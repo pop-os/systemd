@@ -1,3 +1,26 @@
+systemd (251~rc3-1) experimental; urgency=medium
+
+  * autopkgtest: add allow-stderr to boot-and-services. Sometimes we see
+    some ignored logs, don't fail the test run if that happens
+  * autopkgtest: disable networkd in rebooting tests. It seems that on
+    Semaphore CI, running in Bullseye images, having both Network-Manager
+    and systemd-networkd enabled causes 'systemctl start network-
+    online.target' to get stuck, and fail the run. Disable networkd in
+    those tests. See: https://github.com/systemd/systemd/issues/22991
+  * autopkgtest: mark networkd-test.py as breaks-testbed. It will modify
+    the network configuration, which will often make the network stop
+    working. Mark it as breaks-testbed so that a new runner is started.
+  * autopkgtest: ignore rng-tools-debian failure in boot-and-services. It
+    seems sometimes it fails, which has happened on jammy-amd64:
+    https://bugs.debian.org/969568
+  * New upstream version 251~rc3
+  * Drop sd-device-always-translate-sysname-to-sysfs-filename.patch,
+    merged upstream
+  * Rebase patches
+  * Update lintian-overrides for false positives
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 15 May 2022 14:11:49 +0100
+
 systemd (251~rc2-2) experimental; urgency=medium
 
   * sd-device: always translate sysname to sysfs filename
