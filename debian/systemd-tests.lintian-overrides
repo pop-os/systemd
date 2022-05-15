@@ -1,7 +1,5 @@
 # It's not documentation, it's test data
 systemd-tests: package-contains-documentation-outside-usr-share-doc
-# Intentional: value of config got in a release by mistake, needs to be kept
-systemd-tests: spelling-error-in-binary usr/lib/systemd/tests/test-tables anually annually
 # netlink keyword
 systemd-tests: spelling-error-in-binary usr/lib/systemd/tests/test-network iif if
 # variable name, not a typo
