@@ -164,6 +164,7 @@ node /org/freedesktop/systemd1 {
       Dump(out s output);
       DumpByFileDescriptor(out h fd);
       Reload();
+      @org.freedesktop.DBus.Method.NoReply("true")
       Reexecute();
       @org.freedesktop.systemd1.Privileged("true")
       Exit();
@@ -10656,10 +10657,5 @@ $ gdbus introspect --system --dest org.freedesktop.systemd1 \
     </example>
   </refsect1>
 
-  <refsect1>
-    <title>Versioning</title>
-
-    <para>These D-Bus interfaces follow <ulink url="http://0pointer.de/blog/projects/versioning-dbus.html">
-    the usual interface versioning guidelines</ulink>.</para>
-  </refsect1>
+  <xi:include href="org.freedesktop.locale1.xml" xpointer="versioning"/>
 </refentry>
