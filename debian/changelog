@@ -1,3 +1,9 @@
+systemd (251~rc3-2) experimental; urgency=medium
+
+  * Backport removal of ndisc test case, breaks build on armhf/armel.
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 16 May 2022 00:37:36 +0100
+
 systemd (251~rc3-1) experimental; urgency=medium
 
   * autopkgtest: add allow-stderr to boot-and-services. Sometimes we see
