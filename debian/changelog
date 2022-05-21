@@ -1,3 +1,13 @@
+systemd (251-1) experimental; urgency=medium
+
+  * New upstream version 251. For a full list of changes, see:
+    https://github.com/systemd/systemd/releases/tag/v251
+  * Refresh patches
+  * Revert manual removal of ndisc test case, merged upstream
+  * Bump Standards-Version to 4.6.1, no changes
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 21 May 2022 15:04:13 +0100
+
 systemd (251~rc3-2) experimental; urgency=medium
 
   * Backport removal of ndisc test case, breaks build on armhf/armel.
