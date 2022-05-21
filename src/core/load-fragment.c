@@ -644,7 +644,7 @@ int config_parse_socket_listen(
                         p->address.type = SOCK_SEQPACKET;
                 }
 
-                if (socket_address_family(&p->address) != AF_LOCAL && p->address.type == SOCK_SEQPACKET) {
+                if (socket_address_family(&p->address) != AF_UNIX && p->address.type == SOCK_SEQPACKET) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0, "Address family not supported, ignoring: %s", rvalue);
                         return 0;
                 }
@@ -4849,7 +4849,7 @@ int config_parse_load_credential(
         }
 
         if (isempty(p)) {
-                /* If only one field field is specified take it as shortcut for inheriting a credential named
+                /* If only one field is specified take it as shortcut for inheriting a credential named
                  * the same way from our parent */
                 q = strdup(k);
                 if (!q)
