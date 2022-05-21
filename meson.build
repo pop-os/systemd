@@ -669,8 +669,7 @@ gperf_test_format = '''
 const char * in_word_set(const char *, @0@);
 @1@
 '''
-gperf_snippet_format = 'echo foo,bar | @0@ -L ANSI-C'
-gperf_snippet = run_command(sh, '-c', gperf_snippet_format.format(gperf.path()),
+gperf_snippet = run_command(sh, '-c', 'echo foo,bar | "$1" -L ANSI-C', '_', gperf,
                             check : true)
 gperf_test = gperf_test_format.format('size_t', gperf_snippet.stdout())
 if cc.compiles(gperf_test)
@@ -1004,8 +1003,8 @@ bpf_framework_required = want_bpf_framework == 'true'
 libbpf = dependency('libbpf', required : bpf_framework_required, version : '>= 0.2')
 conf.set10('HAVE_LIBBPF', libbpf.found())
 
-if want_bpf_framework == 'false' or not libbpf.found()
-        conf.set10('BPF_FRAMEWORK', 0)
+if want_bpf_framework == 'false' or not libbpf.found() or skip_deps
+        conf.set10('BPF_FRAMEWORK', false)
 else
         # Support 'versioned' clang/llvm-strip binaries, as seen on Debian/Ubuntu
         # (like clang-10/llvm-strip-10)
@@ -1013,11 +1012,7 @@ else
                 r = find_program('clang', required : bpf_framework_required, version : '>= 10.0.0')
                 clang_found = r.found()
                 if clang_found
-                        if meson.version().version_compare('>= 0.55')
-                                clang = [r.full_path()]
-                        else
-                                clang = [r.path()]
-                        endif
+                        clang = r.path()
                 endif
                 # Assume that the required flags are supported by the found clang.
                 clang_supports_flags = clang_found
@@ -1581,20 +1576,6 @@ if dbus_interfaces_dir == '' or dbus_interfaces_dir == 'yes'
                 endif
         endif
 endif
-if dbus_interfaces_dir == dbusdatadir / 'interfaces' or dbus_interfaces_dir == 'no'
-        dbus_interfaces_dir_name = 'interfaces'
-        dbus_interfaces_dir_parent = dbusdatadir
-else
-        elements = dbus_interfaces_dir.split('/')
-        dbus_interfaces_dir_name = elements[-1]
-        dbus_interfaces_dir_parent = '/'
-        foreach elem : elements
-                if elem == dbus_interfaces_dir_name and dbus_interfaces_dir == dbus_interfaces_dir_parent / dbus_interfaces_dir_name
-                        break
-                endif
-                dbus_interfaces_dir_parent = dbus_interfaces_dir_parent / elem
-        endforeach
-endif
 
 # We support one or the other. If gcrypt is available, we assume it's there to
 # be used, and use it in preference.
@@ -2140,13 +2121,16 @@ foreach tuple : [['myhostname', 'ENABLE_NSS_MYHOSTNAME'],
                                         librt],
                         link_depends : sym,
                         install : true,
+                        install_tag : 'nss',
                         install_dir : rootlibdir)
 
                 # We cannot use shared_module because it does not support version suffix.
                 # Unfortunately shared_library insists on creating the symlink…
                 meson.add_install_script('sh', '-c',
                                          'rm $DESTDIR@0@/libnss_@1@.so'
-                                         .format(rootlibdir, module))
+                                         .format(rootlibdir, module),
+                                         install_tag : 'nss'
+                                         )
 
                 if want_tests != 'false'
                         test('dlopen-nss_' + module,
@@ -2415,6 +2399,7 @@ if conf.get('ENABLE_LOGIND') == 1
                                         libpam_misc],
                         link_depends : pam_systemd_sym,
                         install : true,
+                        install_tag : 'pam',
                         install_dir : pamlibdir)
 
                 if want_tests != 'false'
@@ -2643,6 +2628,7 @@ if conf.get('ENABLE_HOMED') == 1
                                         libcrypt],
                         link_depends : pam_systemd_home_sym,
                         install : true,
+                        install_tag : 'pam',
                         install_dir : pamlibdir)
         endif
 endif
@@ -4101,9 +4087,9 @@ alias_target('update-man-rules', update_man_rules)
 if not meson.is_cross_build()
         custom_target(
                 'export-dbus-interfaces',
-                output : dbus_interfaces_dir_name,
+                output : fs.name(dbus_interfaces_dir),
                 install : dbus_interfaces_dir != 'no',
-                install_dir : dbus_interfaces_dir_parent,
+                install_dir : fs.parent(dbus_interfaces_dir),
                 command : [export_dbus_interfaces_py, '@OUTPUT@', dbus_programs])
 endif
 

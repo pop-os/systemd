@@ -107,6 +107,14 @@ sensor:modalias:acpi:BOSC0200*:dmi:*svnAcer*:*pnSpinSP111-34:*
  ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
 
 #########################################
+# Aquarius
+#########################################
+
+# Aquarius NS483
+sensor:modalias:acpi:MXC6655*:dmi:*:svnAquarius*:pnNS483:*
+ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
+
+#########################################
 # Archos
 #########################################
 sensor:modalias:acpi:SMO8500*:dmi:*:svnARCHOS:pnARCHOS80Cesium:*
@@ -277,6 +285,7 @@ sensor:modalias:acpi:KIOX000A*:dmi:*:svnCube:pni18B:*
 
 # Cube iWork 10 Flagship
 sensor:modalias:acpi:BOSC0200*:dmi:*:svnCube:pnI15-TC:*
+sensor:modalias:acpi:BOSC0200*:dmi:*:svnALLDOCUBE:pnI15-TG:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
 
 # Cube iWork 11 Stylus
