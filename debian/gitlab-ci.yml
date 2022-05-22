@@ -6,3 +6,6 @@ variables:
   # some tests do not work in the salsa-ci infrastructure at build time,
   # but work fine in the autopkgtest job anyway, so skip them in the build step
   DEB_BUILD_OPTIONS: "nocheck"
+  # Many false positives due to issue in binutils:
+  # https://bugs.debian.org/1000977
+  SALSA_CI_LINTIAN_SUPPRESS_TAGS: "elf-error"
