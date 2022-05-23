@@ -1,3 +1,10 @@
+systemd (251-2) unstable; urgency=medium
+
+  * Salsa CI: suppress lintian false positive on dbgsym.
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 23 May 2022 12:30:28 +0100
+
 systemd (251-1) experimental; urgency=medium
 
   * New upstream version 251. For a full list of changes, see:
