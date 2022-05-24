@@ -74,6 +74,7 @@ Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
             systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
+          systemd-userdbd,
           libfido2-1,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
@@ -423,3 +424,15 @@ Description: userspace out-of-memory (OOM) killer
  systemd-oomd is a system service that uses cgroups-v2 and
  pressure stall information (PSI) to monitor and take action on
  processes before an OOM occurs in kernel space.
+
+Package: systemd-userdbd
+Architecture: linux-any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd (= ${binary:Version}),
+Description: dynamic user/group manager
+ systemd-userdbd is a system service that multiplexes user/group lookups to all
+ local services that provide JSON user/group record definitions to the system.
+ In addition it synthesizes JSON user/group records from classic UNIX/glibc NSS
+ user/group records in order to provide full backwards compatibility. It may
+ also pick up statically defined JSON user/group records from drop-in files.

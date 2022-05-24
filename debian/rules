@@ -67,7 +67,6 @@ CONFFLAGS = \
 	-Dsysupdate=false \
 	-Dxkbcommon=false \
 	-Dwheel-group=false \
-	-Duserdb=false \
 	-Dhomed=false \
 	-Dpwquality=false \
 	-Dp11kit=false \
@@ -121,6 +120,7 @@ CONFFLAGS += \
 	-Ddns-over-tls=openssl \
 	-Dlibfido2=true \
 	-Dtpm2=true \
+	-Duserdb=true \
 	-Dpcre2=true
 else
 CONFFLAGS += \
@@ -137,6 +137,7 @@ CONFFLAGS += \
 	-Dopenssl=false \
 	-Dlibfido2=false \
 	-Dtpm2=false \
+	-Duserdb=false \
 	-Dpcre2=false
 endif
 
@@ -253,6 +254,7 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
 	dh_installsystemd -psystemd-oomd systemd-oomd.service
 	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
+	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 
 override_dh_installsystemduser:
 
