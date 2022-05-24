@@ -74,6 +74,7 @@ Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
             systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
+          systemd-homed,
           systemd-userdbd,
           libfido2-1,
           libtss2-esys-3.0.2-0,
@@ -436,3 +437,14 @@ Description: dynamic user/group manager
  In addition it synthesizes JSON user/group records from classic UNIX/glibc NSS
  user/group records in order to provide full backwards compatibility. It may
  also pick up statically defined JSON user/group records from drop-in files.
+
+Package: systemd-homed
+Architecture: linux-any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd-userdbd (= ${binary:Version}),
+         systemd (= ${binary:Version}),
+         libpam-runtime,
+Description: home area manager
+ systemd-homed is a system service designed to manage home directories. This
+ package includes the homed and userdbd services, tools and documentation.
