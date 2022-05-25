@@ -1,3 +1,20 @@
+systemd (251.1-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Switch from gnutls to openssl. Upstream is slowly phasing out gnutls.
+    Start switching to openssl. Drops support for '--trust' in the
+    journal-gatewayd and journal-remote programs.
+  * New upstream version 251.1
+  * Add systemd-journal-remote.NEWS to inform about dropping --trust
+
+  [ Michael Biebl ]
+  * Enable pager Hyperlink ANSI sequence support. This requires less ≥
+    563. Add a versioned Breaks accordingly.
+  * Drop unnecessary version constraints / dependencies
+  * Update liblz4-dev Build-Depends as per meson.build
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 26 May 2022 00:58:46 +0100
+
 systemd (251-2) unstable; urgency=medium
 
   * Salsa CI: suppress lintian false positive on dbgsym.
