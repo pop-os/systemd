@@ -5,13 +5,9 @@ lib/systemd/system/systemd-bless-boot.service
 lib/systemd/system/systemd-boot-system-token.service
 lib/systemd/system/systemd-boot-update.service
 usr/bin/bootctl
-usr/lib/systemd/boot/
 usr/share/bash-completion/completions/bootctl
 usr/share/man/man1/bootctl.1
 usr/share/man/man5/loader.conf.5
-usr/share/man/man7/linuxaa64.efi.stub.7
-usr/share/man/man7/linuxia32.efi.stub.7
-usr/share/man/man7/linuxx64.efi.stub.7
 usr/share/man/man7/sd-boot.7
 usr/share/man/man7/systemd-boot.7
 usr/share/man/man8/systemd-bless-boot.8

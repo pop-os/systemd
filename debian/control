@@ -466,12 +466,30 @@ Package: systemd-boot
 Architecture: amd64 i386 arm64 armhf
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         systemd-boot-efi (= ${binary:Version}),
 Recommends: efibootmgr,
 Breaks: systemd (<< 251.2-2~)
 Replaces: systemd (<< 251.2-2~)
-Description: simple UEFI boot manager
+Description: simple UEFI boot manager - tools and services
  systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
  textual menu to select the entry to boot and an editor for the kernel command
  line. It supports systems with UEFI firmware only.
  .
  Installing systemd-boot will not automatically switch your boot loader.
+ .
+ This package contains various tools and services to manage systems using
+ systemd-boot.
+
+Package: systemd-boot-efi
+Architecture: amd64 i386 arm64 armhf
+Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends},
+Depends: ${misc:Depends},
+Breaks: systemd (<< 251.2-2~)
+Replaces: systemd (<< 251.2-2~)
+Description: Simple UEFI boot manager - EFI binaries
+ systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
+ textual menu to select the entry to boot and an editor for the kernel command
+ line. It supports systems with UEFI firmware only.
+ .
+ This package contains the EFI binaries.
