@@ -320,6 +320,18 @@ Description: systemd utility library - development files
  This package contains the files needed for developing applications that
  use libsystemd.
 
+Package: libsystemd-shared
+Architecture: linux-any
+Multi-Arch: same
+Section: libs
+Pre-Depends: ${shlibs:Depends},
+             ${misc:Pre-Depends}
+Depends: ${misc:Depends}
+Description: systemd shared private library
+ This internal shared library provides common code used by various systemd
+ components. It is supposed to decrease memory and disk footprint.
+ The shared library is not meant for public use and is not API or ABI stable.
+
 Package: udev
 Priority: important
 Architecture: linux-any

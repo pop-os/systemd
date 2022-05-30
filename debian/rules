@@ -266,15 +266,16 @@ PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' build-d
 # quasi-essential, so add their dependencies to Pre-Depends
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
-	dh_shlibdeps -psystemd -llib/systemd/ -- \
+	dh_shlibdeps -psystemd -Llibsystemd-shared -- \
 		-dPre-Depends -edebian/systemd/bin/systemctl \
 		-dDepends
-	dh_shlibdeps --remaining-packages -Lsystemd
+	dh_shlibdeps -plibsystemd-shared -lusr/lib/$(DEB_HOST_MULTIARCH)/systemd
+	dh_shlibdeps --remaining-packages -Llibsystemd-shared
 
 override_dh_makeshlibs:
 	sed 's/SHARED_LIB_VERSION/$(PROJECT_VERSION)/' debian/shlibs.local.in > debian/shlibs.local
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
-	dh_makeshlibs -psystemd -Xlibsystemd-shared -Xlibsystemd-core -- -c$(GENSYMBOLS_LEVEL)
+	dh_makeshlibs -plibsystemd-shared -Xlibsystemd-shared -Xlibsystemd-core -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
 
 override_dh_auto_test:
