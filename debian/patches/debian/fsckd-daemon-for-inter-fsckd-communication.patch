@@ -269,7 +269,7 @@ index e045852..131e4bc 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..73cb5d9
+index 0000000..8a85b69
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,697 @@
@@ -898,7 +898,7 @@ index 0000000..73cb5d9
 +        assert(argc >= 0);
 +        assert(argv);
 +
-+        while ((c = getopt_long(argc, argv, "hv", options, NULL)) >= 0)
++        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0)
 +                switch (c) {
 +
 +                case 'h':
