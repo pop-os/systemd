@@ -1,3 +1,11 @@
+systemd (249.11-0ubuntu4) kinetic; urgency=medium
+
+  * d/p/lp1964494-network-do-not-enable-IPv4-ACD-for-IPv4-link-local-a.patch:
+    do not enable IPv4 ACD for IPv4 link-local address if ACD is
+    disabled explicitly (LP: #1964494)
+
+ -- Dan Streetman <ddstreet@ieee.org>  Tue, 31 May 2022 08:25:36 -0400
+
 systemd (249.11-0ubuntu3.1) jammy; urgency=medium
 
   [ Andy Chi ]
