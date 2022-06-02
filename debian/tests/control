@@ -122,7 +122,7 @@ Depends: systemd-tests,
   libpam-systemd,
   autopkgtest,
   lsb-release,
-  lxd
+  snapd,
 Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-not-installable, skippable
 
 Tests: upstream-1, upstream-2
