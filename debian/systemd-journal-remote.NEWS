@@ -1,7 +1,0 @@
-systemd (251.1-1) unstable; urgency=medium
-
-  systemd-journal-gatewayd and systemd-journal-remote are now built
-  without the --trust option, in order to be able to switch away from
-  gnutls to openssl.
-
- -- Luca Boccassi <bluca@debian.org>  Thu, 26 May 2022 00:55:39 +0100
