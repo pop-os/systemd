@@ -1,4 +1,5 @@
 Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
+sha256-fix-compilation-on-efi-ia32.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
