@@ -1,10 +1,21 @@
-systemd (251.2-1) UNRELEASED; urgency=medium
+systemd (251.2-1) unstable; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 251.2
     - logind: do not print wall messages to local pseudoterminals
       (Closes: #1012155)
+  * Rebase patches
+  * Fix parsing of command line options in fsckd (Closes: #1009032)
+  * Do not require a valid version when parsing sd-boot loader entries
+    (Closes: #993292)
+  * Add dpkg file trigger for systemd-binfmt to update binfmt registrations
+  * Use a single NEWS file shipped in the main systemd package
 
- -- Michael Biebl <biebl@debian.org>  Fri, 03 Jun 2022 18:27:20 +0200
+  [ Luca Boccassi ]
+  * autopkgtest: add cryptsetup-initramfs for upstream suite.
+    Needed for https://github.com/systemd/systemd/pull/23517
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 03 Jun 2022 19:37:06 +0200
 
 systemd (251.1-1) unstable; urgency=medium
 
