@@ -8,6 +8,9 @@ Bug: https://github.com/systemd/systemd/issues/13973
  1 file changed, 1 insertion(+)
  create mode 100644 test/TEST-25-IMPORT/deny-list-upstream-ci
 
+diff --git a/test/TEST-25-IMPORT/deny-list-upstream-ci b/test/TEST-25-IMPORT/deny-list-upstream-ci
+new file mode 100644
+index 0000000..47a5f15
 --- /dev/null
 +++ b/test/TEST-25-IMPORT/deny-list-upstream-ci
 @@ -0,0 +1 @@
