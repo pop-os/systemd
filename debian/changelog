@@ -1,3 +1,11 @@
+systemd (251.2-1) UNRELEASED; urgency=medium
+
+  * New upstream version 251.2
+    - logind: do not print wall messages to local pseudoterminals
+      (Closes: #1012155)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 03 Jun 2022 18:27:20 +0200
+
 systemd (251.1-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
