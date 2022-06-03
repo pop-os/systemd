@@ -1,3 +1,9 @@
+systemd (251.2-2) unstable; urgency=medium
+
+  * sha256: fix compilation on efi-ia32
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 04 Jun 2022 00:14:28 +0200
+
 systemd (251.2-1) unstable; urgency=medium
 
   [ Michael Biebl ]
