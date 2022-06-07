@@ -128,7 +128,7 @@ CONFFLAGS += \
 	-Dcryptolib=openssl \
 	-Ddns-over-tls=openssl \
 	-Dlibfido2=true \
-	-Dtpm2=true \
+	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),false,true) \
 	-Dpcre2=true
 else
 CONFFLAGS += \
