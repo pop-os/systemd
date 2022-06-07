@@ -7,7 +7,6 @@ test-enable-debug-logging-of-systemd-oomd.patch
 test-tweak-parameters-for-TEST-55-OOMD.patch
 test-make-test-55-oomd-less-flaky.patch
 units-don-t-install-dbus-org.freedesktop.oom1.service-ali.patch
-test-enable-systemd-oomd.service.patch
 Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
 sha256-fix-compilation-on-efi-ia32.patch
 debian/Use-Debian-specific-config-files.patch
