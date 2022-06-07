@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 3abf9df..ac3d1ac 100644
+index 51928b2..03208c0 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3205,6 +3205,15 @@ executable(
+@@ -3206,6 +3206,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -251,7 +251,7 @@ index 3abf9df..ac3d1ac 100644
 +        'src/fsckd/fsckd.c',
 +        include_directories : includes,
 +        link_with : [libshared],
-+        install_rpath : rootlibexecdir,
++        install_rpath : rootpkglibdir,
 +        install : true,
 +        install_dir : rootlibexecdir)
 +
