@@ -61,7 +61,6 @@ linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementa
 linux-5.15-compat-ioprio/ioprio-util-add-macro-for-default-ioprio-settings.patch
 linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.patch
 linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
-linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
 lp1955997-unmask-intel-hid-for-HP-machines.patch
 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
