@@ -49,7 +49,6 @@ Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
 lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch
 lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
-lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
 lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
 lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
 lp1955997-unmask-intel-hid-for-HP-machines.patch
