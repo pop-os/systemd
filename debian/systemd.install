@@ -32,9 +32,9 @@ usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
 usr/share/locale/
 var/lib
-../../extra/init-functions.d lib/lsb/
-../../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
-../../extra/systemd-sysv-install lib/systemd/
-../../extra/units/* lib/systemd/system/
-../../extra/kernel-install.d/* usr/lib/kernel/install.d
-../../extra/pam.d/* usr/lib/pam.d/
+../extra/init-functions.d lib/lsb/
+../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
+../extra/systemd-sysv-install lib/systemd/
+../extra/units/* lib/systemd/system/
+../extra/kernel-install.d/* usr/lib/kernel/install.d
+../extra/pam.d/* usr/lib/pam.d/

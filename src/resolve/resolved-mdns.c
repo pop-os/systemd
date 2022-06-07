@@ -107,7 +107,8 @@ static int proposed_rrs_cmp(DnsResourceRecord **x, unsigned x_size, DnsResourceR
 
 static int mdns_packet_extract_matching_rrs(DnsPacket *p, DnsResourceKey *key, DnsResourceRecord ***ret_rrs) {
         _cleanup_free_ DnsResourceRecord **list = NULL;
-        unsigned n = 0, size = 0;
+        size_t i, n = 0, size = 0;
+        DnsResourceRecord *rr;
         int r;
 
         assert(p);
@@ -115,28 +116,39 @@ static int mdns_packet_extract_matching_rrs(DnsPacket *p, DnsResourceKey *key, D
         assert(ret_rrs);
         assert_return(DNS_PACKET_NSCOUNT(p) > 0, -EINVAL);
 
-        for (size_t i = DNS_PACKET_ANCOUNT(p); i < (DNS_PACKET_ANCOUNT(p) + DNS_PACKET_NSCOUNT(p)); i++) {
-                r = dns_resource_key_match_rr(key, p->answer->items[i].rr, NULL);
-                if (r < 0)
-                        return r;
-                if (r > 0)
-                        size++;
+        i = 0;
+        DNS_ANSWER_FOREACH(rr, p->answer) {
+                if (i >= DNS_PACKET_ANCOUNT(p) && i < DNS_PACKET_ANCOUNT(p) + DNS_PACKET_NSCOUNT(p)) {
+                        r = dns_resource_key_match_rr(key, rr, NULL);
+                        if (r < 0)
+                                return r;
+                        if (r > 0)
+                                size++;
+                }
+                i++;
         }
 
-        if (size == 0)
+        if (size == 0) {
+                *ret_rrs = NULL;
                 return 0;
+        }
 
         list = new(DnsResourceRecord *, size);
         if (!list)
                 return -ENOMEM;
 
-        for (size_t i = DNS_PACKET_ANCOUNT(p); i < (DNS_PACKET_ANCOUNT(p) + DNS_PACKET_NSCOUNT(p)); i++) {
-                r = dns_resource_key_match_rr(key, p->answer->items[i].rr, NULL);
-                if (r < 0)
-                        return r;
-                if (r > 0)
-                        list[n++] = p->answer->items[i].rr;
+        i = 0;
+        DNS_ANSWER_FOREACH(rr, p->answer) {
+                if (i >= DNS_PACKET_ANCOUNT(p) && i < DNS_PACKET_ANCOUNT(p) + DNS_PACKET_NSCOUNT(p)) {
+                        r = dns_resource_key_match_rr(key, rr, NULL);
+                        if (r < 0)
+                                return r;
+                        if (r > 0)
+                                list[n++] = rr;
+                }
+                i++;
         }
+
         assert(n == size);
         typesafe_qsort(list, size, mdns_rr_compare);
 
@@ -203,7 +215,6 @@ static bool mdns_should_reply_using_unicast(DnsPacket *p) {
 }
 
 static bool sender_on_local_subnet(DnsScope *s, DnsPacket *p) {
-        LinkAddress *a;
         int r;
 
         /* Check whether the sender is on a local subnet. */
@@ -359,7 +370,6 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
 
         if (dns_packet_validate_reply(p) > 0) {
                 DnsResourceRecord *rr;
-                DnsTransaction *t;
 
                 log_debug("Got mDNS reply packet");
 
@@ -494,6 +504,8 @@ int manager_mdns_ipv4_fd(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv4: Failed to create event source: %m");
 
+        (void) sd_event_source_set_description(m->mdns_ipv4_event_source, "mdns-ipv4");
+
         return m->mdns_ipv4_fd = TAKE_FD(s);
 }
 
@@ -518,7 +530,7 @@ int manager_mdns_ipv6_fd(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to set IPV6_UNICAST_HOPS: %m");
 
-        /* RFC 4795, section 2.5 recommends setting the TTL of UDP packets to 255. */
+        /* RFC 6762, section 11 recommends setting the TTL of UDP packets to 255. */
         r = setsockopt_int(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, 255);
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to set IPV6_MULTICAST_HOPS: %m");
@@ -566,6 +578,8 @@ int manager_mdns_ipv6_fd(Manager *m) {
         r = sd_event_add_io(m->event, &m->mdns_ipv6_event_source, s, EPOLLIN, on_mdns_packet, m);
         if (r < 0)
                 return log_error_errno(r, "mDNS-IPv6: Failed to create event source: %m");
+
+        (void) sd_event_source_set_description(m->mdns_ipv6_event_source, "mdns-ipv6");
 
         return m->mdns_ipv6_fd = TAKE_FD(s);
 }

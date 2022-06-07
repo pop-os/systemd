@@ -6,6 +6,10 @@
 #define RENAME_NOREPLACE (1 << 0)
 #endif
 
+#ifndef BLKGETDISKSEQ
+#define BLKGETDISKSEQ _IOR(0x12,128,__u64)
+#endif
+
 /* linux/fs.h or sys/mount.h */
 #ifndef MS_MOVE
 #define MS_MOVE 8192
@@ -50,11 +54,6 @@
 /* Not exposed yet. Defined at fs/ext4/ext4.h */
 #ifndef EXT4_IOC_RESIZE_FS
 #define EXT4_IOC_RESIZE_FS _IOW('f', 16, __u64)
-#endif
-
-/* Not exposed yet. Defined at fs/cifs/cifsglob.h */
-#ifndef CIFS_MAGIC_NUMBER
-#define CIFS_MAGIC_NUMBER 0xFF534D42
 #endif
 
 /* linux/nsfs.h */

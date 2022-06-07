@@ -26,7 +26,7 @@ static inline Set* set_free_free(Set *s) {
 
 /* no set_free_free_free */
 
-#define set_copy(s) ((Set*) _hashmap_copy(HASHMAP_BASE(h)  HASHMAP_DEBUG_SRC_ARGS))
+#define set_copy(s) ((Set*) _hashmap_copy(HASHMAP_BASE(s)  HASHMAP_DEBUG_SRC_ARGS))
 
 int _set_ensure_allocated(Set **s, const struct hash_ops *hash_ops HASHMAP_DEBUG_PARAMS);
 #define set_ensure_allocated(h, ops) _set_ensure_allocated(h, ops HASHMAP_DEBUG_SRC_ARGS)
@@ -153,3 +153,5 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Set*, set_free_free);
 int set_strjoin(Set *s, const char *separator, bool wrap_with_separator, char **ret);
 
 bool set_equal(Set *a, Set *b);
+
+bool set_fnmatch(Set *include_patterns, Set *exclude_patterns, const char *needle);
