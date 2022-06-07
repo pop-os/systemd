@@ -1,6 +1,5 @@
 sysusers-split-up-systemd.conf.patch
 meson-minor-cleanup.patch
-oomd-move-oomctl-to-bindir.patch
 test-check-memory-pressure-more-frequently.patch
 test-enable-debug-logging-of-systemd-oomd.patch
 test-tweak-parameters-for-TEST-55-OOMD.patch
