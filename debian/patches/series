@@ -3,7 +3,6 @@ sha256-fix-compilation-on-efi-ia32.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
-debian/Add-support-for-TuxOnIce-hibernation.patch
 debian/Re-enable-journal-forwarding-to-syslog.patch
 debian/Don-t-enable-audit-by-default.patch
 debian/Only-start-logind-if-dbus-is-installed.patch
