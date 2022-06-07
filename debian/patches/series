@@ -1,4 +1,3 @@
-test-tweak-parameters-for-TEST-55-OOMD.patch
 Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
 sha256-fix-compilation-on-efi-ia32.patch
 debian/Use-Debian-specific-config-files.patch
