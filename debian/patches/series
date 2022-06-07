@@ -53,4 +53,3 @@ lp1955997-unmask-intel-hid-for-HP-machines.patch
 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
-hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
