@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.3) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.3) jammy; urgency=medium
 
   [ Lukas Märdian ]
   * Build with and suggest fido2 and tpm libraries (LP: #1969375)
