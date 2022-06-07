@@ -1,3 +1,34 @@
+systemd (249.11-0ubuntu3.3) UNRELEASED; urgency=medium
+
+  [ Lukas Märdian ]
+  * Build with and suggest fido2 and tpm libraries (LP: #1969375)
+    These are used via dlopen only if available by some tools like
+    systemd-cryptsetup, systemd-cryptenroll and systemd-repart,
+    with graceful fallbacks if they are not found.
+    Build-depend on them so that the features get compiled in
+    (apart from stage1 builds), and add appropriate Suggests.
+    Backport of:
+    https://salsa.debian.org/systemd-team/systemd/-/commit/6b5e99f1d7f63c0c83007de9f98f7745f4a564f8
+    Files:
+    - debian/control
+    - debian/rules
+    - debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c3f5affb669794f9ebfea8d81c68b1aacdde0511
+  * Run tests-in-lxd autopkgtest via LXD snap, deb is no more (LP: #1976607)
+    Files:
+    - debian/tests/control
+    - debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=eccfd52b275d1b0544dd44f858bcee8508c0957f
+
+  [ Nick Rosbrook ]
+  * d/t/boot-and-services: Ignore failed snap mount units in test_no_failed
+    (LP: #1967576)
+    Author: Nick Rosbrook
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cf823bffe5cb47a6eb531d9869f69a844f356376
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 07 Jun 2022 12:49:20 +0200
+
 systemd (249.11-0ubuntu3.2) jammy; urgency=medium
 
   * d/p/lp1964494-network-do-not-enable-IPv4-ACD-for-IPv4-link-local-a.patch:
