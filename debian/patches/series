@@ -1,5 +1,4 @@
 meson-minor-cleanup.patch
-test-check-memory-pressure-more-frequently.patch
 test-tweak-parameters-for-TEST-55-OOMD.patch
 units-don-t-install-dbus-org.freedesktop.oom1.service-ali.patch
 Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
