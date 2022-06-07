@@ -59,7 +59,6 @@ lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
 linux-5.15-compat-ioprio/variuos-add-missing-includes.patch
 linux-5.15-compat-ioprio/Define-ioprio_-get-set-the-same-as-other-compat-syscalls.patch
 linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementati.patch
-linux-5.15-compat-ioprio/shared-split-out-ioprio-related-stuff-into-ioprio-util.-c.patch
 linux-5.15-compat-ioprio/ioprio-util-add-macro-for-default-ioprio-settings.patch
 linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.patch
 linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
