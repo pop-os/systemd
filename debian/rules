@@ -11,7 +11,7 @@ include /usr/share/debhelper/dh_package_notes/package-notes.mk
 ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
     SUPPORT_URL = http://www.ubuntu.com/support
-    CONFFLAGS_DISTRO = -Dtpm-pcrindex=12
+    CONFFLAGS_DISTRO =
 ifeq ($(DEB_HOST_ARCH),amd64)
 # enable CET on ubuntu amd64, until compiler is fixed to do it correctly with
 # -flto
