@@ -1,3 +1,12 @@
+systemd (251.2-3) unstable; urgency=medium
+
+  systemd-boot has been split into a separate package.
+  This new systemd-boot package will not be installed automatically on
+  upgrades. If you are using using systemd-boot, please install this new
+  package manually.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 08 Jun 2022 21:49:47 +0200
+
 systemd (251.1-1) unstable; urgency=medium
 
   systemd-journal-gatewayd and systemd-journal-remote are now built
