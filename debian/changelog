@@ -1,3 +1,30 @@
+systemd (251.2-3) experimental; urgency=medium
+
+  [ Luca Boccassi ]
+  * Add systemd-userdbd package. This can be used to synthetize dynamic
+    user/groups, and can be useful by itself. It will also be used by
+    homed.
+  * Add systemd-homed package (Closes: #976960)
+  * Add systemd-boot-efi multiarch package. Allows EFI binaries for
+    different architectures to be co-installed. Useful when the EFI has a
+    different architecture, or to manipulate images. The userspace tooling
+    doesn't need to match the EFI binaries. Also allows to reduce the
+    number of packages and dependencies needed when i386 is not a full
+    architecture, but a subset for libraries and for EFI support.
+
+  [ Michael Biebl ]
+  * Move homectl and userdbctl to /usr/bin
+  * Install libsystemd-shared into rootpkglibdir
+  * Split out libsystemd-shared into its own package. Since libsystem-
+    shared is an internal implementation detail, do not generate a shlibs
+    file for it. This means dh_shlibdeps needs to be told explicitly where
+    it can find libsystemd-shared. Mark this new package as Multi-Arch:
+    same. (Closes: #990547)
+  * Split out systemd-boot into its own package
+  * Add NEWS entry for the systemd-boot package split
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 08 Jun 2022 23:56:04 +0100
+
 systemd (251.2-2) unstable; urgency=medium
 
   * sha256: fix compilation on efi-ia32
