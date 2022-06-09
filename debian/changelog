@@ -8,7 +8,7 @@ systemd (251.2-3) experimental; urgency=medium
   * Add systemd-boot-efi multiarch package. Allows EFI binaries for
     different architectures to be co-installed. Useful when the EFI has a
     different architecture, or to manipulate images. The userspace tooling
-    doesn't need to match the EFI binaries. Also allows to reduce the
+    doesn't need to match the EFI binaries. Also allows one to reduce the
     number of packages and dependencies needed when i386 is not a full
     architecture, but a subset for libraries and for EFI support.
 
