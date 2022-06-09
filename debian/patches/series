@@ -2,6 +2,7 @@ Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
 sha256-fix-compilation-on-efi-ia32.patch
 Move-homectl-and-userdbctl-to-bindir.patch
 meson-install-libsystemd-shared-into-rootpkglibdir.patch
+shellcheck-clean-kernel-install-again.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
