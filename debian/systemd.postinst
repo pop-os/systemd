@@ -19,7 +19,7 @@ _update_binfmt() {
     # configuration ship a corresponding binfmt.d snippet yet.
     # Once this is the case, this additional safety check can be removed.
     if ! _systemctl -q is-active binfmt-support.service; then
-        _systemctl restart systemd-binfmt.service || true
+        _systemctl try-restart systemd-binfmt.service || true
     fi
 }
 
