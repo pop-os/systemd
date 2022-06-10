@@ -1,3 +1,11 @@
+systemd (251.2-4) unstable; urgency=medium
+
+  * Use try-restart in systemd-binfmt dpkg trigger
+  * Fix bashism in kernel-install
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 10 Jun 2022 09:16:48 +0200
+
 systemd (251.2-3) experimental; urgency=medium
 
   [ Luca Boccassi ]
