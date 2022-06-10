@@ -460,7 +460,8 @@ Depends: ${shlibs:Depends},
          libpam-runtime,
 Description: home area manager
  systemd-homed is a system service designed to manage home directories. This
- package includes the homed and userdbd services, tools and documentation.
+ package includes the homed service, a PAM module to automatically mount home
+ directories on user login, tools and documentation.
 
 Package: systemd-boot
 Architecture: amd64 i386 arm64 armhf
