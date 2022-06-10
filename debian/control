@@ -325,9 +325,9 @@ Package: libsystemd-shared
 Architecture: linux-any
 Multi-Arch: same
 Section: libs
-Pre-Depends: ${shlibs:Depends},
-             ${misc:Pre-Depends}
-Depends: ${misc:Depends}
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
 Description: systemd shared private library
  This internal shared library provides common code used by various systemd
  components. It is supposed to decrease memory and disk footprint.
