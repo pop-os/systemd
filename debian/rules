@@ -93,7 +93,7 @@ CONFFLAGS = \
 	-Dinstall-tests=$(if $(filter noinsttest,$(DEB_BUILD_PROFILES)),false,true) \
 	-Dlibcryptsetup-plugins=false \
 	-Defi=true \
-	-Dman=true \
+	-Dman=$(if $(filter nodoc,$(DEB_BUILD_PROFILES)),false,true) \
 	-Dtranslations=true \
 	-Dnss-myhostname=true \
 	-Dnss-mymachines=true \
@@ -160,7 +160,9 @@ execute_after_dh_auto_install:
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
 	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
-	find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'
+	if test -d debian/tmp/usr/share/man; then \
+		find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'; \
+	fi
 
 execute_before_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
@@ -206,11 +208,10 @@ execute_before_dh_install:
 	rm -f debian/tmp/usr/lib/tmpfiles.d/systemd-resolve.conf
 
 execute_after_dh_install:
-	# install standalone binaries and manpages
+	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/bin debian/systemd-standalone-$$pkg/usr/share/man/man8; \
+		mkdir -p debian/systemd-standalone-$$pkg/bin; \
 		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
-		cp debian/tmp/usr/share/man/man8/systemd-$$pkg.8 debian/systemd-standalone-$$pkg/usr/share/man/man8/; \
 	done
 
 	# we don't want /tmp to be a tmpfs by default
@@ -220,7 +221,7 @@ execute_after_dh_install:
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
-	rm debian/systemd/usr/share/man/man5/crypttab.5
+	rm -f debian/tmp/usr/share/man/man5/crypttab.5
 endif
 
 	# files shipped by systemd
@@ -229,14 +230,6 @@ endif
 	rm debian/udev/lib/udev/rules.d/71-seat.rules
 	rm debian/udev/lib/udev/rules.d/99-systemd.rules
 
-	# remove duplicate files shipped by systemd-*/udev
-	echo "Removing duplicate files in systemd package:"
-	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
-		echo "... from $$pkg..."; \
-		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
-		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
-	done
-
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py
@@ -244,6 +237,22 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
 	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
 endif
+
+execute_after_dh_installman:
+	# remove duplicate files shipped by systemd-*/udev
+	# run after dh_installman, which runs after dh_install, to include manpages
+	echo "Removing duplicate files in systemd package:"
+	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
+		echo "... from $$pkg..."; \
+		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
+		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
+	done
+
+	# dh_installman is affected by false positives and mangles manpages named as lib*.so.*
+	# fixed in debhelper 13.7.2 by https://salsa.debian.org/debian/debhelper/-/merge_requests/69
+	for pkg in libnss-myhostname libnss-mymachines libnss-resolve libnss-systemd; do \
+		rm -rf debian/$$pkg/usr/share/man/so; \
+	done
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)
