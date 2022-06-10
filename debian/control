@@ -95,6 +95,7 @@ Conflicts: consolekit,
 Breaks: resolvconf (<< 1.83~),
         udev (<< 247~),
         less (<< 563),
+        sicherboot (<< 0.1.6),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
 Description: system and service manager
