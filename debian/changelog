@@ -1,3 +1,16 @@
+systemd (251.2-5) unstable; urgency=medium
+
+  * Tweak description of systemd-homed package
+  * Move shlibs dependencies of libsystemd-shared from Pre-Depends to Depends
+    (Closes: #1012637)
+  * Add versioned Breaks against sicherboot for the systemd-boot split
+    (Closes: #1012625)
+  * Drop old Conflicts against hal from udev.
+    The hal package has been gone for several release cycles, so this
+    Conflicts should not be necessary anymore.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 10 Jun 2022 23:51:50 +0200
+
 systemd (251.2-4) unstable; urgency=medium
 
   * Use try-restart in systemd-binfmt dpkg trigger
