@@ -146,34 +146,35 @@ override_dh_auto_configure:
 	dh_auto_configure \
 		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
 
-override_dh_auto_build:
+execute_before_dh_auto_build:
 	# blhc false positives: C++ fuzz test program, cc -E flags listing, PE-COFF EFI binaries
 	@echo 'blhc: ignore-line-regexp: .* -o test-bus-vtable-cc.*'
 	@echo 'blhc: ignore-line-regexp: .*cc -E.*'
 	@echo 'blhc: ignore-line-regexp: .* -o src/boot/efi.*'
-	dh_auto_build
+
+execute_after_dh_auto_build:
 	# generate POT file for translators
 	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
-override_dh_auto_install:
-	dh_auto_install
+execute_after_dh_auto_install:
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
 	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
 	find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'
 
-override_dh_auto_clean:
+execute_before_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
 endif
-	dh_auto_clean
+
+execute_after_dh_auto_clean:
 	rm -f debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
 	rm -rf tools/chromiumos/__pycache__/
 	rm -f po/systemd.pot
 
-override_dh_install:
+execute_before_dh_install:
 	# remove unnecessary / unused files
 	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
 	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
@@ -204,8 +205,7 @@ override_dh_install:
 	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1007018
 	rm -f debian/tmp/usr/lib/tmpfiles.d/systemd-resolve.conf
 
-	dh_install
-
+execute_after_dh_install:
 	# install standalone binaries and manpages
 	for pkg in sysusers tmpfiles; do \
 		mkdir -p debian/systemd-standalone-$$pkg/bin debian/systemd-standalone-$$pkg/usr/share/man/man8; \
