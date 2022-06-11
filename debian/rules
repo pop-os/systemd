@@ -143,7 +143,7 @@ CONFFLAGS += \
 endif
 
 override_dh_auto_configure:
-	dh_auto_configure --builddirectory=build-deb \
+	dh_auto_configure \
 		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
 
 override_dh_auto_build:
@@ -151,12 +151,12 @@ override_dh_auto_build:
 	@echo 'blhc: ignore-line-regexp: .* -o test-bus-vtable-cc.*'
 	@echo 'blhc: ignore-line-regexp: .*cc -E.*'
 	@echo 'blhc: ignore-line-regexp: .* -o src/boot/efi.*'
-	dh_auto_build --builddirectory=build-deb
+	dh_auto_build
 	# generate POT file for translators
-	ninja -C build-deb/ systemd-pot
+	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
 override_dh_auto_install:
-	dh_auto_install --builddirectory=build-deb
+	dh_auto_install
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
 	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
@@ -166,7 +166,7 @@ override_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
 endif
-	dh_auto_clean --builddirectory=build-deb
+	dh_auto_clean
 	rm -f debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
@@ -260,7 +260,7 @@ override_dh_installsystemd:
 
 override_dh_installsystemduser:
 
-PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
+PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
@@ -280,9 +280,9 @@ override_dh_makeshlibs:
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
-	echo "01234567890123456789012345678901" > build-deb/machine-id
+	echo "01234567890123456789012345678901" > obj-$(DEB_HOST_GNU_TYPE)/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id meson test -C build-deb --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
+	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)/machine-id meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
 %:
