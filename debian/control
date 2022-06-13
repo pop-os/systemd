@@ -440,6 +440,7 @@ Description: userspace out-of-memory (OOM) killer
  processes before an OOM occurs in kernel space.
 
 Package: systemd-userdbd
+Build-Profiles: <!stage1>
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -452,6 +453,7 @@ Description: dynamic user/group manager
  also pick up statically defined JSON user/group records from drop-in files.
 
 Package: systemd-homed
+Build-Profiles: <!stage1>
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
