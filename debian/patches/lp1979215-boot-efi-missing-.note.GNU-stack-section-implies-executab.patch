@@ -1,0 +1,32 @@
+Description: Ignore 'missing .note.GNU-stack section implies executable stack' warning
+  This is actually caused by crt0-efi-x86_64.o from gnu-efi. Ignore the warning until
+  this package is fixed.
+Author: Nick Rosbrook <nick.rosbrook@canonical.com>
+Bug: https://sourceforge.net/p/gnu-efi/bugs/28/
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/gnu-efi/+bug/1979215
+Last-Update: 2022-06-20
+---
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Fri, 17 Jun 2022 14:48:49 -0400
+Subject: boot/efi: ignore 'missing .note.GNU-stack section implies executable stack' warning
+
+This actually comes from gnu-efi [1], so once that is fixed we can drop
+this patch.
+
+[1] https://sourceforge.net/p/gnu-efi/bugs/28/
+---
+ src/boot/efi/meson.build | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 299a01b..6f0d7b9 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -256,6 +256,7 @@ efi_ldflags = [
+         '-Wl,--fatal-warnings',
+         '-Wl,--no-undefined',
+         '-Wl,--warn-common',
++        '-Wl,--no-warn-execstack',
+         '-Wl,-Bsymbolic',
+         '-z', 'nocombreloc',
+         efi_crt0,
