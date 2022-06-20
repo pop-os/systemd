@@ -1,0 +1,34 @@
+Description: Set --no-warn-rwx-segments on arm
+ A new linker warning is causing FTBFS on arm. Until upstream systemd
+ has an appropriate patch, just disable the warning.
+Author: Nick Rosbrook <nick.rosbrook@canonical.com>
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1979236
+Last-Update: 2022-06-20
+---
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Fri, 17 Jun 2022 15:54:34 -0400
+Subject: boot/efi: set --no-warn-rwx-segments on arm
+
+---
+ src/boot/efi/meson.build | 2 ++
+ 1 file changed, 2 insertions(+)
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 6f0d7b9..c0beffb 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -266,6 +266,7 @@ if efi_arch[1] in ['aarch64', 'arm', 'riscv64']
+         # Aarch64, ARM32 and 64bit RISC-V don't have an EFI capable objcopy.
+         # Use 'binary' instead, and add required symbols manually.
+         efi_ldflags += ['-Wl,--defsym=EFI_SUBSYSTEM=0xa']
++        efi_ldflags += ['-Wl,--no-warn-rwx-segments']
+         efi_format = ['-O', 'binary']
+ else
+         efi_ldflags += ['-pie']
+@@ -280,6 +281,7 @@ if efi_arch[1] == 'arm'
+         # is because libgcc is not compiled with -fshort-wchar, but it does not
+         # have any occurrences of wchar_t in its sources or the documentation, so
+         # it is safe to assume that we can ignore this warning.
++        efi_ldflags += ['-Wl,--no-warn-rwx-segments']
+         efi_ldflags += ['-Wl,--no-wchar-size-warning']
+ endif
+ 
