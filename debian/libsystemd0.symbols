@@ -494,6 +494,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_hwdb_enumerate@LIBSYSTEMD_240 240
  sd_hwdb_get@LIBSYSTEMD_240 240
  sd_hwdb_new@LIBSYSTEMD_240 240
+ sd_hwdb_new_from_path@LIBSYSTEMD_251 251.2-2ubuntu1~
  sd_hwdb_ref@LIBSYSTEMD_240 240
  sd_hwdb_seek@LIBSYSTEMD_240 240
  sd_hwdb_unref@LIBSYSTEMD_240 240
