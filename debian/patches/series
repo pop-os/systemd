@@ -46,3 +46,4 @@ lp1979236-boot-efi-set-no-warn-rwx-segments-on-arm.patch
 lp1978079-pstore-Run-after-modules-are-loaded.patch
 sd-hwdb-add-sd_hwdb_new_from_path.patch
 hwdb-implement-root-option-for-systemd-hwdb-query.patch
+test-increase-QEMU_MEM-for-some-tests.patch
