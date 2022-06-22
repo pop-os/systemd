@@ -1,0 +1,35 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Wed, 22 Jun 2022 13:11:13 +0200
+Subject: Do not fail EFI build with newer binutils
+
+Newer binutils versions currently trigger the following warnings due to
+a bug in gnu-efi
+
+on arm64:
+/usr/bin/ld.bfd: warning: src/boot/efi/systemd-bootaa64.elf has a LOAD segment with RWX permissions
+
+on amd64:
+/usr/bin/ld.bfd: warning: /usr/lib/crt0-efi-x86_64.o: missing .note.GNU-stack section implies executable stack
+
+This results in a build failure due to --fatal-warnings.
+Work around this issue by suppressing those warnings until gnu-efi has
+been fixed.
+
+See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1013341
+---
+ src/boot/efi/meson.build | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 299a01b..6d60f77 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -252,6 +252,8 @@ efi_ldflags = [
+         '-L', efi_libdir,
+         '-nostdlib',
+         '-T', efi_lds,
++        '-Wl,--no-warn-execstack',
++        '-Wl,--no-warn-rwx-segments',
+         '-Wl,--build-id=sha1',
+         '-Wl,--fatal-warnings',
+         '-Wl,--no-undefined',
