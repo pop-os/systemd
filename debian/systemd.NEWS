@@ -5,6 +5,9 @@ systemd (251.2-3) unstable; urgency=medium
   upgrades. If you are using systemd-boot, please install this new
   package manually.
 
+  The default boot loader in Debian is grub2. If you have not set up
+  systemd-boot manually, no action is required on your side.
+
  -- Michael Biebl <biebl@debian.org>  Wed, 08 Jun 2022 21:49:47 +0200
 
 systemd (251.1-1) unstable; urgency=medium
