@@ -1,3 +1,15 @@
+systemd (249.11-0ubuntu3.4) UNRELEASED; urgency=medium
+
+  [ Mustafa Kemal Gilor ]
+  * d/p/lp1978079-efi-pstore-not-cleared-on-boot.patch: pstore: Run after
+    modules are loaded. Thanks to Alexander Graf <graf@amazon.com>.
+    (LP: #1978079)
+    Author: Mustafa Kemal Gilor
+    File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d990b13612810a296246011ad66a165b30166702
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 23 Jun 2022 16:53:43 +0200
+
 systemd (249.11-0ubuntu3.3) jammy; urgency=medium
 
   [ Lukas Märdian ]
