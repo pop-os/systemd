@@ -187,6 +187,7 @@ Depends: systemd-tests,
   screen,
   swtpm,
   tpm2-tools,
+  libgcc-s1,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
