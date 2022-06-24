@@ -6,4 +6,5 @@ lib/systemd/system/systemd-boot-system-token.service
 lib/systemd/system/systemd-boot-update.service
 usr/bin/bootctl
 usr/share/bash-completion/completions/bootctl
+../extra/initramfs etc/
 ../extra/kernel etc/
