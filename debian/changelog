@@ -1,3 +1,24 @@
+systemd (251.2-6) unstable; urgency=medium
+
+  [ Helmut Grohne ]
+  * Mark systemd-userdbd and systemd-homed as !stage1 (Closes: #1012738)
+
+  [ Luca Boccassi ]
+  * Remove unused Lintian overrides
+  * Stop overriding the build directory name.
+    We don't do a separate udeb build anymore, so there's no need
+    to specify a separate build directory.
+  * Use execute_before_/after_ instead of override_
+  * Add nodoc profile support.
+    Co-authored-by: Michael Biebl <biebl@debian.org>
+
+  [ Michael Biebl ]
+  * Do not fail EFI build with newer binutils (Closes: #1013482)
+  * shared/microhttp-util: silence gcc warning
+  * Clarify NEWS message about systemd-boot split (Closes: #1013340)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 24 Jun 2022 10:12:34 +0200
+
 systemd (251.2-5) unstable; urgency=medium
 
   * Tweak description of systemd-homed package
