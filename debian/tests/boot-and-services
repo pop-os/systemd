@@ -437,6 +437,7 @@ SystemCallFilter=access
 
 
 @unittest.skipIf(is_container, 'systemd-coredump does not work in containers')
+@unittest.skipIf(platform.machine() == 's390x', 'LP: #1980003')
 class CoredumpTest(unittest.TestCase):
     '''Check systemd-coredump'''
 
