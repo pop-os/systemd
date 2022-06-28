@@ -17,19 +17,24 @@ been fixed.
 
 See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1013341
 ---
- src/boot/efi/meson.build | 2 ++
- 1 file changed, 2 insertions(+)
+ src/boot/efi/meson.build | 7 +++++++
+ 1 file changed, 7 insertions(+)
 
 diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
-index 299a01b..6d60f77 100644
+index 299a01b..dd6a3de 100644
 --- a/src/boot/efi/meson.build
 +++ b/src/boot/efi/meson.build
-@@ -252,6 +252,8 @@ efi_ldflags = [
-         '-L', efi_libdir,
-         '-nostdlib',
-         '-T', efi_lds,
+@@ -260,6 +260,13 @@ efi_ldflags = [
+         '-z', 'nocombreloc',
+         efi_crt0,
+ ]
++
++possible_link_flags = [
 +        '-Wl,--no-warn-execstack',
 +        '-Wl,--no-warn-rwx-segments',
-         '-Wl,--build-id=sha1',
-         '-Wl,--fatal-warnings',
-         '-Wl,--no-undefined',
++]
++efi_ldflags += cc.get_supported_link_arguments(possible_link_flags)
++
+ if efi_arch[1] in ['aarch64', 'arm', 'riscv64']
+         efi_ldflags += ['-shared']
+         # Aarch64, ARM32 and 64bit RISC-V don't have an EFI capable objcopy.
