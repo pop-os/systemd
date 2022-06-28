@@ -417,7 +417,6 @@ Description: standalone tmpfiles binary for use in non-systemd systems
  non-systemd systems.
 
 Package: systemd-oomd
-Section: admin
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
