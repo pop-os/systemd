@@ -1,4 +1,4 @@
-systemd (251.2-2ubuntu1) UNRELEASED; urgency=medium
+systemd (251.2-2ubuntu1) kinetic; urgency=medium
 
   [ Nick Rosbrook ]
   * Merge to Ubuntu from Debian unstable
@@ -136,7 +136,7 @@ systemd (251.2-2ubuntu1) UNRELEASED; urgency=medium
     - debian/tests/tests-in-lxd
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b224dd958fe6260886265d170eb3d12467fbabaa
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 29 Jun 2022 11:12:51 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 29 Jun 2022 11:16:00 -0400
 
 systemd (251.2-2) unstable; urgency=medium
 
