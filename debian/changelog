@@ -1,3 +1,143 @@
+systemd (251.2-2ubuntu1) UNRELEASED; urgency=medium
+
+  [ Nick Rosbrook ]
+  * Merge to Ubuntu from Debian unstable
+    - Dropped patches (applied upstream)
+      + test-explicitly-configure-oomd-stuff-via-dropins.patch
+      + test-enable-systemd-oomd.service.patch
+      + linux-5.15-compat-ioprio/shared-split-out-ioprio-related-stuff-into-ioprio-util.-c.patch
+      + linux-5.15-compat-ioprio/variuos-add-missing-includes.patch
+      + linux-5.15-compat-ioprio/man-don-t-mention-IOSchedulingClass-none-anymore-in-the-d.patch
+      + linux-5.15-compat-ioprio/test-add-test-for-ioprio-normalization.patch
+      + linux-5.15-compat-ioprio/Define-ioprio_-get-set-the-same-as-other-compat-syscalls.patch
+      + linux-5.15-compat-ioprio/Get-rid-of-ioprio.h-and-add-a-minimalistic-reimplementati.patch
+      + linux-5.15-compat-ioprio/ioprio-util-add-macro-for-default-ioprio-settings.patch
+      + linux-5.15-compat-ioprio/ioprio-normalize-io-priority-values-in-configuration.patch
+      + linux-5.15-compat-ioprio/core-normalize-ioprio-values-we-acquire-from-kernel.patch
+      + test-also-show-the-memory-pressure-of-testchill.service.patch
+      + test-make-test-55-oomd-less-flaky.patch
+      + lp1964494-network-do-not-enable-IPv4-ACD-for-IPv4-link-local-a.patch
+      + lp1966381-oomd-calculate-used-memory-with-MemAvailable-instead-of-M.patch
+      + lp1926860-hwdb-remove-the-tablet-pad-entry-for-the-UC-Logic-1060N.patch
+      + oomd-move-oomctl-to-bindir.patch
+      + test-enable-debug-logging-of-systemd-oomd.patch
+      + lp1943561/Add-additional-Dell-models-that-require-ACCEL_LOCATION-ba.patch
+      + lp1943561/Use-SKU-to-identify-Dell-clamshell-models-for-acceleromet.patch
+      + lp1929345/hwdb-Force-release-calculator-key-on-all-HP-OMEN-laptops.patch
+      + lp1929345/hwdb-Add-force-release-for-HP-Omen-15-calculator-key.-205.patch
+      + sysusers-split-up-systemd.conf.patch
+      + hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+      + test-check-memory-pressure-more-frequently.patch
+      + meson-minor-cleanup.patch
+      + units-don-t-install-dbus-org.freedesktop.oom1.service-ali.patch
+      + lp1950508-cgroup-check-if-any-controller-is-in-use-as-v1.patch
+      + lp1952735-keymap-Add-microphone-mute-keymap-for-Dell-Machine.patch
+      + test-tweak-parameters-for-TEST-55-OOMD.patch
+      + deny-list-TEST-29-PORTABLE-and-TEST-50-DISSECT.patch
+      + lp1955997-unmask-intel-hid-for-HP-machines.patch
+      + lp1952733-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-Map.patch
+      + Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+    - Refreshed patches
+      + debian/Ubuntu-UseDomains-by-default.patch
+      + debian/UBUNTU-Support-system-image-read-only-etc.patch
+      + Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
+      + debian/UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.patch
+      + lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
+      + 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
+  * Drop debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch.
+    This patch was originally proposed upstream in [1], but was later
+    superseded by [2] (which eventually got committed upstream as
+    390902012c). Thus, we should not need to carry this patch anymore.
+    [1] https://github.com/systemd/systemd/pull/6503
+    [2] https://github.com/systemd/systemd/pull/11397
+    File: debian/patches/debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f1b7fdbe2f1f9be35a1e7bec104e87643718e082
+  * Drop Add-support-for-TuxOnIce-hibernation.patch.
+    This patch adds support for TuxOnIce hibernation, which requires an
+    out-of-tree kernel patch to be operable. Given that this functionality
+    is not appropriate for upstream systemd, the kernel never accepted
+    TuxOnIce, and the project appears to be largely unmaintained, it does
+    not seem appropriate to carry this patch in Ubuntu.
+    See [1] for original Debian discussion of this patch.
+    [1] https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=746463
+    File: debian/patches/debian/Add-support-for-TuxOnIce-hibernation.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=33a592e26c50cb544713ae82ab42872775c2c583
+  * Drop -Dtpm-pcrindex build option.
+    Support for this was dropped in faacf1807e8fcbee4bf60495e0145e4522d76393.
+    However, following discussion in [1], upstream changed the hardcoded PCR
+    index for kernel command line measurement from 8 to 12 in
+    4d32507f5186a89e98093659fbbe386787a97b9f. Thus, there is no functional
+    change here.
+    [1] https://github.com/systemd/systemd/issues/22635
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03464b170d5db5d2ebb77bea1f3706e55b645148
+  * debian/gbp.conf: Update debian-branch to ubuntu-kinetic
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2bf42327dfda5e666d15d1a715c3403f5fbc74a3
+  * Do not build with tpm libraries on i386
+    libtss2-dev is not built for i386, so do not try to build against it in
+    that case.
+    Files:
+    - debian/control
+    - debian/rules
+    - debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3c48036b9d0e3fbd4b209c2312134d431da66b17
+  * d/t/boot-and-services: Ignore failed snap mount units in test_no_failed
+    (LP: #1967576)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=075d08b15ab944021f392cef32d3ee877e844c5c
+  * Skip exec-specifier-credentials-dir.service test in LXC.
+    This test fails in privileged LXC containers, and a set of tests are
+    already patched out for this reason. Refresh this patch to also skip the
+    new test.
+    File: debian/patches/debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1f1f105b1ecc6b5e9f4fe1f851f4c7be6da4ef81
+  * boot/efi: ignore 'missing .note.GNU-stack section implies executable stack' warning (LP: #1979215)
+    File: debian/patches/lp1979215-boot-efi-missing-.note.GNU-stack-section-implies-executab.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5ce8112c93097bcfe99795580d3e61bd32d7e742
+  * boot/efi: set --no-warn-rwx-segments on arm (LP: #1979236)
+    File: debian/patches/lp1979236-boot-efi-set-no-warn-rwx-segments-on-arm.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d0d97980410802ea4402b7826dc172e2ee79af31
+  * pstore: Run after modules are loaded (LP: #1978079)
+    File: debian/patches/lp1978079-pstore-Run-after-modules-are-loaded.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=988e120566a1f2f57bc86143283c986a12f1a13a
+  * hwdb: implement --root option for systemd-hwdb query
+    Files:
+    - debian/libsystemd0.symbols
+    - debian/patches/hwdb-implement-root-option-for-systemd-hwdb-query.patch
+    - debian/patches/sd-hwdb-add-sd_hwdb_new_from_path.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=031d5b5cfc8ad64df5eca604314b8aeda5455def
+  * test: increase QEMU_MEM for some tests
+    File: debian/patches/test-increase-QEMU_MEM-for-some-tests.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=24a49e196d63015cc466d4d38f1cd523d87cb0be
+  * autopkgtest: skip CoredumpTest on s390x (LP: #1980003)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8c8cf122ba7921f3d952688d32bd834c855f537f
+  * systemd-oomd: set ManagedOOMSwap=auto on -.slice (LP: #1972159)
+    This has the effect of disabling swap kill by default, so cgroups will
+    only be monitored for memory pressure, and not swap usage.
+    File: debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a03b493a8ffa9b39161347fae418f56f0d7dbdeb
+  * debian/control: drop unnecessary 'Section:' from systemd-oomd
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=546cfce76d2648d1fba7d65d70f21b44482288f4
+  * autopkgtest: add libgcc-s1 for TEST-70-TPM2
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7a9a7bcd39476088e878f7cbd79c9dab6019d056
+  * test: copy libgcc_s.so.1 to TPM2 test image on Debian-like systems
+    File: debian/patches/test-copy-libgcc_s.so.1-to-TPM2-test-image-on-Debian-like.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8d1acca269463693f9485ed6904dd2604d3ca5dc
+
+  [ Lukas Märdian ]
+  * Run tests-in-lxd autopkgtest via LXD snap, deb is no more (LP: #1976607)
+    Author: Lukas Märdian
+    Files:
+    - debian/tests/control
+    - debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b224dd958fe6260886265d170eb3d12467fbabaa
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 29 Jun 2022 11:12:51 -0400
+
 systemd (251.2-2) unstable; urgency=medium
 
   * sha256: fix compilation on efi-ia32
