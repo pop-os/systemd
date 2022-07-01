@@ -172,6 +172,7 @@ Depends: systemd-tests,
   screen,
   swtpm,
   tpm2-tools,
+  openssl,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
