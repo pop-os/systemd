@@ -490,7 +490,7 @@ Pre-Depends: ${misc:Pre-Depends},
 Depends: ${misc:Depends},
 Breaks: systemd (<< 251.2-3~)
 Replaces: systemd (<< 251.2-3~)
-Description: Simple UEFI boot manager - EFI binaries
+Description: simple UEFI boot manager - EFI binaries
  systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
  textual menu to select the entry to boot and an editor for the kernel command
  line. It supports systems with UEFI firmware only.
