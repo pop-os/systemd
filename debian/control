@@ -302,9 +302,8 @@ Package: libsystemd0
 Architecture: linux-any
 Multi-Arch: same
 Section: libs
-Pre-Depends: ${shlibs:Depends},
-             ${misc:Pre-Depends}
-Depends: ${misc:Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
 Description: systemd utility library
  This library provides APIs to interface with various system components such as
  the system journal, the system service manager, D-Bus and more.
