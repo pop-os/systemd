@@ -455,6 +455,8 @@ Description: dynamic user/group manager
 Package: systemd-homed
 Build-Profiles: <!stage1>
 Architecture: linux-any
+Pre-Depends: ${misc:Pre-Depends},
+             init-system-helpers (>= 1.64~),
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd-userdbd (= ${binary:Version}),
