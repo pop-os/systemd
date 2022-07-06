@@ -253,6 +253,11 @@ execute_after_dh_installman:
 	for pkg in libnss-myhostname libnss-mymachines libnss-resolve libnss-systemd; do \
 		rm -rf debian/$$pkg/usr/share/man/so; \
 	done
+	# work around some more dh_installman issues
+	# see https://salsa.debian.org/debian/debhelper/-/merge_requests/69#note_316102
+	for pkg in libnss-myhostname libnss-mymachines libnss-resolve libnss-systemd; do \
+		rm -rf debian/$$pkg/usr/share/man/man2/; \
+	done
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)
