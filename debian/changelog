@@ -1,3 +1,19 @@
+systemd (251.2-8) unstable; urgency=medium
+
+  * autopkgtest: install openssl for upstream test.
+    Install openssl explicitly and do not rely on other packages, like
+    swtpm-libs, to pull this dependency for us.
+    Used by TEST-50-DISSECT, which otherwise just silently skips the test.
+  * Add versioned dependency on init-system-helpers to systemd-homed.
+    Ensure that we have a version of deb-systemd-helper which properly
+    handles loops in Also= dependencies. (Closes: #1014115)
+  * Demote shlibs dependencies of libsystemd0 from Pre-Depends to Depends.
+    As systemctl, which is quasi-essential, no longer links against
+    libsystemd0, we do not need those strict requirements anymore.
+  * Work around some more dh_installman issues
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 06 Jul 2022 21:23:38 +0200
+
 systemd (251.2-7) unstable; urgency=medium
 
   [ Luca Boccassi ]
