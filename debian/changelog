@@ -1,3 +1,9 @@
+systemd (251.3-1) UNRELEASED; urgency=medium
+
+  * New upstream version 251.3
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 13 Jul 2022 18:45:41 +0200
+
 systemd (251.2-8) unstable; urgency=medium
 
   * autopkgtest: install openssl for upstream test.
