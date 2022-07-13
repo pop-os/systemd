@@ -10,10 +10,10 @@ Those binaries aren't needed during early boot.
  1 file changed, 2 insertions(+), 4 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index 36cbfa4..3abf9df 100644
+index 9c170ac..d7c7d58 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2564,8 +2564,7 @@ if conf.get('ENABLE_USERDB') == 1
+@@ -2566,8 +2566,7 @@ if conf.get('ENABLE_USERDB') == 1
                  link_with : [libshared],
                  dependencies : [threads],
                  install_rpath : rootlibexecdir,
@@ -23,7 +23,7 @@ index 36cbfa4..3abf9df 100644
  endif
  
  if conf.get('ENABLE_HOMED') == 1
-@@ -2608,8 +2607,7 @@ if conf.get('ENABLE_HOMED') == 1
+@@ -2610,8 +2609,7 @@ if conf.get('ENABLE_HOMED') == 1
                                  libp11kit,
                                  libdl],
                  install_rpath : rootlibexecdir,

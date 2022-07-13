@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 51928b2..03208c0 100644
+index f63651e..5ca03e2 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3206,6 +3206,15 @@ executable(
+@@ -3208,6 +3208,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  

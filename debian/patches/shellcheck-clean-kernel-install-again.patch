@@ -8,7 +8,7 @@ Subject: shellcheck-clean kernel-install again
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
-index a41a56a..3da233e 100755
+index cf1b81b..c6965ee 100755
 --- a/src/kernel-install/kernel-install.in
 +++ b/src/kernel-install/kernel-install.in
 @@ -115,6 +115,7 @@ fi
