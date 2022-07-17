@@ -19,7 +19,7 @@ remove_nss_entry() {
         return
     fi
     # we must remove possible [foo=bar] options as well
-    sed -i -r "/(passwd|group):/ s/[[:space:]]+$module\b([[:space:]]*\[[^]]*\])*//" $file
+    sed -i -r "/(passwd|group|shadow|gshadow):/ s/[[:space:]]+$module\b([[:space:]]*\[[^]]*\])*//" $file
 }
 
 if [ "$1" = remove ]; then
