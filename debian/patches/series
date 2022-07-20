@@ -90,3 +90,4 @@ hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
 lp1964494-network-do-not-enable-IPv4-ACD-for-IPv4-link-local-a.patch
 lp1978079-efi-pstore-not-cleared-on-boot.patch
 lp1975667-Ensure-dns_search_domain_unlink_marked-removes-all-marked.patch
+lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
