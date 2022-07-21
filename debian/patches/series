@@ -48,3 +48,4 @@ sd-hwdb-add-sd_hwdb_new_from_path.patch
 hwdb-implement-root-option-for-systemd-hwdb-query.patch
 test-increase-QEMU_MEM-for-some-tests.patch
 test-copy-libgcc_s.so.1-to-TPM2-test-image-on-Debian-like.patch
+units-remove-the-restart-limit-on-the-modprobe-.service.patch
