@@ -92,3 +92,4 @@ lp1978079-efi-pstore-not-cleared-on-boot.patch
 lp1975667-Ensure-dns_search_domain_unlink_marked-removes-all-marked.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 lp1979951-network-do-not-remove-localhost-address.patch
+lp1982462-units-remove-the-restart-limit-on-the-modprobe-.service.patch
