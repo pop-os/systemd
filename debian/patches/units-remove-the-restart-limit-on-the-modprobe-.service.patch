@@ -13,6 +13,9 @@ the modprobe service so just disable it.
 
 Fixes: #23742
 ---
+Origin: upstream, https://github.com/systemd/systemd/commit/9625350e5381a68c1179ae4581e7586c206663e1
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1982462
+---
  units/modprobe@.service | 1 +
  1 file changed, 1 insertion(+)
 
