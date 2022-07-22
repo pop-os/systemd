@@ -1,3 +1,24 @@
+systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
+
+  * Ensure dns_search_domain_unlink_marked removes all marked domains (LP: #1975667)
+    File: debian/patches/lp1975667-Ensure-dns_search_domain_unlink_marked-removes-all-marked.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=919d5ddedd5bb8b45ab9437bf42d66c2821bb074
+  * core,firstboot: workaround timezone issues on Ubuntu Core (LP: #1981042)
+    Thanks to Robert Ancell for preparing the patch.
+    File: debian/patches/lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b15546361b549217908fb6ca5d473be23d7fa757
+  * network: do not remove localhost address (LP: #1979951)
+    File: debian/patches/lp1979951-network-do-not-remove-localhost-address.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2cd88391cce9fe95a486ae6dd214c12f236f3881
+  * units: remove the restart limit on the modprobe@.service (LP: #1982462)
+    File: debian/patches/lp1982462-units-remove-the-restart-limit-on-the-modprobe-.service.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8f0acd1b2fbb8eed1259c34963e5e9b201bef900
+  * pstore: do not try to load mtdpstore (LP: #1981622)
+    File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=15225032c3657f5906ee49d48929f9295a8664a0
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 22 Jul 2022 15:27:16 -0400
+
 systemd (249.11-0ubuntu3.4) jammy; urgency=medium
 
   [ Mustafa Kemal Gilor ]
