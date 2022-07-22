@@ -9,6 +9,9 @@ systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
     (LP: #1966800)
     File: debian/patches/lp1966800-shared-calendarspec-when-mktime-moves-us-backwards-jump-f.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1f063541e44f6ff1a6904676d4264a2e49a09594
+  * network: do not remove localhost address (LP: #1979951)
+    File: debian/patches/lp1979951-network-do-not-remove-localhost-address.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=87f872b8c5451f353601fb606e7fd7a479217cef
 
   [ Mustafa Kemal Gilor ]
   * d/p/lp1978079-efi-pstore-not-cleared-on-boot.patch: pstore: Run after
@@ -18,7 +21,7 @@ systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
     File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6e60756f2079d6408abdb967127a1d9b9a0eba8c
 
- -- Lukas Märdian <slyon@ubuntu.com>  Thu, 23 Jun 2022 18:01:34 +0200
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 22 Jul 2022 15:30:27 -0400
 
 systemd (245.4-4ubuntu3.17) focal; urgency=medium
 
