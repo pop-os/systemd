@@ -4,7 +4,12 @@ Subject: pstore: Run after modules are loaded
 
 Origin: upstream, https://github.com/systemd/systemd/commit/70e74a5997ae2ce7ba72a74ac949c3b2dad1a1d6
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1978079
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1981622
+Last-Updated: 2022-07-22
 
+The original commit has been modified to not load mtdpstore.
+
+---
 The systemd-pstore service takes pstore files on boot and transfers them
 to disk. It only does it once on boot and only if it finds any. The typical
 location of the pstore on modern systems is the UEFI variable store.
@@ -36,8 +41,8 @@ index 848e311..86de30a 100644
  DefaultDependencies=no
  Conflicts=shutdown.target
  Before=sysinit.target shutdown.target
-+After=modprobe@efi_pstore.service modprobe@mtdpstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
-+Wants=modprobe@efi_pstore.service modprobe@mtdpstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
++After=modprobe@efi_pstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
++Wants=modprobe@efi_pstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
  
  [Service]
  Type=oneshot
