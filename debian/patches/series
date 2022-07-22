@@ -178,3 +178,4 @@ lp1966179-add-more-hp-dmi-to-unblock-intel-hid-event.patch
 lp1959475-core-make-sure-we-don-t-get-confused-when-setting-TERM-fo.patch
 lp1966800-shared-calendarspec-when-mktime-moves-us-backwards-jump-f.patch
 lp1978079-efi-pstore-not-cleared-on-boot.patch
+lp1979951-network-do-not-remove-localhost-address.patch
