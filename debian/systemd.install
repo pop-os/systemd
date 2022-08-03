@@ -14,7 +14,6 @@ usr/lib/sysctl.d/
 usr/lib/sysusers.d/basic.conf
 usr/lib/sysusers.d/systemd-journal.conf
 usr/lib/sysusers.d/systemd-network.conf
-usr/lib/sysusers.d/systemd-resolve.conf
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
 usr/lib/kernel

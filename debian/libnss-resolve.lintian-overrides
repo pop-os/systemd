@@ -1,3 +1,2 @@
 # Lintian is really bad at associating manpages
 libnss-resolve: spare-manual-page
-libnss-resolve: maintainer-script-calls-systemctl

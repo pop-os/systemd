@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = configure ] && [ -z "$2" ]; then
+    adduser --quiet --system --group --no-create-home --home /run/systemd \
+        --gecos "systemd Resolver" systemd-resolve
+fi
+
+#DEBHELPER#

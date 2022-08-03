@@ -77,6 +77,7 @@ Suggests: systemd-container,
           systemd-homed,
           systemd-userdbd,
           systemd-boot,
+          systemd-resolved,
           libfido2-1,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
@@ -273,11 +274,11 @@ Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         systemd (= ${binary:Version}),
+         systemd-resolved (= ${binary:Version}),
 Description: nss module to resolve names via systemd-resolved
  nss-resolve is a plugin for the GNU Name Service Switch (NSS) functionality
  of the GNU C Library (glibc) providing DNS and LLMNR resolution to programs via
- the systemd-resolved daemon (provided in the systemd package).
+ the systemd-resolved daemon (provided in the systemd-resolved package).
  .
  Installing this package automatically adds resolve to /etc/nsswitch.conf.
 
@@ -497,3 +498,27 @@ Description: simple UEFI boot manager - EFI binaries
  line. It supports systems with UEFI firmware only.
  .
  This package contains the EFI binaries.
+
+Package: systemd-resolved
+Multi-Arch: foreign
+Architecture: linux-any
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         adduser,
+         systemd (= ${binary:Version}),
+         default-dbus-system-bus | dbus-system-bus
+Recommends: libnss-myhostname,
+            libnss-resolve,
+Suggests: policykit-1,
+Provides: resolvconf
+Conflicts: resolvconf
+Replaces: resolvconf,
+          systemd (<< 251.3-2~)
+Breaks: systemd (<< 251.3-2~)
+Description: systemd DNS resolver
+ This package provides systemd's DNS resolver and the command line tool to
+ manage it.
+ .
+ Installing this package automatically overwrites /etc/resolve.conf and switches
+ it to be managed by systemd-resolved.
