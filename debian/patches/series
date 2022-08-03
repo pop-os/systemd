@@ -93,3 +93,5 @@ lp1975667-Ensure-dns_search_domain_unlink_marked-removes-all-marked.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 lp1979951-network-do-not-remove-localhost-address.patch
 lp1982462-units-remove-the-restart-limit-on-the-modprobe-.service.patch
+lp1979952-Revert-core-mount-fail-early-if-directory-cannot-be-creat.patch
+lp1979952-core-mount-downgrade-log-level-about-several-mkdir-failur.patch
