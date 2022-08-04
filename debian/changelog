@@ -1,3 +1,10 @@
+systemd (251.3-2~exp1) experimental; urgency=medium
+
+  * Split systemd-resolved into its own package which takes over
+    /etc/resolv.conf (Closes: #939904)
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 04 Aug 2022 14:55:48 +0100
+
 systemd (251.3-1) unstable; urgency=medium
 
   * New upstream version 251.3
