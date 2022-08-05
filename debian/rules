@@ -244,6 +244,7 @@ endif
 	# Remove unneeded file that produces errors in debugedit (LP: #1950445)
 ifeq ($(DEB_HOST_ARCH),i386)
 	rm -f debian/systemd/usr/lib/systemd/boot/efi/linuxia32.elf.stub
+	rm -f debian/systemd-boot-efi/usr/lib/systemd/boot/efi/linuxia32.elf.stub
 endif
 
 execute_after_dh_installman:
