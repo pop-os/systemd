@@ -43,8 +43,6 @@ lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
-lp1979215-boot-efi-missing-.note.GNU-stack-section-implies-executab.patch
-lp1979236-boot-efi-set-no-warn-rwx-segments-on-arm.patch
 lp1978079-pstore-Run-after-modules-are-loaded.patch
 sd-hwdb-add-sd_hwdb_new_from_path.patch
 hwdb-implement-root-option-for-systemd-hwdb-query.patch
