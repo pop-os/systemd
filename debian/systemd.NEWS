@@ -1,3 +1,12 @@
+systemd (251.3-2) unstable; urgency=medium
+
+  systemd-resolved has been split into a separate package.
+  This new systemd-resolved package will not be installed automatically on
+  upgrades. If you are using systemd-resolved, please install this new
+  package manually.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 05 Aug 2022 20:26:12 +0100
+
 systemd (251.2-3) unstable; urgency=medium
 
   systemd-boot has been split into a separate package.
