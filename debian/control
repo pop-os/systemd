@@ -520,5 +520,5 @@ Description: systemd DNS resolver
  This package provides systemd's DNS resolver and the command line tool to
  manage it.
  .
- Installing this package automatically overwrites /etc/resolve.conf and switches
+ Installing this package automatically overwrites /etc/resolv.conf and switches
  it to be managed by systemd-resolved.
