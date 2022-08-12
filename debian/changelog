@@ -1,3 +1,18 @@
+systemd (251.3-2~exp2) experimental; urgency=medium
+
+  * Note in systemd.NEWS that resolved has moved to a new package
+  * systemd-resolved: move conffile from systemd. Copied from systemd-
+    timesyncd
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 07 Aug 2022 00:06:03 +0100
+
+systemd (251.3-2~exp1) experimental; urgency=medium
+
+  * Split systemd-resolved into its own package which takes over
+    /etc/resolv.conf (Closes: #939904)
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 04 Aug 2022 14:55:48 +0100
+
 systemd (251.3-1) unstable; urgency=medium
 
   * New upstream version 251.3

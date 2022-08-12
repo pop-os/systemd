@@ -58,8 +58,6 @@ addgroup --quiet --system systemd-journal
 
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Network Management" systemd-network
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Resolver" systemd-resolve
 
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
@@ -86,7 +84,6 @@ if [ -n "$2" ]; then
         _systemctl stop systemd-networkd.socket || true
     fi
     _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-resolved.service || true
     _systemctl try-restart systemd-journald.service || true
 fi
 

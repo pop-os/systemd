@@ -34,6 +34,7 @@ Restrictions: needs-root, isolation-machine
 Tests: networkd-test.py
 Tests-Directory: test
 Depends: systemd,
+  systemd-resolved,
   libpam-systemd,
   libnss-systemd,
   acl,
@@ -122,6 +123,7 @@ Depends: systemd-tests,
   systemd-timesyncd,
   systemd-oomd,
   systemd-homed,
+  systemd-resolved,
   libnss-myhostname,
   libnss-mymachines,
   libnss-resolve,

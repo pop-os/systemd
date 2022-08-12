@@ -199,13 +199,8 @@ execute_before_dh_install:
 	rm -rf debian/tmp/usr/share/factory/
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/tmp/usr/lib/sysusers.d/basic.conf
-	# remove resolvconf compat symlink
-	rm -f debian/tmp/sbin/resolvconf
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
-	# do not create a potentially broken /etc/resolv.conf symlink
-	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1007018
-	rm -f debian/tmp/usr/lib/tmpfiles.d/systemd-resolve.conf
 
 execute_after_dh_install:
 	# install standalone binaries
@@ -271,6 +266,7 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
+	dh_installsystemd -psystemd-resolved
 
 override_dh_installsystemduser:
 
