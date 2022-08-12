@@ -1,3 +1,26 @@
+systemd (251.3-2) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * libnss-systemd: also let userdbd manage passwords.
+    As of upstream commit:
+    https://github.com/systemd/systemd/commit/f43a19ecd6e3415e
+    in v249 userdbd can also synthesize shadow/gshadow records,
+    so add the shadow config to nsswitch.conf on installation.
+    (Closes: #1004326)
+  * homed: make PAM rules higher priority than unix users.
+    Make sure homed is tried first when logging in. This is required
+    after adding nss-systemd support for 'shadow' in /etc/nsswitch.conf.
+    See Arch bug: https://bugs.archlinux.org/task/72967
+
+  [ Gioele Barabucci ]
+  * d/control: Use dh_installnss
+  * d/libnss-myhostname.nss: Install NSS service `myhostname` via dh_installnss
+  * d/libnss-mymaschines.nss: Install NSS service `mymaschines` via dh_installnss
+  * d/libnss-resolve.nss: Install NSS service `resolve` via dh_installnss
+  * d/libnss-systemd.nss: Install NSS service `systemd` via dh_installnss
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 12 Aug 2022 19:06:38 +0200
+
 systemd (251.3-2~exp2) experimental; urgency=medium
 
   * Note in systemd.NEWS that resolved has moved to a new package
