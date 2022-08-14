@@ -1,8 +1,11 @@
-systemd (251.4-1) UNRELEASED; urgency=medium
+systemd (251.4-1) unstable; urgency=medium
 
   * New upstream version 251.4
+  * Rebase patches
+  * Rebuild against fixed dh-nss to avoid duplicates in /etc/nsswitch.conf
+    (Closes: #1017096)
 
- -- Michael Biebl <biebl@debian.org>  Sat, 13 Aug 2022 16:38:36 +0200
+ -- Michael Biebl <biebl@debian.org>  Sun, 14 Aug 2022 20:06:18 +0200
 
 systemd (251.3-2) unstable; urgency=medium
 
