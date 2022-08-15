@@ -1,3 +1,11 @@
+systemd (251.2-2ubuntu3) UNRELEASED; urgency=medium
+
+  * Cherry-pick upstream commit (3657d3a) to fix glibc 2.36 compat
+    File: debian/patches/glibc-Remove-include-linux-fs.h-to-resolve-fsconfig_comma.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1e8048741cc0f811faf6b9e713a3fb7e38ef3503
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 15 Aug 2022 15:29:16 +0200
+
 systemd (251.2-2ubuntu2) kinetic; urgency=medium
 
   [ Lukas Märdian ]
