@@ -9,3 +9,5 @@ variables:
   # Many false positives due to issue in binutils:
   # https://bugs.debian.org/1000977
   SALSA_CI_LINTIAN_SUPPRESS_TAGS: "elf-error"
+  # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1011649
+  SALSA_CI_DISABLE_PIUPARTS: 1

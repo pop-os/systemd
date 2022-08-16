@@ -158,6 +158,7 @@ static Virtualization detect_vm_dmi_vendor(void) {
         } dmi_vendor_table[] = {
                 { "KVM",                 VIRTUALIZATION_KVM       },
                 { "OpenStack",           VIRTUALIZATION_KVM       }, /* Detect OpenStack instance as KVM in non x86 architecture */
+                { "KubeVirt",            VIRTUALIZATION_KVM       }, /* Detect KubeVirt instance as KVM in non x86 architecture */
                 { "Amazon EC2",          VIRTUALIZATION_AMAZON    },
                 { "QEMU",                VIRTUALIZATION_QEMU      },
                 { "VMware",              VIRTUALIZATION_VMWARE    }, /* https://kb.vmware.com/s/article/1009458 */
@@ -436,18 +437,22 @@ Virtualization detect_vm(void) {
 
         /* We have to use the correct order here:
          *
-         * → First, try to detect Oracle Virtualbox and Amazon EC2 Nitro, even if they use KVM, as well as Xen even if
-         *   it cloaks as Microsoft Hyper-V. Attempt to detect uml at this stage also since it runs as a user-process
-         *   nested inside other VMs. Also check for Xen now, because Xen PV mode does not override CPUID when nested
-         *   inside another hypervisor.
+         * → First, try to detect Oracle Virtualbox, Amazon EC2 Nitro, and Parallels, even if they use KVM,
+         *   as well as Xen even if it cloaks as Microsoft Hyper-V. Attempt to detect uml at this stage also
+         *   since it runs as a user-process nested inside other VMs. Also check for Xen now, because Xen PV
+         *   mode does not override CPUID when nested inside another hypervisor.
          *
-         * → Second, try to detect from CPUID, this will report KVM for whatever software is used even if info in DMI is
-         *   overwritten.
+         * → Second, try to detect from CPUID, this will report KVM for whatever software is used even if
+         *   info in DMI is overwritten.
          *
          * → Third, try to detect from DMI. */
 
         dmi = detect_vm_dmi();
-        if (IN_SET(dmi, VIRTUALIZATION_ORACLE, VIRTUALIZATION_XEN, VIRTUALIZATION_AMAZON)) {
+        if (IN_SET(dmi,
+                   VIRTUALIZATION_ORACLE,
+                   VIRTUALIZATION_XEN,
+                   VIRTUALIZATION_AMAZON,
+                   VIRTUALIZATION_PARALLELS)) {
                 v = dmi;
                 goto finish;
         }

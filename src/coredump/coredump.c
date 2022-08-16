@@ -512,8 +512,8 @@ static int save_external_coredump(
 
         if (truncated)
                 log_struct(LOG_INFO,
-                           LOG_MESSAGE("Core file was truncated to %zu bytes.", max_size),
-                           "SIZE_LIMIT=%zu", max_size,
+                           LOG_MESSAGE("Core file was truncated to %"PRIu64" bytes.", max_size),
+                           "SIZE_LIMIT=%"PRIu64, max_size,
                            "MESSAGE_ID=" SD_MESSAGE_TRUNCATED_CORE_STR);
 
         r = fix_permissions(fd, tmp, fn, context, uid);
@@ -1274,6 +1274,13 @@ static int process_kernel(int argc, char* argv[]) {
         Context context = {};
         struct iovec_wrapper *iovw;
         int r;
+
+        /* When we're invoked by the kernel, stdout/stderr are closed which is dangerous because the fds
+         * could get reallocated. To avoid hard to debug issues, let's instead bind stdout/stderr to
+         * /dev/null. */
+        r = rearrange_stdio(STDIN_FILENO, -1, -1);
+        if (r < 0)
+                return log_error_errno(r, "Failed to connect stdout/stderr to /dev/null: %m");
 
         log_debug("Processing coredump received from the kernel...");
 

@@ -37,6 +37,7 @@ Tests: networkd-test.py
 Tests-Directory: test
 Depends: systemd,
   udev,
+  systemd-resolved,
   libpam-systemd,
   libnss-systemd,
   acl,
@@ -137,6 +138,8 @@ Depends: systemd-tests,
   systemd-coredump,
   systemd-timesyncd,
   systemd-oomd,
+  systemd-homed,
+  systemd-resolved,
   libnss-myhostname,
   libnss-mymachines,
   libnss-resolve,
@@ -188,6 +191,7 @@ Depends: systemd-tests,
   swtpm,
   tpm2-tools,
   libgcc-s1,
+  openssl,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke

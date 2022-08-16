@@ -169,6 +169,7 @@ pkgsysconfdir = sysconfdir / 'systemd'
 userunitdir = prefixdir / 'lib/systemd/user'
 userpresetdir = prefixdir / 'lib/systemd/user-preset'
 tmpfilesdir = prefixdir / 'lib/tmpfiles.d'
+usertmpfilesdir = prefixdir / 'share/user-tmpfiles.d'
 sysusersdir = prefixdir / 'lib/sysusers.d'
 sysctldir = prefixdir / 'lib/sysctl.d'
 binfmtdir = prefixdir / 'lib/binfmt.d'
@@ -278,6 +279,7 @@ conf.set_quoted('SYSTEM_SYSVINIT_PATH',                       sysvinit_path)
 conf.set_quoted('SYSTEM_SYSVRCND_PATH',                       sysvrcnd_path)
 conf.set_quoted('SYSUSERS_DIR',                               sysusersdir)
 conf.set_quoted('TMPFILES_DIR',                               tmpfilesdir)
+conf.set_quoted('USER_TMPFILES_DIR',                          usertmpfilesdir)
 conf.set_quoted('UDEVLIBEXECDIR',                             udevlibexecdir)
 conf.set_quoted('UDEV_HWDB_DIR',                              udevhwdbdir)
 conf.set_quoted('UDEV_RULES_DIR',                             udevrulesdir)
@@ -479,7 +481,6 @@ decl_headers = '''
 #include <uchar.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <linux/fs.h>
 '''
 
 foreach decl : ['char16_t',
@@ -490,6 +491,17 @@ foreach decl : ['char16_t',
 
         # We get -1 if the size cannot be determined
         have = cc.sizeof(decl, prefix : decl_headers, args : '-D_GNU_SOURCE') > 0
+
+        if decl == 'struct mount_attr'
+                if have
+                        want_linux_fs_h = false
+                else
+                        have = cc.sizeof(decl,
+                                         prefix : decl_headers + '#include <linux/fs.h>',
+                                         args : '-D_GNU_SOURCE') > 0
+                        want_linux_fs_h = have
+                endif
+        endif
 
         if decl == 'struct statx'
                 if have
@@ -506,6 +518,7 @@ foreach decl : ['char16_t',
 endforeach
 
 conf.set10('WANT_LINUX_STAT_H', want_linux_stat_h)
+conf.set10('WANT_LINUX_FS_H', want_linux_fs_h)
 
 foreach ident : ['secure_getenv', '__secure_getenv']
         conf.set10('HAVE_' + ident.to_upper(), cc.has_function(ident))
@@ -2171,7 +2184,7 @@ public_programs += executable(
         dependencies : [versiondep,
                         libseccomp],
         install_rpath : rootlibexecdir,
-        install : conf.get('ENABLE_ANALYZE'))
+        install : conf.get('ENABLE_ANALYZE') == 1)
 
 executable(
         'systemd-journald',

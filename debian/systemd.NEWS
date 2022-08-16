@@ -1,3 +1,24 @@
+systemd (251.3-2) unstable; urgency=medium
+
+  systemd-resolved has been split into a separate package.
+  This new systemd-resolved package will not be installed automatically on
+  upgrades. If you are using systemd-resolved, please install this new
+  package manually.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 05 Aug 2022 20:26:12 +0100
+
+systemd (251.2-3) unstable; urgency=medium
+
+  systemd-boot has been split into a separate package.
+  This new systemd-boot package will not be installed automatically on
+  upgrades. If you are using systemd-boot, please install this new
+  package manually.
+
+  The default boot loader in Debian is grub2. If you have not set up
+  systemd-boot manually, no action is required on your side.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 08 Jun 2022 21:49:47 +0200
+
 systemd (251.1-1) unstable; urgency=medium
 
   systemd-journal-gatewayd and systemd-journal-remote are now built

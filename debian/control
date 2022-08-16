@@ -15,11 +15,12 @@ Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper-compat (= 13),
+               dh-sequence-installnss,
                dh-sequence-package-notes,
                pkg-config,
-               xsltproc,
-               docbook-xsl,
-               docbook-xml,
+               xsltproc <!nodoc>,
+               docbook-xsl <!nodoc>,
+               docbook-xml <!nodoc>,
                meson (>= 0.53.2),
                gettext,
                gperf,
@@ -76,6 +77,10 @@ Recommends: default-dbus-system-bus | dbus-system-bus,
             networkd-dispatcher,
             systemd-timesyncd | time-daemon,
 Suggests: systemd-container,
+          systemd-homed,
+          systemd-userdbd,
+          systemd-boot,
+          systemd-resolved,
           libfido2-1,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
@@ -94,6 +99,7 @@ Conflicts: consolekit,
 Breaks: resolvconf (<< 1.83~),
         udev (<< 247~),
         less (<< 563),
+        sicherboot (<< 0.1.6),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
 Description: system and service manager
@@ -272,11 +278,11 @@ Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         systemd (= ${binary:Version}),
+         systemd-resolved (= ${binary:Version}),
 Description: nss module to resolve names via systemd-resolved
  nss-resolve is a plugin for the GNU Name Service Switch (NSS) functionality
  of the GNU C Library (glibc) providing DNS and LLMNR resolution to programs via
- the systemd-resolved daemon (provided in the systemd package).
+ the systemd-resolved daemon (provided in the systemd-resolved package).
  .
  Installing this package automatically adds resolve to /etc/nsswitch.conf.
 
@@ -301,9 +307,8 @@ Package: libsystemd0
 Architecture: linux-any
 Multi-Arch: same
 Section: libs
-Pre-Depends: ${shlibs:Depends},
-             ${misc:Pre-Depends}
-Depends: ${misc:Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
 Description: systemd utility library
  This library provides APIs to interface with various system components such as
  the system journal, the system service manager, D-Bus and more.
@@ -321,6 +326,18 @@ Description: systemd utility library - development files
  This package contains the files needed for developing applications that
  use libsystemd.
 
+Package: libsystemd-shared
+Architecture: linux-any
+Multi-Arch: same
+Section: libs
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Description: systemd shared private library
+ This internal shared library provides common code used by various systemd
+ components. It is supposed to decrease memory and disk footprint.
+ The shared library is not meant for public use and is not API or ABI stable.
+
 Package: udev
 Priority: important
 Architecture: linux-any
@@ -331,8 +348,6 @@ Depends: ${shlibs:Depends},
          adduser,
          libudev1 (= ${binary:Version}),
          s390-tools [s390],
-Conflicts: hal
-Breaks: systemd (<< ${binary:Version}),
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
  /dev/, handles hotplug events and loads drivers at boot time.
@@ -427,3 +442,87 @@ Description: userspace out-of-memory (OOM) killer
  systemd-oomd is a system service that uses cgroups-v2 and
  pressure stall information (PSI) to monitor and take action on
  processes before an OOM occurs in kernel space.
+
+Package: systemd-userdbd
+Build-Profiles: <!stage1>
+Architecture: linux-any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd (= ${binary:Version}),
+Description: dynamic user/group manager
+ systemd-userdbd is a system service that multiplexes user/group lookups to all
+ local services that provide JSON user/group record definitions to the system.
+ In addition it synthesizes JSON user/group records from classic UNIX/glibc NSS
+ user/group records in order to provide full backwards compatibility. It may
+ also pick up statically defined JSON user/group records from drop-in files.
+
+Package: systemd-homed
+Build-Profiles: <!stage1>
+Architecture: linux-any
+Pre-Depends: ${misc:Pre-Depends},
+             init-system-helpers (>= 1.64~),
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd-userdbd (= ${binary:Version}),
+         systemd (= ${binary:Version}),
+         libpam-runtime,
+Description: home area manager
+ systemd-homed is a system service designed to manage home directories. This
+ package includes the homed service, a PAM module to automatically mount home
+ directories on user login, tools and documentation.
+
+Package: systemd-boot
+Architecture: amd64 i386 arm64 armhf
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd-boot-efi (= ${binary:Version}),
+Recommends: efibootmgr,
+Breaks: systemd (<< 251.2-3~)
+Replaces: systemd (<< 251.2-3~)
+Description: simple UEFI boot manager - tools and services
+ systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
+ textual menu to select the entry to boot and an editor for the kernel command
+ line. It supports systems with UEFI firmware only.
+ .
+ Installing systemd-boot will not automatically switch your boot loader.
+ .
+ This package contains various tools and services to manage systems using
+ systemd-boot.
+
+Package: systemd-boot-efi
+Architecture: amd64 i386 arm64 armhf
+Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends},
+Depends: ${misc:Depends},
+Breaks: systemd (<< 251.2-3~)
+Replaces: systemd (<< 251.2-3~)
+Description: simple UEFI boot manager - EFI binaries
+ systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
+ textual menu to select the entry to boot and an editor for the kernel command
+ line. It supports systems with UEFI firmware only.
+ .
+ This package contains the EFI binaries.
+
+Package: systemd-resolved
+Multi-Arch: foreign
+Architecture: linux-any
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         adduser,
+         systemd (= ${binary:Version}),
+         default-dbus-system-bus | dbus-system-bus
+Recommends: libnss-myhostname,
+            libnss-resolve,
+Suggests: policykit-1,
+Provides: resolvconf
+Conflicts: resolvconf
+Replaces: resolvconf,
+          systemd (<< 251.3-2~)
+Breaks: systemd (<< 251.3-2~)
+Description: systemd DNS resolver
+ This package provides systemd's DNS resolver and the command line tool to
+ manage it.
+ .
+ Installing this package automatically overwrites /etc/resolv.conf and switches
+ it to be managed by systemd-resolved.

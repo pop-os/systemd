@@ -15,12 +15,5 @@ systemd: package-contains-empty-directory lib/systemd/system/runlevel4.target.wa
 systemd: package-contains-empty-directory lib/systemd/system/runlevel5.target.wants/
 systemd: package-contains-empty-directory usr/lib/binfmt.d/
 systemd: package-contains-empty-directory usr/lib/modules-load.d/
-# Not a shared library
-systemd: shared-library-lacks-prerequisites usr/lib/systemd/boot/efi/linuxx64.elf.stub
-# PE-COFF EFI binaries, false positives
-systemd: executable-not-elf-or-script usr/lib/systemd/boot/efi/linuxx64.efi.stub
-systemd: executable-not-elf-or-script usr/lib/systemd/boot/efi/systemd-bootx64.efi
-# Intentional: value of config got in a release by mistake, needs to be kept
-systemd: spelling-error-in-binary lib/systemd/libsystemd-shared-251.so anually annually
 # netlink keyword
 systemd: spelling-error-in-binary lib/systemd/systemd-networkd iif if

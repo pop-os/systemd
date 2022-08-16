@@ -19,7 +19,7 @@ _update_binfmt() {
     # configuration ship a corresponding binfmt.d snippet yet.
     # Once this is the case, this additional safety check can be removed.
     if ! _systemctl -q is-active binfmt-support.service; then
-        _systemctl restart systemd-binfmt.service || true
+        _systemctl try-restart systemd-binfmt.service || true
     fi
 }
 
@@ -84,8 +84,6 @@ addgroup --quiet --system systemd-journal
 
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Network Management" systemd-network
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Resolver" systemd-resolve
 
 # Enable persistent journal, in auto-mode, by default on new installs installs and upgrades
 if dpkg --compare-versions "$2" lt "235-3ubuntu3~"; then
@@ -116,7 +114,6 @@ if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
         _systemctl stop systemd-networkd.socket || true
     fi
     _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-resolved.service || true
     _systemctl try-restart systemd-journald.service || true
 fi
 

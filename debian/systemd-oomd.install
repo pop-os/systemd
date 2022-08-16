@@ -8,6 +8,5 @@ lib/systemd/system/systemd-oomd.socket
 usr/bin/oomctl
 usr/lib/sysusers.d/systemd-oom.conf
 usr/share/dbus-1/*/*oom*
-usr/share/man/man*/*oom*
 usr/share/bash-completion/completions/oomctl
 usr/share/zsh/vendor-completions/_oomctl

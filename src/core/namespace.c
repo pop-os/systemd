@@ -4,9 +4,12 @@
 #include <linux/loop.h>
 #include <sched.h>
 #include <stdio.h>
+#include <sys/file.h>
 #include <sys/mount.h>
 #include <unistd.h>
+#if WANT_LINUX_FS_H
 #include <linux/fs.h>
+#endif
 
 #include "alloc-util.h"
 #include "base-filesystem.h"
@@ -928,7 +931,7 @@ static int mount_private_dev(MountEntry *m) {
 
         r = label_fix_container(dev, "/dev", 0);
         if (r < 0) {
-                log_debug_errno(errno, "Failed to fix label of '%s' as /dev: %m", dev);
+                log_debug_errno(r, "Failed to fix label of '%s' as /dev: %m", dev);
                 goto fail;
         }
 
