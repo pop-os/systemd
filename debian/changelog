@@ -12,6 +12,9 @@ systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
   * network: do not remove localhost address (LP: #1979951)
     File: debian/patches/lp1979951-network-do-not-remove-localhost-address.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=87f872b8c5451f353601fb606e7fd7a479217cef
+  * units: remove the restart limit on the modprobe@.service (LP: #1982462)
+    File: debian/patches/lp1982462-units-remove-the-restart-limit-on-the-modprobe-.service.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=68353ffaf3539e6a58ef62a8b50850f56eae29ea
 
   [ Mustafa Kemal Gilor ]
   * d/p/lp1978079-efi-pstore-not-cleared-on-boot.patch: pstore: Run after
@@ -21,7 +24,7 @@ systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
     File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6e60756f2079d6408abdb967127a1d9b9a0eba8c
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 22 Jul 2022 15:30:27 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:52:56 -0400
 
 systemd (245.4-4ubuntu3.17) focal; urgency=medium
 
