@@ -1,10 +1,25 @@
 systemd (251.4-1ubuntu1) UNRELEASED; urgency=medium
 
-  * Cherry-pick upstream commit (3657d3a) to fix glibc 2.36 compat
-    File: debian/patches/glibc-Remove-include-linux-fs.h-to-resolve-fsconfig_comma.patch
-    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1e8048741cc0f811faf6b9e713a3fb7e38ef3503
+  * Merge 251.4-1 from Debian
+    - debian/rules: Keep our diff for TPM2 build on i386
+    - Drop EFI build patches.
+      An upstream patch that covers these changes was backported to the 251
+      stable branch.
+      Files:
+      - debian/patches/lp1979215-boot-efi-missing-.note.GNU-stack-section-implies-executab.patch
+      - debian/patches/lp1979236-boot-efi-set-no-warn-rwx-segments-on-arm.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=983b46f110b5a6e32a28b87c4b9458442624c0cd
+    - Drop debian/patches/units-remove-the-restart-limit-on-the-modprobe-.service.patch.
+      This patch was backported to the 251 stable branch.
+      File: debian/patches/units-remove-the-restart-limit-on-the-modprobe-.service.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=959fe326da87466775b37088e9bfd476056373ea
+    - debian/rules: update i386 debugedit workaround.
+      This linuxia32.elf.stub is shipped with systemd-boot-efi now, so update
+      the workaround to include that path as well.
+      File: debian/rules
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=354f9fccc94dcb0d555329921510d5f22e62351a
 
- -- Lukas Märdian <slyon@ubuntu.com>  Mon, 15 Aug 2022 15:29:16 +0200
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:06:55 -0400
 
 systemd (251.4-1) unstable; urgency=medium
 
