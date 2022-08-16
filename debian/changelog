@@ -16,8 +16,13 @@ systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
   * pstore: do not try to load mtdpstore (LP: #1981622)
     File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=15225032c3657f5906ee49d48929f9295a8664a0
+  * core/mount: downgrade log level about several mkdir failures (LP: #1979952)
+    Files:
+    - debian/patches/lp1979952-Revert-core-mount-fail-early-if-directory-cannot-be-creat.patch
+    - debian/patches/lp1979952-core-mount-downgrade-log-level-about-several-mkdir-failur.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ee8cfcf500698fab2e990de291ecf4c3ab87a4ae
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 22 Jul 2022 15:27:16 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:45:46 -0400
 
 systemd (249.11-0ubuntu3.4) jammy; urgency=medium
 
