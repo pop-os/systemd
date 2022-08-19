@@ -54,10 +54,7 @@ fi
 systemd-machine-id-setup
 
 # Setup system users and groups
-addgroup --quiet --system systemd-journal
-
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Network Management" systemd-network
+systemd-sysusers systemd-journal.conf systemd-network.conf
 
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
