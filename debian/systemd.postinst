@@ -3,13 +3,13 @@
 set -e
 
 _systemctl() {
-    if [ -d /run/systemd/system ]; then
+    if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
         systemctl "$@"
     fi
 }
 
 _update_catalog() {
-    journalctl --update-catalog || true
+    journalctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} --update-catalog || true
 }
 
 _update_binfmt() {
@@ -41,31 +41,31 @@ fi
 
 # Enable getty and remote-fs.target by default on new installs
 if [ -z "$2" ]; then
-    systemctl enable getty@tty1.service || true
-    systemctl enable remote-fs.target || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable getty@tty1.service || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable remote-fs.target || true
 fi
 
 # Enable systemd-pstore by default on new installs and upgrades, see #952767
 if dpkg --compare-versions "$2" lt "245.4-4~"; then
-    systemctl enable systemd-pstore.service || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable systemd-pstore.service || true
 fi
 
 # Create /etc/machine-id
-systemd-machine-id-setup
+systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 
 # Setup system users and groups
-systemd-sysusers systemd-journal.conf systemd-network.conf
+systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} systemd-journal.conf systemd-network.conf
 
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
-    mkdir -p /var/log/journal
+    mkdir -p "$DPKG_ROOT/var/log/journal"
     # Applying ACLs requires a mounted /proc and systemd-tmpfiles will fail if
     # /proc is not available. Skip systemd-tmpfiles in this case. This should
     # be fine, as this typically means we are inside a chroot and systemd is
     # not currently active. The permissions will be applied on the next boot.
     # https://github.com/systemd/systemd/issues/14745
     if mountpoint -q /proc; then
-        systemd-tmpfiles --create --prefix /var/log/journal
+        systemd-tmpfiles ${DPKG_ROOT:+--root="$DPKG_ROOT"} --create --prefix /var/log/journal
     fi
 fi
 
