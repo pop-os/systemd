@@ -1,4 +1,4 @@
-systemd (251.4-1ubuntu1) UNRELEASED; urgency=medium
+systemd (251.4-1ubuntu1) kinetic; urgency=medium
 
   * Merge 251.4-1 from Debian
     - debian/rules: Keep our diff for TPM2 build on i386
@@ -18,8 +18,22 @@ systemd (251.4-1ubuntu1) UNRELEASED; urgency=medium
       the workaround to include that path as well.
       File: debian/rules
       https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=354f9fccc94dcb0d555329921510d5f22e62351a
+  * test: denylist TEST-29-PORTABLE again
+    File: debian/patches/test-denylist-TEST-29-PORTABLE-again.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6036de78481f8cbf3e8f3a52dac711c732d80c59
+  * debian/control: add systemd-resolved to systemd's Recommends:
+    In Ubuntu, systemd-resolved is used by default, so after the
+    systemd-resolved package split, we should have a stronger relationship
+    than Suggests: systemd-resolved.
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=400bf9dd2cf83c91f47326769eff0259429f3e0a
+  * debian/control: add Recommends: systemd-hwe-hwdb to udev.
+    The systemd-hwe-hwdb brings in additional hwdb rules for HWE, so we want
+    those installed with udev by default.
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=148d8d9cd4c260559ad944de3427f183e04858cc
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:06:55 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 23 Aug 2022 17:45:48 -0400
 
 systemd (251.4-1) unstable; urgency=medium
 
