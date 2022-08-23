@@ -348,6 +348,7 @@ Depends: ${shlibs:Depends},
          adduser,
          libudev1 (= ${binary:Version}),
          s390-tools [s390],
+Recommends: systemd-hwe-hwdb,
 Breaks: systemd (<< ${binary:Version}),
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
