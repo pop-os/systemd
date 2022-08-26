@@ -1,3 +1,19 @@
+systemd (251.4-2) unstable; urgency=medium
+
+  [ Johannes Schauer Marin Rodrigues ]
+  * use systemd-sysusers instead of adduser. This allows dropping the
+    dependency on adduser (reducing the dependency set) and in turn allows
+    for DPKG_ROOT support of systemd.
+  * debian/systemd.postinst: add --root argument to systemctl and
+    systemd-* calls for DPKG_ROOT support
+
+  [ Luca Boccassi ]
+  * resolved: use DPKG_ROOT and make postinst shellcheck-happy
+  * resolved: switch from .links to postinst/rm
+  * Update Lintian overrides for new incompatible syntax
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 26 Aug 2022 23:16:23 +0100
+
 systemd (251.4-1) unstable; urgency=medium
 
   * New upstream version 251.4
