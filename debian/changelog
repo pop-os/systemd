@@ -1,3 +1,11 @@
+systemd (251.4-3) unstable; urgency=medium
+
+  * resolv.conf: take backup as a fallback in case resolved/resolv.conf
+    is not available, and restore on uninstall, which is necessary for
+    piuparts checks.
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 27 Aug 2022 22:39:04 +0100
+
 systemd (251.4-2) unstable; urgency=medium
 
   [ Johannes Schauer Marin Rodrigues ]
