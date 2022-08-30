@@ -1,5 +1,6 @@
 systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
 
+  [ Nick Rosbrook ]
   * Ensure dns_search_domain_unlink_marked removes all marked domains (LP: #1975667)
     File: debian/patches/lp1975667-Ensure-dns_search_domain_unlink_marked-removes-all-marked.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=919d5ddedd5bb8b45ab9437bf42d66c2821bb074
@@ -22,7 +23,24 @@ systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
     - debian/patches/lp1979952-core-mount-downgrade-log-level-about-several-mkdir-failur.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ee8cfcf500698fab2e990de291ecf4c3ab87a4ae
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:45:46 -0400
+  [ Luca Boccassi ]
+  * Enable systemd-repart and ship it in a new systemd-repart package.
+    (LP: #1897932)
+    Add fdisk as test dependency, needed by test-repart which calls sfdisk.
+    Add libfdisk-dev/libssl-dev as dependencies, needed for systemd-repart.
+    Author: Luca Boccassi
+    Files:
+    - debian/control
+    - debian/rules
+    - debian/systemd-repart.install
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=debbc5e9362522210096ae5fa9da48378791e381
+
+  [ Lukas Märdian ]
+  * Add sd-repart as test depend, to avoid skipping TEST-58-REPART
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=669190653f06a6554ddf9725cbeccac65149df23
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Tue, 30 Aug 2022 11:46:08 +0200
 
 systemd (249.11-0ubuntu3.4) jammy; urgency=medium
 
