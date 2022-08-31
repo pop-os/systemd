@@ -1,10 +1,51 @@
 systemd (251.4-1ubuntu2) UNRELEASED; urgency=medium
 
+  [ Lukas Märdian ]
   * Provide upgrade path (Replaces:) for Jammy's systemd-repart (LP: 1897932)
     File: debian/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2281670aa8007179170d5cc485bb94e3bbc3b63c
 
- -- Lukas Märdian <slyon@ubuntu.com>  Tue, 30 Aug 2022 10:05:19 +0200
+  [ Luca Boccassi ]
+  * resolved: switch from .links to postinst/rm (LP: #1988300)
+    dpkg refuses to install the symlink in chroot/container environments
+    where /etc/resolv.conf is bind mounted:
+    | Unpacking systemd-resolved (251.4-1) ...
+    | dpkg: error processing archive /var/cache/apt/archives/systemd-resolved_251.4-1_amd64.deb (--unpack):
+    |  unable to make backup link of './etc/resolv.conf' before installing new version: Invalid cross-device link
+    So unfortunately manual handling via maintainerscripts is necessary.
+    Use maintainer scripts to avoid failing the installation, and provide
+    feedback to the user if the symlink cannot be successfully installed.
+    Also on removal, either copy /run/systemd/resolve/resolv.conf or
+    create an empty /etc/resolv.conf.
+    Amend to use the correct Ubuntu version string (251.4-1ubuntu2).
+    Author: Luca Boccassi
+    Files:
+    - debian/systemd-resolved.links
+    - debian/systemd-resolved.postinst
+    - debian/systemd-resolved.postrm
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=faf479a6158aac977c2cdb32fd1eaecc0862a7ef
+  * resolv.conf: take backup as a fallback
+    piuparts doesn't like seeing an empty resolv.conf after removing
+    the package, so take a backup and use it in case resolved/resolv.conf
+    is not available
+    Author: Luca Boccassi
+    Files:
+    - debian/systemd-resolved.postinst
+    - debian/systemd-resolved.postrm
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c2b15f43eb7779953a3dda7f461edbb1bf038701
+
+  [ Nick Rosbrook ]
+  * debian/systemd-resolved.{postinst,postrm}: do not use DPKG_ROOT.
+    We cherry-picked "resolved: switch from .links to postinst/rm" and
+    "resolv.conf: take backup as a fallback" from debian/251.4-3 to fix a
+    systemd-resolved installation issue, but we are not taking the DPKG_ROOT
+    changes at the moment due to feature freeze.
+    Files:
+    - debian/systemd-resolved.postinst
+    - debian/systemd-resolved.postrm
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5664be09ce9813cb2dd2bd71c5d325036655c312
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 31 Aug 2022 09:55:14 -0400
 
 systemd (251.4-1ubuntu1) kinetic; urgency=medium
 
