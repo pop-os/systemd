@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.18) focal; urgency=medium
 
   [ Nick Rosbrook ]
   * core: make sure we don't get confused when setting TERM for a tty fd
@@ -24,7 +24,7 @@ systemd (245.4-4ubuntu3.18) UNRELEASED; urgency=medium
     File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6e60756f2079d6408abdb967127a1d9b9a0eba8c
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 16 Aug 2022 17:52:56 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 31 Aug 2022 11:27:33 -0400
 
 systemd (245.4-4ubuntu3.17) focal; urgency=medium
 
