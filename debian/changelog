@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.5) jammy; urgency=medium
 
   [ Nick Rosbrook ]
   * Ensure dns_search_domain_unlink_marked removes all marked domains (LP: #1975667)
@@ -52,7 +52,7 @@ systemd (249.11-0ubuntu3.5) UNRELEASED; urgency=medium
     File: debian/tests/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=669190653f06a6554ddf9725cbeccac65149df23
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Thu, 01 Sep 2022 08:44:49 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Thu, 01 Sep 2022 08:44:50 -0400
 
 systemd (249.11-0ubuntu3.4) jammy; urgency=medium
 
