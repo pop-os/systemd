@@ -1,3 +1,15 @@
+systemd (251.4-1ubuntu3) kinetic; urgency=medium
+
+  * Fix version of backported sd_hwdb_new_from_path symbol.
+    The systemd-hwdb binary calling into this library is linked statically,
+    but we still want to keep a future proof ABI, just in case.
+    Files:
+    - debian/libsystemd0.symbols
+    - debian/patches/sd-hwdb-add-sd_hwdb_new_from_path.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dee01ca169cd41e514658f8a631847c9e852e842
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Thu, 01 Sep 2022 12:42:10 +0200
+
 systemd (251.4-1ubuntu2) kinetic; urgency=medium
 
   [ Lukas Märdian ]
