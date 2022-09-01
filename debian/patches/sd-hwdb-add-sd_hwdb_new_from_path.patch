@@ -13,11 +13,11 @@ Add sd_hwdb_new_from_path to allow a sd_hwdb to be initialized from a
 custom path outside of hwdb_bin_paths.
 ---
  man/sd_hwdb_new.xml              | 14 +++++++++++--
- src/libsystemd/libsystemd.sym    |  1 +
+ src/libsystemd/libsystemd.sym    |  5 +++++
  src/libsystemd/sd-hwdb/sd-hwdb.c | 45 +++++++++++++++++++++++++++-------------
  src/systemd/sd-hwdb.h            |  1 +
  src/test/test-sd-hwdb.c          | 20 ++++++++++++++++++
- 5 files changed, 65 insertions(+), 16 deletions(-)
+ 5 files changed, 69 insertions(+), 16 deletions(-)
 
 diff --git a/man/sd_hwdb_new.xml b/man/sd_hwdb_new.xml
 index c071599..0584add 100644
@@ -66,15 +66,18 @@ index c071599..0584add 100644
      <para><function>sd_hwdb_ref()</function> always returns the argument.
      </para>
 diff --git a/src/libsystemd/libsystemd.sym b/src/libsystemd/libsystemd.sym
-index ccc321e..faf0b2d 100644
+index ccc321e..e568c80 100644
 --- a/src/libsystemd/libsystemd.sym
 +++ b/src/libsystemd/libsystemd.sym
-@@ -777,4 +777,5 @@ global:
-         sd_device_new_from_path;
+@@ -778,3 +778,8 @@ global:
          sd_device_open;
          sd_device_enumerator_add_nomatch_sysname;
-+        sd_hwdb_new_from_path;
  } LIBSYSTEMD_250;
++
++LIBSYSTEMD_252 {
++global:
++        sd_hwdb_new_from_path;
++} LIBSYSTEMD_251;
 diff --git a/src/libsystemd/sd-hwdb/sd-hwdb.c b/src/libsystemd/sd-hwdb/sd-hwdb.c
 index 748cf26..f73d1fc 100644
 --- a/src/libsystemd/sd-hwdb/sd-hwdb.c
@@ -160,7 +163,7 @@ index 9380759..9eee1c1 100644
  int sd_hwdb_get(sd_hwdb *hwdb, const char *modalias, const char *key, const char **value);
  
 diff --git a/src/test/test-sd-hwdb.c b/src/test/test-sd-hwdb.c
-index 4251e2a..8d08ea5 100644
+index 5e13985..f18634c 100644
 --- a/src/test/test-sd-hwdb.c
 +++ b/src/test/test-sd-hwdb.c
 @@ -5,6 +5,8 @@
