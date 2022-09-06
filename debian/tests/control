@@ -184,6 +184,7 @@ Depends: systemd-tests,
   knot-dnsutils,
   bind9-dnsutils,
   bind9-host,
+  jq,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
