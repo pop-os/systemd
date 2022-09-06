@@ -1,4 +1,4 @@
-systemd (251.4-1ubuntu4) UNRELEASED; urgency=medium
+systemd (251.4-1ubuntu4) kinetic; urgency=medium
 
   * debian/systemd-resolved.postinst: copy existing /etc/resolv.conf on new installs (LP: #1988772)
     Commit 20bc8a37fa ("Always setup /etc/resolv.conf on new installations.")
