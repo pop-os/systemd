@@ -1,3 +1,20 @@
+systemd (251.4-1ubuntu4) UNRELEASED; urgency=medium
+
+  * debian/systemd-resolved.postinst: copy existing /etc/resolv.conf on new installs (LP: #1988772)
+    Commit 20bc8a37fa ("Always setup /etc/resolv.conf on new installations.")
+    added logic to copy any existing /etc/resolv.conf to
+    /run/systemd/resolve/stub-resolv.conf before creating the final symlink.
+    When we merged the systemd-resolved package split changes from Debian,
+    this logic was not replicated, which has caused regressions.
+    Move the necessary pieces from systemd.postint to systemd-resolved.postinst
+    to maintain the previous /etc/resolv.conf logic.
+    Files:
+    - debian/systemd-resolved.postinst
+    - debian/systemd.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a34a768a929921978a67ef2192ee787255400ee5
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 06 Sep 2022 19:39:59 -0400
+
 systemd (251.4-1ubuntu3) kinetic; urgency=medium
 
   * Fix version of backported sd_hwdb_new_from_path symbol.
