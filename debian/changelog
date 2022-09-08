@@ -1,3 +1,24 @@
+systemd (245.4-4ubuntu3.19) focal; urgency=medium
+
+  [ dann frazier ]
+  * Add support for the v247 network naming scheme, but keep v245 as default
+    (LP: #1945225)
+    Author: dann frazier
+    Files:
+    - debian/patches/lp1945225/0001-udev-net_id-parse-_SUN-ACPI-index-as-a-signed-intege.patch
+    - debian/patches/lp1945225/0002-udev-net_id-don-t-generate-slot-based-names-if-multi.patch
+    - debian/patches/lp1945225/0003-net_id-fix-newly-added-naming-scheme-name.patch
+    - debian/patches/lp1945225/0004-Add-remaining-supported-schemes-as-options-for-defau.patch
+    - debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f569231b5134a8e4901621ee5b2c33826184dae6
+
+  [ Dimitri John Ledkov ]
+  * test: fix test-execute autotest failure with kernel 5.15 (LP: #1975587)
+    File: debian/patches/test-make-test-execute-pass-on-Linux-5.15.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7b3140ab5916269c020978ce678f06869a769f5c
+
+ -- Dimitri John Ledkov <dimitri.ledkov@canonical.com>  Thu, 08 Sep 2022 10:58:15 +0100
+
 systemd (245.4-4ubuntu3.18) focal; urgency=medium
 
   [ Nick Rosbrook ]
