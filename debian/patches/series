@@ -181,3 +181,7 @@ lp1966800-shared-calendarspec-when-mktime-moves-us-backwards-jump-f.patch
 lp1978079-efi-pstore-not-cleared-on-boot.patch
 lp1979951-network-do-not-remove-localhost-address.patch
 lp1982462-units-remove-the-restart-limit-on-the-modprobe-.service.patch
+lp1945225/0001-udev-net_id-parse-_SUN-ACPI-index-as-a-signed-intege.patch
+lp1945225/0002-udev-net_id-don-t-generate-slot-based-names-if-multi.patch
+lp1945225/0003-net_id-fix-newly-added-naming-scheme-name.patch
+lp1945225/0004-Add-remaining-supported-schemes-as-options-for-defau.patch
