@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.6) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.6) jammy; urgency=medium
 
   * Deny-list TEST-58-REPART on ppc64el (LP: #1988994)
     File: debian/patches/lp1988994-Deny-list-TEST-58-REPART-on-ppc64el.patch
