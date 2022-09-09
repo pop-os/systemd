@@ -1,3 +1,11 @@
+systemd (249.11-0ubuntu3.6) UNRELEASED; urgency=medium
+
+  * Deny-list TEST-58-REPART on ppc64el (LP: #1988994)
+    File: debian/patches/lp1988994-Deny-list-TEST-58-REPART-on-ppc64el.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d2ed3cc1d223bf35015b15ff83b50156b58f0f38
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 09 Sep 2022 14:47:16 -0400
+
 systemd (249.11-0ubuntu3.5) jammy; urgency=medium
 
   [ Nick Rosbrook ]
