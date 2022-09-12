@@ -180,7 +180,6 @@ execute_before_dh_install:
 	# remove unnecessary / unused files
 	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
 	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
-	rm -f debian/tmp/var/log/README
 	rm -f debian/tmp/etc/init.d/README
 	rm -f debian/tmp/lib/*.d/README
 	rm -f debian/tmp/lib/udev/*.d/README
