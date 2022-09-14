@@ -107,3 +107,4 @@ cryptswap-mount-fix.patch
 systemd-boot-id-compat.patch
 system76-usb.patch
 hp-dev-one.patch
+timesyncd-disable.patch

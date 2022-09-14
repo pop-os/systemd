@@ -1,0 +1,97 @@
+Disable systemd-timesyncd because Chrony is used instead.
+(Leave empty packaging in place for apt transition.)
+Index: systemd/debian/control
+===================================================================
+--- systemd.orig/debian/control
++++ systemd/debian/control
+@@ -190,11 +190,8 @@
+          ${misc:Depends},
+          adduser,
+          systemd
+-Breaks: systemd (<< 245.4-2~),
+-Conflicts: time-daemon
+-Replaces: time-daemon,
+-          systemd (<< 245.4-2~),
+-Provides: time-daemon
++Breaks: systemd (<< 245.4-2~)
++Replaces: systemd (<< 245.4-2~)
+ Description: minimalistic service to synchronize local time with NTP servers
+  The package contains the systemd-timesyncd system service that may be used to
+  synchronize the local system clock with a remote Network Time Protocol server.
+Index: systemd/debian/rules
+===================================================================
+--- systemd.orig/debian/rules
++++ systemd/debian/rules
+@@ -99,7 +99,8 @@
+ 	-Dnobody-group=nogroup \
+ 	-Dbump-proc-sys-fs-nr-open=false \
+ 	-Ddev-kvm-mode=0660 \
+-	-Dgroup-render-mode=0660
++	-Dgroup-render-mode=0660 \
++	-Dtimesyncd=false
+ 
+ CONFFLAGS_deb = \
+ 	-Dselinux=true \
+Index: systemd/debian/systemd-timesyncd.install
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.install
++++ /dev/null
+@@ -1,8 +0,0 @@
+-etc/systemd/timesyncd.conf
+-lib/systemd/ntp-units.d/80-systemd-timesync.list
+-lib/systemd/systemd-timesyncd
+-lib/systemd/system/systemd-timesyncd.service
+-usr/lib/sysusers.d/systemd-timesync.conf
+-usr/share/dbus-1/*/*timesync*
+-usr/share/man/man*/*timesyncd*
+-../../extra/dhclient-exit-hooks.d/ etc/dhcp/
+Index: systemd/debian/systemd-timesyncd.postinst
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.postinst
++++ /dev/null
+@@ -1,29 +0,0 @@
+-#!/bin/sh
+-
+-set -e
+-
+-_adopt_conffile() {
+-    conffile=$1
+-    pkg=$2
+-
+-    [ -f ${conffile}.dpkg-bak ] || return 0
+-
+-    md5sum="$(md5sum ${conffile} | sed -e 's/ .*//')"
+-    old_md5sum="$(dpkg-query -W -f='${Conffiles}' $pkg | \
+-                        sed -n -e "\' ${conffile} ' { s/ obsolete$//; s/.* //; p }")"
+-    # On new installs, if the policy file was preserved on systemd upgrade
+-    # by dpkg-maintscript helper, copy it back if the new file has not been modified yet
+-    if [ "$md5sum" = "$old_md5sum" ]; then
+-        mv ${conffile}.dpkg-bak ${conffile}
+-    fi
+-}
+-
+-adduser --quiet --system --group --no-create-home --home /run/systemd \
+-    --gecos "systemd Time Synchronization" systemd-timesync
+-
+-if [ "$1" = configure ] && [ -z "$2" ]; then
+-    _adopt_conffile /etc/dhcp/dhclient-exit-hooks.d/timesyncd systemd-timesyncd
+-    _adopt_conffile /etc/systemd/timesyncd.conf systemd-timesyncd
+-fi
+-
+-#DEBHELPER#
+Index: systemd/debian/systemd-timesyncd.postrm
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.postrm
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#!/bin/sh
+-
+-set -e
+-
+-case "$1" in
+-    purge)
+-        rm -rf /var/lib/systemd/timesync/
+-    ;;
+-esac
+-
+-#DEBHELPER#
