@@ -1,0 +1,81 @@
+From: Dan Streetman <ddstreet@ieee.org>
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1977630
+Forwarded: not-needed
+
+Since import_make_read_only handles a dir by chattr +i, that has to happen
+after renaming, since an immutable dir can't be renamed.
+
+--- a/src/import/pull-tar.c
++++ b/src/import/pull-tar.c
+@@ -353,10 +353,6 @@ static void tar_pull_job_on_finished(Pul
+                 if (r < 0)
+                         goto finish;
+
+-                r = import_make_read_only(i->temp_path);
+-                if (r < 0)
+-                        goto finish;
+-
+                 r = rename_noreplace(AT_FDCWD, i->temp_path, AT_FDCWD, i->final_path);
+                 if (r < 0) {
+                         log_error_errno(r, "Failed to rename to final image name to %s: %m", i->final_path);
+@@ -365,6 +361,10 @@ static void tar_pull_job_on_finished(Pul
+
+                 i->temp_path = mfree(i->temp_path);
+
++                r = import_make_read_only(i->final_path);
++                if (r < 0)
++                        goto finish;
++
+                 if (i->settings_job &&
+                     i->settings_job->error == 0) {
+
+@@ -380,10 +380,6 @@ static void tar_pull_job_on_finished(Pul
+                         if (r < 0)
+                                 goto finish;
+
+-                        r = import_make_read_only(i->settings_temp_path);
+-                        if (r < 0)
+-                                goto finish;
+-
+                         r = rename_noreplace(AT_FDCWD, i->settings_temp_path, AT_FDCWD, i->settings_path);
+                         if (r < 0) {
+                                 log_error_errno(r, "Failed to rename settings file to %s: %m", i->settings_path);
+@@ -391,6 +387,10 @@ static void tar_pull_job_on_finished(Pul
+                         }
+
+                         i->settings_temp_path = mfree(i->settings_temp_path);
++
++                        r = import_make_read_only(i->settings_path);
++                        if (r < 0)
++                                goto finish;
+                 }
+         }
+
+--- a/src/import/import-tar.c
++++ b/src/import/import-tar.c
+@@ -179,12 +179,6 @@ static int tar_import_finish(TarImport *
+         if (r < 0)
+                 return r;
+
+-        if (i->flags & IMPORT_READ_ONLY) {
+-                r = import_make_read_only(i->temp_path);
+-                if (r < 0)
+-                        return r;
+-        }
+-
+         if (i->flags & IMPORT_FORCE)
+                 (void) rm_rf(i->final_path, REMOVE_ROOT|REMOVE_PHYSICAL|REMOVE_SUBVOLUME);
+
+@@ -194,6 +188,12 @@ static int tar_import_finish(TarImport *
+
+         i->temp_path = mfree(i->temp_path);
+
++        if (i->flags & IMPORT_READ_ONLY) {
++                r = import_make_read_only(i->final_path);
++                if (r < 0)
++                        return r;
++        }
++
+         return 0;
+ }
+
