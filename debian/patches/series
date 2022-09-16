@@ -50,3 +50,4 @@ test-increase-QEMU_MEM-for-some-tests.patch
 test-copy-libgcc_s.so.1-to-TPM2-test-image-on-Debian-like.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
+lp1989969-test-deny-list-TEST-36-NUMAPOLICY-on-ppc64el.patch
