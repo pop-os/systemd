@@ -24,7 +24,7 @@ Build-Depends: debhelper-compat (= 13),
                meson (>= 0.53.2),
                gettext,
                gperf,
-               gnu-efi [amd64 i386 arm64 armhf],
+               gnu-efi [amd64 i386 arm64 armhf riscv64],
                libcap-dev,
                libpam0g-dev,
                libapparmor-dev (>= 2.13) <!stage1>,
@@ -477,7 +477,7 @@ Description: home area manager
  directories on user login, tools and documentation.
 
 Package: systemd-boot
-Architecture: amd64 i386 arm64 armhf
+Architecture: amd64 i386 arm64 armhf riscv64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd-boot-efi (= ${binary:Version}),
@@ -495,7 +495,7 @@ Description: simple UEFI boot manager - tools and services
  systemd-boot.
 
 Package: systemd-boot-efi
-Architecture: amd64 i386 arm64 armhf
+Architecture: amd64 i386 arm64 armhf riscv64
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends},
 Depends: ${misc:Depends},

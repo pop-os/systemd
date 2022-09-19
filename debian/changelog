@@ -1,3 +1,9 @@
+systemd (251.4-1ubuntu5) kinetic; urgency=medium
+
+  * enable building systemd-boot for riscv64 (LP: #1989457) 
+
+ -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
+
 systemd (251.4-1ubuntu4) kinetic; urgency=medium
 
   * debian/systemd-resolved.postinst: copy existing /etc/resolv.conf on new installs (LP: #1988772)
