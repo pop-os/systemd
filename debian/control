@@ -510,6 +510,7 @@ Description: simple UEFI boot manager - EFI binaries
 
 Package: systemd-resolved
 Multi-Arch: foreign
+Priority: important
 Architecture: linux-any
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
