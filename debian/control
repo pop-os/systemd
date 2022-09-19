@@ -517,8 +517,6 @@ Depends: ${shlibs:Depends},
          adduser,
          systemd (= ${binary:Version}),
          default-dbus-system-bus | dbus-system-bus
-Recommends: libnss-myhostname,
-            libnss-resolve,
 Suggests: policykit-1,
 Provides: resolvconf
 Conflicts: resolvconf
