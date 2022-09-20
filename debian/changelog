@@ -1,3 +1,25 @@
+systemd (251.4-1ubuntu6) UNRELEASED; urgency=medium
+
+  * test: deny-list TEST-36-NUMAPOLICY on ppc64el (LP: #1989969)
+    File: debian/patches/lp1989969-test-deny-list-TEST-36-NUMAPOLICY-on-ppc64el.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0f61b31fbeb57cf7e47a5f0922fd2ff47b81caa7
+  * debian/control: drop systemd-resolved Recommends: (LP: #1990187)
+    libnss-resolve was previously explicitly excluded from ubuntu-minimal,
+    and this Recommends: reverses that change. While here, drop
+    libnss-myhostname too, because it is in universe and there is no real
+    need for systemd-resolved to Recommends: it.
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=88c134fac13b738efdcc657e160350c061d0a018
+  * debian/control: set Priority: important on systemd-resolved (LP: #1990278)
+    Since this package used to be a part of the systemd binary package,
+    systemd-resolved would be installed by debootstrap by default. Retain
+    this previous behavior by setting Priority: important on
+    systemd-resolved.
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1d9ca06dfe8351ed4d03073fbafa5e2212fe4fcb
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 20 Sep 2022 11:19:05 -0400
+
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
   * enable building systemd-boot for riscv64 (LP: #1989457) 
