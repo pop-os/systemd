@@ -1,4 +1,4 @@
-systemd (251.4-1ubuntu6) UNRELEASED; urgency=medium
+systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
   * test: deny-list TEST-36-NUMAPOLICY on ppc64el (LP: #1989969)
     File: debian/patches/lp1989969-test-deny-list-TEST-36-NUMAPOLICY-on-ppc64el.patch
@@ -18,7 +18,7 @@ systemd (251.4-1ubuntu6) UNRELEASED; urgency=medium
     File: debian/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1d9ca06dfe8351ed4d03073fbafa5e2212fe4fcb
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 20 Sep 2022 11:19:05 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 20 Sep 2022 11:19:06 -0400
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
