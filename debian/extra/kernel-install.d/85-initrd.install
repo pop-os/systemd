@@ -8,18 +8,11 @@ KERNEL_VERSION="$2"
 
 INITRD_SRC="/boot/initrd.img-$KERNEL_VERSION"
 
-if [ "$COMMAND" = remove ]; then
-    exit 0
-fi
-
-if [ "$COMMAND" != add ]; then
-    echo "Invalid command $COMMAND" >&2
-    exit 1
-fi
+[ "$COMMAND" = add ] || exit 0
 
 if [ "$#" -ge 5 ]; then
     # Explicit initrd paths were passed, fall through to default 90-loaderentry.install handling;
-	# we'd be either injecting an unwanted image or, worse, overriding a user-provided one
+    # we'd be either injecting an unwanted image or, worse, overriding a user-provided one
     exit 0
 fi
 
