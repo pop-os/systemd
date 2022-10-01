@@ -1,3 +1,44 @@
+systemd (251.5-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 251.5
+  * Install NEWS.Debian file into all binary packages.
+    While it increases the disk footprint a little, it ensures that NEWS
+    entries are reliably shown by apt-listchanges.
+  * Handle removal of /var/log/README.
+    Remove /var/log/README symlink when the systemd package is purged.
+    This symlink is created via tmpfiles and documents that /var/log no
+    longer contains the traditional syslog text files. (Closes: #877414)
+
+  [ наб ]
+  * debian/extra/kernel/postinst.d/systemd-boot: prefix with zz-
+    Since we explicitly (though this is hidden by indirection through
+    85-initrd.install) depend on /boot/initrd.img-$1 existing or not existing,
+    hard-order ourselves at the end. The zz- prefix matches grub.
+  * debian/extra/kernel-install.d/85-initrd.install: install default initrd
+    with versioned basename.
+    This fixes #1020396 in a superior way by using
+    $KERNEL_INSTALL_STAGING_AREA, available since systemd v251.
+    By just copying the file we both simplify our code, but defer to
+    90-loaderentry to correctly permission it, and simply never generate an
+    unversioned initrd in the first place! (Closes: #1020396)
+  * debian/extra/kernel-install.d/85-initrd.install: explicitly ignore unknown
+    verbs
+  * debian/extra/kernel/postrm.d/systemd-boot: prefix with zz-
+    Doesn't actually matter, but the kernel handbook says we must and we
+    already renamed postinst. (Closes: #1014581)
+
+  [ Luca Boccassi ]
+  * Enable firstboot, disabled by default on Debian.
+    Currently the first-boot conditions are not met by any Debian
+    image (/etc/machine-id with content uninitialized, so we can
+    just enable the build and ship it in the main package.
+    This lets image builders (eg: cloud images) tinker with it.
+    https://www.freedesktop.org/software/systemd/man/machine-id.html#First%20Boot%20Semantics
+    (Closes: #844528)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 01 Oct 2022 21:08:50 +0200
+
 systemd (251.4-3) unstable; urgency=medium
 
   * resolv.conf: take backup as a fallback in case resolved/resolv.conf
