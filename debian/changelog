@@ -1,4 +1,4 @@
-systemd (251.5-1) UNRELEASED; urgency=medium
+systemd (251.5-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 251.5
@@ -9,6 +9,7 @@ systemd (251.5-1) UNRELEASED; urgency=medium
     Remove /var/log/README symlink when the systemd package is purged.
     This symlink is created via tmpfiles and documents that /var/log no
     longer contains the traditional syslog text files. (Closes: #877414)
+  * Rebase patches
 
   [ наб ]
   * debian/extra/kernel/postinst.d/systemd-boot: prefix with zz-
@@ -37,7 +38,7 @@ systemd (251.5-1) UNRELEASED; urgency=medium
     https://www.freedesktop.org/software/systemd/man/machine-id.html#First%20Boot%20Semantics
     (Closes: #844528)
 
- -- Michael Biebl <biebl@debian.org>  Sat, 01 Oct 2022 21:08:50 +0200
+ -- Michael Biebl <biebl@debian.org>  Sun, 02 Oct 2022 21:23:49 +0200
 
 systemd (251.4-3) unstable; urgency=medium
 
