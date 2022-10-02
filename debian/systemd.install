@@ -17,6 +17,7 @@ usr/lib/sysusers.d/systemd-network.conf
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
 usr/lib/kernel
+usr/lib/*/cryptsetup/
 usr/share/bash-completion/
 usr/share/zsh/vendor-completions/
 usr/share/dbus-1/
