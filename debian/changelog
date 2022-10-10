@@ -1,3 +1,20 @@
+systemd (251.5-2) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Build and install libcryptsetup token plugins.
+    The interfaces are now mature and enabled in Debian/Ubuntu in
+    libcryptsetup, so enable and ship the plugins
+
+  [ Michael Biebl ]
+  * salsa-ci: drop no longer needed workaround for lintian false positives
+  * udev: fix regression in udev-builtin path_id when processing NVME devices
+    (Closes: #1021547)
+
+  [ наб ]
+  * systemd-sysv.postinst: which -> command -v
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 11 Oct 2022 00:51:55 +0200
+
 systemd (251.5-1) unstable; urgency=medium
 
   [ Michael Biebl ]
