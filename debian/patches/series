@@ -2,6 +2,8 @@ Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
 Move-homectl-and-userdbctl-to-bindir.patch
 meson-install-libsystemd-shared-into-rootpkglibdir.patch
 shellcheck-clean-kernel-install-again.patch
+udev-drop-assertion-which-is-always-false.patch
+udev-add-one-more-assertion.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
