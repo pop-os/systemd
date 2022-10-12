@@ -5,6 +5,7 @@ shellcheck-clean-kernel-install-again.patch
 udev-drop-assertion-which-is-always-false.patch
 udev-add-one-more-assertion.patch
 ata_id-Fixed-getting-Response-Code-from-SCSI-Sense-Data-2.patch
+logind-do-not-emit-beep-in-wall-messages.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
