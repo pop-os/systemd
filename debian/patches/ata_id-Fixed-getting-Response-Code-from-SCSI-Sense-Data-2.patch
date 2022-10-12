@@ -1,0 +1,37 @@
+From: Aleksey Vasenev <margtu-fivt@ya.ru>
+Date: Wed, 5 Oct 2022 22:33:53 +0300
+Subject: ata_id: Fixed getting Response Code from SCSI Sense Data (#24921)
+
+The Response Code is contained in the first byte of the SCSI Sense Data.
+Bit number 7 is reserved or has a different meaning for some Response Codes
+and is set to 1 for some drives.
+
+(cherry picked from commit 2be1ae54badf7a3a12908a8094ebaba8f91887ca)
+---
+ src/udev/ata_id/ata_id.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/udev/ata_id/ata_id.c b/src/udev/ata_id/ata_id.c
+index 1fc27f4..cbeb2db 100644
+--- a/src/udev/ata_id/ata_id.c
++++ b/src/udev/ata_id/ata_id.c
+@@ -162,8 +162,8 @@ static int disk_identify_command(
+                         return ret;
+         }
+ 
+-        if (!(sense[0] == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c) &&
+-                !(sense[0] == 0x70 && sense[12] == 0x00 && sense[13] == 0x1d)) {
++        if (!((sense[0] & 0x7f) == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c) &&
++                !((sense[0] & 0x7f) == 0x70 && sense[12] == 0x00 && sense[13] == 0x1d)) {
+                 errno = EIO;
+                 return -1;
+         }
+@@ -240,7 +240,7 @@ static int disk_identify_packet_device_command(
+                         return ret;
+         }
+ 
+-        if (!(sense[0] == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c)) {
++        if (!((sense[0] & 0x7f) == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c)) {
+                 errno = EIO;
+                 return -1;
+         }
