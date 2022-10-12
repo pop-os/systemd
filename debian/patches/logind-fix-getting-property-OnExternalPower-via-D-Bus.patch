@@ -1,0 +1,36 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Wed, 12 Oct 2022 11:07:57 +0200
+Subject: logind: fix getting property OnExternalPower via D-Bus
+
+The BUS_DEFINE_PROPERTY_GET_GLOBAL macro requires a value as third
+argument, so we need to call manager_is_on_external_power(). Otherwise
+the function pointer is interpreted as a boolean and always returns
+true:
+
+```
+$ busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager OnExternalPower
+b true
+$ /lib/systemd/systemd-ac-power  --verbose
+no
+```
+
+Thanks: Helmut Grohne <helmut@subdivi.de>
+Bug-Debian: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1021644
+(cherry picked from commit 63168cb517a556b2f4f175b365f5a4b4c7e85150)
+---
+ src/login/logind-dbus.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index 296e0e3..8fd46e1 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -377,7 +377,7 @@ static int property_get_scheduled_shutdown(
+ static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_handle_action, handle_action, HandleAction);
+ static BUS_DEFINE_PROPERTY_GET(property_get_docked, "b", Manager, manager_is_docked_or_external_displays);
+ static BUS_DEFINE_PROPERTY_GET(property_get_lid_closed, "b", Manager, manager_is_lid_closed);
+-static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_on_external_power, "b", manager_is_on_external_power);
++static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_on_external_power, "b", manager_is_on_external_power());
+ static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_compat_user_tasks_max, "t", CGROUP_LIMIT_MAX);
+ static BUS_DEFINE_PROPERTY_GET_REF(property_get_hashmap_size, "t", Hashmap *, (uint64_t) hashmap_size);
+ 
