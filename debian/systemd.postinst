@@ -74,8 +74,8 @@ _update_catalog
 
 if [ -n "$2" ]; then
     _systemctl daemon-reexec || true
-    # do not restart logind; this can be done again once this gets implemented:
-    # https://github.com/systemd/systemd/issues/1163
+    # do not restart logind
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
     if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
         # the socket configuration changed
         _systemctl stop systemd-networkd.socket || true
