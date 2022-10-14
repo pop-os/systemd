@@ -63,7 +63,7 @@ index c891787..9a01af1 100644
  HandleAction handle_action_from_string(const char *s) _pure_;
  
 diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
-index c40d8de..296e0e3 100644
+index 6b77a04..8fd46e1 100644
 --- a/src/login/logind-dbus.c
 +++ b/src/login/logind-dbus.c
 @@ -2355,7 +2355,7 @@ static int method_cancel_scheduled_shutdown(sd_bus_message *message, void *userd

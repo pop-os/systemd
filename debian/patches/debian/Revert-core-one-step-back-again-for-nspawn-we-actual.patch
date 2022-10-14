@@ -14,10 +14,10 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  1 file changed, 1 insertion(+), 10 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index b0756bc..90ec261 100644
+index 1b0c5fc..bdca10e 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -4606,16 +4606,7 @@ int unit_kill_context(
+@@ -4609,16 +4609,7 @@ int unit_kill_context(
  
                  } else if (r > 0) {
  

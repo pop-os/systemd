@@ -27,7 +27,7 @@ See also https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=990547
  5 files changed, 132 insertions(+), 128 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index 1d8b5dc..2c5002c 100644
+index 8c7f0be..98f00f4 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -146,6 +146,7 @@ rootlibdir = get_option('rootlibdir')
@@ -38,7 +38,7 @@ index 1d8b5dc..2c5002c 100644
  
  install_sysconfdir = get_option('install-sysconfdir') != 'false'
  install_sysconfdir_samples = get_option('install-sysconfdir') == 'true'
-@@ -1996,7 +1997,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
+@@ -2006,7 +2007,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                          tpm2,
                                          versiondep],
                          link_depends : cryptsetup_token_sym,
@@ -47,7 +47,7 @@ index 1d8b5dc..2c5002c 100644
                          install : true,
                          install_dir : libcryptsetup_plugins_dir)
          endif
-@@ -2014,7 +2015,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
+@@ -2024,7 +2025,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                          libfido2,
                                          versiondep],
                          link_depends : cryptsetup_token_sym,
@@ -56,7 +56,7 @@ index 1d8b5dc..2c5002c 100644
                          install : true,
                          install_dir : libcryptsetup_plugins_dir)
          endif
-@@ -2032,7 +2033,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
+@@ -2042,7 +2043,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                          libp11kit,
                                          versiondep],
                          link_depends : cryptsetup_token_sym,
@@ -65,7 +65,7 @@ index 1d8b5dc..2c5002c 100644
                          install : true,
                          install_dir : libcryptsetup_plugins_dir)
          endif
-@@ -2167,7 +2168,7 @@ exe = executable(
+@@ -2177,7 +2178,7 @@ exe = executable(
                       libshared],
          dependencies : [versiondep,
                          libseccomp],
@@ -74,7 +74,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  dbus_programs += exe
-@@ -2185,7 +2186,7 @@ public_programs += executable(
+@@ -2195,7 +2196,7 @@ public_programs += executable(
                       libshared],
          dependencies : [versiondep,
                          libseccomp],
@@ -83,7 +83,7 @@ index 1d8b5dc..2c5002c 100644
          install : conf.get('ENABLE_ANALYZE') == 1)
  
  executable(
-@@ -2199,7 +2200,7 @@ executable(
+@@ -2209,7 +2210,7 @@ executable(
                          liblz4,
                          libselinux,
                          libzstd],
@@ -92,7 +92,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -2210,7 +2211,7 @@ public_programs += executable(
+@@ -2220,7 +2221,7 @@ public_programs += executable(
          link_with : [libjournal_core,
                       libshared],
          dependencies : [threads],
@@ -101,7 +101,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -2224,7 +2225,7 @@ public_programs += executable(
+@@ -2234,7 +2235,7 @@ public_programs += executable(
                          liblz4,
                          libzstd,
                          libdl],
@@ -110,7 +110,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -2233,7 +2234,7 @@ executable(
+@@ -2243,7 +2244,7 @@ executable(
          'src/getty-generator/getty-generator.c',
          include_directories : includes,
          link_with : [libshared],
@@ -119,7 +119,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : systemgeneratordir)
  
-@@ -2242,7 +2243,7 @@ executable(
+@@ -2252,7 +2253,7 @@ executable(
          'src/debug-generator/debug-generator.c',
          include_directories : includes,
          link_with : [libshared],
@@ -128,7 +128,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : systemgeneratordir)
  
-@@ -2251,7 +2252,7 @@ executable(
+@@ -2261,7 +2262,7 @@ executable(
          'src/run-generator/run-generator.c',
          include_directories : includes,
          link_with : [libshared],
@@ -137,7 +137,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : systemgeneratordir)
  
-@@ -2260,7 +2261,7 @@ exe = executable(
+@@ -2270,7 +2271,7 @@ exe = executable(
          'src/fstab-generator/fstab-generator.c',
          include_directories : includes,
          link_with : [libshared],
@@ -146,7 +146,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : systemgeneratordir)
  
-@@ -2278,7 +2279,7 @@ if conf.get('ENABLE_ENVIRONMENT_D') == 1
+@@ -2288,7 +2289,7 @@ if conf.get('ENABLE_ENVIRONMENT_D') == 1
                  'src/environment-d-generator/environment-d-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -155,7 +155,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : userenvgeneratordir)
  
-@@ -2293,7 +2294,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
+@@ -2303,7 +2304,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
                  'src/hibernate-resume/hibernate-resume-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -164,7 +164,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  
-@@ -2302,7 +2303,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
+@@ -2312,7 +2313,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
                  'src/hibernate-resume/hibernate-resume.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -173,7 +173,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2314,7 +2315,7 @@ if conf.get('HAVE_BLKID') == 1
+@@ -2324,7 +2325,7 @@ if conf.get('HAVE_BLKID') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : libblkid,
@@ -182,7 +182,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  
-@@ -2323,7 +2324,7 @@ if conf.get('HAVE_BLKID') == 1
+@@ -2333,7 +2334,7 @@ if conf.get('HAVE_BLKID') == 1
                  'src/dissect/dissect.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -191,7 +191,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  endif
  
-@@ -2336,7 +2337,7 @@ if conf.get('ENABLE_RESOLVE') == 1
+@@ -2346,7 +2347,7 @@ if conf.get('ENABLE_RESOLVE') == 1
                               libbasic_gcrypt,
                               libsystemd_resolve_core],
                  dependencies : systemd_resolved_dependencies,
@@ -200,7 +200,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2351,7 +2352,7 @@ if conf.get('ENABLE_RESOLVE') == 1
+@@ -2361,7 +2362,7 @@ if conf.get('ENABLE_RESOLVE') == 1
                                  lib_openssl_or_gcrypt,
                                  libm,
                                  libidn],
@@ -209,7 +209,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  
          meson.add_install_script(meson_make_symlink,
-@@ -2372,7 +2373,7 @@ if conf.get('ENABLE_LOGIND') == 1
+@@ -2382,7 +2383,7 @@ if conf.get('ENABLE_LOGIND') == 1
                               libshared],
                  dependencies : [threads,
                                  libacl],
@@ -218,7 +218,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2385,7 +2386,7 @@ if conf.get('ENABLE_LOGIND') == 1
+@@ -2395,7 +2396,7 @@ if conf.get('ENABLE_LOGIND') == 1
                                  liblz4,
                                  libxz,
                                  libzstd],
@@ -227,7 +227,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  
-@@ -2394,7 +2395,7 @@ if conf.get('ENABLE_LOGIND') == 1
+@@ -2404,7 +2405,7 @@ if conf.get('ENABLE_LOGIND') == 1
                  'src/login/inhibit.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -236,7 +236,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  
-@@ -2431,7 +2432,7 @@ if conf.get('ENABLE_LOGIND') == 1
+@@ -2441,7 +2442,7 @@ if conf.get('ENABLE_LOGIND') == 1
                  user_runtime_dir_sources,
                  include_directories : includes,
                  link_with : [libshared],
@@ -245,7 +245,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2442,7 +2443,7 @@ if conf.get('HAVE_PAM') == 1
+@@ -2452,7 +2453,7 @@ if conf.get('HAVE_PAM') == 1
                  'src/user-sessions/user-sessions.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -254,7 +254,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2460,7 +2461,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
+@@ -2470,7 +2471,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                  include_directories : includes,
                  link_with : [boot_link_with],
                  dependencies : [libblkid],
@@ -263,7 +263,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  
          public_programs += executable(
-@@ -2469,7 +2470,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
+@@ -2479,7 +2480,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                  include_directories : includes,
                  link_with : [boot_link_with],
                  dependencies : [libblkid],
@@ -272,7 +272,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2478,7 +2479,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
+@@ -2488,7 +2489,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                  'src/boot/bless-boot-generator.c',
                  include_directories : includes,
                  link_with : [boot_link_with],
@@ -281,7 +281,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  endif
-@@ -2489,7 +2490,7 @@ executable(
+@@ -2499,7 +2500,7 @@ executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [libblkid],
@@ -290,7 +290,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -2499,7 +2500,7 @@ public_programs += executable(
+@@ -2509,7 +2510,7 @@ public_programs += executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [threads],
@@ -299,7 +299,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  systemctl = executable(
-@@ -2513,7 +2514,7 @@ systemctl = executable(
+@@ -2523,7 +2524,7 @@ systemctl = executable(
                          libxz,
                          liblz4,
                          libzstd],
@@ -308,7 +308,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  public_programs += systemctl
-@@ -2525,7 +2526,7 @@ if conf.get('ENABLE_PORTABLED') == 1
+@@ -2535,7 +2536,7 @@ if conf.get('ENABLE_PORTABLED') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [threads, libselinux],
@@ -317,7 +317,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2535,7 +2536,7 @@ if conf.get('ENABLE_PORTABLED') == 1
+@@ -2545,7 +2546,7 @@ if conf.get('ENABLE_PORTABLED') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [threads],
@@ -326,7 +326,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  endif
-@@ -2546,7 +2547,7 @@ if conf.get('ENABLE_SYSEXT') == 1
+@@ -2556,7 +2557,7 @@ if conf.get('ENABLE_SYSEXT') == 1
                  systemd_sysext_sources,
                  include_directories : includes,
                  link_with : [libshared],
@@ -335,15 +335,6 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  endif
-@@ -2558,7 +2559,7 @@ if conf.get('ENABLE_USERDB') == 1
-                 include_directories : includes,
-                 link_with : [libshared],
-                 dependencies : [threads],
--                install_rpath : rootlibexecdir,
-+                install_rpath : rootpkglibdir,
-                 install : true,
-                 install_dir : rootlibexecdir)
- 
 @@ -2568,7 +2569,7 @@ if conf.get('ENABLE_USERDB') == 1
                  include_directories : includes,
                  link_with : [libshared],
@@ -359,10 +350,19 @@ index 1d8b5dc..2c5002c 100644
                  dependencies : [threads],
 -                install_rpath : rootlibexecdir,
 +                install_rpath : rootpkglibdir,
+                 install : true,
+                 install_dir : rootlibexecdir)
+ 
+@@ -2588,7 +2589,7 @@ if conf.get('ENABLE_USERDB') == 1
+                 include_directories : includes,
+                 link_with : [libshared],
+                 dependencies : [threads],
+-                install_rpath : rootlibexecdir,
++                install_rpath : rootpkglibdir,
                  install : true)
  endif
  
-@@ -2594,7 +2595,7 @@ if conf.get('ENABLE_HOMED') == 1
+@@ -2604,7 +2605,7 @@ if conf.get('ENABLE_HOMED') == 1
                                  libopenssl,
                                  libfdisk,
                                  libp11kit],
@@ -371,7 +371,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2607,7 +2608,7 @@ if conf.get('ENABLE_HOMED') == 1
+@@ -2617,7 +2618,7 @@ if conf.get('ENABLE_HOMED') == 1
                                  libcrypt,
                                  libopenssl,
                                  libm],
@@ -380,7 +380,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2621,7 +2622,7 @@ if conf.get('ENABLE_HOMED') == 1
+@@ -2631,7 +2632,7 @@ if conf.get('ENABLE_HOMED') == 1
                                  libopenssl,
                                  libp11kit,
                                  libdl],
@@ -389,7 +389,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  
          if conf.get('HAVE_PAM') == 1
-@@ -2663,7 +2664,7 @@ if conf.get('ENABLE_BACKLIGHT') == 1
+@@ -2673,7 +2674,7 @@ if conf.get('ENABLE_BACKLIGHT') == 1
                  'src/backlight/backlight.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -398,7 +398,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2674,7 +2675,7 @@ if conf.get('ENABLE_RFKILL') == 1
+@@ -2684,7 +2685,7 @@ if conf.get('ENABLE_RFKILL') == 1
                  'src/rfkill/rfkill.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -407,7 +407,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2684,7 +2685,7 @@ executable(
+@@ -2694,7 +2695,7 @@ executable(
          'src/system-update-generator/system-update-generator.c',
          include_directories : includes,
          link_with : [libshared],
@@ -416,7 +416,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : systemgeneratordir)
  
-@@ -2696,7 +2697,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2706,7 +2707,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  link_with : [libshared],
                  dependencies : [libcryptsetup,
                                  libp11kit],
@@ -425,7 +425,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2705,7 +2706,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2715,7 +2716,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  'src/cryptsetup/cryptsetup-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -434,7 +434,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  
-@@ -2715,7 +2716,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2725,7 +2726,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [libcryptsetup],
@@ -443,7 +443,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2724,7 +2725,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2734,7 +2735,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  'src/veritysetup/veritysetup-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -452,7 +452,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  
-@@ -2737,7 +2738,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2747,7 +2748,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                                  libdl,
                                  libopenssl,
                                  libp11kit],
@@ -461,7 +461,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  
          executable(
-@@ -2746,7 +2747,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2756,7 +2757,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [libcryptsetup],
@@ -470,7 +470,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2755,7 +2756,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
+@@ -2765,7 +2766,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                  ['src/integritysetup/integritysetup-generator.c', 'src/integritysetup/integrity-util.c'],
                  include_directories : includes,
                  link_with : [libshared],
@@ -479,7 +479,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  endif
-@@ -2766,7 +2767,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
+@@ -2776,7 +2777,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
                  'src/sysv-generator/sysv-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -488,7 +488,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  
-@@ -2782,7 +2783,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
+@@ -2792,7 +2793,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
                  'src/rc-local-generator/rc-local-generator.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -497,7 +497,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : systemgeneratordir)
  endif
-@@ -2793,7 +2794,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
+@@ -2803,7 +2804,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
                  systemd_xdg_autostart_generator_sources,
                  include_directories : includes,
                  link_with : [libshared],
@@ -506,7 +506,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : usergeneratordir)
  
-@@ -2802,7 +2803,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
+@@ -2812,7 +2813,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
                  'src/xdg-autostart-generator/xdg-autostart-condition.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -515,7 +515,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2813,7 +2814,7 @@ if conf.get('ENABLE_HOSTNAMED') == 1
+@@ -2823,7 +2824,7 @@ if conf.get('ENABLE_HOSTNAMED') == 1
                  'src/hostname/hostnamed.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -524,7 +524,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2822,7 +2823,7 @@ if conf.get('ENABLE_HOSTNAMED') == 1
+@@ -2832,7 +2833,7 @@ if conf.get('ENABLE_HOSTNAMED') == 1
                  'src/hostname/hostnamectl.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -533,7 +533,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  endif
  
-@@ -2841,7 +2842,7 @@ if conf.get('ENABLE_LOCALED') == 1
+@@ -2851,7 +2852,7 @@ if conf.get('ENABLE_LOCALED') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : deps,
@@ -542,7 +542,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2850,7 +2851,7 @@ if conf.get('ENABLE_LOCALED') == 1
+@@ -2860,7 +2861,7 @@ if conf.get('ENABLE_LOCALED') == 1
                  localectl_sources,
                  include_directories : includes,
                  link_with : [libshared],
@@ -551,7 +551,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  endif
  
-@@ -2860,7 +2861,7 @@ if conf.get('ENABLE_TIMEDATED') == 1
+@@ -2870,7 +2871,7 @@ if conf.get('ENABLE_TIMEDATED') == 1
                  'src/timedate/timedated.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -560,7 +560,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2870,7 +2871,7 @@ if conf.get('ENABLE_TIMEDATECTL') == 1
+@@ -2880,7 +2881,7 @@ if conf.get('ENABLE_TIMEDATECTL') == 1
                  'timedatectl',
                  'src/timedate/timedatectl.c',
                  include_directories : includes,
@@ -569,7 +569,7 @@ index 1d8b5dc..2c5002c 100644
                  link_with : [libshared],
                  dependencies : [libm],
                  install : true)
-@@ -2884,7 +2885,7 @@ if conf.get('ENABLE_TIMESYNCD') == 1
+@@ -2894,7 +2895,7 @@ if conf.get('ENABLE_TIMESYNCD') == 1
                  link_with : [libtimesyncd_core],
                  dependencies : [threads,
                                  libm],
@@ -578,7 +578,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2893,7 +2894,7 @@ if conf.get('ENABLE_TIMESYNCD') == 1
+@@ -2903,7 +2904,7 @@ if conf.get('ENABLE_TIMESYNCD') == 1
                  'src/timesync/wait-sync.c',
                  include_directories : includes,
                  link_with : [libtimesyncd_core],
@@ -587,7 +587,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -2905,7 +2906,7 @@ if conf.get('ENABLE_MACHINED') == 1
+@@ -2915,7 +2916,7 @@ if conf.get('ENABLE_MACHINED') == 1
                  include_directories : includes,
                  link_with : [libmachine_core,
                               libshared],
@@ -596,7 +596,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2918,7 +2919,7 @@ if conf.get('ENABLE_MACHINED') == 1
+@@ -2928,7 +2929,7 @@ if conf.get('ENABLE_MACHINED') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -605,7 +605,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  endif
-@@ -2930,7 +2931,7 @@ if conf.get('ENABLE_IMPORTD') == 1
+@@ -2940,7 +2941,7 @@ if conf.get('ENABLE_IMPORTD') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [threads],
@@ -614,16 +614,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -2946,7 +2947,7 @@ if conf.get('ENABLE_IMPORTD') == 1
-                                 libz,
-                                 libbzip2,
-                                 libxz],
--                install_rpath : rootlibexecdir,
-+                install_rpath : rootpkglibdir,
-                 install : true,
-                 install_dir : rootlibexecdir)
- 
-@@ -2960,7 +2961,7 @@ if conf.get('ENABLE_IMPORTD') == 1
+@@ -2956,7 +2957,7 @@ if conf.get('ENABLE_IMPORTD') == 1
                                  libz,
                                  libbzip2,
                                  libxz],
@@ -633,15 +624,6 @@ index 1d8b5dc..2c5002c 100644
                  install_dir : rootlibexecdir)
  
 @@ -2970,7 +2971,7 @@ if conf.get('ENABLE_IMPORTD') == 1
-                 include_directories : includes,
-                 link_with : [libshared,
-                              lib_import_common],
--                install_rpath : rootlibexecdir,
-+                install_rpath : rootpkglibdir,
-                 install : true,
-                 install_dir : rootlibexecdir)
- 
-@@ -2984,7 +2985,7 @@ if conf.get('ENABLE_IMPORTD') == 1
                                  libz,
                                  libbzip2,
                                  libxz],
@@ -650,7 +632,25 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3004,7 +3005,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_LIBCURL') == 1
+@@ -2980,7 +2981,7 @@ if conf.get('ENABLE_IMPORTD') == 1
+                 include_directories : includes,
+                 link_with : [libshared,
+                              lib_import_common],
+-                install_rpath : rootlibexecdir,
++                install_rpath : rootpkglibdir,
+                 install : true,
+                 install_dir : rootlibexecdir)
+ 
+@@ -2994,7 +2995,7 @@ if conf.get('ENABLE_IMPORTD') == 1
+                                 libz,
+                                 libbzip2,
+                                 libxz],
+-                install_rpath : rootlibexecdir,
++                install_rpath : rootpkglibdir,
+                 install : true,
+                 install_dir : rootlibexecdir)
+ 
+@@ -3014,7 +3015,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_LIBCURL') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -659,7 +659,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3022,7 +3023,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
+@@ -3032,7 +3033,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -668,7 +668,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3037,7 +3038,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
+@@ -3047,7 +3048,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -677,7 +677,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3054,7 +3055,7 @@ if conf.get('ENABLE_COREDUMP') == 1
+@@ -3064,7 +3065,7 @@ if conf.get('ENABLE_COREDUMP') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -686,7 +686,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3068,7 +3069,7 @@ if conf.get('ENABLE_COREDUMP') == 1
+@@ -3078,7 +3079,7 @@ if conf.get('ENABLE_COREDUMP') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -695,7 +695,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  endif
  
-@@ -3083,7 +3084,7 @@ if conf.get('ENABLE_PSTORE') == 1
+@@ -3093,7 +3094,7 @@ if conf.get('ENABLE_PSTORE') == 1
                                  libxz,
                                  liblz4,
                                  libzstd],
@@ -704,16 +704,16 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3094,7 +3095,7 @@ if conf.get('ENABLE_OOMD') == 1
+@@ -3104,7 +3105,7 @@ if conf.get('ENABLE_OOMD') == 1
                     include_directories : includes,
                     link_with : [libshared],
-                    dependencies : [],
+                    dependencies : [libatomic],
 -                   install_rpath : rootlibexecdir,
 +                   install_rpath : rootpkglibdir,
                     install : true,
                     install_dir : rootlibexecdir)
  
-@@ -3104,7 +3105,7 @@ if conf.get('ENABLE_OOMD') == 1
+@@ -3114,7 +3115,7 @@ if conf.get('ENABLE_OOMD') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [],
@@ -722,7 +722,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true)
  endif
  
-@@ -3114,7 +3115,7 @@ if conf.get('ENABLE_BINFMT') == 1
+@@ -3124,7 +3125,7 @@ if conf.get('ENABLE_BINFMT') == 1
                  'src/binfmt/binfmt.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -731,7 +731,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3136,7 +3137,7 @@ if conf.get('ENABLE_SYSUPDATE') == 1
+@@ -3146,7 +3147,7 @@ if conf.get('ENABLE_SYSUPDATE') == 1
                                  libblkid,
                                  libfdisk,
                                  libopenssl],
@@ -740,7 +740,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
          public_programs += exe
-@@ -3148,7 +3149,7 @@ if conf.get('ENABLE_VCONSOLE') == 1
+@@ -3158,7 +3159,7 @@ if conf.get('ENABLE_VCONSOLE') == 1
                  'src/vconsole/vconsole-setup.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -749,7 +749,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3159,7 +3160,7 @@ if conf.get('ENABLE_RANDOMSEED') == 1
+@@ -3169,7 +3170,7 @@ if conf.get('ENABLE_RANDOMSEED') == 1
                  'src/random-seed/random-seed.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -758,7 +758,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3171,7 +3172,7 @@ if conf.get('ENABLE_FIRSTBOOT') == 1
+@@ -3181,7 +3182,7 @@ if conf.get('ENABLE_FIRSTBOOT') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [libcrypt],
@@ -767,7 +767,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  endif
-@@ -3181,7 +3182,7 @@ executable(
+@@ -3191,7 +3192,7 @@ executable(
          'src/remount-fs/remount-fs.c',
          include_directories : includes,
          link_with : [libshared],
@@ -776,7 +776,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3190,7 +3191,7 @@ executable(
+@@ -3200,7 +3201,7 @@ executable(
          'src/machine-id-setup/machine-id-setup-main.c',
          include_directories : includes,
          link_with : [libshared],
@@ -785,7 +785,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3199,7 +3200,7 @@ executable(
+@@ -3209,7 +3210,7 @@ executable(
          'src/fsck/fsck.c',
          include_directories : includes,
          link_with : [libshared],
@@ -794,7 +794,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3207,7 +3208,7 @@ executable('systemd-growfs',
+@@ -3217,7 +3218,7 @@ executable('systemd-growfs',
             'src/partition/growfs.c',
             include_directories : includes,
             link_with : [libshared],
@@ -803,7 +803,7 @@ index 1d8b5dc..2c5002c 100644
             install : true,
             install_dir : rootlibexecdir)
  
-@@ -3216,7 +3217,7 @@ executable(
+@@ -3226,7 +3227,7 @@ executable(
          'src/partition/makefs.c',
          include_directories : includes,
          link_with : [libshared],
@@ -812,7 +812,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3225,7 +3226,7 @@ executable(
+@@ -3235,7 +3236,7 @@ executable(
          'src/sleep/sleep.c',
          include_directories : includes,
          link_with : [libshared],
@@ -821,7 +821,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3239,7 +3240,7 @@ public_programs += executable(
+@@ -3249,7 +3250,7 @@ public_programs += executable(
          'src/sysctl/sysctl.c',
          include_directories : includes,
          link_with : [libshared],
@@ -830,7 +830,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3248,7 +3249,7 @@ executable(
+@@ -3258,7 +3259,7 @@ executable(
          'src/ac-power/ac-power.c',
          include_directories : includes,
          link_with : [libshared],
@@ -839,7 +839,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3257,7 +3258,7 @@ public_programs += executable(
+@@ -3267,7 +3268,7 @@ public_programs += executable(
          'src/detect-virt/detect-virt.c',
          include_directories : includes,
          link_with : [libshared],
@@ -848,7 +848,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3265,7 +3266,7 @@ public_programs += executable(
+@@ -3275,7 +3276,7 @@ public_programs += executable(
          'src/delta/delta.c',
          include_directories : includes,
          link_with : [libshared],
@@ -857,7 +857,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3273,7 +3274,7 @@ public_programs += executable(
+@@ -3283,7 +3284,7 @@ public_programs += executable(
          'src/escape/escape.c',
          include_directories : includes,
          link_with : [libshared],
@@ -866,7 +866,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3282,7 +3283,7 @@ public_programs += executable(
+@@ -3292,7 +3293,7 @@ public_programs += executable(
          'src/notify/notify.c',
          include_directories : includes,
          link_with : [libshared],
@@ -875,7 +875,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3293,7 +3294,7 @@ public_programs += executable(
+@@ -3303,7 +3304,7 @@ public_programs += executable(
          link_with : [libshared],
          dependencies : [threads,
                          libopenssl],
@@ -884,7 +884,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3302,7 +3303,7 @@ executable(
+@@ -3312,7 +3313,7 @@ executable(
          'src/volatile-root/volatile-root.c',
          include_directories : includes,
          link_with : [libshared],
@@ -893,7 +893,7 @@ index 1d8b5dc..2c5002c 100644
          install : conf.get('ENABLE_INITRD') == 1,
          install_dir : rootlibexecdir)
  
-@@ -3311,7 +3312,7 @@ executable(
+@@ -3321,7 +3322,7 @@ executable(
          'src/cgroups-agent/cgroups-agent.c',
          include_directories : includes,
          link_with : [libshared],
@@ -902,7 +902,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3320,7 +3321,7 @@ systemd_id128 = executable(
+@@ -3330,7 +3331,7 @@ systemd_id128 = executable(
          'src/id128/id128.c',
          include_directories : includes,
          link_with : [libshared],
@@ -911,7 +911,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  public_programs += systemd_id128
  
-@@ -3337,7 +3338,7 @@ public_programs += executable(
+@@ -3347,7 +3348,7 @@ public_programs += executable(
          'src/path/path.c',
          include_directories : includes,
          link_with : [libshared],
@@ -920,7 +920,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3345,7 +3346,7 @@ public_programs += executable(
+@@ -3355,7 +3356,7 @@ public_programs += executable(
          'src/ask-password/ask-password.c',
          include_directories : includes,
          link_with : [libshared],
@@ -929,7 +929,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3354,7 +3355,7 @@ executable(
+@@ -3364,7 +3365,7 @@ executable(
          'src/reply-password/reply-password.c',
          include_directories : includes,
          link_with : [libshared],
@@ -938,7 +938,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3363,7 +3364,7 @@ public_programs += executable(
+@@ -3373,7 +3374,7 @@ public_programs += executable(
          'src/tty-ask-password-agent/tty-ask-password-agent.c',
          include_directories : includes,
          link_with : [libshared],
@@ -947,7 +947,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootbindir)
  
-@@ -3372,7 +3373,7 @@ public_programs += executable(
+@@ -3382,7 +3383,7 @@ public_programs += executable(
          'src/cgls/cgls.c',
          include_directories : includes,
          link_with : [libshared],
@@ -956,7 +956,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3380,7 +3381,7 @@ public_programs += executable(
+@@ -3390,7 +3391,7 @@ public_programs += executable(
          'src/cgtop/cgtop.c',
          include_directories : includes,
          link_with : [libshared],
@@ -965,7 +965,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  executable(
-@@ -3388,7 +3389,7 @@ executable(
+@@ -3398,7 +3399,7 @@ executable(
          'src/initctl/initctl.c',
          include_directories : includes,
          link_with : [libshared],
@@ -974,7 +974,7 @@ index 1d8b5dc..2c5002c 100644
          install : (conf.get('HAVE_SYSV_COMPAT') == 1),
          install_dir : rootlibexecdir)
  
-@@ -3398,7 +3399,7 @@ public_programs += executable(
+@@ -3408,7 +3409,7 @@ public_programs += executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies: [libmount],
@@ -983,7 +983,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  meson.add_install_script(meson_make_symlink,
-@@ -3409,7 +3410,7 @@ public_programs += executable(
+@@ -3419,7 +3420,7 @@ public_programs += executable(
          'src/run/run.c',
          include_directories : includes,
          link_with : [libshared],
@@ -992,7 +992,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3418,7 +3419,7 @@ public_programs += executable(
+@@ -3428,7 +3429,7 @@ public_programs += executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [versiondep],
@@ -1001,7 +1001,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  public_programs += executable(
-@@ -3427,7 +3428,7 @@ public_programs += executable(
+@@ -3437,7 +3438,7 @@ public_programs += executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [versiondep],
@@ -1010,7 +1010,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  if enable_sysusers
-@@ -3436,7 +3437,7 @@ if enable_sysusers
+@@ -3446,7 +3447,7 @@ if enable_sysusers
                  'src/sysusers/sysusers.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -1019,7 +1019,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
          public_programs += exe
-@@ -3478,7 +3479,7 @@ if conf.get('ENABLE_TMPFILES') == 1
+@@ -3488,7 +3489,7 @@ if conf.get('ENABLE_TMPFILES') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [libacl],
@@ -1028,7 +1028,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
          public_programs += exe
-@@ -3540,7 +3541,7 @@ if conf.get('ENABLE_QUOTACHECK') == 1
+@@ -3550,7 +3551,7 @@ if conf.get('ENABLE_QUOTACHECK') == 1
                  'src/quotacheck/quotacheck.c',
                  include_directories : includes,
                  link_with : [libshared],
@@ -1037,7 +1037,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  endif
-@@ -3551,7 +3552,7 @@ public_programs += executable(
+@@ -3561,7 +3562,7 @@ public_programs += executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [threads],
@@ -1046,7 +1046,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3580,7 +3581,7 @@ if conf.get('ENABLE_REPART') == 1
+@@ -3590,7 +3591,7 @@ if conf.get('ENABLE_REPART') == 1
                  dependencies : [threads,
                                  libblkid,
                                  libfdisk],
@@ -1055,7 +1055,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
          public_programs += exe
-@@ -3598,7 +3599,7 @@ executable(
+@@ -3608,7 +3609,7 @@ executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [libmount],
@@ -1064,7 +1064,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3607,7 +3608,7 @@ executable(
+@@ -3617,7 +3618,7 @@ executable(
          'src/update-done/update-done.c',
          include_directories : includes,
          link_with : [libshared],
@@ -1073,7 +1073,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3617,7 +3618,7 @@ executable(
+@@ -3627,7 +3628,7 @@ executable(
          include_directories : includes,
          link_with : [libshared],
          dependencies : [libaudit],
@@ -1082,7 +1082,7 @@ index 1d8b5dc..2c5002c 100644
          install : (conf.get('ENABLE_UTMP') == 1),
          install_dir : rootlibexecdir)
  
-@@ -3628,7 +3629,7 @@ if conf.get('HAVE_KMOD') == 1
+@@ -3638,7 +3639,7 @@ if conf.get('HAVE_KMOD') == 1
                  include_directories : includes,
                  link_with : [libshared],
                  dependencies : [libkmod],
@@ -1091,7 +1091,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3648,7 +3649,7 @@ public_programs += executable(
+@@ -3658,7 +3659,7 @@ public_programs += executable(
                       libshared],
          dependencies : [libblkid,
                          libseccomp],
@@ -1100,7 +1100,7 @@ index 1d8b5dc..2c5002c 100644
          install : true)
  
  if conf.get('ENABLE_NETWORKD') == 1
-@@ -3660,7 +3661,7 @@ if conf.get('ENABLE_NETWORKD') == 1
+@@ -3670,7 +3671,7 @@ if conf.get('ENABLE_NETWORKD') == 1
                               libsystemd_network,
                               networkd_link_with],
                  dependencies : [threads],
@@ -1109,7 +1109,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3669,7 +3670,7 @@ if conf.get('ENABLE_NETWORKD') == 1
+@@ -3679,7 +3680,7 @@ if conf.get('ENABLE_NETWORKD') == 1
                  systemd_networkd_wait_online_sources,
                  include_directories : includes,
                  link_with : [networkd_link_with],
@@ -1118,7 +1118,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootlibexecdir)
  
-@@ -3679,7 +3680,7 @@ if conf.get('ENABLE_NETWORKD') == 1
+@@ -3689,7 +3690,7 @@ if conf.get('ENABLE_NETWORKD') == 1
                  include_directories : libsystemd_network_includes,
                  link_with : [libsystemd_network,
                               networkd_link_with],
@@ -1127,7 +1127,7 @@ index 1d8b5dc..2c5002c 100644
                  install : true,
                  install_dir : rootbindir)
  endif
-@@ -3689,7 +3690,7 @@ exe = executable(
+@@ -3699,7 +3700,7 @@ exe = executable(
          network_generator_sources,
          include_directories : includes,
          link_with : [networkd_link_with],
@@ -1136,7 +1136,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3706,7 +3707,7 @@ executable(
+@@ -3716,7 +3717,7 @@ executable(
          'src/sulogin-shell/sulogin-shell.c',
          include_directories : includes,
          link_with : [libshared],
@@ -1145,7 +1145,7 @@ index 1d8b5dc..2c5002c 100644
          install : true,
          install_dir : rootlibexecdir)
  
-@@ -3769,7 +3770,7 @@ foreach tuple : tests
+@@ -3779,7 +3780,7 @@ foreach tuple : tests
                                          dependencies],
                          c_args : defs,
                          build_by_default : want_tests != 'false',

@@ -2,13 +2,9 @@ Do-not-require-a-valid-version-when-parsing-sd-boot-loade.patch
 Move-homectl-and-userdbctl-to-bindir.patch
 meson-install-libsystemd-shared-into-rootpkglibdir.patch
 shellcheck-clean-kernel-install-again.patch
-udev-drop-assertion-which-is-always-false.patch
 udev-add-one-more-assertion.patch
-ata_id-Fixed-getting-Response-Code-from-SCSI-Sense-Data-2.patch
-logind-do-not-emit-beep-in-wall-messages.patch
 logind-rework-wall-message-about-pending-shutdown-halt-re.patch
 logind-remember-our-idle-state-and-use-it-to-detect-idle-.patch
-logind-fix-getting-property-OnExternalPower-via-D-Bus.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
