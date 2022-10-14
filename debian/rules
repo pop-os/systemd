@@ -264,6 +264,7 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
 	dh_installsystemd -psystemd-oomd systemd-oomd.service
 	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
+	dh_installsystemd -psystemd-container --no-stop-on-upgrade machines.target
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
 	dh_installsystemd -psystemd-resolved
