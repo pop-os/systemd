@@ -374,7 +374,7 @@ static sd_device *handle_scsi_default(sd_device *parent, char **path) {
                 return hostdev;
         host -= basenum;
 
-        path_prepend(path, "scsi-%u:%u:%u:%u", host, bus, target, lun);
+        path_prepend(path, "scsi-%i:%i:%i:%i", host, bus, target, lun);
         return hostdev;
 }
 
@@ -556,6 +556,7 @@ static int find_real_nvme_parent(sd_device *dev, sd_device **ret) {
          *   /sys/devices/pci0000:00/0000:00:1c.4/0000:3c:00.0/nvme/nvme0 */
 
         assert(dev);
+        assert(ret);
 
         r = sd_device_get_sysname(dev, &sysname);
         if (r < 0)
@@ -739,9 +740,8 @@ static int builtin_path_id(sd_device *dev, sd_netlink **rtnl, int argc, char *ar
 
                 /* compose valid udev tag name */
                 for (const char *p = path; *p; p++) {
-                        if ((*p >= '0' && *p <= '9') ||
-                            (*p >= 'A' && *p <= 'Z') ||
-                            (*p >= 'a' && *p <= 'z') ||
+                        if (ascii_isdigit(*p) ||
+                            ascii_isalpha(*p) ||
                             *p == '-') {
                                 tag[i++] = *p;
                                 continue;

@@ -21,6 +21,7 @@
 #include "extension-release.h"
 #include "fd-util.h"
 #include "format-util.h"
+#include "glyph-util.h"
 #include "label.h"
 #include "list.h"
 #include "loop-util.h"
@@ -925,11 +926,11 @@ static int mount_private_dev(MountEntry *m) {
 
         dev = strjoina(temporary_mount, "/dev");
         (void) mkdir(dev, 0755);
-        r = mount_nofollow_verbose(LOG_DEBUG, "tmpfs", dev, "tmpfs", DEV_MOUNT_OPTIONS, "mode=755" TMPFS_LIMITS_DEV);
+        r = mount_nofollow_verbose(LOG_DEBUG, "tmpfs", dev, "tmpfs", DEV_MOUNT_OPTIONS, "mode=755" TMPFS_LIMITS_PRIVATE_DEV);
         if (r < 0)
                 goto fail;
 
-        r = label_fix_container(dev, "/dev", 0);
+        r = label_fix_full(AT_FDCWD, dev, "/dev", 0);
         if (r < 0) {
                 log_debug_errno(r, "Failed to fix label of '%s' as /dev: %m", dev);
                 goto fail;
@@ -1159,7 +1160,7 @@ static int mount_tmpfs(const MountEntry *m) {
         if (r < 0)
                 return r;
 
-        r = label_fix_container(entry_path, inner_path, 0);
+        r = label_fix_full(AT_FDCWD, entry_path, inner_path, 0);
         if (r < 0)
                 return log_debug_errno(r, "Failed to fix label of '%s' as '%s': %m", entry_path, inner_path);
 
@@ -1281,7 +1282,8 @@ static int follow_symlink(
                                        "Symlink loop on '%s'.",
                                        mount_entry_path(m));
 
-        log_debug("Followed mount entry path symlink %s → %s.", mount_entry_path(m), target);
+        log_debug("Followed mount entry path symlink %s %s %s.",
+                  mount_entry_path(m), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), target);
 
         mount_entry_consume_prefix(m, TAKE_PTR(target));
 
@@ -1380,7 +1382,7 @@ static int apply_one_mount(
                 if (isempty(host_os_release_id))
                         return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "'ID' field not found or empty in 'os-release' data of OS tree '%s': %m", empty_to_root(root_directory));
 
-                r = load_extension_release_pairs(mount_entry_source(m), extension_name, &extension_release);
+                r = load_extension_release_pairs(mount_entry_source(m), extension_name, /* relax_extension_release_check= */ false, &extension_release);
                 if (r == -ENOENT && m->ignore)
                         return 0;
                 if (r < 0)
@@ -1420,7 +1422,8 @@ static int apply_one_mount(
                 if (r < 0)
                         return log_debug_errno(r, "Failed to follow symlinks on %s: %m", mount_entry_source(m));
 
-                log_debug("Followed source symlinks %s → %s.", mount_entry_source(m), chased);
+                log_debug("Followed source symlinks %s %s %s.",
+                          mount_entry_source(m), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), chased);
 
                 free_and_replace(m->source_malloc, chased);
 
@@ -2000,7 +2003,6 @@ int setup_namespace(
                 char **error_path) {
 
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
         _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
         _cleanup_(verity_settings_done) VeritySettings verity = VERITY_SETTINGS_DEFAULT;
         _cleanup_strv_free_ char **hierarchies = NULL;
@@ -2055,23 +2057,15 @@ int setup_namespace(
                                 root_image,
                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                LOCK_SH,
                                 &loop_device);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to create loop device for root image: %m");
 
-                /* Make sure udevd won't issue BLKRRPART (which might flush out the loaded partition table)
-                 * while we are still trying to mount things */
-                r = loop_device_flock(loop_device, LOCK_SH);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to lock loopback device with LOCK_SH: %m");
-
-                r = dissect_image(
-                                loop_device->fd,
+                r = dissect_loop_device(
+                                loop_device,
                                 &verity,
                                 root_image_options,
-                                loop_device->diskseq,
-                                loop_device->uevent_seqnum_not_before,
-                                loop_device->timestamp_not_before,
                                 dissect_image_flags,
                                 &dissected_image);
                 if (r < 0)
@@ -2088,8 +2082,7 @@ int setup_namespace(
                                 dissected_image,
                                 NULL,
                                 &verity,
-                                dissect_image_flags,
-                                &decrypted_image);
+                                dissect_image_flags);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to decrypt dissected image: %m");
         }
@@ -2421,15 +2414,11 @@ int setup_namespace(
                         goto finish;
                 }
 
-                if (decrypted_image) {
-                        r = decrypted_image_relinquish(decrypted_image);
-                        if (r < 0) {
-                                log_debug_errno(r, "Failed to relinquish decrypted image: %m");
-                                goto finish;
-                        }
+                r = dissected_image_relinquish(dissected_image);
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to relinquish dissected image: %m");
+                        goto finish;
                 }
-
-                loop_device_relinquish(loop_device);
 
         } else if (root_directory) {
 
@@ -2756,7 +2745,7 @@ static int setup_one_tmp_dir(const char *id, const char *prefix, char **path, ch
                         if (mkdir(y, 0777 | S_ISVTX) < 0)
                                     return -errno;
 
-                r = label_fix_container(y, prefix, 0);
+                r = label_fix_full(AT_FDCWD, y, prefix, 0);
                 if (r < 0)
                         return r;
 
@@ -2963,6 +2952,7 @@ static const char* const namespace_type_table[] = {
         [NAMESPACE_USER]   = "user",
         [NAMESPACE_PID]    = "pid",
         [NAMESPACE_NET]    = "net",
+        [NAMESPACE_TIME]   = "time",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(namespace_type, NamespaceType);

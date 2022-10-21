@@ -64,7 +64,7 @@ typedef struct ExecStatusInfo {
 
         ExecCommandFlags flags;
 
-        LIST_FIELDS(struct ExecStatusInfo, exec);
+        LIST_FIELDS(struct ExecStatusInfo, exec_status_info_list);
 } ExecStatusInfo;
 
 static void exec_status_info_free(ExecStatusInfo *i) {
@@ -263,7 +263,7 @@ typedef struct UnitStatusInfo {
         uint64_t default_memory_min;
         uint64_t default_memory_low;
 
-        LIST_HEAD(ExecStatusInfo, exec);
+        LIST_HEAD(ExecStatusInfo, exec_status_info_list);
 } UnitStatusInfo;
 
 static void unit_status_info_free(UnitStatusInfo *info) {
@@ -281,8 +281,8 @@ static void unit_status_info_free(UnitStatusInfo *info) {
                 unit_condition_free(c);
         }
 
-        while ((p = info->exec)) {
-                LIST_REMOVE(exec, info->exec, p);
+        while ((p = info->exec_status_info_list)) {
+                LIST_REMOVE(exec_status_info_list, info->exec_status_info_list, p);
                 exec_status_info_free(p);
         }
 }
@@ -393,10 +393,10 @@ static void print_status_info(
 
                                 dir = mfree(dir);
 
-                                dir = dirname_malloc(*dropin);
-                                if (!dir) {
-                                        log_oom();
-                                        return;
+                                r = path_extract_directory(*dropin, &dir);
+                                if (r < 0) {
+                                        log_error_errno(r, "Failed to extract directory of '%s': %m", *dropin);
+                                        break;
                                 }
 
                                 printf("%s\n"
@@ -566,7 +566,7 @@ static void print_status_info(
                 printf("\n");
         }
 
-        LIST_FOREACH(exec, p, i->exec) {
+        LIST_FOREACH(exec_status_info_list, p, i->exec_status_info_list) {
                 _cleanup_free_ char *argv = NULL;
                 bool good;
 
@@ -670,8 +670,10 @@ static void print_status_info(
 
         if (i->status_text)
                 printf("     Status: \"%s\"\n", i->status_text);
-        if (i->status_errno > 0)
-                printf("      Error: %i (%s)\n", i->status_errno, strerror_safe(i->status_errno));
+        if (i->status_errno > 0) {
+                errno = i->status_errno;
+                printf("      Error: %i (%m)\n", i->status_errno);
+        }
 
         if (i->ip_ingress_bytes != UINT64_MAX && i->ip_egress_bytes != UINT64_MAX)
                 printf("         IP: %s in, %s out\n",
@@ -944,7 +946,7 @@ static int map_exec(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_e
         if (!info)
                 return -ENOMEM;
 
-        LIST_FIND_TAIL(exec, i->exec, last);
+        LIST_FIND_TAIL(exec_status_info_list, i->exec_status_info_list, last);
 
         while ((r = exec_status_info_deserialize(m, info, is_ex_prop)) > 0) {
 
@@ -952,7 +954,7 @@ static int map_exec(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_e
                 if (!info->name)
                         return -ENOMEM;
 
-                LIST_INSERT_AFTER(exec, i->exec, last, info);
+                LIST_INSERT_AFTER(exec_status_info_list, i->exec_status_info_list, last, info);
                 last = info;
 
                 info = new0(ExecStatusInfo, 1);
@@ -1454,7 +1456,6 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 return bus_log_parse_error(r);
 
                         for (;;) {
-                                _cleanup_free_ char *str = NULL;
                                 uint32_t prefixlen;
                                 int32_t family;
                                 const void *ap;
@@ -1491,10 +1492,8 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (prefixlen > FAMILY_ADDRESS_SIZE(family) * 8)
                                         continue;
 
-                                if (in_addr_prefix_to_string(family, (const union in_addr_union*) ap, prefixlen, &str) < 0)
-                                        continue;
-
-                                if (!strextend_with_separator(&addresses, " ", str))
+                                if (!strextend_with_separator(&addresses, " ",
+                                                              IN_ADDR_PREFIX_TO_STRING(family, ap, prefixlen)))
                                         return log_oom();
                         }
 
@@ -2070,6 +2069,7 @@ static int get_unit_dbus_path_by_pid(
 
 static int show_all(
                 sd_bus *bus,
+                SystemctlShowMode show_mode,
                 bool *new_line,
                 bool *ellipsized) {
 
@@ -2095,7 +2095,7 @@ static int show_all(
                 if (!p)
                         return log_oom();
 
-                r = show_one(bus, p, u->id, SYSTEMCTL_SHOW_STATUS, new_line, ellipsized);
+                r = show_one(bus, p, u->id, show_mode, new_line, ellipsized);
                 if (r < 0)
                         return r;
                 if (r > 0 && ret == 0)
@@ -2196,17 +2196,28 @@ int verb_show(int argc, char *argv[], void *userdata) {
 
         pager_open(arg_pager_flags);
 
-        /* If no argument is specified inspect the manager itself */
-        if (show_mode == SYSTEMCTL_SHOW_PROPERTIES && argc <= 1)
-                return show_one(bus, "/org/freedesktop/systemd1", NULL, show_mode, &new_line, &ellipsized);
+        if (argc <= 1) {
+                /* If no argument or filter is specified inspect the manager itself:
+                 * systemctl status → we show status of the manager
+                 * systemctl status --all → status of the manager + status of all units
+                 * systemctl status --state=… → status of units in listed states
+                 * systemctl status --type=… → status of units of listed types
+                 * systemctl status --failed → status of failed units, mirroring systemctl list-units --failed
+                 */
 
-        if (show_mode == SYSTEMCTL_SHOW_STATUS && argc <= 1) {
+                if (!arg_states && !arg_types) {
+                        if (show_mode == SYSTEMCTL_SHOW_PROPERTIES)
+                                r = show_one(bus, "/org/freedesktop/systemd1", NULL, show_mode, &new_line, &ellipsized);
+                        else
+                                r = show_system_status(bus);
+                        if (r < 0)
+                                return r;
 
-                show_system_status(bus);
-                new_line = true;
+                        new_line = true;
+                }
 
-                if (arg_all)
-                        ret = show_all(bus, &new_line, &ellipsized);
+                if (arg_all || arg_states || arg_types)
+                        ret = show_all(bus, show_mode, &new_line, &ellipsized);
         } else {
                 _cleanup_free_ char **patterns = NULL;
 

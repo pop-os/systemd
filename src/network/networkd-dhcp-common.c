@@ -4,6 +4,7 @@
 #include <linux/if_arp.h>
 
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "dhcp-identifier.h"
 #include "dhcp-internal.h"
 #include "dhcp6-internal.h"
@@ -130,14 +131,13 @@ const DUID *link_get_duid(Link *link, int family) {
 }
 
 static int get_product_uuid_handler(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        Manager *manager = userdata;
+        Manager *manager = ASSERT_PTR(userdata);
         const sd_bus_error *e;
         const void *a;
         size_t sz;
         int r;
 
         assert(m);
-        assert(manager);
 
         /* To avoid calling GetProductUUID() bus method so frequently, set the flag below
          * even if the method fails. */
@@ -187,12 +187,10 @@ int manager_request_product_uuid(Manager *m) {
 
         m->product_uuid_requested = false;
 
-        r = sd_bus_call_method_async(
+        r = bus_call_method_async(
                         m->bus,
                         NULL,
-                        "org.freedesktop.hostname1",
-                        "/org/freedesktop/hostname1",
-                        "org.freedesktop.hostname1",
+                        bus_hostname,
                         "GetProductUUID",
                         get_product_uuid_handler,
                         m,
@@ -522,7 +520,7 @@ int config_parse_dhcp_or_ra_route_table(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         uint32_t rt;
         int r;
 
@@ -530,7 +528,6 @@ int config_parse_dhcp_or_ra_route_table(
         assert(lvalue);
         assert(IN_SET(ltype, AF_INET, AF_INET6));
         assert(rvalue);
-        assert(userdata);
 
         r = safe_atou32(rvalue, &rt);
         if (r < 0) {
@@ -567,14 +564,13 @@ int config_parse_iaid(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         uint32_t iaid;
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(network);
         assert(IN_SET(ltype, AF_INET, AF_INET6));
 
         r = safe_atou32(rvalue, &iaid);
@@ -615,10 +611,9 @@ int config_parse_dhcp_user_or_vendor_class(
                 void *data,
                 void *userdata) {
 
-        char ***l = data;
+        char ***l = ASSERT_PTR(data);
         int r;
 
-        assert(l);
         assert(lvalue);
         assert(rvalue);
         assert(IN_SET(ltype, AF_INET, AF_INET6));
@@ -682,7 +677,7 @@ int config_parse_dhcp_send_option(
         _unused_ _cleanup_(sd_dhcp6_option_unrefp) sd_dhcp6_option *old6 = NULL;
         uint32_t uint32_data, enterprise_identifier = 0;
         _cleanup_free_ char *word = NULL, *q = NULL;
-        OrderedHashmap **options = data;
+        OrderedHashmap **options = ASSERT_PTR(data);
         uint16_t u16, uint16_data;
         union in_addr_union addr;
         DHCPOptionDataType type;
@@ -695,7 +690,6 @@ int config_parse_dhcp_send_option(
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
 
         if (isempty(rvalue)) {
                 *options = ordered_hashmap_free(*options);
@@ -1006,16 +1000,14 @@ int config_parse_duid_type(
                 void *userdata) {
 
         _cleanup_free_ char *type_string = NULL;
-        const char *p = rvalue;
+        const char *p = ASSERT_PTR(rvalue);
         bool force = ltype;
-        DUID *duid = data;
+        DUID *duid = ASSERT_PTR(data);
         DUIDType type;
         int r;
 
         assert(filename);
         assert(lvalue);
-        assert(rvalue);
-        assert(duid);
 
         if (!force && duid->set)
                 return 0;
@@ -1078,10 +1070,8 @@ int config_parse_manager_duid_type(
                 void *data,
                 void *userdata) {
 
-        Manager *manager = userdata;
+        Manager *manager = ASSERT_PTR(userdata);
         int r;
-
-        assert(manager);
 
         /* For backward compatibility. Setting both DHCPv4 and DHCPv6 DUID if they are not specified explicitly. */
 
@@ -1104,10 +1094,8 @@ int config_parse_network_duid_type(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         int r;
-
-        assert(network);
 
         r = config_parse_duid_type(unit, filename, line, section, section_line, lvalue, true, rvalue, &network->dhcp_duid, network);
         if (r < 0)
@@ -1132,12 +1120,11 @@ int config_parse_duid_rawdata(
         uint8_t raw_data[MAX_DUID_LEN];
         unsigned count = 0;
         bool force = ltype;
-        DUID *duid = data;
+        DUID *duid = ASSERT_PTR(data);
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(duid);
 
         if (!force && duid->set)
                 return 0;
@@ -1203,10 +1190,8 @@ int config_parse_manager_duid_rawdata(
                 void *data,
                 void *userdata) {
 
-        Manager *manager = userdata;
+        Manager *manager = ASSERT_PTR(userdata);
         int r;
-
-        assert(manager);
 
         /* For backward compatibility. Setting both DHCPv4 and DHCPv6 DUID if they are not specified explicitly. */
 
@@ -1229,10 +1214,8 @@ int config_parse_network_duid_rawdata(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         int r;
-
-        assert(network);
 
         r = config_parse_duid_rawdata(unit, filename, line, section, section_line, lvalue, true, rvalue, &network->dhcp_duid, network);
         if (r < 0)
@@ -1254,7 +1237,7 @@ int config_parse_uplink(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         bool accept_none = true;
         int *index, r;
         char **name;
@@ -1263,7 +1246,6 @@ int config_parse_uplink(
         assert(section);
         assert(lvalue);
         assert(rvalue);
-        assert(userdata);
 
         if (streq(section, "DHCPServer")) {
                 index = &network->dhcp_server_uplink_index;

@@ -8,6 +8,7 @@
 #include "errno-list.h"
 #include "errno-util.h"
 #include "fd-util.h"
+#include "glyph-util.h"
 #include "random-util.h"
 #include "resolved-dns-cache.h"
 #include "resolved-dns-transaction.h"
@@ -333,7 +334,6 @@ static void dns_transaction_shuffle_id(DnsTransaction *t) {
 }
 
 static void dns_transaction_tentative(DnsTransaction *t, DnsPacket *p) {
-        _cleanup_free_ char *pretty = NULL;
         char key_str[DNS_RESOURCE_KEY_STRING_MAX];
         DnsZoneItem *z;
 
@@ -344,15 +344,13 @@ static void dns_transaction_tentative(DnsTransaction *t, DnsPacket *p) {
         if (manager_packet_from_local_address(t->scope->manager, p) != 0)
                 return;
 
-        (void) in_addr_to_string(p->family, &p->sender, &pretty);
-
         log_debug("Transaction %" PRIu16 " for <%s> on scope %s on %s/%s got tentative packet from %s.",
                   t->id,
                   dns_resource_key_to_string(dns_transaction_key(t), key_str, sizeof key_str),
                   dns_protocol_to_string(t->scope->protocol),
                   t->scope->link ? t->scope->link->ifname : "*",
                   af_to_name_short(t->scope->family),
-                  strnull(pretty));
+                  IN_ADDR_TO_STRING(p->family, &p->sender));
 
         /* RFC 4795, Section 4.1 says that the peer with the
          * lexicographically smaller IP address loses */
@@ -1407,10 +1405,9 @@ fail:
 
 static int on_dns_packet(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
-        DnsTransaction *t = userdata;
+        DnsTransaction *t = ASSERT_PTR(userdata);
         int r;
 
-        assert(t);
         assert(t->scope);
 
         r = manager_recv(t->scope->manager, fd, DNS_PROTOCOL_DNS, &p);
@@ -1519,10 +1516,9 @@ static int dns_transaction_emit_udp(DnsTransaction *t) {
 }
 
 static int on_transaction_timeout(sd_event_source *s, usec_t usec, void *userdata) {
-        DnsTransaction *t = userdata;
+        DnsTransaction *t = ASSERT_PTR(userdata);
 
         assert(s);
-        assert(t);
 
         if (t->initial_jitter_scheduled && !t->initial_jitter_elapsed) {
                 log_debug("Initial jitter phase for transaction %" PRIu16 " elapsed.", t->id);
@@ -1923,7 +1919,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
                 ancount = be16toh(DNS_PACKET_HEADER(p)->ancount);
         }
 
-        /* Then, create acctual packet. */
+        /* Then, create actual packet. */
         p = dns_packet_unref(p);
         r = dns_packet_new_query(&p, t->scope->protocol, 0, false);
         if (r < 0)
@@ -2629,21 +2625,22 @@ int dns_transaction_request_dnssec_keys(DnsTransaction *t) {
                         r = dns_name_parent(&name);
                         if (r > 0) {
                                 type = DNS_TYPE_SOA;
-                                log_debug("Requesting parent SOA (→ %s) to validate transaction %" PRIu16 " (%s, %s empty DS response).",
-                                          name, t->id, dns_resource_key_name(dns_transaction_key(t)), signed_status);
+                                log_debug("Requesting parent SOA (%s %s) to validate transaction %" PRIu16 " (%s, %s empty DS response).",
+                                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id,
+                                          dns_resource_key_name(dns_transaction_key(t)), signed_status);
                         } else
                                 name = NULL;
 
                 } else if (IN_SET(dns_transaction_key(t)->type, DNS_TYPE_SOA, DNS_TYPE_NS)) {
 
                         type = DNS_TYPE_DS;
-                        log_debug("Requesting DS (→ %s) to validate transaction %" PRIu16 " (%s, %s empty SOA/NS response).",
-                                  name, t->id, name, signed_status);
+                        log_debug("Requesting DS (%s %s) to validate transaction %" PRIu16 " (%s, %s empty SOA/NS response).",
+                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id, name, signed_status);
 
                 } else {
                         type = DNS_TYPE_SOA;
-                        log_debug("Requesting SOA (→ %s) to validate transaction %" PRIu16 " (%s, %s empty non-SOA/NS/DS response).",
-                                  name, t->id, name, signed_status);
+                        log_debug("Requesting SOA (%s %s) to validate transaction %" PRIu16 " (%s, %s empty non-SOA/NS/DS response).",
+                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id, name, signed_status);
                 }
 
                 if (name) {
