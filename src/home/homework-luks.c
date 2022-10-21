@@ -13,11 +13,13 @@
 #include "sd-daemon.h"
 #include "sd-device.h"
 #include "sd-event.h"
+#include "sd-id128.h"
 
 #include "blkid-util.h"
 #include "blockdev-util.h"
 #include "btrfs-util.h"
 #include "chattr-util.h"
+#include "device-util.h"
 #include "devnum-util.h"
 #include "dm-util.h"
 #include "env-util.h"
@@ -28,11 +30,11 @@
 #include "filesystems.h"
 #include "fs-util.h"
 #include "fsck-util.h"
+#include "glyph-util.h"
 #include "gpt.h"
 #include "home-util.h"
 #include "homework-luks.h"
 #include "homework-mount.h"
-#include "id128-util.h"
 #include "io-util.h"
 #include "keyring-util.h"
 #include "memory-util.h"
@@ -94,7 +96,7 @@ int run_mark_dirty(int fd, bool b) {
                         return log_debug_errno(r, "Failed to synchronize image before marking it clean: %m");
 
                 ret = fremovexattr(fd, "user.home-dirty");
-                if (ret < 0 && errno != ENODATA)
+                if (ret < 0 && !ERRNO_IS_XATTR_ABSENT(errno))
                         return log_debug_errno(errno, "Could not mark home directory as clean: %m");
         }
 
@@ -178,7 +180,7 @@ static int probe_file_system_by_path(const char *path, char **ret_fstype, sd_id1
 
         fd = open(path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
         if (fd < 0)
-                return -errno;
+                return negative_errno();
 
         return probe_file_system_by_fd(fd, ret_fstype, ret_uuid);
 }
@@ -702,7 +704,7 @@ static int luks_validate(
                 if (!pp)
                         return errno > 0 ? -errno : -EIO;
 
-                if (id128_equal_string(blkid_partition_get_type_string(pp), GPT_USER_HOME) <= 0)
+                if (sd_id128_string_equal(blkid_partition_get_type_string(pp), SD_GPT_USER_HOME) <= 0)
                         continue;
 
                 if (!streq_ptr(blkid_partition_get_name(pp), label))
@@ -948,7 +950,7 @@ static int format_luks_token_text(
                 if (!iv)
                         return log_oom();
 
-                r = genuine_random_bytes(iv, iv_size, RANDOM_BLOCK);
+                r = crypto_random_bytes(iv, iv_size);
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate IV: %m");
         }
@@ -1228,7 +1230,7 @@ int home_setup_luks(
                 PasswordCache *cache,
                 UserRecord **ret_luks_home) {
 
-        sd_id128_t found_partition_uuid = SD_ID128_NULL, found_luks_uuid = SD_ID128_NULL, found_fs_uuid = SD_ID128_NULL;
+        sd_id128_t found_partition_uuid, found_fs_uuid, found_luks_uuid = SD_ID128_NULL;
         _cleanup_(user_record_unrefp) UserRecord *luks_home = NULL;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
         size_t volume_key_size = 0;
@@ -1282,7 +1284,7 @@ int home_setup_luks(
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to determine backing device for DM %s.", setup->dm_name);
 
                 if (!setup->loop) {
-                        r = loop_device_open(n, O_RDWR, &setup->loop);
+                        r = loop_device_open_from_path(n, O_RDWR, LOCK_UN, &setup->loop);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to open loopback device %s: %m", n);
                 }
@@ -1376,7 +1378,7 @@ int home_setup_luks(
                                 return r;
                 }
 
-                r = loop_device_make(setup->image_fd, O_RDWR, offset, size, 0, &setup->loop);
+                r = loop_device_make(setup->image_fd, O_RDWR, offset, size, user_record_luks_sector_size(h), 0, LOCK_UN, &setup->loop);
                 if (r == -ENOENT) {
                         log_error_errno(r, "Loopback block device support is not available on this system.");
                         return -ENOLINK; /* make recognizable */
@@ -1734,7 +1736,7 @@ static int luks_format(
         if (!volume_key)
                 return log_oom();
 
-        r = genuine_random_bytes(volume_key, volume_key_size, RANDOM_BLOCK);
+        r = crypto_random_bytes(volume_key, volume_key_size);
         if (r < 0)
                 return log_error_errno(r, "Failed to generate volume key: %m");
 
@@ -1759,7 +1761,7 @@ static int luks_format(
                         &(struct crypt_params_luks2) {
                                 .label = label,
                                 .subsystem = "systemd-home",
-                                .sector_size = 512U,
+                                .sector_size = user_record_luks_sector_size(hr),
                                 .pbkdf = &good_pbkdf,
                         });
         if (r < 0)
@@ -1849,7 +1851,7 @@ static int make_partition_table(
         if (!t)
                 return log_oom();
 
-        r = fdisk_parttype_set_typestr(t, GPT_USER_HOME_STR);
+        r = fdisk_parttype_set_typestr(t, SD_GPT_USER_HOME_STR);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize partition type: %m");
 
@@ -1988,10 +1990,11 @@ static int wait_for_devlink(const char *path) {
                                 return log_error_errno(errno, "Failed to allocate inotify fd: %m");
                 }
 
-                dn = dirname_malloc(path);
+                r = path_extract_directory(path, &dn);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to extract directory from device node path '%s': %m", path);
                 for (;;) {
-                        if (!dn)
-                                return log_oom();
+                        _cleanup_free_ char *ndn = NULL;
 
                         log_info("Watching %s", dn);
 
@@ -2001,10 +2004,13 @@ static int wait_for_devlink(const char *path) {
                         } else
                                 break;
 
-                        if (empty_or_root(dn))
+                        r = path_extract_directory(dn, &ndn);
+                        if (r == -EADDRNOTAVAIL) /* Arrived at the top? */
                                 break;
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract directory from device node path '%s': %m", dn);
 
-                        dn = dirname_malloc(dn);
+                        free_and_replace(dn, ndn);
                 }
 
                 w = now(CLOCK_MONOTONIC);
@@ -2293,7 +2299,7 @@ int home_create_luks(
 
         log_info("Writing of partition table completed.");
 
-        r = loop_device_make(setup->image_fd, O_RDWR, partition_offset, partition_size, 0, &setup->loop);
+        r = loop_device_make(setup->image_fd, O_RDWR, partition_offset, partition_size, user_record_luks_sector_size(h), 0, LOCK_EX, &setup->loop);
         if (r < 0) {
                 if (r == -ENOENT) { /* this means /dev/loop-control doesn't exist, i.e. we are in a container
                                      * or similar and loopback bock devices are not available, return a
@@ -2304,10 +2310,6 @@ int home_create_luks(
 
                 return log_error_errno(r, "Failed to set up loopback device for %s: %m", setup->temporary_image_path);
         }
-
-        r = loop_device_flock(setup->loop, LOCK_EX); /* make sure udev won't read before we are done */
-        if (r < 0)
-                return log_error_errno(r, "Failed to take lock on loop device: %m");
 
         log_info("Setting up loopback device %s completed.", setup->loop->node ?: ip);
 
@@ -2331,7 +2333,7 @@ int home_create_luks(
 
         log_info("Setting up LUKS device %s completed.", setup->dm_node);
 
-        r = make_filesystem(setup->dm_node, fstype, user_record_user_name_and_realm(h), fs_uuid, user_record_luks_discard(h));
+        r = make_filesystem(setup->dm_node, fstype, user_record_user_name_and_realm(h), NULL, fs_uuid, user_record_luks_discard(h));
         if (r < 0)
                 return r;
 
@@ -3116,20 +3118,14 @@ int home_resize_luks(
 
                         log_info("Operating on partition device %s, using parent device.", ip);
 
-                        r = device_path_make_major_minor(st.st_mode, parent, &whole_disk);
+                        opened_image_fd = r = device_open_from_devnum(S_IFBLK, parent, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK, &whole_disk);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to derive whole disk path for %s: %m", ip);
-
-                        opened_image_fd = open(whole_disk, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
-                        if (opened_image_fd < 0)
-                                return log_error_errno(errno, "Failed to open whole block device %s: %m", whole_disk);
+                                return log_error_errno(r, "Failed to open whole block device for %s: %m", ip);
 
                         image_fd = opened_image_fd;
 
                         if (fstat(image_fd, &st) < 0)
                                 return log_error_errno(errno, "Failed to stat whole block device %s: %m", whole_disk);
-                        if (!S_ISBLK(st.st_mode))
-                                return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK), "Whole block device %s is not actually a block device, refusing.", whole_disk);
                 } else
                         log_info("Operating on whole block device %s.", ip);
 
@@ -3303,12 +3299,15 @@ int home_resize_luks(
         if (resize_type == CAN_RESIZE_OFFLINE && FLAGS_SET(flags, HOME_SETUP_ALREADY_ACTIVATED))
                 return log_error_errno(SYNTHETIC_ERRNO(ETXTBSY), "File systems of this type can only be resized offline, but is currently online.");
 
-        log_info("Ready to resize image size %s → %s, partition size %s → %s, file system size %s → %s.",
+        log_info("Ready to resize image size %s %s %s, partition size %s %s %s, file system size %s %s %s.",
                  FORMAT_BYTES(old_image_size),
+                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
                  FORMAT_BYTES(new_image_size),
                  FORMAT_BYTES(setup->partition_size),
+                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
                  FORMAT_BYTES(new_partition_size),
                  FORMAT_BYTES(old_fs_size),
+                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
                  FORMAT_BYTES(new_fs_size));
 
         r = prepare_resize_partition(
@@ -3737,10 +3736,8 @@ static int device_is_gone(HomeSetup *setup) {
 }
 
 static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device, void *userdata) {
-        HomeSetup *setup = userdata;
+        HomeSetup *setup = ASSERT_PTR(userdata);
         int r;
-
-        assert(setup);
 
         if (!device_for_action(device, SD_DEVICE_REMOVE))
                 return 0;

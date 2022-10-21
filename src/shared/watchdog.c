@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <linux/watchdog.h>
 
+#include "devnum-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -17,9 +18,9 @@
 #include "watchdog.h"
 
 static int watchdog_fd = -1;
-static char *watchdog_device;
-static usec_t watchdog_timeout; /* 0 → close device and USEC_INFINITY → don't change timeout */
-static usec_t watchdog_pretimeout; /* 0 → disable pretimeout and USEC_INFINITY → don't change pretimeout */
+static char *watchdog_device = NULL;
+static usec_t watchdog_timeout = 0; /* 0 → close device and USEC_INFINITY → don't change timeout */
+static usec_t watchdog_pretimeout = 0; /* 0 → disable pretimeout and USEC_INFINITY → don't change pretimeout */
 static usec_t watchdog_last_ping = USEC_INFINITY;
 static bool watchdog_supports_pretimeout = false; /* Depends on kernel state that might change at runtime */
 static char *watchdog_pretimeout_governor = NULL;
@@ -52,7 +53,7 @@ static int get_watchdog_sysfs_path(const char *filename, char **ret_path) {
         if (!S_ISCHR(st.st_mode))
                 return -EBADF;
 
-        if (asprintf(ret_path, "/sys/dev/char/%d:%d/%s", major(st.st_rdev), minor(st.st_rdev), filename) < 0)
+        if (asprintf(ret_path, "/sys/dev/char/"DEVNUM_FORMAT_STR"/%s", DEVNUM_FORMAT_VAL(st.st_rdev), filename) < 0)
                 return -ENOMEM;
 
         return 0;
@@ -118,7 +119,7 @@ static int watchdog_set_enable(bool enable) {
         return 0;
 }
 
-static int watchdog_get_timeout(void) {
+static int watchdog_read_timeout(void) {
         int sec = 0;
 
         assert(watchdog_fd >= 0);
@@ -149,7 +150,7 @@ static int watchdog_set_timeout(void) {
         return 0;
 }
 
-static int watchdog_get_pretimeout(void) {
+static int watchdog_read_pretimeout(void) {
         int sec = 0;
 
         assert(watchdog_fd >= 0);
@@ -184,9 +185,13 @@ static int watchdog_set_pretimeout(void) {
         }
 
         /* The set ioctl does not return the actual value set so get it now. */
-        (void) watchdog_get_pretimeout();
+        (void) watchdog_read_pretimeout();
 
         return 0;
+}
+
+usec_t watchdog_get_last_ping(clockid_t clock) {
+        return map_clock_usec(watchdog_last_ping, CLOCK_BOOTTIME, clock);
 }
 
 static int watchdog_ping_now(void) {
@@ -240,7 +245,7 @@ static int update_pretimeout(void) {
                 r = log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                     "Cannot set watchdog pretimeout to %is (%s watchdog timeout of %is)",
                                     pt_sec, pt_sec == t_sec ? "same as" : "longer than", t_sec);
-                (void) watchdog_get_pretimeout();
+                (void) watchdog_read_pretimeout();
         } else
                 r = watchdog_set_pretimeout();
 
@@ -275,7 +280,7 @@ static int update_timeout(void) {
         }
 
         if (watchdog_timeout == USEC_INFINITY) {
-                r = watchdog_get_timeout();
+                r = watchdog_read_timeout();
                 if (r < 0)
                         return log_error_errno(r, "Failed to query watchdog HW timeout: %m");
         }
@@ -340,6 +345,10 @@ static int open_watchdog(void) {
                 watchdog_close(true);
 
         return r;
+}
+
+const char *watchdog_get_device(void) {
+        return watchdog_device;
 }
 
 int watchdog_set_device(const char *path) {

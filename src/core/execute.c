@@ -278,8 +278,6 @@ static int connect_journal_socket(
                 uid_t uid,
                 gid_t gid) {
 
-        union sockaddr_union sa;
-        socklen_t sa_len;
         uid_t olduid = UID_INVALID;
         gid_t oldgid = GID_INVALID;
         const char *j;
@@ -288,10 +286,6 @@ static int connect_journal_socket(
         j = log_namespace ?
                 strjoina("/run/systemd/journal.", log_namespace, "/stdout") :
                 "/run/systemd/journal/stdout";
-        r = sockaddr_un_set_path(&sa.un, j);
-        if (r < 0)
-                return r;
-        sa_len = r;
 
         if (gid_is_valid(gid)) {
                 oldgid = getgid();
@@ -309,10 +303,10 @@ static int connect_journal_socket(
                 }
         }
 
-        r = RET_NERRNO(connect(fd, &sa.sa, sa_len));
+        r = connect_unix_path(fd, AT_FDCWD, j);
 
-        /* If we fail to restore the uid or gid, things will likely
-           fail later on. This should only happen if an LSM interferes. */
+        /* If we fail to restore the uid or gid, things will likely fail later on. This should only happen if
+           an LSM interferes. */
 
         if (uid_is_valid(uid))
                 (void) seteuid(olduid);
@@ -390,8 +384,6 @@ static int open_terminal_as(const char *path, int flags, int nfd) {
 }
 
 static int acquire_path(const char *path, int flags, mode_t mode) {
-        union sockaddr_union sa;
-        socklen_t sa_len;
         _cleanup_close_ int fd = -1;
         int r;
 
@@ -409,18 +401,17 @@ static int acquire_path(const char *path, int flags, mode_t mode) {
 
         /* So, it appears the specified path could be an AF_UNIX socket. Let's see if we can connect to it. */
 
-        r = sockaddr_un_set_path(&sa.un, path);
-        if (r < 0)
-                return r == -EINVAL ? -ENXIO : r;
-        sa_len = r;
-
         fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0)
                 return -errno;
 
-        if (connect(fd, &sa.sa, sa_len) < 0)
-                return errno == EINVAL ? -ENXIO : -errno; /* Propagate initial error if we get EINVAL, i.e. we have
-                                                           * indication that this wasn't an AF_UNIX socket after all */
+        r = connect_unix_path(fd, AT_FDCWD, path);
+        if (IN_SET(r, -ENOTSOCK, -EINVAL))
+                /* Propagate initial error if we get ENOTSOCK or EINVAL, i.e. we have indication that this
+                 * wasn't an AF_UNIX socket after all */
+                return -ENXIO;
+        if (r < 0)
+                return r;
 
         if ((flags & O_ACCMODE) == O_RDONLY)
                 r = shutdown(fd, SHUT_WR);
@@ -928,7 +919,7 @@ static int ask_for_confirmation(const ExecContext *context, const char *vc, Unit
                                u->id, u->description, cmdline);
                         continue; /* ask again */
                 case 'j':
-                        manager_dump_jobs(u->manager, stdout, "  ");
+                        manager_dump_jobs(u->manager, stdout, /* patterns= */ NULL, "  ");
                         continue; /* ask again */
                 case 'n':
                         /* 'n' was removed in favor of 'f'. */
@@ -2768,7 +2759,7 @@ static int load_credential(
                 _cleanup_free_ void *plaintext = NULL;
                 size_t plaintext_size = 0;
 
-                r = decrypt_credential_and_warn(id, now(CLOCK_REALTIME), NULL, data, size, &plaintext, &plaintext_size);
+                r = decrypt_credential_and_warn(id, now(CLOCK_REALTIME), NULL, NULL, data, size, &plaintext, &plaintext_size);
                 if (r < 0)
                         return r;
 
@@ -2942,7 +2933,7 @@ static int acquire_credentials(
                         return log_debug_errno(errno, "Failed to test if credential %s exists: %m", sc->id);
 
                 if (sc->encrypted) {
-                        r = decrypt_credential_and_warn(sc->id, now(CLOCK_REALTIME), NULL, sc->data, sc->size, &plaintext, &size);
+                        r = decrypt_credential_and_warn(sc->id, now(CLOCK_REALTIME), NULL, NULL, sc->data, sc->size, &plaintext, &size);
                         if (r < 0)
                                 return r;
 
@@ -3101,7 +3092,7 @@ static int setup_credentials_internal(
         assert(!must_mount || workspace_mounted > 0);
         where = workspace_mounted ? workspace : final;
 
-        (void) label_fix_container(where, final, 0);
+        (void) label_fix_full(AT_FDCWD, where, final, 0);
 
         r = acquire_credentials(context, params, unit, where, uid, workspace_mounted);
         if (r < 0)
@@ -3126,9 +3117,9 @@ static int setup_credentials_internal(
                 /* If we do not have our own mount put used the plain directory fallback, then we need to
                  * open access to the top-level credential directory and the per-service directory now */
 
-                parent = dirname_malloc(final);
-                if (!parent)
-                        return -ENOMEM;
+                r = path_extract_directory(final, &parent);
+                if (r < 0)
+                        return r;
                 if (chmod(parent, 0755) < 0)
                         return -errno;
         }
@@ -3260,6 +3251,7 @@ static int setup_credentials(
 
 #if ENABLE_SMACK
 static int setup_smack(
+                const Manager *manager,
                 const ExecContext *context,
                 int executable_fd) {
         int r;
@@ -3271,20 +3263,17 @@ static int setup_smack(
                 r = mac_smack_apply_pid(0, context->smack_process_label);
                 if (r < 0)
                         return r;
-        }
-#ifdef SMACK_DEFAULT_PROCESS_LABEL
-        else {
+        } else if (manager->default_smack_process_label) {
                 _cleanup_free_ char *exec_label = NULL;
 
                 r = mac_smack_read_fd(executable_fd, SMACK_ATTR_EXEC, &exec_label);
-                if (r < 0 && !IN_SET(r, -ENODATA, -EOPNOTSUPP))
+                if (r < 0 && !ERRNO_IS_XATTR_ABSENT(r))
                         return r;
 
-                r = mac_smack_apply_pid(0, exec_label ? : SMACK_DEFAULT_PROCESS_LABEL);
+                r = mac_smack_apply_pid(0, exec_label ? : manager->default_smack_process_label);
                 if (r < 0)
                         return r;
         }
-#endif
 
         return 0;
 }
@@ -3567,7 +3556,7 @@ static int apply_mount_namespace(
         /* Symlinks for exec dirs are set up after other mounts, before they are made read-only. */
         r = compile_symlinks(context, params, &symlinks);
         if (r < 0)
-                return r;
+                goto finalize;
 
         needs_sandboxing = (params->flags & EXEC_APPLY_SANDBOXING) && !(command_flags & EXEC_COMMAND_FULLY_PRIVILEGED);
         if (needs_sandboxing) {
@@ -4105,7 +4094,7 @@ static int add_shifted_fd(int *fds, size_t fds_size, size_t *n_fds, int fd, int 
                 if (r < 0)
                         return -errno;
 
-                CLOSE_AND_REPLACE(fd, r);
+                close_and_replace(fd, r);
         }
 
         *ret_fd = fds[*n_fds] = fd;
@@ -4881,7 +4870,7 @@ static int exec_child(
                 /* LSM Smack needs the capability CAP_MAC_ADMIN to change the current execution security context of the
                  * process. This is the latest place before dropping capabilities. Other MAC context are set later. */
                 if (use_smack) {
-                        r = setup_smack(context, executable_fd);
+                        r = setup_smack(unit->manager, context, executable_fd);
                         if (r < 0 && !context->smack_process_label_ignore) {
                                 *exit_status = EXIT_SMACK_PROCESS_LABEL;
                                 return log_unit_error_errno(unit, r, "Failed to set SMACK process label: %m");
@@ -6460,9 +6449,10 @@ static void exec_command_dump(ExecCommand *c, FILE *f, const char *prefix) {
         prefix2 = strjoina(prefix, "\t");
 
         cmd = quote_command_line(c->argv, SHELL_ESCAPE_EMPTY);
+
         fprintf(f,
                 "%sCommand Line: %s\n",
-                prefix, cmd ?: strerror_safe(ENOMEM));
+                prefix, strnull(cmd));
 
         exec_status_dump(&c->exec_status, f, prefix2);
 }
@@ -6901,11 +6891,10 @@ int exec_runtime_deserialize_one(Manager *m, const char *value, FDSet *fds) {
         _cleanup_free_ char *tmp_dir = NULL, *var_tmp_dir = NULL;
         char *id = NULL;
         int r, netns_fdpair[] = {-1, -1}, ipcns_fdpair[] = {-1, -1};
-        const char *p, *v = value;
+        const char *p, *v = ASSERT_PTR(value);
         size_t n;
 
         assert(m);
-        assert(value);
         assert(fds);
 
         n = strcspn(v, " ");

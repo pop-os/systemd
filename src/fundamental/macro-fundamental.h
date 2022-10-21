@@ -2,36 +2,50 @@
 #pragma once
 
 #ifndef SD_BOOT
-#include <assert.h>
+#  include <assert.h>
 #endif
 
 #include <limits.h>
-#include "types-fundamental.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #define _align_(x) __attribute__((__aligned__(x)))
-#define _const_ __attribute__((__const__))
-#define _pure_ __attribute__((__pure__))
-#define _section_(x) __attribute__((__section__(x)))
-#define _packed_ __attribute__((__packed__))
-#define _retain_ __attribute__((__retain__))
-#define _used_ __attribute__((__used__))
-#define _unused_ __attribute__((__unused__))
+#define _alignas_(x) __attribute__((__aligned__(__alignof__(x))))
+#define _alignptr_ __attribute__((__aligned__(sizeof(void *))))
 #define _cleanup_(x) __attribute__((__cleanup__(x)))
+#define _const_ __attribute__((__const__))
+#define _deprecated_ __attribute__((__deprecated__))
+#define _destructor_ __attribute__((__destructor__))
+#define _hidden_ __attribute__((__visibility__("hidden")))
 #define _likely_(x) (__builtin_expect(!!(x), 1))
-#define _unlikely_(x) (__builtin_expect(!!(x), 0))
-#if __GNUC__ >= 7
-#define _fallthrough_ __attribute__((__fallthrough__))
-#else
-#define _fallthrough_
-#endif
-/* Define C11 noreturn without <stdnoreturn.h> and even on older gcc
- * compiler versions */
-#ifndef _noreturn_
-#if __STDC_VERSION__ >= 201112L
+#define _malloc_ __attribute__((__malloc__))
 #define _noreturn_ _Noreturn
+#define _packed_ __attribute__((__packed__))
+#define _printf_(a, b) __attribute__((__format__(printf, a, b)))
+#define _public_ __attribute__((__visibility__("default")))
+#define _pure_ __attribute__((__pure__))
+#define _retain_ __attribute__((__retain__))
+#define _returns_nonnull_ __attribute__((__returns_nonnull__))
+#define _section_(x) __attribute__((__section__(x)))
+#define _sentinel_ __attribute__((__sentinel__))
+#define _unlikely_(x) (__builtin_expect(!!(x), 0))
+#define _unused_ __attribute__((__unused__))
+#define _used_ __attribute__((__used__))
+#define _warn_unused_result_ __attribute__((__warn_unused_result__))
+#define _weak_ __attribute__((__weak__))
+#define _weakref_(x) __attribute__((__weakref__(#x)))
+
+#ifdef __clang__
+#  define _alloc_(...)
 #else
-#define _noreturn_ __attribute__((__noreturn__))
+#  define _alloc_(...) __attribute__((__alloc_size__(__VA_ARGS__)))
 #endif
+
+#if __GNUC__ >= 7 || (defined(__clang__) && __clang_major__ >= 10)
+#  define _fallthrough_ __attribute__((__fallthrough__))
+#else
+#  define _fallthrough_
 #endif
 
 #define XSTRINGIFY(x) #x
@@ -64,24 +78,16 @@
         #endif
         #define static_assert _Static_assert
         #define assert_se(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __PRETTY_FUNCTION__); })
-
-        #define memcpy(a, b, c) CopyMem((a), (b), (c))
-        #define free(a) FreePool(a)
 #endif
 
 /* This passes the argument through after (if asserts are enabled) checking that it is not null. */
-#define ASSERT_PTR(expr)                        \
-        ({                                      \
-                typeof(expr) _expr_ = (expr);   \
-                assert(_expr_);                 \
-                _expr_;                         \
-        })
-
-#define ASSERT_SE_PTR(expr)                     \
-        ({                                      \
-                typeof(expr) _expr_ = (expr);   \
-                assert_se(_expr_);              \
-                _expr_;                         \
+#define ASSERT_PTR(expr) _ASSERT_PTR(expr, UNIQ_T(_expr_, UNIQ), assert)
+#define ASSERT_SE_PTR(expr) _ASSERT_PTR(expr, UNIQ_T(_expr_, UNIQ), assert_se)
+#define _ASSERT_PTR(expr, var, check)      \
+        ({                                 \
+                typeof(expr) var = (expr); \
+                check(var);                \
+                var;                       \
         })
 
 #define ASSERT_NONNEG(expr)                              \
@@ -109,10 +115,10 @@
  * on this macro will run concurrently to all other code conditionalized
  * the same way, there's no ordering or completion enforced. */
 #define ONCE __ONCE(UNIQ_T(_once_, UNIQ))
-#define __ONCE(o)                                                       \
-        ({                                                              \
-                static sd_bool (o) = sd_false;                          \
-                __sync_bool_compare_and_swap(&(o), sd_false, sd_true);  \
+#define __ONCE(o)                                                  \
+        ({                                                         \
+                static bool (o) = false;                           \
+                __atomic_exchange_n(&(o), true, __ATOMIC_SEQ_CST); \
         })
 
 #undef MAX
@@ -189,6 +195,19 @@
                 MIN(_c, z);                             \
         })
 
+/* Returns true if the passed integer is a positive power of two */
+#define CONST_ISPOWEROF2(x)                     \
+        ((x) > 0 && ((x) & ((x) - 1)) == 0)
+
+#define ISPOWEROF2(x)                                                  \
+        __builtin_choose_expr(                                         \
+                __builtin_constant_p(x),                               \
+                CONST_ISPOWEROF2(x),                                   \
+                ({                                                     \
+                        const typeof(x) _x = (x);                      \
+                        CONST_ISPOWEROF2(_x);                          \
+                }))
+
 #define LESS_BY(a, b) __LESS_BY(UNIQ, (a), UNIQ, (b))
 #define __LESS_BY(aq, a, bq, b)                         \
         ({                                              \
@@ -262,7 +281,7 @@
 
 #define IN_SET(x, ...)                                                  \
         ({                                                              \
-                sd_bool _found = sd_false;                              \
+                bool _found = false;                                    \
                 /* If the build breaks in the line below, you need to extend the case macros. (We use "long double" as  \
                  * type for the array, in the hope that checkers such as ubsan don't complain that the initializers for \
                  * the array are not representable by the base type. Ideally we'd use typeof(x) as base type, but that  \
@@ -271,7 +290,7 @@
                 assert_cc(ELEMENTSOF(__assert_in_set) <= 20);           \
                 switch (x) {                                            \
                 FOR_EACH_MAKE_CASE(__VA_ARGS__)                         \
-                        _found = sd_true;                               \
+                        _found = true;                                  \
                        break;                                           \
                 default:                                                \
                         break;                                          \
@@ -303,19 +322,7 @@
         })
 
 static inline size_t ALIGN_TO(size_t l, size_t ali) {
-        /* sd-boot uses UINTN for size_t, let's make sure SIZE_MAX is correct. */
-        assert_cc(SIZE_MAX == ~(size_t)0);
-
-        /* Check that alignment is exponent of 2 */
-#if SIZE_MAX == UINT_MAX
-        assert(__builtin_popcount(ali) == 1);
-#elif SIZE_MAX == ULONG_MAX
-        assert(__builtin_popcountl(ali) == 1);
-#elif SIZE_MAX == ULLONG_MAX
-        assert(__builtin_popcountll(ali) == 1);
-#else
-        #error "Unexpected size_t"
-#endif
+        assert(ISPOWEROF2(ali));
 
         if (l > SIZE_MAX - (ali - 1))
                 return SIZE_MAX; /* indicate overflow */
@@ -323,12 +330,20 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
         return ((l + ali - 1) & ~(ali - 1));
 }
 
+#define ALIGN4(l) ALIGN_TO(l, 4)
+#define ALIGN8(l) ALIGN_TO(l, 8)
+#ifndef SD_BOOT
+/* libefi also provides ALIGN, and we do not use them in sd-boot explicitly. */
+#define ALIGN(l)  ALIGN_TO(l, sizeof(void*))
+#define ALIGN_PTR(p) ((void*) ALIGN((uintptr_t) (p)))
+#endif
+
 /* Same as ALIGN_TO but callable in constant contexts. */
 #define CONST_ALIGN_TO(l, ali)                                         \
         __builtin_choose_expr(                                         \
                 __builtin_constant_p(l) &&                             \
                 __builtin_constant_p(ali) &&                           \
-                __builtin_popcountll(ali) == 1 && /* is power of 2? */ \
+                CONST_ISPOWEROF2(ali) &&                               \
                 (l <= SIZE_MAX - (ali - 1)),      /* overflow? */      \
                 ((l) + (ali) - 1) & ~((ali) - 1),                      \
                 VOID_0)

@@ -11,13 +11,14 @@
 Description=Create System Users
 Documentation=man:sysusers.d(5) man:systemd-sysusers.service(8)
 
-ConditionNeedsUpdate=/etc
-
 DefaultDependencies=no
 After=systemd-remount-fs.service
 Before=sysinit.target systemd-update-done.service
 Conflicts=shutdown.target initrd-switch-root.target
 Before=shutdown.target initrd-switch-root.target
+
+ConditionNeedsUpdate=|/etc
+ConditionCredential=|sysusers.extra
 
 [Service]
 Type=oneshot
@@ -31,3 +32,6 @@ TimeoutSec=90s
 LoadCredential=passwd.hashed-password.root
 LoadCredential=passwd.plaintext-password.root
 LoadCredential=passwd.shell.root
+
+# Also, allow configuring extra sysusers lines via a credential
+LoadCredential=sysusers.extra
