@@ -20,10 +20,10 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=62344
  2 files changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
-index 09c3401..2d4b117 100644
+index 709c8ff..78e7151 100644
 --- a/src/libsystemd/sd-id128/sd-id128.c
 +++ b/src/libsystemd/sd-id128/sd-id128.c
-@@ -108,7 +108,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+@@ -124,7 +124,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
          assert_return(ret, -EINVAL);
  
          if (sd_id128_is_null(saved_machine_id)) {

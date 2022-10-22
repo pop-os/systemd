@@ -17,10 +17,10 @@ conf.d snippet.
  3 files changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 4b0dd90..ed7e428 100644
+index a14abad..043b3ea 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -353,7 +353,7 @@
+@@ -361,7 +361,7 @@
          traditional syslog daemon, to the kernel log buffer (kmsg), to the system console, or sent as wall
          messages to all logged-in users.  These options take boolean arguments. If forwarding to syslog is
          enabled but nothing reads messages from the socket, forwarding to syslog has no effect. By default,
@@ -30,10 +30,10 @@ index 4b0dd90..ed7e428 100644
          <literal>systemd.journald.forward_to_kmsg</literal>,
          <literal>systemd.journald.forward_to_console</literal>, and
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index dc94337..3ed8b80 100644
+index 71d7a59..e5708c7 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
-@@ -2303,6 +2303,7 @@ int server_init(Server *s, const char *namespace) {
+@@ -2277,6 +2277,7 @@ int server_init(Server *s, const char *namespace) {
                  .ratelimit_interval = DEFAULT_RATE_LIMIT_INTERVAL,
                  .ratelimit_burst = DEFAULT_RATE_LIMIT_BURST,
  
