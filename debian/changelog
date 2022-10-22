@@ -1,3 +1,29 @@
+systemd (252~rc2-1) experimental; urgency=medium
+
+  [ Jan Kiszka ]
+  * Enable systemd-boot for riscv64. Tested against U-Boot 2022.10 as UEFI
+    provider on the RZ/Five. Signed-off-by: Jan Kiszka
+    <jan.kiszka@siemens.com>
+
+  [ Helmut Grohne ]
+  * Conditionalize installation of cryptsetup plugins in stage1 using dh-
+    exec (Closes: #1021821)
+
+  [ Michael Biebl ]
+  * Install sysusers.d and tmpfiles.d man pages in standalone packages
+    (Closes: #1021933)
+
+  [ Luca Boccassi ]
+  * d/watch: switch to non-stable repo
+  * New upstream version 252~rc2
+  * Drop patches merged upstream
+  * Refresh patches
+  * Update symbols file
+  * Update Lintian overrides
+  * autopkgtest: update expected output of localectl
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 22 Oct 2022 01:10:00 +0100
+
 systemd (251.6-1) unstable; urgency=medium
 
   * New upstream version 251.6
