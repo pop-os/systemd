@@ -1,3 +1,12 @@
+systemd (252~rc3-1) experimental; urgency=medium
+
+  * New upstream version 252~rc3
+  * Refresh patches
+  * Backport patches to fix tests without machine-id. Drop out-of-tree
+    patch and backport upstream fixes.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 25 Oct 2022 01:30:02 +0100
+
 systemd (252~rc2-1) experimental; urgency=medium
 
   [ Jan Kiszka ]
