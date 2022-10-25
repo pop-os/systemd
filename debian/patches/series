@@ -1,3 +1,13 @@
+test-sd-device-check-if-run-udev-exists.patch
+test-condition-skip-test-if-machine-id-is-missing.patch
+test-fs-util-do-not-fail-if-machine-id-is-missing.patch
+test-id128-do-not-fail-if-machine-id-is-missing.patch
+test-specifier-do-not-fail-if-machine-id-is-missing.patch
+test-unit-name-do-not-fail-if-machine-id-is-missing.patch
+test-execute-do-not-fail-if-machine-id-is-missing.patch
+test-load-fragment-do-not-fail-if-machine-id-is-missing.patch
+test-test-systemd-tmpfiles.py-do-not-fail-if-machine-id-i.patch
+udev-test-use-passwd-instead-of-machine-id-for-checks.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -10,7 +20,6 @@ debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-one-step-back-again-for-nspawn-we-actual.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
-debian/Add-env-variable-for-machine-ID-path.patch
 debian/deny-list-upstream-test-25.patch
 debian/deny-list-upstream-test-02-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch

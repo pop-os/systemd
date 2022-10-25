@@ -1,0 +1,22 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Tue, 25 Oct 2022 00:59:47 +0100
+Subject: test-fs-util: do not fail if machine-id is missing
+
+When building in a chroot there might not be any machine-id
+---
+ src/test/test-fs-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index 5d9d99e..9c1ced7 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -216,7 +216,7 @@ TEST(chase_symlinks) {
+         result = mfree(result);
+ 
+         r = chase_symlinks("/etc/machine-id/foo", NULL, 0, &result, NULL);
+-        assert_se(r == -ENOTDIR);
++        assert_se(IN_SET(r, -ENOTDIR, -ENOENT));
+         result = mfree(result);
+ 
+         /* Path that loops back to self */

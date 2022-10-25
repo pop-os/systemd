@@ -291,9 +291,8 @@ override_dh_makeshlibs:
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
-	echo "01234567890123456789012345678901" > obj-$(DEB_HOST_GNU_TYPE)/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)/machine-id meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
+	env -u LD_PRELOAD meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
 %:
