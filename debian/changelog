@@ -1,3 +1,9 @@
+systemd (252~rc3-2) unstable; urgency=medium
+
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 27 Oct 2022 15:24:32 +0100
+
 systemd (252~rc3-1) experimental; urgency=medium
 
   * New upstream version 252~rc3
