@@ -337,7 +337,6 @@ Multi-Arch: foreign
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          libudev1 (= ${binary:Version}),
          systemd-dev (>= ${source:Version}),
          s390-tools [s390],
