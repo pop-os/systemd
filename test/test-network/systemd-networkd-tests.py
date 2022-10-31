@@ -13,7 +13,6 @@ import errno
 import itertools
 import os
 import pathlib
-import psutil
 import re
 import shutil
 import signal
@@ -21,6 +20,8 @@ import subprocess
 import sys
 import time
 import unittest
+
+import psutil
 
 network_unit_dir = '/run/systemd/network'
 networkd_conf_dropin_dir = '/run/systemd/networkd.conf.d'
@@ -96,6 +97,7 @@ def mkdir_p(path):
 def touch(path):
     pathlib.Path(path).touch()
 
+# pylint: disable=R1710
 def check_output(*command, **kwargs):
     # This checks the result and returns stdout (and stderr) on success.
     command = command[0].split() + list(command[1:])
@@ -242,6 +244,21 @@ def expectedFailureIfNetdevsimWithSRIOVIsNotAvailable():
         return finalize(func, rc == 0)
 
     return f
+
+# pylint: disable=C0415
+def compare_kernel_version(min_kernel_version):
+    try:
+        import platform
+        from packaging import version
+    except ImportError:
+        print('Failed to import either platform or packaging module, assuming the comparison failed')
+        return False
+
+    # Get only the actual kernel version without any build/distro/arch stuff
+    # e.g. '5.18.5-200.fc36.x86_64' -> '5.18.5'
+    kver = platform.release().split('-')[0]
+
+    return version.parse(kver) >= version.parse(min_kernel_version)
 
 def udev_reload():
     check_output(*udevadm_cmd, 'control', '--reload')
@@ -506,6 +523,7 @@ def flush_l2tp_tunnels():
             print(f'Cannot remove L2TP tunnel {tid}, ignoring.')
 
 def save_timezone():
+    # pylint: disable=global-statement
     global saved_timezone
     r = run(*timedatectl_cmd, 'show', '--value', '--property', 'Timezone', env=env)
     if r.returncode == 0:
@@ -858,7 +876,7 @@ class Utilities():
             args += ['--ipv6']
         try:
             check_output(*args, env=wait_online_env)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             # show detailed status on failure
             for link in links_with_operstate:
                 name = link.split(':')[0]
@@ -891,11 +909,11 @@ class Utilities():
 
     def check_netlabel(self, interface, address, label='system_u:object_r:root_t:s0'):
         if not shutil.which('selinuxenabled'):
-            print(f'## Checking NetLabel skipped: selinuxenabled command not found.')
+            print('## Checking NetLabel skipped: selinuxenabled command not found.')
         elif call_quiet('selinuxenabled') != 0:
-            print(f'## Checking NetLabel skipped: SELinux disabled.')
+            print('## Checking NetLabel skipped: SELinux disabled.')
         elif not shutil.which('netlabelctl'): # not packaged by all distros
-            print(f'## Checking NetLabel skipped: netlabelctl command not found.')
+            print('## Checking NetLabel skipped: netlabelctl command not found.')
         else:
             output = check_output('netlabelctl unlbl list')
             print(output)
@@ -1383,8 +1401,8 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
         output = check_output('ip -d tuntap show')
         print(output)
-        self.assertRegex(output, f'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
-        self.assertRegex(output, f'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
+        self.assertRegex(output, fr'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
+        self.assertRegex(output, fr'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
 
         output = check_output('ip -d link show testtun99')
         print(output)
@@ -1407,8 +1425,8 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
         output = check_output('ip -d tuntap show')
         print(output)
-        self.assertRegex(output, f'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
-        self.assertRegex(output, f'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
+        self.assertRegex(output, fr'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
+        self.assertRegex(output, fr'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:{name}\({pid}\)systemd\(1\)$')
 
         output = check_output('ip -d link show testtun99')
         print(output)
@@ -1426,8 +1444,8 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
         output = check_output('ip -d tuntap show')
         print(output)
-        self.assertRegex(output, f'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:$')
-        self.assertRegex(output, f'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:$')
+        self.assertRegex(output, r'(?m)testtap99: tap pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:$')
+        self.assertRegex(output, r'(?m)testtun99: tun pi (multi_queue |)vnet_hdr persist filter *(0x100|)\n\tAttached to processes:$')
 
         for i in range(10):
             if i != 0:
@@ -2051,7 +2069,7 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
         print(output)
         self.assertIn('inet6 2002:da8:1:0:1034:56ff:fe78:9abc/64 scope global dynamic', output)
 
-    @unittest.skip(reason="Causes kernel panic on recent kernels: https://bugzilla.kernel.org/show_bug.cgi?id=208315")
+    @unittest.skipUnless(compare_kernel_version("6"), reason="Causes kernel panic on unpatched kernels: https://bugzilla.kernel.org/show_bug.cgi?id=208315")
     def test_macsec(self):
         copy_network_unit('25-macsec.netdev', '25-macsec.network', '25-macsec.key',
                           '26-macsec.network', '12-dummy.netdev')
@@ -2221,7 +2239,7 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertIn('inet6 2001:db8:1:f101::1/64 scope global deprecated', output)
         self.assertRegex(output, r'inet6 fd[0-9a-f:]*1/64 scope global')
 
-        self.check_netlabel('dummy98', '10\.4\.3\.0/24')
+        self.check_netlabel('dummy98', r'10\.4\.3\.0/24')
 
         # Tests for #20891.
         # 1. set preferred lifetime forever to drop the deprecated flag for testing #20891.
@@ -2618,18 +2636,18 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertIn('anycast 149.10.123.2 proto static scope link', output)
         self.assertIn('broadcast 149.10.123.3 proto static scope link', output)
 
-        print('### ip route show type blackhole')
-        output = check_output('ip route show type blackhole')
+        print('### ip -4 route show type blackhole')
+        output = check_output('ip -4 route show type blackhole')
         print(output)
         self.assertIn('blackhole 202.54.1.2 proto static', output)
 
-        print('### ip route show type unreachable')
-        output = check_output('ip route show type unreachable')
+        print('### ip -4 route show type unreachable')
+        output = check_output('ip -4 route show type unreachable')
         print(output)
         self.assertIn('unreachable 202.54.1.3 proto static', output)
 
-        print('### ip route show type prohibit')
-        output = check_output('ip route show type prohibit')
+        print('### ip -4 route show type prohibit')
+        output = check_output('ip -4 route show type prohibit')
         print(output)
         self.assertIn('prohibit 202.54.1.4 proto static', output)
 
@@ -2680,18 +2698,18 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.wait_online(['dummy98:routable'])
 
         # check all routes managed by Manager are removed
-        print('### ip route show type blackhole')
-        output = check_output('ip route show type blackhole')
+        print('### ip -4 route show type blackhole')
+        output = check_output('ip -4 route show type blackhole')
         print(output)
         self.assertEqual(output, '')
 
-        print('### ip route show type unreachable')
-        output = check_output('ip route show type unreachable')
+        print('### ip -4 route show type unreachable')
+        output = check_output('ip -4 route show type unreachable')
         print(output)
         self.assertEqual(output, '')
 
-        print('### ip route show type prohibit')
-        output = check_output('ip route show type prohibit')
+        print('### ip -4 route show type prohibit')
+        output = check_output('ip -4 route show type prohibit')
         print(output)
         self.assertEqual(output, '')
 
@@ -2715,18 +2733,18 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.wait_online(['dummy98:routable'])
 
         # check all routes managed by Manager are reconfigured
-        print('### ip route show type blackhole')
-        output = check_output('ip route show type blackhole')
+        print('### ip -4 route show type blackhole')
+        output = check_output('ip -4 route show type blackhole')
         print(output)
         self.assertIn('blackhole 202.54.1.2 proto static', output)
 
-        print('### ip route show type unreachable')
-        output = check_output('ip route show type unreachable')
+        print('### ip -4 route show type unreachable')
+        output = check_output('ip -4 route show type unreachable')
         print(output)
         self.assertIn('unreachable 202.54.1.3 proto static', output)
 
-        print('### ip route show type prohibit')
-        output = check_output('ip route show type prohibit')
+        print('### ip -4 route show type prohibit')
+        output = check_output('ip -4 route show type prohibit')
         print(output)
         self.assertIn('prohibit 202.54.1.4 proto static', output)
 
@@ -2749,18 +2767,18 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         time.sleep(2)
 
         # check all routes managed by Manager are removed
-        print('### ip route show type blackhole')
-        output = check_output('ip route show type blackhole')
+        print('### ip -4 route show type blackhole')
+        output = check_output('ip -4 route show type blackhole')
         print(output)
         self.assertEqual(output, '')
 
-        print('### ip route show type unreachable')
-        output = check_output('ip route show type unreachable')
+        print('### ip -4 route show type unreachable')
+        output = check_output('ip -4 route show type unreachable')
         print(output)
         self.assertEqual(output, '')
 
-        print('### ip route show type prohibit')
-        output = check_output('ip route show type prohibit')
+        print('### ip -4 route show type prohibit')
+        output = check_output('ip -4 route show type prohibit')
         print(output)
         self.assertEqual(output, '')
 
@@ -3631,32 +3649,6 @@ class NetworkdTCTests(unittest.TestCase, Utilities):
         print(output)
         self.assertRegex(output, 'qdisc teql1 31: root')
 
-class NetworkWaitOnlineTests(unittest.TestCase, Utilities):
-
-    def setUp(self):
-        setup_common()
-
-    def tearDown(self):
-        tear_down_common()
-
-    @expectedFailureIfModuleIsNotAvailable('sch_netem')
-    def test_wait_online_ipv4(self):
-        copy_network_unit('25-veth.netdev', '25-dhcp-server-with-ipv6-prefix.network', '25-dhcp-client-ipv4-ipv6ra-prefix-client-with-delay.network')
-        start_networkd()
-
-        self.wait_online(['veth99:routable'], ipv4=True)
-
-        self.wait_address('veth99', r'192.168.5.[0-9]+', ipv='-4', timeout_sec=1)
-
-    @expectedFailureIfModuleIsNotAvailable('sch_netem')
-    def test_wait_online_ipv6(self):
-        copy_network_unit('25-veth.netdev', '25-ipv6-prefix-with-delay.network', '25-ipv6ra-prefix-client-with-static-ipv4-address.network')
-        start_networkd()
-
-        self.wait_online(['veth99:routable'], ipv6=True)
-
-        self.wait_address('veth99', r'2002:da8:1:0:1034:56ff:fe78:9abc', ipv='-6', timeout_sec=1)
-
 class NetworkdStateFileTests(unittest.TestCase, Utilities):
 
     def setUp(self):
@@ -3744,6 +3736,36 @@ class NetworkdStateFileTests(unittest.TestCase, Utilities):
         self.assertIn('LLMNR=no', output)
         self.assertIn('MDNS=yes', output)
         self.assertIn('DNSSEC=no', output)
+
+    def test_address_state(self):
+        copy_network_unit('12-dummy.netdev', '12-dummy-no-address.network')
+        start_networkd()
+
+        self.wait_online(['dummy98:degraded'])
+
+        output = read_link_state_file('dummy98')
+        self.assertIn('IPV4_ADDRESS_STATE=off', output)
+        self.assertIn('IPV6_ADDRESS_STATE=degraded', output)
+
+        # with a routable IPv4 address
+        check_output('ip address add 10.1.2.3/16 dev dummy98')
+        self.wait_online(['dummy98:routable'], ipv4=True)
+        self.wait_online(['dummy98:routable'])
+
+        output = read_link_state_file('dummy98')
+        self.assertIn('IPV4_ADDRESS_STATE=routable', output)
+        self.assertIn('IPV6_ADDRESS_STATE=degraded', output)
+
+        check_output('ip address del 10.1.2.3/16 dev dummy98')
+
+        # with a routable IPv6 address
+        check_output('ip address add 2002:da8:1:0:1034:56ff:fe78:9abc/64 dev dummy98')
+        self.wait_online(['dummy98:routable'], ipv6=True)
+        self.wait_online(['dummy98:routable'])
+
+        output = read_link_state_file('dummy98')
+        self.assertIn('IPV4_ADDRESS_STATE=off', output)
+        self.assertIn('IPV6_ADDRESS_STATE=routable', output)
 
 class NetworkdBondTests(unittest.TestCase, Utilities):
 
@@ -4577,7 +4599,7 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
         self.assertIn('client provides name: test-hostname', output)
         self.assertIn('26:mtu', output)
 
-        self.check_netlabel('veth99', '192\.168\.5\.0/24')
+        self.check_netlabel('veth99', r'192\.168\.5\.0/24')
 
     def test_dhcp_client_ipv4_use_routes_gateway(self):
         first = True
