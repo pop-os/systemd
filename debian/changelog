@@ -1,3 +1,13 @@
+systemd (252-1) unstable; urgency=medium
+
+  * Use systemd-sysusers to setup systemd users and groups
+  * New upstream version 252
+  * Drop patches merged upstream
+  * libsystemd0: set symbols version to 252
+  * Drop unused lintian override
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 31 Oct 2022 22:02:43 +0000
+
 systemd (252~rc3-2) unstable; urgency=medium
 
   * Upload to unstable.
