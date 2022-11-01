@@ -56,14 +56,6 @@ systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
     mkdir -p "$DPKG_ROOT/var/log/journal"
-    # Applying ACLs requires a mounted /proc and systemd-tmpfiles will fail if
-    # /proc is not available. Skip systemd-tmpfiles in this case. This should
-    # be fine, as this typically means we are inside a chroot and systemd is
-    # not currently active. The permissions will be applied on the next boot.
-    # https://github.com/systemd/systemd/issues/14745
-    if mountpoint -q /proc; then
-        systemd-tmpfiles ${DPKG_ROOT:+--root="$DPKG_ROOT"} --create --prefix /var/log/journal
-    fi
 fi
 
 # Initial update of the Message Catalogs database
