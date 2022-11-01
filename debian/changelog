@@ -1,3 +1,17 @@
+systemd (252-2) unstable; urgency=medium
+
+  [ Jochen Sprickerhof ]
+  * Let dh_installsysusers fix the /var/log/journal permissions.
+    dh_installsysusers adds a systemd-sysusers in #DEBHELPER#. Otherwise
+    it fails with: /usr/lib/tmpfiles.d/systemd.conf:28: Failed to resolve
+    group 'systemd-journal'. Regression of fa0aade329. (Closes: #1023248)
+  * Move restarting units after #DEBHELPER#. This makes sure that systemd-
+    sysusers was executed as well as systemd-tmpfiles to setup proper
+    permissions for /var/log/journal before systemd-journald is being
+    restarted.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 01 Nov 2022 12:06:18 +0000
+
 systemd (252-1) unstable; urgency=medium
 
   * Use systemd-sysusers to setup systemd users and groups
