@@ -61,18 +61,6 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-if [ -n "$2" ]; then
-    _systemctl daemon-reexec || true
-    # do not restart logind
-    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
-    if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
-        # the socket configuration changed
-        _systemctl stop systemd-networkd.socket || true
-    fi
-    _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-journald.service || true
-fi
-
 if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
     # systemd-pstore.service is now enabled via sysinit.target
     rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
@@ -85,3 +73,15 @@ if dpkg --compare-versions "$2" lt-nl "245.4-5~"; then
 fi
 
 #DEBHELPER#
+
+if [ -n "$2" ]; then
+    _systemctl daemon-reexec || true
+    # do not restart logind
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
+    if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
+        # the socket configuration changed
+        _systemctl stop systemd-networkd.socket || true
+    fi
+    _systemctl try-restart systemd-networkd.service || true
+    _systemctl try-restart systemd-journald.service || true
+fi
