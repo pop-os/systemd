@@ -1,0 +1,24 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Thu, 3 Nov 2022 20:10:57 +0000
+Subject: [PATCH] tmpfiles.d: do not fail if provision.conf fails
+
+On a read-only filesystem creating /root/.ssh might fail, but that's ok.
+Do not fail the run, as this is only needed to add the credential, which
+is a separate step.
+---
+ tmpfiles.d/provision.conf | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tmpfiles.d/provision.conf b/tmpfiles.d/provision.conf
+index 3c56f42..093104a 100644
+--- a/tmpfiles.d/provision.conf
++++ b/tmpfiles.d/provision.conf
+@@ -17,6 +17,6 @@ f^ /etc/issue.d/50-provision.conf - - - - login.issue
+ f^ /etc/hosts - - - - network.hosts
+ 
+ # Provision SSH key for root
+-d /root :0700 root :root -
+-d /root/.ssh :0700 root :root -
++d- /root :0700 root :root -
++d- /root/.ssh :0700 root :root -
+ f^ /root/.ssh/authorized_keys :0600 root :root - ssh.authorized_keys.root

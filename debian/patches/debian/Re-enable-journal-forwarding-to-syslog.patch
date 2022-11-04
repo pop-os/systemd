@@ -17,10 +17,10 @@ conf.d snippet.
  3 files changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index a14abad..043b3ea 100644
+index 24cee4c..185e1dc 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -361,7 +361,7 @@
+@@ -356,7 +356,7 @@
          traditional syslog daemon, to the kernel log buffer (kmsg), to the system console, or sent as wall
          messages to all logged-in users.  These options take boolean arguments. If forwarding to syslog is
          enabled but nothing reads messages from the socket, forwarding to syslog has no effect. By default,

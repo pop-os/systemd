@@ -51,7 +51,7 @@ index 3c5df6c..24eff86 100644
                                      "Please update package to include a native systemd unit file, in order to make it more safe and robust.", fpath);
  
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index 7687316..2240ff9 100644
+index 784b895..de75047 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
 @@ -2970,6 +2970,7 @@ static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *
