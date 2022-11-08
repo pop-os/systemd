@@ -39,7 +39,6 @@ lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 lp1978079-pstore-Run-after-modules-are-loaded.patch
-hwdb-implement-root-option-for-systemd-hwdb-query.patch
 test-increase-QEMU_MEM-for-some-tests.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
