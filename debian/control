@@ -87,7 +87,7 @@ Suggests: systemd-container,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
           libtss2-rc0,
-          policykit-1
+          polkitd,
 Pre-Depends: ${shlibs:Pre-Depends},
              ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
