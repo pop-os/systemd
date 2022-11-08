@@ -33,7 +33,6 @@ Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
 debian/UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.patch
 debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
-debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch
 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
