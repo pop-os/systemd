@@ -38,4 +38,3 @@ debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 test-increase-QEMU_MEM-for-some-tests.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
-lp1989969-test-deny-list-TEST-36-NUMAPOLICY-on-ppc64el.patch
