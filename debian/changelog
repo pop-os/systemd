@@ -1,3 +1,13 @@
+systemd (252.1-1) unstable; urgency=medium
+
+  * d/watch: switch back to stable repository
+  * New upstream version 252.1 (Closes: #1023607 #1023515)
+  * Drop patches merged upstream
+  * Refresh patches
+  * Suggest polkitd instead of policykit-1 (deprecated)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 08 Nov 2022 14:23:22 +0000
+
 systemd (252-3) unstable; urgency=medium
 
   * Backport patches to fix tmpfiles error and missing /dev/serial/by-
