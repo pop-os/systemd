@@ -9,7 +9,6 @@ debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-one-step-back-again-for-nspawn-we-actual.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
-debian/deny-list-upstream-test-25.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
