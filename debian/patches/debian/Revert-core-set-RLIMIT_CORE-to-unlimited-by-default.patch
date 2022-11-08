@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 21 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 69d450a..badd385 100644
+index 14a4f81..696bb28 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1619,24 +1619,6 @@ static void cmdline_take_random_seed(void) {
+@@ -1648,24 +1648,6 @@ static void cmdline_take_random_seed(void) {
                     "This functionality should not be used outside of testing environments.");
  }
  
@@ -38,7 +38,7 @@ index 69d450a..badd385 100644
 -
 -        /* But at the same time, turn off the core_pattern logic by default, so that no coredumps are stored
 -         * until the systemd-coredump tool is enabled via sysctl. However it can be changed via the kernel
--         * command line later so core dumps can still be generated during early startup and in initramfs. */
+-         * command line later so core dumps can still be generated during early startup and in initrd. */
 -        if (!skip_setup)
 -                disable_coredumps();
 -#endif
@@ -47,7 +47,7 @@ index 69d450a..badd385 100644
  static void initialize_core_pattern(bool skip_setup) {
          int r;
  
-@@ -2763,8 +2745,6 @@ int main(int argc, char *argv[]) {
+@@ -2802,8 +2784,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  

@@ -3,13 +3,13 @@
 set -e
 
 _systemctl() {
-    if [ -d /run/systemd/system ]; then
+    if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
         systemctl "$@"
     fi
 }
 
 _update_catalog() {
-    journalctl --update-catalog || true
+    journalctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} --update-catalog || true
 }
 
 _update_binfmt() {
@@ -41,8 +41,8 @@ fi
 
 # Enable getty and remote-fs.target by default on new installs
 if [ -z "$2" ]; then
-    systemctl enable getty@tty1.service || true
-    systemctl enable remote-fs.target || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable getty@tty1.service || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable remote-fs.target || true
 fi
 
 # Enable resolved by default on new installs installs and upgrades
@@ -62,25 +62,15 @@ fi
 
 # Enable systemd-pstore by default on new installs and upgrades, see #952767
 if dpkg --compare-versions "$2" lt "245.4-4~"; then
-    systemctl enable systemd-pstore.service || true
+    systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable systemd-pstore.service || true
 fi
 
 # Create /etc/machine-id
-systemd-machine-id-setup
+systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 
-# Setup system users and groups
-addgroup --quiet --system systemd-journal
-
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Network Management" systemd-network
-
-# Enable persistent journal, in auto-mode, by default on new installs installs and upgrades
-if dpkg --compare-versions "$2" lt "235-3ubuntu3~"; then
-    mkdir -p /var/log/journal
-    # create tmpfiles only when running systemd, otherwise %b substitution fails
-    if [ -d /run/systemd/system ]; then
-        systemd-tmpfiles --create --prefix /var/log/journal
-    fi
+# Enable persistent journal, in auto-mode, by default on new installs and upgrades
+if dpkg --compare-versions "$2" lt "244.1-2~"; then
+    mkdir -p "$DPKG_ROOT/var/log/journal"
 fi
 
 # Initial update of the Message Catalogs database
@@ -124,3 +114,15 @@ if dpkg --compare-versions "$2" lt-nl "245.4-5~"; then
 fi
 
 #DEBHELPER#
+
+if [ -n "$2" ]; then
+    _systemctl daemon-reexec || true
+    # do not restart logind
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
+    if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
+        # the socket configuration changed
+        _systemctl stop systemd-networkd.socket || true
+    fi
+    _systemctl try-restart systemd-networkd.service || true
+    _systemctl try-restart systemd-journald.service || true
+fi

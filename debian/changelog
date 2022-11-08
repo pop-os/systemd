@@ -1,3 +1,191 @@
+systemd (252.1-1) unstable; urgency=medium
+
+  * d/watch: switch back to stable repository
+  * New upstream version 252.1 (Closes: #1023607 #1023515)
+  * Drop patches merged upstream
+  * Refresh patches
+  * Suggest polkitd instead of policykit-1 (deprecated)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 08 Nov 2022 14:23:22 +0000
+
+systemd (252-3) unstable; urgency=medium
+
+  * Backport patches to fix tmpfiles error and missing /dev/serial/by-
+    id/usb-* (Closes: #1023311)
+  * Drop :native suffix from python3-pyparsing build dependency (Closes:
+    #1023442)
+  * Enable support for libqrencode. dlopen() feature so no additional cost.
+    Allows printing out recovery keys in QR format.
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 06 Nov 2022 14:16:52 +0000
+
+systemd (252-2) unstable; urgency=medium
+
+  [ Jochen Sprickerhof ]
+  * Let dh_installsysusers fix the /var/log/journal permissions.
+    dh_installsysusers adds a systemd-sysusers in #DEBHELPER#. Otherwise
+    it fails with: /usr/lib/tmpfiles.d/systemd.conf:28: Failed to resolve
+    group 'systemd-journal'. Regression of fa0aade329. (Closes: #1023248)
+  * Move restarting units after #DEBHELPER#. This makes sure that systemd-
+    sysusers was executed as well as systemd-tmpfiles to setup proper
+    permissions for /var/log/journal before systemd-journald is being
+    restarted.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 01 Nov 2022 12:06:18 +0000
+
+systemd (252-1) unstable; urgency=medium
+
+  * Use systemd-sysusers to setup systemd users and groups
+  * New upstream version 252
+  * Drop patches merged upstream
+  * libsystemd0: set symbols version to 252
+  * Drop unused lintian override
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 31 Oct 2022 22:02:43 +0000
+
+systemd (252~rc3-2) unstable; urgency=medium
+
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 27 Oct 2022 15:24:32 +0100
+
+systemd (252~rc3-1) experimental; urgency=medium
+
+  * New upstream version 252~rc3
+  * Refresh patches
+  * Backport patches to fix tests without machine-id. Drop out-of-tree
+    patch and backport upstream fixes.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 25 Oct 2022 01:30:02 +0100
+
+systemd (252~rc2-1) experimental; urgency=medium
+
+  [ Jan Kiszka ]
+  * Enable systemd-boot for riscv64. Tested against U-Boot 2022.10 as UEFI
+    provider on the RZ/Five. Signed-off-by: Jan Kiszka
+    <jan.kiszka@siemens.com>
+
+  [ Helmut Grohne ]
+  * Conditionalize installation of cryptsetup plugins in stage1 using dh-
+    exec (Closes: #1021821)
+
+  [ Michael Biebl ]
+  * Install sysusers.d and tmpfiles.d man pages in standalone packages
+    (Closes: #1021933)
+
+  [ Luca Boccassi ]
+  * d/watch: switch to non-stable repo
+  * New upstream version 252~rc2
+  * Drop patches merged upstream
+  * Refresh patches
+  * Update symbols file
+  * Update Lintian overrides
+  * autopkgtest: update expected output of localectl
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 22 Oct 2022 01:10:00 +0100
+
+systemd (251.6-1) unstable; urgency=medium
+
+  * New upstream version 251.6
+  * Rebase patches
+  * Use dh_installsystemd to enable machines.target in systemd-container
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 14 Oct 2022 16:34:00 +0200
+
+systemd (251.5-3) unstable; urgency=medium
+
+  * Update symbol versions for the v251 release
+  * ata_id: fix getting Response Code from SCSI Sense Data (Closes: #1021579)
+  * logind: do not emit beep in wall messages (Closes: #1019510)
+  * logind: remember our idle state and use it to detect idle level
+    transitions (Closes: #963135)
+  * logind: fix getting property OnExternalPower via D-Bus (Closes: #1021644)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 12 Oct 2022 17:01:05 +0200
+
+systemd (251.5-2) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Build and install libcryptsetup token plugins.
+    The interfaces are now mature and enabled in Debian/Ubuntu in
+    libcryptsetup, so enable and ship the plugins
+
+  [ Michael Biebl ]
+  * salsa-ci: drop no longer needed workaround for lintian false positives
+  * udev: fix regression in udev-builtin path_id when processing NVME devices
+    (Closes: #1021547)
+
+  [ наб ]
+  * systemd-sysv.postinst: which -> command -v
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 11 Oct 2022 00:51:55 +0200
+
+systemd (251.5-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 251.5
+  * Install NEWS.Debian file into all binary packages.
+    While it increases the disk footprint a little, it ensures that NEWS
+    entries are reliably shown by apt-listchanges.
+  * Handle removal of /var/log/README.
+    Remove /var/log/README symlink when the systemd package is purged.
+    This symlink is created via tmpfiles and documents that /var/log no
+    longer contains the traditional syslog text files. (Closes: #877414)
+  * Rebase patches
+
+  [ наб ]
+  * debian/extra/kernel/postinst.d/systemd-boot: prefix with zz-
+    Since we explicitly (though this is hidden by indirection through
+    85-initrd.install) depend on /boot/initrd.img-$1 existing or not existing,
+    hard-order ourselves at the end. The zz- prefix matches grub.
+  * debian/extra/kernel-install.d/85-initrd.install: install default initrd
+    with versioned basename.
+    This fixes #1020396 in a superior way by using
+    $KERNEL_INSTALL_STAGING_AREA, available since systemd v251.
+    By just copying the file we both simplify our code, but defer to
+    90-loaderentry to correctly permission it, and simply never generate an
+    unversioned initrd in the first place! (Closes: #1020396)
+  * debian/extra/kernel-install.d/85-initrd.install: explicitly ignore unknown
+    verbs
+  * debian/extra/kernel/postrm.d/systemd-boot: prefix with zz-
+    Doesn't actually matter, but the kernel handbook says we must and we
+    already renamed postinst. (Closes: #1014581)
+
+  [ Luca Boccassi ]
+  * Enable firstboot, disabled by default on Debian.
+    Currently the first-boot conditions are not met by any Debian
+    image (/etc/machine-id with content uninitialized, so we can
+    just enable the build and ship it in the main package.
+    This lets image builders (eg: cloud images) tinker with it.
+    https://www.freedesktop.org/software/systemd/man/machine-id.html#First%20Boot%20Semantics
+    (Closes: #844528)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 02 Oct 2022 21:23:49 +0200
+
+systemd (251.4-3) unstable; urgency=medium
+
+  * resolv.conf: take backup as a fallback in case resolved/resolv.conf
+    is not available, and restore on uninstall, which is necessary for
+    piuparts checks.
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 27 Aug 2022 22:39:04 +0100
+
+systemd (251.4-2) unstable; urgency=medium
+
+  [ Johannes Schauer Marin Rodrigues ]
+  * use systemd-sysusers instead of adduser. This allows dropping the
+    dependency on adduser (reducing the dependency set) and in turn allows
+    for DPKG_ROOT support of systemd.
+  * debian/systemd.postinst: add --root argument to systemctl and
+    systemd-* calls for DPKG_ROOT support
+
+  [ Luca Boccassi ]
+  * resolved: use DPKG_ROOT and make postinst shellcheck-happy
+  * resolved: switch from .links to postinst/rm
+  * Update Lintian overrides for new incompatible syntax
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 26 Aug 2022 23:16:23 +0100
+
 systemd (251.4-1ubuntu7) kinetic; urgency=medium
 
   [ Nick Rosbrook ]

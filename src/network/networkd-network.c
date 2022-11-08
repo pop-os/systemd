@@ -45,7 +45,7 @@
 #include "util.h"
 
 /* Let's assume that anything above this number is a user misconfiguration. */
-#define MAX_NTP_SERVERS 128
+#define MAX_NTP_SERVERS 128U
 
 static int network_resolve_netdev_one(Network *network, const char *name, NetDevKind kind, NetDev **ret) {
         const char *kind_string;
@@ -414,6 +414,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .dhcp6_use_dns = true,
                 .dhcp6_use_hostname = true,
                 .dhcp6_use_ntp = true,
+                .dhcp6_use_rapid_commit = true,
                 .dhcp6_duid.type = _DUID_TYPE_INVALID,
                 .dhcp6_client_start_mode = _DHCP6_CLIENT_START_MODE_INVALID,
 
@@ -549,7 +550,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                         config_item_perf_lookup, network_network_gperf_lookup,
                         CONFIG_PARSE_WARN,
                         network,
-                        &network->stats_by_path);
+                        &network->stats_by_path,
+                        NULL);
         if (r < 0)
                 return r; /* config_parse_many() logs internally. */
 
@@ -664,48 +666,87 @@ static Network *network_free(Network *network) {
         if (!network)
                 return NULL;
 
+        free(network->name);
         free(network->filename);
+        free(network->description);
         hashmap_free(network->stats_by_path);
 
+        /* conditions */
         net_match_clear(&network->match);
         condition_free_list(network->conditions);
 
-        free(network->dhcp_server_relay_agent_circuit_id);
-        free(network->dhcp_server_relay_agent_remote_id);
-        free(network->dhcp_server_boot_server_name);
-        free(network->dhcp_server_boot_filename);
+        /* link settings */
+        strv_free(network->bind_carrier);
 
-        free(network->description);
-        free(network->dhcp_vendor_class_identifier);
-        free(network->dhcp_mudurl);
-        strv_free(network->dhcp_user_class);
-        free(network->dhcp_hostname);
-        free(network->dhcp_label);
-        set_free(network->dhcp_deny_listed_ip);
-        set_free(network->dhcp_allow_listed_ip);
-        set_free(network->dhcp_request_options);
-        set_free(network->dhcp6_request_options);
-        free(network->dhcp6_mudurl);
-        strv_free(network->dhcp6_user_class);
-        strv_free(network->dhcp6_vendor_class);
-
+        /* NTP */
         strv_free(network->ntp);
+
+        /* DNS */
         for (unsigned i = 0; i < network->n_dns; i++)
                 in_addr_full_free(network->dns[i]);
         free(network->dns);
         ordered_set_free(network->search_domains);
         ordered_set_free(network->route_domains);
-        strv_free(network->bind_carrier);
+        set_free_free(network->dnssec_negative_trust_anchors);
 
+        /* DHCP server */
+        free(network->dhcp_server_relay_agent_circuit_id);
+        free(network->dhcp_server_relay_agent_remote_id);
+        free(network->dhcp_server_boot_server_name);
+        free(network->dhcp_server_boot_filename);
+        free(network->dhcp_server_timezone);
+        free(network->dhcp_server_uplink_name);
+        for (sd_dhcp_lease_server_type_t t = 0; t < _SD_DHCP_LEASE_SERVER_TYPE_MAX; t++)
+                free(network->dhcp_server_emit[t].addresses);
+        ordered_hashmap_free(network->dhcp_server_send_options);
+        ordered_hashmap_free(network->dhcp_server_send_vendor_options);
+
+        /* DHCP client */
+        free(network->dhcp_vendor_class_identifier);
+        free(network->dhcp_mudurl);
+        free(network->dhcp_hostname);
+        free(network->dhcp_label);
+        set_free(network->dhcp_deny_listed_ip);
+        set_free(network->dhcp_allow_listed_ip);
+        strv_free(network->dhcp_user_class);
+        set_free(network->dhcp_request_options);
+        ordered_hashmap_free(network->dhcp_client_send_options);
+        ordered_hashmap_free(network->dhcp_client_send_vendor_options);
+        free(network->dhcp_netlabel);
+
+        /* DHCPv6 client */
+        free(network->dhcp6_mudurl);
+        strv_free(network->dhcp6_user_class);
+        strv_free(network->dhcp6_vendor_class);
+        set_free(network->dhcp6_request_options);
+        ordered_hashmap_free(network->dhcp6_client_send_options);
+        ordered_hashmap_free(network->dhcp6_client_send_vendor_options);
+        free(network->dhcp6_netlabel);
+
+        /* DHCP PD */
+        free(network->dhcp_pd_uplink_name);
+        set_free(network->dhcp_pd_tokens);
+        free(network->dhcp_pd_netlabel);
+
+        /* Router advertisement */
         ordered_set_free(network->router_search_domains);
         free(network->router_dns);
+        free(network->router_uplink_name);
+
+        /* NDisc */
         set_free(network->ndisc_deny_listed_router);
         set_free(network->ndisc_allow_listed_router);
         set_free(network->ndisc_deny_listed_prefix);
         set_free(network->ndisc_allow_listed_prefix);
         set_free(network->ndisc_deny_listed_route_prefix);
         set_free(network->ndisc_allow_listed_route_prefix);
+        set_free(network->ndisc_tokens);
+        free(network->ndisc_netlabel);
 
+        /* LLDP */
+        free(network->lldp_mudurl);
+
+        /* netdev */
         free(network->batadv_name);
         free(network->bridge_name);
         free(network->bond_name);
@@ -716,6 +757,7 @@ static Network *network_free(Network *network) {
         netdev_unref(network->vrf);
         hashmap_free_with_destructor(network->stacked_netdevs, netdev_unref);
 
+        /* static configs */
         set_free_free(network->ipv6_proxy_ndp_addresses);
         ordered_hashmap_free_with_destructor(network->addresses_by_section, address_free);
         hashmap_free_with_destructor(network->routes_by_section, route_free);
@@ -731,29 +773,6 @@ static Network *network_free(Network *network) {
         ordered_hashmap_free_with_destructor(network->sr_iov_by_section, sr_iov_free);
         hashmap_free_with_destructor(network->qdiscs_by_section, qdisc_free);
         hashmap_free_with_destructor(network->tclasses_by_section, tclass_free);
-
-        free(network->name);
-
-        free(network->dhcp_server_timezone);
-        free(network->dhcp_server_uplink_name);
-        free(network->router_uplink_name);
-        free(network->dhcp_pd_uplink_name);
-
-        for (sd_dhcp_lease_server_type_t t = 0; t < _SD_DHCP_LEASE_SERVER_TYPE_MAX; t++)
-                free(network->dhcp_server_emit[t].addresses);
-
-        set_free_free(network->dnssec_negative_trust_anchors);
-
-        free(network->lldp_mudurl);
-
-        ordered_hashmap_free(network->dhcp_client_send_options);
-        ordered_hashmap_free(network->dhcp_client_send_vendor_options);
-        ordered_hashmap_free(network->dhcp_server_send_options);
-        ordered_hashmap_free(network->dhcp_server_send_vendor_options);
-        ordered_hashmap_free(network->dhcp6_client_send_options);
-        ordered_hashmap_free(network->dhcp6_client_send_vendor_options);
-        set_free(network->dhcp_pd_tokens);
-        set_free(network->ndisc_tokens);
 
         return mfree(network);
 }
@@ -831,13 +850,12 @@ int config_parse_stacked_netdev(
 
         _cleanup_free_ char *name = NULL;
         NetDevKind kind = ltype;
-        Hashmap **h = data;
+        Hashmap **h = ASSERT_PTR(data);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
         assert(IN_SET(kind,
                       NETDEV_KIND_IPOIB,
                       NETDEV_KIND_IPVLAN,
@@ -887,13 +905,12 @@ int config_parse_domains(
                 void *data,
                 void *userdata) {
 
-        Network *n = userdata;
+        Network *n = ASSERT_PTR(userdata);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(n);
 
         if (isempty(rvalue)) {
                 n->search_domains = ordered_set_free(n->search_domains);
@@ -965,13 +982,12 @@ int config_parse_timezone(
                 void *data,
                 void *userdata) {
 
-        char **tz = data;
+        char **tz = ASSERT_PTR(data);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
 
         if (isempty(rvalue)) {
                 *tz = mfree(*tz);
@@ -1000,13 +1016,12 @@ int config_parse_dns(
                 void *data,
                 void *userdata) {
 
-        Network *n = userdata;
+        Network *n = ASSERT_PTR(userdata);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(n);
 
         if (isempty(rvalue)) {
                 for (unsigned i = 0; i < n->n_dns; i++)
@@ -1063,13 +1078,12 @@ int config_parse_dnssec_negative_trust_anchors(
                 void *data,
                 void *userdata) {
 
-        Set **nta = data;
+        Set **nta = ASSERT_PTR(data);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(nta);
 
         if (isempty(rvalue)) {
                 *nta = set_free_free(*nta);
@@ -1115,13 +1129,12 @@ int config_parse_ntp(
                 void *data,
                 void *userdata) {
 
-        char ***l = data;
+        char ***l = ASSERT_PTR(data);
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(l);
 
         if (isempty(rvalue)) {
                 *l = strv_free(*l);
@@ -1174,7 +1187,7 @@ int config_parse_required_for_online(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         LinkOperationalStateRange range;
         bool required = true;
         int r;
@@ -1182,7 +1195,6 @@ int config_parse_required_for_online(
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(network);
 
         if (isempty(rvalue)) {
                 network->required_for_online = -1;
@@ -1222,14 +1234,13 @@ int config_parse_link_group(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         int r;
         int32_t group;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(network);
 
         if (isempty(rvalue)) {
                 network->group = -1;
@@ -1265,14 +1276,13 @@ int config_parse_ignore_carrier_loss(
                 void *data,
                 void *userdata) {
 
-        Network *network = userdata;
+        Network *network = ASSERT_PTR(userdata);
         usec_t usec;
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(network);
 
         if (isempty(rvalue)) {
                 network->ignore_carrier_loss_set = false;

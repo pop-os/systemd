@@ -69,9 +69,8 @@ CONFFLAGS = \
 	-Dpamconfdir=no \
 	-Dpamlibdir=/lib/$(DEB_HOST_MULTIARCH)/security \
 	-Drpmmacrosdir=no \
-	-Dqrencode=false \
 	-Dvconsole=false \
-	-Dfirstboot=false \
+	-Dfirstboot=true \
 	-Dsysupdate=false \
 	-Dxkbcommon=false \
 	-Dwheel-group=false \
@@ -99,7 +98,6 @@ CONFFLAGS = \
 	-Dhwdb=true \
 	-Dsysusers=true \
 	-Dinstall-tests=$(if $(filter noinsttest,$(DEB_BUILD_PROFILES)),false,true) \
-	-Dlibcryptsetup-plugins=false \
 	-Defi=true \
 	-Dman=$(if $(filter nodoc,$(DEB_BUILD_PROFILES)),false,true) \
 	-Dtranslations=true \
@@ -114,6 +112,7 @@ ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
 	-Daudit=true \
 	-Dlibcryptsetup=true \
+	-Dlibcryptsetup-plugins=true \
 	-Dcoredump=true \
 	-Delfutils=true \
 	-Dapparmor=true \
@@ -127,6 +126,7 @@ CONFFLAGS += \
 	-Ddns-over-tls=openssl \
 	-Dlibfido2=true \
 	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),false,true) \
+	-Dqrencode=true \
 	-Dhomed=true \
 	-Duserdb=true \
 	-Dpcre2=true
@@ -134,6 +134,7 @@ else
 CONFFLAGS += \
 	-Daudit=false \
 	-Dlibcryptsetup=false \
+	-Dlibcryptsetup-plugins=false \
 	-Dcoredump=false \
 	-Delfutils=false \
 	-Dapparmor=false \
@@ -145,6 +146,7 @@ CONFFLAGS += \
 	-Dopenssl=false \
 	-Dlibfido2=false \
 	-Dtpm2=false \
+	-Dqrencode=false \
 	-Dhomed=false \
 	-Duserdb=false \
 	-Dpcre2=false
@@ -188,7 +190,6 @@ execute_before_dh_install:
 	# remove unnecessary / unused files
 	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
 	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
-	rm -f debian/tmp/var/log/README
 	rm -f debian/tmp/etc/init.d/README
 	rm -f debian/tmp/lib/*.d/README
 	rm -f debian/tmp/lib/udev/*.d/README
@@ -279,6 +280,7 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
 	dh_installsystemd -psystemd-oomd systemd-oomd.service
 	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
+	dh_installsystemd -psystemd-container --no-stop-on-upgrade machines.target
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
 	dh_installsystemd -psystemd-resolved
@@ -305,9 +307,8 @@ override_dh_makeshlibs:
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
-	echo "01234567890123456789012345678901" > obj-$(DEB_HOST_GNU_TYPE)/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/obj-$(DEB_HOST_GNU_TYPE)/machine-id meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
+	env -u LD_PRELOAD meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
 %:

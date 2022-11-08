@@ -15,7 +15,9 @@ Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper-compat (= 13),
+               dh-exec,
                dh-sequence-installnss,
+               dh-sequence-installsysusers,
                dh-sequence-package-notes,
                pkg-config,
                xsltproc <!nodoc>,
@@ -32,7 +34,7 @@ Build-Depends: debhelper-compat (= 13),
                libiptc-dev <!stage1>,
                libaudit-dev <!stage1>,
                libdbus-1-dev (>= 1.3.2) <!nocheck> <!noinsttest>,
-               libcryptsetup-dev (>= 2:1.6.0) <!stage1>,
+               libcryptsetup-dev (>= 2:2.4) <!stage1>,
                libselinux1-dev (>= 2.1.9),
                libacl1-dev,
                liblzma-dev,
@@ -55,12 +57,13 @@ Build-Depends: debhelper-compat (= 13),
                libtss2-dev [!i386] <!stage1>,
                libfido2-dev <!stage1>,
                libssl-dev <!stage1>,
+               libqrencode-dev <!stage1>,
                linux-base <!nocheck>,
                acl <!nocheck>,
                python3:native,
                python3-jinja2:native,
                python3-lxml:native,
-               python3-pyparsing:native <!nocheck>,
+               python3-pyparsing <!nocheck>,
                python3-evdev:native <!nocheck>,
                tzdata <!nocheck>,
                libcap2-bin <!nocheck>,
@@ -82,17 +85,17 @@ Suggests: systemd-container,
           systemd-userdbd,
           systemd-boot,
           libfido2-1,
+          libqrencode4,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
           libtss2-rc0,
-          policykit-1
+          polkitd,
 Pre-Depends: ${shlibs:Pre-Depends},
              ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
          mount,
-         adduser,
 Replaces: systemd-repart (<< 250.2-3~)
 Conflicts: consolekit,
            libpam-ck-connector,
@@ -168,7 +171,6 @@ Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
-         adduser
 Description: tools for sending and receiving remote journal logs
  This package provides tools for sending and receiving remote journal logs:
   * systemd-journal-remote
@@ -181,7 +183,6 @@ Architecture: linux-any
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd
 Recommends: libdw1
 Conflicts: core-dump-handler
@@ -198,7 +199,6 @@ Multi-Arch: foreign
 Priority: standard
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd
 Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon
@@ -440,7 +440,6 @@ Package: systemd-oomd
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
 Breaks: systemd (<< 250.2-2~)
 Replaces: systemd (<< 250.2-2~)
 Description: userspace out-of-memory (OOM) killer
@@ -515,7 +514,6 @@ Architecture: linux-any
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd (= ${binary:Version}),
          default-dbus-system-bus | dbus-system-bus
 Suggests: policykit-1,
