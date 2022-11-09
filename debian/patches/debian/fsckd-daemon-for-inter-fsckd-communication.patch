@@ -58,11 +58,9 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.service.in
  create mode 100644 units/systemd-fsckd.socket
 
-diff --git a/man/rules/meson.build b/man/rules/meson.build
-index bb77990..8609433 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -892,6 +892,7 @@ manpages = [
+@@ -892,6 +892,7 @@
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -70,9 +68,6 @@ index bb77990..8609433 100644
   ['systemd-fstab-generator', '8', [], ''],
   ['systemd-getty-generator', '8', [], ''],
   ['systemd-gpt-auto-generator', '8', [], 'HAVE_BLKID'],
-diff --git a/man/systemd-fsckd.service.xml b/man/systemd-fsckd.service.xml
-new file mode 100644
-index 0000000..b7ad58d
 --- /dev/null
 +++ b/man/systemd-fsckd.service.xml
 @@ -0,0 +1,162 @@
@@ -238,15 +233,12 @@ index 0000000..b7ad58d
 +  </refsect1>
 +
 +</refentry>
-diff --git a/meson.build b/meson.build
-index 7750534..c636510 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3343,6 +3343,15 @@ executable(
-         install : true,
+@@ -3344,6 +3344,15 @@
          install_dir : rootlibexecdir)
  
-+executable(
+ executable(
 +        'systemd-fsckd',
 +        'src/fsckd/fsckd.c',
 +        include_directories : includes,
@@ -255,21 +247,17 @@ index 7750534..c636510 100644
 +        install : true,
 +        install_dir : rootlibexecdir)
 +
- executable(
++executable(
          'systemd-sleep',
          'src/sleep/sleep.c',
-diff --git a/po/POTFILES.in b/po/POTFILES.in
-index e045852..131e4bc 100644
+         include_directories : includes,
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -12,3 +12,4 @@ src/portable/org.freedesktop.portable1.policy
+@@ -12,3 +12,4 @@
  src/resolve/org.freedesktop.resolve1.policy
  src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
 +src/fsckd/fsckd.c
-diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-new file mode 100644
-index 0000000..8a85b69
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,697 @@
@@ -970,11 +958,9 @@ index 0000000..8a85b69
 +finish:
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
-diff --git a/units/meson.build b/units/meson.build
-index 25e9209..8d3bef3 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -113,6 +113,7 @@ units = [
+@@ -113,6 +113,7 @@
          ['systemd-exit.service',                ''],
          ['systemd-firstboot.service',           'ENABLE_FIRSTBOOT',
           'sysinit.target.wants/'],
@@ -982,7 +968,7 @@ index 25e9209..8d3bef3 100644
          ['systemd-halt.service',                ''],
          ['systemd-homed-activate.service',      'ENABLE_HOMED'],
          ['systemd-initctl.socket',              'HAVE_SYSV_COMPAT',
-@@ -194,6 +195,7 @@ in_units = [
+@@ -194,6 +195,7 @@
          ['systemd-pstore.service',               'ENABLE_PSTORE'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],
@@ -990,11 +976,9 @@ index 25e9209..8d3bef3 100644
          ['systemd-hibernate-resume@.service',    'ENABLE_HIBERNATE'],
          ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
          ['systemd-hybrid-sleep.service',         'ENABLE_HIBERNATE'],
-diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index 8378df8..4b1cd43 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
-@@ -13,6 +13,8 @@ Documentation=man:systemd-fsck-root.service(8)
+@@ -13,6 +13,8 @@
  DefaultDependencies=no
  Conflicts=shutdown.target
  Before=local-fs.target shutdown.target
@@ -1003,11 +987,9 @@ index 8378df8..4b1cd43 100644
  ConditionPathIsReadWrite=!/
  OnFailure=emergency.target
  OnFailureJobMode=replace-irreversibly
-diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 06b91ae..de0b767 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
-@@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)
+@@ -13,7 +13,8 @@
  DefaultDependencies=no
  BindsTo=%i.device
  Conflicts=shutdown.target
@@ -1017,9 +999,6 @@ index 06b91ae..de0b767 100644
  Before=systemd-quotacheck.service shutdown.target
  
  [Service]
-diff --git a/units/systemd-fsckd.service.in b/units/systemd-fsckd.service.in
-new file mode 100644
-index 0000000..f075b66
 --- /dev/null
 +++ b/units/systemd-fsckd.service.in
 @@ -0,0 +1,17 @@
@@ -1040,9 +1019,6 @@ index 0000000..f075b66
 +[Service]
 +ExecStart={{ROOTLIBEXECDIR}}/systemd-fsckd
 +StandardOutput=journal+console
-diff --git a/units/systemd-fsckd.socket b/units/systemd-fsckd.socket
-new file mode 100644
-index 0000000..61fec97
 --- /dev/null
 +++ b/units/systemd-fsckd.socket
 @@ -0,0 +1,15 @@

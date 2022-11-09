@@ -7,11 +7,9 @@ Bug-Ubuntu: https://bugs.launchpad.net/snappy/+bug/1953172
 Forwarded: not-needed (part of read-only /etc workaround)
 Last-Update: 2022-07-20
 ---
-diff --git a/src/core/manager.c b/src/core/manager.c
-index 296b759..230e5c8 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
-@@ -424,6 +424,25 @@ static int manager_setup_time_change(Manager *m) {
+@@ -423,6 +423,25 @@
          return 0;
  }
  
@@ -37,7 +35,7 @@ index 296b759..230e5c8 100644
  static int manager_read_timezone_stat(Manager *m) {
          struct stat st;
          bool changed;
-@@ -431,7 +450,7 @@ static int manager_read_timezone_stat(Manager *m) {
+@@ -430,7 +449,7 @@
          assert(m);
  
          /* Read the current stat() data of /etc/localtime so that we detect changes */
@@ -46,7 +44,7 @@ index 296b759..230e5c8 100644
                  log_debug_errno(errno, "Failed to stat /etc/localtime, ignoring: %m");
                  changed = m->etc_localtime_accessible;
                  m->etc_localtime_accessible = false;
-@@ -468,7 +487,7 @@ static int manager_setup_timezone_change(Manager *m) {
+@@ -467,7 +486,7 @@
           * Note that we create the new event source first here, before releasing the old one. This should optimize
           * behaviour as this way sd-event can reuse the old watch in case the inode didn't change. */
  
@@ -55,11 +53,9 @@ index 296b759..230e5c8 100644
                                   IN_ATTRIB|IN_MOVE_SELF|IN_CLOSE_WRITE|IN_DONT_FOLLOW, manager_dispatch_timezone_change, m);
          if (r == -ENOENT) {
                  /* If the file doesn't exist yet, subscribe to /etc instead, and wait until it is created either by
-diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
-index 3916018..9f2d178 100644
 --- a/src/firstboot/firstboot.c
 +++ b/src/firstboot/firstboot.c
-@@ -462,18 +462,37 @@ static int prompt_timezone(void) {
+@@ -474,11 +474,30 @@
          return 0;
  }
  
@@ -88,9 +84,10 @@ index 3916018..9f2d178 100644
  
 -        etc_localtime = prefix_roota(arg_root, "/etc/localtime");
 +        etc_localtime = prefix_roota(arg_root, writable_filename("/etc/localtime"));
-         if (laccess(etc_localtime, F_OK) >= 0 && !arg_force)
-                 return 0;
- 
+         if (laccess(etc_localtime, F_OK) >= 0 && !arg_force) {
+                 log_debug("Found %s, assuming timezone has been configured.",
+                           etc_localtime);
+@@ -488,7 +507,7 @@
          if (arg_copy_timezone && arg_root) {
                  _cleanup_free_ char *p = NULL;
  
@@ -99,7 +96,7 @@ index 3916018..9f2d178 100644
                  if (r != -ENOENT) {
                          if (r < 0)
                                  return log_error_errno(r, "Failed to read host timezone: %m");
-@@ -494,7 +513,7 @@ static int process_timezone(void) {
+@@ -510,7 +529,7 @@
          if (isempty(arg_timezone))
                  return 0;
  
@@ -107,4 +104,4 @@ index 3916018..9f2d178 100644
 +        e = strjoina("/usr/share/zoneinfo/", arg_timezone);
  
          (void) mkdir_parents(etc_localtime, 0755);
-         if (symlink(e, etc_localtime) < 0)
+         r = symlink_atomic(e, etc_localtime);

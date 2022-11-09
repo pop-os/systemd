@@ -9,9 +9,6 @@ Bug: https://github.com/systemd/systemd/issues/24147
  1 file changed, 1 insertion(+)
  create mode 100644 test/TEST-29-PORTABLE/deny-list-upstream-ci
 
-diff --git a/test/TEST-29-PORTABLE/deny-list-upstream-ci b/test/TEST-29-PORTABLE/deny-list-upstream-ci
-new file mode 100644
-index 0000000..89e1567
 --- /dev/null
 +++ b/test/TEST-29-PORTABLE/deny-list-upstream-ci
 @@ -0,0 +1 @@

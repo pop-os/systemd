@@ -9,7 +9,7 @@ Subject: wait-online: exit, if no links are managed.
 
 --- a/src/network/wait-online/manager.c
 +++ b/src/network/wait-online/manager.c
-@@ -118,6 +118,7 @@ static int manager_link_is_online(Manage
+@@ -116,6 +116,7 @@
  
  bool manager_configured(Manager *m) {
          bool one_ready = false;
@@ -17,7 +17,7 @@ Subject: wait-online: exit, if no links are managed.
          const char *ifname;
          Link *l;
          int r;
-@@ -168,13 +169,17 @@ bool manager_configured(Manager *m) {
+@@ -166,13 +167,17 @@
                                                                           _LINK_OPERSTATE_INVALID });
                  if (r < 0 && !m->any)
                          return false;

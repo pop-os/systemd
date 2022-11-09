@@ -16,7 +16,7 @@ Last-Update: 2021-09-24
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -320,9 +320,9 @@
+@@ -338,9 +338,9 @@
                          return r;
                  }
  

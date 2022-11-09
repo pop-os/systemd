@@ -15,7 +15,7 @@ This reverts commit ae53f4b5e48860b473c4d05958486a77f84ecc6d.
 
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
-@@ -1142,16 +1142,6 @@
+@@ -1147,16 +1147,6 @@
          test_service(m, "exec-condition-skip.service", SERVICE_SKIP_CONDITION);
  }
  
@@ -32,7 +32,7 @@ This reverts commit ae53f4b5e48860b473c4d05958486a77f84ecc6d.
  typedef struct test_entry {
          test_function_t f;
          const char *name;
-@@ -1234,7 +1224,6 @@
+@@ -1239,7 +1229,6 @@
                  entry(test_exec_specifier),
                  entry(test_exec_execsearchpath_specifier),
                  entry(test_exec_systemcallfilter_system),

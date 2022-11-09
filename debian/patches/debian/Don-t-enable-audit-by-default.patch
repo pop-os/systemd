@@ -15,8 +15,6 @@ Bug-Debian: https://bugs.debian.org/773528
  src/journal/journald.conf     | 2 +-
  3 files changed, 3 insertions(+), 3 deletions(-)
 
-diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 185e1dc..d963a1d 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
 @@ -429,7 +429,7 @@
@@ -28,11 +26,9 @@ index 185e1dc..d963a1d 100644
        </varlistentry>
  
        <varlistentry>
-diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index e5708c7..c36936d 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
-@@ -2267,7 +2267,7 @@ int server_init(Server *s, const char *namespace) {
+@@ -2267,7 +2267,7 @@
                  .compress.threshold_bytes = UINT64_MAX,
                  .seal = true,
  
@@ -41,8 +37,6 @@ index e5708c7..c36936d 100644
  
                  .watchdog_usec = USEC_INFINITY,
  
-diff --git a/src/journal/journald.conf b/src/journal/journald.conf
-index 64f4d4b..a690681 100644
 --- a/src/journal/journald.conf
 +++ b/src/journal/journald.conf
 @@ -44,4 +44,4 @@

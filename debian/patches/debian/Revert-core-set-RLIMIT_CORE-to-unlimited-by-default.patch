@@ -18,11 +18,9 @@ Bug-Debian: https://bugs.debian.org/815020
  sysctl.d/50-coredump.conf.in |  2 +-
  2 files changed, 1 insertion(+), 21 deletions(-)
 
-diff --git a/src/core/main.c b/src/core/main.c
-index 14a4f81..696bb28 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1648,24 +1648,6 @@ static void cmdline_take_random_seed(void) {
+@@ -1648,24 +1648,6 @@
                     "This functionality should not be used outside of testing environments.");
  }
  
@@ -47,7 +45,7 @@ index 14a4f81..696bb28 100644
  static void initialize_core_pattern(bool skip_setup) {
          int r;
  
-@@ -2802,8 +2784,6 @@ int main(int argc, char *argv[]) {
+@@ -2802,8 +2784,6 @@
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  
@@ -56,8 +54,6 @@ index 14a4f81..696bb28 100644
                  r = fixup_environment();
                  if (r < 0) {
                          log_emergency_errno(r, "Failed to fix up PID 1 environment: %m");
-diff --git a/sysctl.d/50-coredump.conf.in b/sysctl.d/50-coredump.conf.in
-index 5fb551a..13495f1 100644
 --- a/sysctl.d/50-coredump.conf.in
 +++ b/sysctl.d/50-coredump.conf.in
 @@ -13,7 +13,7 @@

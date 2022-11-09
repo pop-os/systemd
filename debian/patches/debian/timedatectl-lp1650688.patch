@@ -14,11 +14,9 @@ Forwarded: not-needed (part of read-only /etc workaround)
 Last-Update: 2021-09-24
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
-diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index d7028ac..b9bb4da 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1391,6 +1391,25 @@ bool clock_supported(clockid_t clock) {
+@@ -1470,6 +1470,25 @@
          }
  }
  
@@ -44,7 +42,7 @@ index d7028ac..b9bb4da 100644
  int get_timezone(char **ret) {
          _cleanup_free_ char *t = NULL;
          const char *e;
-@@ -1398,7 +1417,7 @@ int get_timezone(char **ret) {
+@@ -1477,7 +1496,7 @@
          int r;
          bool use_utc_fallback = false;
  
