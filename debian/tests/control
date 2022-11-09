@@ -120,7 +120,7 @@ Depends: systemd-tests,
   libtss2-dev [!i386],
   libfido2-dev,
   libdw-dev,
-  libqrencode-dev,
+  libqrencode-dev [!i386],
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: tests-in-lxd
@@ -187,7 +187,7 @@ Depends: systemd-tests,
   dbus-user-session,
   libtss2-dev [!i386],
   libfido2-dev,
-  libqrencode-dev,
+  libqrencode-dev [!i386],
   python3-pexpect,
   screen,
   swtpm,
