@@ -10,10 +10,11 @@ keyboard configuration.
 Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c     |  34 +++++++--
- src/locale/localed-util.c | 188 ++++++++++++++++++++--------------------------
- src/shared/locale-setup.c |  24 ++++--
+ src/firstboot/firstboot.c |  12 ++--
+ src/locale/localed-util.c | 174 ++++++++++++++++++++--------------------------
+ src/shared/locale-setup.c |  24 +++++--
  src/timedate/timedated.c  |  21 +++++-
- 4 files changed, 147 insertions(+), 120 deletions(-)
+ 5 files changed, 148 insertions(+), 117 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
 index 71b2f67..fa00d9d 100644
@@ -68,6 +69,39 @@ index 71b2f67..fa00d9d 100644
  
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
+diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
+index 63db78b..3242534 100644
+--- a/src/firstboot/firstboot.c
++++ b/src/firstboot/firstboot.c
+@@ -308,12 +308,16 @@ static int prompt_locale(void) {
+ }
+ 
+ static int process_locale(void) {
+-        const char *etc_localeconf;
++        const char *etc_localeconf, *path = "/etc/locale.conf";
+         char* locales[3];
+         unsigned i = 0;
+-        int r;
++        int r, ret = 0;
++
++        if (laccess(path, F_OK) < 0 && errno == ENOENT)
++                path = "/etc/default/locale";
++
++        etc_localeconf = prefix_roota(arg_root, path);
+ 
+-        etc_localeconf = prefix_roota(arg_root, "/etc/locale.conf");
+         if (laccess(etc_localeconf, F_OK) >= 0 && !arg_force) {
+                 log_debug("Found %s, assuming locale information has been configured.",
+                           etc_localeconf);
+@@ -323,7 +327,7 @@ static int process_locale(void) {
+         if (arg_copy_locale && arg_root) {
+ 
+                 (void) mkdir_parents(etc_localeconf, 0755);
+-                r = copy_file("/etc/locale.conf", etc_localeconf, 0, 0644, 0, 0, COPY_REFLINK);
++                r = copy_file(path, etc_localeconf, 0, 0644, 0, 0, COPY_REFLINK);
+                 if (r != -ENOENT) {
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to copy %s: %m", etc_localeconf);
 diff --git a/src/locale/localed-util.c b/src/locale/localed-util.c
 index dd2bbf5..4df9da6 100644
 --- a/src/locale/localed-util.c
