@@ -1,0 +1,36 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 22 Nov 2022 10:33:55 -0500
+Subject: oomd: always allow root-owned cgroups to set ManagedOOMPreference
+
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/2bdf5b03821eb69f7415adf28bd4b0a92b8a8fad
+
+Commit 652a4efb66a ("oomd: loosen the restriction on ManagedOOMPreference")
+made the change to allow ManagedOOMPreference on a cgroup candidate when
+the monitored cgroup and cgroup candidate are owned by the same user.
+
+The commit assumed that this check was sufficient to continue allowing
+ManagedOOMPreference on all cgroups owned by root. However, it caused a
+regression for unprivileged LXD containers where e.g. /sys/fs/cgroup is
+owned by nobody (uid=65534).
+
+Fix this by explicitly allowing the ManagedOOMPreference if uid == 0 in
+oomd_fetch_cgroup_oom_preference().
+
+(cherry picked from commit 89186093485b52ca957d17842fc1f7c87958454a)
+---
+ src/oom/oomd-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/oom/oomd-util.c b/src/oom/oomd-util.c
+index 1fc81d1..70a1dc9 100644
+--- a/src/oom/oomd-util.c
++++ b/src/oom/oomd-util.c
+@@ -164,7 +164,7 @@ int oomd_fetch_cgroup_oom_preference(OomdCGroupContext *ctx, const char *prefix)
+         if (r < 0)
+                 return log_debug_errno(r, "Failed to get owner/group from %s: %m", ctx->path);
+ 
+-        if (uid == prefix_uid) {
++        if (uid == prefix_uid || uid == 0) {
+                 /* Ignore most errors when reading the xattr since it is usually unset and cgroup xattrs are only used
+                  * as an optional feature of systemd-oomd (and the system might not even support them). */
+                 r = cg_get_xattr_bool(SYSTEMD_CGROUP_CONTROLLER, ctx->path, "user.oomd_avoid");
