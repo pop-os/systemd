@@ -10,11 +10,11 @@ keyboard configuration.
 Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c     |  34 +++++++--
- src/firstboot/firstboot.c |  12 ++--
- src/locale/localed-util.c | 174 ++++++++++++++++++++--------------------------
- src/shared/locale-setup.c |  24 +++++--
+ src/firstboot/firstboot.c |  12 ++-
+ src/locale/localed-util.c | 188 ++++++++++++++++++++--------------------------
+ src/shared/locale-setup.c |  24 ++++--
  src/timedate/timedated.c  |  21 +++++-
- 5 files changed, 148 insertions(+), 117 deletions(-)
+ 5 files changed, 155 insertions(+), 124 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
 index 71b2f67..fa00d9d 100644
