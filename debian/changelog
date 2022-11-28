@@ -1,3 +1,22 @@
+systemd (252.2-1) unstable; urgency=medium
+
+  [ Helmut Grohne ]
+  * Explicitly B-D on libcrypt-dev (Closes: #1024646)
+
+  [ Nick Rosbrook ]
+  * Add handling for /etc/default/locale to firstboot. The TEST-74-AUX-
+    UTILS upstream test revealed that firstboot does not currently handle
+    Debian's /etc/default/locale.
+
+  [ Luca Boccassi ]
+  * Build depend on dh-package-notes, sequence was removed. Only the
+    makefile is in use now, no files are generated at build time as
+    --package-metadata from the linkers is used now
+  * New upstream version 252.2
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 28 Nov 2022 22:35:56 +0000
+
 systemd (252.1-1) unstable; urgency=medium
 
   * d/watch: switch back to stable repository
