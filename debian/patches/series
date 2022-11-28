@@ -39,3 +39,4 @@ lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
 oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch
+oomd-fix-unreachable-test-case-in-test-oomd-util.patch
