@@ -16,9 +16,9 @@ Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper-compat (= 13),
                dh-exec,
+               dh-package-notes,
                dh-sequence-installnss,
                dh-sequence-installsysusers,
-               dh-sequence-package-notes,
                pkg-config,
                xsltproc <!nodoc>,
                docbook-xsl <!nodoc>,
