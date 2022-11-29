@@ -1,0 +1,119 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 29 Nov 2022 14:18:42 -0500
+Subject: test: skip some tests when machine-id is not initialized
+
+---
+ src/journal/test-journal-interleaving.c | 24 +++++++++++++-----------
+ src/shared/tests.c                      | 12 ++++++++++++
+ src/shared/tests.h                      |  1 +
+ src/test/test-fs-util.c                 |  2 +-
+ src/test/test-id128.c                   |  4 ++--
+ 5 files changed, 29 insertions(+), 14 deletions(-)
+
+diff --git a/src/journal/test-journal-interleaving.c b/src/journal/test-journal-interleaving.c
+index 378bf16..5672a3f 100644
+--- a/src/journal/test-journal-interleaving.c
++++ b/src/journal/test-journal-interleaving.c
+@@ -267,22 +267,24 @@ static void test_sequence_numbers_one(void) {
+ 
+         test_close(one);
+ 
+-        /* restart server */
+-        seqnum = 0;
++        if (machine_id_initialized() > 0) {
++                /* restart server */
++                seqnum = 0;
+ 
+-        assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
+-                                            UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
++                assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
++                                                    UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
+ 
+-        assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
++                assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
+ 
+-        append_number(two, 7, &seqnum);
+-        printf("seqnum=%"PRIu64"\n", seqnum);
+-        assert_se(seqnum == 5);
++                append_number(two, 7, &seqnum);
++                printf("seqnum=%"PRIu64"\n", seqnum);
++                assert_se(seqnum == 5);
+ 
+-        /* So..., here we have the same seqnum in two files with the
+-         * same seqnum_id. */
++                /* So..., here we have the same seqnum in two files with the
++                 * same seqnum_id. */
+ 
+-        test_close(two);
++                test_close(two);
++        }
+ 
+         log_info("Done...");
+ 
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index a65080c..8b7ddda 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -35,6 +35,7 @@
+ #include "strv.h"
+ #include "tests.h"
+ #include "tmpfile-util.h"
++#include "id128-util.h"
+ 
+ char* setup_fake_runtime_dir(void) {
+         char t[] = "/tmp/fake-xdg-runtime-XXXXXX", *p;
+@@ -361,3 +362,14 @@ const char *ci_environment(void) {
+ 
+         return (ans = NULL);
+ }
++
++int machine_id_initialized(void) {
++        sd_id128_t id;
++        int r;
++
++        r = id128_read("/etc/machine-id", ID128_PLAIN_OR_UNINIT, &id);
++        if (IN_SET(r, 0, -ENOENT, -ENOMEDIUM))
++                return !r;
++
++        return r;
++}
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index a2f7f38..9be1285 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -33,6 +33,7 @@ int log_tests_skipped_errno(int r, const char *message);
+ int write_tmpfile(char *pattern, const char *contents);
+ 
+ bool have_namespaces(void);
++int machine_id_initialized(void);
+ 
+ /* We use the small but non-trivial limit here */
+ #define CAN_MEMLOCK_SIZE (512 * 1024U)
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index 9c1ced7..c10ff64 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -292,7 +292,7 @@ TEST(chase_symlinks) {
+         assert_se(symlink("/usr/../etc/./machine-id", p) >= 0);
+ 
+         r = chase_symlinks(p, NULL, 0, NULL, &pfd);
+-        if (r != -ENOENT) {
++        if (r != -ENOENT && machine_id_initialized() > 0) {
+                 _cleanup_close_ int fd = -1;
+                 sd_id128_t a, b;
+ 
+diff --git a/src/test/test-id128.c b/src/test/test-id128.c
+index 4b71c5c..1e74b1f 100644
+--- a/src/test/test-id128.c
++++ b/src/test/test-id128.c
+@@ -170,8 +170,8 @@ TEST(benchmark_sd_id128_get_machine_app_specific) {
+         unsigned iterations = slow_tests_enabled() ? 1000000 : 1000;
+         usec_t t, q;
+ 
+-        if (access("/etc/machine-id", F_OK) < 0 && errno == ENOENT)
+-                return (void) log_tests_skipped("/etc/machine-id does not exist");
++        if (machine_id_initialized() <= 0)
++                return (void) log_tests_skipped("/etc/machine-id is not initialized");
+ 
+         log_info("/* %s (%u iterations) */", __func__, iterations);
+ 

@@ -42,3 +42,4 @@ oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch
 oomd-fix-unreachable-test-case-in-test-oomd-util.patch
 test-make-sure-mount-point-exists-in-testsuite-64.sh.patch
 test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
+test-skip-some-tests-when-machine-id-is-not-initialized.patch
