@@ -1,0 +1,22 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 22 Nov 2022 12:43:51 -0500
+Subject: test: make sure mount point exists in testsuite-64.sh
+
+Origin: upstream, https://github.com/systemd/systemd/commit/84e5b9225d12f8a1a7d414ef01f97fcd6881c14f
+
+---
+ test/units/testsuite-64.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index 7673036..8e46533 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -243,6 +243,7 @@ EOF
+     echo "${FUNCNAME[0]}: test failover"
+     local device expected link mpoint part
+     local -a devices
++    mkdir -p /mnt
+     mpoint="$(mktemp -d /mnt/mpathXXX)"
+     wwid="deaddeadbeef0000"
+     path="/dev/disk/by-id/wwn-0x$wwid"
