@@ -13,14 +13,14 @@ IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
 autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
     patch /usr/bin/autopkgtest-build-lxd <<'EOF'
 @@ -70,6 +70,8 @@
- 
+
      sleep 5
      if lxc exec "$CONTAINER" -- systemctl mask serial-getty@getty.service; then
 +       lxc exec "$CONTAINER" -- systemctl mask snapd.service
 +       lxc exec "$CONTAINER" -- systemctl mask snapd.seeded.service
         lxc exec "$CONTAINER" -- reboot
      fi
- 
+
 EOF
 
 # help debugging if building lxd image still fails
@@ -46,20 +46,15 @@ if [ -d ../../binaries ]; then
     lxc file push -r ../../binaries systemd-lxc/root/
 fi
 
-# systemd-sysusers is unable to pass credentials on privileged containers (LP: #1950787)
-lxc exec systemd-lxc -- mkdir -p /etc/systemd/system/systemd-sysusers.service.d
-lxc exec systemd-lxc -- sh -c "echo [Service] > /etc/systemd/system/systemd-sysusers.service.d/override.conf"
-lxc exec systemd-lxc -- sh -c "echo LoadCredential= >> /etc/systemd/system/systemd-sysusers.service.d/override.conf"
-
 lxc stop systemd-lxc
 lxc publish systemd-lxc --alias $IMAGE
 
-for t in unit-tests boot-and-services; do
-    autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
-done
-
-# also check tests in privileged containers
-lxc profile set default security.privileged "true"
+# Only test unprivileged LXD containers, since privileged LXD containers cause LoadCredential= (LP: #1950787),
+# and other things to break. According to upstream LXD, we should not worry to much about privileged LXD
+# containers anyways (see https://bugs.launchpad.net/ubuntu/+source/lxd/+bug/1950787/comments/4).
+#
+# We would like to have a simple boot smoke test for privileged LXD containers still, but cannot do
+# so until LP: #1998943 is fixed in autopkgtest.
 for t in unit-tests boot-and-services; do
     autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
 done
