@@ -253,7 +253,6 @@ poweroff\n''')
         self.assertRegex(out, b'Container c1.*shut down')
         self.assertEqual(nspawn.returncode, 0)
 
-    @unittest.skip('Broken on Linux > 5.10, see https://github.com/systemd/systemd/issues/20989')
     def test_service(self):
         self.assertTrue(os.path.isdir('/var/lib/machines'))
         cont = '/var/lib/machines/c1'
