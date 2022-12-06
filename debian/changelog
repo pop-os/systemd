@@ -1,3 +1,13 @@
+systemd (252.2-2) unstable; urgency=medium
+
+  * Keep policykit-1 as alternative dependency to polkitd for systemd.
+    This will make backports easier.
+  * Update remaining policykit-1 (test) dependencies and prefer polkitd.
+    Keep the policykit-1 dependency as alternative for easier backports.
+    (Closes: #1025591)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 06 Dec 2022 20:30:29 +0100
+
 systemd (252.2-1) unstable; urgency=medium
 
   [ Helmut Grohne ]
