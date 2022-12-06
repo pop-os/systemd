@@ -1,4 +1,4 @@
-systemd (252.1-1ubuntu1) UNRELEASED; urgency=medium
+systemd (252.1-1ubuntu1) lunar; urgency=medium
 
   [ Nick Rosbrook ]
   * Merge 252.1-1 from Debian unstable
@@ -92,7 +92,7 @@ systemd (252.1-1ubuntu1) UNRELEASED; urgency=medium
     File: debian/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5501f9d2629d4e22dc45e6569946aefd9c78d3c6
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 06 Dec 2022 10:57:20 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 06 Dec 2022 11:00:38 -0500
 
 systemd (252.1-1) unstable; urgency=medium
 
