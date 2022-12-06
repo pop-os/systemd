@@ -1,3 +1,99 @@
+systemd (252.1-1ubuntu1) UNRELEASED; urgency=medium
+
+  [ Nick Rosbrook ]
+  * Merge 252.1-1 from Debian unstable
+    - Resolve merge conflicts:
+      + debian/patches: Do not take back Add-support-for-TuxOnIce-hibernation.patch.
+      + debian/libsystemd0.symbols: Increment sd_hwdb_new_from_path min version
+        to reduce delta with Debian.
+      + debian/control: Keep Ubuntu systemd-repart delta for now.
+      + debian/rules: Keep our diff for TPM2 build on i386
+      + debian/systemd-resolved.postrm: Take Debian DPKG_ROOT changes, removing
+        the Ubuntu delta.
+    - Drop patches:
+      + Drop sd-hwdb-add-sd_hwdb_new_from_path.patch:
+        Applied upstream: https://github.com/systemd/systemd-stable/commit/60f0ba7556
+      + Drop test-copy-libgcc_s.so.1-to-TPM2-test-image-on-Debian-like.patch:
+        Applied upstream: https://github.com/systemd/systemd-stable/commit/ddbc88188c
+      + Drop lp1991829-add-CAP_LINUX_IMMUTABLE-to-systemd-machined-so-it-ca.patch:
+        Applied upstream: https://github.com/systemd/systemd-stable/commit/137d162c42
+      + Drop hwdb-implement-root-option-for-systemd-hwdb-query.patch:
+        Applied upstream: https://github.com/systemd/systemd-stable/commit/beff73f94e
+      + Drop lp1978079-pstore-Run-after-modules-are-loaded.patch:
+        Applied upstream: https://github.com/systemd/systemd-stable/commit/70e74a5997
+      + Drop debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch:
+        It looks like this has not been a problem upstream. Let's try it again
+        in autopkgtest.
+      + Drop debian/deny-list-upstream-test-02-ppc64el.patch:
+        There was never any movement on the upstream issue. Since it has been a
+        while, let's re-enable for now to see if it is still a problem.
+      + Drop debian/deny-list-upstream-test-25.patch:
+        It's been a while, let's see if this still presents a problem.
+      + Drop lp1989969-test-deny-list-TEST-36-NUMAPOLICY-on-ppc64el.patch:
+        This is likely due to [1], and is not specific to TEST-36-NUMAPOLICY.
+        [1] https://github.com/systemd/systemd/issues/25091
+      + Drop lp1950794-Revert-sd-dhcp-do-not-use-detect_container-to-guess-.patch:
+        This patch no longer applies, see:
+        https://github.com/systemd/systemd/commit/14805b1468
+    - Refresh patches
+    - debian/gbp.conf: Update debian-branch to ubuntu-lunar
+      File: debian/gbp.conf
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=aa7b7c457ce90478b38fc73e628f8b5a4874614f
+    - debian/rules: do not enable libqrencode on i386
+      Files:
+      - debian/control
+      - debian/rules
+      - debian/tests/control
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3ed5e1433e2ee05e2941f0e16ebc482933a382fd
+    - Add handling for /etc/default/locale to firstboot.
+      The TEST-74-AUX-UTILS upstream test revealed that firstboot does not
+      currently handle Debian's /etc/default/locale.
+      File: debian/patches/debian/Use-Debian-specific-config-files.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9dc07337354155b100ea0423ed090f3dc6040a7a
+    - test: remove no-longer-needed quirk for set-locale on Debian/Ubuntu
+      File: debian/patches/test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e14e582fe158c7e63d6146386ec901fededa2e78
+    - oomd: always allow root-owned cgroups to set ManagedOOMPreference
+      File: debian/patches/oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e2fc04c5a6dfbe4bada17f117b957febcc5356d7
+    - oomd: fix unreachable test case in test-oomd-util
+      File: debian/patches/oomd-fix-unreachable-test-case-in-test-oomd-util.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a9ad5284e2730c777fbc4dd7919be1631b788c44
+    - test: make sure mount point exists in testsuite-64.sh
+      File: debian/patches/test-make-sure-mount-point-exists-in-testsuite-64.sh.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1a6bae6133ebe11108b1b8515da7371e5567a189
+    - test: handle Debian's /etc/default/locale in testsuite-74.firstboot.sh
+      File: debian/patches/test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5e80690a112fb579070d99d6cbd3623f3cea790c
+    - test: skip some tests when machine-id is not initialized
+      File: debian/patches/test-skip-some-tests-when-machine-id-is-not-initialized.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=362c58ae565eefc172f085dc22f5058c5d3adb85
+    - debian/tests: stop testing in privileged LXD containers
+      File: debian/tests/tests-in-lxd
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a74c46945722f9bb8d925543a0fabe64d38f7c8f
+    - debian/systemd.postinst: drop our v234-specific delta.
+      Upgrades from systems this old are not supported to Lunar and newer.
+      File: debian/systemd.postinst
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a3f79c2d259da6d0537cb4a31e0eb7bf0c2aaeff
+    - debian/tests: stop skipping test_service in boot-and-services.
+      The linked github issue has been resolved and is included in this
+      release.
+      File: debian/tests/boot-and-services
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bdb12cb08e0f959ff875713a78cb2a3beadae87e
+    - debian/systemd-resolved.postinst: consolidate Ubuntu delta
+      File: debian/systemd-resolved.postinst
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7f6c0a62320ce5670ba9a0648ae54af24ae3dc1c
+
+  [ Luca Boccassi ]
+  * Build depend on dh-package-notes, sequence was removed.
+    Only the makefile is in use now, no files are generated at build time
+    as --package-metadata from the linkers is used now
+    Author: Luca Boccassi
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5501f9d2629d4e22dc45e6569946aefd9c78d3c6
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 06 Dec 2022 10:57:20 -0500
+
 systemd (252.1-1) unstable; urgency=medium
 
   * d/watch: switch back to stable repository
