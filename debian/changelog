@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.6pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Tue, 06 Dec 2022 09:34:55 -0700
+
 systemd (249.11-0ubuntu3.6) jammy; urgency=medium
 
   * Deny-list TEST-58-REPART on ppc64el (LP: #1988994)
