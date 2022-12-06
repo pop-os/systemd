@@ -44,7 +44,7 @@ Depends: systemd,
   pkg-config,
   cryptsetup-bin,
   systemd-sysv,
-  policykit-1,
+  polkitd | policykit-1,
   dnsmasq-base
 Restrictions: needs-root, isolation-container, breaks-testbed
 
@@ -59,7 +59,7 @@ Depends: systemd,
   pkg-config,
   cryptsetup-bin,
   systemd-sysv,
-  policykit-1,
+  polkitd | policykit-1,
   dnsmasq-base,
   build-essential,
   libsystemd-dev,

@@ -510,7 +510,7 @@ Depends: ${shlibs:Depends},
          default-dbus-system-bus | dbus-system-bus
 Recommends: libnss-myhostname,
             libnss-resolve,
-Suggests: policykit-1,
+Suggests: polkitd | policykit-1,
 Provides: resolvconf
 Conflicts: resolvconf
 Replaces: resolvconf,
