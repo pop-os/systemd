@@ -1,3 +1,9 @@
+systemd (252.3-1) UNRELEASED; urgency=medium
+
+  * New upstream version 252.3
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 10 Dec 2022 18:18:30 +0100
+
 systemd (252.2-2) unstable; urgency=medium
 
   * Keep policykit-1 as alternative dependency to polkitd for systemd.
