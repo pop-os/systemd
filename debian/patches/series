@@ -16,3 +16,4 @@ debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
+debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
