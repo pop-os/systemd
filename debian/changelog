@@ -1,3 +1,11 @@
+systemd (252.3-2) unstable; urgency=medium
+
+  * Skip flaky test_resolved_domain_restricted_dns in networkd-test.py.
+    This test is part of DnsmasqClientTest and does not work reliably under
+    LXC/debci, so skip it for the time being. (Closes: #1025908)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 13 Dec 2022 01:03:58 +0100
+
 systemd (252.3-1) unstable; urgency=medium
 
   * New upstream version 252.3
