@@ -10,15 +10,17 @@ keyboard configuration.
 Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c     |  34 +++++++--
- src/firstboot/firstboot.c |  12 ++--
- src/locale/localed-util.c | 174 ++++++++++++++++++++--------------------------
- src/shared/locale-setup.c |  24 +++++--
+ src/firstboot/firstboot.c |  12 ++-
+ src/locale/localed-util.c | 188 ++++++++++++++++++++--------------------------
+ src/shared/locale-setup.c |  24 ++++--
  src/timedate/timedated.c  |  21 +++++-
- 5 files changed, 148 insertions(+), 117 deletions(-)
+ 5 files changed, 155 insertions(+), 124 deletions(-)
 
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 71b2f67..fa00d9d 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1475,19 +1475,43 @@
+@@ -1475,19 +1475,43 @@ int get_timezone(char **ret) {
          const char *e;
          char *z;
          int r;
@@ -67,6 +69,8 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
+diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
+index 63db78b..3242534 100644
 --- a/src/firstboot/firstboot.c
 +++ b/src/firstboot/firstboot.c
 @@ -308,12 +308,16 @@ static int prompt_locale(void) {
@@ -98,9 +102,11 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                  if (r != -ENOENT) {
                          if (r < 0)
                                  return log_error_errno(r, "Failed to copy %s: %m", etc_localeconf);
+diff --git a/src/locale/localed-util.c b/src/locale/localed-util.c
+index dd2bbf5..4df9da6 100644
 --- a/src/locale/localed-util.c
 +++ b/src/locale/localed-util.c
-@@ -142,7 +142,7 @@
+@@ -142,7 +142,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                  c->x11_cache = sd_bus_message_ref(m);
          }
  
@@ -109,7 +115,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                  if (errno != ENOENT)
                          return -errno;
  
-@@ -159,60 +159,14 @@
+@@ -159,60 +159,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
          c->x11_mtime = t;
          context_free_x11(c);
  
@@ -120,12 +126,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 -        for (;;) {
 -                _cleanup_free_ char *line = NULL;
 -                char *l;
-+        r = parse_env_file(NULL, "/etc/default/keyboard",
-+                           "XKBMODEL",          &c->x11_model,
-+                           "XKBLAYOUT",         &c->x11_layout,
-+                           "XKBVARIANT",        &c->x11_variant,
-+                           "XKBOPTIONS",        &c->x11_options);
- 
+-
 -                r = read_line(f, LONG_LINE_MAX, &line);
 -                if (r < 0)
 -                        return r;
@@ -172,12 +173,18 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 -                } else if (in_section && first_word(l, "EndSection"))
 -                        in_section = false;
 -        }
++        r = parse_env_file(NULL, "/etc/default/keyboard",
++                           "XKBMODEL",          &c->x11_model,
++                           "XKBLAYOUT",         &c->x11_layout,
++                           "XKBVARIANT",        &c->x11_variant,
++                           "XKBOPTIONS",        &c->x11_options);
++
 +        if (r < 0)
 +                return r;
  
          return 0;
  }
-@@ -253,68 +207,92 @@
+@@ -253,69 +207,93 @@ int vconsole_write_data(Context *c) {
  }
  
  int x11_write_data(Context *c) {
@@ -191,32 +198,11 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 -            isempty(c->x11_model) &&
 -            isempty(c->x11_variant) &&
 -            isempty(c->x11_options)) {
--
--                if (unlink("/etc/X11/xorg.conf.d/00-keyboard.conf") < 0)
--                        return errno == ENOENT ? 0 : -errno;
--
--                c->vc_mtime = USEC_INFINITY;
--                return 0;
--        }
--
--        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
--        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
--        if (r < 0)
 +        r = load_env_file(NULL, "/etc/default/keyboard", &l);
 +        if (r < 0 && r != -ENOENT)
-                 return r;
++                return r;
  
--        (void) fchmod(fileno(f), 0644);
--
--        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
--              "# probably wise not to edit this file manually. Use localectl(1) to\n"
--              "# instruct systemd-localed to update it.\n"
--              "Section \"InputClass\"\n"
--              "        Identifier \"system-keyboard\"\n"
--              "        MatchIsKeyboard \"on\"\n", f);
--
--        if (!isempty(c->x11_layout))
--                fprintf(f, "        Option \"XkbLayout\" \"%s\"\n", c->x11_layout);
+-                if (unlink("/etc/X11/xorg.conf.d/00-keyboard.conf") < 0)
 +        /* This could perhaps be done more elegantly using an array
 +         * like we do for the locale, instead of struct
 +         */
@@ -234,9 +220,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 +                        return r;
 +                }
 +        }
- 
--        if (!isempty(c->x11_model))
--                fprintf(f, "        Option \"XkbModel\" \"%s\"\n", c->x11_model);
++
 +        if (isempty(c->x11_model)) {
 +                l = strv_env_unset(l, "XKBMODEL");
 +        } else {
@@ -251,9 +235,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 +                        return r;
 +                }
 +        }
- 
--        if (!isempty(c->x11_variant))
--                fprintf(f, "        Option \"XkbVariant\" \"%s\"\n", c->x11_variant);
++
 +        if (isempty(c->x11_variant)) {
 +                l = strv_env_unset(l, "XKBVARIANT");
 +        } else {
@@ -268,9 +250,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 +                        return r;
 +                }
 +        }
- 
--        if (!isempty(c->x11_options))
--                fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
++
 +        if (isempty(c->x11_options)) {
 +                l = strv_env_unset(l, "XKBOPTIONS");
 +        } else {
@@ -285,42 +265,74 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 +                        return r;
 +                }
 +        }
- 
--        fputs("EndSection\n", f);
++
 +        if (strv_isempty(l)) {
 +                strv_free(l);
- 
--        r = fflush_sync_and_check(f);
--        if (r < 0)
--                goto fail;
++
 +                if (unlink("/etc/default/keyboard") < 0)
-+                        return errno == ENOENT ? 0 : -errno;
+                         return errno == ENOENT ? 0 : -errno;
  
--        if (rename(temp_path, "/etc/X11/xorg.conf.d/00-keyboard.conf") < 0) {
--                r = -errno;
--                goto fail;
-+                c->vc_mtime = USEC_INFINITY;
-+                return 0;
+                 c->vc_mtime = USEC_INFINITY;
+                 return 0;
          }
  
--        if (stat("/etc/X11/xorg.conf.d/00-keyboard.conf", &st) >= 0)
--                c->x11_mtime = timespec_load(&st.st_mtim);
--
--        return 0;
+-        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
+-        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
+-        if (r < 0)
+-                return r;
 +        r = write_env_file("/etc/default/keyboard", l);
 +        strv_free(l);
  
+-        (void) fchmod(fileno(f), 0644);
+-
+-        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
+-              "# probably wise not to edit this file manually. Use localectl(1) to\n"
+-              "# instruct systemd-localed to update it.\n"
+-              "Section \"InputClass\"\n"
+-              "        Identifier \"system-keyboard\"\n"
+-              "        MatchIsKeyboard \"on\"\n", f);
+-
+-        if (!isempty(c->x11_layout))
+-                fprintf(f, "        Option \"XkbLayout\" \"%s\"\n", c->x11_layout);
+-
+-        if (!isempty(c->x11_model))
+-                fprintf(f, "        Option \"XkbModel\" \"%s\"\n", c->x11_model);
+-
+-        if (!isempty(c->x11_variant))
+-                fprintf(f, "        Option \"XkbVariant\" \"%s\"\n", c->x11_variant);
+-
+-        if (!isempty(c->x11_options))
+-                fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
+-
+-        fputs("EndSection\n", f);
+-
+-        r = fflush_sync_and_check(f);
+-        if (r < 0)
+-                goto fail;
+-
+-        if (rename(temp_path, "/etc/X11/xorg.conf.d/00-keyboard.conf") < 0) {
+-                r = -errno;
+-                goto fail;
+-        }
+-
+-        if (stat("/etc/X11/xorg.conf.d/00-keyboard.conf", &st) >= 0)
++        if (r >= 0 && stat("/etc/default/keyboard", &st) >= 0)
+                 c->x11_mtime = timespec_load(&st.st_mtim);
+ 
+-        return 0;
+-
 -fail:
 -        if (temp_path)
 -                (void) unlink(temp_path);
-+        if (r >= 0 && stat("/etc/default/keyboard", &st) >= 0)
-+                c->x11_mtime = timespec_load(&st.st_mtim);
- 
+-
          return r;
  }
+ 
+diff --git a/src/shared/locale-setup.c b/src/shared/locale-setup.c
+index b8c6647..be7efcb 100644
 --- a/src/shared/locale-setup.c
 +++ b/src/shared/locale-setup.c
-@@ -49,14 +49,20 @@
+@@ -49,14 +49,20 @@ int locale_context_load(LocaleContext *c, LocaleLoadFlag flag) {
          }
  
          if (FLAGS_SET(flag, LOCALE_LOAD_LOCALE_CONF)) {
@@ -343,7 +355,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                          /* If mtime is not changed, then we do not need to re-read the file. */
                          t = timespec_load(&st.st_mtim);
                          if (c->mtime != USEC_INFINITY && t == c->mtime)
-@@ -65,7 +71,7 @@
+@@ -65,7 +71,7 @@ int locale_context_load(LocaleContext *c, LocaleLoadFlag flag) {
                          locale_context_clear(c);
                          c->mtime = t;
  
@@ -352,7 +364,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                                             "LANG",              &c->locale[VARIABLE_LANG],
                                             "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
                                             "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
-@@ -81,7 +87,7 @@
+@@ -81,7 +87,7 @@ int locale_context_load(LocaleContext *c, LocaleLoadFlag flag) {
                                             "LC_MEASUREMENT",    &c->locale[VARIABLE_LC_MEASUREMENT],
                                             "LC_IDENTIFICATION", &c->locale[VARIABLE_LC_IDENTIFICATION]);
                          if (r < 0)
@@ -361,7 +373,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  
                          goto finalize;
                  }
-@@ -149,17 +155,21 @@
+@@ -149,17 +155,21 @@ int locale_context_save(LocaleContext *c, char ***ret_set, char ***ret_unset) {
          _cleanup_strv_free_ char **set = NULL, **unset = NULL;
          struct stat st;
          int r;
@@ -384,7 +396,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                          return errno == ENOENT ? 0 : -errno;
  
                  c->mtime = USEC_INFINITY;
-@@ -170,11 +180,11 @@
+@@ -170,11 +180,11 @@ int locale_context_save(LocaleContext *c, char ***ret_set, char ***ret_unset) {
                  return 0;
          }
  
@@ -398,9 +410,11 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                  c->mtime = timespec_load(&st.st_mtim);
  
          if (ret_set)
+diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
+index 373574c..bc84f3b 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -296,6 +296,8 @@
+@@ -296,6 +296,8 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
@@ -409,7 +423,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  
          assert(c);
  
-@@ -309,9 +311,12 @@
+@@ -309,9 +311,12 @@ static int context_write_data_timezone(Context *c) {
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
                          if (unlink("/etc/localtime") < 0 && errno != ENOENT)
@@ -424,7 +438,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
                  }
  
                  source = "../usr/share/zoneinfo/UTC";
-@@ -323,7 +328,17 @@
+@@ -323,7 +328,17 @@ static int context_write_data_timezone(Context *c) {
                  source = p;
          }
  
