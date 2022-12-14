@@ -38,7 +38,6 @@ test-increase-QEMU_MEM-for-some-tests.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
-oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch
 test-make-sure-mount-point-exists-in-testsuite-64.sh.patch
 test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
 test-skip-some-tests-when-machine-id-is-not-initialized.patch
