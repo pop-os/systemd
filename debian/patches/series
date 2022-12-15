@@ -45,3 +45,4 @@ lp1999275-binfmt-util-split-out-binfmt_mounted.patch
 lp1999275-binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
 lp1999275-binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
 lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
+debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
