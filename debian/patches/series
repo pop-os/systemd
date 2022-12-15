@@ -40,3 +40,8 @@ test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
 test-make-sure-mount-point-exists-in-testsuite-64.sh.patch
 test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
 test-skip-some-tests-when-machine-id-is-not-initialized.patch
+lp1999275-stat-util-introduce-fd_is_read_only_fs.patch
+lp1999275-binfmt-util-split-out-binfmt_mounted.patch
+lp1999275-binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
+lp1999275-binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
+lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch

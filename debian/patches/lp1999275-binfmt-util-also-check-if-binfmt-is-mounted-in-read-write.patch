@@ -1,0 +1,41 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 10 Dec 2022 11:32:24 +0900
+Subject: binfmt-util: also check if binfmt is mounted in read-write
+
+Origin: upstream, https://github.com/systemd/systemd/commit/5aaa79ce96997825b4dcdcf5be10d8f955fb3339
+Bug-Ubuntu: https://launchpad.net/bugs/1999275
+
+---
+ src/shared/binfmt-util.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/binfmt-util.c b/src/shared/binfmt-util.c
+index e813c3e..51fc245 100644
+--- a/src/shared/binfmt-util.c
++++ b/src/shared/binfmt-util.c
+@@ -8,6 +8,7 @@
+ #include "errno-util.h"
+ #include "fd-util.h"
+ #include "fileio.h"
++#include "fs-util.h"
+ #include "missing_magic.h"
+ #include "stat-util.h"
+ 
+@@ -25,7 +26,7 @@ static int binfmt_mounted(void) {
+         if (r <= 0)
+                 return r;
+ 
+-        return true;
++        return access_fd(fd, W_OK) >= 0;
+ }
+ 
+ int disable_binfmt(void) {
+@@ -41,7 +42,7 @@ int disable_binfmt(void) {
+         if (r < 0)
+                 return log_warning_errno(r, "Failed to determine whether binfmt_misc is mounted: %m");
+         if (r == 0) {
+-                log_debug("binfmt_misc is not mounted, not detaching entries.");
++                log_debug("binfmt_misc is not mounted in read-write mode, not detaching entries.");
+                 return 0;
+         }
+ 

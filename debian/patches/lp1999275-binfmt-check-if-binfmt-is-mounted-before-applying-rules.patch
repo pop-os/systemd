@@ -1,0 +1,90 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 10 Dec 2022 11:42:50 +0900
+Subject: binfmt: check if binfmt is mounted before applying rules
+
+Origin: upstream, https://github.com/systemd/systemd/commit/94ba5b15329d9d19277ca418bfd0266da98f7b2a
+Bug-Ubuntu: https://launchpad.net/bugs/1999275
+
+---
+ src/binfmt/binfmt.c      | 24 ++++++++++++++++++++++--
+ src/shared/binfmt-util.c |  2 +-
+ src/shared/binfmt-util.h |  1 +
+ 3 files changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/src/binfmt/binfmt.c b/src/binfmt/binfmt.c
+index 71cb56a..f43b539 100644
+--- a/src/binfmt/binfmt.c
++++ b/src/binfmt/binfmt.c
+@@ -189,6 +189,18 @@ static int parse_argv(int argc, char *argv[]) {
+         return 1;
+ }
+ 
++static int binfmt_mounted_warn(void) {
++        int r;
++
++        r = binfmt_mounted();
++        if (r < 0)
++                return log_error_errno(r, "Failed to check if /proc/sys/fs/binfmt_misc is mounted: %m");
++        if (r == 0)
++                log_debug("/proc/sys/fs/binfmt_misc is not mounted in read-write mode, skipping.");
++
++        return r;
++}
++
+ static int run(int argc, char *argv[]) {
+         int r, k;
+ 
+@@ -205,13 +217,17 @@ static int run(int argc, char *argv[]) {
+         if (arg_unregister)
+                 return disable_binfmt();
+ 
+-        if (argc > optind)
++        if (argc > optind) {
++                r = binfmt_mounted_warn();
++                if (r <= 0)
++                        return r;
++
+                 for (int i = optind; i < argc; i++) {
+                         k = apply_file(argv[i], false);
+                         if (k < 0 && r >= 0)
+                                 r = k;
+                 }
+-        else {
++        } else {
+                 _cleanup_strv_free_ char **files = NULL;
+ 
+                 r = conf_files_list_strv(&files, ".conf", NULL, 0, (const char**) CONF_PATHS_STRV("binfmt.d"));
+@@ -224,6 +240,10 @@ static int run(int argc, char *argv[]) {
+                         return cat_files(NULL, files, 0);
+                 }
+ 
++                r = binfmt_mounted_warn();
++                if (r <= 0)
++                        return r;
++
+                 /* Flush out all rules */
+                 r = write_string_file("/proc/sys/fs/binfmt_misc/status", "-1", WRITE_STRING_FILE_DISABLE_BUFFER);
+                 if (r < 0)
+diff --git a/src/shared/binfmt-util.c b/src/shared/binfmt-util.c
+index 51fc245..a261754 100644
+--- a/src/shared/binfmt-util.c
++++ b/src/shared/binfmt-util.c
+@@ -12,7 +12,7 @@
+ #include "missing_magic.h"
+ #include "stat-util.h"
+ 
+-static int binfmt_mounted(void) {
++int binfmt_mounted(void) {
+         _cleanup_close_ int fd = -EBADF;
+         int r;
+ 
+diff --git a/src/shared/binfmt-util.h b/src/shared/binfmt-util.h
+index 2f008d1..13f4548 100644
+--- a/src/shared/binfmt-util.h
++++ b/src/shared/binfmt-util.h
+@@ -1,4 +1,5 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ #pragma once
+ 
++int binfmt_mounted(void);
+ int disable_binfmt(void);

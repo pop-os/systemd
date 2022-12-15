@@ -1,0 +1,26 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 10 Dec 2022 11:46:45 +0900
+Subject: unit: check more specific path to be written by systemd-binfmt
+
+Origin: upstream, https://github.com/systemd/systemd/commit/f74a7cb45c2458f90de6d37c70fa3afc1a3be279
+Bug-Ubuntu: https://launchpad.net/bugs/1999275
+
+Follow-up for 41807efb1594ae8e71e0255e154ea7d17be2251a.
+Replaces #25690.
+---
+ units/systemd-binfmt.service.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/units/systemd-binfmt.service.in b/units/systemd-binfmt.service.in
+index a702c0d..b04412e 100644
+--- a/units/systemd-binfmt.service.in
++++ b/units/systemd-binfmt.service.in
+@@ -18,7 +18,7 @@ After=proc-sys-fs-binfmt_misc.automount
+ After=proc-sys-fs-binfmt_misc.mount
+ After=local-fs.target
+ Before=sysinit.target shutdown.target
+-ConditionPathIsReadWrite=/proc/sys/
++ConditionPathIsMountPoint=/proc/sys/fs/binfmt_misc
+ ConditionDirectoryNotEmpty=|/lib/binfmt.d
+ ConditionDirectoryNotEmpty=|/usr/lib/binfmt.d
+ ConditionDirectoryNotEmpty=|/usr/local/lib/binfmt.d

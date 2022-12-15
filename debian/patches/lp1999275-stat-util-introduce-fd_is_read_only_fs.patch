@@ -1,0 +1,61 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 10 Dec 2022 11:23:05 +0900
+Subject: stat-util: introduce fd_is_read_only_fs()
+
+Origin: upstream, https://github.com/systemd/systemd/commit/dc1752ea72ef9cda3fc4c9445a8dc436bd900884
+Bug-Ubuntu: https://launchpad.net/bugs/1999275
+
+Then, reimplement path_is_read_only_fs() by the function to avoid race.
+---
+ src/basic/stat-util.c | 25 ++++++++++++++++++-------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/src/basic/stat-util.c b/src/basic/stat-util.c
+index 51adaca..a467321 100644
+--- a/src/basic/stat-util.c
++++ b/src/basic/stat-util.c
+@@ -162,26 +162,37 @@ int null_or_empty_fd(int fd) {
+         return null_or_empty(&st);
+ }
+ 
+-int path_is_read_only_fs(const char *path) {
++static int fd_is_read_only_fs(int fd) {
+         struct statvfs st;
+ 
+-        assert(path);
++        assert(fd >= 0);
+ 
+-        if (statvfs(path, &st) < 0)
++        if (fstatvfs(fd, &st) < 0)
+                 return -errno;
+ 
+         if (st.f_flag & ST_RDONLY)
+                 return true;
+ 
+-        /* On NFS, statvfs() might not reflect whether we can actually
+-         * write to the remote share. Let's try again with
+-         * access(W_OK) which is more reliable, at least sometimes. */
+-        if (access(path, W_OK) < 0 && errno == EROFS)
++        /* On NFS, fstatvfs() might not reflect whether we can actually write to the remote share. Let's try
++         * again with access(W_OK) which is more reliable, at least sometimes. */
++        if (access_fd(fd, W_OK) == -EROFS)
+                 return true;
+ 
+         return false;
+ }
+ 
++int path_is_read_only_fs(const char *path) {
++        _cleanup_close_ int fd = -EBADFD;
++
++        assert(path);
++
++        fd = open(path, O_CLOEXEC | O_PATH);
++        if (fd < 0)
++                return -errno;
++
++        return fd_is_read_only_fs(fd);
++}
++
+ int files_same(const char *filea, const char *fileb, int flags) {
+         struct stat a, b;
+ 
