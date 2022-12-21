@@ -113,9 +113,6 @@ Description: system and service manager
  Linux control groups, maintains mount and automount points and implements an
  elaborate transactional dependency-based service control logic.
  .
- systemd is compatible with SysV and LSB init scripts and can work as a
- drop-in replacement for sysvinit.
- .
  Installing the systemd package will not switch your init system unless you
  boot with init=/lib/systemd/systemd or install systemd-sysv in addition.
 
@@ -131,19 +128,11 @@ Pre-Depends: systemd
 Depends: ${misc:Depends},
 Recommends: libpam-systemd,
             libnss-systemd
-Description: system and service manager - SysV links
- systemd is a system and service manager for Linux. It provides aggressive
- parallelization capabilities, uses socket and D-Bus activation for starting
- services, offers on-demand starting of daemons, keeps track of processes using
- Linux control groups, maintains mount and automount points and implements an
- elaborate transactional dependency-based service control logic.
+Description: system and service manager - SysV compatibility symlinks
+ This package provides manual pages and compatibility symlinks needed for
+ systemd to replace sysvinit.
  .
- systemd is compatible with SysV and LSB init scripts and can work as a
- drop-in replacement for sysvinit.
- .
- This package provides the manual pages and links needed for systemd
- to replace sysvinit. Installing systemd-sysv will overwrite /sbin/init with a
- link to systemd.
+ Installing systemd-sysv will overwrite /sbin/init with a symlink to systemd.
 
 Package: systemd-container
 Build-Profiles: <!stage1>
