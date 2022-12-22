@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 3570494..6898526 100644
+index b7768d9..2f6d9c8 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3346,6 +3346,15 @@ executable(
+@@ -3348,6 +3348,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -1004,7 +1004,7 @@ index 8378df8..4b1cd43 100644
  OnFailure=emergency.target
  OnFailureJobMode=replace-irreversibly
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 06b91aea..de0b767 100644
+index 06b91ae..de0b767 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
 @@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)
