@@ -1,3 +1,13 @@
+systemd (252.4-1) unstable; urgency=medium
+
+  * Enable p11kit. Backport patch to dlopen-ify p11kit support and enable
+    it. (Closes: #1023635)
+  * New upstream version 252.4. (Closes: #1026831 and fixes CVE-2022-4415)
+  * Refresh patches
+  * Bump Standards-Version to 4.6.2, no changes
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 22 Dec 2022 12:26:41 +0100
+
 systemd (252.3-2) unstable; urgency=medium
 
   * Skip flaky test_resolved_domain_restricted_dns in networkd-test.py.
