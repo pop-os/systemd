@@ -455,7 +455,7 @@ Description: Userspace out-of-memory (OOM) killer
 
 Package: systemd-repart
 Section: admin
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
