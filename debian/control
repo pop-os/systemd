@@ -9,7 +9,7 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Martin Pitt <mpitt@debian.org>,
            Felipe Sateler <fsateler@debian.org>,
            Luca Boccassi <bluca@debian.org>,
-Standards-Version: 4.6.1
+Standards-Version: 4.6.2
 Rules-Requires-Root: no
 Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
@@ -57,6 +57,7 @@ Build-Depends: debhelper-compat (= 13),
                libzstd-dev (>= 1.4.0),
                libtss2-dev [!i386] <!stage1>,
                libfido2-dev <!stage1>,
+               libp11-kit-dev <!stage1>,
                libssl-dev <!stage1>,
                libqrencode-dev [!i386] <!stage1>,
                linux-base <!nocheck>,
@@ -86,6 +87,7 @@ Suggests: systemd-container,
           systemd-userdbd,
           systemd-boot,
           libfido2-1,
+          libp11-kit0,
           libqrencode4,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,

@@ -13,9 +13,11 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  src/core/unit.c | 11 +----------
  1 file changed, 1 insertion(+), 10 deletions(-)
 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index bed5544..48d76f2 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -4631,16 +4631,7 @@
+@@ -4615,16 +4615,7 @@ int unit_kill_context(
  
                  } else if (r > 0) {
  
