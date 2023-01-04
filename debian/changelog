@@ -1,3 +1,50 @@
+systemd (252.4-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Drop oomd-fix-unreachable-test-case-in-test-oomd-util.patch.
+    Applied upstream: https://github.com/systemd/systemd-stable/commit/bcd42b3c88
+    File: debian/patches/oomd-fix-unreachable-test-case-in-test-oomd-util.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=93cf2f4709a6768d6eeb04153c92bffec0726753
+  * Drop oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch.
+    Applied upstream: https://github.com/systemd/systemd-stable/commit/2bdf5b0382
+    File: debian/patches/oomd-always-allow-root-owned-cgroups-to-set-ManagedOOMPre.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=24f51625bcec9a7b4f32a0caf363b000b173748b
+  * debian/rules: remove explicit -fcf-protection flag.
+    This is included in the default gcc flags on Ubuntu[1], so we do not need
+    this anymore. Drop the diff to reduce our delta from Debian.
+    [1] https://wiki.ubuntu.com/ToolChain/CompilerFlags#A-fcf-protection
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b72bf5bb964aa89769417491fcc99926a06490ba
+  * Revert "Drop systemd.prerm safety check."
+    This reverts commit 0244c4d56556317f14eecc2f51871969ef02ba7b.
+    systemd does not run in a chroot, so /run/systemd/system should not
+    exist in chroots. Debian has kept this without issue, so revert this in
+    order to reduce delta with Debian.
+    File: debian/systemd.prerm
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d7df55f11603022cde6cf897aaddc02624e79336
+  * Drop 0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch.
+    This patch is specific to privileged LXD containers, which we are not
+    testing anymore, so there is no need to carry the patch anymore.
+    File: debian/patches/0001-Revert-tests-add-test-case-for-UMask-BindPaths-combi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2acbc4741346c684ea3fa8aecf1d6ed88a7444cd
+  * binfmt: fix systemd-binfmt in LXD containers (LP: #1999275)
+    Files:
+    - debian/patches/lp1999275-binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
+    - debian/patches/lp1999275-binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
+    - debian/patches/lp1999275-binfmt-util-split-out-binfmt_mounted.patch
+    - debian/patches/lp1999275-stat-util-introduce-fd_is_read_only_fs.patch
+    - debian/patches/lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=41fa3a0420c5633200ecd60add6cadb149c98ccd
+  * debian/patches: update test-skip-some-tests-when-machine-id-is-not-initialized.patch.
+    The latest stable tag includes some, but not all patches which [1] needs
+    to work correctly. For now, just simplify the `machine_id_initialized()`
+    helper and make a note in the patch that the changes were forwarded
+    upstream.
+    [1] https://github.com/systemd/systemd/pull/25732
+    File: debian/patches/test-skip-some-tests-when-machine-id-is-not-initialized.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d17ca14b237f477899c7af793b698dc0740985d1
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 04 Jan 2023 13:55:28 -0500
+
 systemd (252.4-1) unstable; urgency=medium
 
   * Enable p11kit. Backport patch to dlopen-ify p11kit support and enable
