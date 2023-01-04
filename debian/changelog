@@ -1,4 +1,4 @@
-systemd (252.4-1ubuntu1) UNRELEASED; urgency=medium
+systemd (252.4-1ubuntu1) lunar; urgency=medium
 
   * Drop oomd-fix-unreachable-test-case-in-test-oomd-util.patch.
     Applied upstream: https://github.com/systemd/systemd-stable/commit/bcd42b3c88
@@ -43,7 +43,7 @@ systemd (252.4-1ubuntu1) UNRELEASED; urgency=medium
     File: debian/patches/test-skip-some-tests-when-machine-id-is-not-initialized.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d17ca14b237f477899c7af793b698dc0740985d1
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 04 Jan 2023 13:55:28 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 04 Jan 2023 13:56:18 -0500
 
 systemd (252.4-1) unstable; urgency=medium
 
