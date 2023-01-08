@@ -187,6 +187,7 @@ Depends: systemd-tests,
   bind9-dnsutils,
   bind9-host,
   jq,
+  psmisc,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
