@@ -188,6 +188,9 @@ Depends: systemd-tests,
   bind9-host,
   jq,
   psmisc,
+  xkb-data,
+  locales,
+  locales-all,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
