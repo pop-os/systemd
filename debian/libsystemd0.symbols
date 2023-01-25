@@ -33,6 +33,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_250@LIBSYSTEMD_250 250
  LIBSYSTEMD_251@LIBSYSTEMD_251 251
  LIBSYSTEMD_252@LIBSYSTEMD_252 252
+ LIBSYSTEMD_253@LIBSYSTEMD_253 253~rc1
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -106,6 +107,8 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_emit_properties_changed@LIBSYSTEMD_221 221
  sd_bus_emit_properties_changed_strv@LIBSYSTEMD_221 221
  sd_bus_emit_signal@LIBSYSTEMD_221 221
+ sd_bus_emit_signal_to@LIBSYSTEMD_253 253~rc1
+ sd_bus_emit_signal_tov@LIBSYSTEMD_253 253~rc1
  sd_bus_emit_signalv@LIBSYSTEMD_246 246
  sd_bus_enqueue_for_read@LIBSYSTEMD_245 245
  sd_bus_error_add_map@LIBSYSTEMD_221 221
@@ -218,6 +221,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_new_method_errorf@LIBSYSTEMD_221 221
  sd_bus_message_new_method_return@LIBSYSTEMD_221 221
  sd_bus_message_new_signal@LIBSYSTEMD_221 221
+ sd_bus_message_new_signal_to@LIBSYSTEMD_253 253~rc1
  sd_bus_message_open_container@LIBSYSTEMD_221 221
  sd_bus_message_peek_type@LIBSYSTEMD_221 221
  sd_bus_message_read@LIBSYSTEMD_221 221
@@ -619,6 +623,14 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_pid_notify@LIBSYSTEMD_214 214
  sd_pid_notify_with_fds@LIBSYSTEMD_219 219
  sd_pid_notifyf@LIBSYSTEMD_214 214
+ sd_pidfd_get_cgroup@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_machine_name@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_owner_uid@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_session@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_slice@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_unit@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_user_slice@LIBSYSTEMD_253 253~rc1
+ sd_pidfd_get_user_unit@LIBSYSTEMD_253 253~rc1
  sd_seat_can_graphical@LIBSYSTEMD_209 0
  sd_seat_can_multi_session@LIBSYSTEMD_209 0
  sd_seat_can_tty@LIBSYSTEMD_209 0
