@@ -199,11 +199,3 @@ Depends: systemd-sysv,
   gdm3 [!s390x],
   xserver-xorg-video-dummy,
 Restrictions: needs-root, isolation-container, allow-stderr, breaks-testbed
-
-# NOUPSTREAM: Do not run these tests for upstream builds
-
-Tests: systemd-fsckd
-Depends: systemd-sysv,
-  python3,
-  plymouth
-Restrictions: needs-root, isolation-machine, breaks-testbed
