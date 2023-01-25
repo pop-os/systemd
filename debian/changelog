@@ -1,3 +1,51 @@
+systemd (252.4-2) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Refresh patches
+  * Tweak description of systemd and systemd-sysv package.
+    Remove redundancy and de-emphasize sysvinit.
+  * autopkgtest: add psmsic to upstream suite.
+    Needed for the killall binary.
+    See https://github.com/systemd/systemd/pull/24569
+  * autopkgtest: add xkb-data, locales and locales-all to upstream suite.
+    Use locales-all so all necessary locales can be installed into the test
+    image without having to generate them on-the-fly.
+    See https://github.com/systemd/systemd/pull/23709
+  * autopkgtest: prefer knot-dnssecutils over knot-dnsutils for upstream
+    suite.
+    The kzonecheck utility required by TEST-75-RESOLVED was split out from
+    knot-dnsutils into knot-dnssecutils so update the test dependencies
+    accordingly. Keep knot-dnsutils as alternative dependency to make
+    backports easier.
+  * Cherry-pick upstream fixes for TEST-74-AUX-UTILS
+  * Cherry-pick upstream fix for TEST-73-LOCALE
+  * Skip firstboot --prompt-keymap check in TEST-74-AUX-UTILS.
+    This test requires compatible keymaps from kbd which are not available
+    in Debian.
+
+  [ Luca Boccassi ]
+  * autopkgtest: add netlabel-tools to networkd-test.py suite.
+    The netlabelctl tool is needed to test the NetLabel integration.
+    See https://github.com/systemd/systemd/pull/23888
+  * autopkgtest: add bsdutils to upstream suite.
+    The logger utility is now used in TEST-04-JOURNAL.
+    See https://github.com/systemd/systemd/pull/23086
+  * autopkgtest: add knot, knot-dnsutils, bind9-dnsutils, bind9-host to
+    upstream suite.
+    Needed by TEST-75-RESOLVED.
+    See https://github.com/systemd/systemd/pull/23104
+  * autopkgtest: add jq to upstream suite.
+    Needed by TEST-58-REPART.
+    See https://github.com/systemd/systemd/pull/24572
+  * autopkgtest: add mtools to upstream suite.
+    Needed by TEST-58-REPART.
+    See https://github.com/systemd/systemd/pull/24944
+  * autopkgtest: add erofs-utils to upstream suite.
+    Needed by TEST-58-REPART.
+    See https://github.com/systemd/systemd/pull/25686
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 25 Jan 2023 09:17:24 +0100
+
 systemd (252.4-1) unstable; urgency=medium
 
   * Enable p11kit. Backport patch to dlopen-ify p11kit support and enable
