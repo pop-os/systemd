@@ -35,3 +35,4 @@ var/lib
 ../extra/units/* lib/systemd/system/
 ../extra/kernel-install.d/* usr/lib/kernel/install.d
 ../extra/pam.d/* usr/lib/pam.d/
+../extra/journald.conf.d lib/systemd/
