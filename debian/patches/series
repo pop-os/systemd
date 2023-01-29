@@ -1,8 +1,4 @@
 p11kit-switch-to-dlopen.patch
-test-re-enable-skipped-systemd-firstboot-locale-messages-.patch
-test-cover-some-interactive-error-paths-in-firstboot.patch
-test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
-test-fix-TEST-73-LOCALE-on-Debian.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -22,4 +18,3 @@ debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
-debian/test-skip-firstboot-prompt-keymap-check-if-keymaps-are-mi.patch
