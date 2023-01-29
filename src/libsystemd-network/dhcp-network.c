@@ -25,7 +25,9 @@ static int _bind_raw_socket(
                 const struct hw_addr_data *hw_addr,
                 const struct hw_addr_data *bcast_addr,
                 uint16_t arp_type,
-                uint16_t port) {
+                uint16_t port,
+                bool so_priority_set,
+                int so_priority) {
 
         assert(ifindex > 0);
         assert(link);
@@ -98,7 +100,7 @@ static int _bind_raw_socket(
                 .len = ELEMENTSOF(filter),
                 .filter = filter
         };
-        _cleanup_close_ int s = -1;
+        _cleanup_close_ int s = -EBADF;
         int r;
 
         s = socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
@@ -112,6 +114,12 @@ static int _bind_raw_socket(
         r = setsockopt(s, SOL_SOCKET, SO_ATTACH_FILTER, &fprog, sizeof(fprog));
         if (r < 0)
                 return -errno;
+
+        if (so_priority_set) {
+                r = setsockopt_int(s, SOL_SOCKET, SO_PRIORITY, so_priority);
+                if (r < 0)
+                        return r;
+        }
 
         link->ll = (struct sockaddr_ll) {
                 .sll_family = AF_PACKET,
@@ -137,7 +145,9 @@ int dhcp_network_bind_raw_socket(
                 const struct hw_addr_data *hw_addr,
                 const struct hw_addr_data *bcast_addr,
                 uint16_t arp_type,
-                uint16_t port) {
+                uint16_t port,
+                bool so_priority_set,
+                int so_priority) {
 
         static struct hw_addr_data default_eth_bcast = {
                 .length = ETH_ALEN,
@@ -160,13 +170,13 @@ int dhcp_network_bind_raw_socket(
                 return _bind_raw_socket(ifindex, link, xid,
                                         hw_addr,
                                         (bcast_addr && !hw_addr_is_null(bcast_addr)) ? bcast_addr : &default_eth_bcast,
-                                        arp_type, port);
+                                        arp_type, port, so_priority_set, so_priority);
 
         case ARPHRD_INFINIBAND:
                 return _bind_raw_socket(ifindex, link, xid,
                                         &HW_ADDR_NULL,
                                         (bcast_addr && !hw_addr_is_null(bcast_addr)) ? bcast_addr : &default_ib_bcast,
-                                        arp_type, port);
+                                        arp_type, port, so_priority_set, so_priority);
         default:
                 return -EINVAL;
         }
@@ -178,7 +188,7 @@ int dhcp_network_bind_udp_socket(int ifindex, be32_t address, uint16_t port, int
                 .in.sin_port = htobe16(port),
                 .in.sin_addr.s_addr = address,
         };
-        _cleanup_close_ int s = -1;
+        _cleanup_close_ int s = -EBADF;
         int r;
 
         s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);

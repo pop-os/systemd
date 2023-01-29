@@ -24,7 +24,6 @@
 #include "strv.h"
 #include "tests.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 TEST(parse_env_file) {
         _cleanup_(unlink_tempfilep) char
@@ -526,7 +525,7 @@ TEST(search_and_fopen) {
         char name[] = "/tmp/test-search_and_fopen.XXXXXX";
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *e;
         int r;
 
@@ -574,7 +573,7 @@ TEST(search_and_fopen_nulstr) {
         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-search_and_fopen.XXXXXX";
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *e;
         int r;
 
@@ -611,7 +610,7 @@ TEST(writing_tmpfile) {
         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-systemd_writing_tmpfile.XXXXXX";
         _cleanup_free_ char *contents = NULL;
         size_t size;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         struct iovec iov[] = {
@@ -878,7 +877,7 @@ TEST(read_nul_string) {
 
 TEST(read_full_file_socket) {
         _cleanup_(rm_rf_physical_and_freep) char *z = NULL;
-        _cleanup_close_ int listener = -1;
+        _cleanup_close_ int listener = -EBADF;
         _cleanup_free_ char *data = NULL, *clientname = NULL;
         union sockaddr_union sa;
         const char *j, *jj;
@@ -910,7 +909,7 @@ TEST(read_full_file_socket) {
         if (r == 0) {
                 union sockaddr_union peer = {};
                 socklen_t peerlen = sizeof(peer);
-                _cleanup_close_ int rfd = -1;
+                _cleanup_close_ int rfd = -EBADF;
                 /* child */
 
                 rfd = accept4(listener, NULL, 0, SOCK_CLOEXEC);

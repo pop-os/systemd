@@ -150,9 +150,56 @@ if [ -e /usr/lib/systemd/systemd-measure ] && \
     SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE=1 /usr/lib/systemd/systemd-cryptsetup attach test-volume2 $img - tpm2-device=auto,tpm2-signature="/tmp/pcrsign.sig3",headless=1
     /usr/lib/systemd/systemd-cryptsetup detach test-volume2
 
+    # Test --append mode and de-duplication. With the same parameters signing should not add a new entry
+    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: --append="/tmp/pcrsign.sig3" > "/tmp/pcrsign.sig4"
+    cmp "/tmp/pcrsign.sig3" "/tmp/pcrsign.sig4"
+
+    # Sign one more phase, this should
+    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=quux:waldo --append="/tmp/pcrsign.sig4" > "/tmp/pcrsign.sig5"
+    ( ! cmp "/tmp/pcrsign.sig4" "/tmp/pcrsign.sig5" )
+
+    # Should still be good to unlock, given the old entry still exists
+    SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE=0 /usr/lib/systemd/systemd-cryptsetup attach test-volume2 $img - tpm2-device=auto,tpm2-signature="/tmp/pcrsign.sig5",headless=1
+    /usr/lib/systemd/systemd-cryptsetup detach test-volume2
+
+    # Adding both signatures once more should not change anything, due to the deduplication
+    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: --append="/tmp/pcrsign.sig5" > "/tmp/pcrsign.sig6"
+    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=quux:waldo --append="/tmp/pcrsign.sig6" > "/tmp/pcrsign.sig7"
+    cmp "/tmp/pcrsign.sig5" "/tmp/pcrsign.sig7"
+
     rm $img
 else
     echo "/usr/lib/systemd/systemd-measure or PCR sysfs files not found, skipping signed PCR policy test case"
+fi
+
+if [ -e /usr/lib/systemd/systemd-pcrphase ] && \
+       [ -f /sys/class/tpm/tpm0/pcr-sha256/11 ]; then
+
+    # Let's measure the machine ID
+    tpm2_pcrread sha256:15 -Q -o /tmp/oldpcr15
+    mv /etc/machine-id /etc/machine-id.save
+    echo 994013bf23864ee7992eab39a96dd3bb >/etc/machine-id
+    SYSTEMD_FORCE_MEASURE=1 /usr/lib/systemd/systemd-pcrphase --machine-id
+    mv /etc/machine-id.save /etc/machine-id
+    tpm2_pcrread sha256:15 -Q -o /tmp/newpcr15
+
+    # And check it matches expectations
+    ( cat /tmp/oldpcr15 ;
+      echo -n "machine-id:994013bf23864ee7992eab39a96dd3bb" | openssl dgst -binary -sha256 ) | openssl dgst -binary -sha256 | cmp - /tmp/newpcr15
+
+    rm /tmp/oldpcr15 /tmp/newpcr15
+
+    # And similar for the boot phase measurement into PCR 11
+    tpm2_pcrread sha256:11 -Q -o /tmp/oldpcr11
+    SYSTEMD_FORCE_MEASURE=1 /usr/lib/systemd/systemd-pcrphase foobar
+    tpm2_pcrread sha256:11 -Q -o /tmp/newpcr11
+
+    ( cat /tmp/oldpcr11 ;
+      echo -n "foobar" | openssl dgst -binary -sha256 ) | openssl dgst -binary -sha256 | cmp - /tmp/newpcr11
+
+    rm /tmp/oldpcr11 /tmp/newpcr11
+else
+    echo "/usr/lib/systemd/systemd-pcrphase or PCR sysfs files not found, skipping PCR extension test case"
 fi
 
 echo OK >/testok

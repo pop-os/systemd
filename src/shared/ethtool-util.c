@@ -349,7 +349,7 @@ int ethtool_get_link_info(
 }
 
 int ethtool_get_permanent_hw_addr(int *ethtool_fd, const char *ifname, struct hw_addr_data *ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct {
                 struct ethtool_perm_addr addr;
                 uint8_t space[HW_ADDR_MAX_SIZE];
@@ -434,6 +434,8 @@ int ethtool_set_wol(
 
         strscpy(ifr.ifr_name, sizeof(ifr.ifr_name), ifname);
 
+        CLEANUP_ERASE(ecmd);
+
         if (ioctl(*ethtool_fd, SIOCETHTOOL, &ifr) < 0)
                 return -errno;
 
@@ -466,16 +468,11 @@ int ethtool_set_wol(
                 need_update = true;
         }
 
-        if (!need_update) {
-                explicit_bzero_safe(&ecmd, sizeof(ecmd));
+        if (!need_update)
                 return 0;
-        }
 
         ecmd.cmd = ETHTOOL_SWOL;
-        r = RET_NERRNO(ioctl(*ethtool_fd, SIOCETHTOOL, &ifr));
-
-        explicit_bzero_safe(&ecmd, sizeof(ecmd));
-        return r;
+        return RET_NERRNO(ioctl(*ethtool_fd, SIOCETHTOOL, &ifr));
 }
 
 int ethtool_set_nic_buffer_size(int *ethtool_fd, const char *ifname, const netdev_ring_param *ring) {

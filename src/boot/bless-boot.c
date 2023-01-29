@@ -5,6 +5,7 @@
 
 #include "alloc-util.h"
 #include "bootspec.h"
+#include "build.h"
 #include "devnum-util.h"
 #include "efi-api.h"
 #include "efi-loader.h"
@@ -19,7 +20,6 @@
 #include "pretty-print.h"
 #include "sync-util.h"
 #include "terminal-util.h"
-#include "util.h"
 #include "verbs.h"
 #include "virt.h"
 
@@ -360,7 +360,7 @@ static int verb_status(int argc, char *argv[], void *userdata) {
                   left, done);
 
         STRV_FOREACH(p, arg_path) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 fd = open(*p, O_DIRECTORY|O_CLOEXEC|O_RDONLY);
                 if (fd < 0) {
@@ -439,7 +439,7 @@ static int verb_set(int argc, char *argv[], void *userdata) {
         }
 
         STRV_FOREACH(p, arg_path) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 fd = open(*p, O_DIRECTORY|O_CLOEXEC|O_RDONLY);
                 if (fd < 0)

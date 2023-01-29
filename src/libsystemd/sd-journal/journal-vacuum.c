@@ -13,6 +13,7 @@
 #include "fs-util.h"
 #include "journal-def.h"
 #include "journal-file.h"
+#include "journal-internal.h"
 #include "journal-vacuum.h"
 #include "sort-util.h"
 #include "string-util.h"
@@ -84,7 +85,7 @@ static void patch_realtime(
 }
 
 static int journal_file_empty(int dir_fd, const char *name) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
         le64_t n_entries;
         ssize_t n;
@@ -251,7 +252,9 @@ int journal_directory_vacuum(
 
                                 freed += size;
                         } else if (r != -ENOENT)
-                                log_warning_errno(r, "Failed to delete empty archived journal %s/%s: %m", directory, p);
+                                log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                            "Failed to delete empty archived journal %s/%s: %m",
+                                                            directory, p);
 
                         continue;
                 }
@@ -299,7 +302,9 @@ int journal_directory_vacuum(
                                 sum = 0;
 
                 } else if (r != -ENOENT)
-                        log_warning_errno(r, "Failed to delete archived journal %s/%s: %m", directory, list[i].filename);
+                        log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                    "Failed to delete archived journal %s/%s: %m",
+                                                    directory, list[i].filename);
         }
 
         if (oldest_usec && i < n_list && (*oldest_usec == 0 || list[i].realtime < *oldest_usec))

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# shellcheck disable=SC2016
 set -eux
 set -o pipefail
 
@@ -10,19 +11,22 @@ set -o pipefail
 
 at_exit() {
     if [[ -v UNIT_NAME && -e "/usr/lib/systemd/system/$UNIT_NAME" ]]; then
-        rm -fv "/usr/lib/systemd/system/$UNIT_NAME"
+        rm -fvr "/usr/lib/systemd/system/$UNIT_NAME" "/etc/systemd/system/$UNIT_NAME.d" "+4"
     fi
 
     rm -f /etc/init.d/issue-24990
     return 0
 }
 
+# shellcheck source=test/units/assert.sh
+. "$(dirname "$0")"/assert.sh
+
 trap at_exit EXIT
 
 # Create a simple unit file for testing
 # Note: the service file is created under /usr on purpose to test
 #       the 'revert' verb as well
-UNIT_NAME="systemctl-test-$RANDOM.service"
+export UNIT_NAME="systemctl-test-$RANDOM.service"
 cat >"/usr/lib/systemd/system/$UNIT_NAME" <<\EOF
 [Unit]
 Description=systemctl test
@@ -46,7 +50,16 @@ EOF
 mkdir /run/systemd/system-preset/
 echo "disable $UNIT_NAME" >/run/systemd/system-preset/99-systemd-test.preset
 
-systemctl daemon-reload
+EDITOR='true' script -ec 'systemctl edit "$UNIT_NAME"' /dev/null
+[ ! -e "/etc/systemd/system/$UNIT_NAME.d/override.conf" ]
+
+printf '%s\n' '[Service]' 'ExecStart=' 'ExecStart=sleep 10d' > "+4"
+EDITOR='mv' script -ec 'systemctl edit "$UNIT_NAME"' /dev/null
+printf '%s\n' '[Service]' 'ExecStart=' 'ExecStart=sleep 10d' | cmp - "/etc/systemd/system/$UNIT_NAME.d/override.conf"
+
+printf '%b'   '[Service]\n' 'ExecStart=\n' 'ExecStart=sleep 10d' > "+4"
+EDITOR='mv' script -ec 'systemctl edit "$UNIT_NAME"' /dev/null
+printf '%s\n' '[Service]'   'ExecStart='   'ExecStart=sleep 10d' | cmp - "/etc/systemd/system/$UNIT_NAME.d/override.conf"
 
 # Argument help
 systemctl --state help
@@ -86,6 +99,19 @@ systemctl list-jobs --after
 systemctl list-jobs --before
 systemctl list-jobs --after --before
 systemctl list-jobs "*"
+systemctl list-dependencies sysinit.target --type=socket,mount
+systemctl list-dependencies multi-user.target --state=active
+systemctl list-dependencies sysinit.target --state=mounted --all
+
+# is-* verbs
+# Should return 4 for a missing unit file
+assert_rc 4 systemctl --quiet is-active not-found.service
+assert_rc 4 systemctl --quiet is-failed not-found.service
+assert_rc 4 systemctl --quiet is-enabled not-found.service
+# is-active: return 3 when the unit exists but inactive
+assert_rc 3 systemctl --quiet is-active "$UNIT_NAME"
+# is-enabled: return 1 when the unit exists but disabled
+assert_rc 1 systemctl --quiet is-enabled "$UNIT_NAME"
 
 # Basic service management
 systemctl start --show-transaction "$UNIT_NAME"
@@ -219,6 +245,7 @@ systemctl status "systemd-*.timer"
 systemctl status "systemd-journald*.socket"
 systemctl status "sys-devices-*-ttyS0.device"
 systemctl status -- -.mount
+systemctl status 1
 
 # --marked
 systemctl restart "$UNIT_NAME"
@@ -294,9 +321,12 @@ systemctl unset-environment IMPORT_THIS IMPORT_THIS_TOO
 
 # test for sysv-generator (issue #24990)
 if [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]; then
-    mkdir -p /etc/init.d
+    # This is configurable via -Dsysvinit-path=, but we can't get the value
+    # at runtime, so let's just support the two most common paths for now.
+    [[ -d /etc/rc.d/init.d ]] && SYSVINIT_PATH="/etc/rc.d/init.d" || SYSVINIT_PATH="/etc/init.d"
+
     # invalid dependency
-    cat >/etc/init.d/issue-24990 <<\EOF
+    cat >"${SYSVINIT_PATH:?}/issue-24990" <<\EOF
 #!/bin/bash
 
 ### BEGIN INIT INFO
@@ -322,21 +352,21 @@ case "$1" in
 esac
 EOF
 
-    chmod +x /etc/init.d/issue-24990
+    chmod +x "$SYSVINIT_PATH/issue-24990"
     systemctl daemon-reload
     [[ -L /run/systemd/generator.late/test1.service ]]
     [[ -L /run/systemd/generator.late/test2.service ]]
     assert_eq "$(readlink -f /run/systemd/generator.late/test1.service)" "/run/systemd/generator.late/issue-24990.service"
     assert_eq "$(readlink -f /run/systemd/generator.late/test2.service)" "/run/systemd/generator.late/issue-24990.service"
     output=$(systemctl cat issue-24990)
-    assert_in "SourcePath=/etc/init.d/issue-24990" "$output"
+    assert_in "SourcePath=$SYSVINIT_PATH/issue-24990" "$output"
     assert_in "Description=LSB: Test" "$output"
     assert_in "After=test1.service" "$output"
     assert_in "After=remote-fs.target" "$output"
     assert_in "After=network-online.target" "$output"
     assert_in "Wants=network-online.target" "$output"
-    assert_in "ExecStart=/etc/init.d/issue-24990 start" "$output"
-    assert_in "ExecStop=/etc/init.d/issue-24990 stop" "$output"
+    assert_in "ExecStart=$SYSVINIT_PATH/issue-24990 start" "$output"
+    assert_in "ExecStop=$SYSVINIT_PATH/issue-24990 stop" "$output"
     systemctl status issue-24990 || :
     systemctl show issue-24990
     assert_not_in "issue-24990.service" "$(systemctl show --property=After --value)"
@@ -350,7 +380,7 @@ EOF
     systemctl stop issue-24990
 
     # valid dependency
-    cat >/etc/init.d/issue-24990 <<\EOF
+    cat >"$SYSVINIT_PATH/issue-24990" <<\EOF
 #!/bin/bash
 
 ### BEGIN INIT INFO
@@ -376,18 +406,18 @@ case "$1" in
 esac
 EOF
 
-    chmod +x /etc/init.d/issue-24990
+    chmod +x "$SYSVINIT_PATH/issue-24990"
     systemctl daemon-reload
     [[ -L /run/systemd/generator.late/test1.service ]]
     [[ -L /run/systemd/generator.late/test2.service ]]
     assert_eq "$(readlink -f /run/systemd/generator.late/test1.service)" "/run/systemd/generator.late/issue-24990.service"
     assert_eq "$(readlink -f /run/systemd/generator.late/test2.service)" "/run/systemd/generator.late/issue-24990.service"
     output=$(systemctl cat issue-24990)
-    assert_in "SourcePath=/etc/init.d/issue-24990" "$output"
+    assert_in "SourcePath=$SYSVINIT_PATH/issue-24990" "$output"
     assert_in "Description=LSB: Test" "$output"
     assert_in "After=remote-fs.target" "$output"
-    assert_in "ExecStart=/etc/init.d/issue-24990 start" "$output"
-    assert_in "ExecStop=/etc/init.d/issue-24990 stop" "$output"
+    assert_in "ExecStart=$SYSVINIT_PATH/issue-24990 start" "$output"
+    assert_in "ExecStop=$SYSVINIT_PATH/issue-24990 stop" "$output"
     systemctl status issue-24990 || :
     systemctl show issue-24990
     assert_not_in "issue-24990.service" "$(systemctl show --property=After --value)"

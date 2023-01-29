@@ -22,14 +22,13 @@
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "user-util.h"
-#include "util.h"
 #include "virt.h"
 
 static const char *arg_test_dir = NULL;
 
 TEST(chase_symlinks) {
         _cleanup_free_ char *result = NULL, *pwd = NULL;
-        _cleanup_close_ int pfd = -1;
+        _cleanup_close_ int pfd = -EBADF;
         char *temp;
         const char *top, *p, *pslash, *q, *qslash;
         struct stat st;
@@ -316,8 +315,8 @@ TEST(chase_symlinks) {
         assert_se(symlink("/usr/../etc/./machine-id", p) >= 0);
 
         r = chase_symlinks(p, NULL, 0, NULL, &pfd);
-        if (r != -ENOENT) {
-                _cleanup_close_ int fd = -1;
+        if (r != -ENOENT && sd_id128_get_machine(NULL) >= 0) {
+                _cleanup_close_ int fd = -EBADF;
                 sd_id128_t a, b;
 
                 assert_se(pfd >= 0);
@@ -330,6 +329,13 @@ TEST(chase_symlinks) {
                 assert_se(sd_id128_get_machine(&b) >= 0);
                 assert_se(sd_id128_equal(a, b));
         }
+
+        assert_se(lstat(p, &st) >= 0);
+        r = chase_symlinks_and_unlink(p, NULL, 0, 0,  &result);
+        assert_se(path_equal(result, p));
+        result = mfree(result);
+        assert_se(r == 0);
+        assert_se(lstat(p, &st) == -1 && errno == ENOENT);
 
         /* Test CHASE_NOFOLLOW */
 
@@ -410,6 +416,15 @@ TEST(chase_symlinks) {
         assert_se(r > 0);
         assert_se(path_equal(path_startswith(result, p), "usr"));
         result = mfree(result);
+
+        /* Test CHASE_PROHIBIT_SYMLINKS */
+
+        assert_se(chase_symlinks("top/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
+        assert_se(chase_symlinks("top/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
+        assert_se(chase_symlinks("top/dotdot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
+        assert_se(chase_symlinks("top/dotdot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
+        assert_se(chase_symlinks("top/dot/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
+        assert_se(chase_symlinks("top/dot/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
 
  cleanup:
         assert_se(rm_rf(temp, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
@@ -545,7 +560,7 @@ TEST(dot_or_dot_dot) {
 
 TEST(access_fd) {
         _cleanup_(rmdir_and_freep) char *p = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *a;
 
         a = strjoina(arg_test_dir ?: "/tmp", "/access-fd.XXXXXX");
@@ -671,7 +686,7 @@ TEST(touch_file) {
 
 TEST(unlinkat_deallocate) {
         _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
 
         assert_se(tempfn_random_child(arg_test_dir, "unlink-deallocation", &p) >= 0);
@@ -696,7 +711,7 @@ TEST(unlinkat_deallocate) {
 }
 
 TEST(fsync_directory_of_file) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open_tmpfile_unlinkable(arg_test_dir, O_RDWR);
         assert_se(fd >= 0);
@@ -813,7 +828,7 @@ TEST(chmod_and_chown) {
 }
 
 static void create_binary_file(const char *p, const void *data, size_t l) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open(p, O_CREAT|O_WRONLY|O_EXCL|O_CLOEXEC, 0600);
         assert_se(fd >= 0);
@@ -953,7 +968,7 @@ TEST(parse_cifs_service) {
 }
 
 TEST(open_mkdir_at) {
-        _cleanup_close_ int fd = -1, subdir_fd = -1, subsubdir_fd = -1;
+        _cleanup_close_ int fd = -EBADF, subdir_fd = -EBADF, subsubdir_fd = -EBADF;
         _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
 
         assert_se(open_mkdir_at(AT_FDCWD, "/proc", O_EXCL|O_CLOEXEC, 0) == -EEXIST);
@@ -997,7 +1012,7 @@ TEST(open_mkdir_at) {
 TEST(openat_report_new) {
         _cleanup_free_ char *j = NULL;
         _cleanup_(rm_rf_physical_and_freep) char *d = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         bool b;
 
         assert_se(mkdtemp_malloc(NULL, &d) >= 0);

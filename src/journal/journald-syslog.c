@@ -10,6 +10,8 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "io-util.h"
+#include "journal-internal.h"
+#include "journald-client.h"
 #include "journald-console.h"
 #include "journald-kmsg.h"
 #include "journald-server.h"
@@ -334,7 +336,9 @@ void server_process_syslog_message(
         if (ucred && pid_is_valid(ucred->pid)) {
                 r = client_context_get(s, ucred->pid, ucred, label, label_len, NULL, &context);
                 if (r < 0)
-                        log_warning_errno(r, "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m", ucred->pid);
+                        log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                    "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m",
+                                                    ucred->pid);
         }
 
         /* We are creating a copy of the message because we want to forward the original message
@@ -369,6 +373,9 @@ void server_process_syslog_message(
         syslog_parse_priority(&msg, &priority, true);
 
         if (!client_context_test_priority(context, priority))
+                return;
+
+        if (client_context_check_keep_log(context, msg, strlen(msg)) <= 0)
                 return;
 
         syslog_ts = msg;

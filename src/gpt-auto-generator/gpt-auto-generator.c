@@ -23,6 +23,7 @@
 #include "fstab-util.h"
 #include "generator.h"
 #include "gpt.h"
+#include "initrd-util.h"
 #include "mkdir.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
@@ -34,23 +35,28 @@
 #include "string-util.h"
 #include "strv.h"
 #include "unit-name.h"
-#include "util.h"
 #include "virt.h"
 
 static const char *arg_dest = NULL;
 static bool arg_enabled = true;
 static bool arg_root_enabled = true;
+static char *arg_root_fstype = NULL;
+static char *arg_root_options = NULL;
 static int arg_root_rw = -1;
+
+STATIC_DESTRUCTOR_REGISTER(arg_root_fstype, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_root_options, freep);
 
 static int add_cryptsetup(
                 const char *id,
                 const char *what,
                 bool rw,
                 bool require,
+                bool measure,
                 char **ret_device) {
 
 #if HAVE_LIBCRYPTSETUP
-        _cleanup_free_ char *e = NULL, *n = NULL, *d = NULL;
+        _cleanup_free_ char *e = NULL, *n = NULL, *d = NULL, *options = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -84,7 +90,28 @@ static int add_cryptsetup(
                 "After=%s\n",
                 d, d);
 
-        r = generator_write_cryptsetup_service_section(f, id, what, NULL, rw ? NULL : "read-only");
+        if (!rw) {
+                options = strdup("read-only");
+                if (!options)
+                        return log_oom();
+        }
+
+        if (measure) {
+                /* We only measure the root volume key into PCR 15 if we are booted with sd-stub (i.e. in a
+                 * UKI), and sd-stub measured the UKI. We do this in order not to step into people's own PCR
+                 * assignment, under the assumption that people who are fine to use sd-stub with its PCR
+                 * assignments are also OK with our PCR 15 use here. */
+
+                r = efi_stub_measured(LOG_WARNING);
+                if (r == 0)
+                        log_debug("Will not measure volume key of volume '%s', because not booted via systemd-stub with measurements enabled.", id);
+                else if (r > 0) {
+                        if (!strextend_with_separator(&options, ",", "tpm2-measure-pcr=yes"))
+                                return log_oom();
+                }
+        }
+
+        r = generator_write_cryptsetup_service_section(f, id, what, NULL, options);
         if (r < 0)
                 return r;
 
@@ -139,6 +166,7 @@ static int add_mount(
                 const char *fstype,
                 bool rw,
                 bool growfs,
+                bool measure,
                 const char *options,
                 const char *description,
                 const char *post) {
@@ -159,12 +187,21 @@ static int add_mount(
         log_debug("Adding %s: %s fstype=%s", where, what, fstype ?: "(any)");
 
         if (streq_ptr(fstype, "crypto_LUKS")) {
-                r = add_cryptsetup(id, what, rw, true, &crypto_what);
+                r = add_cryptsetup(id, what, rw, /* require= */ true, measure, &crypto_what);
                 if (r < 0)
                         return r;
 
                 what = crypto_what;
                 fstype = NULL;
+        } else if (fstype) {
+                r = dissect_fstype_ok(fstype);
+                if (r < 0)
+                        return log_error_errno(r, "Unable to determine of dissected file system type '%s' is permitted: %m", fstype);
+                if (!r)
+                        return log_error_errno(
+                                        SYNTHETIC_ERRNO(EIDRM),
+                                        "Refusing to automatically mount uncommon file system '%s' to '%s'.",
+                                        fstype, where);
         }
 
         r = unit_name_from_path(where, ".mount", &unit);
@@ -218,6 +255,12 @@ static int add_mount(
 
         if (growfs) {
                 r = generator_hook_up_growfs(arg_dest, where, post);
+                if (r < 0)
+                        return r;
+        }
+
+        if (measure) {
+                r = generator_hook_up_pcrfs(arg_dest, where, post);
                 if (r < 0)
                         return r;
         }
@@ -277,6 +320,7 @@ static int add_partition_mount(
                         p->fstype,
                         p->rw,
                         p->growfs,
+                        /* measure= */ STR_IN_SET(id, "root", "var"), /* by default measure rootfs and /var, since they contain the "identity" of the system */
                         NULL,
                         description,
                         SPECIAL_LOCAL_FS_TARGET);
@@ -301,7 +345,7 @@ static int add_partition_swap(DissectedPartition *p) {
         }
 
         if (streq_ptr(p->fstype, "crypto_LUKS")) {
-                r = add_cryptsetup("swap", p->node, true, true, &crypto_what);
+                r = add_cryptsetup("swap", p->node, /* rw= */ true, /* require= */ true, /* measure= */ false, &crypto_what);
                 if (r < 0)
                         return r;
                 what = crypto_what;
@@ -358,15 +402,11 @@ static int add_automount(
 
         _cleanup_free_ char *unit = NULL, *p = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        const char *opt = "noauto";
         int r;
 
         assert(id);
         assert(where);
         assert(description);
-
-        if (options)
-                opt = strjoina(options, ",", opt);
 
         r = add_mount(id,
                       what,
@@ -374,7 +414,8 @@ static int add_automount(
                       fstype,
                       rw,
                       growfs,
-                      opt,
+                      /* measure= */ false,
+                      options,
                       description,
                       NULL);
         if (r < 0)
@@ -414,7 +455,7 @@ static int add_automount(
 static const char *esp_or_xbootldr_options(const DissectedPartition *p) {
         assert(p);
 
-        /* Discoveried ESP and XBOOTLDR partition are always hardened with "noexec,nosuid,nodev".
+        /* Discovered ESP and XBOOTLDR partition are always hardened with "noexec,nosuid,nodev".
          * If we probed vfat or have no idea about the file system then assume these file systems are vfat
          * and thus understand "umask=0077". */
 
@@ -582,7 +623,7 @@ static int add_root_cryptsetup(void) {
         /* If a device /dev/gpt-auto-root-luks appears, then make it pull in systemd-cryptsetup-root.service, which
          * sets it up, and causes /dev/gpt-auto-root to appear which is all we are looking for. */
 
-        return add_cryptsetup("root", "/dev/gpt-auto-root-luks", true, false, NULL);
+        return add_cryptsetup("root", "/dev/gpt-auto-root-luks", /* rw= */ true, /* require= */ false, /* measure= */ true, NULL);
 #else
         return 0;
 #endif
@@ -626,10 +667,11 @@ static int add_root_mount(void) {
                         "root",
                         "/dev/gpt-auto-root",
                         in_initrd() ? "/sysroot" : "/",
-                        NULL,
+                        arg_root_fstype,
                         /* rw= */ arg_root_rw > 0,
                         /* growfs= */ false,
-                        NULL,
+                        /* measure= */ true,
+                        arg_root_options,
                         "Root Partition",
                         in_initrd() ? SPECIAL_INITRD_ROOT_FS_TARGET : SPECIAL_LOCAL_FS_TARGET);
 #else
@@ -664,7 +706,8 @@ static int enumerate_partitions(dev_t devnum) {
                         loop,
                         NULL, NULL,
                         DISSECT_IMAGE_GPT_ONLY|
-                        DISSECT_IMAGE_USR_NO_ROOT,
+                        DISSECT_IMAGE_USR_NO_ROOT|
+                        DISSECT_IMAGE_DISKSEQ_DEVNODE,
                         /* NB! Unlike most other places where we dissect block devices we do not use
                          * DISSECT_IMAGE_ADD_PARTITION_DEVICES here: we want that the kernel finds the
                          * devices, and udev probes them before we mount them via .mount units much later
@@ -672,11 +715,11 @@ static int enumerate_partitions(dev_t devnum) {
                          * we don't actually mount anything immediately. */
                         &m);
         if (r == -ENOPKG) {
-                log_debug_errno(r, "No suitable partition table found, ignoring.");
+                log_debug_errno(r, "No suitable partition table found on block device %s, ignoring.", devname);
                 return 0;
         }
         if (r < 0)
-                return log_error_errno(r, "Failed to dissect: %m");
+                return log_error_errno(r, "Failed to dissect partition table of block device %s: %m", devname);
 
         if (m->partitions[PARTITION_SWAP].found) {
                 k = add_partition_swap(m->partitions + PARTITION_SWAP);
@@ -804,6 +847,21 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 /* Disable root disk logic if there's roothash= defined (i.e. verity enabled) */
 
                 arg_root_enabled = false;
+
+        } else if (streq(key, "rootfstype")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                return free_and_strdup_warn(&arg_root_fstype, value);
+
+        } else if (streq(key, "rootflags")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                if (!strextend_with_separator(&arg_root_options, ",", value))
+                        return log_oom();
 
         } else if (proc_cmdline_key_streq(key, "rw") && !value)
                 arg_root_rw = true;

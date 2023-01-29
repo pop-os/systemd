@@ -14,6 +14,7 @@
 #include "sd-bus.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-locator.h"
@@ -24,8 +25,8 @@
 #include "bus-wait-for-jobs.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
+#include "constants.h"
 #include "copy.h"
-#include "def.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "format-table.h"
@@ -76,6 +77,7 @@ static bool arg_quiet = false;
 static bool arg_ask_password = true;
 static unsigned arg_lines = 10;
 static OutputMode arg_output = OUTPUT_SHORT;
+static bool arg_now = false;
 static bool arg_force = false;
 static ImportVerify arg_verify = IMPORT_VERIFY_SIGNATURE;
 static const char* arg_format = NULL;
@@ -97,7 +99,7 @@ static OutputFlags get_output_flags(void) {
 static int call_get_os_release(sd_bus *bus, const char *method, const char *name, const char *query, ...) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        const char *k, *v, *iter, **query_res = NULL;
+        const char *k, *v, **query_res = NULL;
         size_t count = 0, awaited_args = 0;
         va_list ap;
         int r;
@@ -1599,7 +1601,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         InstallChange *changes = NULL;
         size_t n_changes = 0;
-        const char *method = NULL;
+        const char *method;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -1614,6 +1616,12 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
         r = sd_bus_message_open_container(m, 'a', "s");
         if (r < 0)
                 return bus_log_create_error(r);
+
+        if (streq(argv[0], "enable")) {
+                r = sd_bus_message_append(m, "s", "machines.target");
+                if (r < 0)
+                        return bus_log_create_error(r);
+        }
 
         for (int i = 1; i < argc; i++) {
                 _cleanup_free_ char *unit = NULL;
@@ -1666,7 +1674,26 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                 goto finish;
         }
 
-        r = 0;
+        if (arg_now) {
+                _cleanup_strv_free_ char **new_args = NULL;
+
+                new_args = strv_new(streq(argv[0], "enable") ? "start" : "poweroff");
+                if (!new_args) {
+                        r = log_oom();
+                        goto finish;
+                }
+
+                r = strv_extend_strv(&new_args, argv + 1, /* filter_duplicates = */ false);
+                if (r < 0) {
+                        log_oom();
+                        goto finish;
+                }
+
+                if (streq(argv[0], "enable"))
+                        r = start_machine(strv_length(new_args), new_args, userdata);
+                else
+                        r = poweroff_machine(strv_length(new_args), new_args, userdata);
+        }
 
 finish:
         install_changes_free(changes, n_changes);
@@ -1799,7 +1826,7 @@ static int import_tar(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         _cleanup_free_ char *ll = NULL, *fn = NULL;
         const char *local = NULL, *path = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -1860,7 +1887,7 @@ static int import_raw(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         _cleanup_free_ char *ll = NULL, *fn = NULL;
         const char *local = NULL, *path = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -1921,7 +1948,7 @@ static int import_fs(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         const char *local = NULL, *path = NULL;
         _cleanup_free_ char *fn = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -1986,7 +2013,7 @@ static void determine_compression_from_filename(const char *p) {
 
 static int export_tar(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *local = NULL, *path = NULL;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
@@ -2026,7 +2053,7 @@ static int export_tar(int argc, char *argv[], void *userdata) {
 
 static int export_raw(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *local = NULL, *path = NULL;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
@@ -2464,8 +2491,10 @@ static int help(int argc, char *argv[], void *userdata) {
                "                               json, json-pretty, json-sse, json-seq, cat,\n"
                "                               verbose, export, with-unit)\n"
                "     --verify=MODE            Verification mode for downloaded images (no,\n"
-               "                              checksum, signature)\n"
+               "                               checksum, signature)\n"
                "     --force                  Download image even if already exists\n"
+               "     --now                    Start or power off container after enabling or\n"
+               "                              disabling it\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                ansi_highlight(),
@@ -2489,6 +2518,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_MKDIR,
                 ARG_NO_ASK_PASSWORD,
                 ARG_VERIFY,
+                ARG_NOW,
                 ARG_FORCE,
                 ARG_FORMAT,
                 ARG_UID,
@@ -2515,6 +2545,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "output",          required_argument, NULL, 'o'                 },
                 { "no-ask-password", no_argument,       NULL, ARG_NO_ASK_PASSWORD },
                 { "verify",          required_argument, NULL, ARG_VERIFY          },
+                { "now",             no_argument,       NULL, ARG_NOW             },
                 { "force",           no_argument,       NULL, ARG_FORCE           },
                 { "format",          required_argument, NULL, ARG_FORMAT          },
                 { "uid",             required_argument, NULL, ARG_UID             },
@@ -2689,6 +2720,10 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --verify= setting: %s", optarg);
                         arg_verify = r;
+                        break;
+
+                case ARG_NOW:
+                        arg_now = true;
                         break;
 
                 case ARG_FORCE:

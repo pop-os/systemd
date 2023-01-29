@@ -10,6 +10,7 @@
 #include "sd-journal.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "fd-util.h"
 #include "main-func.h"
 #include "parse-argument.h"
@@ -18,7 +19,6 @@
 #include "string-util.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
-#include "util.h"
 
 static const char *arg_identifier = NULL;
 static int arg_priority = LOG_INFO;
@@ -122,7 +122,7 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_close_ int outfd = -1, errfd = -1, saved_stderr = -1;
+        _cleanup_close_ int outfd = -EBADF, errfd = -EBADF, saved_stderr = -EBADF;
         int r;
 
         log_setup();

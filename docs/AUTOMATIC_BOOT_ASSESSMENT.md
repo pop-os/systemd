@@ -9,13 +9,13 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 
 systemd provides support for automatically reverting back to the previous
 version of the OS or kernel in case the system consistently fails to boot. The
-[Boot Loader Specification](BOOT_LOADER_SPECIFICATION.md#boot-counting)
+[Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
 describes how to annotate boot loader entries with a counter that specifies how
 many attempts should be made to boot it. This document describes how systemd
 implements this scheme.
 
 The many different components involved in the implementation may be used
-independently and in combination with other software to for example support
+independently and in combination with other software to, for example, support
 other boot loaders or take actions outside of the boot loader.
 
 Here's a brief overview of the complete set of components:
@@ -28,7 +28,7 @@ Here's a brief overview of the complete set of components:
 * The
   [`systemd-boot(7)`](https://www.freedesktop.org/software/systemd/man/systemd-boot.html)
   boot loader optionally maintains a per-boot-loader-entry counter described by
-  the [Boot Loader Specification](BOOT_LOADER_SPECIFICATION.md#boot-counting)
+  the [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
   that is decreased by one on each attempt to boot the entry, prioritizing
   entries that have non-zero counters over those which already reached a
   counter of zero when choosing the entry to boot.
@@ -60,7 +60,8 @@ Here's a brief overview of the complete set of components:
 
 ## Details
 
-As described in [Boot Loader Specification](BOOT_LOADER_SPECIFICATION.md#boot-counting),
+As described in the
+[Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting),
 the boot counting data is stored in the file name of the boot loader entries as
 a plus (`+`), followed by a number, optionally followed by `-` and another
 number, right before the file name suffix (`.conf` or `.efi`).
@@ -92,10 +93,10 @@ Here's an example walkthrough of how this all fits together.
    After the rename completed, the entry is booted as usual.
 
 4. Let's say this attempt to boot fails. On the following boot the boot loader
-   will hence see the `+2-1` tag in the name, and hence rename the entry file to
+   will hence see the `+2-1` tag in the name, and will hence rename the entry file to
    `4.14.11-300.fc27.x86_64+1-2.conf`, and boot it.
 
-5. Let's say the boot fails again. On the subsequent boot the loader hence will
+5. Let's say the boot fails again. On the subsequent boot the loader will hence
    see the `+1-2` tag, and rename the file to
    `4.14.11-300.fc27.x86_64+0-3.conf` and boot it.
 
@@ -199,7 +200,7 @@ are a couple of recommendations.
 
    Such unit would be typically wanted (or required) by one of the
    [`bootup`](https://www.freedesktop.org/software/systemd/man/bootup.html) targets,
-   for example `multi-user.target`. To avoid potential loops due to conflicting
+   for example, `multi-user.target`. To avoid potential loops due to conflicting
    [default dependencies](https://www.freedesktop.org/software/systemd/man/systemd.unit.html#Default%20Dependencies)
    ordering, it is recommended to also add an explicit dependency (e.g.
    `After=multi-user.target`) to the unit. This overrides the implicit ordering

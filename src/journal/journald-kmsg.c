@@ -16,6 +16,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "io-util.h"
+#include "journal-internal.h"
 #include "journald-kmsg.h"
 #include "journald-server.h"
 #include "journald-syslog.h"
@@ -320,7 +321,7 @@ static int server_read_dev_kmsg(Server *s) {
         if (l < 0) {
                 /* Old kernels who don't allow reading from /dev/kmsg
                  * return EINVAL when we try. So handle this cleanly,
-                 * but don' try to ever read from it again. */
+                 * but don't try to ever read from it again. */
                 if (errno == EINVAL) {
                         s->dev_kmsg_event_source = sd_event_source_unref(s->dev_kmsg_event_source);
                         return 0;
@@ -329,7 +330,7 @@ static int server_read_dev_kmsg(Server *s) {
                 if (ERRNO_IS_TRANSIENT(errno) || errno == EPIPE)
                         return 0;
 
-                return log_error_errno(errno, "Failed to read from /dev/kmsg: %m");
+                return log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT, "Failed to read from /dev/kmsg: %m");
         }
 
         dev_kmsg_record(s, buffer, l);
@@ -368,7 +369,8 @@ static int dispatch_dev_kmsg(sd_event_source *es, int fd, uint32_t revents, void
         assert(fd == s->dev_kmsg_fd);
 
         if (revents & EPOLLERR)
-                log_warning("/dev/kmsg buffer overrun, some messages lost.");
+                log_ratelimit_warning(JOURNAL_LOG_RATELIMIT,
+                                      "/dev/kmsg buffer overrun, some messages lost.");
 
         if (!(revents & EPOLLIN))
                 log_error("Got invalid event from epoll for /dev/kmsg: %"PRIx32, revents);
@@ -429,7 +431,7 @@ fail:
 }
 
 int server_open_kernel_seqnum(Server *s) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *fn;
         uint64_t *p;
         int r;

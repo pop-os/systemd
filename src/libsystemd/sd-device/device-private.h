@@ -18,6 +18,7 @@ int device_new_from_strv(sd_device **ret, char **strv);
 int device_opendir(sd_device *device, const char *subdir, DIR **ret);
 
 int device_get_property_bool(sd_device *device, const char *key);
+int device_get_property_int(sd_device *device, const char *key, int *ret);
 int device_get_sysattr_int(sd_device *device, const char *sysattr, int *ret_value);
 int device_get_sysattr_unsigned(sd_device *device, const char *sysattr, unsigned *ret_value);
 int device_get_sysattr_bool(sd_device *device, const char *sysattr);
@@ -37,6 +38,7 @@ void device_set_db_persist(sd_device *device);
 void device_set_devlink_priority(sd_device *device, int priority);
 int device_ensure_usec_initialized(sd_device *device, sd_device *device_old);
 int device_add_devlink(sd_device *device, const char *devlink);
+void device_remove_devlink(sd_device *device, const char *devlink);
 bool device_has_devlink(sd_device *device, const char *devlink);
 int device_add_property(sd_device *device, const char *property, const char *value);
 int device_add_propertyf(sd_device *device, const char *key, const char *format, ...) _printf_(3, 4);
@@ -53,7 +55,6 @@ int device_properties_prepare(sd_device *device);
 int device_get_properties_nulstr(sd_device *device, const char **ret_nulstr, size_t *ret_len);
 int device_get_properties_strv(sd_device *device, char ***ret);
 
-int device_rename(sd_device *device, const char *name);
 int device_clone_with_db(sd_device *device, sd_device **ret);
 
 int device_tag_index(sd_device *dev, sd_device *dev_old, bool add);

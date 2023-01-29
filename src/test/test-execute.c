@@ -32,7 +32,6 @@
 #include "tmpfile-util.h"
 #include "unit.h"
 #include "user-util.h"
-#include "util.h"
 #include "virt.h"
 
 static char *user_runtime_unit_dir = NULL;
@@ -560,7 +559,7 @@ static int find_libraries(const char *exec, char ***ret) {
         _cleanup_(sd_event_source_unrefp) sd_event_source *sigchld_source = NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *stdout_source = NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *stderr_source = NULL;
-        _cleanup_close_pair_ int outpipe[2] = {-1, -1}, errpipe[2] = {-1, -1};
+        _cleanup_close_pair_ int outpipe[2] = PIPE_EBADF, errpipe[2] = PIPE_EBADF;
         _cleanup_strv_free_ char **libraries = NULL;
         _cleanup_free_ char *result = NULL;
         pid_t pid;
@@ -577,7 +576,7 @@ static int find_libraries(const char *exec, char ***ret) {
         r = safe_fork("(spawn-ldd)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
         assert_se(r >= 0);
         if (r == 0) {
-                if (rearrange_stdio(-1, TAKE_FD(outpipe[1]), TAKE_FD(errpipe[1])) < 0)
+                if (rearrange_stdio(-EBADF, TAKE_FD(outpipe[1]), TAKE_FD(errpipe[1])) < 0)
                         _exit(EXIT_FAILURE);
 
                 (void) close_all_fds(NULL, 0);
@@ -1227,9 +1226,6 @@ int main(int argc, char *argv[]) {
         r = enter_cgroup_subroot(NULL);
         if (r == -ENOMEDIUM)
                 return log_tests_skipped("cgroupfs not available");
-
-        if (path_is_read_only_fs("/sys") > 0)
-                return log_tests_skipped("/sys is mounted read-only");
 
         _cleanup_free_ char *unit_dir = NULL, *unit_paths = NULL;
         assert_se(get_testdata_dir("test-execute/", &unit_dir) >= 0);

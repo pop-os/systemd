@@ -18,6 +18,7 @@
 #include "hashmap.h"
 #include "macro.h"
 #include "missing_syscall.h"
+#include "path-util.h"
 #include "process-util.h"
 #include "rlimit-util.h"
 #include "serialize.h"
@@ -29,7 +30,6 @@
 #include "strv.h"
 #include "terminal-util.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 /* Put this test here for a lack of better place */
 assert_cc(EAGAIN == EWOULDBLOCK);
@@ -124,7 +124,7 @@ static int do_execute(
 
         STRV_FOREACH(path, paths) {
                 _cleanup_free_ char *t = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 pid_t pid;
 
                 t = strdup(*path);
@@ -132,7 +132,13 @@ static int do_execute(
                         return log_oom();
 
                 if (callbacks) {
-                        fd = open_serialization_fd(basename(*path));
+                        _cleanup_free_ char *bn = NULL;
+
+                        r = path_extract_filename(*path, &bn);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract filename from path '%s': %m", *path);
+
+                        fd = open_serialization_fd(bn);
                         if (fd < 0)
                                 return log_error_errno(fd, "Failed to open serialization file: %m");
                 }
@@ -159,7 +165,7 @@ static int do_execute(
                                         return log_error_errno(errno, "Failed to seek on serialization fd: %m");
 
                                 r = callbacks[STDOUT_GENERATE](fd, callback_args[STDOUT_GENERATE]);
-                                fd = -1;
+                                fd = -EBADF;
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to process output from %s: %m", *path);
                         }
@@ -200,15 +206,16 @@ int execute_directories(
                 ExecDirFlags flags) {
 
         char **dirs = (char**) directories;
-        _cleanup_close_ int fd = -1;
-        char *name;
+        _cleanup_free_ char *name = NULL;
+        _cleanup_close_ int fd = -EBADF;
         int r;
         pid_t executor_pid;
 
         assert(!strv_isempty(dirs));
 
-        name = basename(dirs[0]);
-        assert(!isempty(name));
+        r = path_extract_filename(dirs[0], &name);
+        if (r < 0)
+                return log_error_errno(r, "Failed to extract file name from '%s': %m", dirs[0]);
 
         if (callbacks) {
                 assert(callback_args);
@@ -246,7 +253,7 @@ int execute_directories(
                 return log_error_errno(errno, "Failed to rewind serialization fd: %m");
 
         r = callbacks[STDOUT_CONSUME](fd, callback_args[STDOUT_CONSUME]);
-        fd = -1;
+        fd = -EBADF;
         if (r < 0)
                 return log_error_errno(r, "Failed to parse returned data: %m");
         return 0;

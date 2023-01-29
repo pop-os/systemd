@@ -440,7 +440,7 @@ struct rtnexthop {
 /* RTA_VIA */
 struct rtvia {
 	__kernel_sa_family_t	rtvia_family;
-	__u8			rtvia_addr[];
+	__u8			rtvia_addr[0];
 };
 
 /* RTM_CACHEINFO */

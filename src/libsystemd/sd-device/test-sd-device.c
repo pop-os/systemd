@@ -131,7 +131,7 @@ static void test_sd_device_one(sd_device *d) {
                         assert_se(streq(syspath, val));
                         dev = sd_device_unref(dev);
 
-                        _cleanup_close_ int fd = -1;
+                        _cleanup_close_ int fd = -EBADF;
                         fd = sd_device_open(d, O_CLOEXEC| O_NONBLOCK | (is_block ? O_RDONLY : O_NOCTTY | O_PATH));
                         assert_se(fd >= 0 || ERRNO_IS_PRIVILEGE(fd));
                 } else
@@ -535,7 +535,7 @@ TEST(sd_device_new_from_nulstr) {
 
         _cleanup_(sd_device_unrefp) sd_device *device = NULL, *from_nulstr = NULL;
         _cleanup_free_ char *nulstr_copy = NULL;
-        const char *devlink, *nulstr;
+        const char *nulstr;
         size_t len;
 
         assert_se(sd_device_new_from_syspath(&device, "/sys/class/net/lo") >= 0);

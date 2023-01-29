@@ -512,7 +512,7 @@ int home_sync_and_statfs(int root_fd, struct statfs *ret) {
 
 static int read_identity_file(int root_fd, JsonVariant **ret) {
         _cleanup_(fclosep) FILE *identity_file = NULL;
-        _cleanup_close_ int identity_fd = -1;
+        _cleanup_close_ int identity_fd = -EBADF;
         unsigned line, column;
         int r;
 
@@ -543,7 +543,7 @@ static int read_identity_file(int root_fd, JsonVariant **ret) {
 static int write_identity_file(int root_fd, JsonVariant *v, uid_t uid) {
         _cleanup_(json_variant_unrefp) JsonVariant *normalized = NULL;
         _cleanup_(fclosep) FILE *identity_file = NULL;
-        _cleanup_close_ int identity_fd = -1;
+        _cleanup_close_ int identity_fd = -EBADF;
         _cleanup_free_ char *fn = NULL;
         int r;
 
@@ -785,7 +785,7 @@ int home_maybe_shift_uid(
                 HomeSetupFlags flags,
                 HomeSetup *setup) {
 
-        _cleanup_close_ int mount_fd = -1;
+        _cleanup_close_ int mount_fd = -EBADF;
         struct stat st;
 
         assert(h);
@@ -1036,7 +1036,7 @@ static int copy_skel(int root_fd, const char *skel) {
 
         assert(root_fd >= 0);
 
-        r = copy_tree_at(AT_FDCWD, skel, root_fd, ".", UID_INVALID, GID_INVALID, COPY_MERGE|COPY_REPLACE);
+        r = copy_tree_at(AT_FDCWD, skel, root_fd, ".", UID_INVALID, GID_INVALID, COPY_MERGE|COPY_REPLACE, NULL);
         if (r == -ENOENT) {
                 log_info("Skeleton directory %s missing, ignoring.", skel);
                 return 0;

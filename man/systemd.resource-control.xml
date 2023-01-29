@@ -331,8 +331,26 @@
 
           <para>Takes a swap size in bytes. If the value is suffixed with K, M, G or T, the specified swap size is
           parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. If assigned the
-          special value <literal>infinity</literal>, no swap limit is applied. This controls the
+          special value <literal>infinity</literal>, no swap limit is applied. These settings control the
           <literal>memory.swap.max</literal> control group attribute. For details about this control group attribute,
+          see <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryZSwapMax=<replaceable>bytes</replaceable></varname></term>
+
+        <listitem>
+          <para>Specify the absolute limit on zswap usage of the processes in this unit. Zswap is a lightweight compressed
+          cache for swap pages. It takes pages that are in the process of being swapped out and attempts to compress them into a
+          dynamically allocated RAM-based memory pool. If the limit specified is hit, no entries from this unit will be
+          stored in the pool until existing entries are faulted back or written out to disk. See the kernel's
+          <ulink url="https://www.kernel.org/doc/html/latest/admin-guide/mm/zswap.html">Zswap</ulink> documentation for more details.</para>
+
+          <para>Takes a size in bytes. If the value is suffixed with K, M, G or T, the specified size is
+          parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. If assigned the
+          special value <literal>infinity</literal>, no limit is applied. These settings control the
+          <literal>memory.zswap.max</literal> control group attribute. For details about this control group attribute,
           see <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
         </listitem>
       </varlistentry>
@@ -620,6 +638,8 @@
           support is not enabled in the underlying kernel or container manager). These settings will have no effect in
           that case. If compatibility with such systems is desired it is hence recommended to not exclusively rely on
           them for IP security.</para>
+
+          <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
         </listitem>
       </varlistentry>
 
@@ -796,6 +816,8 @@ SocketBindDeny=any
 SocketBindAllow=ipv4:udp:10000-65535
 SocketBindDeny=any
 …</programlisting></para>
+
+          <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
         </listitem>
       </varlistentry>
 
@@ -842,6 +864,8 @@ RestrictNetworkInterfaces=eth1 eth2
 RestrictNetworkInterfaces=~eth1</programlisting>
           Programs in the unit will be only able to use the eth2 network interface.
           </para>
+
+          <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
         </listitem>
       </varlistentry>
 
@@ -894,6 +918,7 @@ DeviceAllow=block-loop
 DeviceAllow=/dev/loop-control
 …</programlisting></para>
 
+          <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
         </listitem>
       </varlistentry>
 
@@ -938,6 +963,8 @@ DeviceAllow=/dev/loop-control
               </listitem>
             </varlistentry>
           </variablelist>
+
+          <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
         </listitem>
       </varlistentry>
 
@@ -1083,10 +1110,10 @@ DeviceAllow=/dev/loop-control
           only respect these extended attributes if the unit's cgroup is owned by root.</para>
 
           <para>When calculating candidates to relieve memory pressure, <command>systemd-oomd</command>
-          will only respect these extended attributes if the unit's cgroup owner, and the
-          owner of the monitored ancestor cgroup are the same. For example, if <command>systemd-oomd</command>
-          is calculating candidates for <filename>-.slice</filename>, then extended attributes set
-          on descendants of <filename>/user.slice/user-1000.slice/user@1000.service/</filename>
+          will only respect these extended attributes if the unit's cgroup is owned by root, or if the
+          unit's cgroup owner, and the owner of the monitored ancestor cgroup are the same. For example,
+          if <command>systemd-oomd</command> is calculating candidates for <filename>-.slice</filename>,
+          then extended attributes set on descendants of <filename>/user.slice/user-1000.slice/user@1000.service/</filename>
           will be ignored because the descendants are owned by UID 1000, and <filename>-.slice</filename>
           is owned by UID 0. But, if calculating candidates for
           <filename>/user.slice/user-1000.slice/user@1000.service/</filename>, then extended attributes set
@@ -1121,8 +1148,9 @@ DeviceAllow=/dev/loop-control
         <varlistentry>
           <term>systemd 252</term>
           <listitem><para> Options for controlling the Legacy Control Group Hierarchy (<ulink
-          url="https://docs.kernel.org/admin-guide/cgroup-v1/index.html">Control Groups version 1</ulink> are
-          now fully deprecated: <varname>CPUShares=<replaceable>weight</replaceable></varname>,
+          url="https://docs.kernel.org/admin-guide/cgroup-v1/index.html">Control Groups version 1</ulink>)
+          are now fully deprecated:
+          <varname>CPUShares=<replaceable>weight</replaceable></varname>,
           <varname>StartupCPUShares=<replaceable>weight</replaceable></varname>,
           <varname>MemoryLimit=<replaceable>bytes</replaceable></varname>,
           <varname>BlockIOAccounting=</varname>,
@@ -1132,8 +1160,7 @@ DeviceAllow=/dev/loop-control
           <replaceable>weight</replaceable></varname>,
           <varname>BlockIOReadBandwidth=<replaceable>device</replaceable>
           <replaceable>bytes</replaceable></varname>,
-          <varname>BlockIOWriteBandwidth=<replaceable>device</replaceable>
-          <replaceable>bytes</replaceable></varname>.
+          <varname>BlockIOWriteBandwidth=<replaceable>device</replaceable> <replaceable>bytes</replaceable></varname>.
           Please switch to the unified cgroup hierarchy.</para></listitem>
         </varlistentry>
       </variablelist>

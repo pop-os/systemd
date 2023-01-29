@@ -860,7 +860,7 @@ static int manager_assess_image(
 
         if (S_ISDIR(st.st_mode)) {
                 _cleanup_free_ char *n = NULL, *user_name = NULL, *realm = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 UserStorage storage;
 
                 if (!directory_suffix)
@@ -1022,9 +1022,9 @@ static int manager_bind_varlink(Manager *m) {
                 return log_error_errno(r, "Failed to attach varlink connection to event loop: %m");
 
         assert(!m->userdb_service);
-        m->userdb_service = strdup(basename(socket_path));
-        if (!m->userdb_service)
-                return log_oom();
+        r = path_extract_filename(socket_path, &m->userdb_service);
+        if (r < 0)
+                return log_error_errno(r, "Failed to extra filename from socket path '%s': %m", socket_path);
 
         /* Avoid recursion */
         if (setenv("SYSTEMD_BYPASS_USERDB", m->userdb_service, 1) < 0)
@@ -1041,7 +1041,7 @@ static ssize_t read_datagram(
 
         CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred)) + CMSG_SPACE(sizeof(int))) control;
         _cleanup_free_ void *buffer = NULL;
-        _cleanup_close_ int passed_fd = -1;
+        _cleanup_close_ int passed_fd = -EBADF;
         struct ucred *sender = NULL;
         struct cmsghdr *cmsg;
         struct msghdr mh;
@@ -1119,7 +1119,7 @@ static ssize_t read_datagram(
 static int on_notify_socket(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_strv_free_ char **l = NULL;
         _cleanup_free_ void *datagram = NULL;
-        _cleanup_close_ int passed_fd = -1;
+        _cleanup_close_ int passed_fd = -EBADF;
         struct ucred sender = UCRED_INVALID;
         Manager *m = ASSERT_PTR(userdata);
         ssize_t n;
@@ -1154,7 +1154,7 @@ static int on_notify_socket(sd_event_source *s, int fd, uint32_t revents, void *
 }
 
 static int manager_listen_notify(Manager *m) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
                 .un.sun_path = "/run/systemd/home/notify",
@@ -1505,7 +1505,11 @@ static int manager_load_public_key_one(Manager *m, const char *path) {
 
         assert(m);
 
-        if (streq(basename(path), "local.public")) /* we already loaded the private key, which includes the public one */
+        r = path_extract_filename(path, &fn);
+        if (r < 0)
+                return log_error_errno(r, "Failed to extract filename of path '%s': %m", path);
+
+        if (streq(fn, "local.public")) /* we already loaded the private key, which includes the public one */
                 return 0;
 
         f = fopen(path, "re");
@@ -1533,10 +1537,6 @@ static int manager_load_public_key_one(Manager *m, const char *path) {
         pkey = PEM_read_PUBKEY(f, &pkey, NULL, NULL);
         if (!pkey)
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse public key file %s.", path);
-
-        fn = strdup(basename(path));
-        if (!fn)
-                return log_oom();
 
         r = hashmap_put(m->public_keys, fn, pkey);
         if (r < 0)

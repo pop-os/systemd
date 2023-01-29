@@ -16,7 +16,6 @@
 #include "strv.h"
 #include "tests.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 TEST(print_paths) {
         log_info("DEFAULT_PATH=%s", DEFAULT_PATH);
@@ -196,7 +195,7 @@ TEST(path_equal_root) {
 TEST(find_executable_full) {
         char *p;
         char* test_file_name;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         char fn[] = "/tmp/test-XXXXXX";
 
         assert_se(find_executable_full("sh", NULL, NULL, true, &p, NULL) == 0);
@@ -279,7 +278,7 @@ TEST(find_executable) {
 
 static void test_find_executable_exec_one(const char *path) {
         _cleanup_free_ char *t = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         pid_t pid;
         int r;
 
@@ -601,23 +600,19 @@ TEST(prefix_root) {
 TEST(file_in_same_dir) {
         char *t;
 
-        t = file_in_same_dir("/", "a");
+        assert_se(file_in_same_dir("/", "a", &t) == -EADDRNOTAVAIL);
+
+        assert_se(file_in_same_dir("/", "/a", &t) >= 0);
         assert_se(streq(t, "/a"));
         free(t);
 
-        t = file_in_same_dir("/", "/a");
-        assert_se(streq(t, "/a"));
+        assert_se(file_in_same_dir("", "a", &t) == -EINVAL);
+
+        assert_se(file_in_same_dir("a/", "x", &t) >= 0);
+        assert_se(streq(t, "x"));
         free(t);
 
-        t = file_in_same_dir("", "a");
-        assert_se(streq(t, "a"));
-        free(t);
-
-        t = file_in_same_dir("a/", "a");
-        assert_se(streq(t, "a/a"));
-        free(t);
-
-        t = file_in_same_dir("bar/foo", "bar");
+        assert_se(file_in_same_dir("bar/foo", "bar", &t) >= 0);
         assert_se(streq(t, "bar/bar"));
         free(t);
 }

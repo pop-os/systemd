@@ -5,6 +5,7 @@
 #include "sd-bus.h"
 
 #include "ask-password-api.h"
+#include "build.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-locator.h"
@@ -1797,26 +1798,6 @@ static int parse_disk_size(const char *t, uint64_t *ret) {
         return 0;
 }
 
-static int parse_sector_size(const char *t, uint64_t *ret) {
-        int r;
-
-        assert(t);
-        assert(ret);
-
-        uint64_t ss;
-
-        r = safe_atou64(t, &ss);
-        if (r < 0)
-                return log_error_errno(r, "Failed to parse sector size parameter %s", t);
-        if (ss < 512 || ss > 4096) /* Allow up to 4K due to dm-crypt support and 4K alignment by the homed LUKS backend */
-                return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Sector size not between 512 and 4096: %s", t);
-        if (!ISPOWEROF2(ss))
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Sector size not power of 2: %s", t);
-
-        *ret = ss;
-        return 0;
-}
-
 static int resize_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(user_record_unrefp) UserRecord *secret = NULL;
@@ -1963,7 +1944,7 @@ static int with_home(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(user_record_unrefp) UserRecord *secret = NULL;
-        _cleanup_close_ int acquired_fd = -1;
+        _cleanup_close_ int acquired_fd = -EBADF;
         _cleanup_strv_free_ char **cmdline  = NULL;
         const char *home;
         int r, ret;
@@ -2391,6 +2372,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_IO_WEIGHT,
                 ARG_LUKS_PBKDF_TYPE,
                 ARG_LUKS_PBKDF_HASH_ALGORITHM,
+                ARG_LUKS_PBKDF_FORCE_ITERATIONS,
                 ARG_LUKS_PBKDF_TIME_COST,
                 ARG_LUKS_PBKDF_MEMORY_COST,
                 ARG_LUKS_PBKDF_PARALLEL_THREADS,
@@ -2472,6 +2454,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "luks-volume-key-size",        required_argument, NULL, ARG_LUKS_VOLUME_KEY_SIZE        },
                 { "luks-pbkdf-type",             required_argument, NULL, ARG_LUKS_PBKDF_TYPE             },
                 { "luks-pbkdf-hash-algorithm",   required_argument, NULL, ARG_LUKS_PBKDF_HASH_ALGORITHM   },
+                { "luks-pbkdf-force-iterations", required_argument, NULL, ARG_LUKS_PBKDF_FORCE_ITERATIONS },
                 { "luks-pbkdf-time-cost",        required_argument, NULL, ARG_LUKS_PBKDF_TIME_COST        },
                 { "luks-pbkdf-memory-cost",      required_argument, NULL, ARG_LUKS_PBKDF_MEMORY_COST      },
                 { "luks-pbkdf-parallel-threads", required_argument, NULL, ARG_LUKS_PBKDF_PARALLEL_THREADS },
@@ -3092,10 +3075,12 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_LUKS_VOLUME_KEY_SIZE:
+                case ARG_LUKS_PBKDF_FORCE_ITERATIONS:
                 case ARG_LUKS_PBKDF_PARALLEL_THREADS:
                 case ARG_RATE_LIMIT_BURST: {
                         const char *field =
                                        c == ARG_LUKS_VOLUME_KEY_SIZE ? "luksVolumeKeySize" :
+                                c == ARG_LUKS_PBKDF_FORCE_ITERATIONS ? "luksPbkdfForceIterations" :
                                 c == ARG_LUKS_PBKDF_PARALLEL_THREADS ? "luksPbkdfParallelThreads" :
                                            c == ARG_RATE_LIMIT_BURST ? "rateLimitBurst" : NULL;
                         unsigned n;

@@ -11,7 +11,6 @@
 #include "string-util.h"
 #include "tests.h"
 #include "user-util.h"
-#include "util.h"
 #include "virt.h"
 
 TEST(namespace_cleanup_tmpdir) {
@@ -84,7 +83,7 @@ TEST(tmpdir) {
 }
 
 static void test_shareable_ns(unsigned long nsflag) {
-        _cleanup_close_pair_ int s[2] = { -1, -1 };
+        _cleanup_close_pair_ int s[2] = PIPE_EBADF;
         pid_t pid1, pid2, pid3;
         int r, n = 0;
         siginfo_t si;
@@ -171,7 +170,7 @@ TEST(protect_kernel_logs) {
         assert_se(pid >= 0);
 
         if (pid == 0) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 fd = open("/dev/kmsg", O_RDONLY | O_CLOEXEC);
                 assert_se(fd > 0);

@@ -20,8 +20,8 @@
 
 #include "alloc-util.h"
 #include "ask-password-api.h"
+#include "constants.h"
 #include "creds-util.h"
-#include "def.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
@@ -34,6 +34,7 @@
 #include "memory-util.h"
 #include "missing_syscall.h"
 #include "mkdir-label.h"
+#include "nulstr-util.h"
 #include "process-util.h"
 #include "random-util.h"
 #include "signal-util.h"
@@ -111,6 +112,10 @@ static int add_to_keyring(const char *keyname, AskPasswordFlags flags, char **pa
         r = strv_make_nulstr(l, &p, &n);
         if (r < 0)
                 return r;
+
+        /* chop off the final NUL byte. We do this because we want to use the separator NUL bytes only if we
+         * have multiple passwords. */
+        n = LESS_BY(n, (size_t) 1);
 
         serial = add_key("user", keyname, p, n, KEY_SPEC_USER_KEYRING);
         if (serial == -1)
@@ -208,7 +213,7 @@ int ask_password_plymouth(
                 char ***ret) {
 
         static const union sockaddr_union sa = PLYMOUTH_SOCKET;
-        _cleanup_close_ int fd = -1, notify = -1;
+        _cleanup_close_ int fd = -EBADF, notify = -EBADF;
         _cleanup_free_ char *packet = NULL;
         ssize_t k;
         int r, n;
@@ -230,8 +235,7 @@ int ask_password_plymouth(
                 if (notify < 0)
                         return -errno;
 
-                r = inotify_add_watch(notify, flag_file, IN_ATTRIB); /* for the link count */
-                if (r < 0)
+                if (inotify_add_watch(notify, flag_file, IN_ATTRIB) < 0) /* for the link count */
                         return -errno;
         }
 
@@ -239,8 +243,7 @@ int ask_password_plymouth(
         if (fd < 0)
                 return -errno;
 
-        r = connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
-        if (r < 0)
+        if (connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0)
                 return -errno;
 
         if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED)) {
@@ -255,6 +258,8 @@ int ask_password_plymouth(
         if (r < 0)
                 return r;
 
+        CLEANUP_ERASE(buffer);
+
         pollfd[POLL_SOCKET].fd = fd;
         pollfd[POLL_SOCKET].events = POLLIN;
         pollfd[POLL_INOTIFY].fd = notify;
@@ -268,20 +273,16 @@ int ask_password_plymouth(
                 else
                         timeout = USEC_INFINITY;
 
-                if (flag_file && access(flag_file, F_OK) < 0) {
-                        r = -errno;
-                        goto finish;
-                }
+                if (flag_file && access(flag_file, F_OK) < 0)
+                        return -errno;
 
                 r = ppoll_usec(pollfd, notify >= 0 ? 2 : 1, timeout);
                 if (r == -EINTR)
                         continue;
                 if (r < 0)
-                        goto finish;
-                if (r == 0) {
-                        r = -ETIME;
-                        goto finish;
-                }
+                        return r;
+                if (r == 0)
+                        return -ETIME;
 
                 if (notify >= 0 && pollfd[POLL_INOTIFY].revents != 0)
                         (void) flush_fd(notify);
@@ -294,13 +295,10 @@ int ask_password_plymouth(
                         if (ERRNO_IS_TRANSIENT(errno))
                                 continue;
 
-                        r = -errno;
-                        goto finish;
+                        return -errno;
                 }
-                if (k == 0) {
-                        r = -EIO;
-                        goto finish;
-                }
+                if (k == 0)
+                        return -EIO;
 
                 p += k;
 
@@ -312,14 +310,12 @@ int ask_password_plymouth(
                                  * with a normal password request */
                                 packet = mfree(packet);
 
-                                if (asprintf(&packet, "*\002%c%s%n", (int) (strlen(message) + 1), message, &n) < 0) {
-                                        r = -ENOMEM;
-                                        goto finish;
-                                }
+                                if (asprintf(&packet, "*\002%c%s%n", (int) (strlen(message) + 1), message, &n) < 0)
+                                        return -ENOMEM;
 
                                 r = loop_write(fd, packet, n+1, true);
                                 if (r < 0)
-                                        goto finish;
+                                        return r;
 
                                 flags &= ~ASK_PASSWORD_ACCEPT_CACHED;
                                 p = 0;
@@ -327,8 +323,7 @@ int ask_password_plymouth(
                         }
 
                         /* No password, because UI not shown */
-                        r = -ENOENT;
-                        goto finish;
+                        return -ENOENT;
 
                 } else if (IN_SET(buffer[0], 2, 9)) {
                         uint32_t size;
@@ -340,35 +335,25 @@ int ask_password_plymouth(
 
                         memcpy(&size, buffer+1, sizeof(size));
                         size = le32toh(size);
-                        if (size + 5 > sizeof(buffer)) {
-                                r = -EIO;
-                                goto finish;
-                        }
+                        if (size + 5 > sizeof(buffer))
+                                return -EIO;
 
                         if (p-5 < size)
                                 continue;
 
                         l = strv_parse_nulstr(buffer + 5, size);
-                        if (!l) {
-                                r = -ENOMEM;
-                                goto finish;
-                        }
+                        if (!l)
+                                return -ENOMEM;
 
                         *ret = l;
                         break;
 
-                } else {
+                } else
                         /* Unknown packet */
-                        r = -EIO;
-                        goto finish;
-                }
+                        return -EIO;
         }
 
-        r = 0;
-
-finish:
-        explicit_bzero_safe(buffer, sizeof(buffer));
-        return r;
+        return 0;
 }
 
 #define NO_ECHO "(no echo) "
@@ -391,7 +376,7 @@ int ask_password_tty(
         };
 
         bool reset_tty = false, dirty = false, use_color = false, press_tab_visible = false;
-        _cleanup_close_ int cttyfd = -1, notify = -1;
+        _cleanup_close_ int cttyfd = -EBADF, notify = -EBADF;
         struct termios old_termios, new_termios;
         char passphrase[LINE_MAX + 1] = {}, *x;
         _cleanup_strv_free_erase_ char **l = NULL;
@@ -430,6 +415,8 @@ int ask_password_tty(
                         return -errno;
         }
 
+        CLEANUP_ERASE(passphrase);
+
         /* If the caller didn't specify a TTY, then use the controlling tty, if we can. */
         if (ttyfd < 0)
                 ttyfd = cttyfd = open("/dev/tty", O_RDWR|O_NOCTTY|O_CLOEXEC);
@@ -464,10 +451,9 @@ int ask_password_tty(
                 new_termios.c_cc[VMIN] = 1;
                 new_termios.c_cc[VTIME] = 0;
 
-                if (tcsetattr(ttyfd, TCSADRAIN, &new_termios) < 0) {
-                        r = -errno;
+                r = RET_NERRNO(tcsetattr(ttyfd, TCSADRAIN, &new_termios));
+                if (r < 0)
                         goto finish;
-                }
 
                 reset_tty = true;
         }
@@ -491,11 +477,11 @@ int ask_password_tty(
                 else
                         timeout = USEC_INFINITY;
 
-                if (flag_file)
-                        if (access(flag_file, F_OK) < 0) {
-                                r = -errno;
+                if (flag_file) {
+                        r = RET_NERRNO(access(flag_file, F_OK));
+                        if (r < 0)
                                 goto finish;
-                        }
+                }
 
                 r = ppoll_usec(pollfd, notify >= 0 ? 2 : 1, timeout);
                 if (r == -EINTR)
@@ -634,7 +620,6 @@ int ask_password_tty(
         }
 
         x = strndup(passphrase, p);
-        explicit_bzero_safe(passphrase, sizeof(passphrase));
         if (!x) {
                 r = -ENOMEM;
                 goto finish;
@@ -668,7 +653,7 @@ static int create_socket(char **ret) {
         _cleanup_free_ char *path = NULL;
         union sockaddr_union sa;
         socklen_t sa_len;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(ret);
@@ -685,7 +670,7 @@ static int create_socket(char **ret) {
                 return r;
         sa_len = r;
 
-        RUN_WITH_UMASK(0177)
+        WITH_UMASK(0177)
                 if (bind(fd, &sa.sa, sa_len) < 0)
                         return -errno;
 
@@ -713,7 +698,7 @@ int ask_password_agent(
                 _FD_MAX
         };
 
-        _cleanup_close_ int socket_fd = -1, signal_fd = -1, notify = -1, fd = -1;
+        _cleanup_close_ int socket_fd = -EBADF, signal_fd = -EBADF, notify = -EBADF, fd = -EBADF;
         char temp[] = "/run/systemd/ask-password/tmp.XXXXXX";
         char final[sizeof(temp)] = "";
         _cleanup_free_ char *socket_name = NULL;
@@ -747,10 +732,10 @@ int ask_password_agent(
                         r = -errno;
                         goto finish;
                 }
-                if (inotify_add_watch(notify, "/run/systemd/ask-password", IN_ATTRIB /* for mtime */) < 0) {
-                        r = -errno;
+
+                r = RET_NERRNO(inotify_add_watch(notify, "/run/systemd/ask-password", IN_ATTRIB /* for mtime */));
+                if (r < 0)
                         goto finish;
-                }
         }
 
         fd = mkostemp_safe(temp);
@@ -813,10 +798,9 @@ int ask_password_agent(
         final[sizeof(final)-10] = 's';
         final[sizeof(final)-9] = 'k';
 
-        if (rename(temp, final) < 0) {
-                r = -errno;
+        r = RET_NERRNO(rename(temp, final));
+        if (r < 0)
                 goto finish;
-        }
 
         zero(pollfd);
         pollfd[FD_SOCKET].fd = socket_fd;
@@ -895,6 +879,8 @@ int ask_password_agent(
                         goto finish;
                 }
 
+                CLEANUP_ERASE(passphrase);
+
                 cmsg_close_all(&msghdr);
 
                 if (n == 0) {
@@ -919,7 +905,6 @@ int ask_password_agent(
                                 l = strv_new("");
                         else
                                 l = strv_parse_nulstr(passphrase+1, n-1);
-                        explicit_bzero_safe(passphrase, n);
                         if (!l) {
                                 r = -ENOMEM;
                                 goto finish;

@@ -593,6 +593,10 @@ static int dhcp6_configure(Link *link) {
         if (r < 0)
                 return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to attach event: %m");
 
+        r = sd_dhcp6_client_attach_device(client, link->dev);
+        if (r < 0)
+                return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to attach device: %m");
+
         r = dhcp6_set_identifier(link, client);
         if (r < 0)
                 return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to set identifier: %m");
@@ -702,6 +706,12 @@ static int dhcp6_configure(Link *link) {
                 return log_link_debug_errno(link, r,
                                             "DHCPv6 CLIENT: Failed to %s rapid commit: %m",
                                             enable_disable(link->network->dhcp6_use_rapid_commit));
+
+        r = sd_dhcp6_client_set_send_release(client, link->network->dhcp6_send_release);
+        if (r < 0)
+                return log_link_debug_errno(link, r,
+                                            "DHCPv6 CLIENT: Failed to %s sending release message on stop: %m",
+                                            enable_disable(link->network->dhcp6_send_release));
 
         link->dhcp6_client = TAKE_PTR(client);
 
