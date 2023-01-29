@@ -1,3 +1,22 @@
+systemd (252.5-1) unstable; urgency=medium
+
+  [ Nick Rosbrook ]
+  * debian/tests: remove systemd-fsckd autopkgtest. This test never runs
+    in Debian autopkgtest because of missing machine isolation
+    requirements, and it nevers runs in Ubuntu because:  SKIP: root file
+    system is being checked by initramfs already Since the test is not
+    providing any good feedback, and generally has not been maintained,
+    let's just remove it.
+
+  [ Luca Boccassi ]
+  * New upstream version 252.5
+  * Drop patches merged in v252.5
+  * Refresh patches
+  * Set default status format to 'combined': show both unit name and
+    description in logs/boot messages
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 29 Jan 2023 19:39:28 +0000
+
 systemd (252.4-2) unstable; urgency=medium
 
   [ Michael Biebl ]
