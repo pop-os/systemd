@@ -737,7 +737,7 @@ Table=1234</programlisting></para>
           may trigger the start of the DHCPv6 client if the relevant flags are set in the RA data, or
           if no routers are found on the link. The default is to disable RA reception for bridge
           devices or when IP forwarding is enabled, and to enable it otherwise. Cannot be enabled on
-          bond devices and when link-local addressing is disabled.</para>
+          devices aggregated in a bond device or when link-local addressing is disabled.</para>
 
           <para>Further settings for the IPv6 RA support may be configured in the [IPv6AcceptRA]
           section, see below.</para>
@@ -1279,7 +1279,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
       <varlistentry>
         <term><varname>Table=</varname></term>
         <listitem>
-          <para>Specifies the routing table identifier to lookup if the rule selector matches. Takes
+          <para>Specifies the routing table identifier to look up if the rule selector matches. Takes
           one of predefined names <literal>default</literal>, <literal>main</literal>, and
           <literal>local</literal>, and names defined in <varname>RouteTable=</varname> in
           <citerefentry><refentrytitle>networkd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
@@ -1645,8 +1645,8 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
       <varlistentry>
         <term><varname>QuickAck=</varname></term>
         <listitem>
-          <para>Takes a boolean. When true enables TCP quick ack mode for the route. When unset, the
-          kernel's default will be used.</para>
+          <para>Takes a boolean. When true, the TCP quick ACK mode for the route is enabled. When unset,
+          the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
 
@@ -1890,6 +1890,20 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
         </listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><varname>SocketPriority=</varname></term>
+        <listitem>
+          <para>The Linux socket option <constant>SO_PRIORITY</constant> applied to the raw IP socket used for
+          initial DHCPv4 messages. Unset by default. Usual values range from 0 to 6.
+          More details about <constant>SO_PRIORITY</constant> socket option in
+          <citerefentry project='man-pages'><refentrytitle>socket</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+          Can be used in conjunction with [VLAN] section <varname>EgressQOSMaps=</varname> setting of .netdev
+          file to set the 802.1Q VLAN ethernet tagged header priority, see
+          <citerefentry><refentrytitle>systemd.netdev</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          </para>
+        </listitem>
+      </varlistentry>
+
       <!-- How to use the DHCP lease -->
 
       <varlistentry>
@@ -2029,6 +2043,14 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
         <listitem>
           <para>Specifies the MTU for the DHCP routes. Please see the [Route] section for further
           details.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>QuickAck=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, the TCP quick ACK mode is enabled for the routes configured by
+          the acquired DHCPv4 lease. When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
 
@@ -2270,6 +2292,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
         <term><varname>UseHostname=</varname></term>
         <term><varname>UseDomains=</varname></term>
         <term><varname>NetLabel=</varname></term>
+        <term><varname>SendRelease=</varname></term>
         <listitem>
           <para>As in the [DHCPv4] section.</para>
         </listitem>
@@ -2297,7 +2320,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
   <refsect1>
     <title>[DHCPPrefixDelegation] Section Options</title>
     <para>The [DHCPPrefixDelegation] section configures subnet prefixes of the delegated prefixes
-    acquired by a DHCPv6 client, or by a DHCPv4 client through the 6RD option on another interface.
+    acquired by a DHCPv6 client or by a DHCPv4 client through the 6RD option on another interface.
     The settings in this section are used only when the <varname>DHCPPrefixDelegation=</varname>
     setting in the [Network] section is enabled.</para>
 
@@ -2340,7 +2363,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
         <listitem>
           <para>Takes a boolean. Specifies whether to add an address from the delegated prefixes which
           are received from the WAN interface by the DHCPv6 Prefix Delegation. When true (on LAN
-          interfce), the EUI-64 algorithm will be used by default to form an interface identifier from
+          interface), the EUI-64 algorithm will be used by default to form an interface identifier from
           the delegated prefixes. See also <varname>Token=</varname> setting below. Defaults to yes.
           </para>
         </listitem>
@@ -2523,8 +2546,20 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
       <varlistentry>
         <term><varname>RouteMetric=</varname></term>
         <listitem>
-          <para>Set the routing metric for the routes received in the Router Advertisement. Takes an
-          unsigned integer in the range 0…4294967295. Defaults to 1024.</para>
+          <para>Set the routing metric for the routes received in the Router Advertisement. Takes an unsigned
+          integer in the range 0…4294967295, or three unsigned integer separated with <literal>:</literal>,
+          in that case the first one is used when the router preference is high, the second is for medium
+          preference, and the last is for low preference
+          (<literal><replaceable>high</replaceable>:<replaceable>medium</replaceable>:<replaceable>low</replaceable></literal>).
+          Defaults to <literal>512:1024:2048</literal>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>QuickAck=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, the TCP quick ACK mode is enabled for the routes configured by
+          the received RAs. When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
 
@@ -4024,6 +4059,27 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
           <para>Takes a boolean value. When true, CAKE will split General Segmentation Offload (GSO)
           super-packets into their on-the-wire components and dequeue them individually. Defaults to
           unset, and the kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RTTSec=</varname></term>
+        <listitem>
+          <para>Specifies the RTT for the filter. Takes a timespan. Typical values are e.g. 100us for
+          extremely high-performance 10GigE+ networks like datacentre, 1ms for non-WiFi LAN connections,
+          100ms for typical internet connections. Defaults to unset, and the kernel's default will be used.
+          </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>AckFilter=</varname></term>
+        <listitem>
+          <para>Takes a boolean value, or special value <literal>aggressive</literal>. If enabled, ACKs in
+          each flow are queued and redundant ACKs to the upstream are dropped. If yes, the filter will always
+          keep at least two redundant ACKs in the queue, while in <literal>aggressive</literal> mode, it will
+          filter down to a single ACK. This may improve download throughput on links with very asymmetrical
+          rate limits. Defaults to unset, and the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
 

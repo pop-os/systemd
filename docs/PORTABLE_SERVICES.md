@@ -95,7 +95,7 @@ This command does the following:
    image, and looks for all included unit files.
 
 2. It copies out all unit files with a suffix of `.service`, `.socket`,
-   `.target`, `.timer` and `.path`. whose name begins with the image's name
+   `.target`, `.timer` and `.path`, whose name begins with the image's name
    (with `.raw` removed), truncated at the first underscore if there is one.
    This prefix name generated from the image name must be followed by a ".",
    "-" or "@" character in the unit name. Or in other words, given the image
@@ -169,7 +169,7 @@ requirements are made for an image that can be attached/detached with
    an image with a partition table understood by the Linux kernel with only a
    single partition defined, or alternatively, a GPT partition table with a set
    of properly marked partitions following the
-   [Discoverable Partitions Specification](DISCOVERABLE_PARTITIONS.md).
+   [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification).
 
 3. The image must at least contain one matching unit file, with the right name
    prefix and suffix (see above). The unit file is searched in the usual paths,
@@ -223,8 +223,8 @@ images minimal.
 
 If the image is writable, and some of the files or directories that are
 overmounted from the host do not exist yet they will be automatically created.
-On read-only, immutable images (e.g. squashfs images) all files and directories
-to over-mount must exist already.
+On read-only, immutable images (e.g. `erofs` or `squashfs` images) all files
+and directories to over-mount must exist already.
 
 Note that as no new image format or metadata is defined, it's very
 straightforward to define images than can be made use of in a number of
@@ -303,7 +303,7 @@ Docker would do it, as these are regular system services they aren't run as PID
 
 If services shipped with this mechanism shall be able to access host resources
 (such as files or AF_UNIX sockets for IPC), use the normal `BindPaths=` and
-`BindReadOnlyPaths=` settings in unit files to mount them in. In fact the
+`BindReadOnlyPaths=` settings in unit files to mount them in. In fact, the
 `default` profile mentioned above makes use of this to ensure
 `/etc/resolv.conf`, the D-Bus system bus socket or write access to the logging
 subsystem are available to the service.
@@ -329,7 +329,7 @@ units shipped with the OS itself as for attached portable services.
 ## Immutable images with local data
 
 It's a good idea to keep portable service images read-only during normal
-operation. In fact all but the `trusted` profile will default to this kind of
+operation. In fact, all but the `trusted` profile will default to this kind of
 behaviour, by setting the `ProtectSystem=strict` option. In this case writable
 service data may be placed on the host file system. Use `StateDirectory=` in
 the unit files to enable such behaviour and add a local data directory to the

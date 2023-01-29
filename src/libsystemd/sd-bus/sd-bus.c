@@ -27,7 +27,7 @@
 #include "bus-track.h"
 #include "bus-type.h"
 #include "cgroup-util.h"
-#include "def.h"
+#include "constants.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "glyph-util.h"
@@ -240,9 +240,9 @@ _public_ int sd_bus_new(sd_bus **ret) {
 
         *b = (sd_bus) {
                 .n_ref = 1,
-                .input_fd = -1,
-                .output_fd = -1,
-                .inotify_fd = -1,
+                .input_fd = -EBADF,
+                .output_fd = -EBADF,
+                .inotify_fd = -EBADF,
                 .message_version = 1,
                 .creds_mask = SD_BUS_CREDS_WELL_KNOWN_NAMES|SD_BUS_CREDS_UNIQUE_NAME,
                 .accept_fd = true,
@@ -2465,8 +2465,11 @@ _public_ int sd_bus_call(
                         left = UINT64_MAX;
 
                 r = bus_poll(bus, true, left);
-                if (r < 0)
+                if (r < 0) {
+                        if (ERRNO_IS_TRANSIENT(r))
+                                continue;
                         goto fail;
+                }
                 if (r == 0) {
                         r = -ETIMEDOUT;
                         goto fail;
@@ -2925,6 +2928,7 @@ static int process_fd_check(sd_bus *bus, sd_bus_message *m) {
 }
 
 static int process_message(sd_bus *bus, sd_bus_message *m) {
+        _unused_ _cleanup_(log_context_freep) LogContext *c = NULL;
         int r;
 
         assert(bus);
@@ -2932,6 +2936,9 @@ static int process_message(sd_bus *bus, sd_bus_message *m) {
 
         bus->current_message = m;
         bus->iteration_counter++;
+
+        if (log_context_enabled())
+                c = log_context_new_consume(bus_message_make_log_fields(m));
 
         log_debug_bus_message(m);
 
@@ -3321,6 +3328,7 @@ static int bus_poll(sd_bus *bus, bool need_more, uint64_t timeout_usec) {
 }
 
 _public_ int sd_bus_wait(sd_bus *bus, uint64_t timeout_usec) {
+        int r;
 
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
@@ -3335,7 +3343,11 @@ _public_ int sd_bus_wait(sd_bus *bus, uint64_t timeout_usec) {
         if (bus->rqueue_size > 0)
                 return 0;
 
-        return bus_poll(bus, false, timeout_usec);
+        r = bus_poll(bus, false, timeout_usec);
+        if (r < 0 && ERRNO_IS_TRANSIENT(r))
+                return 1; /* treat EINTR as success, but let's exit, so that the caller will call back into us soon. */
+
+        return r;
 }
 
 _public_ int sd_bus_flush(sd_bus *bus) {
@@ -3377,8 +3389,12 @@ _public_ int sd_bus_flush(sd_bus *bus) {
                         return 0;
 
                 r = bus_poll(bus, false, UINT64_MAX);
-                if (r < 0)
+                if (r < 0) {
+                        if (ERRNO_IS_TRANSIENT(r))
+                                continue;
+
                         return r;
+                }
         }
 }
 

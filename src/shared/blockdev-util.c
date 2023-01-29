@@ -43,23 +43,7 @@ static int fd_get_devnum(int fd, BlockDeviceLookupFlag flags, dev_t *ret) {
                 /* If major(st.st_dev) is zero, this might mean we are backed by btrfs, which needs special
                  * handing, to get the backing device node. */
 
-                r = fcntl(fd, F_GETFL);
-                if (r < 0)
-                        return -errno;
-
-                if (FLAGS_SET(r, O_PATH)) {
-                        _cleanup_close_ int regfd = -1;
-
-                        /* The fstat() above we can execute on an O_PATH fd. But the btrfs ioctl we cannot.
-                         * Hence acquire a "real" fd first, without the O_PATH flag. */
-
-                        regfd = fd_reopen(fd, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
-                        if (regfd < 0)
-                                return regfd;
-
-                        r = btrfs_get_block_device_fd(regfd, &devnum);
-                } else
-                        r = btrfs_get_block_device_fd(fd, &devnum);
+                r = btrfs_get_block_device_fd(fd, &devnum);
                 if (r == -ENOTTY) /* not btrfs */
                         return -ENOTBLK;
                 if (r < 0)
@@ -214,7 +198,7 @@ int block_device_new_from_fd(int fd, BlockDeviceLookupFlag flags, sd_device **re
 }
 
 int block_device_new_from_path(const char *path, BlockDeviceLookupFlag flags, sd_device **ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(path);
         assert(ret);
@@ -288,21 +272,7 @@ int get_block_device_fd(int fd, dev_t *ret) {
                 return 1;
         }
 
-        r = fcntl(fd, F_GETFL);
-        if (r < 0)
-                return -errno;
-        if (FLAGS_SET(r, O_PATH) && (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode))) {
-                _cleanup_close_ int real_fd = -1;
-
-                /* The fstat() above we can execute on an O_PATH fd. But the btrfs ioctl we cannot. Hence
-                 * acquire a "real" fd first, without the O_PATH flag. */
-
-                real_fd = fd_reopen(fd, O_RDONLY|O_CLOEXEC);
-                if (real_fd < 0)
-                        return real_fd;
-                r = btrfs_get_block_device_fd(real_fd, ret);
-        } else
-                r = btrfs_get_block_device_fd(fd, ret);
+        r = btrfs_get_block_device_fd(fd, ret);
         if (r > 0)
                 return 1;
         if (r != -ENOTTY) /* not btrfs */
@@ -313,7 +283,7 @@ int get_block_device_fd(int fd, dev_t *ret) {
 }
 
 int get_block_device(const char *path, dev_t *ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(path);
         assert(ret);
@@ -363,7 +333,7 @@ int get_block_device_harder_fd(int fd, dev_t *ret) {
 }
 
 int get_block_device_harder(const char *path, dev_t *ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(path);
         assert(ret);
@@ -376,7 +346,7 @@ int get_block_device_harder(const char *path, dev_t *ret) {
 }
 
 int lock_whole_block_device(dev_t devt, int operation) {
-        _cleanup_close_ int lock_fd = -1;
+        _cleanup_close_ int lock_fd = -EBADF;
         dev_t whole_devt;
         int r;
 
@@ -549,7 +519,7 @@ int fd_get_whole_disk(int fd, bool backing, dev_t *ret) {
 }
 
 int path_get_whole_disk(const char *path, bool backing, dev_t *ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open(path, O_CLOEXEC|O_PATH);
         if (fd < 0)
@@ -692,7 +662,7 @@ int partition_enumerator_new(sd_device *dev, sd_device_enumerator **ret) {
 int block_device_remove_all_partitions(sd_device *dev, int fd) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
         _cleanup_(sd_device_unrefp) sd_device *dev_unref = NULL;
-        _cleanup_close_ int fd_close = -1;
+        _cleanup_close_ int fd_close = -EBADF;
         bool has_partitions = false;
         sd_device *part;
         int r, k = 0;
@@ -737,6 +707,10 @@ int block_device_remove_all_partitions(sd_device *dev, int fd) {
                 if (r < 0)
                         return r;
 
+                r = btrfs_forget_device(devname);
+                if (r < 0 && r != -ENOENT)
+                        log_debug_errno(r, "Failed to forget btrfs device %s, ignoring: %m", devname);
+
                 r = block_device_remove_partition(fd, devname, nr);
                 if (r == -ENODEV) {
                         log_debug("Kernel removed partition %s before us, ignoring", devname);
@@ -770,7 +744,7 @@ int block_device_has_partitions(sd_device *dev) {
 }
 
 int blockdev_reread_partition_table(sd_device *dev) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(dev);
 
@@ -786,5 +760,20 @@ int blockdev_reread_partition_table(sd_device *dev) {
         if (ioctl(fd, BLKRRPART, 0) < 0)
                 return -errno;
 
+        return 0;
+}
+
+int blockdev_get_sector_size(int fd, uint32_t *ret) {
+        int ssz = 0;
+
+        assert(fd >= 0);
+        assert(ret);
+
+        if (ioctl(fd, BLKSSZGET, &ssz) < 0)
+                return -errno;
+        if (ssz <= 0) /* make sure the field is initialized */
+                return log_debug_errno(SYNTHETIC_ERRNO(EIO), "Block device reported invalid sector size %i.", ssz);
+
+        *ret = ssz;
         return 0;
 }

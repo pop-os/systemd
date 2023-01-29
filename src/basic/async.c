@@ -12,7 +12,6 @@
 #include "macro.h"
 #include "process-util.h"
 #include "signal-util.h"
-#include "util.h"
 
 int asynchronous_job(void* (*func)(void *p), void *arg) {
         sigset_t ss, saved_ss;
@@ -104,5 +103,5 @@ int asynchronous_close(int fd) {
                          assert_se(close_nointr(fd) != -EBADF);
         }
 
-        return -1;
+        return -EBADF;
 }

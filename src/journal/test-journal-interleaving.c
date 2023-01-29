@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "sd-id128.h"
 #include "sd-journal.h"
 
 #include "alloc-util.h"
@@ -14,7 +15,6 @@
 #include "parse-util.h"
 #include "rm-rf.h"
 #include "tests.h"
-#include "util.h"
 
 /* This program tests skipping around in a multi-file journal. */
 
@@ -30,7 +30,7 @@ _noreturn_ static void log_assert_errno(const char *text, int error, const char 
         do {                                                            \
                 int _r_ = (expr);                                       \
                 if (_unlikely_(_r_ < 0))                                \
-                        log_assert_errno(#expr, -_r_, PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__); \
+                        log_assert_errno(#expr, -_r_, PROJECT_FILE, __LINE__, __func__); \
         } while (false)
 
 static ManagedJournalFile *test_open(const char *name) {
@@ -263,22 +263,26 @@ static void test_sequence_numbers_one(void) {
 
         test_close(one);
 
-        /* restart server */
-        seqnum = 0;
+        /* If the machine-id is not initialized, the header file verification
+         * (which happens when re-opening a journal file) will fail. */
+        if (sd_id128_get_machine(NULL) >= 0) {
+                /* restart server */
+                seqnum = 0;
 
-        assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
-                                            UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
+                assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
+                                                    UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
 
-        assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
+                assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
 
-        append_number(two, 7, &seqnum);
-        printf("seqnum=%"PRIu64"\n", seqnum);
-        assert_se(seqnum == 5);
+                append_number(two, 7, &seqnum);
+                printf("seqnum=%"PRIu64"\n", seqnum);
+                assert_se(seqnum == 5);
 
-        /* So..., here we have the same seqnum in two files with the
-         * same seqnum_id. */
+                /* So..., here we have the same seqnum in two files with the
+                 * same seqnum_id. */
 
-        test_close(two);
+                test_close(two);
+        }
 
         log_info("Done...");
 

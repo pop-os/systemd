@@ -25,6 +25,7 @@
 #include <sys/types.h>
 #include <stdbool.h>
 
+#include "sd-device.h"
 #include "sd-dhcp-lease.h"
 #include "sd-dhcp-option.h"
 #include "sd-event.h"
@@ -308,6 +309,9 @@ int sd_dhcp_client_get_lease(
 int sd_dhcp_client_set_service_type(
                 sd_dhcp_client *client,
                 int type);
+int sd_dhcp_client_set_socket_priority(
+                sd_dhcp_client *client,
+                int so_priority);
 int sd_dhcp_client_set_fallback_lease_lifetime(
                 sd_dhcp_client *client,
                 uint32_t fallback_lease_lifetime);
@@ -337,6 +341,7 @@ int sd_dhcp_client_attach_event(
                 int64_t priority);
 int sd_dhcp_client_detach_event(sd_dhcp_client *client);
 sd_event *sd_dhcp_client_get_event(sd_dhcp_client *client);
+int sd_dhcp_client_attach_device(sd_dhcp_client *client, sd_device *dev);
 
 _SD_DEFINE_POINTER_CLEANUP_FUNC(sd_dhcp_client, sd_dhcp_client_unref);
 

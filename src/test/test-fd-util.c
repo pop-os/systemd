@@ -58,8 +58,8 @@ TEST(close_nointr) {
 }
 
 TEST(same_fd) {
-        _cleanup_close_pair_ int p[2] = { -1, -1 };
-        _cleanup_close_ int a = -1, b = -1, c = -1;
+        _cleanup_close_pair_ int p[2];
+        _cleanup_close_ int a, b, c;
 
         assert_se(pipe2(p, O_CLOEXEC) >= 0);
         assert_se((a = fcntl(p[0], F_DUPFD, 3)) >= 0);
@@ -92,7 +92,7 @@ TEST(same_fd) {
 }
 
 TEST(open_serialization_fd) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open_serialization_fd("test");
         assert_se(fd >= 0);
@@ -133,7 +133,7 @@ TEST(rearrange_stdio) {
 
                 safe_close(STDERR_FILENO); /* Let's close an fd < 2, to make it more interesting */
 
-                assert_se(rearrange_stdio(-1, -1, -1) >= 0);
+                assert_se(rearrange_stdio(-EBADF, -EBADF, -EBADF) >= 0);
 
                 assert_se(fd_get_path(STDIN_FILENO, &path) >= 0);
                 assert_se(path_equal(path, "/dev/null"));
@@ -170,7 +170,7 @@ TEST(rearrange_stdio) {
                 assert_se(read(0, buffer, sizeof(buffer)) == 6);
                 assert_se(memcmp(buffer, "foobar", 6) == 0);
 
-                assert_se(rearrange_stdio(-1, 1, 2) >= 0);
+                assert_se(rearrange_stdio(-EBADF, 1, 2) >= 0);
                 assert_se(write(1, "a", 1) < 0 && errno == ENOSPC);
                 assert_se(write(2, "y", 1) == 1);
                 assert_se(read(3, buffer, sizeof(buffer)) == 1);
@@ -322,8 +322,8 @@ TEST(close_all_fds) {
         int r;
 
         /* Runs the test four times. Once as is. Once with close_range() syscall blocked via seccomp, once
-         * with /proc overmounted, and once with the combination of both. This should trigger all fallbacks in
-         * the close_range_all() function. */
+         * with /proc/ overmounted, and once with the combination of both. This should trigger all fallbacks
+         * in the close_range_all() function. */
 
         r = safe_fork("(caf-plain)", FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_WAIT, NULL);
         if (r == 0) {
@@ -332,26 +332,22 @@ TEST(close_all_fds) {
         }
         assert_se(r >= 0);
 
-        if (geteuid() != 0) {
-                log_notice("Lacking privileges, skipping running tests with blocked close_range() and with /proc/ overnmounted.");
-                return;
-        }
+        if (geteuid() != 0)
+                return (void) log_tests_skipped("Lacking privileges for test with close_range() blocked and /proc/ overmounted");
 
         r = safe_fork("(caf-noproc)", FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE, NULL);
         if (r == 0) {
                 r = mount_nofollow_verbose(LOG_WARNING, "tmpfs", "/proc", "tmpfs", 0, NULL);
                 if (r < 0)
-                        log_notice("Overmounting /proc didn#t work, skipping close_all_fds() with masked /proc/.");
+                        log_notice("Overmounting /proc/ didn't work, skipping close_all_fds() with masked /proc/.");
                 else
                         test_close_all_fds_inner();
                 _exit(EXIT_SUCCESS);
         }
         assert_se(r >= 0);
 
-        if (!is_seccomp_available()) {
-                log_notice("Seccomp not available, skipping seccomp tests in %s", __func__);
-                return;
-        }
+        if (!is_seccomp_available())
+                return (void) log_tests_skipped("Seccomp not available");
 
         r = safe_fork("(caf-seccomp)", FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_WAIT, NULL);
         if (r == 0) {
@@ -373,7 +369,7 @@ TEST(close_all_fds) {
                 else {
                         r = mount_nofollow_verbose(LOG_WARNING, "tmpfs", "/proc", "tmpfs", 0, NULL);
                         if (r < 0)
-                                log_notice("Overmounting /proc didn#t work, skipping close_all_fds() with masked /proc/.");
+                                log_notice("Overmounting /proc/ didn't work, skipping close_all_fds() with masked /proc/.");
                         else
                                 test_close_all_fds_inner();
                 }
@@ -393,7 +389,7 @@ TEST(format_proc_fd_path) {
 }
 
 TEST(fd_reopen) {
-        _cleanup_close_ int fd1 = -1, fd2 = -1;
+        _cleanup_close_ int fd1 = -EBADF, fd2 = -EBADF;
         struct stat st1, st2;
         int fl;
 
@@ -484,46 +480,93 @@ TEST(fd_reopen) {
         /* Also check the right error is generated if the fd is already closed */
         safe_close(fd1);
         assert_se(fd_reopen(fd1, O_RDONLY|O_CLOEXEC) == -EBADF);
-        fd1 = -1;
+        fd1 = -EBADF;
+}
+
+TEST(fd_reopen_condition) {
+        _cleanup_close_ int fd1 = -EBADF, fd3 = -EBADF;
+        int fd2, fl;
+
+        /* Open without O_PATH */
+        fd1 = open("/usr/", O_RDONLY|O_DIRECTORY|O_CLOEXEC);
+        assert_se(fd1 >= 0);
+
+        fl = fcntl(fd1, F_GETFL);
+        assert_se(FLAGS_SET(fl, O_DIRECTORY));
+        assert_se(!FLAGS_SET(fl, O_PATH));
+
+        fd2 = fd_reopen_condition(fd1, O_DIRECTORY, O_DIRECTORY|O_PATH, &fd3);
+        assert_se(fd2 == fd1);
+        assert_se(fd3 < 0);
+
+        /* Switch on O_PATH */
+        fd2 = fd_reopen_condition(fd1, O_DIRECTORY|O_PATH, O_DIRECTORY|O_PATH, &fd3);
+        assert_se(fd2 != fd1);
+        assert_se(fd3 == fd2);
+
+        fl = fcntl(fd2, F_GETFL);
+        assert_se(FLAGS_SET(fl, O_DIRECTORY));
+        assert_se(FLAGS_SET(fl, O_PATH));
+
+        close_and_replace(fd1, fd3);
+
+        fd2 = fd_reopen_condition(fd1, O_DIRECTORY|O_PATH, O_DIRECTORY|O_PATH, &fd3);
+        assert_se(fd2 == fd1);
+        assert_se(fd3 < 0);
+
+        /* Switch off O_PATH again */
+        fd2 = fd_reopen_condition(fd1, O_DIRECTORY, O_DIRECTORY|O_PATH, &fd3);
+        assert_se(fd2 != fd1);
+        assert_se(fd3 == fd2);
+
+        fl = fcntl(fd2, F_GETFL);
+        assert_se(FLAGS_SET(fl, O_DIRECTORY));
+        assert_se(!FLAGS_SET(fl, O_PATH));
+
+        close_and_replace(fd1, fd3);
+
+        fd2 = fd_reopen_condition(fd1, O_DIRECTORY, O_DIRECTORY|O_PATH, &fd3);
+        assert_se(fd2 == fd1);
+        assert_se(fd3 < 0);
 }
 
 TEST(take_fd) {
-        _cleanup_close_ int fd1 = -1, fd2 = -1;
-        int array[2] = { -1, -1 }, i = 0;
+        _cleanup_close_ int fd1 = -EBADF, fd2 = -EBADF;
+        int array[2] = PIPE_EBADF, i = 0;
 
-        assert_se(fd1 == -1);
-        assert_se(fd2 == -1);
+        assert_se(fd1 == -EBADF);
+        assert_se(fd2 == -EBADF);
 
         fd1 = eventfd(0, EFD_CLOEXEC);
         assert_se(fd1 >= 0);
 
         fd2 = TAKE_FD(fd1);
-        assert_se(fd1 == -1);
+        assert_se(fd1 == -EBADF);
         assert_se(fd2 >= 0);
 
-        assert_se(array[0] == -1);
-        assert_se(array[1] == -1);
+        assert_se(array[0] == -EBADF);
+        assert_se(array[1] == -EBADF);
 
         array[0] = TAKE_FD(fd2);
-        assert_se(fd1 == -1);
-        assert_se(fd2 == -1);
+        assert_se(fd1 == -EBADF);
+        assert_se(fd2 == -EBADF);
         assert_se(array[0] >= 0);
-        assert_se(array[1] == -1);
+        assert_se(array[1] == -EBADF);
 
         array[1] = TAKE_FD(array[i]);
-        assert_se(array[0] == -1);
+        assert_se(array[0] == -EBADF);
         assert_se(array[1] >= 0);
 
         i = 1 - i;
         array[0] = TAKE_FD(*(array + i));
         assert_se(array[0] >= 0);
-        assert_se(array[1] == -1);
+        assert_se(array[1] == -EBADF);
 
         i = 1 - i;
         fd1 = TAKE_FD(array[i]);
         assert_se(fd1 >= 0);
-        assert_se(array[0] == -1);
-        assert_se(array[1] == -1);
+        assert_se(array[0] == -EBADF);
+        assert_se(array[1] == -EBADF);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

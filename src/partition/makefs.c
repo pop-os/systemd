@@ -13,13 +13,14 @@
 #include "fd-util.h"
 #include "main-func.h"
 #include "mkfs-util.h"
+#include "path-util.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "string-util.h"
 
 static int run(int argc, char *argv[]) {
-        _cleanup_free_ char *device = NULL, *fstype = NULL, *detected = NULL;
-        _cleanup_close_ int lock_fd = -1;
+        _cleanup_free_ char *device = NULL, *fstype = NULL, *detected = NULL, *label = NULL;
+        _cleanup_close_ int lock_fd = -EBADF;
         sd_id128_t uuid;
         struct stat st;
         int r;
@@ -65,7 +66,11 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to generate UUID for file system: %m");
 
-        return make_filesystem(device, fstype, basename(device), NULL, uuid, true);
+        r = path_extract_filename(device, &label);
+        if (r < 0)
+                return log_error_errno(r, "Failed to extract file name from '%s': %m", device);
+
+        return make_filesystem(device, fstype, label, NULL, uuid, true, 0, NULL);
 }
 
 DEFINE_MAIN_FUNCTION(run);

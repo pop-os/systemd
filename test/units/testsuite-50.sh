@@ -41,6 +41,15 @@ systemd-dissect --json=short "${image}.raw" | grep -q -F '{"rw":"ro","designator
 systemd-dissect "${image}.raw" | grep -q -F "MARKER=1"
 systemd-dissect "${image}.raw" | grep -q -F -f <(sed 's/"//g' "$os_release")
 
+systemd-dissect --list "${image}.raw" | grep -q '^etc/os-release$'
+systemd-dissect --mtree "${image}.raw" | grep -q "./usr/bin/cat type=file mode=0755 uid=0 gid=0"
+
+read -r SHA256SUM1 _ < <(systemd-dissect --copy-from "${image}.raw" etc/os-release | sha256sum)
+test "$SHA256SUM1" != ""
+read -r SHA256SUM2 _ < <(systemd-dissect --read-only --with "${image}.raw" sha256sum etc/os-release)
+test "$SHA256SUM2" != ""
+test "$SHA256SUM1" = "$SHA256SUM2"
+
 mv "${image}.verity" "${image}.fooverity"
 mv "${image}.roothash" "${image}.foohash"
 systemd-dissect --json=short "${image}.raw" --root-hash="${roothash}" --verity-data="${image}.fooverity" | grep -q -F '{"rw":"ro","designator":"root","partition_uuid":null,"partition_label":null,"fstype":"squashfs","architecture":null,"verity":"external"'
@@ -228,6 +237,12 @@ grep -q -F -f "$os_release" "${image_dir}/mount/etc/os-release"
 grep -q -F "MARKER=1" "${image_dir}/mount/usr/lib/os-release"
 systemd-dissect --umount "${image_dir}/mount"
 
+systemd-dissect --root-hash "${roothash}" --mount "${image}.gpt" --in-memory "${image_dir}/mount"
+grep -q -F -f "$os_release" "${image_dir}/mount/usr/lib/os-release"
+grep -q -F -f "$os_release" "${image_dir}/mount/etc/os-release"
+grep -q -F "MARKER=1" "${image_dir}/mount/usr/lib/os-release"
+systemd-dissect --umount "${image_dir}/mount"
+
 # add explicit -p MountAPIVFS=yes once to test the parser
 systemd-run -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1"
 
@@ -399,6 +414,15 @@ test ! -e /usr/lib/systemd/system/some_file
 systemd-sysext unmerge
 rmdir /etc/extensions/app-nodistro
 rm /var/lib/extensions/app-nodistro.raw
+
+mkdir -p /run/machines /run/portables /run/extensions
+touch /run/machines/a.raw /run/portables/b.raw /run/extensions/c.raw
+
+systemd-dissect --discover --json=short > /tmp/discover.json
+grep -q -F '{"name":"a","type":"raw","class":"machine","ro":false,"path":"/run/machines/a.raw"' /tmp/discover.json
+grep -q -F '{"name":"b","type":"raw","class":"portable","ro":false,"path":"/run/portables/b.raw"' /tmp/discover.json
+grep -q -F '{"name":"c","type":"raw","class":"extension","ro":false,"path":"/run/extensions/c.raw"' /tmp/discover.json
+rm /tmp/discover.json /run/machines/a.raw /run/portables/b.raw /run/extensions/c.raw
 
 echo OK >/testok
 

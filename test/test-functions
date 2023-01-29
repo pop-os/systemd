@@ -198,6 +198,7 @@ BASICTOOLS=(
     nproc
     pkill
     readlink
+    realpath
     rev
     rm
     rmdir
@@ -955,6 +956,8 @@ install_modules() {
 
     if get_bool "$LOOKS_LIKE_SUSE"; then
         instmods ext4
+        # for TEST-54-CREDS
+        instmods dmi-sysfs
     fi
 }
 
@@ -1148,7 +1151,6 @@ install_debian_systemd() {
 }
 
 install_suse_systemd() {
-    local testsdir=/usr/lib/systemd/tests
     local pkgs
 
     dinfo "Install SUSE systemd"
@@ -1159,6 +1161,9 @@ install_suse_systemd() {
         systemd-coredump
         systemd-experimental
         systemd-journal-remote
+        # Since commit fb6f25d7b979134a, systemd-resolved, which is shipped by
+        # systemd-network sub-package on openSUSE, has its own testsuite.
+        systemd-network
         systemd-portable
         udev
     )
@@ -1174,15 +1179,21 @@ install_suse_systemd() {
         done < <(rpm -ql "$p")
     done
 
-    # we only need testsdata dir as well as the unit tests (for
-    # TEST-02-UNITTESTS) in the image.
-    dinfo "Install unit tests and testdata directory"
+    # Embed the files needed by the extended testsuite at runtime. Also include
+    # the unit tests needed by TEST-02-UNITTESTS. This is mostly equivalent to
+    # what `ninja install` does for the tests when '-Dinstall-tests=true'.
+    #
+    # Why? openSUSE ships a package named 'systemd-testsuite' which contains
+    # the minimal set of files that allows to run the testsuite on the host (as
+    # long as it runs an equivalent version of systemd) getting rid of the
+    # hassles of fetching, configuring, building the source code.
+    dinfo "Install the files needed by the tests at runtime"
+    image_install "${SOURCE_DIR}"/test-*
+    inst_recursive "${SOURCE_DIR}/testdata"
+    inst_recursive "${SOURCE_DIR}/manual"
 
-    mkdir -p "$initdir/$testsdir"
-    cp "$testsdir"/test-* "$initdir/$testsdir/"
-    cp -a "$testsdir/testdata" "$initdir/$testsdir/"
-
-    # On openSUSE, these dirs are not created at package install for now on.
+    # On openSUSE, this directory is not created at package install, at least
+    # for now.
     mkdir -p "$initdir/var/log/journal/remote"
 }
 
@@ -1276,7 +1287,7 @@ install_missing_libraries() {
     local lib path
     # A number of dependencies is now optional via dlopen, so the install
     # script will not pick them up, since it looks at linkage.
-    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu tss2-tcti-device libfido2 libbpf libelf libdw xkbcommon; do
+    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu tss2-tcti-device libfido2 libbpf libelf libdw xkbcommon p11-kit-1; do
         ddebug "Searching for $lib via pkg-config"
         if pkg-config --exists "$lib"; then
                 path="$(pkg-config --variable=libdir "$lib")"
@@ -1287,6 +1298,10 @@ install_missing_libraries() {
 
                 if ! [[ ${lib} =~ ^lib ]]; then
                         lib="lib${lib}"
+                fi
+                # p11-kit-1's .so doesn't have the API level in the name
+                if [[ ${lib} =~ p11-kit-1$ ]]; then
+                        lib="libp11-kit"
                 fi
                 # Some pkg-config files are broken and give out the wrong paths
                 # (eg: libcryptsetup), so just ignore them
@@ -1310,6 +1325,11 @@ install_missing_libraries() {
     inst_simple "${path}/engines-3/capi.so" || true
     inst_simple "${path}/engines-3/loader_attic.so" || true
     inst_simple "${path}/engines-3/padlock.so" || true
+
+    # Binaries from mtools depend on the gconv modules to translate between codepages. Because there's no
+    # pkg-config file for these, we copy every gconv/ directory we can find in /usr/lib and /usr/lib64.
+    # shellcheck disable=SC2046
+    inst_recursive $(find /usr/lib* -name gconv 2>/dev/null)
 }
 
 cleanup_loopdev() {
@@ -1345,6 +1365,9 @@ create_empty_image() {
     if ! get_bool "$STRIP_BINARIES"; then
         root_size=$((4 * root_size))
         data_size=$((2 * data_size))
+    fi
+    if [ "$IMAGE_NAME" = "repart" ]; then
+        root_size=$((root_size+=1000))
     fi
 
     echo "Setting up ${IMAGE_PUBLIC:?} (${root_size} MB)"

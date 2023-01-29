@@ -258,7 +258,7 @@ static int varlink_new(Varlink **ret) {
 
         *v = (Varlink) {
                 .n_ref = 1,
-                .fd = -1,
+                .fd = -EBADF,
 
                 .state = _VARLINK_STATE_INVALID,
 
@@ -423,7 +423,7 @@ static int varlink_test_disconnect(Varlink *v) {
         /* Similar, if are a client that hasn't written anything yet but the write side is dead, also
          * disconnect. We also explicitly check for POLLHUP here since we likely won't notice the write side
          * being down if we never wrote anything. */
-        if (IN_SET(v->state, VARLINK_IDLE_CLIENT) && (v->write_disconnected || v->got_pollhup))
+        if (v->state == VARLINK_IDLE_CLIENT && (v->write_disconnected || v->got_pollhup))
                 goto disconnect;
 
         /* We are on the server side and still want to send out more replies, but we saw POLLHUP already, and
@@ -1025,7 +1025,7 @@ static void handle_revents(Varlink *v, int revents) {
                 if ((revents & (POLLOUT|POLLHUP)) == 0)
                         return;
 
-                varlink_log(v, "Anynchronous connection completed.");
+                varlink_log(v, "Asynchronous connection completed.");
                 v->connecting = false;
         } else {
                 /* Note that we don't care much about POLLIN/POLLOUT here, we'll just try reading and writing
@@ -1075,6 +1075,9 @@ int varlink_wait(Varlink *v, usec_t timeout) {
                 return events;
 
         r = fd_wait_for_event(fd, events, t);
+        if (r < 0 && ERRNO_IS_TRANSIENT(r)) /* Treat EINTR as not a timeout, but also nothing happened, and
+                                             * the caller gets a chance to call back into us */
+                return 1;
         if (r <= 0)
                 return r;
 
@@ -1161,8 +1164,12 @@ int varlink_flush(Varlink *v) {
                 }
 
                 r = fd_wait_for_event(v->fd, POLLOUT, USEC_INFINITY);
-                if (r < 0)
+                if (r < 0) {
+                        if (ERRNO_IS_TRANSIENT(r))
+                                continue;
+
                         return varlink_log_errno(v, r, "Poll failed on fd: %m");
+                }
 
                 assert(r != 0);
 
@@ -1466,7 +1473,7 @@ int varlink_call(
 
         if (v->state == VARLINK_DISCONNECTED)
                 return varlink_log_errno(v, SYNTHETIC_ERRNO(ENOTCONN), "Not connected.");
-        if (!IN_SET(v->state, VARLINK_IDLE_CLIENT))
+        if (v->state != VARLINK_IDLE_CLIENT)
                 return varlink_log_errno(v, SYNTHETIC_ERRNO(EBUSY), "Connection busy.");
 
         assert(v->n_pending == 0); /* n_pending can't be > 0 if we are in VARLINK_IDLE_CLIENT state */
@@ -2187,7 +2194,7 @@ int varlink_server_add_connection(VarlinkServer *server, int fd, Varlink **ret) 
                 r = varlink_attach_event(v, server->event, server->event_priority);
                 if (r < 0) {
                         varlink_log_errno(v, r, "Failed to attach new connection: %m");
-                        v->fd = -1; /* take the fd out of the connection again */
+                        v->fd = -EBADF; /* take the fd out of the connection again */
                         varlink_close(v);
                         return r;
                 }
@@ -2211,7 +2218,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(VarlinkServerSocket *, varlink_server_socket_free);
 
 static int connect_callback(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
         VarlinkServerSocket *ss = ASSERT_PTR(userdata);
-        _cleanup_close_ int cfd = -1;
+        _cleanup_close_ int cfd = -EBADF;
         Varlink *v = NULL;
         int r;
 
@@ -2299,7 +2306,7 @@ int varlink_server_listen_address(VarlinkServer *s, const char *address, mode_t 
         _cleanup_(varlink_server_socket_freep) VarlinkServerSocket *ss = NULL;
         union sockaddr_union sockaddr;
         socklen_t sockaddr_len;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert_return(s, -EINVAL);
@@ -2319,7 +2326,7 @@ int varlink_server_listen_address(VarlinkServer *s, const char *address, mode_t 
 
         (void) sockaddr_un_unlink(&sockaddr.un);
 
-        RUN_WITH_UMASK(~m & 0777) {
+        WITH_UMASK(~m & 0777) {
                 r = mac_selinux_bind(fd, &sockaddr.sa, sockaddr_len);
                 if (r < 0)
                         return r;
@@ -2612,7 +2619,7 @@ int varlink_server_deserialize_one(VarlinkServer *s, const char *value, FDSet *f
         _cleanup_(varlink_server_socket_freep) VarlinkServerSocket *ss = NULL;
         _cleanup_free_ char *address = NULL;
         const char *v = ASSERT_PTR(value);
-        int r, fd = -1;
+        int r, fd = -EBADF;
         char *buf;
         size_t n;
 

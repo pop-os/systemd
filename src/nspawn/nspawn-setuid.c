@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "def.h"
+#include "constants.h"
 #include "errno.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -17,7 +17,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "user-util.h"
-#include "util.h"
 
 static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
         int pipe_fds[2], r;
@@ -40,7 +39,7 @@ static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
 
                 pipe_fds[0] = safe_close(pipe_fds[0]);
 
-                if (rearrange_stdio(-1, TAKE_FD(pipe_fds[1]), -1) < 0)
+                if (rearrange_stdio(-EBADF, TAKE_FD(pipe_fds[1]), -EBADF) < 0)
                         _exit(EXIT_FAILURE);
 
                 (void) close_all_fds(NULL, 0);
@@ -94,7 +93,7 @@ int change_uid_gid(const char *user, bool chown_stdio, char **ret_home) {
         _cleanup_free_ gid_t *gids = NULL;
         _cleanup_free_ char *home = NULL, *line = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         unsigned n_gids = 0;
         uid_t uid;
         gid_t gid;

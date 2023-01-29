@@ -3,6 +3,7 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include "build.h"
 #include "creds-util.h"
 #include "dirent-util.h"
 #include "escape.h"
@@ -136,7 +137,7 @@ static int add_credentials_to_table(Table *t, bool encrypted) {
         for (;;) {
                 _cleanup_free_ char *j = NULL;
                 const char *secure, *secure_color = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 struct dirent *de;
                 struct stat st;
 
@@ -325,16 +326,12 @@ static int write_blob(FILE *f, const void *data, size_t size) {
 
         if (arg_transcode == TRANSCODE_OFF &&
             arg_json_format_flags != JSON_FORMAT_OFF) {
-
                 _cleanup_(erase_and_freep) char *suffixed = NULL;
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
 
-                if (memchr(data, 0, size))
-                        return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Credential data contains embedded NUL, can't parse as JSON.");
-
-                suffixed = memdup_suffix0(data, size);
-                if (!suffixed)
-                        return log_oom();
+                r = make_cstring(data, size, MAKE_CSTRING_REFUSE_TRAILING_NUL, &suffixed);
+                if (r < 0)
+                        return log_error_errno(r, "Unable to convert binary string to C string: %m");
 
                 r = json_parse(suffixed, JSON_PARSE_SENSITIVE, &v, NULL, NULL);
                 if (r < 0)
@@ -562,7 +559,7 @@ static int verb_decrypt(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to read encrypted credential data: %m");
 
-        output_path = (argc < 3 || isempty(argv[2]) || streq(argv[2], "-")) ? NULL : argv[2];
+        output_path = (argc < 3 || empty_or_dash(argv[2])) ? NULL : argv[2];
 
         if (arg_name_any)
                 name = NULL;

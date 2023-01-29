@@ -56,6 +56,90 @@ echo nameserver 10.0.3.1 10.0.3.2 | "$RESOLVCONF" -a hoge.inet.ipsec.192.168.35
 echo nameserver 10.0.3.3 10.0.3.4 | "$RESOLVCONF" -a hoge.foo.dhcp
 assert_in '10.0.3.1 10.0.3.2' "$(resolvectl dns hoge)"
 assert_in '10.0.3.3 10.0.3.4' "$(resolvectl dns hoge.foo)"
+
+# Tests for _localdnsstub and _localdnsproxy
+assert_in '127.0.0.53' "$(resolvectl query _localdnsstub)"
+assert_in '_localdnsstub' "$(resolvectl query 127.0.0.53)"
+assert_in '127.0.0.54' "$(resolvectl query _localdnsproxy)"
+assert_in '_localdnsproxy' "$(resolvectl query 127.0.0.54)"
+
+assert_in '127.0.0.53' "$(dig @127.0.0.53 _localdnsstub)"
+assert_in '_localdnsstub' "$(dig @127.0.0.53 -x 127.0.0.53)"
+assert_in '127.0.0.54' "$(dig @127.0.0.53 _localdnsproxy)"
+assert_in '_localdnsproxy' "$(dig @127.0.0.53 -x 127.0.0.54)"
+
+# Tests for mDNS and LLMNR settings
+mkdir -p /run/systemd/resolved.conf.d
+{
+    echo "[Resolve]"
+    echo "MulticastDNS=yes"
+    echo "LLMNR=yes"
+} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
+systemctl restart systemd-resolved.service
+systemctl service-log-level systemd-resolved.service debug
+# make sure networkd is not running.
+systemctl stop systemd-networkd.service
+# defaults to yes (both the global and per-link settings are yes)
+assert_in 'yes' "$(resolvectl mdns hoge)"
+assert_in 'yes' "$(resolvectl llmnr hoge)"
+# set per-link setting
+resolvectl mdns hoge yes
+resolvectl llmnr hoge yes
+assert_in 'yes' "$(resolvectl mdns hoge)"
+assert_in 'yes' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge resolve
+resolvectl llmnr hoge resolve
+assert_in 'resolve' "$(resolvectl mdns hoge)"
+assert_in 'resolve' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge no
+resolvectl llmnr hoge no
+assert_in 'no' "$(resolvectl mdns hoge)"
+assert_in 'no' "$(resolvectl llmnr hoge)"
+# downgrade global setting to resolve
+{
+    echo "[Resolve]"
+    echo "MulticastDNS=resolve"
+    echo "LLMNR=resolve"
+} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
+systemctl restart systemd-resolved.service
+systemctl service-log-level systemd-resolved.service debug
+# set per-link setting
+resolvectl mdns hoge yes
+resolvectl llmnr hoge yes
+assert_in 'resolve' "$(resolvectl mdns hoge)"
+assert_in 'resolve' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge resolve
+resolvectl llmnr hoge resolve
+assert_in 'resolve' "$(resolvectl mdns hoge)"
+assert_in 'resolve' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge no
+resolvectl llmnr hoge no
+assert_in 'no' "$(resolvectl mdns hoge)"
+assert_in 'no' "$(resolvectl llmnr hoge)"
+# downgrade global setting to no
+{
+    echo "[Resolve]"
+    echo "MulticastDNS=no"
+    echo "LLMNR=no"
+} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
+systemctl restart systemd-resolved.service
+systemctl service-log-level systemd-resolved.service debug
+# set per-link setting
+resolvectl mdns hoge yes
+resolvectl llmnr hoge yes
+assert_in 'no' "$(resolvectl mdns hoge)"
+assert_in 'no' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge resolve
+resolvectl llmnr hoge resolve
+assert_in 'no' "$(resolvectl mdns hoge)"
+assert_in 'no' "$(resolvectl llmnr hoge)"
+resolvectl mdns hoge no
+resolvectl llmnr hoge no
+assert_in 'no' "$(resolvectl mdns hoge)"
+assert_in 'no' "$(resolvectl llmnr hoge)"
+
+# Cleanup
+rm -f /run/systemd/resolved.conf.d/mdns-llmnr.conf
 ip link del hoge
 ip link del hoge.foo
 
@@ -80,11 +164,13 @@ DNSSEC=allow-downgrade
 DNS=10.0.0.1
 EOF
 
+mkdir -p /run/systemd/resolved.conf.d
 {
+    echo "[Resolve]"
     echo "FallbackDNS="
     echo "DNSSEC=allow-downgrade"
     echo "DNSOverTLS=opportunistic"
-} >>/etc/systemd/resolved.conf
+} >/run/systemd/resolved.conf.d/test.conf
 ln -svf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 # Override the default NTA list, which turns off DNSSEC validation for (among
 # others) the test. domain
@@ -127,11 +213,6 @@ resolvectl log-level debug
 
 # Start monitoring queries
 systemd-run -u resmontest.service -p Type=notify resolvectl monitor
-# Wait for the monitoring service to become active
-for _ in {0..9}; do
-    [[ "$(systemctl show -P ActiveState resmontest.service)" == "active" ]] && break
-    sleep .5
-done
 
 # We need to manually propagate the DS records of onlinesign.test. to the parent
 # zone, since they're generated online

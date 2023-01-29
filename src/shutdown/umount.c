@@ -23,7 +23,8 @@
 
 #include "alloc-util.h"
 #include "blockdev-util.h"
-#include "def.h"
+#include "chase-symlinks.h"
+#include "constants.h"
 #include "device-util.h"
 #include "dirent-util.h"
 #include "escape.h"
@@ -32,18 +33,20 @@
 #include "fs-util.h"
 #include "fstab-util.h"
 #include "libmount-util.h"
+#include "mkdir.h"
 #include "mount-setup.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "random-util.h"
 #include "signal-util.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "sync-util.h"
 #include "umount.h"
-#include "util.h"
 #include "virt.h"
 
 static void mount_point_free(MountPoint **head, MountPoint *m) {
@@ -156,6 +159,11 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                 if (!m)
                         return log_oom();
 
+                r = libmount_is_leaf(table, fs);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get children mounts for %s from %s: %m", path, mountinfo ?: "/proc/self/mountinfo");
+                bool leaf = r;
+
                 *m = (MountPoint) {
                         .remount_options = remount_options,
                         .remount_flags = remount_flags,
@@ -164,6 +172,7 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                         /* Unmount sysfs/procfs/… lazily, since syncing doesn't matter there, and it's OK if
                          * something keeps an fd open to it. */
                         .umount_lazily = is_api_vfs,
+                        .leaf = leaf,
                 };
 
                 m->path = strdup(path);
@@ -402,7 +411,7 @@ static int md_list_get(MountPoint **head) {
 }
 
 static int delete_loopback(const char *device) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct loop_info64 info;
 
         assert(device);
@@ -477,7 +486,7 @@ static int delete_loopback(const char *device) {
 }
 
 static int delete_dm(MountPoint *m) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(m);
@@ -504,7 +513,7 @@ static int delete_dm(MountPoint *m) {
 }
 
 static int delete_md(MountPoint *m) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(m);
         assert(major(m->devnum) != 0);
@@ -595,19 +604,26 @@ static void log_umount_blockers(const char *mnt) {
 }
 
 static int remount_with_timeout(MountPoint *m, bool last_try) {
-        pid_t pid;
+        _cleanup_(close_pairp) int pfd[2] = PIPE_EBADF;
+        _cleanup_(sigkill_nowaitp) pid_t pid = 0;
         int r;
 
         BLOCK_SIGNALS(SIGCHLD);
 
         assert(m);
 
+        r = pipe2(pfd, O_CLOEXEC|O_NONBLOCK);
+        if (r < 0)
+                return r;
+
         /* Due to the possibility of a remount operation hanging, we fork a child process and set a
          * timeout. If the timeout lapses, the assumption is that the particular remount failed. */
-        r = safe_fork("(sd-remount)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_REOPEN_LOG, &pid);
+        r = safe_fork_full("(sd-remount)", pfd, ELEMENTSOF(pfd), FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_REOPEN_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
+                pfd[0] = safe_close(pfd[0]);
+
                 log_info("Remounting '%s' read-only with options '%s'.", m->path, strempty(m->remount_options));
 
                 /* Start the mount operation here in the child */
@@ -618,35 +634,49 @@ static int remount_with_timeout(MountPoint *m, bool last_try) {
                                        "Failed to remount '%s' read-only: %m",
                                        m->path);
 
+                (void) write(pfd[1], &r, sizeof(r)); /* try to send errno up */
                 _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
         }
 
+        pfd[1] = safe_close(pfd[1]);
+
         r = wait_for_terminate_with_timeout(pid, DEFAULT_TIMEOUT_USEC);
-        if (r == -ETIMEDOUT) {
+        if (r == -ETIMEDOUT)
                 log_error_errno(r, "Remounting '%s' timed out, issuing SIGKILL to PID " PID_FMT ".", m->path, pid);
-                (void) kill(pid, SIGKILL);
-        } else if (r == -EPROTO)
-                log_debug_errno(r, "Remounting '%s' failed abnormally, child process " PID_FMT " aborted or exited non-zero.", m->path, pid);
-        else if (r < 0)
+        else if (r == -EPROTO) {
+                /* Try to read error code from child */
+                if (read(pfd[0], &r, sizeof(r)) == sizeof(r))
+                        log_debug_errno(r, "Remounting '%s' failed abnormally, child process " PID_FMT " failed: %m", m->path, pid);
+                else
+                        r = log_debug_errno(EPROTO, "Remounting '%s' failed abnormally, child process " PID_FMT " aborted or exited non-zero.", m->path, pid);
+                TAKE_PID(pid); /* child exited (just not as we expected) hence don't kill anymore */
+        } else if (r < 0)
                 log_error_errno(r, "Remounting '%s' failed unexpectedly, couldn't wait for child process " PID_FMT ": %m", m->path, pid);
 
         return r;
 }
 
 static int umount_with_timeout(MountPoint *m, bool last_try) {
-        pid_t pid;
+        _cleanup_(close_pairp) int pfd[2] = PIPE_EBADF;
+        _cleanup_(sigkill_nowaitp) pid_t pid = 0;
         int r;
 
         BLOCK_SIGNALS(SIGCHLD);
 
         assert(m);
 
+        r = pipe2(pfd, O_CLOEXEC|O_NONBLOCK);
+        if (r < 0)
+                return r;
+
         /* Due to the possibility of a umount operation hanging, we fork a child process and set a
          * timeout. If the timeout lapses, the assumption is that the particular umount failed. */
-        r = safe_fork("(sd-umount)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_REOPEN_LOG, &pid);
+        r = safe_fork_full("(sd-umount)", pfd, ELEMENTSOF(pfd), FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_REOPEN_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
+                pfd[0] = safe_close(pfd[0]);
+
                 log_info("Unmounting '%s'.", m->path);
 
                 /* Start the mount operation here in the child Using MNT_FORCE causes some filesystems
@@ -664,16 +694,23 @@ static int umount_with_timeout(MountPoint *m, bool last_try) {
                                 log_umount_blockers(m->path);
                 }
 
+                (void) write(pfd[1], &r, sizeof(r)); /* try to send errno up */
                 _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
         }
 
+        pfd[1] = safe_close(pfd[1]);
+
         r = wait_for_terminate_with_timeout(pid, DEFAULT_TIMEOUT_USEC);
-        if (r == -ETIMEDOUT) {
+        if (r == -ETIMEDOUT)
                 log_error_errno(r, "Unmounting '%s' timed out, issuing SIGKILL to PID " PID_FMT ".", m->path, pid);
-                (void) kill(pid, SIGKILL);
-        } else if (r == -EPROTO)
-                log_debug_errno(r, "Unmounting '%s' failed abnormally, child process " PID_FMT " aborted or exited non-zero.", m->path, pid);
-        else if (r < 0)
+        else if (r == -EPROTO) {
+                /* Try to read error code from child */
+                if (read(pfd[0], &r, sizeof(r)) == sizeof(r))
+                        log_debug_errno(r, "Unmounting '%s' failed abnormally, child process " PID_FMT " failed: %m", m->path, pid);
+                else
+                        r = log_debug_errno(EPROTO, "Unmounting '%s' failed abnormally, child process " PID_FMT " aborted or exited non-zero.", m->path, pid);
+                TAKE_PID(pid); /* It died, but abnormally, no purpose in killing */
+        } else if (r < 0)
                 log_error_errno(r, "Unmounting '%s' failed unexpectedly, couldn't wait for child process " PID_FMT ": %m", m->path, pid);
 
         return r;
@@ -682,7 +719,8 @@ static int umount_with_timeout(MountPoint *m, bool last_try) {
 /* This includes remounting readonly, which changes the kernel mount options.  Therefore the list passed to
  * this function is invalidated, and should not be reused. */
 static int mount_points_list_umount(MountPoint **head, bool *changed, bool last_try) {
-        int n_failed = 0;
+        int n_failed = 0, r;
+        _cleanup_free_ char *resolved_mounts_path = NULL;
 
         assert(head);
         assert(changed);
@@ -717,10 +755,63 @@ static int mount_points_list_umount(MountPoint **head, bool *changed, bool last_
                         continue;
 
                 /* Trying to umount */
-                if (umount_with_timeout(m, last_try) < 0)
+                r = umount_with_timeout(m, last_try);
+                if (r < 0)
                         n_failed++;
                 else
                         *changed = true;
+
+                /* If a mount is busy, we move it to not keep parent mount points busy.
+                 * If a mount point is not a leaf, moving it would invalidate our mount table.
+                 * More moving will occur in next iteration with a fresh mount table.
+                 */
+                if (r != -EBUSY || !m->leaf)
+                        continue;
+
+                _cleanup_free_ char *dirname = NULL;
+
+                r = path_extract_directory(m->path, &dirname);
+                if (r < 0) {
+                        n_failed++;
+                        log_full_errno(last_try ? LOG_ERR : LOG_INFO, r, "Cannot find directory for %s: %m", m->path);
+                        continue;
+                }
+
+                /* We need to canonicalize /run/shutdown/mounts. We cannot compare inodes, since /run
+                 * might be bind mounted somewhere we want to unmount. And we need to move all mounts in
+                 * /run/shutdown/mounts from there.
+                 */
+                if (!resolved_mounts_path)
+                        (void) chase_symlinks("/run/shutdown/mounts", NULL, 0, &resolved_mounts_path, NULL);
+                if (!path_equal(dirname, resolved_mounts_path)) {
+                        char newpath[STRLEN("/run/shutdown/mounts/") + 16 + 1];
+
+                        xsprintf(newpath, "/run/shutdown/mounts/%016" PRIx64, random_u64());
+
+                        /* on error of is_dir, assume directory */
+                        if (is_dir(m->path, true) != 0) {
+                                r = mkdir_p(newpath, 0000);
+                                if (r < 0) {
+                                        log_full_errno(last_try ? LOG_ERR : LOG_INFO, r, "Could not create directory %s: %m", newpath);
+                                        continue;
+                                }
+                        } else {
+                                r = touch_file(newpath, /* parents= */ true, USEC_INFINITY, UID_INVALID, GID_INVALID, 0700);
+                                if (r < 0) {
+                                        log_full_errno(last_try ? LOG_ERR : LOG_INFO, r, "Could not create file %s: %m", newpath);
+                                        continue;
+                                }
+                        }
+
+                        log_info("Moving mount %s to %s.", m->path, newpath);
+
+                        r = RET_NERRNO(mount(m->path, newpath, NULL, MS_MOVE, NULL));
+                        if (r < 0) {
+                                n_failed++;
+                                log_full_errno(last_try ? LOG_ERR : LOG_INFO, r, "Could not move %s to %s: %m", m->path, newpath);
+                        } else
+                                *changed = true;
+                }
         }
 
         return n_failed;

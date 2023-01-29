@@ -23,7 +23,6 @@
 #include "string-util.h"
 #include "terminal-util.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 int seat_new(Seat** ret, Manager *m, const char *id) {
         _cleanup_(seat_freep) Seat *s = NULL;
@@ -168,7 +167,7 @@ int seat_load(Seat *s) {
 
 static int vt_allocate(unsigned vtnr) {
         char p[sizeof("/dev/tty") + DECIMAL_STR_MAX(unsigned)];
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(vtnr >= 1);
 

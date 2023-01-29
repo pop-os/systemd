@@ -9,6 +9,7 @@
 #include "sd-daemon.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "env-util.h"
 #include "errno-util.h"
 #include "escape.h"
@@ -23,7 +24,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "util.h"
 
 static char **arg_listen = NULL;
 static bool arg_accept = false;
@@ -233,7 +233,7 @@ static int fork_and_exec_process(const char *child, char **argv, int fd) {
 
 static int do_accept(const char *name, char **argv, int fd) {
         _cleanup_free_ char *local = NULL, *peer = NULL;
-        _cleanup_close_ int fd_accepted = -1;
+        _cleanup_close_ int fd_accepted = -EBADF;
 
         fd_accepted = accept4(fd, NULL, NULL, 0);
         if (fd_accepted < 0) {
@@ -434,7 +434,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 int main(int argc, char **argv) {
         int r, n;
-        int epoll_fd = -1;
+        int epoll_fd = -EBADF;
 
         log_show_color(true);
         log_parse_environment();

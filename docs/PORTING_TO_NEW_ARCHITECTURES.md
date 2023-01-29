@@ -27,14 +27,14 @@ architecture.
    partitions. Use `systemd-id128 new -p` to generate new suitable UUIDs you
    can use for this. Make sure to register your new types in the various
    functions in `gpt.c`. Also make sure to update the tables in
-   `docs/DISCOVERABLE_PARTITIONS.md` and `man/systemd-gpt-auto-generator.xml`
-   accordingly.
+   [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification)
+   and `man/systemd-gpt-auto-generator.xml` accordingly.
 
 3. If your architecture supports UEFI, make sure to update the `efi_arch`
    variable logic in `meson.build` to be set to the right architecture string
    as defined by the UEFI specification. (This ensures that `systemd-boot` will
    be built as the appropriately named `BOOT<arch>.EFI` binary.) Also, if your
-   architecture uses a special boot protocol for the Linux kernel make sure to
+   architecture uses a special boot protocol for the Linux kernel, make sure to
    implement it in `src/boot/efi/linux*.c`, so that the `systemd-stub` EFI stub
    can work.
 
@@ -54,5 +54,5 @@ architecture.
    `/usr/` mounted in.
 
 7. If your architecture supports VM virtualization and provides CPU opcodes
-   similar to x86' CPUID consider adding native support for detecting VMs this
+   similar to x86' CPUID, consider adding native support for detecting VMs this
    way to `src/basic/virt.c`.

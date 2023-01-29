@@ -17,7 +17,6 @@
 #include "missing_drm.h"
 #include "missing_input.h"
 #include "parse-util.h"
-#include "util.h"
 
 enum SessionDeviceNotifications {
         SESSION_DEVICE_RESUME,
@@ -334,7 +333,7 @@ int session_device_new(Session *s, dev_t dev, bool open_device, SessionDevice **
 
         sd->session = s;
         sd->dev = dev;
-        sd->fd = -1;
+        sd->fd = -EBADF;
         sd->type = DEVICE_TYPE_UNKNOWN;
 
         r = session_device_verify(sd);

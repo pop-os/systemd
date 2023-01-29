@@ -22,6 +22,7 @@
 #include "dbus-unit.h"
 #include "dbus.h"
 #include "dropin.h"
+#include "env-util.h"
 #include "escape.h"
 #include "execute.h"
 #include "fd-util.h"
@@ -114,20 +115,20 @@ Unit* unit_new(Manager *m, size_t size) {
         u->cgroup_invalidated_mask |= CGROUP_MASK_BPF_FIREWALL;
         u->failure_action_exit_status = u->success_action_exit_status = -1;
 
-        u->ip_accounting_ingress_map_fd = -1;
-        u->ip_accounting_egress_map_fd = -1;
+        u->ip_accounting_ingress_map_fd = -EBADF;
+        u->ip_accounting_egress_map_fd = -EBADF;
         for (CGroupIOAccountingMetric i = 0; i < _CGROUP_IO_ACCOUNTING_METRIC_MAX; i++)
                 u->io_accounting_last[i] = UINT64_MAX;
 
-        u->ipv4_allow_map_fd = -1;
-        u->ipv6_allow_map_fd = -1;
-        u->ipv4_deny_map_fd = -1;
-        u->ipv6_deny_map_fd = -1;
+        u->ipv4_allow_map_fd = -EBADF;
+        u->ipv6_allow_map_fd = -EBADF;
+        u->ipv4_deny_map_fd = -EBADF;
+        u->ipv6_deny_map_fd = -EBADF;
 
         u->last_section_private = -1;
 
         u->start_ratelimit = (RateLimit) { m->default_start_limit_interval, m->default_start_limit_burst };
-        u->auto_start_stop_ratelimit = (RateLimit) { 10 * USEC_PER_SEC, 16 };
+        u->auto_start_stop_ratelimit = (const RateLimit) { 10 * USEC_PER_SEC, 16 };
 
         return u;
 }
@@ -686,7 +687,7 @@ Unit* unit_free(Unit *u) {
         u->match_bus_slot = sd_bus_slot_unref(u->match_bus_slot);
         u->bus_track = sd_bus_track_unref(u->bus_track);
         u->deserialized_refs = strv_free(u->deserialized_refs);
-        u->pending_freezer_message = sd_bus_message_unref(u->pending_freezer_message);
+        u->pending_freezer_invocation = sd_bus_message_unref(u->pending_freezer_invocation);
 
         unit_free_requires_mounts_for(u);
 
@@ -719,7 +720,6 @@ Unit* unit_free(Unit *u) {
 
         if (u->on_console)
                 manager_unref_console(u->manager);
-
 
         fdset_free(u->initial_socket_bind_link_fds);
 #if BPF_FRAMEWORK
@@ -3976,14 +3976,26 @@ UnitFileState unit_get_unit_file_state(Unit *u) {
 }
 
 int unit_get_unit_file_preset(Unit *u) {
+        int r;
+
         assert(u);
 
-        if (u->unit_file_preset < 0 && u->fragment_path)
+        if (u->unit_file_preset < 0 && u->fragment_path) {
+                _cleanup_free_ char *bn = NULL;
+
+                r = path_extract_filename(u->fragment_path, &bn);
+                if (r < 0)
+                        return (u->unit_file_preset = r);
+
+                if (r == O_DIRECTORY)
+                        return (u->unit_file_preset = -EISDIR);
+
                 u->unit_file_preset = unit_file_query_preset(
                                 u->manager->unit_file_scope,
                                 NULL,
-                                basename(u->fragment_path),
+                                bn,
                                 NULL);
+        }
 
         return u->unit_file_preset;
 }
@@ -4452,7 +4464,7 @@ int unit_make_transient(Unit *u) {
         /* Let's open the file we'll write the transient settings into. This file is kept open as long as we are
          * creating the transient, and is closed in unit_load(), as soon as we start loading the file. */
 
-        RUN_WITH_UMASK(0022) {
+        WITH_UMASK(0022) {
                 f = fopen(path, "we");
                 if (!f)
                         return -errno;
@@ -4499,26 +4511,30 @@ static int log_kill(pid_t pid, int sig, void *userdata) {
         return 1;
 }
 
-static int operation_to_signal(const KillContext *c, KillOperation k, bool *noteworthy) {
+static int operation_to_signal(
+                const KillContext *c,
+                KillOperation k,
+                bool *ret_noteworthy) {
+
         assert(c);
 
         switch (k) {
 
         case KILL_TERMINATE:
         case KILL_TERMINATE_AND_LOG:
-                *noteworthy = false;
+                *ret_noteworthy = false;
                 return c->kill_signal;
 
         case KILL_RESTART:
-                *noteworthy = false;
+                *ret_noteworthy = false;
                 return restart_kill_signal(c);
 
         case KILL_KILL:
-                *noteworthy = true;
+                *ret_noteworthy = true;
                 return c->final_kill_signal;
 
         case KILL_WATCHDOG:
-                *noteworthy = true;
+                *ret_noteworthy = true;
                 return c->watchdog_signal;
 
         default:
@@ -4765,9 +4781,26 @@ int unit_setup_dynamic_creds(Unit *u) {
 }
 
 bool unit_type_supported(UnitType t) {
+        static int8_t cache[_UNIT_TYPE_MAX] = {}; /* -1: disabled, 1: enabled: 0: don't know */
+        int r;
+
         if (_unlikely_(t < 0))
                 return false;
         if (_unlikely_(t >= _UNIT_TYPE_MAX))
+                return false;
+
+        if (cache[t] == 0) {
+                char *e;
+
+                e = strjoina("SYSTEMD_SUPPORT_", unit_type_to_string(t));
+
+                r = getenv_bool(ascii_strupper(e));
+                if (r < 0 && r != -ENXIO)
+                        log_debug_errno(r, "Failed to parse $%s, ignoring: %m", e);
+
+                cache[t] = r == 0 ? -1 : 1;
+        }
+        if (cache[t] < 0)
                 return false;
 
         if (!unit_vtable[t]->supported)
@@ -5257,7 +5290,7 @@ static int unit_export_log_level_max(Unit *u, const ExecContext *c) {
 }
 
 static int unit_export_log_extra_fields(Unit *u, const ExecContext *c) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct iovec *iovec;
         const char *p;
         char *pattern;
@@ -5761,7 +5794,7 @@ int unit_clean(Unit *u, ExecCleanMask mask) {
                 return -EBUSY;
 
         state = unit_active_state(u);
-        if (!IN_SET(state, UNIT_INACTIVE))
+        if (state != UNIT_INACTIVE)
                 return -EBUSY;
 
         return UNIT_VTABLE(u)->clean(u, mask);

@@ -12,7 +12,6 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "terminal-util.h"
-#include "util.h"
 
 static const char* const show_status_table[_SHOW_STATUS_MAX] = {
         [SHOW_STATUS_NO]        = "no",
@@ -40,7 +39,7 @@ int parse_show_status(const char *v, ShowStatus *ret) {
 int status_vprintf(const char *status, ShowStatusFlags flags, const char *format, va_list ap) {
         static const char status_indent[] = "         "; /* "[" STATUS "] " */
         _cleanup_free_ char *s = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct iovec iovec[7] = {};
         int n = 0;
         static bool prev_ephemeral;

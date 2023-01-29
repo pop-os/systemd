@@ -48,14 +48,18 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
 
         if (!checked) {
                 /* Get the *first* TextInputEx device.*/
-                err = BS->LocateProtocol(&SimpleTextInputExProtocol, NULL, (void **) &extraInEx);
+                err = BS->LocateProtocol(
+                                MAKE_GUID_PTR(EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL), NULL, (void **) &extraInEx);
                 if (err != EFI_SUCCESS || BS->CheckEvent(extraInEx->WaitForKeyEx) == EFI_INVALID_PARAMETER)
                         /* If WaitForKeyEx fails here, the firmware pretends it talks this
                          * protocol, but it really doesn't. */
                         extraInEx = NULL;
 
                 /* Get the TextInputEx version of ST->ConIn. */
-                err = BS->HandleProtocol(ST->ConsoleInHandle, &SimpleTextInputExProtocol, (void **) &conInEx);
+                err = BS->HandleProtocol(
+                                ST->ConsoleInHandle,
+                                MAKE_GUID_PTR(EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL),
+                                (void **) &conInEx);
                 if (err != EFI_SUCCESS || BS->CheckEvent(conInEx->WaitForKeyEx) == EFI_INVALID_PARAMETER)
                         conInEx = NULL;
 
@@ -67,7 +71,7 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
 
         err = BS->CreateEvent(EVT_TIMER, 0, NULL, NULL, &timer);
         if (err != EFI_SUCCESS)
-                return log_error_status_stall(err, L"Error creating timer event: %r", err);
+                return log_error_status(err, "Error creating timer event: %m");
 
         EFI_EVENT events[] = {
                 timer,
@@ -88,14 +92,14 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
                                 TimerRelative,
                                 MIN(timeout_usec, watchdog_ping_usec) * 10);
                 if (err != EFI_SUCCESS)
-                        return log_error_status_stall(err, L"Error arming timer event: %r", err);
+                        return log_error_status(err, "Error arming timer event: %m");
 
                 (void) BS->SetWatchdogTimer(watchdog_timeout_sec, 0x10000, 0, NULL);
                 err = BS->WaitForEvent(n_events, events, &index);
                 (void) BS->SetWatchdogTimer(watchdog_timeout_sec, 0x10000, 0, NULL);
 
                 if (err != EFI_SUCCESS)
-                        return log_error_status_stall(err, L"Error waiting for events: %r", err);
+                        return log_error_status(err, "Error waiting for events: %m");
 
                 /* We have keyboard input, process it after this loop. */
                 if (timer != events[index])
@@ -172,6 +176,7 @@ static EFI_STATUS change_mode(int64_t mode) {
         mode = CLAMP(mode, CONSOLE_MODE_RANGE_MIN, CONSOLE_MODE_RANGE_MAX);
         old_mode = MAX(CONSOLE_MODE_RANGE_MIN, ST->ConOut->Mode->Mode);
 
+        log_wait();
         err = ST->ConOut->SetMode(ST->ConOut, mode);
         if (err == EFI_SUCCESS)
                 return EFI_SUCCESS;
@@ -190,7 +195,7 @@ EFI_STATUS query_screen_resolution(uint32_t *ret_w, uint32_t *ret_h) {
         EFI_STATUS err;
         EFI_GRAPHICS_OUTPUT_PROTOCOL *go;
 
-        err = BS->LocateProtocol(&GraphicsOutputProtocol, NULL, (void **) &go);
+        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_GRAPHICS_OUTPUT_PROTOCOL), NULL, (void **) &go);
         if (err != EFI_SUCCESS)
                 return err;
 

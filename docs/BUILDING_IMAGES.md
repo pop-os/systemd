@@ -32,7 +32,7 @@ boot. For that it's essential to:
    is not reset, and carries a valid ID every instance of the system will come
    up with the same ID and that will likely lead to problems sooner or later,
    as many network-visible identifiers are commonly derived from the machine
-   ID, for example IPv6 addresses or transient MAC addresses.
+   ID, for example, IPv6 addresses or transient MAC addresses.
 
 2. Remove the `/var/lib/systemd/random-seed` file (see
    [`systemd-random-seed(8)`](https://www.freedesktop.org/software/systemd/man/systemd-random-seed.service.html)),
@@ -67,14 +67,14 @@ boot. For that it's essential to:
 The
 [`kernel-install(8)`](https://www.freedesktop.org/software/systemd/man/kernel-install.html)
 logic used to generate
-[Boot Loader Specification Type 1](BOOT_LOADER_SPECIFICATION.md) entries by
-default uses the machine ID as stored in `/etc/machine-id` for naming boot menu
-entries and the directories in the ESP to place kernel images in. This is done
-in order to allow multiple installations of the same OS on the same system
-without conflicts. However, this is problematic if the machine ID shall be
-generated automatically on first boot: if the ID is not known before the first
-boot it cannot be used to name the most basic resources required for the boot
-process to complete.
+[Boot Loader Specification Type #1](https://uapi-group.org/specifications/specs/boot_loader_specification/#type-1-boot-loader-specification-entries)
+entries by default uses the machine ID as stored in `/etc/machine-id` for
+naming boot menu entries and the directories in the ESP to place kernel images
+in. This is done in order to allow multiple installations of the same OS on the
+same system without conflicts. However, this is problematic if the machine ID
+shall be generated automatically on first boot: if the ID is not known before
+the first boot it cannot be used to name the most basic resources required for
+the boot process to complete.
 
 Thus, for images that shall acquire their identity on first boot only, it is
 required to use a different identifier for naming boot menu entries. To allow
@@ -83,7 +83,7 @@ which can be a freely chosen string to use for identifying the boot menu
 resources of the OS. If not configured explicitly it defaults to the machine
 ID. The file `/etc/kernel/entry-token` may be used to configure this string
 explicitly. Thus, golden image builders should write a suitable identifier into
-this file, for example the `IMAGE_ID=` or `ID=` field from
+this file, for example, the `IMAGE_ID=` or `ID=` field from
 [`/etc/os-release`](https://www.freedesktop.org/software/systemd/man/os-release.html)
 (also see below). It is recommended to do this before the `kernel-install`
 functionality is invoked (i.e. before the package manager is used to install
@@ -117,7 +117,7 @@ Specifically, the following mechanisms are in place:
 
 4. The
    [`systemd-sysusers(8)`](https://www.freedesktop.org/software/systemd/man/systemd-sysusers.service.html)
-   will component automatically populate `/etc/passwd` and `/etc/group` on
+   component will automatically populate `/etc/passwd` and `/etc/group` on
    first boot with further necessary system users.
 
 5. The
@@ -161,7 +161,7 @@ the OS should take possession of the backing storage as necessary, dynamically
 using available space. Specifically:
 
 1. Additional partitions should be created, that make no sense to ship
-   pre-built in the image. For example `/tmp/` or `/home/` partitions, or even
+   pre-built in the image. For example, `/tmp/` or `/home/` partitions, or even
    `/var/` or the root file system (see above).
 
 2. Additional partitions should be created that shall function as A/B
@@ -203,8 +203,8 @@ it, then format it.
    in. The `x-systemd.growfs` mount option in `/etc/fstab` is sufficient to
    enable this logic for specific mounts. Alternatively appropriately set up
    partitions can set GPT partition flag 59 to request this behaviour, see the
-   [Discoverable Partitions Specification](DISCOVERABLE_PARTITIONS.md) for
-   details. If the file system is already grown it executes no operation.
+   [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification)
+   for details. If the file system is already grown it executes no operation.
 
 3. Similar, the `systemd-makefs@.service` and `systemd-makeswap@.service`
    services can format file systems and swap spaces before first use, if they
@@ -267,8 +267,8 @@ fields.
 [`machine-id(5)`](https://www.freedesktop.org/software/systemd/man/machine-id.html)<br>
 [`systemd-random-seed(8)`](https://www.freedesktop.org/software/systemd/man/systemd-random-seed.service.html)<br>
 [`os-release(5)`](https://www.freedesktop.org/software/systemd/man/os-release.html)<br>
-[Boot Loader Specification](BOOT_LOADER_SPECIFICATION.md)<br>
-[Discoverable Partitions Specification](DISCOVERABLE_PARTITIONS.md)<br>
+[Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification)<br>
+[Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification)<br>
 [`mkosi`](https://github.com/systemd/mkosi)<br>
 [`systemd-boot(7)`](https://www.freedesktop.org/software/systemd/man/systemd-boot.html)<br>
 [`systemd-repart(8)`](https://www.freedesktop.org/software/systemd/man/systemd-repart.service.html)<br>

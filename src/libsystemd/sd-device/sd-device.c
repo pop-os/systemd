@@ -33,7 +33,6 @@
 #include "strv.h"
 #include "strxcpyx.h"
 #include "user-util.h"
-#include "util.h"
 
 int device_new_aux(sd_device **ret) {
         sd_device *device;
@@ -146,7 +145,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
         assert(_syspath);
 
         if (verify) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 /* The input path maybe a symlink located outside of /sys. Let's try to chase the symlink at first.
                  * The primary usecase is that e.g. /proc/device-tree is a symlink to /sys/firmware/devicetree/base.
@@ -250,6 +249,10 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
 
         free_and_replace(device->syspath, syspath);
         device->devpath = devpath;
+
+        /* Unset sysname and sysnum, they will be assigned when requested. */
+        device->sysnum = NULL;
+        device->sysname = mfree(device->sysname);
         return 0;
 }
 
@@ -1486,6 +1489,20 @@ int device_add_devlink(sd_device *device, const char *devlink) {
         return 0;
 }
 
+void device_remove_devlink(sd_device *device, const char *devlink) {
+        _cleanup_free_ char *s = NULL;
+
+        assert(device);
+        assert(devlink);
+
+        s = set_remove(device->devlinks, devlink);
+        if (!s)
+                return;
+
+        device->devlinks_generation++;
+        device->property_devlinks_outdated = true;
+}
+
 bool device_has_devlink(sd_device *device, const char *devlink) {
         assert(device);
         assert(devlink);
@@ -2182,6 +2199,26 @@ int device_get_property_bool(sd_device *device, const char *key) {
         return parse_boolean(value);
 }
 
+int device_get_property_int(sd_device *device, const char *key, int *ret) {
+        const char *value;
+        int r, v;
+
+        assert(device);
+        assert(key);
+
+        r = sd_device_get_property_value(device, key, &value);
+        if (r < 0)
+                return r;
+
+        r = safe_atoi(value, &v);
+        if (r < 0)
+                return r;
+
+        if (ret)
+                *ret = v;
+        return 0;
+}
+
 _public_ int sd_device_get_trigger_uuid(sd_device *device, sd_id128_t *ret) {
         const char *s;
         sd_id128_t id;
@@ -2536,7 +2573,7 @@ _public_ int sd_device_trigger_with_uuid(
 }
 
 _public_ int sd_device_open(sd_device *device, int flags) {
-        _cleanup_close_ int fd = -1, fd2 = -1;
+        _cleanup_close_ int fd = -EBADF, fd2 = -EBADF;
         const char *devname, *subsystem = NULL;
         uint64_t q, diskseq = 0;
         struct stat st;

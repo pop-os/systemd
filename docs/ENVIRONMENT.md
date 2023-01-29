@@ -85,6 +85,12 @@ All tools:
 * `$SYSTEMD_MEMPOOL=0` — if set, the internal memory caching logic employed by
   hash tables is turned off, and libc `malloc()` is used for all allocations.
 
+* `$SYSTEMD_UTF8=` — takes a boolean value, and overrides whether to generate
+  non-ASCII special glyphs at various places (i.e. "→" instead of
+  "->"). Usually this is deterined automatically, based on $LC_CTYPE, but in
+  scenarios where locale definitions are not installed it might make sense to
+  override this check explicitly.
+
 * `$SYSTEMD_EMOJI=0` — if set, tools such as `systemd-analyze security` will
   not output graphical smiley emojis, but ASCII alternatives instead. Note that
   this only controls use of Unicode emoji glyphs, and has no effect on other
@@ -107,6 +113,9 @@ All tools:
 * `$SYSTEMD_LOG_SECCOMP=1` — if set, system calls blocked by seccomp filtering,
   for example in `systemd-nspawn`, will be logged to the audit log, if the
   kernel supports this.
+
+* `$SYSTEMD_ENABLE_LOG_CONTEXT` — if set, extra fields will always be logged to
+the journal instead of only when logging in debug mode.
 
 `systemctl`:
 
@@ -182,12 +191,12 @@ All tools:
   file may be checked for by services run during system shutdown in order to
   request the appropriate operation from the boot loader in an alternative
   fashion. Note that by default only boot loader entries which follow the
-  [Boot Loader Specification](BOOT_LOADER_SPECIFICATION.md) and are
-  placed in the ESP or the Extended Boot Loader partition may be selected this
-  way. However, if a directory `/run/boot-loader-entries/` exists, the entries
-  are loaded from there instead. The directory should contain the usual
-  directory hierarchy mandated by the Boot Loader Specification, i.e. the entry
-  drop-ins should be placed in
+  [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification)
+  and are placed in the ESP or the Extended Boot Loader partition may be
+  selected this way. However, if a directory `/run/boot-loader-entries/`
+  exists, the entries are loaded from there instead. The directory should
+  contain the usual directory hierarchy mandated by the Boot Loader
+  Specification, i.e. the entry drop-ins should be placed in
   `/run/boot-loader-entries/loader/entries/*.conf`, and the files referenced by
   the drop-ins (including the kernels and initrds) somewhere else below
   `/run/boot-loader-entries/`. Note that all these files may be (and are
@@ -250,6 +259,9 @@ All tools:
   `--path=` switch only very superficial validation of the specified path is
   done when this environment variable is used.
 
+* `$KERNEL_INSTALL_CONF_ROOT=…` — override the built in default configuration
+  directory /etc/kernel/ to read files like entry-token and install.conf from.
+
 `systemd` itself:
 
 * `$SYSTEMD_ACTIVATION_UNIT` — set for all NSS and PAM module invocations that
@@ -267,6 +279,15 @@ All tools:
 * `$SYSTEMD_ACTIVATION_SCOPE` — closely related to `$SYSTEMD_ACTIVATION_UNIT`,
   it is either set to `system` or `user` depending on whether the NSS/PAM
   module is called by systemd in `--system` or `--user` mode.
+
+* `$SYSTEMD_SUPPORT_DEVICE`, `$SYSTEMD_SUPPORT_MOUNT`, `$SYSTEMD_SUPPORT_SWAP` -
+  can be set to `0` to mark respective unit type as unsupported. Generally,
+  having less units saves system resources so these options might be useful
+  for cases where we don't need to track given unit type, e.g. `--user` manager
+  often doesn't need to deal with device or swap units because they are
+  handled by the `--system` manager (PID 1). Note that setting certain unit
+  type as unsupported may not prevent loading some units of that type if they
+  are referenced by other units of another supported type.
 
 * `$SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST` — can be set to override the mount
   units burst rate limit for parsing `/proc/self/mountinfo`. On a system with
@@ -385,7 +406,7 @@ disk images with `--image=` or similar:
   to load the embedded Verity signature data. If enabled (which is the
   default), Verity root hash information and a suitable signature is
   automatically acquired from a signature partition, following the
-  [Discoverable Partitions Specification](DISCOVERABLE_PARTITIONS.md).
+  [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification).
   If disabled any such partition is ignored. Note that this only disables
   discovery of the root hash and its signature, the Verity data partition
   itself is still searched in the GPT image.
@@ -399,6 +420,10 @@ disk images with `--image=` or similar:
 
 * `$SYSTEMD_DISSECT_VERITY_TIMEOUT_SEC=sec` — takes a timespan, which controls
   the timeout waiting for the image to be configured. Defaults to 100 msec.
+
+* `$SYSTEMD_DISSECT_FILE_SYSTEMS=` — takes a colon-separated list of file
+  systems that may be mounted for automatically dissected disk images. If not
+  specified defaults to something like: `ext4:btrfs:xfs:vfat:erofs:squashfs`
 
 * `$SYSTEMD_LOOP_DIRECT_IO` – takes a boolean, which controls whether to enable
   LO_FLAGS_DIRECT_IO (i.e. direct IO + asynchronous IO) on loopback block
@@ -465,6 +490,11 @@ SYSTEMD_HOME_DEBUG_SUFFIX=foo \
   options. There's one variable for each of the supported file systems for the
   LUKS home directory backend.
 
+* `$SYSTEMD_HOME_MKFS_OPTIONS_BTRFS`, `$SYSTEMD_HOME_MKFS_OPTIONS_EXT4`,
+  `$SYSTEMD_HOME_MKFS_OPTIONS_XFS` – configure additional arguments to use for
+  `mkfs` when formatting LUKS home directories. There's one variable for each
+  of the supported file systems for the LUKS home directory backend.
+
 `kernel-install`:
 
 * `$KERNEL_INSTALL_BYPASS` – If set to "1", execution of kernel-install is skipped
@@ -474,7 +504,15 @@ SYSTEMD_HOME_DEBUG_SUFFIX=foo \
 
 `systemd-journald`:
 
-* `$SYSTEMD_JOURNAL_COMPACT` - Takes a boolean. If enabled, journal files are written
+* `$SYSTEMD_JOURNAL_COMPACT` – Takes a boolean. If enabled, journal files are written
   in a more compact format that reduces the amount of disk space required by the
   journal. Note that journal files in compact mode are limited to 4G to allow use of
   32-bit offsets. Enabled by default.
+
+`systemd-pcrphase`, `systemd-cryptsetup`:
+
+* `$SYSTEMD_FORCE_MEASURE=1` — If set, force measuring of resources (which are
+  marked for measurement) even if not booted on a kernel equipped with
+  systemd-stub. Normally, requested measurement of resources is conditionalized
+  on kernels that have booted with `systemd-stub`. With this environment
+  variable the test for that my be bypassed, for testing purposes.

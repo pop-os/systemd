@@ -44,7 +44,7 @@ static int property_get_pool_usage(
                 void *userdata,
                 sd_bus_error *error) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         uint64_t usage = UINT64_MAX;
 
         assert(bus);
@@ -70,7 +70,7 @@ static int property_get_pool_limit(
                 void *userdata,
                 sd_bus_error *error) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         uint64_t size = UINT64_MAX;
 
         assert(bus);
@@ -683,8 +683,8 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
                 REMOVE_HIDDEN,
         } mode;
 
-        _cleanup_close_pair_ int errno_pipe_fd[2] = { -1, -1 };
-        _cleanup_close_ int result_fd = -1;
+        _cleanup_close_pair_ int errno_pipe_fd[2] = PIPE_EBADF;
+        _cleanup_close_ int result_fd = -EBADF;
         Manager *m = userdata;
         Operation *operation;
         const char *mm;
@@ -824,8 +824,8 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
         operation->extra_fd = result_fd;
         operation->done = clean_pool_done;
 
-        result_fd = -1;
-        errno_pipe_fd[0] = -1;
+        result_fd = -EBADF;
+        errno_pipe_fd[0] = -EBADF;
 
         return 1;
 }
@@ -1492,15 +1492,16 @@ int manager_get_machine_by_pid(Manager *m, pid_t pid, Machine **machine) {
 
 int manager_add_machine(Manager *m, const char *name, Machine **_machine) {
         Machine *machine;
+        int r;
 
         assert(m);
         assert(name);
 
         machine = hashmap_get(m->machines, name);
         if (!machine) {
-                machine = machine_new(m, _MACHINE_CLASS_INVALID, name);
-                if (!machine)
-                        return -ENOMEM;
+                r = machine_new(m, _MACHINE_CLASS_INVALID, name, &machine);
+                if (r < 0)
+                        return r;
         }
 
         if (_machine)

@@ -461,6 +461,9 @@ struct Manager {
         struct restrict_fs_bpf *restrict_fs;
 
         char *default_smack_process_label;
+
+        /* Allow users to configure a rate limit for Reload() operations */
+        RateLimit reload_ratelimit;
 };
 
 static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
@@ -535,6 +538,7 @@ void manager_send_unit_plymouth(Manager *m, Unit *u);
 bool manager_unit_inactive_or_pending(Manager *m, const char *name);
 
 void manager_check_finished(Manager *m);
+void manager_send_reloading(Manager *m);
 
 void disable_printk_ratelimit(void);
 void manager_recheck_dbus(Manager *m);

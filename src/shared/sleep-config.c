@@ -21,7 +21,7 @@
 #include "blockdev-util.h"
 #include "btrfs-util.h"
 #include "conf-parser.h"
-#include "def.h"
+#include "constants.h"
 #include "device-util.h"
 #include "devnum-util.h"
 #include "env-util.h"
@@ -150,7 +150,7 @@ static int battery_enumerator_new(sd_device_enumerator **ret) {
         return 0;
 }
 
-static int get_capacity_by_name(Hashmap *capacities_by_name, const char *name) {
+int get_capacity_by_name(Hashmap *capacities_by_name, const char *name) {
         void *p;
 
         assert(capacities_by_name);
@@ -716,7 +716,7 @@ static int swap_device_to_device_id(const SwapEntry *swap, dev_t *ret_dev) {
  * filesystems, a debug message is logged and ret_offset is set to UINT64_MAX.
  */
 static int calculate_swap_file_offset(const SwapEntry *swap, uint64_t *ret_offset) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         _cleanup_free_ struct fiemap *fiemap = NULL;
         struct stat sb;
         int r;

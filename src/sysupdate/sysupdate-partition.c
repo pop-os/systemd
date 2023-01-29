@@ -10,7 +10,6 @@
 #include "stdio-util.h"
 #include "string-util.h"
 #include "sysupdate-partition.h"
-#include "util.h"
 
 void partition_info_destroy(PartitionInfo *p) {
         assert(p);
@@ -107,11 +106,11 @@ int read_partition_info(
                 PartitionInfo *ret) {
 
         _cleanup_free_ char *label_copy = NULL, *device = NULL;
-        const char *pts, *ids, *label;
+        const char *label;
         struct fdisk_partition *p;
-        struct fdisk_parttype *pt;
         uint64_t start, size, flags;
         sd_id128_t ptid, id;
+        GptPartitionType type;
         size_t partno;
         int r;
 
@@ -147,25 +146,13 @@ int read_partition_info(
         if (!label)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Found a partition without a label.");
 
-        pt = fdisk_partition_get_type(p);
-        if (!pt)
-                return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to acquire type of partition: %m");
-
-        pts = fdisk_parttype_get_string(pt);
-        if (!pts)
-                return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to acquire type of partition as string: %m");
-
-        r = sd_id128_from_string(pts, &ptid);
+        r = fdisk_partition_get_type_as_id128(p, &ptid);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse partition type UUID %s: %m", pts);
+                return log_error_errno(r, "Failed to read partition type UUID: %m");
 
-        ids = fdisk_partition_get_uuid(p);
-        if (!ids)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Found a partition without a UUID.");
-
-        r = sd_id128_from_string(ids, &id);
+        r = fdisk_partition_get_uuid_as_id128(p, &id);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse partition UUID %s: %m", ids);
+                return log_error_errno(r, "Failed to read partition UUID: %m");
 
         r = fdisk_partition_get_attrs_as_uint64(p, &flags);
         if (r < 0)
@@ -179,6 +166,8 @@ int read_partition_info(
         if (!label_copy)
                 return log_oom();
 
+        type = gpt_partition_type_from_uuid(ptid);
+
         *ret = (PartitionInfo) {
                 .partno = partno,
                 .start = start,
@@ -188,9 +177,9 @@ int read_partition_info(
                 .uuid = id,
                 .label = TAKE_PTR(label_copy),
                 .device = TAKE_PTR(device),
-                .no_auto = FLAGS_SET(flags, SD_GPT_FLAG_NO_AUTO) && gpt_partition_type_knows_no_auto(ptid),
-                .read_only = FLAGS_SET(flags, SD_GPT_FLAG_READ_ONLY) && gpt_partition_type_knows_read_only(ptid),
-                .growfs = FLAGS_SET(flags, SD_GPT_FLAG_GROWFS) && gpt_partition_type_knows_growfs(ptid),
+                .no_auto = FLAGS_SET(flags, SD_GPT_FLAG_NO_AUTO) && gpt_partition_type_knows_no_auto(type),
+                .read_only = FLAGS_SET(flags, SD_GPT_FLAG_READ_ONLY) && gpt_partition_type_knows_read_only(type),
+                .growfs = FLAGS_SET(flags, SD_GPT_FLAG_GROWFS) && gpt_partition_type_knows_growfs(type),
         };
 
         return 1; /* found! */
@@ -270,6 +259,7 @@ int patch_partition(
         _cleanup_(fdisk_unref_partitionp) struct fdisk_partition *pa = NULL;
         _cleanup_(fdisk_unref_contextp) struct fdisk_context *c = NULL;
         bool tweak_no_auto, tweak_read_only, tweak_growfs;
+        GptPartitionType type;
         int r, fd;
 
         assert(device);
@@ -314,16 +304,18 @@ int patch_partition(
                         return log_error_errno(r, "Failed to update partition UUID: %m");
         }
 
+        type = gpt_partition_type_from_uuid(info->type);
+
         /* Tweak the read-only flag, but only if supported by the partition type */
         tweak_no_auto =
                 FLAGS_SET(change, PARTITION_NO_AUTO) &&
-                gpt_partition_type_knows_no_auto(info->type);
+                gpt_partition_type_knows_no_auto(type);
         tweak_read_only =
                 FLAGS_SET(change, PARTITION_READ_ONLY) &&
-                gpt_partition_type_knows_read_only(info->type);
+                gpt_partition_type_knows_read_only(type);
         tweak_growfs =
                 FLAGS_SET(change, PARTITION_GROWFS) &&
-                gpt_partition_type_knows_growfs(info->type);
+                gpt_partition_type_knows_growfs(type);
 
         if (change & PARTITION_FLAGS) {
                 uint64_t flags;

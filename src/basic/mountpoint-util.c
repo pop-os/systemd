@@ -37,7 +37,6 @@ int name_to_handle_at_loop(
                 int *ret_mnt_id,
                 int flags) {
 
-        _cleanup_free_ struct file_handle *h = NULL;
         size_t n = ORIGINAL_MAX_HANDLE_SZ;
 
         assert((flags & ~(AT_SYMLINK_FOLLOW|AT_EMPTY_PATH)) == 0);
@@ -50,6 +49,7 @@ int name_to_handle_at_loop(
          * as NULL if there's no interest in either. */
 
         for (;;) {
+                _cleanup_free_ struct file_handle *h = NULL;
                 int mnt_id = -1;
 
                 h = malloc0(offsetof(struct file_handle, f_handle) + n);
@@ -91,15 +91,13 @@ int name_to_handle_at_loop(
                 n = h->handle_bytes;
                 if (offsetof(struct file_handle, f_handle) + n < n) /* check for addition overflow */
                         return -EOVERFLOW;
-
-                h = mfree(h);
         }
 }
 
 static int fd_fdinfo_mnt_id(int fd, const char *filename, int flags, int *ret_mnt_id) {
         char path[STRLEN("/proc/self/fdinfo/") + DECIMAL_STR_MAX(int)];
         _cleanup_free_ char *fdinfo = NULL;
-        _cleanup_close_ int subfd = -1;
+        _cleanup_close_ int subfd = -EBADF;
         char *p;
         int r;
 
@@ -324,7 +322,7 @@ fallback_fstat:
 /* flags can be AT_SYMLINK_FOLLOW or 0 */
 int path_is_mount_point(const char *t, const char *root, int flags) {
         _cleanup_free_ char *canonical = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(t);
@@ -524,7 +522,53 @@ int dev_is_devtmpfs(void) {
         return false;
 }
 
-const char *mount_propagation_flags_to_string(unsigned long flags) {
+int mount_fd(const char *source,
+             int target_fd,
+             const char *filesystemtype,
+             unsigned long mountflags,
+             const void *data) {
+
+        if (mount(source, FORMAT_PROC_FD_PATH(target_fd), filesystemtype, mountflags, data) < 0) {
+                if (errno != ENOENT)
+                        return -errno;
+
+                /* ENOENT can mean two things: either that the source is missing, or that /proc/ isn't
+                 * mounted. Check for the latter to generate better error messages. */
+                if (proc_mounted() == 0)
+                        return -ENOSYS;
+
+                return -ENOENT;
+        }
+
+        return 0;
+}
+
+int mount_nofollow(
+                const char *source,
+                const char *target,
+                const char *filesystemtype,
+                unsigned long mountflags,
+                const void *data) {
+
+        _cleanup_close_ int fd = -EBADF;
+
+        /* In almost all cases we want to manipulate the mount table without following symlinks, hence
+         * mount_nofollow() is usually the way to go. The only exceptions are environments where /proc/ is
+         * not available yet, since we need /proc/self/fd/ for this logic to work. i.e. during the early
+         * initialization of namespacing/container stuff where /proc is not yet mounted (and maybe even the
+         * fs to mount) we can only use traditional mount() directly.
+         *
+         * Note that this disables following only for the final component of the target, i.e symlinks within
+         * the path of the target are honoured, as are symlinks in the source path everywhere. */
+
+        fd = open(target, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        if (fd < 0)
+                return -errno;
+
+        return mount_fd(source, fd, filesystemtype, mountflags, data);
+}
+
+const char *mount_propagation_flag_to_string(unsigned long flags) {
 
         switch (flags & (MS_SHARED|MS_SLAVE|MS_PRIVATE)) {
         case 0:
@@ -540,7 +584,7 @@ const char *mount_propagation_flags_to_string(unsigned long flags) {
         return NULL;
 }
 
-int mount_propagation_flags_from_string(const char *name, unsigned long *ret) {
+int mount_propagation_flag_from_string(const char *name, unsigned long *ret) {
 
         if (isempty(name))
                 *ret = 0;
@@ -553,4 +597,8 @@ int mount_propagation_flags_from_string(const char *name, unsigned long *ret) {
         else
                 return -EINVAL;
         return 0;
+}
+
+bool mount_propagation_flag_is_valid(unsigned long flag) {
+        return IN_SET(flag, 0, MS_SHARED, MS_PRIVATE, MS_SLAVE);
 }

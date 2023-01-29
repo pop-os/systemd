@@ -6,6 +6,7 @@
 #include "sd-id128.h"
 
 #include "architecture.h"
+#include "gpt.h"
 #include "list.h"
 #include "loop-util.h"
 #include "macro.h"
@@ -32,13 +33,14 @@ struct DissectedPartition {
         int mount_node_fd;
         uint64_t size;
         uint64_t offset;
+        uint64_t gpt_flags;
 };
 
 #define DISSECTED_PARTITION_NULL                                        \
         ((DissectedPartition) {                                         \
                 .partno = -1,                                           \
                 .architecture = _ARCHITECTURE_INVALID,                  \
-                .mount_node_fd = -1,                                    \
+                .mount_node_fd = -EBADF,                                \
         })
 #define TAKE_PARTITION(p)                                       \
         ({                                                      \
@@ -46,147 +48,6 @@ struct DissectedPartition {
                 *_pp = DISSECTED_PARTITION_NULL;                \
                 _p;                                             \
         })
-
-typedef enum PartitionDesignator {
-        PARTITION_ROOT,
-        PARTITION_ROOT_SECONDARY,  /* Secondary architecture */
-        PARTITION_ROOT_OTHER,
-        PARTITION_USR,
-        PARTITION_USR_SECONDARY,
-        PARTITION_USR_OTHER,
-        PARTITION_HOME,
-        PARTITION_SRV,
-        PARTITION_ESP,
-        PARTITION_XBOOTLDR,
-        PARTITION_SWAP,
-        PARTITION_ROOT_VERITY, /* verity data for the PARTITION_ROOT partition */
-        PARTITION_ROOT_SECONDARY_VERITY, /* verity data for the PARTITION_ROOT_SECONDARY partition */
-        PARTITION_ROOT_OTHER_VERITY,
-        PARTITION_USR_VERITY,
-        PARTITION_USR_SECONDARY_VERITY,
-        PARTITION_USR_OTHER_VERITY,
-        PARTITION_ROOT_VERITY_SIG, /* PKCS#7 signature for root hash for the PARTITION_ROOT partition */
-        PARTITION_ROOT_SECONDARY_VERITY_SIG, /* ditto for the PARTITION_ROOT_SECONDARY partition */
-        PARTITION_ROOT_OTHER_VERITY_SIG,
-        PARTITION_USR_VERITY_SIG,
-        PARTITION_USR_SECONDARY_VERITY_SIG,
-        PARTITION_USR_OTHER_VERITY_SIG,
-        PARTITION_TMP,
-        PARTITION_VAR,
-        _PARTITION_DESIGNATOR_MAX,
-        _PARTITION_DESIGNATOR_INVALID = -EINVAL,
-} PartitionDesignator;
-
-static inline bool PARTITION_DESIGNATOR_VERSIONED(PartitionDesignator d) {
-        /* Returns true for all designators where we want to support a concept of "versioning", i.e. which
-         * likely contain software binaries (or hashes thereof) that make sense to be versioned as a
-         * whole. We use this check to automatically pick the newest version of these partitions, by version
-         * comparing the partition labels. */
-
-        return IN_SET(d,
-                      PARTITION_ROOT,
-                      PARTITION_ROOT_SECONDARY,
-                      PARTITION_ROOT_OTHER,
-                      PARTITION_USR,
-                      PARTITION_USR_SECONDARY,
-                      PARTITION_USR_OTHER,
-                      PARTITION_ROOT_VERITY,
-                      PARTITION_ROOT_SECONDARY_VERITY,
-                      PARTITION_ROOT_OTHER_VERITY,
-                      PARTITION_USR_VERITY,
-                      PARTITION_USR_SECONDARY_VERITY,
-                      PARTITION_USR_OTHER_VERITY,
-                      PARTITION_ROOT_VERITY_SIG,
-                      PARTITION_ROOT_SECONDARY_VERITY_SIG,
-                      PARTITION_ROOT_OTHER_VERITY_SIG,
-                      PARTITION_USR_VERITY_SIG,
-                      PARTITION_USR_SECONDARY_VERITY_SIG,
-                      PARTITION_USR_OTHER_VERITY_SIG);
-}
-
-static inline PartitionDesignator PARTITION_VERITY_OF(PartitionDesignator p) {
-        switch (p) {
-
-        case PARTITION_ROOT:
-                return PARTITION_ROOT_VERITY;
-
-        case PARTITION_ROOT_SECONDARY:
-                return PARTITION_ROOT_SECONDARY_VERITY;
-
-        case PARTITION_ROOT_OTHER:
-                return PARTITION_ROOT_OTHER_VERITY;
-
-        case PARTITION_USR:
-                return PARTITION_USR_VERITY;
-
-        case PARTITION_USR_SECONDARY:
-                return PARTITION_USR_SECONDARY_VERITY;
-
-        case PARTITION_USR_OTHER:
-                return PARTITION_USR_OTHER_VERITY;
-
-        default:
-                return _PARTITION_DESIGNATOR_INVALID;
-        }
-}
-
-static inline PartitionDesignator PARTITION_VERITY_SIG_OF(PartitionDesignator p) {
-        switch (p) {
-
-        case PARTITION_ROOT:
-                return PARTITION_ROOT_VERITY_SIG;
-
-        case PARTITION_ROOT_SECONDARY:
-                return PARTITION_ROOT_SECONDARY_VERITY_SIG;
-
-        case PARTITION_ROOT_OTHER:
-                return PARTITION_ROOT_OTHER_VERITY_SIG;
-
-        case PARTITION_USR:
-                return PARTITION_USR_VERITY_SIG;
-
-        case PARTITION_USR_SECONDARY:
-                return PARTITION_USR_SECONDARY_VERITY_SIG;
-
-        case PARTITION_USR_OTHER:
-                return PARTITION_USR_OTHER_VERITY_SIG;
-
-        default:
-                return _PARTITION_DESIGNATOR_INVALID;
-        }
-}
-
-static inline PartitionDesignator PARTITION_ROOT_OF_ARCH(Architecture arch) {
-        switch (arch) {
-
-        case native_architecture():
-                return PARTITION_ROOT;
-
-#ifdef ARCHITECTURE_SECONDARY
-        case ARCHITECTURE_SECONDARY:
-                return PARTITION_ROOT_SECONDARY;
-#endif
-
-        default:
-                return PARTITION_ROOT_OTHER;
-        }
-}
-
-static inline PartitionDesignator PARTITION_USR_OF_ARCH(Architecture arch) {
-        switch (arch) {
-
-        case native_architecture():
-                return PARTITION_USR;
-
-#ifdef ARCHITECTURE_SECONDARY
-        case ARCHITECTURE_SECONDARY:
-                return PARTITION_USR_SECONDARY;
-#endif
-
-        default:
-                return PARTITION_USR_OTHER;
-        }
-}
 
 typedef enum DissectImageFlags {
         DISSECT_IMAGE_DEVICE_READ_ONLY         = 1 << 0,  /* Make device read-only */
@@ -217,6 +78,7 @@ typedef enum DissectImageFlags {
         DISSECT_IMAGE_ADD_PARTITION_DEVICES    = 1 << 20, /* Create partition devices via BLKPG_ADD_PARTITION */
         DISSECT_IMAGE_PIN_PARTITION_DEVICES    = 1 << 21, /* Open dissected partitions and decrypted partitions and pin them by fd */
         DISSECT_IMAGE_RELAX_SYSEXT_CHECK       = 1 << 22, /* Don't insist that the extension-release file name matches the image name */
+        DISSECT_IMAGE_DISKSEQ_DEVNODE          = 1 << 23, /* Prefer /dev/disk/by-diskseq/… device nodes */
 } DissectImageFlags;
 
 struct DissectedImage {
@@ -231,12 +93,16 @@ struct DissectedImage {
         DissectedPartition partitions[_PARTITION_DESIGNATOR_MAX];
         DecryptedImage *decrypted_image;
 
+        uint32_t sector_size;
+
         /* Meta information extracted from /etc/os-release and similar */
         char *image_name;
+        sd_id128_t image_uuid;
         char *hostname;
         sd_id128_t machine_id;
         char **machine_info;
         char **os_release;
+        char **initrd_release;
         char **extension_release;
         int has_init_system;
 };
@@ -300,11 +166,16 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(DecryptedImage*, decrypted_image_unref);
 
 int dissected_image_relinquish(DissectedImage *m);
 
-const char* partition_designator_to_string(PartitionDesignator d) _const_;
-PartitionDesignator partition_designator_from_string(const char *name) _pure_;
-
 int verity_settings_load(VeritySettings *verity, const char *image, const char *root_hash_path, const char *root_hash_sig_path);
 void verity_settings_done(VeritySettings *verity);
+
+static inline bool verity_settings_data_covers(const VeritySettings *verity, PartitionDesignator d) {
+        /* Returns true if the verity settings contain sufficient information to cover the specified partition */
+        return verity &&
+                ((d >= 0 && verity->designator == d) || (d == PARTITION_ROOT && verity->designator < 0)) &&
+                verity->root_hash &&
+                verity->data_path;
+}
 
 int dissected_image_load_verity_sig_partition(DissectedImage *m, int fd, VeritySettings *verity);
 
@@ -315,3 +186,8 @@ bool dissected_image_verity_sig_ready(const DissectedImage *image, PartitionDesi
 int mount_image_privately_interactively(const char *path, DissectImageFlags flags, char **ret_directory, LoopDevice **ret_loop_device);
 
 int verity_dissect_and_mount(int src_fd, const char *src, const char *dest, const MountOptions *options, const char *required_host_os_release_id, const char *required_host_os_release_version_id, const char *required_host_os_release_sysext_level, const char *required_sysext_scope);
+
+int dissect_fstype_ok(const char *fstype);
+
+int probe_sector_size(int fd, uint32_t *ret);
+int probe_sector_size_prefer_ioctl(int fd, uint32_t *ret);

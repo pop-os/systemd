@@ -28,7 +28,6 @@
 #include "strv.h"
 #include "tmpfile-util.h"
 #include "utf8.h"
-#include "util.h"
 #include "web-util.h"
 
 typedef enum RawProgress {
@@ -239,7 +238,7 @@ static void raw_pull_report_progress(RawPull *i, RawProgress p) {
 
 static int raw_pull_maybe_convert_qcow2(RawPull *i) {
         _cleanup_(unlink_and_freep) char *t = NULL;
-        _cleanup_close_ int converted_fd = -1;
+        _cleanup_close_ int converted_fd = -EBADF;
         _cleanup_free_ char *f = NULL;
         int r;
 
@@ -347,7 +346,7 @@ static int raw_pull_copy_auxiliary_file(
 static int raw_pull_make_local_copy(RawPull *i) {
         _cleanup_(unlink_and_freep) char *tp = NULL;
         _cleanup_free_ char *f = NULL;
-        _cleanup_close_ int dfd = -1;
+        _cleanup_close_ int dfd = -EBADF;
         const char *p;
         int r;
 

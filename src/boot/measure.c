@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "build.h"
 #include "efi-loader.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -32,12 +33,14 @@ static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_PRETTY_AUTO|JSON_FORM
 static PagerFlags arg_pager_flags = 0;
 static bool arg_current = false;
 static char **arg_phase = NULL;
+static char *arg_append = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_banks, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_device, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_private_key, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_public_key, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_phase, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_append, freep);
 
 static inline void free_sections(char*(*sections)[_UNIFIED_SECTION_MAX]) {
         for (UnifiedSection c = 0; c < _UNIFIED_SECTION_MAX; c++)
@@ -72,6 +75,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --public-key=KEY    Public key (PEM) to validate against\n"
                "     --json=MODE         Output as JSON\n"
                "  -j                     Same as --json=pretty on tty, --json=short otherwise\n"
+               "     --append=PATH       Load specified JSON signature, and append new signature to it\n"
                "\n%3$sUKI PE Section Options:%4$s                                         %3$sUKI PE Section%4$s\n"
                "     --linux=PATH        Path to Linux kernel image file        %7$s .linux\n"
                "     --osrel=PATH        Path to os-release file                %7$s .osrel\n"
@@ -127,6 +131,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_TPM2_DEVICE,
                 ARG_JSON,
                 ARG_PHASE,
+                ARG_APPEND,
         };
 
         static const struct option options[] = {
@@ -147,6 +152,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "public-key",  required_argument, NULL, ARG_PUBLIC_KEY  },
                 { "json",        required_argument, NULL, ARG_JSON        },
                 { "phase",       required_argument, NULL, ARG_PHASE       },
+                { "append",      required_argument, NULL, ARG_APPEND      },
                 {}
         };
 
@@ -252,6 +258,13 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
                 }
+
+                case ARG_APPEND:
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_append);
+                        if (r < 0)
+                                return r;
+
+                        break;
 
                 case '?':
                         return -EINVAL;
@@ -414,7 +427,7 @@ static int measure_kernel(PcrState *pcr_states, size_t n) {
 
         for (UnifiedSection c = 0; c < _UNIFIED_SECTION_MAX; c++) {
                 _cleanup_(evp_md_ctx_free_all) EVP_MD_CTX **mdctx = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 uint64_t m = 0;
 
                 if (!arg_sections[c])
@@ -622,6 +635,8 @@ static int verb_calculate(int argc, char *argv[], void *userdata) {
 
         if (!arg_sections[UNIFIED_SECTION_LINUX] && !arg_current)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Either --linux= or --current must be specified, refusing.");
+        if (arg_append)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "The --append= switch is only supported for 'sign', not 'calculate'.");
 
         assert(!strv_isempty(arg_banks));
         assert(!strv_isempty(arg_phase));
@@ -726,6 +741,15 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
 
         assert(!strv_isempty(arg_banks));
         assert(!strv_isempty(arg_phase));
+
+        if (arg_append) {
+                r = json_parse_file(NULL, arg_append, 0, &v, NULL, NULL);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse '%s': %m", arg_append);
+
+                if (!json_variant_is_object(v))
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "File '%s' is not a valid JSON object, refusing.", arg_append);
+        }
 
         /* When signing we only support JSON output */
         arg_json_format_flags &= ~JSON_FORMAT_OFF;
@@ -935,7 +959,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                         _cleanup_(json_variant_unrefp) JsonVariant *av = NULL;
                         av = json_variant_ref(json_variant_by_key(v, p->bank));
 
-                        r = json_variant_append_array(&av, bv);
+                        r = json_variant_append_array_nodup(&av, bv);
                         if (r < 0) {
                                 log_error_errno(r, "Failed to append JSON object: %m");
                                 goto finish;
@@ -1001,15 +1025,15 @@ static int validate_stub(void) {
                 log_warning("Warning: current kernel image does not support measuring itself, the command line or initrd system extension images.\n"
                             "The PCR measurements seen are unlikely to be valid.");
 
-        r = compare_reported_pcr_nr(TPM_PCR_INDEX_KERNEL_IMAGE, EFI_LOADER_VARIABLE("StubPcrKernelImage"), "kernel image");
+        r = compare_reported_pcr_nr(TPM_PCR_INDEX_KERNEL_IMAGE, EFI_LOADER_VARIABLE(StubPcrKernelImage), "kernel image");
         if (r < 0)
                 return r;
 
-        r = compare_reported_pcr_nr(TPM_PCR_INDEX_KERNEL_PARAMETERS, EFI_LOADER_VARIABLE("StubPcrKernelParameters"), "kernel parameters");
+        r = compare_reported_pcr_nr(TPM_PCR_INDEX_KERNEL_PARAMETERS, EFI_LOADER_VARIABLE(StubPcrKernelParameters), "kernel parameters");
         if (r < 0)
                 return r;
 
-        r = compare_reported_pcr_nr(TPM_PCR_INDEX_INITRD_SYSEXTS, EFI_LOADER_VARIABLE("StubPcrInitRDSysExts"), "initrd system extension images");
+        r = compare_reported_pcr_nr(TPM_PCR_INDEX_INITRD_SYSEXTS, EFI_LOADER_VARIABLE(StubPcrInitRDSysExts), "initrd system extension images");
         if (r < 0)
                 return r;
 

@@ -151,6 +151,7 @@ void cgroup_context_init(CGroupContext *c) {
                 .memory_high = CGROUP_LIMIT_MAX,
                 .memory_max = CGROUP_LIMIT_MAX,
                 .memory_swap_max = CGROUP_LIMIT_MAX,
+                .memory_zswap_max = CGROUP_LIMIT_MAX,
 
                 .memory_limit = CGROUP_LIMIT_MAX,
 
@@ -354,6 +355,9 @@ static int unit_compare_memory_limit(Unit *u, const char *property_name, uint64_
         } else if (streq(property_name, "MemorySwapMax")) {
                 unit_value = c->memory_swap_max;
                 file = "memory.swap.max";
+        } else if (streq(property_name, "MemoryZSwapMax")) {
+                unit_value = c->memory_zswap_max;
+                file = "memory.zswap.max";
         } else
                 return -EINVAL;
 
@@ -396,9 +400,10 @@ static char *format_cgroup_memory_limit_comparison(char *buf, size_t l, Unit *u,
 
         /* memory.swap.max is special in that it relies on CONFIG_MEMCG_SWAP (and the default swapaccount=1).
          * In the absence of reliably being able to detect whether memcg swap support is available or not,
-         * only complain if the error is not ENOENT. */
+         * only complain if the error is not ENOENT. This is similarly the case for memory.zswap.max relying
+         * on CONFIG_ZSWAP. */
         if (r > 0 || IN_SET(r, -ENODATA, -EOWNERDEAD) ||
-            (r == -ENOENT && streq(property_name, "MemorySwapMax")))
+            (r == -ENOENT && STR_IN_SET(property_name, "MemorySwapMax", "MemoryZSwapMax")))
                 buf[0] = 0;
         else if (r < 0) {
                 errno = -r;
@@ -462,6 +467,7 @@ void cgroup_context_dump(Unit *u, FILE* f, const char *prefix) {
                 "%sMemoryHigh: %" PRIu64 "%s\n"
                 "%sMemoryMax: %" PRIu64 "%s\n"
                 "%sMemorySwapMax: %" PRIu64 "%s\n"
+                "%sMemoryZSwapMax: %" PRIu64 "%s\n"
                 "%sMemoryLimit: %" PRIu64 "\n"
                 "%sTasksMax: %" PRIu64 "\n"
                 "%sDevicePolicy: %s\n"
@@ -498,6 +504,7 @@ void cgroup_context_dump(Unit *u, FILE* f, const char *prefix) {
                 prefix, c->memory_high, format_cgroup_memory_limit_comparison(cdc, sizeof(cdc), u, "MemoryHigh"),
                 prefix, c->memory_max, format_cgroup_memory_limit_comparison(cdd, sizeof(cdd), u, "MemoryMax"),
                 prefix, c->memory_swap_max, format_cgroup_memory_limit_comparison(cde, sizeof(cde), u, "MemorySwapMax"),
+                prefix, c->memory_zswap_max, format_cgroup_memory_limit_comparison(cde, sizeof(cde), u, "MemoryZSwapMax"),
                 prefix, c->memory_limit,
                 prefix, tasks_max_resolve(&c->tasks_max),
                 prefix, cgroup_device_policy_to_string(c->device_policy),
@@ -774,6 +781,52 @@ void cgroup_oomd_xattr_apply(Unit *u, const char *cgroup_path) {
                 unit_remove_xattr_graceful(u, cgroup_path, "user.oomd_omit");
 }
 
+int cgroup_log_xattr_apply(Unit *u, const char *cgroup_path) {
+        ExecContext *c;
+        size_t len, allowed_patterns_len, denied_patterns_len;
+        _cleanup_free_ char *patterns = NULL, *allowed_patterns = NULL, *denied_patterns = NULL;
+        char *last;
+        int r;
+
+        assert(u);
+
+        c = unit_get_exec_context(u);
+        if (!c)
+                /* Some unit types have a cgroup context but no exec context, so we do not log
+                 * any error here to avoid confusion. */
+                return 0;
+
+        if (set_isempty(c->log_filter_allowed_patterns) && set_isempty(c->log_filter_denied_patterns)) {
+                unit_remove_xattr_graceful(u, cgroup_path, "user.journald_log_filter_patterns");
+                return 0;
+        }
+
+        r = set_make_nulstr(c->log_filter_allowed_patterns, &allowed_patterns, &allowed_patterns_len);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to make nulstr from set: %m");
+
+        r = set_make_nulstr(c->log_filter_denied_patterns, &denied_patterns, &denied_patterns_len);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to make nulstr from set: %m");
+
+        /* Use nul character separated strings without trailing nul */
+        allowed_patterns_len = LESS_BY(allowed_patterns_len, 1u);
+        denied_patterns_len = LESS_BY(denied_patterns_len, 1u);
+
+        len = allowed_patterns_len + 1 + denied_patterns_len;
+        patterns = new(char, len);
+        if (!patterns)
+                return log_oom_debug();
+
+        last = mempcpy_safe(patterns, allowed_patterns, allowed_patterns_len);
+        *(last++) = '\xff';
+        memcpy_safe(last, denied_patterns, denied_patterns_len);
+
+        unit_set_xattr_graceful(u, cgroup_path, "user.journald_log_filter_patterns", patterns, len);
+
+        return 0;
+}
+
 static void cgroup_xattr_apply(Unit *u) {
         bool b;
 
@@ -781,6 +834,7 @@ static void cgroup_xattr_apply(Unit *u) {
 
         /* The 'user.*' xattrs can be set from a user manager. */
         cgroup_oomd_xattr_apply(u, u->cgroup_path);
+        cgroup_log_xattr_apply(u, u->cgroup_path);
 
         if (!MANAGER_IS_SYSTEM(u->manager))
                 return;
@@ -1209,7 +1263,7 @@ static bool unit_has_unified_memory_config(Unit *u) {
 
         return unit_get_ancestor_memory_min(u) > 0 || unit_get_ancestor_memory_low(u) > 0 ||
                c->memory_high != CGROUP_LIMIT_MAX || c->memory_max != CGROUP_LIMIT_MAX ||
-               c->memory_swap_max != CGROUP_LIMIT_MAX;
+               c->memory_swap_max != CGROUP_LIMIT_MAX || c->memory_zswap_max != CGROUP_LIMIT_MAX;
 }
 
 static void cgroup_apply_unified_memory_limit(Unit *u, const char *file, uint64_t v) {
@@ -1569,11 +1623,12 @@ static void cgroup_context_apply(
         if ((apply_mask & CGROUP_MASK_MEMORY) && !is_local_root) {
 
                 if (cg_all_unified() > 0) {
-                        uint64_t max, swap_max = CGROUP_LIMIT_MAX;
+                        uint64_t max, swap_max = CGROUP_LIMIT_MAX, zswap_max = CGROUP_LIMIT_MAX;
 
                         if (unit_has_unified_memory_config(u)) {
                                 max = c->memory_max;
                                 swap_max = c->memory_swap_max;
+                                zswap_max = c->memory_zswap_max;
                         } else {
                                 max = c->memory_limit;
 
@@ -1586,6 +1641,7 @@ static void cgroup_context_apply(
                         cgroup_apply_unified_memory_limit(u, "memory.high", c->memory_high);
                         cgroup_apply_unified_memory_limit(u, "memory.max", max);
                         cgroup_apply_unified_memory_limit(u, "memory.swap.max", swap_max);
+                        cgroup_apply_unified_memory_limit(u, "memory.zswap.max", zswap_max);
 
                         (void) set_attribute_and_warn(u, "memory", "memory.oom.group", one_zero(c->memory_oom_group));
 
@@ -1595,7 +1651,8 @@ static void cgroup_context_apply(
 
                         if (unit_has_unified_memory_config(u)) {
                                 val = c->memory_max;
-                                log_cgroup_compat(u, "Applying MemoryMax=%" PRIu64 " as MemoryLimit=", val);
+                                if (val != CGROUP_LIMIT_MAX)
+                                        log_cgroup_compat(u, "Applying MemoryMax=%" PRIu64 " as MemoryLimit=", val);
                         } else
                                 val = c->memory_limit;
 

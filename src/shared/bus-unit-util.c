@@ -29,6 +29,7 @@
 #include "mountpoint-util.h"
 #include "nsflags.h"
 #include "numa-util.h"
+#include "open-file.h"
 #include "parse-helpers.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -131,7 +132,7 @@ DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, uint64_t, cg_blkio_weight_parse);
 DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, uint64_t, cg_cpu_shares_parse);
 DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, uint64_t, cg_weight_parse);
 DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, uint64_t, cg_cpu_weight_parse);
-DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, unsigned long, mount_propagation_flags_from_string);
+DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, unsigned long, mount_propagation_flag_from_string);
 DEFINE_BUS_APPEND_PARSE_PTR("t", uint64_t, uint64_t, safe_atou64);
 DEFINE_BUS_APPEND_PARSE_PTR("u", uint32_t, mode_t, parse_mode);
 DEFINE_BUS_APPEND_PARSE_PTR("u", uint32_t, unsigned, safe_atou);
@@ -410,6 +411,23 @@ static int bus_append_exec_command(sd_bus_message *m, const char *field, const c
         return 1;
 }
 
+static int bus_append_open_file(sd_bus_message *m, const char *field, const char *eq) {
+        _cleanup_(open_file_freep) OpenFile *of = NULL;
+        int r;
+
+        assert(m);
+
+        r = open_file_parse(eq, &of);
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse OpenFile= setting: %m");
+
+        r = sd_bus_message_append(m, "(sv)", field, "a(sst)", (size_t) 1, of->path, of->fdname, of->flags);
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        return 1;
+}
+
 static int bus_append_ip_address_access(sd_bus_message *m, int family, const union in_addr_union *prefix, unsigned char prefixlen) {
         int r;
 
@@ -523,6 +541,7 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                               "MemoryHigh",
                               "MemoryMax",
                               "MemorySwapMax",
+                              "MemoryZSwapMax",
                               "MemoryLimit",
                               "TasksMax")) {
 
@@ -1034,7 +1053,7 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                 return bus_append_safe_atou(m, field, eq);
 
         if (streq(field, "MountFlags"))
-                return bus_append_mount_propagation_flags_from_string(m, field, eq);
+                return bus_append_mount_propagation_flag_from_string(m, field, eq);
 
         if (STR_IN_SET(field, "Environment",
                               "UnsetEnvironment",
@@ -1211,6 +1230,16 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                         return bus_log_create_error(r);
 
                 r = sd_bus_message_close_container(m);
+                if (r < 0)
+                        return bus_log_create_error(r);
+
+                return 1;
+        }
+
+        if (streq(field, "LogFilterPatterns")) {
+                r = sd_bus_message_append(m, "(sv)", "LogFilterPatterns", "a(bs)", 1,
+                                          eq[0] != '~',
+                                          eq[0] != '~' ? eq : eq + 1);
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -2065,7 +2094,8 @@ static int bus_append_kill_property(sd_bus_message *m, const char *field, const 
         if (STR_IN_SET(field, "KillSignal",
                               "RestartKillSignal",
                               "FinalKillSignal",
-                              "WatchdogSignal"))
+                              "WatchdogSignal",
+                              "ReloadSignal"))
                 return bus_append_signal_from_string(m, field, eq);
 
         return 0;
@@ -2288,6 +2318,9 @@ static int bus_append_service_property(sd_bus_message *m, const char *field, con
 
                 return 1;
         }
+
+        if (streq(field, "OpenFile"))
+                return bus_append_open_file(m, field, eq);
 
         return 0;
 }

@@ -6,7 +6,7 @@
 #include "architecture.h"
 #include "conf-files.h"
 #include "conf-parser.h"
-#include "def.h"
+#include "constants.h"
 #include "device-private.h"
 #include "device-util.h"
 #include "dirent-util.h"
@@ -579,9 +579,6 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
         } else if (streq(key, "SYMLINK")) {
                 if (attr)
                         return log_token_invalid_attr(rules, key);
-                if (op == OP_REMOVE)
-                        return log_token_invalid_op(rules, key);
-
                 if (!is_match) {
                         check_value_format_and_warn(rules, key, value, false);
                         r = rule_line_add_token(rule_line, TK_A_DEVLINK, op, value, NULL);
@@ -1341,7 +1338,7 @@ bool udev_rules_should_reload(UdevRules *rules) {
 }
 
 static bool token_match_string(UdevRuleToken *token, const char *str) {
-        const char *i, *value;
+        const char *value;
         bool match = false;
 
         assert(token);
@@ -1641,7 +1638,7 @@ static int udev_rule_apply_token_to_event(
         case TK_M_PARENTS_TAG: {
                 const char *val;
 
-                FOREACH_DEVICE_TAG(dev, val)
+                FOREACH_DEVICE_CURRENT_TAG(dev, val)
                         if (token_match_string(token, val))
                                 return token->op == OP_MATCH;
                 return token->op == OP_NOMATCH;
@@ -2313,11 +2310,17 @@ static int udev_rule_apply_token_to_event(
                         if (truncated)
                                 continue;
 
-                        r = device_add_devlink(dev, filename);
-                        if (r < 0)
-                                return log_rule_error_errno(dev, rules, r, "Failed to add devlink '%s': %m", filename);
+                        if (token->op == OP_REMOVE) {
+                                device_remove_devlink(dev, filename);
+                                log_rule_debug(dev, rules, "Dropped SYMLINK '%s'", p);
+                        } else {
+                                r = device_add_devlink(dev, filename);
+                                if (r < 0)
+                                        return log_rule_error_errno(dev, rules, r, "Failed to add devlink '%s': %m", filename);
 
-                        log_rule_debug(dev, rules, "LINK '%s'", p);
+                                log_rule_debug(dev, rules, "Added SYMLINK '%s'", p);
+                        }
+
                         p = next;
                 }
                 break;

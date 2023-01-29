@@ -39,6 +39,7 @@
 #if HAVE_APPARMOR
 #include "apparmor-util.h"
 #endif
+#include "argv-util.h"
 #include "async.h"
 #include "barrier.h"
 #include "bpf-lsm.h"
@@ -47,10 +48,10 @@
 #include "cgroup-setup.h"
 #include "chase-symlinks.h"
 #include "chown-recursive.h"
+#include "constants.h"
 #include "cpu-set-util.h"
 #include "creds-util.h"
 #include "data-fd-util.h"
-#include "def.h"
 #include "env-file.h"
 #include "env-util.h"
 #include "errno-list.h"
@@ -150,11 +151,14 @@ static int shift_fds(int fds[], size_t n_fds) {
         return 0;
 }
 
-static int flags_fds(const int fds[], size_t n_socket_fds, size_t n_storage_fds, bool nonblock) {
-        size_t n_fds;
+static int flags_fds(
+                const int fds[],
+                size_t n_socket_fds,
+                size_t n_fds,
+                bool nonblock) {
+
         int r;
 
-        n_fds = n_socket_fds + n_storage_fds;
         if (n_fds <= 0)
                 return 0;
 
@@ -328,7 +332,7 @@ static int connect_logger_as(
                 uid_t uid,
                 gid_t gid) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(context);
@@ -384,7 +388,7 @@ static int open_terminal_as(const char *path, int flags, int nfd) {
 }
 
 static int acquire_path(const char *path, int flags, mode_t mode) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(path);
@@ -765,7 +769,7 @@ static int setup_confirm_stdio(
                 int *ret_saved_stdin,
                 int *ret_saved_stdout) {
 
-        _cleanup_close_ int fd = -1, saved_stdin = -1, saved_stdout = -1;
+        _cleanup_close_ int fd = -EBADF, saved_stdin = -EBADF, saved_stdout = -EBADF;
         int r;
 
         assert(ret_saved_stdin);
@@ -817,7 +821,7 @@ static void write_confirm_error_fd(int err, int fd, const Unit *u) {
 }
 
 static void write_confirm_error(int err, const char *vc, const Unit *u) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         assert(vc);
 
@@ -1375,28 +1379,29 @@ fail:
 }
 
 static void rename_process_from_path(const char *path) {
-        char process_name[11];
+        _cleanup_free_ char *buf = NULL;
         const char *p;
-        size_t l;
 
-        /* This resulting string must fit in 10 chars (i.e. the length
-         * of "/sbin/init") to look pretty in /bin/ps */
+        assert(path);
 
-        p = basename(path);
-        if (isempty(p)) {
+        /* This resulting string must fit in 10 chars (i.e. the length of "/sbin/init") to look pretty in
+         * /bin/ps */
+
+        if (path_extract_filename(path, &buf) < 0) {
                 rename_process("(...)");
                 return;
         }
 
-        l = strlen(p);
+        size_t l = strlen(buf);
         if (l > 8) {
-                /* The end of the process name is usually more
-                 * interesting, since the first bit might just be
+                /* The end of the process name is usually more interesting, since the first bit might just be
                  * "systemd-" */
-                p = p + l - 8;
+                p = buf + l - 8;
                 l = 8;
-        }
+        } else
+                p = buf;
 
+        char process_name[11];
         process_name[0] = '(';
         memcpy(process_name+1, p, l);
         process_name[1+l] = ')';
@@ -1432,7 +1437,7 @@ static bool context_has_no_new_privileges(const ExecContext *c) {
         if (c->no_new_privileges)
                 return true;
 
-        if (have_effective_cap(CAP_SYS_ADMIN)) /* if we are privileged, we don't need NNP */
+        if (have_effective_cap(CAP_SYS_ADMIN) > 0) /* if we are privileged, we don't need NNP */
                 return false;
 
         /* We need NNP if we have any form of seccomp and are unprivileged */
@@ -1803,6 +1808,7 @@ static int build_environment(
                 const ExecContext *c,
                 const ExecParameters *p,
                 size_t n_fds,
+                char **fdnames,
                 const char *home,
                 const char *username,
                 const char *shell,
@@ -1835,7 +1841,7 @@ static int build_environment(
                         return -ENOMEM;
                 our_env[n_env++] = x;
 
-                joined = strv_join(p->fd_names, ":");
+                joined = strv_join(fdnames, ":");
                 if (!joined)
                         return -ENOMEM;
 
@@ -2098,8 +2104,8 @@ bool exec_needs_mount_namespace(
 
 static int setup_private_users(uid_t ouid, gid_t ogid, uid_t uid, gid_t gid) {
         _cleanup_free_ char *uid_map = NULL, *gid_map = NULL;
-        _cleanup_close_pair_ int errno_pipe[2] = { -1, -1 };
-        _cleanup_close_ int unshare_ready_fd = -1;
+        _cleanup_close_pair_ int errno_pipe[2] = PIPE_EBADF;
+        _cleanup_close_ int unshare_ready_fd = -EBADF;
         _cleanup_(sigkill_waitp) pid_t pid = 0;
         uint64_t c = 1;
         ssize_t n;
@@ -2116,7 +2122,7 @@ static int setup_private_users(uid_t ouid, gid_t ogid, uid_t uid, gid_t gid) {
          * does not need CAP_SETUID to write the single line mapping to itself. */
 
         /* Can only set up multiple mappings with CAP_SETUID. */
-        if (have_effective_cap(CAP_SETUID) && uid != ouid && uid_is_valid(uid))
+        if (have_effective_cap(CAP_SETUID) > 0 && uid != ouid && uid_is_valid(uid))
                 r = asprintf(&uid_map,
                              UID_FMT " " UID_FMT " 1\n"     /* Map $OUID → $OUID */
                              UID_FMT " " UID_FMT " 1\n",    /* Map $UID → $UID */
@@ -2130,7 +2136,7 @@ static int setup_private_users(uid_t ouid, gid_t ogid, uid_t uid, gid_t gid) {
                 return -ENOMEM;
 
         /* Can only set up multiple mappings with CAP_SETGID. */
-        if (have_effective_cap(CAP_SETGID) && gid != ogid && gid_is_valid(gid))
+        if (have_effective_cap(CAP_SETGID) > 0 && gid != ogid && gid_is_valid(gid))
                 r = asprintf(&gid_map,
                              GID_FMT " " GID_FMT " 1\n"     /* Map $OGID → $OGID */
                              GID_FMT " " GID_FMT " 1\n",    /* Map $GID → $GID */
@@ -2158,7 +2164,7 @@ static int setup_private_users(uid_t ouid, gid_t ogid, uid_t uid, gid_t gid) {
         if (r < 0)
                 return r;
         if (r == 0) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 const char *a;
                 pid_t ppid;
 
@@ -2553,7 +2559,7 @@ static int write_credential(
                 bool ownership_ok) {
 
         _cleanup_(unlink_and_freep) char *tmp = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         r = tempfn_random_child("", "cred", &tmp);
@@ -2851,7 +2857,7 @@ static int acquire_credentials(
                 bool ownership_ok) {
 
         uint64_t left = CREDENTIALS_TOTAL_SIZE_MAX;
-        _cleanup_close_ int dfd = -1;
+        _cleanup_close_ int dfd = -EBADF;
         ExecLoadCredential *lc;
         ExecSetCredential *sc;
         int r;
@@ -2865,7 +2871,7 @@ static int acquire_credentials(
 
         /* First, load credentials off disk (or acquire via AF_UNIX socket) */
         HASHMAP_FOREACH(lc, context->load_credentials) {
-                _cleanup_close_ int sub_fd = -1;
+                _cleanup_close_ int sub_fd = -EBADF;
 
                 /* If this is an absolute path, then try to open it as a directory. If that works, then we'll
                  * recurse into it. If it is an absolute path but it isn't a directory, then we'll open it as
@@ -4083,7 +4089,7 @@ static int add_shifted_fd(int *fds, size_t fds_size, size_t *n_fds, int fd, int 
         assert(ret_fd);
 
         if (fd < 0) {
-                *ret_fd = -1;
+                *ret_fd = -EBADF;
                 return 0;
         }
 
@@ -4103,6 +4109,123 @@ static int add_shifted_fd(int *fds, size_t fds_size, size_t *n_fds, int fd, int 
         return 1;
 }
 
+static int connect_unix_harder(Unit *u, const OpenFile *of, int ofd) {
+        union sockaddr_union addr = {
+                .un.sun_family = AF_UNIX,
+        };
+        socklen_t sa_len;
+        static const int socket_types[] = { SOCK_DGRAM, SOCK_STREAM, SOCK_SEQPACKET };
+        int r;
+
+        assert(u);
+        assert(of);
+        assert(ofd >= 0);
+
+        r = sockaddr_un_set_path(&addr.un, FORMAT_PROC_FD_PATH(ofd));
+        if (r < 0)
+                return log_unit_error_errno(u, r, "Failed to set sockaddr for %s: %m", of->path);
+
+        sa_len = r;
+
+        for (size_t i = 0; i < ELEMENTSOF(socket_types); i++) {
+                _cleanup_close_ int fd = -EBADF;
+
+                fd = socket(AF_UNIX, socket_types[i] | SOCK_CLOEXEC, 0);
+                if (fd < 0)
+                        return log_unit_error_errno(u, errno, "Failed to create socket for %s: %m", of->path);
+
+                r = RET_NERRNO(connect(fd, &addr.sa, sa_len));
+                if (r == -EPROTOTYPE)
+                        continue;
+                if (r < 0)
+                        return log_unit_error_errno(u, r, "Failed to connect socket for %s: %m", of->path);
+
+                return TAKE_FD(fd);
+        }
+
+        return log_unit_error_errno(u, SYNTHETIC_ERRNO(EPROTOTYPE), "Failed to connect socket for \"%s\".", of->path);
+}
+
+static int get_open_file_fd(Unit *u, const OpenFile *of) {
+        struct stat st;
+        _cleanup_close_ int fd = -EBADF, ofd = -EBADF;
+
+        assert(u);
+        assert(of);
+
+        ofd = open(of->path, O_PATH | O_CLOEXEC);
+        if (ofd < 0)
+                return log_error_errno(errno, "Could not open \"%s\": %m", of->path);
+        if (fstat(ofd, &st) < 0)
+                return log_error_errno(errno, "Failed to stat %s: %m", of->path);
+
+        if (S_ISSOCK(st.st_mode)) {
+                fd = connect_unix_harder(u, of, ofd);
+                if (fd < 0)
+                        return fd;
+
+                if (FLAGS_SET(of->flags, OPENFILE_READ_ONLY) && shutdown(fd, SHUT_WR) < 0)
+                        return log_error_errno(errno, "Failed to shutdown send for socket %s: %m", of->path);
+
+                log_unit_debug(u, "socket %s opened (fd=%d)", of->path, fd);
+        } else {
+                int flags = FLAGS_SET(of->flags, OPENFILE_READ_ONLY) ? O_RDONLY : O_RDWR;
+                if (FLAGS_SET(of->flags, OPENFILE_APPEND))
+                        flags |= O_APPEND;
+                else if (FLAGS_SET(of->flags, OPENFILE_TRUNCATE))
+                        flags |= O_TRUNC;
+
+                fd = fd_reopen(ofd, flags | O_CLOEXEC);
+                if (fd < 0)
+                        return log_unit_error_errno(u, fd, "Failed to open file %s: %m", of->path);
+
+                log_unit_debug(u, "file %s opened (fd=%d)", of->path, fd);
+        }
+
+        return TAKE_FD(fd);
+}
+
+static int collect_open_file_fds(
+                Unit *u,
+                OpenFile* open_files,
+                int **fds,
+                char ***fdnames,
+                size_t *n_fds) {
+        int r;
+
+        assert(u);
+        assert(fds);
+        assert(fdnames);
+        assert(n_fds);
+
+        LIST_FOREACH(open_files, of, open_files) {
+                _cleanup_close_ int fd = -EBADF;
+
+                fd = get_open_file_fd(u, of);
+                if (fd < 0) {
+                        if (FLAGS_SET(of->flags, OPENFILE_GRACEFUL)) {
+                                log_unit_debug_errno(u, fd, "Failed to get OpenFile= file descriptor for %s, ignoring: %m", of->path);
+                                continue;
+                        }
+
+                        return fd;
+                }
+
+                if (!GREEDY_REALLOC(*fds, *n_fds + 1))
+                        return -ENOMEM;
+
+                r = strv_extend(fdnames, of->fdname);
+                if (r < 0)
+                        return r;
+
+                (*fds)[*n_fds] = TAKE_FD(fd);
+
+                (*n_fds)++;
+        }
+
+        return 0;
+}
+
 static int exec_child(
                 Unit *unit,
                 const ExecCommand *command,
@@ -4112,7 +4235,7 @@ static int exec_child(
                 DynamicCreds *dcreds,
                 int socket_fd,
                 const int named_iofds[static 3],
-                int *fds,
+                int *params_fds,
                 size_t n_socket_fds,
                 size_t n_storage_fds,
                 char **files_env,
@@ -4152,6 +4275,8 @@ static int exec_child(
         int secure_bits;
         _cleanup_free_ gid_t *gids_after_pam = NULL;
         int ngids_after_pam = 0;
+        _cleanup_free_ int *fds = NULL;
+        _cleanup_strv_free_ char **fdnames = NULL;
 
         assert(unit);
         assert(command);
@@ -4193,6 +4318,24 @@ static int exec_child(
 
         /* In case anything used libc syslog(), close this here, too */
         closelog();
+
+        fds = newdup(int, params_fds, n_fds);
+        if (!fds) {
+                *exit_status = EXIT_MEMORY;
+                return log_oom();
+        }
+
+        fdnames = strv_copy((char**) params->fd_names);
+        if (!fdnames) {
+                *exit_status = EXIT_MEMORY;
+                return log_oom();
+        }
+
+        r = collect_open_file_fds(unit, params->open_files, &fds, &fdnames, &n_fds);
+        if (r < 0) {
+                *exit_status = EXIT_FDS;
+                return log_unit_error_errno(unit, r, "Failed to get OpenFile= file descriptors: %m");
+        }
 
         int keep_fds[n_fds + 3];
         memcpy_safe(keep_fds, fds, n_fds * sizeof(int));
@@ -4549,6 +4692,7 @@ static int exec_child(
                         context,
                         params,
                         n_fds,
+                        fdnames,
                         home,
                         username,
                         shell,
@@ -4668,7 +4812,7 @@ static int exec_child(
                 }
         }
 
-        if (needs_sandboxing && context->private_users && !have_effective_cap(CAP_SYS_ADMIN)) {
+        if (needs_sandboxing && context->private_users && have_effective_cap(CAP_SYS_ADMIN) <= 0) {
                 /* If we're unprivileged, set up the user namespace first to enable use of the other namespaces.
                  * Users with CAP_SYS_ADMIN can set up user namespaces last because they will be able to
                  * set up the all of the other namespaces (i.e. network, mount, UTS) without a user namespace. */
@@ -4764,7 +4908,7 @@ static int exec_child(
 
         /* If the user namespace was not set up above, try to do it now.
          * It's preferred to set up the user namespace later (after all other namespaces) so as not to be
-         * restricted by rules pertaining to combining user namspaces with other namespaces (e.g. in the
+         * restricted by rules pertaining to combining user namespaces with other namespaces (e.g. in the
          * case of mount namespaces being less privileged when the mount point list is copied from a
          * different user namespace). */
 
@@ -4780,7 +4924,7 @@ static int exec_child(
          * shall execute. */
 
         _cleanup_free_ char *executable = NULL;
-        _cleanup_close_ int executable_fd = -1;
+        _cleanup_close_ int executable_fd = -EBADF;
         r = find_executable_full(command->path, /* root= */ NULL, context->exec_search_path, false, &executable, &executable_fd);
         if (r < 0) {
                 if (r != -ENOMEM && (command->flags & EXEC_COMMAND_IGNORE_FAILURE)) {
@@ -4811,7 +4955,7 @@ static int exec_child(
 
 #if HAVE_SELINUX
         if (needs_sandboxing && use_selinux && params->selinux_context_net) {
-                int fd = -1;
+                int fd = -EBADF;
 
                 if (socket_fd >= 0)
                         fd = socket_fd;
@@ -4841,7 +4985,7 @@ static int exec_child(
         if (r >= 0)
                 r = shift_fds(fds, n_fds);
         if (r >= 0)
-                r = flags_fds(fds, n_socket_fds, n_storage_fds, context->non_blocking);
+                r = flags_fds(fds, n_socket_fds, n_fds, context->non_blocking);
         if (r < 0) {
                 *exit_status = EXIT_FDS;
                 return log_unit_error_errno(unit, r, "Failed to adjust passed file descriptors: %m");
@@ -5210,7 +5354,7 @@ int exec_spawn(Unit *unit,
 
                 socket_fd = params->fds[0];
         } else {
-                socket_fd = -1;
+                socket_fd = -EBADF;
                 fds = params->fds;
                 n_socket_fds = params->n_socket_fds;
                 n_storage_fds = params->n_storage_fds;
@@ -5249,9 +5393,10 @@ int exec_spawn(Unit *unit,
                         if (r < 0)
                                 return log_unit_error_errno(unit, r, "Failed to create control group '%s': %m", subcgroup_path);
 
-                        /* Normally we would not propagate the oomd xattrs to children but since we created this
+                        /* Normally we would not propagate the xattrs to children but since we created this
                          * sub-cgroup internally we should do it. */
                         cgroup_oomd_xattr_apply(unit, subcgroup_path);
+                        cgroup_log_xattr_apply(unit, subcgroup_path);
                 }
         }
 
@@ -5405,6 +5550,8 @@ void exec_context_done(ExecContext *c) {
         c->log_level_max = -1;
 
         exec_context_free_log_extra_fields(c);
+        c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
+        c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
 
         c->log_ratelimit_interval_usec = 0;
         c->log_ratelimit_burst = 0;
@@ -6016,6 +6163,17 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
         if (c->log_ratelimit_burst > 0)
                 fprintf(f, "%sLogRateLimitBurst: %u\n", prefix, c->log_ratelimit_burst);
 
+        if (!set_isempty(c->log_filter_allowed_patterns) || !set_isempty(c->log_filter_denied_patterns)) {
+                fprintf(f, "%sLogFilterPatterns:", prefix);
+
+                char *pattern;
+                SET_FOREACH(pattern, c->log_filter_allowed_patterns)
+                        fprintf(f, " %s", pattern);
+                SET_FOREACH(pattern, c->log_filter_denied_patterns)
+                        fprintf(f, " ~%s", pattern);
+                fputc('\n', f);
+        }
+
         for (size_t j = 0; j < c->n_log_extra_fields; j++) {
                 fprintf(f, "%sLogExtraFields: ", prefix);
                 fwrite(c->log_extra_fields[j].iov_base,
@@ -6281,7 +6439,7 @@ void exec_context_free_log_extra_fields(ExecContext *c) {
 }
 
 void exec_context_revert_tty(ExecContext *c) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *path;
         struct stat st;
         int r;
@@ -6492,7 +6650,7 @@ void exec_command_append_list(ExecCommand **l, ExecCommand *e) {
 
         if (*l) {
                 /* It's kind of important, that we keep the order here */
-                LIST_FIND_TAIL(command, *l, end);
+                end = LIST_FIND_TAIL(command, *l);
                 LIST_INSERT_AFTER(command, *l, end, e);
         } else
               *l = e;
@@ -6611,8 +6769,8 @@ static int exec_runtime_allocate(ExecRuntime **ret, const char *id) {
 
         *n = (ExecRuntime) {
                 .id = TAKE_PTR(id_copy),
-                .netns_storage_socket = { -1, -1 },
-                .ipcns_storage_socket = { -1, -1 },
+                .netns_storage_socket = PIPE_EBADF,
+                .ipcns_storage_socket = PIPE_EBADF,
         };
 
         *ret = n;
@@ -6674,7 +6832,7 @@ static int exec_runtime_make(
                 ExecRuntime **ret) {
 
         _cleanup_(namespace_cleanup_tmpdirp) char *tmp_dir = NULL, *var_tmp_dir = NULL;
-        _cleanup_close_pair_ int netns_storage_socket[2] = { -1, -1 }, ipcns_storage_socket[2] = { -1, -1 };
+        _cleanup_close_pair_ int netns_storage_socket[2] = PIPE_EBADF, ipcns_storage_socket[2] = PIPE_EBADF;
         int r;
 
         assert(m);
