@@ -1,3 +1,9 @@
+systemd (252.5-2) unstable; urgency=medium
+
+  * Fix boot-and-services autopkgtest.
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 30 Jan 2023 01:03:48 +0000
+
 systemd (252.5-1) unstable; urgency=medium
 
   [ Nick Rosbrook ]
