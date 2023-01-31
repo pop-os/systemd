@@ -98,6 +98,7 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
+	-Dukify=false \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
