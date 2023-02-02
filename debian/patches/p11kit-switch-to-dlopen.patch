@@ -718,10 +718,10 @@ index 85dbb81..55728c2 100644
  }
  
 diff --git a/test/test-functions b/test/test-functions
-index 5613215..7f0ab56 100644
+index ae0a993..be3b686 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -1275,7 +1275,7 @@ install_missing_libraries() {
+@@ -1276,7 +1276,7 @@ install_missing_libraries() {
      local lib path
      # A number of dependencies is now optional via dlopen, so the install
      # script will not pick them up, since it looks at linkage.
@@ -730,7 +730,7 @@ index 5613215..7f0ab56 100644
          ddebug "Searching for $lib via pkg-config"
          if pkg-config --exists "$lib"; then
                  path="$(pkg-config --variable=libdir "$lib")"
-@@ -1287,6 +1287,10 @@ install_missing_libraries() {
+@@ -1288,6 +1288,10 @@ install_missing_libraries() {
                  if ! [[ ${lib} =~ ^lib ]]; then
                          lib="lib${lib}"
                  fi

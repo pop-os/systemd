@@ -48,6 +48,7 @@ Depends: systemd,
   cryptsetup-bin,
   systemd-sysv,
   polkitd | policykit-1,
+  netlabel-tools,
   dnsmasq-base
 Restrictions: needs-root, isolation-container, breaks-testbed
 
@@ -182,6 +183,8 @@ Depends: systemd-tests,
   squashfs-tools,
   vim-tiny,
   dosfstools,
+  mtools,
+  erofs-utils,
   libdw-dev,
   libelf-dev,
   dbus-user-session,
@@ -195,6 +198,16 @@ Depends: systemd-tests,
   tpm2-tools,
   libgcc-s1,
   openssl,
+  bsdutils,
+  knot,
+  knot-dnssecutils | knot-dnsutils,
+  bind9-dnsutils,
+  bind9-host,
+  jq,
+  psmisc,
+  xkb-data,
+  locales,
+  locales-all,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
@@ -205,11 +218,3 @@ Depends: systemd-sysv,
   systemd,
   udev,
 Restrictions: needs-root, isolation-container, allow-stderr, breaks-testbed
-
-# NOUPSTREAM: Do not run these tests for upstream builds
-
-Tests: systemd-fsckd
-Depends: systemd-sysv,
-  python3,
-  plymouth
-Restrictions: needs-root, isolation-machine, breaks-testbed, skippable, flaky
