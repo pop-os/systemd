@@ -4,7 +4,6 @@ debian/Only-start-logind-if-dbus-is-installed.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
-debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
