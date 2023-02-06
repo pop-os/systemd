@@ -37,7 +37,6 @@ debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 test-increase-QEMU_MEM-for-some-tests.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
-test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
 test-skip-some-tests-when-machine-id-is-not-initialized.patch
 lp1999275-stat-util-introduce-fd_is_read_only_fs.patch
 lp1999275-binfmt-util-split-out-binfmt_mounted.patch
