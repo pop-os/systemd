@@ -1,3 +1,21 @@
+systemd (252.5-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge 252.5-2 from Debian unstable
+    - Drop test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/9b42646b22
+      File: debian/patches/test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1b0789416172ec60d8086fe2b458b5396bb7e857
+    - Drop test-make-sure-mount-point-exists-in-testsuite-64.sh.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/07e4787106
+      File: debian/patches/test-make-sure-mount-point-exists-in-testsuite-64.sh.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f97b2d5ae1a1f35668c4648f1c7fc715a588de50
+    - Drop test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch.
+      Fixed upstream: https://github.com/systemd/systemd-stable/commit/1c325f6d7f
+      File: debian/patches/test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
+      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5f85226d61393c08d7ea51c2f28db7fd4c79bcc6
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 06 Feb 2023 10:42:24 -0500
+
 systemd (252.5-2) unstable; urgency=medium
 
   * Fix boot-and-services autopkgtest.
