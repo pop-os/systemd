@@ -1,0 +1,63 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Fri, 2 Dec 2022 15:35:25 -0500
+Subject: udev: attempt device rename even if interface is up
+
+Origin: upstream, https://github.com/systemd/systemd/commit/53584e7b61
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+Currently rename_netif() will not attempt to rename a device if it is
+already up, because the kernel will return -EBUSY unless live renaming
+is allowed on the device. This restriction will be removed in a future
+kernel version [1].
+
+To cover both cases, always attempt to rename the interface and return 0
+if we get -EBUSY.
+
+[1] https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/commit/?id=bd039b5ea2a9
+---
+ src/udev/udev-event.c | 18 ++++++------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
+index b3d92d5..08d69cf 100644
+--- a/src/udev/udev-event.c
++++ b/src/udev/udev-event.c
+@@ -862,7 +862,6 @@ int udev_event_spawn(
+ static int rename_netif(UdevEvent *event) {
+         const char *oldname;
+         sd_device *dev;
+-        unsigned flags;
+         int ifindex, r;
+ 
+         assert(event);
+@@ -896,17 +895,7 @@ static int rename_netif(UdevEvent *event) {
+                 return 0;
+         }
+ 
+-        r = rtnl_get_link_info(&event->rtnl, ifindex, NULL, &flags, NULL, NULL, NULL);
+-        if (r < 0)
+-                return log_device_warning_errno(dev, r, "Failed to get link flags: %m");
+-
+-        if (FLAGS_SET(flags, IFF_UP)) {
+-                log_device_info(dev, "Network interface '%s' is already up, refusing to rename to '%s'.",
+-                                oldname, event->name);
+-                return 0;
+-        }
+-
+-        /* Set ID_RENAMING boolean property here, and drop it in the corresponding move uevent later. */
++        /* Set ID_RENAMING boolean property here. It will be dropped when the corresponding move uevent is processed. */
+         r = device_add_property(dev, "ID_RENAMING", "1");
+         if (r < 0)
+                 return log_device_warning_errno(dev, r, "Failed to add 'ID_RENAMING' property: %m");
+@@ -927,6 +916,11 @@ static int rename_netif(UdevEvent *event) {
+                 return log_device_debug_errno(event->dev_db_clone, r, "Failed to update database under /run/udev/data/: %m");
+ 
+         r = rtnl_set_link_name(&event->rtnl, ifindex, event->name);
++        if (r == -EBUSY) {
++                log_device_info(dev, "Network interface '%s' is already up, cannot rename to '%s'.",
++                                oldname, event->name);
++                return 0;
++        }
+         if (r < 0)
+                 return log_device_error_errno(dev, r, "Failed to rename network interface %i from '%s' to '%s': %m",
+                                               ifindex, oldname, event->name);

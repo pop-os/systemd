@@ -1,0 +1,62 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Fri, 2 Dec 2022 15:26:18 -0500
+Subject: sd-netlink: do not swap old name and alternative name
+
+Origin: upstream, https://github.com/systemd/systemd/commit/080afbb57c
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+Commit 434a348380 ("netlink: do not fail when new interface name is
+already used as an alternative name") added logic to set the old
+interface name as an alternative name, but only when the new name is
+currently an alternative name. This is not the desired outcome in most
+cases, and the important part of this commit was to delete the new name
+from the list of alternative names if necessary.
+---
+ src/libsystemd/sd-netlink/netlink-util.c | 13 -------------
+ 1 file changed, 13 deletions(-)
+
+diff --git a/src/libsystemd/sd-netlink/netlink-util.c b/src/libsystemd/sd-netlink/netlink-util.c
+index 12cdc99..6b4c25f 100644
+--- a/src/libsystemd/sd-netlink/netlink-util.c
++++ b/src/libsystemd/sd-netlink/netlink-util.c
+@@ -3,7 +3,6 @@
+ #include "sd-netlink.h"
+ 
+ #include "fd-util.h"
+-#include "format-util.h"
+ #include "io-util.h"
+ #include "memory-util.h"
+ #include "netlink-internal.h"
+@@ -15,7 +14,6 @@
+ int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL;
+         _cleanup_strv_free_ char **alternative_names = NULL;
+-        char old_name[IF_NAMESIZE] = {};
+         int r;
+ 
+         assert(rtnl);
+@@ -35,10 +33,6 @@ int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+                 if (r < 0)
+                         return log_debug_errno(r, "Failed to remove '%s' from alternative names on network interface %i: %m",
+                                                name, ifindex);
+-
+-                r = format_ifname(ifindex, old_name);
+-                if (r < 0)
+-                        return log_debug_errno(r, "Failed to get current name of network interface %i: %m", ifindex);
+         }
+ 
+         r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
+@@ -53,13 +47,6 @@ int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+         if (r < 0)
+                 return r;
+ 
+-        if (!isempty(old_name)) {
+-                r = rtnl_set_link_alternative_names(rtnl, ifindex, STRV_MAKE(old_name));
+-                if (r < 0)
+-                        log_debug_errno(r, "Failed to set '%s' as an alternative name on network interface %i, ignoring: %m",
+-                                        old_name, ifindex);
+-        }
+-
+         return 0;
+ }
+ 

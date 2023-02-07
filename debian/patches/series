@@ -44,3 +44,9 @@ lp1999275-binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
 lp1999275-binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
 lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
+lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+lp2002445-sd-netlink-do-not-swap-old-name-and-alternative-name.patch
+lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
+lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
+lp2002445-test-network-add-a-test-for-renaming-device-to-current-al.patch
