@@ -13,8 +13,17 @@ systemd (252.5-2ubuntu1) UNRELEASED; urgency=medium
       Fixed upstream: https://github.com/systemd/systemd-stable/commit/1c325f6d7f
       File: debian/patches/test-remove-no-longer-needed-quirk-for-set-locale-on-Debi.patch
       https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5f85226d61393c08d7ea51c2f28db7fd4c79bcc6
+  * udev: avoid NIC renaming race with kernel (LP: #2002445)
+    Files:
+    - debian/patches/lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
+    - debian/patches/lp2002445-sd-netlink-do-not-swap-old-name-and-alternative-name.patch
+    - debian/patches/lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+    - debian/patches/lp2002445-test-network-add-a-test-for-renaming-device-to-current-al.patch
+    - debian/patches/lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
+    - debian/patches/lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=58d29c2b376f03c44ed5a719877c95b332018cdc
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 06 Feb 2023 10:42:24 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 07 Feb 2023 13:55:54 -0500
 
 systemd (252.5-2) unstable; urgency=medium
 
