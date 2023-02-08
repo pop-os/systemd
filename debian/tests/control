@@ -6,7 +6,7 @@ Depends: systemd,
   acl,
   locales,
   evemu-tools,
-Restrictions: needs-root, isolation-container
+Restrictions: needs-root, isolation-container, skippable
 
 Tests: unit-config
 Depends: systemd,
