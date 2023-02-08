@@ -124,7 +124,12 @@ Deprecations and removals:
   That requires distros to enable CONFIG_ACPI_FPDT, and have kernels v5.12 for
   x86 and v6.2 for arm.
 
+* Once baseline is 4.13, remove support for INTERFACE_OLD= checks in "udevadm
+  trigger"'s waiting logic, since we can then rely on uuid-tagged uevents
+
 Features:
+
+* tmpfiles snippet that locks down /etc/credstore/ and friends, just in case.
 
 * split out execute.c into new "systemd-executor" binary. Then make PID 1 fork
   that off via vfork(), and then let that executor do the hard work. Ultimately
