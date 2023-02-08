@@ -1,3 +1,45 @@
+systemd (253~rc2-1) experimental; urgency=medium
+
+  * New upstream version 253~rc2
+  * systemd: make /etc/default/locale a symlink to /etc/locale.conf. Let's
+    match upstream's filename and keep a backward-compatibility symlink
+    for older tools. The content of the files match anyway.
+  * Update timedated autopkgtest. We no longer support /etc/timezone, as
+    /etc/localtime is always available
+  * Drop patches merged upstream
+  * Drop Don-t-enable-audit-by-default.patch. We can disable the socket
+    now
+  * Drop Use-Debian-specific-config-files.patch, no longer needed
+  * systemd-boot-system-token was renamed to systemd-boot-random-seed
+  * Add new libsystemd symbols
+  * Update Lintian override for new so bump
+  * Remove systemd-localed drop-in, no longer needed. The change was
+    merged upstream
+  * Drop udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
+    and use a drop-in
+  * Drop Re-enable-journal-forwarding-to-syslog.patch and use a drop-in
+  * Drop TuxOnIce out-of-tree patch. The
+    SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK environment variable can be
+    used to skip the check, so it is no longer necessary to maintain a
+    patch.
+  * Drop autopkgtest denylist patches. No longer needed, the tests are
+    working now
+  * Drop Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch, we now
+    use the unified hierarchy
+  * Drop Let-graphical-session-pre.target-be-manually-started.patch, not
+    used anymore
+  * Refresh patches
+  * Do not install repart/shutdown standalone binaries
+  * Build with libxen-dev. Buildtime-only dependency, enables support for
+    kexec on Xen (via ioctl, so no new runtime dependency).
+  * Do not install ukify script for now
+  * Update NEWS file
+  * locale: disable keymap support
+  * d/watch: use main repository
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 08 Feb 2023 20:36:58 +0000
+
 systemd (252.5-2) unstable; urgency=medium
 
   * Fix boot-and-services autopkgtest.
