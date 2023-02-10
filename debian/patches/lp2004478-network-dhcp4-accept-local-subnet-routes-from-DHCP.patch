@@ -1,0 +1,54 @@
+From: Tuetuopay <tuetuopay@me.com>
+Date: Fri, 27 Jan 2023 15:10:49 +0100
+Subject: network/dhcp4: accept local subnet routes from DHCP
+
+Origin: upstream, https://github.com/systemd/systemd/commit/1d84a3c7792a8910b05904937c703307ca19740f
+Bug-Ubuntu: https://launchpad.net/bugs/2004478
+
+RFC3442 specifies option 121 (Classless Static Routes) that allow a DHCP
+server to push arbitrary routes to a client. It has a Local Subnet
+Routes section expliciting the behavior of routes with a null (0.0.0.0)
+gateway.
+
+Such routes are to be installed on the interface with a Link scope, to
+mark them as directly available on the link without any gateway.
+
+Networkd currently drops those routes, which is against the RFC, as
+Linux has proper support for such routes.
+
+Fixes: 7f20627 ("network: dhcp4: ignore gateway in static routes if destination is link-local or in the same network")
+---
+ src/network/networkd-dhcp4.c | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
+index f80adcd..9b06edc 100644
+--- a/src/network/networkd-dhcp4.c
++++ b/src/network/networkd-dhcp4.c
+@@ -349,15 +349,18 @@ static int dhcp4_request_route_auto(
+                 route->gw = IN_ADDR_NULL;
+                 route->prefsrc.in = address;
+ 
+-        } else {
+-                if (in4_addr_is_null(gw)) {
+-                        log_link_debug(link, "DHCP: requested route destination "IPV4_ADDRESS_FMT_STR"/%u is not in the assigned network "
+-                                       IPV4_ADDRESS_FMT_STR"/%u, but no gateway is specified, ignoring.",
+-                                       IPV4_ADDRESS_FMT_VAL(route->dst.in), route->dst_prefixlen,
+-                                       IPV4_ADDRESS_FMT_VAL(prefix), prefixlen);
+-                        return 0;
+-                }
++        } else if (in4_addr_is_null(gw)) {
++                log_link_debug(link, "DHCP: requested route destination "IPV4_ADDRESS_FMT_STR"/%u is not in the assigned network "
++                               IPV4_ADDRESS_FMT_STR"/%u, but no gateway is specified, using 'link' scope.",
++                               IPV4_ADDRESS_FMT_VAL(route->dst.in), route->dst_prefixlen,
++                               IPV4_ADDRESS_FMT_VAL(prefix), prefixlen);
++
++                route->scope = RT_SCOPE_LINK;
++                route->gw_family = AF_UNSPEC;
++                route->gw = IN_ADDR_NULL;
++                route->prefsrc.in = address;
+ 
++        } else {
+                 r = dhcp4_request_route_to_gateway(link, gw);
+                 if (r < 0)
+                         return r;
