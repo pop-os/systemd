@@ -2,6 +2,38 @@ systemd System and Service Manager
 
 CHANGES WITH 253 in spe:
 
+        Announcements of Future Feature Removals and Incompatible Changes:
+
+        * We intend to remove cgroup v1 support from systemd release after the
+          end of 2023. If you run services that make explicit use of cgroup v1
+          features (i.e. the "legacy hierarchy" with separate hierarchies for
+          each controller), please implement compatibility with cgroup v2 (i.e.
+          the "unified hierarchy") sooner rather than later. Most of Linux
+          userspace has been ported over already.
+
+        * We intend to remove support for split-usr (/usr mounted separately
+          during boot) and unmerged-usr (parallel directories /bin and
+          /usr/bin, /lib and /usr/lib, etc). This will happen in the second
+          half of 2023, in the first release that falls into that time window.
+          For more details, see:
+          https://lists.freedesktop.org/archives/systemd-devel/2022-September/048352.html
+
+        * We intend to change behaviour w.r.t. units of the per-user service
+          manager and sandboxing options, so that they work without having to
+          manually enable PrivateUsers= as well, which is not required for
+          system units. To make this work, we will implicitly enable user
+          namespaces (PrivateUsers=yes) when a sandboxing option is enabled in a
+          user unit. The drawback is that system users will no longer be visible
+          (and appear as 'nobody') to the user unit when a sandboxing option is
+          enabled. By definition a sandboxed user unit should run with reduced
+          privileges, so impact should be small. This will remove a great source
+          of confusion that has been reported by users over the years, due to
+          how these options require an extra setting to be manually enabled when
+          used in the per-user service manager, as opposed as to the system
+          service manager. We plan to enable this change in the next release
+          later this year. For more details, see:
+          https://lists.freedesktop.org/archives/systemd-devel/2022-December/048682.html
+
         Deprecations and incompatible changes:
 
         * systemctl will now warn when invoked without /proc/ mounted
@@ -29,8 +61,8 @@ CHANGES WITH 253 in spe:
         * systemd-networkd-wait-online exits successfully when all interfaces
           are ready or unmanaged. Previously, if neither '--any' nor
           '--interface=' options were used, at least one interface had to be in
-          configured state. This change allows the case, where systemd-networkd
-          is enabled but no interfaces are configured, to be handled
+          configured state. This change allows the case where systemd-networkd
+          is enabled, but no interfaces are configured, to be handled
           gracefully. It may occur in particular when a different network
           manager is also enabled and used.
 
@@ -47,7 +79,7 @@ CHANGES WITH 253 in spe:
           unit files, the --image= switch in various tools such as
           systemd-nspawn, as well as systemd-dissect) will now only mount file
           systems of types btrfs, ext4, xfs, erofs, squashfs, vfat. This list
-          can be overriden via the $SYSTEMD_DISSECT_FILE_SYSTEMS environment
+          can be overridden via the $SYSTEMD_DISSECT_FILE_SYSTEMS environment
           variable. These file systems are fairly well supported and maintained
           in current kernels, while others are usually more niche, exotic or
           legacy and thus typically do not receive the same level of security
@@ -80,7 +112,7 @@ CHANGES WITH 253 in spe:
         * Initrd environments which are not on a pure memory file system (e.g.
           overlayfs combination as opposed to tmpfs) are now supported. With
           this change, during the initrd → host transition ("switch root")
-          systemd will no longer erase all files of the initrd unless it's
+          systemd will erase all files of the initrd only when the initrd is
           backed by a memory file system such as tmpfs.
 
         * New per-unit MemoryZSwapMax= option has been added to configure
@@ -109,13 +141,15 @@ CHANGES WITH 253 in spe:
         * The maximum rate at which daemon reloads are executed can now be
           limited with the new ReloadLimitIntervalSec=/ReloadLimitBurst=
           options. (Or the equivalent on the kernel command line:
-          systemd.reload_limit_interval_sec=/systemd.reload_limit_burst=).  In
+          systemd.reload_limit_interval_sec=/systemd.reload_limit_burst=). In
           addition, systemd now logs the originating unit and PID when a reload
           request is received over D-Bus.
 
         * When enabling a swap device systemd will now reinitialize the device
           when the page size of the swap space does not match the page size of
-          the running kernel.
+          the running kernel. Note that this requires the 'swapon' utility to
+          provide the '--fixpgsz' option, as implemented by util-linux, and it
+          is not supported by busybox at the time of writing.
 
         * systemd now executes generator programs in a mount namespace
           "sandbox" with most of the file system read-only and write access
@@ -128,9 +162,10 @@ CHANGES WITH 253 in spe:
 
         * The system manager manager will now parse a new "vmm.notify_socket"
           system credential, which may be supplied to a VM via SMBIOS. If
-          found, it will send a "READY=1" notification on the specified socket
-          after boot is complete. This allows readiness notification to be sent
-          from a VM guest to the VM host over a VSOCK socket.
+          found, the manager will send a "READY=1" notification on the
+          specified socket after boot is complete. This allows readiness
+          notification to be sent from a VM guest to the VM host over a VSOCK
+          socket.
 
         * The sample PAM configuration file for systemd-user@.service now
           includes a call to pam_namespace. This puts children of user@.service
@@ -139,8 +174,8 @@ CHANGES WITH 253 in spe:
 
         * A new environment variable $SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST
           can can be used to override the mount units burst late limit for
-          parsing '/proc/self/mountinfo', which was introduced in
-          v249. Defaults to 5.
+          parsing '/proc/self/mountinfo', which was introduced in v249.
+          Defaults to 5.
 
         * Drop-ins for init.scope changing control group resource limits are
           now applied, while they were previously ignored.
@@ -247,7 +282,7 @@ CHANGES WITH 253 in spe:
         * bootctl also gained a new verb "cleanup" that automatically removes
           all files from the ESP's and XBOOTLDR's "entry-token" directory, that
           is not referenced anymore by any installed Type #1 boot loader
-          specification entry. This is particulary useful in environments where
+          specification entry. This is particularly useful in environments where
           a large number of entries reference the same or partly the same
           resources (for example, for snapshot-based setups).
 
@@ -558,7 +593,7 @@ CHANGES WITH 253 in spe:
           that systemd tools will silently skip various operations in such an
           environment.
 
-        * "Lockheed Matrin Hardened Security for Intel Processors" (HS SRE)
+        * "Lockheed Martin Hardened Security for Intel Processors" (HS SRE)
           virtualization is now detected.
 
         Changes in the build system:
@@ -585,9 +620,10 @@ CHANGES WITH 253 in spe:
         Bernd Steinhauser, blutch112, cake03, Callum Farmer, Carlo Teubner,
         Charles Hardin, chris, Christian Brauner, Christian Göttsche,
         Cristian Rodríguez, Daan De Meyer, Dan Streetman, DaPigGuy,
-        David Tardon, dependabot[bot], Dirk Su, Dmitry V. Levin, drosdeck,
-        Edson Juliano Drosdeck, edupont, Eric DeVolder, Erik Moqvist,
-        Evgeny Vereshchagin, Felix Riemann, Franck Bui, Frantisek Sumsal,
+        Darrell Kavanagh, David Tardon, dependabot[bot], Dirk Su,
+        Dmitry V. Levin, drosdeck, Edson Juliano Drosdeck, edupont,
+        Eric DeVolder, Erik Moqvist, Evgeny Vereshchagin, Fabian Gurtner,
+        Felix Riemann, Franck Bui, Frantisek Sumsal, Geert Lorang,
         Gerd Hoffmann, Gio, Hannoskaj, Hans de Goede, Hugo Carvalho,
         igo95862, Ilya Leoshkevich, Ivan Shapovalov, Jacek Migacz,
         Jade Lovelace, Jan Engelhardt, Jan Janssen, Jan Macku, January,
@@ -603,15 +639,16 @@ CHANGES WITH 253 in spe:
         Phaedrus Leeds, Philipp Jungkamp, Quentin Deslandes, Ray Strode,
         reuben olinsky, Richard E. van der Luit, Richard Phibel,
         Ricky Tigg, Robin Humble, rogg, Rudi Heitbaum, Sam James,
-        Samuel Thibault, Siddhesh Poyarekar, Space Meyer, Spindle Security,
-        Steve Ramage, Thomas Haller, Tonći Galić, Torsten Hilbrich,
+        Samuel Cabrero, Samuel Thibault, Siddhesh Poyarekar, Simon Brand,
+        Space Meyer, Spindle Security, Steve Ramage, Takashi Sakamoto,
+        Thomas Haller, Tonći Galić, Topi Miettinen, Torsten Hilbrich,
         Tuetuopay, uerdogan, Ulrich Ölmann, Valentin David,
         Vitaly Kuznetsov, Vito Caputo, Waltibaba, Will Fancher,
         William Roberts, wouter bolsterlee, Youfu Zhang, Yu Watanabe,
         Zbigniew Jędrzejewski-Szmek, Дамјан Георгиевски,
         наб
 
-        — Warsaw, 2023-02-02
+        — Warsaw, 2023-02-10
 
 CHANGES WITH 252 🎃:
 
