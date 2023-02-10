@@ -1,0 +1,81 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 22 Nov 2022 17:01:47 -0500
+Subject: sd-netlink: add a test for rtnl_set_link_name()
+
+Origin: upstream, https://github.com/systemd/systemd/commit/b338a8bb40
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+Add a test that verifies a deleted alternative name is restored on error
+in rtnl_set_link_name().
+
+(modified to apply to v249.11)
+---
+ src/libsystemd/sd-netlink/test-netlink.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/libsystemd/sd-netlink/test-netlink.c b/src/libsystemd/sd-netlink/test-netlink.c
+index 41a7280..6ee7f2d 100644
+--- a/src/libsystemd/sd-netlink/test-netlink.c
++++ b/src/libsystemd/sd-netlink/test-netlink.c
+@@ -3,17 +3,20 @@
+ #include <net/if.h>
+ #include <netinet/ether.h>
+ #include <linux/genetlink.h>
++#include <unistd.h>
+ 
+ #include "sd-netlink.h"
+ 
+ #include "alloc-util.h"
+ #include "ether-addr-util.h"
+ #include "macro.h"
++#include "netlink-internal.h"
+ #include "netlink-util.h"
+ #include "socket-util.h"
+ #include "stdio-util.h"
+ #include "string-util.h"
+ #include "strv.h"
++#include "tests.h"
+ #include "util.h"
+ 
+ static void test_message_link_bridge(sd_netlink *rtnl) {
+@@ -547,6 +550,32 @@ static void test_strv(sd_netlink *rtnl) {
+         assert_se(sd_netlink_message_exit_container(m) >= 0);
+ }
+ 
++static void test_rtnl_set_link_name(sd_netlink *rtnl, int ifindex) {
++        _cleanup_strv_free_ char **alternative_names = NULL;
++        int r;
++
++        log_debug("/* %s */", __func__);
++
++        if (geteuid() != 0)
++                return (void) log_tests_skipped("not root");
++
++        /* Test that the new name (which is currently an alternative name) is
++         * restored as an alternative name on error. Create an error by using
++         * an invalid device name, namely one that exceeds IFNAMSIZ
++         * (alternative names can exceed IFNAMSIZ, but not regular names). */
++        r = rtnl_set_link_alternative_names(&rtnl, ifindex, STRV_MAKE("testlongalternativename"));
++        if (r == -EPERM)
++                return (void) log_tests_skipped("missing required capabilities");
++        if (r == -EOPNOTSUPP)
++                return (void) log_tests_skipped("alternative name is not supported");
++
++        assert_se(r >= 0);
++        assert_se(rtnl_set_link_name(&rtnl, ifindex, "testlongalternativename") == -EINVAL);
++        assert_se(rtnl_get_link_alternative_names(&rtnl, ifindex, &alternative_names) >= 0);
++        assert_se(strv_contains(alternative_names, "testlongalternativename"));
++        assert_se(rtnl_delete_link_alternative_names(&rtnl, ifindex, STRV_MAKE("testlongalternativename")) >= 0);
++}
++
+ int main(void) {
+         sd_netlink *rtnl;
+         sd_netlink_message *m;
+@@ -576,6 +605,7 @@ int main(void) {
+         test_pipe(if_loopback);
+         test_event_loop(if_loopback);
+         test_link_configure(rtnl, if_loopback);
++        test_rtnl_set_link_name(rtnl, if_loopback);
+ 
+         test_get_addresses(rtnl);
+         test_message_link_bridge(rtnl);

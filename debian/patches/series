@@ -102,3 +102,8 @@ lp1988994-Deny-list-TEST-58-REPART-on-ppc64el.patch
 CVE-2022-3821.patch
 CVE-2022-4415.patch
 lp2004478-network-dhcp4-accept-local-subnet-routes-from-DHCP.patch
+lp2002445/udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+lp2002445/sd-netlink-do-not-swap-old-name-and-alternative-name.patch
+lp2002445/sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+lp2002445/udev-attempt-device-rename-even-if-interface-is-up.patch
+lp2002445/sd-netlink-add-a-test-for-rtnl_set_link_name.patch
