@@ -5,7 +5,6 @@ Subject: localectl-disable-keymap-support
 We no longer support old debianisms such as /etc/default/keyboard,
 so disable the keymap interface in localectl until a definitive
 solution is found.
-
 ---
  src/locale/localectl.c | 29 ++++++++++++-----------------
  1 file changed, 12 insertions(+), 17 deletions(-)
