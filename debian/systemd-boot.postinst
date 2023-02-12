@@ -1,0 +1,9 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = configure ] && [ -n "$2" ] && bootctl is-installed --quiet; then
+    bootctl update --graceful
+fi
+
+#DEBHELPER#
