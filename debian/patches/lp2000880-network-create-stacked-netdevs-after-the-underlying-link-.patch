@@ -1,0 +1,33 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 24 Feb 2022 08:20:44 +0900
+Subject: network: create stacked netdevs after the underlying link is
+ activated
+
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/e74e1dc8cc339ee7bd6bc5c5a329f75ac5cf4821
+Bug-Ubuntu: https://launchpad.net/bugs/2000880
+
+Otherwise, the activation policy for the netdevs are ignored.
+
+Fixes #22593.
+
+(cherry picked from commit 047b9991a4d0d93d0dfe3d144410c619a8b74699)
+---
+ src/network/netdev/netdev.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/network/netdev/netdev.c b/src/network/netdev/netdev.c
+index 53534d4..2698e36 100644
+--- a/src/network/netdev/netdev.c
++++ b/src/network/netdev/netdev.c
+@@ -557,6 +557,11 @@ static bool netdev_is_ready_to_create(NetDev *netdev, Link *link) {
+         if (ordered_set_contains(link->manager->request_queue, &req))
+                 return false;
+ 
++        /* If stacked netdevs are created before the underlying interface being activated, then
++         * the activation policy for the netdevs are ignored. See issue #22593. */
++        if (!link->activated)
++                return false;
++
+         return true;
+ }
+ 
