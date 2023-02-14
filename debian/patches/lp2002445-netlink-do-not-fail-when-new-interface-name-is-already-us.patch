@@ -1,0 +1,50 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 17 Jul 2020 21:31:24 +0900
+Subject: netlink: do not fail when new interface name is already used as an
+  alternative name
+
+Origin: upstream, https://github.com/systemd/systemd/commit/434a34838034347f45fb9a47df55b1a36e5addfd
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+When renaming a network interface, the new name may be used as an
+alternative name. In that case, let's swap the current name and the
+alternative name. That is, first drop the new name from the list of
+alternative names, then rename the interface, finally set the old name
+as an alternative name.
+
+(partial backport with 080afbb57c4b2d592c5cf77ab10c6e0be74f0732 amended)
+---
+ src/libsystemd/sd-netlink/netlink-util.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/libsystemd/sd-netlink/netlink-util.c b/src/libsystemd/sd-netlink/netlink-util.c
+index 83f2a9b..7e3ec53 100644
+--- a/src/libsystemd/sd-netlink/netlink-util.c
++++ b/src/libsystemd/sd-netlink/netlink-util.c
+@@ -9,6 +9,7 @@
+ 
+ int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL;
++        _cleanup_strv_free_ char **alternative_names = NULL;
+         int r;
+ 
+         assert(rtnl);
+@@ -24,6 +25,18 @@ int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+                         return r;
+         }
+ 
++        r = rtnl_get_link_alternative_names(rtnl, ifindex, &alternative_names);
++        if (r < 0)
++                log_debug_errno(r, "Failed to get alternative names on network interface %i, ignoring: %m",
++                                ifindex);
++
++        if (strv_contains(alternative_names, name)) {
++                r = rtnl_delete_link_alternative_names(rtnl, ifindex, STRV_MAKE(name));
++                if (r < 0)
++                        return log_debug_errno(r, "Failed to remove '%s' from alternative names on network interface %i: %m",
++                                               name, ifindex);
++        }
++
+         r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
+         if (r < 0)
+                 return r;
