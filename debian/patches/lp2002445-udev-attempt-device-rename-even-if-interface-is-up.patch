@@ -1,0 +1,38 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 14 Feb 2023 15:56:38 -0500
+Subject: udev: attempt device rename even if interface is up
+
+Origin: upstream, https://github.com/systemd/systemd/commit/53584e7b61
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+Currently rename_netif() will not attempt to rename a device if it is
+already up, because the kernel will return -EBUSY unless live renaming
+is allowed on the device. This restriction will be removed in a future
+kernel version [1].
+
+To cover both cases, always attempt to rename the interface and return 0
+if we get -EBUSY.
+
+[1] https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/commit/?id=bd039b5ea2a9
+
+(modified to apply to v245.4)
+---
+ src/udev/udev-event.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
+index eb51139..dae485b 100644
+--- a/src/udev/udev-event.c
++++ b/src/udev/udev-event.c
+@@ -835,6 +835,11 @@ static int rename_netif(UdevEvent *event) {
+                 return log_device_error_errno(dev, r, "Failed to get ifindex: %m");
+ 
+         r = rtnl_set_link_name(&event->rtnl, ifindex, event->name);
++        if (r == -EBUSY) {
++                log_device_info(dev, "Network interface '%s' is already up, cannot rename to '%s'.",
++                                oldname, event->name);
++                return 0;
++        }
+         if (r < 0)
+                 return log_device_error_errno(dev, r, "Failed to rename network interface %i from '%s' to '%s': %m",
+                                               ifindex, oldname, event->name);

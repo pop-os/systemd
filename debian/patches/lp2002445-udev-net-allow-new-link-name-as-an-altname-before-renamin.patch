@@ -1,0 +1,36 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Wed, 2 Nov 2022 11:05:01 -0400
+Subject: udev/net: allow new link name as an altname before renaming happens
+
+Origin: upstream, https://github.com/systemd/systemd/commit/d0b31efc1a
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+When configuring a link's alternative names, the link's new name to-be
+is not allowed to be included because interface renaming will fail if
+the new name is already present as an alternative name. However,
+rtnl_set_link_name will delete the conflicting alternative name before
+renaming the device, if necessary.
+
+Allow the new link name to be set as an alternative name before the
+device is renamed. This means that if the rename is later skipped (i.e.
+because the link is already up), then the name can at least still be
+present as an alternative name.
+
+(modified to apply to v245.5)
+---
+ src/udev/net/link-config.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
+index 4d08bce..26c4a02 100644
+--- a/src/udev/net/link-config.c
++++ b/src/udev/net/link-config.c
+@@ -536,8 +536,6 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
+                         }
+                 }
+ 
+-        if (new_name)
+-                strv_remove(altnames, new_name);
+         strv_remove(altnames, old_name);
+         strv_uniq(altnames);
+         strv_sort(altnames);
