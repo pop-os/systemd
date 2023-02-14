@@ -1,4 +1,4 @@
-systemd (252.5-2ubuntu1) UNRELEASED; urgency=medium
+systemd (252.5-2ubuntu1) lunar; urgency=medium
 
   * Merge 252.5-2 from Debian unstable
     - Drop test-handle-Debian-s-etc-default-locale-in-testsuite-74.f.patch.
@@ -28,7 +28,7 @@ systemd (252.5-2ubuntu1) UNRELEASED; urgency=medium
     File: debian/patches/Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a3a059d86e2fe3a104419ae2afcab557171f9809
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 14 Feb 2023 11:52:30 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 14 Feb 2023 11:52:31 -0500
 
 systemd (252.5-2) unstable; urgency=medium
 
