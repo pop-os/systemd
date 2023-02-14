@@ -22,8 +22,13 @@ systemd (252.5-2ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
     - debian/patches/lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=58d29c2b376f03c44ed5a719877c95b332018cdc
+  * Deny-list TEST-74-AUX-UTILS on s390x.
+    Since this currently is only known to fail on the autopkgtest
+    infrastructure, we believe this is a temporary issue.
+    File: debian/patches/Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a3a059d86e2fe3a104419ae2afcab557171f9809
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 07 Feb 2023 13:55:54 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 14 Feb 2023 11:52:30 -0500
 
 systemd (252.5-2) unstable; urgency=medium
 
