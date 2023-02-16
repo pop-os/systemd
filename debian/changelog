@@ -1,3 +1,18 @@
+systemd (252.6-1) UNRELEASED; urgency=medium
+
+  * Update timedated autopkgtest. We no longer support /etc/timezone, as
+    /etc/localtime is always available (cherry picked from commit
+    6ef7bb0ce0f89e732a8b95624af059e52c3712b5)
+  * Stop supporting /etc/timezone tzdata will no longer create it, we can
+    just rely on /etc/localtime
+  * systemd-boot: update on package upgrade, if installed
+  * Override Lintian warning in systemd-coredump
+  * d/watch: restrict to v252.x for bookworm
+  * New upstream version 252.6
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 16 Feb 2023 22:57:38 +0000
+
 systemd (252.5-2) unstable; urgency=medium
 
   * Fix boot-and-services autopkgtest.
