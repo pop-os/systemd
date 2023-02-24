@@ -2,6 +2,17 @@
 
 set -e
 
+if [ "$1" = configure ] && [ -z "$2" ] && bootctl --print-esp-path >/dev/null; then
+    bootctl install --make-machine-id-directory=auto
+
+    # register existing kernel(s)
+    for k in /boot/vmlinuz-* ; do
+        [ -f "$k" ] || continue
+        ver=$(basename "$k" | sed s/^vmlinuz-//)
+        kernel-install add "$ver" "$k"
+    done
+fi
+
 if [ "$1" = configure ] && [ -n "$2" ] && bootctl is-installed --quiet; then
     bootctl update --graceful
 fi

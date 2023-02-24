@@ -472,7 +472,7 @@ Description: simple UEFI boot manager - tools and services
  textual menu to select the entry to boot and an editor for the kernel command
  line. It supports systems with UEFI firmware only.
  .
- Installing systemd-boot will not automatically switch your boot loader.
+ Installing systemd-boot will configure and install it in the ESP.
  .
  This package contains various tools and services to manage systems using
  systemd-boot.
