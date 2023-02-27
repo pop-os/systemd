@@ -1,3 +1,23 @@
+systemd (245.4-4ubuntu3.20) UNRELEASED; urgency=medium
+
+  * udev: avoid NIC renaming race with kernel (LP: #2002445)
+    Files:
+    - debian/patches/lp2002445-netlink-do-not-fail-when-new-interface-name-is-already-us.patch
+    - debian/patches/lp2002445-netlink-introduce-rtnl_get-delete_link_alternative_names.patch
+    - debian/patches/lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+    - debian/patches/lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
+    - debian/patches/lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e34409f9d68a15220aa36cbae219d4f4987e5207
+  * test-seccomp: accept ENOSYS from sysctl(2) too (LP: #1933090)
+    Thanks to Roxana Nicolescu
+    File: debian/patches/lp1933090-test-seccomp-accept-ENOSYS-from-sysctl-2-too.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=706f2e0c787cade9609d0f2b37634d7eb4517beb
+  * debian/test: ignore systemd-remount-fs.service failure on armhf (LP: #1991285)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cddc66ef6ecfb555dfd38c5f5fe8572efb424114
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 27 Feb 2023 10:11:12 -0500
+
 systemd (245.4-4ubuntu3.19) focal; urgency=medium
 
   [ dann frazier ]
