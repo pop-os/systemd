@@ -2,7 +2,7 @@
 
 set -e
 
-if [ "$1" = configure ] && [ -z "$2" ] && bootctl --print-esp-path >/dev/null; then
+if [ "$1" = configure ] && [ -z "$2" ] && bootctl --print-esp-path > /dev/null 2>&1; then
     bootctl install --make-machine-id-directory=auto
 
     # register existing kernel(s)
@@ -13,7 +13,7 @@ if [ "$1" = configure ] && [ -z "$2" ] && bootctl --print-esp-path >/dev/null; t
     done
 fi
 
-if [ "$1" = configure ] && [ -n "$2" ] && bootctl is-installed --quiet; then
+if [ "$1" = configure ] && [ -n "$2" ] && bootctl is-installed > /dev/null 2>&1; then
     bootctl update --graceful
 fi
 
