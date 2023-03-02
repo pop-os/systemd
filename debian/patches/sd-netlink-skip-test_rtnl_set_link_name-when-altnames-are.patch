@@ -1,0 +1,27 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Thu, 2 Mar 2023 10:07:00 -0500
+Subject: sd-netlink: skip test_rtnl_set_link_name when altnames are not supported
+Origin: vendor, Ubuntu
+Applied-Upstream: https://github.com/systemd/systemd/pull/25986 (v253)
+Acked-by: Lukas Märdian <slyon@ubuntu.com>
+Forwarded: not-needed
+Last-Update: 2023-03-09
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+---
+ src/libsystemd/sd-netlink/test-netlink.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/libsystemd/sd-netlink/test-netlink.c b/src/libsystemd/sd-netlink/test-netlink.c
+index 2d93f9e..736252d 100644
+--- a/src/libsystemd/sd-netlink/test-netlink.c
++++ b/src/libsystemd/sd-netlink/test-netlink.c
+@@ -685,6 +685,8 @@ static void test_rtnl_set_link_name(sd_netlink *rtnl, int ifindex) {
+         r = rtnl_set_link_alternative_names(&rtnl, ifindex, STRV_MAKE("testlongalternativename"));
+         if (r == -EPERM)
+                 return (void) log_tests_skipped("missing required capabilities");
++        if (r == -EOPNOTSUPP)
++                return (void) log_tests_skipped("alternative name is not supported");
+ 
+         assert_se(r >= 0);
+         assert_se(rtnl_set_link_name(&rtnl, ifindex, "testlongalternativename") == -EINVAL);
