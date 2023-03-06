@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.8) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.8) jammy; urgency=medium
 
   * network/dhcp4: accept local subnet routes from DHCP (LP: #2004478)
     File: debian/patches/lp2004478-network-dhcp4-accept-local-subnet-routes-from-DHCP.patch
@@ -18,7 +18,7 @@ systemd (249.11-0ubuntu3.8) UNRELEASED; urgency=medium
     File: debian/patches/lp2009502-Enable-dev-sgx_vepc-access-for-the-group-sgx.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=434480ae4059a16ccbde9613be0c26ff1983cc3a
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 06 Mar 2023 14:51:05 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 06 Mar 2023 14:51:06 -0500
 
 systemd (249.11-0ubuntu3.7) jammy-security; urgency=medium
 
