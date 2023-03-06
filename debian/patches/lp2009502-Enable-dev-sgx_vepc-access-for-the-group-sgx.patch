@@ -1,0 +1,27 @@
+From: Jarkko Sakkinen <jarkko.sakkinen@iki.fi>
+Date: Sat, 11 Dec 2021 06:39:59 +0200
+Subject: Enable /dev/sgx_vepc access for the group 'sgx'
+
+Origin: upstream, https://github.com/systemd/systemd/commit/b5d3138f9177bbc3505f42ba073d08d4f90b4888
+Bug-Ubuntu: https://launchpad.net/bugs/2009502
+
+Enable /dev/sgx_vepc access for the group 'sgx', which allows KVM-backed VMs
+to host Intel Software Guard eXtension (SGX) enclaves. The upcoming QEMU
+6.2 uses /dev/sgx_vepc to reserve portions of Enclave Page Cache (EPC) for
+VMs. EPC is the reserved physical memory used for hosting enclaves.
+---
+ rules.d/50-udev-default.rules.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/rules.d/50-udev-default.rules.in b/rules.d/50-udev-default.rules.in
+index 18a3cf4..685b59a 100644
+--- a/rules.d/50-udev-default.rules.in
++++ b/rules.d/50-udev-default.rules.in
+@@ -40,6 +40,7 @@ SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="{{GROUP_RENDER_MODE}
+ SUBSYSTEM=="kfd", GROUP="render", MODE="{{GROUP_RENDER_MODE}}"
+ 
+ SUBSYSTEM=="misc", KERNEL=="sgx_enclave", GROUP="sgx", MODE="0660"
++SUBSYSTEM=="misc", KERNEL=="sgx_vepc", GROUP="sgx", MODE="0660"
+ 
+ # When using static_node= with non-default permissions, also update
+ # tmpfiles.d/static-nodes-permissions.conf.in to keep permissions synchronized.
