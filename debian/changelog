@@ -1,3 +1,25 @@
+systemd (249.11-0ubuntu3.8) UNRELEASED; urgency=medium
+
+  * network/dhcp4: accept local subnet routes from DHCP (LP: #2004478)
+    File: debian/patches/lp2004478-network-dhcp4-accept-local-subnet-routes-from-DHCP.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=96928d5f45ebbfe682b47e842d63506fa0ac9583
+  * udev: avoid NIC renaming race with kernel (LP: #2002445)
+    Files:
+    - debian/patches/lp2002445/sd-netlink-add-a-test-for-rtnl_set_link_name.patch
+    - debian/patches/lp2002445/sd-netlink-do-not-swap-old-name-and-alternative-name.patch
+    - debian/patches/lp2002445/sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+    - debian/patches/lp2002445/udev-attempt-device-rename-even-if-interface-is-up.patch
+    - debian/patches/lp2002445/udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=20dc4d51a340669c26c446c23b5a84516e82ea74
+  * network: create stacked netdevs after the underlying link is (LP: #2000880)
+    File: debian/patches/lp2000880-network-create-stacked-netdevs-after-the-underlying-link-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ab620e709f3f62eda86af26fd66c00d6e5165a25
+  * Enable /dev/sgx_vepc access for the group 'sgx' (LP: #2009502)
+    File: debian/patches/lp2009502-Enable-dev-sgx_vepc-access-for-the-group-sgx.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=434480ae4059a16ccbde9613be0c26ff1983cc3a
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 06 Mar 2023 14:51:05 -0500
+
 systemd (249.11-0ubuntu3.7) jammy-security; urgency=medium
 
   * SECURITY UPDATE: buffer overrun vulnerability in format_timespan()
