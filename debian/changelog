@@ -1,4 +1,4 @@
-systemd (252.5-2ubuntu2) UNRELEASED; urgency=medium
+systemd (252.5-2ubuntu2) lunar; urgency=medium
 
   * network/dhcp4: accept local subnet routes from DHCP (LP: #2004478)
     File: debian/patches/lp2004478-network-dhcp4-accept-local-subnet-routes-from-DHCP.patch
@@ -9,7 +9,7 @@ systemd (252.5-2ubuntu2) UNRELEASED; urgency=medium
     File: debian/patches/sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=195985ee5aa2cfdbbac178a07e5b43b83f0550d0
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Thu, 02 Mar 2023 10:10:31 -0500
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 08 Mar 2023 12:51:51 -0500
 
 systemd (252.5-2ubuntu1) lunar; urgency=medium
 
