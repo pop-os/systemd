@@ -1,3 +1,10 @@
+systemd (252.7-1) UNRELEASED; urgency=medium
+
+  * New upstream version 252.7
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 11 Mar 2023 17:28:42 +0000
+
 systemd (252.6-1) unstable; urgency=medium
 
   * Update timedated autopkgtest. We no longer support /etc/timezone, as
