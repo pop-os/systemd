@@ -59,6 +59,8 @@ class ServicesTest(unittest.TestCase):
         # https://bugs.debian.org/926138
         if is_container:
             failed = [f for f in failed if 'e2scrub_reap.service' not in f]
+            # LP: #1991285
+            failed = [f for f in failed if 'systemd-remount-fs.service' not in f]
         if failed:
             for f in failed:
                 f = f.split()[0]
