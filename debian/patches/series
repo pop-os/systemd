@@ -185,9 +185,3 @@ lp1945225/0001-udev-net_id-parse-_SUN-ACPI-index-as-a-signed-intege.patch
 lp1945225/0002-udev-net_id-don-t-generate-slot-based-names-if-multi.patch
 lp1945225/0003-net_id-fix-newly-added-naming-scheme-name.patch
 lp1945225/0004-Add-remaining-supported-schemes-as-options-for-defau.patch
-lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
-lp2002445-netlink-introduce-rtnl_get-delete_link_alternative_names.patch
-lp2002445-netlink-do-not-fail-when-new-interface-name-is-already-us.patch
-lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
-lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
-lp1933090-test-seccomp-accept-ENOSYS-from-sysctl-2-too.patch
