@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.21) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.21) focal; urgency=medium
 
   * udev: avoid NIC renaming race with kernel (LP: #2002445)
     Files:
@@ -16,7 +16,7 @@ systemd (245.4-4ubuntu3.21) UNRELEASED; urgency=medium
     File: debian/tests/boot-and-services
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=264bdc86f1e4dcd10e8d914d095581c54c33199a
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 15 Mar 2023 11:02:46 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 15 Mar 2023 11:04:15 -0400
 
 systemd (245.4-4ubuntu3.20) focal-security; urgency=medium
 
