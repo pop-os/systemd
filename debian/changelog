@@ -1,3 +1,23 @@
+systemd (245.4-4ubuntu3.21) UNRELEASED; urgency=medium
+
+  * udev: avoid NIC renaming race with kernel (LP: #2002445)
+    Files:
+    - debian/patches/lp2002445-netlink-do-not-fail-when-new-interface-name-is-already-us.patch
+    - debian/patches/lp2002445-netlink-introduce-rtnl_get-delete_link_alternative_names.patch
+    - debian/patches/lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
+    - debian/patches/lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
+    - debian/patches/lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=69ab4a02e828e20ea0ddbd75179324df7a8d1175
+  * test-seccomp: accept ENOSYS from sysctl(2) too (LP: #1933090)
+    Thanks to Roxana Nicolescu
+    File: debian/patches/lp1933090-test-seccomp-accept-ENOSYS-from-sysctl-2-too.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=adaddd1441370ebcdb8bc33d7406b95d85b744f9
+  * debian/test: ignore systemd-remount-fs.service failure in containers (LP: #1991285)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=264bdc86f1e4dcd10e8d914d095581c54c33199a
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Wed, 15 Mar 2023 11:02:46 -0400
+
 systemd (245.4-4ubuntu3.20) focal-security; urgency=medium
 
   * SECURITY UPDATE: buffer overrun vulnerability in format_timespan()
