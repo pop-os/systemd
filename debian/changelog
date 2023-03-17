@@ -1,3 +1,15 @@
+systemd (249.11-0ubuntu3.9) UNRELEASED; urgency=medium
+
+  * udev: gracefully handle rename failures (LP: #2002445)
+    Files:
+    - debian/patches/lp2002445/core-device-ignore-failed-uevents.patch
+    - debian/patches/lp2002445/sd-device-introduce-device_get_property_int.patch
+    - debian/patches/lp2002445/sd-device-make-device_set_syspath-clear-sysname-and-sysnu.patch
+    - debian/patches/lp2002445/udev-restore-syspath-and-properties-on-failure.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a7ad4a9fc708500c61e3b8127f112d8c90049b2c
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Fri, 17 Mar 2023 10:35:04 -0400
+
 systemd (249.11-0ubuntu3.8) jammy; urgency=medium
 
   * network/dhcp4: accept local subnet routes from DHCP (LP: #2004478)
