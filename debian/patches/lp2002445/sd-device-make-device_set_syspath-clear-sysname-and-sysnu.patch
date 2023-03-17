@@ -1,0 +1,29 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 9 Jan 2023 14:00:09 +0900
+Subject: sd-device: make device_set_syspath() clear sysname and sysnum
+
+Origin: upstream, https://github.com/systemd/systemd/commit/9a26098e90116fdb5fcffa03485b375ee0c82b6a
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+Otherwise, when a new syspath is assigned to the sd-device object,
+sd_device_get_sysname() or _sysnum() will provide an outdated device
+name or number.
+---
+ src/libsystemd/sd-device/sd-device.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/libsystemd/sd-device/sd-device.c b/src/libsystemd/sd-device/sd-device.c
+index 418a5b1..49f56ca 100644
+--- a/src/libsystemd/sd-device/sd-device.c
++++ b/src/libsystemd/sd-device/sd-device.c
+@@ -213,6 +213,10 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
+ 
+         free_and_replace(device->syspath, syspath);
+         device->devpath = devpath;
++
++        /* Unset sysname and sysnum, they will be assigned when requested. */
++        device->sysnum = NULL;
++        device->sysname = mfree(device->sysname);
+         return 0;
+ }
+ 

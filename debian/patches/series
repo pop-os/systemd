@@ -109,3 +109,7 @@ lp2002445/udev-attempt-device-rename-even-if-interface-is-up.patch
 lp2002445/sd-netlink-add-a-test-for-rtnl_set_link_name.patch
 lp2000880-network-create-stacked-netdevs-after-the-underlying-link-.patch
 lp2009502-Enable-dev-sgx_vepc-access-for-the-group-sgx.patch
+lp2002445/sd-device-make-device_set_syspath-clear-sysname-and-sysnu.patch
+lp2002445/udev-restore-syspath-and-properties-on-failure.patch
+lp2002445/sd-device-introduce-device_get_property_int.patch
+lp2002445/core-device-ignore-failed-uevents.patch

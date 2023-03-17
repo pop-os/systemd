@@ -1,0 +1,56 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 9 Jan 2023 16:44:11 +0900
+Subject: sd-device: introduce device_get_property_int()
+
+Origin: upstream, https://github.com/systemd/systemd/commit/eedfef0f0d2654fcde2a3b694e62518d688af827
+Bug-Ubuntu: https://launchpad.net/bugs/2002445
+
+(modified to apply to v249.11)
+---
+ src/libsystemd/sd-device/device-private.h |  1 +
+ src/libsystemd/sd-device/sd-device.c      | 20 ++++++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/src/libsystemd/sd-device/device-private.h b/src/libsystemd/sd-device/device-private.h
+index 9bb5eff..0ed7807 100644
+--- a/src/libsystemd/sd-device/device-private.h
++++ b/src/libsystemd/sd-device/device-private.h
+@@ -17,6 +17,7 @@ static inline int device_new_from_watch_handle(sd_device **ret, int wd) {
+         return device_new_from_watch_handle_at(ret, -1, wd);
+ }
+ 
++int device_get_property_int(sd_device *device, const char *key, int *ret);
+ int device_get_device_id(sd_device *device, const char **ret);
+ 
+ int device_get_devlink_priority(sd_device *device, int *priority);
+diff --git a/src/libsystemd/sd-device/sd-device.c b/src/libsystemd/sd-device/sd-device.c
+index 49f56ca..2b9be24 100644
+--- a/src/libsystemd/sd-device/sd-device.c
++++ b/src/libsystemd/sd-device/sd-device.c
+@@ -1904,6 +1904,26 @@ _public_ int sd_device_get_property_value(sd_device *device, const char *key, co
+         return 0;
+ }
+ 
++int device_get_property_int(sd_device *device, const char *key, int *ret) {
++        const char *value;
++        int r, v;
++
++        assert(device);
++        assert(key);
++
++        r = sd_device_get_property_value(device, key, &value);
++        if (r < 0)
++                return r;
++
++        r = safe_atoi(value, &v);
++        if (r < 0)
++                return r;
++
++        if (ret)
++                *ret = v;
++        return 0;
++}
++
+ _public_ int sd_device_get_trigger_uuid(sd_device *device, sd_id128_t *ret) {
+         const char *s;
+         sd_id128_t id;
