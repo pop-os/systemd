@@ -1,4 +1,4 @@
-systemd (252.5-2ubuntu3) UNRELEASED; urgency=medium
+systemd (252.5-2ubuntu3) lunar; urgency=medium
 
   * udev: gracefully handle rename failures (LP: #2002445)
     Files:
@@ -8,7 +8,7 @@ systemd (252.5-2ubuntu3) UNRELEASED; urgency=medium
     - debian/patches/lp2002445/udev-restore-syspath-and-properties-on-failure.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=79536dbb165dbcc402629684e0911693626df5b1
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Thu, 16 Mar 2023 17:40:01 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 20 Mar 2023 10:17:24 -0400
 
 systemd (252.5-2ubuntu2) lunar; urgency=medium
 
