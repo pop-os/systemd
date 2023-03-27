@@ -1,0 +1,33 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 5 Feb 2022 21:37:01 +0900
+Subject: resolve: fix potential memleak and use-after-free
+
+Origin: upstream, https://github.com/systemd/systemd/commit/73bfd7be042cc63e7649242b377ad494bf74ea4b
+Bug-Ubuntu: https://launchpad.net/bugs/2012943
+
+When stub stream is closed early, then queries associated to the stream
+are freed. Previously, the timer event source for queries may not be
+disabled, hence may be triggered with already freed query.
+See also dns_stub_stream_complete().
+
+Note that we usually not set NULL or zero when freeing simple objects.
+But, here DnsQuery is large and complicated object, and the element may
+be referenced in subsequent freeing process in the future. Hence, for
+safety, let's set NULL to the pointer.
+---
+ src/resolve/resolved-dns-query.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/resolve/resolved-dns-query.c b/src/resolve/resolved-dns-query.c
+index 614cc32..564bc3c 100644
+--- a/src/resolve/resolved-dns-query.c
++++ b/src/resolve/resolved-dns-query.c
+@@ -363,6 +363,8 @@ DnsQuery *dns_query_free(DnsQuery *q) {
+         if (!q)
+                 return NULL;
+ 
++        q->timeout_event_source = sd_event_source_disable_unref(q->timeout_event_source);
++
+         while (q->auxiliary_queries)
+                 dns_query_free(q->auxiliary_queries);
+ 

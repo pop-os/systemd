@@ -193,3 +193,4 @@ lp2002445-netlink-do-not-fail-when-new-interface-name-is-already-us.patch
 lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
 lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
 lp1933090-test-seccomp-accept-ENOSYS-from-sysctl-2-too.patch
+lp2012943-resolve-fix-potential-memleak-and-use-after-free.patch
