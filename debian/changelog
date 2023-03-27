@@ -1,10 +1,10 @@
-systemd (245.4-4ubuntu3.22) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.22) focal; urgency=medium
 
   * resolve: fix potential memleak and use-after-free (LP: #2012943)
     File: debian/patches/lp2012943-resolve-fix-potential-memleak-and-use-after-free.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ed2729587663dbab3583d06492b715df2896874e
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 27 Mar 2023 11:00:07 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 27 Mar 2023 13:54:06 -0400
 
 systemd (245.4-4ubuntu3.21) focal; urgency=medium
 
