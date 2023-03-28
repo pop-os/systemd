@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.7pop1) jammy; urgency=medium
+
+  * Pop!_OS Updates
+
+ -- Brock Szuszczewicz <brock@szu.email>  Tue, 28 Mar 2023 17:54:06 -0600
+
 systemd (249.11-0ubuntu3.7) jammy-security; urgency=medium
 
   * SECURITY UPDATE: buffer overrun vulnerability in format_timespan()
