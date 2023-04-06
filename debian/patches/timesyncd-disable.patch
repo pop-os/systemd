@@ -4,7 +4,15 @@ Index: systemd/debian/control
 ===================================================================
 --- systemd.orig/debian/control
 +++ systemd/debian/control
-@@ -190,11 +190,8 @@
+@@ -89,6 +89,7 @@ Depends: ${shlibs:Depends},
+          util-linux (>= 2.27.1),
+          mount (>= 2.26),
+          adduser,
++         chrony | openntpd,
+ Conflicts: consolekit,
+            libpam-ck-connector,
+            systemd-shim,
+@@ -199,11 +200,8 @@ Depends: ${shlibs:Depends},
           ${misc:Depends},
           adduser,
           systemd
@@ -22,7 +30,7 @@ Index: systemd/debian/rules
 ===================================================================
 --- systemd.orig/debian/rules
 +++ systemd/debian/rules
-@@ -99,7 +99,8 @@
+@@ -99,7 +99,8 @@ CONFFLAGS = \
  	-Dnobody-group=nogroup \
  	-Dbump-proc-sys-fs-nr-open=false \
  	-Ddev-kvm-mode=0660 \
