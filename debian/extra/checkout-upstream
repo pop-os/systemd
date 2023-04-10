@@ -92,6 +92,12 @@ UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//;s/-/./g')
 # clean out original upstream sources
 find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xargs -0n1 rm -rf
 
+# These options changes are only needed for the upstream CI, and we don't want to pollute d/rules with them.
+# Also we want to ensure running on an older branch (e.g.: for the systemd-stable repository) doesn't break.
+if grep -q default-timeout-sec debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('default-timeout-sec', type : 'integer', value : 90/option('default-timeout-sec', type : 'integer', value : 180/" debian/tmp/upstream/meson_options.txt
+fi
+
 # replace with checkout
 mv debian/tmp/upstream/* .
 rm -rf debian/tmp
