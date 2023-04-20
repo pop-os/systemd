@@ -32,6 +32,5 @@ lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 test-skip-some-tests-when-machine-id-is-not-initialized.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
-Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
 sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch
 debian/localectl-disable-keymap-support.patch
