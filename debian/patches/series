@@ -34,7 +34,6 @@ test-skip-some-tests-when-machine-id-is-not-initialized.patch
 lp1999275-binfmt-util-split-out-binfmt_mounted.patch
 lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
-lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch
 lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch
 lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
 lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
