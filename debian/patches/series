@@ -37,5 +37,4 @@ lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
 lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
 Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
 sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch
-lp2002445/sd-device-introduce-device_get_property_int.patch
 debian/localectl-disable-keymap-support.patch
