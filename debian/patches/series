@@ -35,7 +35,6 @@ lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch
 lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
-lp2002445-test-network-add-a-test-for-renaming-device-to-current-al.patch
 Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
 sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch
 lp2002445/sd-device-make-device_set_syspath-clear-sysname-and-sysnu.patch
