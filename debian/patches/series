@@ -31,7 +31,6 @@ test-increase-QEMU_MEM-for-some-tests.patch
 lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 test-skip-some-tests-when-machine-id-is-not-initialized.patch
-lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
 Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
