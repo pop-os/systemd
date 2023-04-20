@@ -39,5 +39,4 @@ Deny-list-TEST-74-AUX-UTILS-on-s390x.patch
 sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch
 lp2002445/udev-restore-syspath-and-properties-on-failure.patch
 lp2002445/sd-device-introduce-device_get_property_int.patch
-lp2002445/core-device-ignore-failed-uevents.patch
 debian/localectl-disable-keymap-support.patch
