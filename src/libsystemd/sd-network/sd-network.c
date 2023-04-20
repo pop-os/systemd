@@ -16,7 +16,6 @@
 #include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
-#include "util.h"
 
 static int network_get_string(const char *field, char **ret) {
         _cleanup_free_ char *s = NULL;
@@ -158,6 +157,25 @@ int sd_network_link_get_setup_state(int ifindex, char **ret) {
 
 int sd_network_link_get_network_file(int ifindex, char **ret) {
         return network_link_get_string(ifindex, "NETWORK_FILE", ret);
+}
+
+int sd_network_link_get_network_file_dropins(int ifindex, char ***ret) {
+        _cleanup_free_ char **sv = NULL, *joined = NULL;
+        int r;
+
+        assert_return(ifindex > 0, -EINVAL);
+        assert_return(ret, -EINVAL);
+
+        r = network_link_get_string(ifindex, "NETWORK_FILE_DROPINS", &joined);
+        if (r < 0)
+                return r;
+
+        r = strv_split_full(&sv, joined, ":", EXTRACT_CUNESCAPE);
+        if (r < 0)
+                return r;
+
+        *ret = TAKE_PTR(sv);
+        return 0;
 }
 
 int sd_network_link_get_operational_state(int ifindex, char **ret) {
@@ -345,7 +363,7 @@ static int monitor_add_inotify_watch(int fd) {
 }
 
 int sd_network_monitor_new(sd_network_monitor **m, const char *category) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int k;
         bool good = false;
 

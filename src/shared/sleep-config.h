@@ -6,6 +6,8 @@
 #include "hashmap.h"
 #include "time-util.h"
 
+#define DEFAULT_SUSPEND_ESTIMATION_USEC (1 * USEC_PER_HOUR)
+
 typedef enum SleepOperation {
         SLEEP_SUSPEND,
         SLEEP_HIBERNATE,
@@ -19,7 +21,8 @@ typedef struct SleepConfig {
         bool allow[_SLEEP_OPERATION_MAX];
         char **modes[_SLEEP_OPERATION_MAX];
         char **states[_SLEEP_OPERATION_MAX];
-        usec_t hibernate_delay_sec;
+        usec_t hibernate_delay_usec;
+        usec_t suspend_estimation_usec;
 } SleepConfig;
 
 SleepConfig* free_sleep_config(SleepConfig *sc);
@@ -60,6 +63,7 @@ int can_sleep_state(char **types);
 int battery_is_low(void);
 int get_total_suspend_interval(Hashmap *last_capacity, usec_t *ret);
 int fetch_batteries_capacity_by_name(Hashmap **ret_current_capacity);
+int get_capacity_by_name(Hashmap *capacities_by_name, const char *name);
 int estimate_battery_discharge_rate_per_hour(
                 Hashmap *last_capacity,
                 Hashmap *current_capacity,

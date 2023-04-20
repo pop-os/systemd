@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "console.h"
 #include "sbat.h"
 #include "secure-boot.h"
-#include "console.h"
 #include "util.h"
+#include "vmm.h"
 
 bool secure_boot_enabled(void) {
         bool secure = false;  /* avoid false maybe-uninitialized warning */
         EFI_STATUS err;
 
-        err = efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SecureBoot", &secure);
+        err = efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SecureBoot", &secure);
 
         return err == EFI_SUCCESS && secure;
 }
@@ -18,15 +19,15 @@ SecureBootMode secure_boot_mode(void) {
         bool secure, audit = false, deployed = false, setup = false;
         EFI_STATUS err;
 
-        err = efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SecureBoot", &secure);
+        err = efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SecureBoot", &secure);
         if (err != EFI_SUCCESS)
                 return SECURE_BOOT_UNSUPPORTED;
 
         /* We can assume false for all these if they are abscent (AuditMode and
          * DeployedMode may not exist on older firmware). */
-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"AuditMode", &audit);
-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"DeployedMode", &deployed);
-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SetupMode", &setup);
+        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"AuditMode", &audit);
+        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"DeployedMode", &deployed);
+        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SetupMode", &setup);
 
         return decode_secure_boot_mode(secure, audit, deployed, setup);
 }
@@ -35,7 +36,7 @@ SecureBootMode secure_boot_mode(void) {
 static const char sbat[] _used_ _section_(".sbat") = SBAT_SECTION_TEXT;
 #endif
 
-EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
+EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path, bool force) {
         assert(root_dir);
         assert(path);
 
@@ -43,41 +44,47 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
 
         clear_screen(COLOR_NORMAL);
 
-        Print(L"Enrolling secure boot keys from directory: %s\n"
-              L"Warning: Enrolling custom Secure Boot keys might soft-brick your machine!\n",
-              path);
+        /* Enrolling secure boot keys is safe to do in virtualized environments as there is nothing
+         * we can brick there. */
+        bool is_safe = in_hypervisor();
 
-        unsigned timeout_sec = 15;
-        for(;;) {
-                /* Enrolling secure boot keys is safe to do in virtualized environments as there is nothing
-                 * we can brick there. */
-                if (in_hypervisor())
-                        break;
-
-                PrintAt(0, ST->ConOut->Mode->CursorRow, L"Enrolling in %2u s, press any key to abort.", timeout_sec);
-
-                uint64_t key;
-                err = console_key_read(&key, 1000 * 1000);
-                if (err == EFI_NOT_READY)
-                        continue;
-                if (err == EFI_TIMEOUT) {
-                        if (timeout_sec == 0) /* continue enrolling keys */
-                                break;
-                        timeout_sec--;
-                        continue;
-                }
-                if (err != EFI_SUCCESS)
-                        return log_error_status_stall(err, L"Error waiting for user input to enroll Secure Boot keys: %r", err);
-
-                /* user aborted, returning EFI_SUCCESS here allows the user to go back to the menu */
+        if (!is_safe && !force)
                 return EFI_SUCCESS;
+
+        printf("Enrolling secure boot keys from directory: %ls\n", path);
+
+        if (!is_safe) {
+                printf("Warning: Enrolling custom Secure Boot keys might soft-brick your machine!\n");
+
+                unsigned timeout_sec = 15;
+                for (;;) {
+                        printf("\rEnrolling in %2u s, press any key to abort.", timeout_sec);
+
+                        uint64_t key;
+                        err = console_key_read(&key, 1000 * 1000);
+                        if (err == EFI_NOT_READY)
+                                continue;
+                        if (err == EFI_TIMEOUT) {
+                                if (timeout_sec == 0) /* continue enrolling keys */
+                                        break;
+                                timeout_sec--;
+                                continue;
+                        }
+                        if (err != EFI_SUCCESS)
+                                return log_error_status(
+                                                err,
+                                                "Error waiting for user input to enroll Secure Boot keys: %m");
+
+                        /* user aborted, returning EFI_SUCCESS here allows the user to go back to the menu */
+                        return EFI_SUCCESS;
+                }
         }
 
         _cleanup_(file_closep) EFI_FILE *dir = NULL;
 
         err = open_directory(root_dir, path, &dir);
         if (err != EFI_SUCCESS)
-                return log_error_status_stall(err, L"Failed opening keys directory %s: %r", path, err);
+                return log_error_status(err, "Failed opening keys directory %ls: %m", path);
 
         struct {
                 const char16_t *name;
@@ -95,7 +102,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
         for (size_t i = 0; i < ELEMENTSOF(sb_vars); i++) {
                 err = file_read(dir, sb_vars[i].filename, 0, 0, &sb_vars[i].buffer, &sb_vars[i].size);
                 if (err != EFI_SUCCESS) {
-                        log_error_stall(L"Failed reading file %s\\%s: %r", path, sb_vars[i].filename, err);
+                        log_error_status(err, "Failed reading file %ls\\%ls: %m", path, sb_vars[i].filename);
                         goto out_deallocate;
                 }
         }
@@ -109,7 +116,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
 
                 err = efivar_set_raw(&sb_vars[i].vendor, sb_vars[i].name, sb_vars[i].buffer, sb_vars[i].size, sb_vars_opts);
                 if (err != EFI_SUCCESS) {
-                        log_error_stall(L"Failed to write %s secure boot variable: %r", sb_vars[i].name, err);
+                        log_error_status(err, "Failed to write %ls secure boot variable: %m", sb_vars[i].name);
                         goto out_deallocate;
                 }
         }
@@ -122,7 +129,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
 
 out_deallocate:
         for (size_t i = 0; i < ELEMENTSOF(sb_vars); i++)
-                FreePool(sb_vars[i].buffer);
+                free(sb_vars[i].buffer);
 
         return err;
 }
@@ -193,7 +200,7 @@ void install_security_override(security_validator_t validator, const void *valid
         };
 
         EFI_SECURITY_ARCH_PROTOCOL *security = NULL;
-        err = BS->LocateProtocol(&(EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID, NULL, (void **) &security);
+        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_SECURITY_ARCH_PROTOCOL), NULL, (void **) &security);
         if (err == EFI_SUCCESS) {
                 security_override.security = security;
                 security_override.original_hook = security->FileAuthenticationState;
@@ -201,7 +208,7 @@ void install_security_override(security_validator_t validator, const void *valid
         }
 
         EFI_SECURITY2_ARCH_PROTOCOL *security2 = NULL;
-        err = BS->LocateProtocol(&(EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID, NULL, (void **) &security2);
+        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_SECURITY2_ARCH_PROTOCOL), NULL, (void **) &security2);
         if (err == EFI_SUCCESS) {
                 security_override.security2 = security2;
                 security_override.original_hook2 = security2->FileAuthentication;

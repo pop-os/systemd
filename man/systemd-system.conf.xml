@@ -349,25 +349,20 @@
         <term><varname>DefaultTimeoutAbortSec=</varname></term>
         <term><varname>DefaultRestartSec=</varname></term>
 
-        <listitem><para>Configures the default timeouts for starting,
-        stopping and aborting of units, as well as the default time to sleep
-        between automatic restarts of units, as configured per-unit in
-        <varname>TimeoutStartSec=</varname>,
-        <varname>TimeoutStopSec=</varname>,
-        <varname>TimeoutAbortSec=</varname> and
-        <varname>RestartSec=</varname> (for services, see
+        <listitem><para>Configures the default timeouts for starting, stopping and aborting of units, as well
+        as the default time to sleep between automatic restarts of units, as configured per-unit in
+        <varname>TimeoutStartSec=</varname>, <varname>TimeoutStopSec=</varname>,
+        <varname>TimeoutAbortSec=</varname> and <varname>RestartSec=</varname> (for services, see
         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details on the per-unit settings). Disabled by default, when
-        service with <varname>Type=oneshot</varname> is used.
-        For non-service units,
-        <varname>DefaultTimeoutStartSec=</varname> sets the default
-        <varname>TimeoutSec=</varname>
-        value. <varname>DefaultTimeoutStartSec=</varname> and
-        <varname>DefaultTimeoutStopSec=</varname> default to
-        90s. <varname>DefaultTimeoutAbortSec=</varname> is not set by default
-        so that all units fall back to <varname>TimeoutStopSec=</varname>.
-        <varname>DefaultRestartSec=</varname> defaults to
-        100ms.</para></listitem>
+        for details on the per-unit settings). For non-service units,
+        <varname>DefaultTimeoutStartSec=</varname> sets the default <varname>TimeoutSec=</varname> value.
+        </para>
+
+        <para><varname>DefaultTimeoutStartSec=</varname> and <varname>DefaultTimeoutStopSec=</varname>
+        default to &DEFAULT_TIMEOUT; in the system manager and &DEFAULT_USER_TIMEOUT; in the user manager.
+        <varname>DefaultTimeoutAbortSec=</varname> is not set by default so that all units fall back to
+        <varname>TimeoutStopSec=</varname>. <varname>DefaultRestartSec=</varname> defaults to 100 ms.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -378,7 +373,8 @@
         and <filename>/etc/crypttab</filename> (see
         <citerefentry><refentrytitle>systemd.mount</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
-        Defaults to 90s.</para></listitem>
+        Defaults to &DEFAULT_TIMEOUT; in the system manager and &DEFAULT_USER_TIMEOUT; in the user manager.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -464,7 +460,7 @@
         of slice units. Defaults to 15% of the minimum of <varname>kernel.pid_max=</varname>, <varname>kernel.threads-max=</varname>
         and root cgroup <varname>pids.max</varname>.
         Kernel has a default value for <varname>kernel.pid_max=</varname> and an algorithm of counting in case of more than 32 cores.
-        For example with the default <varname>kernel.pid_max=</varname>, <varname>DefaultTasksMax=</varname> defaults to 4915,
+        For example, with the default <varname>kernel.pid_max=</varname>, <varname>DefaultTasksMax=</varname> defaults to 4915,
         but might be greater in other systems or smaller in OS containers.</para></listitem>
       </varlistentry>
 
@@ -549,6 +545,16 @@
 
         <para>If the value is <literal>/</literal>, only labels specified with <varname>SmackProcessLabel=</varname>
         are assigned and the compile-time default is ignored.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ReloadLimitIntervalSec=</varname></term>
+        <term><varname>ReloadLimitBurst=</varname></term>
+
+        <listitem><para>Rate limiting for daemon-reload requests. Default to unset, and any number of daemon-reload
+        operations can be requested at any time. <varname>ReloadLimitIntervalSec=</varname> takes a value in seconds
+        to configure the rate limit window, and <varname>ReloadLimitBurst=</varname> takes a positive integer to
+        configure the maximum allowed number of reloads within the configured time window.</para></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

@@ -5,9 +5,10 @@
 
 #include "sd-daemon.h"
 
+#include "build.h"
 #include "conf-parser.h"
+#include "constants.h"
 #include "daemon-util.h"
-#include "def.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "journal-remote-write.h"
@@ -52,6 +53,11 @@ static bool arg_trust_all = false;
 static bool arg_trust_all = true;
 #endif
 
+static uint64_t arg_max_use = UINT64_MAX;
+static uint64_t arg_max_size = UINT64_MAX;
+static uint64_t arg_n_max_files = UINT64_MAX;
+static uint64_t arg_keep_free = UINT64_MAX;
+
 STATIC_DESTRUCTOR_REGISTER(arg_gnutls_log, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_key, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_cert, freep);
@@ -79,7 +85,7 @@ static int spawn_child(const char* child, char** argv) {
         if (pipe(fd) < 0)
                 return log_error_errno(errno, "Failed to create pager pipe: %m");
 
-        r = safe_fork("(remote)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &child_pid);
+        r = safe_fork("(remote)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE, &child_pid);
         if (r < 0) {
                 safe_close_pair(fd);
                 return r;
@@ -94,8 +100,6 @@ static int spawn_child(const char* child, char** argv) {
                         log_error_errno(r, "Failed to dup pipe to stdout: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                (void) rlimit_nofile_safe();
 
                 execvp(child, argv);
                 log_error_errno(errno, "Failed to exec child %s: %m", child);
@@ -758,11 +762,15 @@ static int negative_fd(const char *spec) {
 
 static int parse_config(void) {
         const ConfigTableItem items[] = {
-                { "Remote",  "Seal",                   config_parse_bool,             0, &arg_seal       },
-                { "Remote",  "SplitMode",              config_parse_write_split_mode, 0, &arg_split_mode },
-                { "Remote",  "ServerKeyFile",          config_parse_path,             0, &arg_key        },
-                { "Remote",  "ServerCertificateFile",  config_parse_path,             0, &arg_cert       },
-                { "Remote",  "TrustedCertificateFile", config_parse_path,             0, &arg_trust      },
+                { "Remote",  "Seal",                   config_parse_bool,             0, &arg_seal        },
+                { "Remote",  "SplitMode",              config_parse_write_split_mode, 0, &arg_split_mode  },
+                { "Remote",  "ServerKeyFile",          config_parse_path,             0, &arg_key         },
+                { "Remote",  "ServerCertificateFile",  config_parse_path,             0, &arg_cert        },
+                { "Remote",  "TrustedCertificateFile", config_parse_path,             0, &arg_trust       },
+                { "Remote",  "MaxUse",                 config_parse_iec_uint64,       0, &arg_max_use     },
+                { "Remote",  "MaxFileSize",            config_parse_iec_uint64,       0, &arg_max_size    },
+                { "Remote",  "MaxFiles",               config_parse_uint64,           0, &arg_n_max_files },
+                { "Remote",  "KeepFree",               config_parse_iec_uint64,       0, &arg_keep_free   },
                 {}
         };
 
@@ -1134,6 +1142,12 @@ static int run(int argc, char **argv) {
 
                 s.check_trust = !arg_trust_all;
         }
+
+        journal_reset_metrics(&s.metrics);
+        s.metrics.max_use = arg_max_use;
+        s.metrics.max_size = arg_max_size;
+        s.metrics.keep_free = arg_keep_free;
+        s.metrics.n_max_files = arg_n_max_files;
 
         r = create_remoteserver(&s, key, cert, trust);
         if (r < 0)

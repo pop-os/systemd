@@ -26,10 +26,17 @@ TEST(find_converted_keymap) {
         _cleanup_free_ char *ans = NULL, *ans2 = NULL;
         int r;
 
-        assert_se(find_converted_keymap("pl", "foobar", &ans) == 0);
+        assert_se(find_converted_keymap(
+                        &(X11Context) {
+                                .layout  = (char*) "pl",
+                                .variant = (char*) "foobar",
+                        }, &ans) == 0);
         assert_se(ans == NULL);
 
-        r = find_converted_keymap("pl", NULL, &ans);
+        r = find_converted_keymap(
+                        &(X11Context) {
+                                .layout  = (char*) "pl",
+                        }, &ans);
         if (r == 0) {
                 log_info("Skipping rest of %s: keymaps are not installed", __func__);
                 return;
@@ -38,145 +45,131 @@ TEST(find_converted_keymap) {
         assert_se(r == 1);
         assert_se(streq(ans, "pl"));
 
-        assert_se(find_converted_keymap("pl", "dvorak", &ans2) == 1);
+        assert_se(find_converted_keymap(
+                        &(X11Context) {
+                                .layout  = (char*) "pl",
+                                .variant = (char*) "dvorak",
+                        }, &ans2) == 1);
         assert_se(streq(ans2, "pl-dvorak"));
 }
 
 TEST(find_legacy_keymap) {
-        Context c = {};
+        X11Context xc = {};
         _cleanup_free_ char *ans = NULL, *ans2 = NULL;
 
-        c.x11_layout = (char*) "foobar";
-        assert_se(find_legacy_keymap(&c, &ans) == 0);
+        xc.layout = (char*) "foobar";
+        assert_se(find_legacy_keymap(&xc, &ans) == 0);
         assert_se(ans == NULL);
 
-        c.x11_layout = (char*) "pl";
-        assert_se(find_legacy_keymap(&c, &ans) == 1);
+        xc.layout = (char*) "pl";
+        assert_se(find_legacy_keymap(&xc, &ans) == 1);
         assert_se(streq(ans, "pl2"));
 
-        c.x11_layout = (char*) "pl,ru";
-        assert_se(find_legacy_keymap(&c, &ans2) == 1);
+        xc.layout = (char*) "pl,ru";
+        assert_se(find_legacy_keymap(&xc, &ans2) == 1);
         assert_se(streq(ans, "pl2"));
 }
 
 TEST(vconsole_convert_to_x11) {
-        _cleanup_(context_clear) Context c = {};
+        _cleanup_(x11_context_clear) X11Context xc = {};
+        _cleanup_(vc_context_clear) VCContext vc = {};
 
-        log_info("/* test emptying first (:) */");
-        assert_se(free_and_strdup(&c.x11_layout, "foo") >= 0);
-        assert_se(free_and_strdup(&c.x11_variant, "bar") >= 0);
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(c.x11_layout == NULL);
-        assert_se(c.x11_variant == NULL);
-
-        log_info("/* test emptying second (:) */");
-
-        assert_se(vconsole_convert_to_x11(&c) == 0);
-        assert_se(c.x11_layout == NULL);
-        assert_se(c.x11_variant == NULL);
+        log_info("/* test empty keymap */");
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(x11_context_isempty(&xc));
 
         log_info("/* test without variant, new mapping (es:) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "es") >= 0);
-
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(streq(c.x11_layout, "es"));
-        assert_se(c.x11_variant == NULL);
+        assert_se(free_and_strdup(&vc.keymap, "es") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(streq(xc.layout, "es"));
+        assert_se(xc.variant == NULL);
+        x11_context_clear(&xc);
 
         log_info("/* test with known variant, new mapping (es:dvorak) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "es-dvorak") >= 0);
-
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(streq(c.x11_layout, "es"));
-        assert_se(streq(c.x11_variant, "dvorak"));
+        assert_se(free_and_strdup(&vc.keymap, "es-dvorak") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(streq(xc.layout, "es"));
+        assert_se(streq(xc.variant, "dvorak"));
+        x11_context_clear(&xc);
 
         log_info("/* test with old mapping (fr:latin9) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "fr-latin9") >= 0);
-
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(streq(c.x11_layout, "fr"));
-        assert_se(streq(c.x11_variant, "latin9"));
+        assert_se(free_and_strdup(&vc.keymap, "fr-latin9") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(streq(xc.layout, "fr"));
+        assert_se(streq(xc.variant, "latin9"));
+        x11_context_clear(&xc);
 
         log_info("/* test with a compound mapping (ru,us) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "ru") >= 0);
-
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(streq(c.x11_layout, "ru,us"));
-        assert_se(c.x11_variant == NULL);
+        assert_se(free_and_strdup(&vc.keymap, "ru") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(streq(xc.layout, "ru,us"));
+        assert_se(xc.variant == NULL);
+        x11_context_clear(&xc);
 
         log_info("/* test with a simple mapping (us) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "us") >= 0);
-
-        assert_se(vconsole_convert_to_x11(&c) == 1);
-        assert_se(streq(c.x11_layout, "us"));
-        assert_se(c.x11_variant == NULL);
+        assert_se(free_and_strdup(&vc.keymap, "us") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
+        assert_se(streq(xc.layout, "us"));
+        assert_se(xc.variant == NULL);
 }
 
 TEST(x11_convert_to_vconsole) {
-        _cleanup_(context_clear) Context c = {};
-        int r;
+        _cleanup_(x11_context_clear) X11Context xc = {};
+        _cleanup_(vc_context_clear) VCContext vc = {};
 
-        log_info("/* test emptying first (:) */");
-        assert_se(free_and_strdup(&c.vc_keymap, "foobar") >= 0);
-        assert_se(x11_convert_to_vconsole(&c) == 1);
-        assert_se(c.vc_keymap == NULL);
-
-        log_info("/* test emptying second (:) */");
-
-        assert_se(x11_convert_to_vconsole(&c) == 0);
-        assert_se(c.vc_keymap == NULL);
+        log_info("/* test empty layout (:) */");
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(vc_context_isempty(&vc));
 
         log_info("/* test without variant, new mapping (es:) */");
-        assert_se(free_and_strdup(&c.x11_layout, "es") >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 1);
-        assert_se(streq(c.vc_keymap, "es"));
+        assert_se(free_and_strdup(&xc.layout, "es") >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "es"));
+        vc_context_clear(&vc);
 
         log_info("/* test with unknown variant, new mapping (es:foobar) */");
-        assert_se(free_and_strdup(&c.x11_variant, "foobar") >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 0);
-        assert_se(streq(c.vc_keymap, "es"));
+        assert_se(free_and_strdup(&xc.variant, "foobar") >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "es"));
+        vc_context_clear(&vc);
 
         log_info("/* test with known variant, new mapping (es:dvorak) */");
-        assert_se(free_and_strdup(&c.x11_variant, "dvorak") >= 0);
-
-        r = x11_convert_to_vconsole(&c);
-        if (r == 0) {
+        assert_se(free_and_strdup(&xc.variant, "dvorak") >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        if (vc_context_isempty(&vc)) {
                 log_info("Skipping rest of %s: keymaps are not installed", __func__);
                 return;
         }
-
-        assert_se(r == 1);
-        assert_se(streq(c.vc_keymap, "es-dvorak"));
+        assert_se(streq(vc.keymap, "es-dvorak"));
+        vc_context_clear(&vc);
 
         log_info("/* test with old mapping (fr:latin9) */");
-        assert_se(free_and_strdup(&c.x11_layout, "fr") >= 0);
-        assert_se(free_and_strdup(&c.x11_variant, "latin9") >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 1);
-        assert_se(streq(c.vc_keymap, "fr-latin9"));
+        assert_se(free_and_strdup(&xc.layout, "fr") >= 0);
+        assert_se(free_and_strdup(&xc.variant, "latin9") >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "fr-latin9"));
+        vc_context_clear(&vc);
 
         log_info("/* test with a compound mapping (us,ru:) */");
-        assert_se(free_and_strdup(&c.x11_layout, "us,ru") >= 0);
-        assert_se(free_and_strdup(&c.x11_variant, NULL) >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 1);
-        assert_se(streq(c.vc_keymap, "us"));
+        assert_se(free_and_strdup(&xc.layout, "us,ru") >= 0);
+        assert_se(free_and_strdup(&xc.variant, NULL) >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "us"));
+        vc_context_clear(&vc);
 
         log_info("/* test with a compound mapping (ru,us:) */");
-        assert_se(free_and_strdup(&c.x11_layout, "ru,us") >= 0);
-        assert_se(free_and_strdup(&c.x11_variant, NULL) >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 1);
-        assert_se(streq(c.vc_keymap, "ru"));
+        assert_se(free_and_strdup(&xc.layout, "ru,us") >= 0);
+        assert_se(free_and_strdup(&xc.variant, NULL) >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "ru"));
+        vc_context_clear(&vc);
 
         /* https://bugzilla.redhat.com/show_bug.cgi?id=1333998 */
         log_info("/* test with a simple new mapping (ru:) */");
-        assert_se(free_and_strdup(&c.x11_layout, "ru") >= 0);
-        assert_se(free_and_strdup(&c.x11_variant, NULL) >= 0);
-
-        assert_se(x11_convert_to_vconsole(&c) == 0);
-        assert_se(streq(c.vc_keymap, "ru"));
+        assert_se(free_and_strdup(&xc.layout, "ru") >= 0);
+        assert_se(free_and_strdup(&xc.variant, NULL) >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "ru"));
 }
 
 static int intro(void) {

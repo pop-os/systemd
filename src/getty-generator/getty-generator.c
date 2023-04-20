@@ -18,7 +18,6 @@
 #include "strv.h"
 #include "terminal-util.h"
 #include "unit-name.h"
-#include "util.h"
 #include "virt.h"
 
 static const char *arg_dest = NULL;
@@ -79,7 +78,7 @@ static int add_container_getty(const char *tty) {
 }
 
 static int verify_tty(const char *name) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *p;
 
         /* Some TTYs are weird and have been enumerated but don't work

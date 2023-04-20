@@ -18,8 +18,9 @@
 
 #include "alloc-util.h"
 #include "ask-password-api.h"
+#include "build.h"
 #include "conf-parser.h"
-#include "def.h"
+#include "constants.h"
 #include "dirent-util.h"
 #include "exit-status.h"
 #include "fd-util.h"
@@ -55,7 +56,7 @@ static const char *arg_device = NULL;
 
 static int send_passwords(const char *socket_name, char **passwords) {
         _cleanup_(erase_and_freep) char *packet = NULL;
-        _cleanup_close_ int socket_fd = -1;
+        _cleanup_close_ int socket_fd = -EBADF;
         union sockaddr_union sa;
         socklen_t sa_len;
         size_t packet_length = 1;
@@ -96,7 +97,7 @@ static int send_passwords(const char *socket_name, char **passwords) {
 
 static bool wall_tty_match(const char *path, bool is_local, void *userdata) {
         _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
 
         assert(path_is_absolute(path));
@@ -141,7 +142,7 @@ static int agent_ask_password_tty(
                 const char *flag_file,
                 char ***ret) {
 
-        int tty_fd = -1, r;
+        int tty_fd = -EBADF, r;
         const char *con = arg_device ?: "/dev/console";
 
         if (arg_console) {
@@ -336,8 +337,8 @@ static int process_and_watch_password_files(bool watch) {
                 _FD_MAX
         };
 
-        _unused_ _cleanup_close_ int tty_block_fd = -1;
-        _cleanup_close_ int notify = -1, signal_fd = -1;
+        _unused_ _cleanup_close_ int tty_block_fd = -EBADF;
+        _cleanup_close_ int notify = -EBADF, signal_fd = -EBADF;
         struct pollfd pollfd[_FD_MAX];
         sigset_t mask;
         int r;

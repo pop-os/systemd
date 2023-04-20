@@ -181,16 +181,6 @@ def expectedFailureIfRoutingPolicyUIDRangeIsNotAvailable():
 
     return f
 
-def expectedFailureIfLinkFileFieldIsNotSet():
-    def f(func):
-        call_quiet('ip link add name dummy99 type dummy')
-        ret = run('udevadm info -w10s /sys/class/net/dummy99')
-        supported = ret.returncode == 0 and 'E: ID_NET_LINK_FILE=' in ret.stdout
-        remove_link('dummy99')
-        return func if supported else unittest.expectedFailure(func)
-
-    return f
-
 def expectedFailureIfNexthopIsNotAvailable():
     def f(func):
         rc = call_quiet('ip nexthop list')
@@ -236,12 +226,7 @@ def expectedFailureIfNetdevsimWithSRIOVIsNotAvailable():
         except OSError:
             return finalize(func, False)
 
-        if not os.path.exists('/sys/bus/netdevsim/devices/netdevsim99/sriov_numvfs'):
-            return finalize(func, False)
-
-        # Also checks if udevd supports .link files, as it seems disabled on CentOS CI (Arch).
-        rc = call_quiet('udevadm info -w10s /sys/class/net/eni99np1')
-        return finalize(func, rc == 0)
+        return finalize(func, os.path.exists('/sys/bus/netdevsim/devices/netdevsim99/sriov_numvfs'))
 
     return f
 
@@ -411,7 +396,10 @@ def create_service_dropin(service, command, reload_command=None, additional_sett
     create_unit_dropin(f'{service}.service', drop_in)
 
 def link_exists(link):
-    return os.path.exists(os.path.join('/sys/class/net', link, 'ifindex'))
+    return call_quiet(f'ip link show {link}') == 0
+
+def link_resolve(link):
+    return check_output(f'ip link show {link}').split(':')[1].strip()
 
 def remove_link(*links, protect=False):
     for link in links:
@@ -839,7 +827,6 @@ class Utilities():
             if re.search(rf'(?m)^\s*State:\s+{operstate}\s+\({setup_state}\)\s*$', output):
                 return True
 
-        print(output)
         if fail_assert:
             self.fail(f'Timed out waiting for {link} to reach state {operstate}/{setup_state}')
         return False
@@ -867,7 +854,7 @@ class Utilities():
         This returns if the links reached the requested operstate/setup_state; otherwise it
         raises CalledProcessError or fails test assertion.
         """
-        args = wait_online_cmd + [f'--timeout={timeout}'] + [f'--interface={link}' for link in links_with_operstate]
+        args = wait_online_cmd + [f'--timeout={timeout}'] + [f'--interface={link}' for link in links_with_operstate] + [f'--ignore={link}' for link in protected_links]
         if bool_any:
             args += ['--any']
         if ipv4:
@@ -907,6 +894,16 @@ class Utilities():
 
         self.assertNotRegex(output, address_regex)
 
+    def wait_route(self, link, route_regex, table='main', ipv='', timeout_sec=100):
+        for i in range(timeout_sec):
+            if i > 0:
+                time.sleep(1)
+            output = check_output(f'ip {ipv} route show dev {link} table {table}')
+            if re.search(route_regex, output):
+                break
+
+        self.assertRegex(output, route_regex)
+
     def check_netlabel(self, interface, address, label='system_u:object_r:root_t:s0'):
         if not shutil.which('selinuxenabled'):
             print('## Checking NetLabel skipped: selinuxenabled command not found.')
@@ -935,6 +932,17 @@ class NetworkctlTests(unittest.TestCase, Utilities):
 
         output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98', env=env)
         self.assertRegex(output, 'hogehogehogehogehogehoge')
+
+    @expectedFailureIfAlternativeNameIsNotAvailable()
+    def test_rename_to_altname(self):
+        copy_network_unit('26-netdev-link-local-addressing-yes.network',
+                          '12-dummy.netdev', '12-dummy-rename-to-altname.link')
+        start_networkd()
+        self.wait_online(['dummyalt:degraded'])
+
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummyalt', env=env)
+        self.assertIn('hogehogehogehogehogehoge', output)
+        self.assertNotIn('dummy98', output)
 
     def test_reconfigure(self):
         copy_network_unit('25-address-static.network', '12-dummy.netdev')
@@ -1052,15 +1060,14 @@ class NetworkctlTests(unittest.TestCase, Utilities):
         print(output)
         self.assertRegex(output, 'Type: loopback')
 
-    @expectedFailureIfLinkFileFieldIsNotSet()
     def test_udev_link_file(self):
-        copy_network_unit('11-dummy.netdev', '11-dummy.network')
+        copy_network_unit('11-dummy.netdev', '11-dummy.network', '25-default.link')
         start_networkd()
         self.wait_online(['test1:degraded'])
 
         output = check_output(*networkctl_cmd, '-n', '0', 'status', 'test1', env=env)
         print(output)
-        self.assertRegex(output, r'Link File: (/usr)?/lib/systemd/network/99-default.link')
+        self.assertRegex(output, r'Link File: /run/systemd/network/25-default.link')
         self.assertRegex(output, r'Network File: /run/systemd/network/11-dummy.network')
 
         # This test may be run on the system that has older udevd than 70f32a260b5ebb68c19ecadf5d69b3844896ba55 (v249).
@@ -1084,6 +1091,85 @@ class NetworkctlTests(unittest.TestCase, Utilities):
         self.check_link_exists('veth99', expected=False)
         self.check_link_exists('veth-peer', expected=False)
 
+class NetworkdMatchTests(unittest.TestCase, Utilities):
+
+    def setUp(self):
+        setup_common()
+
+    def tearDown(self):
+        tear_down_common()
+
+    @expectedFailureIfAlternativeNameIsNotAvailable()
+    def test_match(self):
+        copy_network_unit('12-dummy-mac.netdev',
+                          '12-dummy-match-mac-01.network',
+                          '12-dummy-match-mac-02.network',
+                          '12-dummy-match-renamed.network',
+                          '12-dummy-match-altname.network',
+                          '12-dummy-altname.link')
+        start_networkd()
+
+        self.wait_online(['dummy98:routable'])
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98', env=env)
+        self.assertIn('Network File: /run/systemd/network/12-dummy-match-mac-01.network', output)
+        output = check_output('ip -4 address show dev dummy98')
+        self.assertIn('10.0.0.1/16', output)
+
+        check_output('ip link set dev dummy98 down')
+        check_output('ip link set dev dummy98 address 12:34:56:78:9a:02')
+
+        self.wait_address('dummy98', '10.0.0.2/16', ipv='-4', timeout_sec=10)
+        self.wait_online(['dummy98:routable'])
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98', env=env)
+        self.assertIn('Network File: /run/systemd/network/12-dummy-match-mac-02.network', output)
+
+        check_output('ip link set dev dummy98 down')
+        check_output('ip link set dev dummy98 name dummy98-1')
+
+        self.wait_address('dummy98-1', '10.0.1.2/16', ipv='-4', timeout_sec=10)
+        self.wait_online(['dummy98-1:routable'])
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98-1', env=env)
+        self.assertIn('Network File: /run/systemd/network/12-dummy-match-renamed.network', output)
+
+        check_output('ip link set dev dummy98-1 down')
+        check_output('ip link set dev dummy98-1 name dummy98-2')
+        check_output(*udevadm_cmd, 'trigger', '--action=add', '/sys/class/net/dummy98-2')
+
+        self.wait_address('dummy98-2', '10.0.2.2/16', ipv='-4', timeout_sec=10)
+        self.wait_online(['dummy98-2:routable'])
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98-2', env=env)
+        self.assertIn('Network File: /run/systemd/network/12-dummy-match-altname.network', output)
+
+    def test_match_udev_property(self):
+        copy_network_unit('12-dummy.netdev', '13-not-match-udev-property.network', '14-match-udev-property.network')
+        start_networkd()
+        self.wait_online(['dummy98:routable'])
+
+        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98', env=env)
+        print(output)
+        self.assertRegex(output, 'Network File: /run/systemd/network/14-match-udev-property')
+
+class WaitOnlineTests(unittest.TestCase, Utilities):
+
+    def setUp(self):
+        setup_common()
+
+    def tearDown(self):
+        tear_down_common()
+
+    def test_wait_online_all_unmanaged(self):
+        start_networkd()
+        self.wait_online([])
+
+    def test_wait_online_any(self):
+        copy_network_unit('25-bridge.netdev', '25-bridge.network', '11-dummy.netdev', '11-dummy.network')
+        start_networkd()
+
+        self.wait_online(['bridge99', 'test1:degraded'], bool_any=True)
+
+        self.wait_operstate('bridge99', '(off|no-carrier)', setup_state='configuring')
+        self.wait_operstate('test1', 'degraded')
+
 class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
     def setUp(self):
@@ -1101,24 +1187,6 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
         output = check_output('ip link show dropin-test')
         print(output)
         self.assertRegex(output, '00:50:56:c0:00:28')
-
-    def test_match_udev_property(self):
-        copy_network_unit('12-dummy.netdev', '13-not-match-udev-property.network', '14-match-udev-property.network')
-        start_networkd()
-        self.wait_online(['dummy98:routable'])
-
-        output = check_output(*networkctl_cmd, '-n', '0', 'status', 'dummy98', env=env)
-        print(output)
-        self.assertRegex(output, 'Network File: /run/systemd/network/14-match-udev-property')
-
-    def test_wait_online_any(self):
-        copy_network_unit('25-bridge.netdev', '25-bridge.network', '11-dummy.netdev', '11-dummy.network')
-        start_networkd()
-
-        self.wait_online(['bridge99', 'test1:degraded'], bool_any=True)
-
-        self.wait_operstate('bridge99', '(off|no-carrier)', setup_state='configuring')
-        self.wait_operstate('test1', 'degraded')
 
     @expectedFailureIfModuleIsNotAvailable('bareudp')
     def test_bareudp(self):
@@ -3113,53 +3181,78 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertRegex(output, 'via 2607:5300:203:39ff:ff:ff:ff:ff')
 
     def test_bind_carrier(self):
-        check_output('ip link add dummy98 type dummy')
-        check_output('ip link set dummy98 up')
-        time.sleep(2)
-
         copy_network_unit('25-bind-carrier.network', '11-dummy.netdev')
         start_networkd()
-        self.wait_online(['test1:routable'])
 
+        # no bound interface.
+        self.wait_operstate('test1', 'off', setup_state='configuring')
         output = check_output('ip address show test1')
         print(output)
-        self.assertRegex(output, 'UP,LOWER_UP')
-        self.assertRegex(output, 'inet 192.168.10.30/24 brd 192.168.10.255 scope global test1')
-        self.wait_operstate('test1', 'routable')
+        self.assertNotIn('UP,LOWER_UP', output)
+        self.assertIn('DOWN', output)
+        self.assertNotIn('192.168.10', output)
 
+        # add one bound interface. The interface will be up.
+        check_output('ip link add dummy98 type dummy')
+        check_output('ip link set dummy98 up')
+        self.wait_online(['test1:routable'])
+        output = check_output('ip address show test1')
+        print(output)
+        self.assertIn('UP,LOWER_UP', output)
+        self.assertIn('inet 192.168.10.30/24 brd 192.168.10.255 scope global test1', output)
+
+        # add another bound interface. The interface is still up.
         check_output('ip link add dummy99 type dummy')
         check_output('ip link set dummy99 up')
-        time.sleep(2)
+        self.wait_operstate('dummy99', 'degraded', setup_state='unmanaged')
         output = check_output('ip address show test1')
         print(output)
-        self.assertRegex(output, 'UP,LOWER_UP')
-        self.assertRegex(output, 'inet 192.168.10.30/24 brd 192.168.10.255 scope global test1')
-        self.wait_operstate('test1', 'routable')
+        self.assertIn('UP,LOWER_UP', output)
+        self.assertIn('inet 192.168.10.30/24 brd 192.168.10.255 scope global test1', output)
 
+        # remove one of the bound interfaces. The interface is still up
         remove_link('dummy98')
-        time.sleep(2)
         output = check_output('ip address show test1')
         print(output)
-        self.assertRegex(output, 'UP,LOWER_UP')
-        self.assertRegex(output, 'inet 192.168.10.30/24 brd 192.168.10.255 scope global test1')
-        self.wait_operstate('test1', 'routable')
+        self.assertIn('UP,LOWER_UP', output)
+        self.assertIn('inet 192.168.10.30/24 brd 192.168.10.255 scope global test1', output)
 
+        # bring down the remaining bound interface. The interface will be down.
         check_output('ip link set dummy99 down')
-        time.sleep(2)
-        output = check_output('ip address show test1')
-        print(output)
-        self.assertNotRegex(output, 'UP,LOWER_UP')
-        self.assertRegex(output, 'DOWN')
-        self.assertNotRegex(output, '192.168.10')
         self.wait_operstate('test1', 'off')
-
-        check_output('ip link set dummy99 up')
-        time.sleep(2)
+        self.wait_address_dropped('test1', r'192.168.10', ipv='-4', timeout_sec=10)
         output = check_output('ip address show test1')
         print(output)
-        self.assertRegex(output, 'UP,LOWER_UP')
-        self.assertRegex(output, 'inet 192.168.10.30/24 brd 192.168.10.255 scope global test1')
-        self.wait_operstate('test1', 'routable')
+        self.assertNotIn('UP,LOWER_UP', output)
+        self.assertIn('DOWN', output)
+        self.assertNotIn('192.168.10', output)
+
+        # bring up the bound interface. The interface will be up.
+        check_output('ip link set dummy99 up')
+        self.wait_online(['test1:routable'])
+        output = check_output('ip address show test1')
+        print(output)
+        self.assertIn('UP,LOWER_UP', output)
+        self.assertIn('inet 192.168.10.30/24 brd 192.168.10.255 scope global test1', output)
+
+        # remove the remaining bound interface. The interface will be down.
+        remove_link('dummy99')
+        self.wait_operstate('test1', 'off')
+        self.wait_address_dropped('test1', r'192.168.10', ipv='-4', timeout_sec=10)
+        output = check_output('ip address show test1')
+        print(output)
+        self.assertNotIn('UP,LOWER_UP', output)
+        self.assertIn('DOWN', output)
+        self.assertNotIn('192.168.10', output)
+
+        # re-add one bound interface. The interface will be up.
+        check_output('ip link add dummy98 type dummy')
+        check_output('ip link set dummy98 up')
+        self.wait_online(['test1:routable'])
+        output = check_output('ip address show test1')
+        print(output)
+        self.assertIn('UP,LOWER_UP', output)
+        self.assertIn('inet 192.168.10.30/24 brd 192.168.10.255 scope global test1', output)
 
     def _test_activation_policy(self, interface, test):
         conffile = '25-activation-policy.network'
@@ -3419,6 +3512,8 @@ class NetworkdTCTests(unittest.TestCase, Utilities):
         self.assertIn('overhead 128', output)
         self.assertIn('mpu 20', output)
         self.assertIn('fwmark 0xff00', output)
+        self.assertIn('rtt 1s', output)
+        self.assertIn('ack-filter-aggressive', output)
 
     @expectedFailureIfModuleIsNotAvailable('sch_codel')
     def test_qdisc_codel(self):
@@ -4164,6 +4259,8 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
 
     @expectedFailureIfNetdevsimWithSRIOVIsNotAvailable()
     def test_sriov(self):
+        copy_network_unit('25-default.link', '25-sriov.network')
+
         call('modprobe netdevsim')
 
         with open('/sys/bus/netdevsim/new_device', mode='w', encoding='utf-8') as f:
@@ -4172,7 +4269,6 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         with open('/sys/bus/netdevsim/devices/netdevsim99/sriov_numvfs', mode='w', encoding='utf-8') as f:
             f.write('3')
 
-        copy_network_unit('25-sriov.network')
         start_networkd()
         self.wait_online(['eni99np1:routable'])
 
@@ -4196,6 +4292,9 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         start_networkd()
         self.wait_online(['eni99np1:routable'])
 
+        # the name eni99np1 may be an alternative name.
+        ifname = link_resolve('eni99np1')
+
         output = check_output('ip link show dev eni99np1')
         print(output)
         self.assertRegex(output,
@@ -4210,7 +4309,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
             f.write('[Link]\nSR-IOVVirtualFunctions=4\n')
 
         udev_reload()
-        call(*udevadm_cmd, 'trigger', '--action=add', '--settle', '/sys/devices/netdevsim99/net/eni99np1')
+        check_output(*udevadm_cmd, 'trigger', '--action=add', '--settle', f'/sys/devices/netdevsim99/net/{ifname}')
 
         output = check_output('ip link show dev eni99np1')
         print(output)
@@ -4226,7 +4325,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
             f.write('[Link]\nSR-IOVVirtualFunctions=\n')
 
         udev_reload()
-        call(*udevadm_cmd, 'trigger', '--action=add', '--settle', '/sys/devices/netdevsim99/net/eni99np1')
+        check_output(*udevadm_cmd, 'trigger', '--action=add', '--settle', f'/sys/devices/netdevsim99/net/{ifname}')
 
         output = check_output('ip link show dev eni99np1')
         print(output)
@@ -4242,7 +4341,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
             f.write('[Link]\nSR-IOVVirtualFunctions=2\n')
 
         udev_reload()
-        call(*udevadm_cmd, 'trigger', '--action=add', '--settle', '/sys/devices/netdevsim99/net/eni99np1')
+        check_output(*udevadm_cmd, 'trigger', '--action=add', '--settle', f'/sys/devices/netdevsim99/net/{ifname}')
 
         output = check_output('ip link show dev eni99np1')
         print(output)
@@ -4258,7 +4357,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
             f.write('[Link]\nSR-IOVVirtualFunctions=\n')
 
         udev_reload()
-        call(*udevadm_cmd, 'trigger', '--action=add', '--settle', '/sys/devices/netdevsim99/net/eni99np1')
+        check_output(*udevadm_cmd, 'trigger', '--action=add', '--settle', f'/sys/devices/netdevsim99/net/{ifname}')
 
         output = check_output('ip link show dev eni99np1')
         print(output)
@@ -4354,6 +4453,55 @@ class NetworkdRATests(unittest.TestCase, Utilities):
         print(output)
         self.assertIn('2002:da8:1:0:b47e:7975:fc7a:7d6e', output)
         self.assertIn('2002:da8:2:0:f689:561a:8eda:7443', output)
+
+    def test_router_preference(self):
+        copy_network_unit('25-veth-client.netdev',
+                          '25-veth-router-high.netdev',
+                          '25-veth-router-low.netdev',
+                          '26-bridge.netdev',
+                          '25-veth-bridge.network',
+                          '25-veth-client.network',
+                          '25-veth-router-high.network',
+                          '25-veth-router-low.network',
+                          '25-bridge99.network')
+        start_networkd()
+        self.wait_online(['client-p:enslaved',
+                          'router-high:degraded', 'router-high-p:enslaved',
+                          'router-low:degraded', 'router-low-p:enslaved',
+                          'bridge99:routable'])
+
+        networkctl_reconfigure('client')
+        self.wait_online(['client:routable'])
+
+        self.wait_address('client', '2002:da8:1:99:1034:56ff:fe78:9a00/64', ipv='-6', timeout_sec=10)
+        self.wait_address('client', '2002:da8:1:98:1034:56ff:fe78:9a00/64', ipv='-6', timeout_sec=10)
+        self.wait_route('client', 'default via fe80::1034:56ff:fe78:9a99 proto ra metric 512', ipv='-6', timeout_sec=10)
+        self.wait_route('client', 'default via fe80::1034:56ff:fe78:9a98 proto ra metric 2048', ipv='-6', timeout_sec=10)
+
+        output = check_output('ip -6 route show dev client default via fe80::1034:56ff:fe78:9a99')
+        print(output)
+        self.assertIn('pref high', output)
+        output = check_output('ip -6 route show dev client default via fe80::1034:56ff:fe78:9a98')
+        print(output)
+        self.assertIn('pref low', output)
+
+        with open(os.path.join(network_unit_dir, '25-veth-client.network'), mode='a', encoding='utf-8') as f:
+            f.write('\n[Link]\nMACAddress=12:34:56:78:9a:01\n[IPv6AcceptRA]\nRouteMetric=100:200:300\n')
+
+        networkctl_reload()
+        self.wait_online(['client:routable'])
+
+        self.wait_address('client', '2002:da8:1:99:1034:56ff:fe78:9a01/64', ipv='-6', timeout_sec=10)
+        self.wait_address('client', '2002:da8:1:98:1034:56ff:fe78:9a01/64', ipv='-6', timeout_sec=10)
+        self.wait_route('client', 'default via fe80::1034:56ff:fe78:9a99 proto ra metric 100', ipv='-6', timeout_sec=10)
+        self.wait_route('client', 'default via fe80::1034:56ff:fe78:9a98 proto ra metric 300', ipv='-6', timeout_sec=10)
+
+        output = check_output('ip -6 route show dev client default via fe80::1034:56ff:fe78:9a99')
+        print(output)
+        self.assertIn('pref high', output)
+        output = check_output('ip -6 route show dev client default via fe80::1034:56ff:fe78:9a98')
+        print(output)
+        self.assertIn('pref low', output)
 
 class NetworkdDHCPServerTests(unittest.TestCase, Utilities):
 

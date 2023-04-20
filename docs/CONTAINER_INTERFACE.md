@@ -210,7 +210,7 @@ manager, please consider supporting the following interfaces.
    container name the external side `ve-` + the container name.
 
 3. It is recommended to configure stable MAC addresses for container `veth`
-   devices, for example hashed out of the container names. That way it is more
+   devices, for example, hashed out of the container names. That way it is more
    likely that DHCP and IPv4LL will acquire stable addresses.
 
 ## The `/run/host/` Hierarchy
@@ -298,9 +298,9 @@ care should be taken to avoid naming conflicts. `systemd` (and in particular
    you cannot link them to each other.
 
 4. Do not pretend that the real VTs are available in the container. The VT
-   subsystem consists of all the devices `/dev/tty*`, `/dev/vcs*`, `/dev/vcsa*`
-   plus their `sysfs` counterparts. They speak specific `ioctl()`s and
-   understand specific escape sequences, that other ptys don't understand.
+   subsystem consists of all the devices `/dev/tty[0-9]*`, `/dev/vcs*`,
+   `/dev/vcsa*` plus their `sysfs` counterparts. They speak specific `ioctl()`s
+   and understand specific escape sequences, that other ptys don't understand.
    Hence, it is explicitly not OK to mount a pty to `/dev/tty1`, `/dev/tty2`,
    `/dev/tty3`. This is explicitly not supported.
 
@@ -389,7 +389,7 @@ everybody. However, that's a systemd-specific interface and other init systems
 are unlikely to do the same.
 
 Note that it is our intention to make systemd systems work flawlessly and
-out-of-the-box in containers. In fact we are interested to ensure that the same
+out-of-the-box in containers. In fact, we are interested to ensure that the same
 OS image can be booted on a bare system, in a VM and in a container, and behave
 correctly each time. If you notice that some component in systemd does not work
 in a container as it should, even though the container manager implements

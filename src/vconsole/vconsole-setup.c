@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "creds-util.h"
 #include "env-file.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -33,7 +34,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "util.h"
 #include "virt.h"
 
 static int verify_vc_device(int fd) {
@@ -279,7 +279,7 @@ static void setup_remaining_vcs(int src_fd, unsigned src_idx, bool utf8) {
 
         for (i = 1; i <= 63; i++) {
                 char ttyname[sizeof("/dev/tty63")];
-                _cleanup_close_ int fd_d = -1;
+                _cleanup_close_ int fd_d = -EBADF;
 
                 if (i == src_idx || verify_vc_allocation(i) < 0)
                         continue;
@@ -351,7 +351,7 @@ static int find_source_vc(char **ret_path, unsigned *ret_idx) {
                 return log_oom();
 
         for (i = 1; i <= 63; i++) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 r = verify_vc_allocation(i);
                 if (r < 0) {
@@ -384,7 +384,7 @@ static int find_source_vc(char **ret_path, unsigned *ret_idx) {
 }
 
 static int verify_source_vc(char **ret_path, const char *src_vc) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         char *path;
         int r;
 
@@ -417,7 +417,7 @@ int main(int argc, char **argv) {
                 *vc = NULL,
                 *vc_keymap = NULL, *vc_keymap_toggle = NULL,
                 *vc_font = NULL, *vc_font_map = NULL, *vc_font_unimap = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         bool utf8, keyboard_ok;
         unsigned idx = 0;
         int r;
@@ -435,6 +435,17 @@ int main(int argc, char **argv) {
 
         utf8 = is_locale_utf8();
 
+        /* Load data from credentials (lowest priority) */
+        r = read_credential_strings_many(
+                        "vconsole.keymap", &vc_keymap,
+                        "vconsole.keymap_toggle", &vc_keymap_toggle,
+                        "vconsole.font", &vc_font,
+                        "vconsole.font_map", &vc_font_map,
+                        "vconsole.font_unimap", &vc_font_unimap);
+        if (r < 0 && r != -ENXIO)
+                log_warning_errno(r, "Failed to import credentials, ignoring: %m");
+
+        /* Load data from configuration file (middle priority) */
         r = parse_env_file(NULL, "/etc/vconsole.conf",
                            "KEYMAP", &vc_keymap,
                            "KEYMAP_TOGGLE", &vc_keymap_toggle,
@@ -442,9 +453,9 @@ int main(int argc, char **argv) {
                            "FONT_MAP", &vc_font_map,
                            "FONT_UNIMAP", &vc_font_unimap);
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to read /etc/vconsole.conf: %m");
+                log_warning_errno(r, "Failed to read /etc/vconsole.conf, ignoring: %m");
 
-        /* Let the kernel command line override /etc/vconsole.conf */
+        /* Let the kernel command line override /etc/vconsole.conf (highest priority) */
         r = proc_cmdline_get_key_many(
                         PROC_CMDLINE_STRIP_RD_PREFIX,
                         "vconsole.keymap", &vc_keymap,
@@ -457,7 +468,7 @@ int main(int argc, char **argv) {
                         "vconsole.font.map", &vc_font_map,
                         "vconsole.font.unimap", &vc_font_unimap);
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to read /proc/cmdline: %m");
+                log_warning_errno(r, "Failed to read /proc/cmdline, ignoring: %m");
 
         (void) toggle_utf8_sysfs(utf8);
         (void) toggle_utf8_vc(vc, fd, utf8);

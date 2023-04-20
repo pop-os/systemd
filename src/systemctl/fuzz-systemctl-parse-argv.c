@@ -6,6 +6,7 @@
 #include "env-util.h"
 #include "fd-util.h"
 #include "fuzz.h"
+#include "nulstr-util.h"
 #include "selinux-util.h"
 #include "static-destruct.h"
 #include "stdio-util.h"
@@ -15,8 +16,11 @@
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         _cleanup_strv_free_ char **argv = NULL;
-        _cleanup_close_ int orig_stdout_fd = -1;
+        _cleanup_close_ int orig_stdout_fd = -EBADF;
         int r;
+
+        if (size > 16*1024)
+                return 0; /* See the comment below about the limit for strv_length(). */
 
         /* We don't want to fill the logs with messages about parse errors.
          * Disable most logging if not running standalone */

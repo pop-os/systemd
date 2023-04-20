@@ -5,6 +5,7 @@
 
 #include "json.h"
 #include "macro.h"
+#include "sha256.h"
 
 typedef enum TPM2Flags {
         TPM2_FLAGS_USE_PIN = 1 << 0,
@@ -52,13 +53,32 @@ int dlopen_tpm2(void);
 int tpm2_seal(const char *device, uint32_t hash_pcr_mask, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg);
 int tpm2_unseal(const char *device, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, void **ret_secret, size_t *ret_secret_size);
 
-struct tpm2_context {
+typedef struct {
+        unsigned n_ref;
+
         void *tcti_dl;
         TSS2_TCTI_CONTEXT *tcti_context;
         ESYS_CONTEXT *esys_context;
-};
+} Tpm2Context;
 
-ESYS_TR tpm2_flush_context_verbose(ESYS_CONTEXT *c, ESYS_TR handle);
+int tpm2_context_new(const char *device, Tpm2Context **ret_context);
+Tpm2Context *tpm2_context_ref(Tpm2Context *context);
+Tpm2Context *tpm2_context_unref(Tpm2Context *context);
+DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Context*, tpm2_context_unref);
+#define _cleanup_tpm2_context_ _cleanup_(tpm2_context_unrefp)
+
+typedef struct {
+        Tpm2Context *tpm2_context;
+        ESYS_TR esys_handle;
+} Tpm2Handle;
+
+#define _tpm2_handle(c, h) { .tpm2_context = (c), .esys_handle = (h), }
+static const Tpm2Handle TPM2_HANDLE_NONE = _tpm2_handle(NULL, ESYS_TR_NONE);
+
+int tpm2_handle_new(Tpm2Context *context, Tpm2Handle **ret_handle);
+Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle);
+DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Handle*, tpm2_handle_free);
+#define _cleanup_tpm2_handle_ _cleanup_(tpm2_handle_freep)
 
 void tpm2_pcr_mask_to_selection(uint32_t mask, uint16_t bank, TPML_PCR_SELECTION *ret);
 
@@ -67,14 +87,15 @@ static inline void Esys_Freep(void *p) {
                 sym_Esys_Free(*(void**) p);
 }
 
-int tpm2_get_good_pcr_banks(ESYS_CONTEXT *c, uint32_t pcr_mask, TPMI_ALG_HASH **ret_banks);
+int tpm2_get_good_pcr_banks(Tpm2Context *c, uint32_t pcr_mask, TPMI_ALG_HASH **ret_banks);
+int tpm2_get_good_pcr_banks_strv(Tpm2Context *c, uint32_t pcr_mask, char ***ret);
 
-#else
-struct tpm2_context;
-#endif
+int tpm2_extend_bytes(Tpm2Context *c, char **banks, unsigned pcr_index, const void *data, size_t data_size, const void *secret, size_t secret_size);
 
-int tpm2_context_init(const char *device, struct tpm2_context *ret);
-void tpm2_context_destroy(struct tpm2_context *c);
+#else /* HAVE_TPM2 */
+typedef struct {} Tpm2Context;
+typedef struct {} Tpm2Handle;
+#endif /* HAVE_TPM2 */
 
 int tpm2_list_devices(void);
 int tpm2_find_device_auto(int log_level, char **ret);
@@ -84,8 +105,8 @@ int tpm2_parse_pcrs(const char *s, uint32_t *ret);
 int tpm2_make_pcr_json_array(uint32_t pcr_mask, JsonVariant **ret);
 int tpm2_parse_pcr_json_array(JsonVariant *v, uint32_t *ret);
 
-int tpm2_make_luks2_json(int keyslot, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, TPM2Flags flags, JsonVariant **ret);
-int tpm2_parse_luks2_json(JsonVariant *v, int *ret_keyslot, uint32_t *ret_hash_pcr_mask, uint16_t *ret_pcr_bank, void **ret_pubkey, size_t *ret_pubkey_size, uint32_t *ret_pubkey_pcr_mask, uint16_t *ret_primary_alg, void **ret_blob, size_t *ret_blob_size, void **ret_policy_hash, size_t *ret_policy_hash_size, TPM2Flags *ret_flags);
+int tpm2_make_luks2_json(int keyslot, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *salt, size_t salt_size, TPM2Flags flags, JsonVariant **ret);
+int tpm2_parse_luks2_json(JsonVariant *v, int *ret_keyslot, uint32_t *ret_hash_pcr_mask, uint16_t *ret_pcr_bank, void **ret_pubkey, size_t *ret_pubkey_size, uint32_t *ret_pubkey_pcr_mask, uint16_t *ret_primary_alg, void **ret_blob, size_t *ret_blob_size, void **ret_policy_hash, size_t *ret_policy_hash_size, void **ret_salt, size_t *ret_salt_size, TPM2Flags *ret_flags);
 
 #define TPM2_PCRS_MAX 24U
 
@@ -122,11 +143,11 @@ static inline bool TPM2_PCR_MASK_VALID(uint64_t pcr_mask) {
 #define TPM2_ALG_RSA 0x1
 #endif
 
-const char *tpm2_pcr_bank_to_string(uint16_t bank);
-int tpm2_pcr_bank_from_string(const char *bank);
+const char *tpm2_hash_alg_to_string(uint16_t alg);
+int tpm2_hash_alg_from_string(const char *alg);
 
-const char *tpm2_primary_alg_to_string(uint16_t alg);
-int tpm2_primary_alg_from_string(const char *alg);
+const char *tpm2_asym_alg_to_string(uint16_t alg);
+int tpm2_asym_alg_from_string(const char *alg);
 
 typedef struct {
         uint32_t search_pcr_mask;
@@ -153,3 +174,9 @@ int tpm2_load_pcr_signature(const char *path, JsonVariant **ret);
 int tpm2_load_pcr_public_key(const char *path, void **ret_pubkey, size_t *ret_pubkey_size);
 
 int pcr_mask_to_string(uint32_t mask, char **ret);
+
+int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
+                    size_t passlen,
+                    const void *salt,
+                    size_t saltlen,
+                    uint8_t res[static SHA256_DIGEST_SIZE]);

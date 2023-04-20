@@ -32,6 +32,7 @@
 #include "cgroup-setup.h"
 #include "cgroup-util.h"
 #include "cpu-set-util.h"
+#include "daemon-util.h"
 #include "dev-setup.h"
 #include "device-monitor-private.h"
 #include "device-private.h"
@@ -330,9 +331,7 @@ static void manager_exit(Manager *manager) {
 
         manager->exit = true;
 
-        sd_notify(false,
-                  "STOPPING=1\n"
-                  "STATUS=Starting shutdown...");
+        (void) sd_notify(/* unset= */ false, NOTIFY_STOPPING);
 
         /* close sources of new events and discard buffered events */
         manager->ctrl = udev_ctrl_unref(manager->ctrl);
@@ -350,7 +349,7 @@ static void manager_exit(Manager *manager) {
 static void notify_ready(void) {
         int r;
 
-        r = sd_notifyf(false,
+        r = sd_notifyf(/* unset= */ false,
                        "READY=1\n"
                        "STATUS=Processing with %u children at max", arg_children_max);
         if (r < 0)
@@ -375,23 +374,33 @@ static void manager_reload(Manager *manager, bool force) {
         mac_selinux_maybe_reload();
 
         /* Nothing changed. It is not necessary to reload. */
-        if (!udev_rules_should_reload(manager->rules) && !udev_builtin_should_reload())
-                return;
+        if (!udev_rules_should_reload(manager->rules) && !udev_builtin_should_reload()) {
 
-        sd_notify(false,
-                  "RELOADING=1\n"
-                  "STATUS=Flushing configuration...");
+                if (!force)
+                        return;
 
-        manager_kill_workers(manager, false);
+                /* If we eat this up, then tell our service manager to just continue */
+                (void) sd_notifyf(/* unset= */ false,
+                                  "RELOADING=1\n"
+                                  "STATUS=Skipping configuration reloading, nothing changed.\n"
+                                  "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
+        } else {
+                (void) sd_notifyf(/* unset= */ false,
+                                  "RELOADING=1\n"
+                                  "STATUS=Flushing configuration...\n"
+                                  "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
 
-        udev_builtin_exit();
-        udev_builtin_init();
+                manager_kill_workers(manager, false);
 
-        r = udev_rules_load(&rules, arg_resolve_name_timing);
-        if (r < 0)
-                log_warning_errno(r, "Failed to read udev rules, using the previously loaded rules, ignoring: %m");
-        else
-                udev_rules_free_and_replace(manager->rules, rules);
+                udev_builtin_exit();
+                udev_builtin_init();
+
+                r = udev_rules_load(&rules, arg_resolve_name_timing);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to read udev rules, using the previously loaded rules, ignoring: %m");
+                else
+                        udev_rules_free_and_replace(manager->rules, rules);
+        }
 
         notify_ready();
 }
@@ -513,7 +522,7 @@ irrelevant:
 }
 
 static int worker_lock_whole_disk(sd_device *dev, int *ret_fd) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         sd_device *dev_whole_disk;
         const char *val;
         int r;
@@ -550,12 +559,12 @@ static int worker_lock_whole_disk(sd_device *dev, int *ret_fd) {
         return 1;
 
 nolock:
-        *ret_fd = -1;
+        *ret_fd = -EBADF;
         return 0;
 }
 
 static int worker_mark_block_device_read_only(sd_device *dev) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *val;
         int state = 1, r;
 
@@ -600,7 +609,7 @@ static int worker_mark_block_device_read_only(sd_device *dev) {
 
 static int worker_process_device(Manager *manager, sd_device *dev) {
         _cleanup_(udev_event_freep) UdevEvent *udev_event = NULL;
-        _cleanup_close_ int fd_lock = -1;
+        _cleanup_close_ int fd_lock = -EBADF;
         int r;
 
         assert(manager);
@@ -642,7 +651,11 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
                 /* in case rtnl was initialized */
                 manager->rtnl = sd_netlink_ref(udev_event->rtnl);
 
-        udev_event_process_inotify_watch(udev_event, manager->inotify_fd);
+        if (udev_event->inotify_watch) {
+                r = udev_watch_begin(manager->inotify_fd, dev);
+                if (r < 0 && r != -ENOENT) /* The device may be already removed, ignore -ENOENT. */
+                        log_device_warning_errno(dev, r, "Failed to add inotify watch, ignoring: %m");
+        }
 
         log_device_uevent(dev, "Device processed");
         return 0;
@@ -794,7 +807,7 @@ static int worker_spawn(Manager *manager, Event *event) {
         if (r < 0)
                 return log_error_errno(r, "Worker: Failed to enable receiving of device: %m");
 
-        r = safe_fork(NULL, FORK_DEATHSIG, &pid);
+        r = safe_fork("(udev-worker)", FORK_DEATHSIG, &pid);
         if (r < 0) {
                 event->state = EVENT_QUEUED;
                 return log_error_errno(r, "Failed to fork() worker: %m");
@@ -1557,7 +1570,7 @@ static int on_post(sd_event_source *s, void *userdata) {
 }
 
 static int listen_fds(int *ret_ctrl, int *ret_netlink) {
-        int ctrl_fd = -1, netlink_fd = -1;
+        int ctrl_fd = -EBADF, netlink_fd = -EBADF;
         int fd, n;
 
         assert(ret_ctrl);
@@ -1843,8 +1856,8 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent) {
                 return log_oom();
 
         *manager = (Manager) {
-                .inotify_fd = -1,
-                .worker_watch = { -1, -1 },
+                .inotify_fd = -EBADF,
+                .worker_watch = PIPE_EBADF,
                 .cgroup = TAKE_PTR(cgroup),
         };
 
@@ -1981,15 +1994,13 @@ static int main_loop(Manager *manager) {
         if (r < 0)
                 log_error_errno(r, "Event loop failed: %m");
 
-        sd_notify(false,
-                  "STOPPING=1\n"
-                  "STATUS=Shutting down...");
+        (void) sd_notify(/* unset= */ false, NOTIFY_STOPPING);
         return r;
 }
 
 int run_udevd(int argc, char *argv[]) {
         _cleanup_(manager_freep) Manager *manager = NULL;
-        int fd_ctrl = -1, fd_uevent = -1;
+        int fd_ctrl = -EBADF, fd_uevent = -EBADF;
         int r;
 
         log_set_target(LOG_TARGET_AUTO);

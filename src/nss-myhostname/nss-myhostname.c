@@ -12,6 +12,7 @@
 #include "local-addresses.h"
 #include "macro.h"
 #include "nss-util.h"
+#include "resolve-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
 #include "string-util.h"
@@ -21,7 +22,7 @@
  * IPv6 we use ::1 which unfortunately will not translate back to the
  * hostname but instead something like "localhost" or so. */
 
-#define LOCALADDRESS_IPV4 (htobe32(0x7F000002))
+#define LOCALADDRESS_IPV4 (htobe32(INADDR_LOCALADDRESS))
 #define LOCALADDRESS_IPV6 &in6addr_loopback
 
 NSS_GETHOSTBYNAME_PROTOTYPES(myhostname);
@@ -345,9 +346,10 @@ enum nss_status _nss_myhostname_gethostbyname3_r(
                 return NSS_STATUS_UNAVAIL;
         }
 
+        if (af == AF_INET6 && !socket_ipv6_is_enabled())
+                goto not_found;
+
         if (is_localhost(name)) {
-                if (af == AF_INET6 && !socket_ipv6_is_enabled())
-                        goto not_found;
 
                 canonical = "localhost";
                 local_address_ipv4 = htobe32(INADDR_LOOPBACK);
@@ -460,7 +462,7 @@ enum nss_status _nss_myhostname_gethostbyaddr2_r(
         } else {
                 assert(af == AF_INET6);
 
-                if (socket_ipv6_is_enabled())
+                if (!socket_ipv6_is_enabled())
                         goto not_found;
 
                 if (memcmp(addr, LOCALADDRESS_IPV6, 16) == 0) {

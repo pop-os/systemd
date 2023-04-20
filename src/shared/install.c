@@ -13,7 +13,7 @@
 #include "chase-symlinks.h"
 #include "conf-files.h"
 #include "conf-parser.h"
-#include "def.h"
+#include "constants.h"
 #include "dirent-util.h"
 #include "errno-list.h"
 #include "extract-word.h"
@@ -744,7 +744,7 @@ static int remove_marked_symlinks(
                 InstallChange **changes,
                 size_t *n_changes) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         bool restart;
         int r = 0;
 
@@ -1335,7 +1335,7 @@ static int unit_file_load(
 
         UnitType type;
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
         int r;
 
@@ -1658,7 +1658,7 @@ static int install_info_traverse(
                 r = install_info_follow(ctx, i, lp, flags,
                                         /* If linked, don't look at the target name */
                                         /* ignore_different_name= */ i->install_mode == INSTALL_MODE_LINKED);
-                if (r == -EXDEV) {
+                if (r == -EXDEV && i->symlink_target) {
                         _cleanup_free_ char *buffer = NULL;
                         const char *bn;
 
@@ -1897,6 +1897,7 @@ static int install_info_symlink_alias(
 
         STRV_FOREACH(s, info->aliases) {
                 _cleanup_free_ char *alias_path = NULL, *dst = NULL, *dst_updated = NULL;
+                bool broken;
 
                 q = install_name_printf(scope, info, *s, &dst);
                 if (q < 0) {
@@ -1917,7 +1918,14 @@ static int install_info_symlink_alias(
                 if (!alias_path)
                         return -ENOMEM;
 
-                q = create_symlink(lp, info->path, alias_path, force, changes, n_changes);
+                q = chase_symlinks(alias_path, lp->root_dir, CHASE_NONEXISTENT, NULL, NULL);
+                if (q < 0 && q != -ENOENT) {
+                        r = r < 0 ? r : q;
+                        continue;
+                }
+                broken = q == 0; /* symlink target does not exist? */
+
+                q = create_symlink(lp, info->path, alias_path, force || broken, changes, n_changes);
                 r = r < 0 ? r : q;
         }
 
@@ -2795,24 +2803,37 @@ static int do_unit_file_disable(
 
         _cleanup_(install_context_done) InstallContext ctx = { .scope = scope };
         _cleanup_set_free_free_ Set *remove_symlinks_to = NULL;
+        InstallInfo *info;
+        bool has_install_info = false;
         int r;
 
         STRV_FOREACH(name, names) {
                 if (!unit_name_is_valid(*name, UNIT_NAME_ANY))
                         return install_changes_add(changes, n_changes, -EUCLEAN, *name, NULL);
 
-                r = install_info_add(&ctx, *name, NULL, lp->root_dir, /* auxiliary= */ false, NULL);
+                r = install_info_add(&ctx, *name, NULL, lp->root_dir, /* auxiliary= */ false, &info);
+                if (r >= 0)
+                        r = install_info_traverse(&ctx, lp, info, SEARCH_LOAD|SEARCH_FOLLOW_CONFIG_SYMLINKS, NULL);
+
                 if (r < 0)
-                        return r;
+                        return install_changes_add(changes, n_changes, r, *name, NULL);
+
+                /* If we enable multiple units, some with install info and others without,
+                 * the "empty [Install] section" warning is not shown. Let's make the behavior
+                 * of disable align with that. */
+                has_install_info = has_install_info || install_info_has_rules(info) || install_info_has_also(info);
         }
 
         r = install_context_mark_for_removal(&ctx, lp, &remove_symlinks_to, config_path, changes, n_changes);
+        if (r >= 0)
+                r = remove_marked_symlinks(remove_symlinks_to, config_path, lp, flags & UNIT_FILE_DRY_RUN, changes, n_changes);
+
         if (r < 0)
                 return r;
 
-        return remove_marked_symlinks(remove_symlinks_to, config_path, lp, flags & UNIT_FILE_DRY_RUN, changes, n_changes);
+        /* The warning is shown only if it's a no-op */
+        return install_changes_have_modification(*changes, *n_changes) || has_install_info;
 }
-
 
 int unit_file_disable(
                 LookupScope scope,
@@ -2847,7 +2868,7 @@ static int normalize_linked_files(
                 char ***ret_files) {
 
         /* This is similar to normalize_filenames()/normalize_names() in src/systemctl/,
-         * but operates on real unit names. For each argument we we look up the actual path
+         * but operates on real unit names. For each argument we look up the actual path
          * where the unit is found. This way linked units can be re-enabled successfully. */
 
         _cleanup_strv_free_ char **files = NULL, **names = NULL;

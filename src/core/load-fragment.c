@@ -49,9 +49,11 @@
 #include "missing_ioprio.h"
 #include "mountpoint-util.h"
 #include "nulstr-util.h"
+#include "open-file.h"
 #include "parse-helpers.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pcre2-util.h"
 #include "percent-util.h"
 #include "process-util.h"
 #if HAVE_SECCOMP
@@ -149,7 +151,7 @@ DEFINE_CONFIG_PARSE_PTR(config_parse_blockio_weight, cg_blkio_weight_parse, uint
 DEFINE_CONFIG_PARSE_PTR(config_parse_cg_weight, cg_weight_parse, uint64_t, "Invalid weight");
 DEFINE_CONFIG_PARSE_PTR(config_parse_cg_cpu_weight, cg_cpu_weight_parse, uint64_t, "Invalid CPU weight");
 static DEFINE_CONFIG_PARSE_PTR(config_parse_cpu_shares_internal, cg_cpu_shares_parse, uint64_t, "Invalid CPU shares");
-DEFINE_CONFIG_PARSE_PTR(config_parse_exec_mount_flags, mount_propagation_flags_from_string, unsigned long, "Failed to parse mount flag");
+DEFINE_CONFIG_PARSE_PTR(config_parse_exec_mount_flags, mount_propagation_flag_from_string, unsigned long, "Failed to parse mount flag");
 DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_numa_policy, mpol, int, -1, "Invalid NUMA policy type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_status_unit_format, status_unit_format, StatusUnitFormat, "Failed to parse status unit format");
 DEFINE_CONFIG_PARSE_ENUM_FULL(config_parse_socket_timestamping, socket_timestamping_from_string_harder, SocketTimestamping, "Failed to parse timestamping precision");
@@ -673,12 +675,12 @@ int config_parse_socket_listen(
                 p->type = SOCKET_SOCKET;
         }
 
-        p->fd = -1;
+        p->fd = -EBADF;
         p->auxiliary_fds = NULL;
         p->n_auxiliary_fds = 0;
         p->socket = s;
 
-        LIST_FIND_TAIL(port, s->ports, tail);
+        tail = LIST_FIND_TAIL(port, s->ports);
         LIST_INSERT_AFTER(port, s->ports, tail, p);
 
         p = NULL;
@@ -2231,7 +2233,7 @@ int config_parse_path_spec(const char *unit,
         s->unit = UNIT(p);
         s->path = TAKE_PTR(k);
         s->type = b;
-        s->inotify_fd = -1;
+        s->inotify_fd = -EBADF;
 
         LIST_PREPEND(spec, p->specs, s);
 
@@ -3826,7 +3828,7 @@ int config_parse_memory_limit(
                         bytes = physical_memory_scale(r, 10000U);
 
                 if (bytes >= UINT64_MAX ||
-                    (bytes <= 0 && !STR_IN_SET(lvalue, "MemorySwapMax", "MemoryLow", "MemoryMin", "DefaultMemoryLow", "DefaultMemoryMin"))) {
+                    (bytes <= 0 && !STR_IN_SET(lvalue, "MemorySwapMax", "MemoryZSwapMax", "MemoryLow", "MemoryMin", "DefaultMemoryLow", "DefaultMemoryMin"))) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0, "Memory limit '%s' out of range, ignoring.", rvalue);
                         return 0;
                 }
@@ -3850,6 +3852,8 @@ int config_parse_memory_limit(
                 c->memory_max = bytes;
         else if (streq(lvalue, "MemorySwapMax"))
                 c->memory_swap_max = bytes;
+        else if (streq(lvalue, "MemoryZSwapMax"))
+                c->memory_zswap_max = bytes;
         else if (streq(lvalue, "MemoryLimit")) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Unit uses MemoryLimit=; please use MemoryMax= instead. Support for MemoryLimit= will be removed soon.");
@@ -4602,7 +4606,7 @@ int config_parse_exec_directories(
                 if (r == -ENOMEM)
                         return log_oom();
                 if (r <= 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, r ?: SYNTHETIC_ERRNO(EINVAL),
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Invalid syntax in %s=, ignoring: %s", lvalue, tuple);
                         return 0;
                 }
@@ -5578,35 +5582,26 @@ int config_parse_emergency_action(
                 void *data,
                 void *userdata) {
 
-        Manager *m = NULL;
         EmergencyAction *x = ASSERT_PTR(data);
+        bool is_system;
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
 
+        /* If we have a unit determine the scope based on it */
         if (unit)
-                m = ((Unit*) userdata)->manager;
+                is_system = MANAGER_IS_SYSTEM(((Unit*) ASSERT_PTR(userdata))->manager);
         else
-                m = data;
+                is_system = ltype; /* otherwise, assume the scope is passed in via ltype */
 
-        r = parse_emergency_action(rvalue, MANAGER_IS_SYSTEM(m), x);
+        r = parse_emergency_action(rvalue, is_system, x);
         if (r < 0) {
-                if (r == -EOPNOTSUPP && MANAGER_IS_USER(m)) {
-                        /* Compat mode: remove for systemd 241. */
-
-                        log_syntax(unit, LOG_INFO, filename, line, r,
-                                   "%s= in user mode specified as \"%s\", using \"exit-force\" instead.",
-                                   lvalue, rvalue);
-                        *x = EMERGENCY_ACTION_EXIT_FORCE;
-                        return 0;
-                }
-
                 if (r == -EOPNOTSUPP)
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "%s= specified as %s mode action, ignoring: %s",
-                                   lvalue, MANAGER_IS_SYSTEM(m) ? "user" : "system", rvalue);
+                                   lvalue, is_system ? "user" : "system", rvalue);
                 else
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to parse %s=, ignoring: %s", lvalue, rvalue);
@@ -6223,10 +6218,10 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_job_mode,              "MODE" },
                 { config_parse_job_mode_isolate,      "BOOLEAN" },
                 { config_parse_personality,           "PERSONALITY" },
+                { config_parse_log_filter_patterns,   "REGEX" },
         };
 
         const char *prev = NULL;
-        const char *i;
 
         assert(f);
 
@@ -6487,4 +6482,90 @@ int config_parse_tty_size(
         }
 
         return config_parse_unsigned(unit, filename, line, section, section_line, lvalue, ltype, rvalue, data, userdata);
+}
+
+int config_parse_log_filter_patterns(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        ExecContext *c = ASSERT_PTR(data);
+        const char *pattern = ASSERT_PTR(rvalue);
+        bool is_allowlist = true;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+
+        if (isempty(pattern)) {
+                /* Empty assignment resets the lists. */
+                c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
+                c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
+                return 0;
+        }
+
+        if (pattern[0] == '~') {
+                is_allowlist = false;
+                pattern++;
+                if (isempty(pattern))
+                        /* LogFilterPatterns=~ is not considered a valid pattern. */
+                        return log_syntax(unit, LOG_WARNING, filename, line, 0,
+                                          "Regex pattern invalid, ignoring: %s=%s", lvalue, rvalue);
+        }
+
+        if (pattern_compile_and_log(pattern, 0, NULL) < 0)
+                return 0;
+
+        r = set_put_strdup(is_allowlist ? &c->log_filter_allowed_patterns : &c->log_filter_denied_patterns,
+                           pattern);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to store log filtering pattern, ignoring: %s=%s", lvalue, rvalue);
+                return 0;
+        }
+
+        return 0;
+}
+
+int config_parse_open_file(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_(open_file_freep) OpenFile *of = NULL;
+        OpenFile **head = ASSERT_PTR(data);
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                open_file_free_many(head);
+                return 0;
+        }
+
+        r = open_file_parse(rvalue, &of);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse OpenFile= setting, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        LIST_APPEND(open_files, *head, TAKE_PTR(of));
+
+        return 0;
 }

@@ -11,8 +11,8 @@
 #include "arphrd-util.h"
 #include "conf-files.h"
 #include "conf-parser.h"
+#include "constants.h"
 #include "creds-util.h"
-#include "def.h"
 #include "device-private.h"
 #include "device-util.h"
 #include "ethtool-util.h"
@@ -47,6 +47,7 @@ static LinkConfig* link_config_free(LinkConfig *config) {
                 return NULL;
 
         free(config->filename);
+        strv_free(config->dropins);
 
         net_match_clear(&config->match);
         condition_free_list(config->conditions);
@@ -97,7 +98,7 @@ int link_config_ctx_new(LinkConfigContext **ret) {
                 return -ENOMEM;
 
         *ctx = (LinkConfigContext) {
-                .ethtool_fd = -1,
+                .ethtool_fd = -EBADF,
         };
 
         *ret = TAKE_PTR(ctx);
@@ -264,7 +265,7 @@ int link_load_one(LinkConfigContext *ctx, const char *filename) {
                         "SR-IOV\0",
                         config_item_perf_lookup, link_config_gperf_lookup,
                         CONFIG_PARSE_WARN, config, &stats_by_path,
-                        NULL);
+                        &config->dropins);
         if (r < 0)
                 return r; /* config_parse_many() logs internally. */
 
@@ -547,7 +548,7 @@ static bool hw_addr_is_valid(Link *link, const struct hw_addr_data *hw_addr) {
                 return !ether_addr_is_null(&hw_addr->ether) && !ether_addr_is_broadcast(&hw_addr->ether);
 
         case ARPHRD_INFINIBAND:
-                /* The last 8 bytes cannot be zero*/
+                /* The last 8 bytes cannot be zero. */
                 assert(hw_addr->length == INFINIBAND_ALEN);
                 return !memeqzero(hw_addr->bytes + INFINIBAND_ALEN - 8, 8);
 
@@ -841,8 +842,6 @@ static int link_apply_alternative_names(Link *link, sd_netlink **rtnl) {
                         }
                 }
 
-        if (link->new_name)
-                strv_remove(altnames, link->new_name);
         strv_remove(altnames, link->ifname);
 
         r = rtnl_get_link_alternative_names(rtnl, link->ifindex, &current_altnames);

@@ -14,3 +14,4 @@ usr/share/pkgconfig/udev.pc
 ../extra/rules/*.rules lib/udev/rules.d/
 ../extra/network/*.link lib/systemd/network/
 ../extra/fbdev-blacklist.conf lib/modprobe.d/
+../extra/units/systemd-udevd.service.d lib/systemd/system/

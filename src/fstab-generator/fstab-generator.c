@@ -8,11 +8,13 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "chase-symlinks.h"
+#include "efi-loader.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fstab-util.h"
 #include "generator.h"
 #include "in-addr-util.h"
+#include "initrd-util.h"
 #include "log.h"
 #include "main-func.h"
 #include "mkdir.h"
@@ -29,7 +31,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "unit-name.h"
-#include "util.h"
 #include "virt.h"
 #include "volatile-util.h"
 
@@ -40,6 +41,7 @@ typedef enum MountPointFlags {
         MOUNT_MAKEFS    = 1 << 3,
         MOUNT_GROWFS    = 1 << 4,
         MOUNT_RW_ONLY   = 1 << 5,
+        MOUNT_PCRFS     = 1 << 6,
 } MountPointFlags;
 
 static bool arg_sysroot_check = false;
@@ -176,6 +178,8 @@ static int add_swap(
         if (flags & MOUNT_GROWFS)
                 /* TODO: swap devices must be wiped and recreated */
                 log_warning("%s: growing swap devices is currently unsupported.", what);
+        if (flags & MOUNT_PCRFS)
+                log_warning("%s: measuring swap devices is currently unsupported.", what);
 
         if (!(flags & MOUNT_NOAUTO)) {
                 r = generator_add_symlink(arg_dest, SPECIAL_SWAP_TARGET,
@@ -525,6 +529,17 @@ static int add_mount(
                         return r;
         }
 
+        if (flags & MOUNT_PCRFS) {
+                r = efi_stub_measured(LOG_WARNING);
+                if (r == 0)
+                        log_debug("Kernel stub did not measure kernel image into PCR, skipping userspace measurement, too.");
+                else if (r > 0) {
+                        r = generator_hook_up_pcrfs(dest, where, target_unit);
+                        if (r < 0)
+                                return r;
+                }
+        }
+
         if (!FLAGS_SET(flags, MOUNT_AUTOMOUNT)) {
                 if (!FLAGS_SET(flags, MOUNT_NOAUTO) && strv_isempty(wanted_by) && strv_isempty(required_by)) {
                         r = generator_add_symlink(dest, target_unit,
@@ -658,7 +673,7 @@ static int parse_fstab(bool initrd) {
 
         while ((me = getmntent(f))) {
                 _cleanup_free_ char *where = NULL, *what = NULL, *canonical_where = NULL;
-                bool makefs, growfs, noauto, nofail;
+                bool makefs, growfs, pcrfs, noauto, nofail;
                 MountPointFlags flags;
                 int k;
 
@@ -671,12 +686,12 @@ static int parse_fstab(bool initrd) {
 
                 if (path_is_read_only_fs("/sys") > 0) {
                         if (streq(what, "sysfs")) {
-                                log_info("Running in a container, ignoring fstab entry for %s.", what);
+                                log_info("/sys/ is read-only (running in a container?), ignoring fstab entry for %s.", me->mnt_dir);
                                 continue;
                         }
 
                         if (is_device_path(what)) {
-                                log_info("Running in a container, ignoring fstab device entry for %s.", what);
+                                log_info("/sys/ is read-only (running in a container?), ignoring fstab device entry for %s.", what);
                                 continue;
                         }
                 }
@@ -718,16 +733,18 @@ static int parse_fstab(bool initrd) {
 
                 makefs = fstab_test_option(me->mnt_opts, "x-systemd.makefs\0");
                 growfs = fstab_test_option(me->mnt_opts, "x-systemd.growfs\0");
+                pcrfs = fstab_test_option(me->mnt_opts, "x-systemd.pcrfs\0");
                 noauto = fstab_test_yes_no_option(me->mnt_opts, "noauto\0" "auto\0");
                 nofail = fstab_test_yes_no_option(me->mnt_opts, "nofail\0" "fail\0");
 
-                log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s noauto=%s nofail=%s",
+                log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s pcrfs=%s noauto=%s nofail=%s",
                           what, where, me->mnt_type,
-                          yes_no(makefs), yes_no(growfs),
+                          yes_no(makefs), yes_no(growfs), yes_no(pcrfs),
                           yes_no(noauto), yes_no(nofail));
 
                 flags = makefs * MOUNT_MAKEFS |
                         growfs * MOUNT_GROWFS |
+                        pcrfs * MOUNT_PCRFS |
                         noauto * MOUNT_NOAUTO |
                         nofail * MOUNT_NOFAIL;
 
@@ -824,7 +841,8 @@ static int sysroot_is_nfsroot(void) {
 static int add_sysroot_mount(void) {
         _cleanup_free_ char *what = NULL;
         const char *opts, *fstype;
-        bool default_rw;
+        bool default_rw, makefs;
+        MountPointFlags flags;
         int r;
 
         if (isempty(arg_root_what)) {
@@ -899,6 +917,9 @@ static int add_sysroot_mount(void) {
                         return r;
         }
 
+        makefs = fstab_test_option(opts, "x-systemd.makefs\0");
+        flags = makefs * MOUNT_MAKEFS;
+
         return add_mount("/proc/cmdline",
                          arg_dest,
                          what,
@@ -907,13 +928,15 @@ static int add_sysroot_mount(void) {
                          fstype,
                          opts,
                          is_device_path(what) ? 1 : 0, /* passno */
-                         0,                            /* makefs off, growfs off, noauto off, nofail off, automount off */
+                         flags,                        /* makefs off, pcrfs off, noauto off, nofail off, automount off */
                          SPECIAL_INITRD_ROOT_FS_TARGET);
 }
 
 static int add_sysroot_usr_mount(void) {
         _cleanup_free_ char *what = NULL;
         const char *opts;
+        bool makefs;
+        MountPointFlags flags;
         int r;
 
         /* Returns 0 if we didn't do anything, > 0 if we either generated a unit for the /usr/ mount, or we
@@ -979,6 +1002,9 @@ static int add_sysroot_usr_mount(void) {
 
         log_debug("Found entry what=%s where=/sysusr/usr type=%s opts=%s", what, strna(arg_usr_fstype), strempty(opts));
 
+        makefs = fstab_test_option(opts, "x-systemd.makefs\0");
+        flags = makefs * MOUNT_MAKEFS;
+
         r = add_mount("/proc/cmdline",
                       arg_dest,
                       what,
@@ -987,7 +1013,7 @@ static int add_sysroot_usr_mount(void) {
                       arg_usr_fstype,
                       opts,
                       is_device_path(what) ? 1 : 0, /* passno */
-                      0,
+                      flags,
                       SPECIAL_INITRD_USR_FS_TARGET);
         if (r < 0)
                 return r;

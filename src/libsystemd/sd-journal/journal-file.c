@@ -20,9 +20,11 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "fs-util.h"
+#include "id128-util.h"
 #include "journal-authenticate.h"
 #include "journal-def.h"
 #include "journal-file.h"
+#include "journal-internal.h"
 #include "lookup3.h"
 #include "memory-util.h"
 #include "path-util.h"
@@ -34,6 +36,7 @@
 #include "string-util.h"
 #include "strv.h"
 #include "sync-util.h"
+#include "user-util.h"
 #include "xattr-util.h"
 
 #define DEFAULT_DATA_HASH_TABLE_SIZE (2047ULL*sizeof(HashItem))
@@ -91,6 +94,19 @@
 #ifdef __clang__
 #  pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 #endif
+
+static int mmap_prot_from_open_flags(int flags) {
+        switch (flags & O_ACCMODE) {
+        case O_RDONLY:
+                return PROT_READ;
+        case O_WRONLY:
+                return PROT_WRITE;
+        case O_RDWR:
+                return PROT_READ|PROT_WRITE;
+        default:
+                assert_not_reached();
+        }
+}
 
 int journal_file_tail_end_by_pread(JournalFile *f, uint64_t *ret_offset) {
         uint64_t p;
@@ -319,10 +335,13 @@ static bool compact_mode_requested(void) {
         return true;
 }
 
-static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags, JournalFile *template) {
-        Header h = {};
-        ssize_t k;
+static int journal_file_init_header(
+                JournalFile *f,
+                JournalFileFlags file_flags,
+                JournalFile *template) {
+
         bool seal = false;
+        ssize_t k;
         int r;
 
         assert(f);
@@ -332,16 +351,17 @@ static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags,
         seal = FLAGS_SET(file_flags, JOURNAL_SEAL) && journal_file_fss_load(f) >= 0;
 #endif
 
-        memcpy(h.signature, HEADER_SIGNATURE, 8);
-        h.header_size = htole64(ALIGN64(sizeof(h)));
+        Header h = {
+                .header_size = htole64(ALIGN64(sizeof(h))),
+                .incompatible_flags = htole32(
+                                FLAGS_SET(file_flags, JOURNAL_COMPRESS) * COMPRESSION_TO_HEADER_INCOMPATIBLE_FLAG(DEFAULT_COMPRESSION) |
+                                keyed_hash_requested() * HEADER_INCOMPATIBLE_KEYED_HASH |
+                                compact_mode_requested() * HEADER_INCOMPATIBLE_COMPACT),
+                .compatible_flags = htole32(seal * HEADER_COMPATIBLE_SEALED),
+        };
 
-        h.incompatible_flags |= htole32(
-                        FLAGS_SET(file_flags, JOURNAL_COMPRESS) *
-                        COMPRESSION_TO_HEADER_INCOMPATIBLE_FLAG(DEFAULT_COMPRESSION) |
-                        keyed_hash_requested() * HEADER_INCOMPATIBLE_KEYED_HASH |
-                        compact_mode_requested() * HEADER_INCOMPATIBLE_COMPACT);
-
-        h.compatible_flags = htole32(seal * HEADER_COMPATIBLE_SEALED);
+        assert_cc(sizeof(h.signature) == sizeof(HEADER_SIGNATURE));
+        memcpy(h.signature, HEADER_SIGNATURE, sizeof(HEADER_SIGNATURE));
 
         r = sd_id128_randomize(&h.file_id);
         if (r < 0)
@@ -356,7 +376,6 @@ static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags,
         k = pwrite(f->fd, &h, sizeof(h), 0);
         if (k < 0)
                 return -errno;
-
         if (k != sizeof(h))
                 return -EIO;
 
@@ -370,11 +389,13 @@ static int journal_file_refresh_header(JournalFile *f) {
         assert(f->header);
 
         r = sd_id128_get_machine(&f->header->machine_id);
-        if (IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG))
-                /* We don't have a machine-id, let's continue without */
-                zero(f->header->machine_id);
-        else if (r < 0)
-                return r;
+        if (r < 0) {
+                if (!ERRNO_IS_MACHINE_ID_UNSET(r))
+                        return r;
+
+                /* don't have a machine-id, let's continue without */
+                f->header->machine_id = SD_ID128_NULL;
+        }
 
         r = sd_id128_get_boot(&f->header->boot_id);
         if (r < 0)
@@ -465,6 +486,11 @@ static int journal_file_verify_header(JournalFile *f) {
         if (header_size < HEADER_SIZE_MIN)
                 return -EBADMSG;
 
+        /* When open for writing we refuse to open files with a mismatch of the header size, i.e. writing to
+         * files implementing older or new header structures. */
+        if (journal_file_writable(f) && header_size != sizeof(Header))
+                return -EPROTONOSUPPORT;
+
         if (JOURNAL_HEADER_SEALED(f->header) && !JOURNAL_HEADER_CONTAINS(f->header, n_entry_arrays))
                 return -EBADMSG;
 
@@ -492,17 +518,18 @@ static int journal_file_verify_header(JournalFile *f) {
                         return r;
 
                 if (!sd_id128_equal(machine_id, f->header->machine_id))
-                        return -EHOSTDOWN;
+                        return log_debug_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                               "Trying to open journal file from different host for writing, refusing.");
 
                 state = f->header->state;
 
                 if (state == STATE_ARCHIVED)
                         return -ESHUTDOWN; /* Already archived */
-                else if (state == STATE_ONLINE)
+                if (state == STATE_ONLINE)
                         return log_debug_errno(SYNTHETIC_ERRNO(EBUSY),
                                                "Journal file %s is already online. Assuming unclean closing.",
                                                f->path);
-                else if (state != STATE_OFFLINE)
+                if (state != STATE_OFFLINE)
                         return log_debug_errno(SYNTHETIC_ERRNO(EBUSY),
                                                "Journal file %s has unknown state %i.",
                                                f->path, state);
@@ -973,35 +1000,37 @@ int journal_file_read_object_header(JournalFile *f, ObjectType type, uint64_t of
         return 0;
 }
 
+static uint64_t inc_seqnum(uint64_t seqnum) {
+        if (seqnum < UINT64_MAX-1)
+                return seqnum + 1;
+
+        return 1; /* skip over UINT64_MAX and 0 when we run out of seqnums and start again */
+}
+
 static uint64_t journal_file_entry_seqnum(
                 JournalFile *f,
                 uint64_t *seqnum) {
 
-        uint64_t ret;
+        uint64_t next_seqnum;
 
         assert(f);
         assert(f->header);
 
         /* Picks a new sequence number for the entry we are about to add and returns it. */
 
-        ret = le64toh(f->header->tail_entry_seqnum) + 1;
+        next_seqnum = inc_seqnum(le64toh(f->header->tail_entry_seqnum));
 
-        if (seqnum) {
-                /* If an external seqnum counter was passed, we update both the local and the external one,
-                 * and set it to the maximum of both */
+        /* If an external seqnum counter was passed, we update both the local and the external one, and set
+         * it to the maximum of both */
+        if (seqnum)
+                *seqnum = next_seqnum = MAX(inc_seqnum(*seqnum), next_seqnum);
 
-                if (*seqnum + 1 > ret)
-                        ret = *seqnum + 1;
-
-                *seqnum = ret;
-        }
-
-        f->header->tail_entry_seqnum = htole64(ret);
+        f->header->tail_entry_seqnum = htole64(next_seqnum);
 
         if (f->header->head_entry_seqnum == 0)
-                f->header->head_entry_seqnum = htole64(ret);
+                f->header->head_entry_seqnum = htole64(next_seqnum);
 
-        return ret;
+        return next_seqnum;
 }
 
 int journal_file_append_object(
@@ -2078,6 +2107,38 @@ static int journal_file_append_entry_internal(
         assert(ts);
         assert(items || n_items == 0);
 
+        if (f->strict_order) {
+                /* If requested be stricter with ordering in this journal file, to make searching via
+                 * bisection fully deterministic. This is an optional feature, so that if desired journal
+                 * files can be written where the ordering is not strictly enforced (in which case bisection
+                 * will yield *a* result, but not the *only* result, when searching for points in
+                 * time). Strict ordering mode is enabled when journald originally writes the files, but
+                 * might not necessarily be if other tools (the remoting tools for example) write journal
+                 * files from combined sources.
+                 *
+                 * Typically, if any of the errors generated here are seen journald will just rotate the
+                 * journal files and start anew. */
+
+                if (ts->realtime < le64toh(f->header->tail_entry_realtime))
+                        return log_debug_errno(SYNTHETIC_ERRNO(EREMCHG),
+                                               "Realtime timestamp %" PRIu64 " smaller than previous realtime "
+                                               "timestamp %" PRIu64 ", refusing entry.",
+                                               ts->realtime, le64toh(f->header->tail_entry_realtime));
+
+                if (!sd_id128_is_null(f->header->boot_id) && boot_id) {
+
+                        if (!sd_id128_equal(f->header->boot_id, *boot_id))
+                                return log_debug_errno(SYNTHETIC_ERRNO(EREMOTE),
+                                                       "Boot ID to write is different from previous boot id, refusing entry.");
+
+                        if (ts->monotonic < le64toh(f->header->tail_entry_monotonic))
+                                return log_debug_errno(SYNTHETIC_ERRNO(ENOTNAM),
+                                                       "Monotonic timestamp %" PRIu64 " smaller than previous monotonic "
+                                                       "timestamp %" PRIu64 ", refusing entry.",
+                                                       ts->monotonic, le64toh(f->header->tail_entry_monotonic));
+                }
+        }
+
         osize = offsetof(Object, entry.items) + (n_items * journal_file_entry_item_size(f));
 
         r = journal_file_append_object(f, OBJECT_ENTRY, osize, &o, &np);
@@ -2227,7 +2288,7 @@ int journal_file_append_entry(
                 const dual_timestamp *ts,
                 const sd_id128_t *boot_id,
                 const struct iovec iovec[],
-                unsigned n_iovec,
+                size_t n_iovec,
                 uint64_t *seqnum,
                 Object **ret_object,
                 uint64_t *ret_offset) {
@@ -2236,6 +2297,7 @@ int journal_file_append_entry(
         EntryItem *items;
         uint64_t xor_hash = 0;
         struct dual_timestamp _ts;
+        sd_id128_t _boot_id;
         int r;
 
         assert(f);
@@ -2255,6 +2317,14 @@ int journal_file_append_entry(
         } else {
                 dual_timestamp_get(&_ts);
                 ts = &_ts;
+        }
+
+        if (!boot_id) {
+                r = sd_id128_get_boot(&_boot_id);
+                if (r < 0)
+                        return r;
+
+                boot_id = &_boot_id;
         }
 
 #if HAVE_GCRYPT
@@ -3569,22 +3639,24 @@ static int journal_file_warn_btrfs(JournalFile *f) {
 
         r = fd_is_fs_type(f->fd, BTRFS_SUPER_MAGIC);
         if (r < 0)
-                return log_warning_errno(r, "Failed to determine if journal is on btrfs: %m");
+                return log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT, "Failed to determine if journal is on btrfs: %m");
         if (!r)
                 return 0;
 
         r = read_attr_fd(f->fd, &attrs);
         if (r < 0)
-                return log_warning_errno(r, "Failed to read file attributes: %m");
+                return log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT, "Failed to read file attributes: %m");
 
         if (attrs & FS_NOCOW_FL) {
                 log_debug("Detected btrfs file system with copy-on-write disabled, all is good.");
                 return 0;
         }
 
-        log_notice("Creating journal file %s on a btrfs file system, and copy-on-write is enabled. "
-                   "This is likely to slow down journal access substantially, please consider turning "
-                   "off the copy-on-write file attribute on the journal directory, using chattr +C.", f->path);
+        log_ratelimit_notice(JOURNAL_LOG_RATELIMIT,
+                             "Creating journal file %s on a btrfs file system, and copy-on-write is enabled. "
+                             "This is likely to slow down journal access substantially, please consider turning "
+                             "off the copy-on-write file attribute on the journal directory, using chattr +C.",
+                             f->path);
 
         return 1;
 }
@@ -3688,6 +3760,8 @@ int journal_file_open(
         int r;
 
         assert(fd >= 0 || fname);
+        assert(file_flags >= 0);
+        assert(file_flags <= _JOURNAL_FILE_FLAGS_MAX);
         assert(mmap_cache);
         assert(ret);
 
@@ -3711,6 +3785,7 @@ int journal_file_open(
                 .compress_threshold_bytes = compress_threshold_bytes == UINT64_MAX ?
                                             DEFAULT_COMPRESS_THRESHOLD :
                                             MAX(MIN_COMPRESS_THRESHOLD, compress_threshold_bytes),
+                .strict_order = FLAGS_SET(file_flags, JOURNAL_STRICT_ORDER),
         };
 
         if (fname) {
@@ -3767,7 +3842,7 @@ int journal_file_open(
                 newly_created = f->last_stat.st_size == 0 && journal_file_writable(f);
         }
 
-        f->cache_fd = mmap_cache_add_fd(mmap_cache, f->fd, prot_from_flags(open_flags));
+        f->cache_fd = mmap_cache_add_fd(mmap_cache, f->fd, mmap_prot_from_open_flags(open_flags));
         if (!f->cache_fd) {
                 r = -ENOMEM;
                 goto fail;
@@ -3908,6 +3983,41 @@ fail:
                 (void) unlink(fname);
 
         return r;
+}
+
+int journal_file_parse_uid_from_filename(const char *path, uid_t *ret_uid) {
+        _cleanup_free_ char *buf = NULL, *p = NULL;
+        const char *a, *b, *at;
+        int r;
+
+        /* This helper returns -EREMOTE when the filename doesn't match user online/offline journal
+         * pattern. Hence it currently doesn't parse archived or disposed user journals. */
+
+        assert(path);
+        assert(ret_uid);
+
+        r = path_extract_filename(path, &p);
+        if (r < 0)
+                return r;
+        if (r == O_DIRECTORY)
+                return -EISDIR;
+
+        a = startswith(p, "user-");
+        if (!a)
+                return -EREMOTE;
+        b = endswith(p, ".journal");
+        if (!b)
+                return -EREMOTE;
+
+        at = strchr(a, '@');
+        if (at)
+                return -EREMOTE;
+
+        buf = strndup(a, b-a);
+        if (!buf)
+                return -ENOMEM;
+
+        return parse_uid(buf, ret_uid);
 }
 
 int journal_file_archive(JournalFile *f, char **ret_previous_path) {
@@ -4155,7 +4265,8 @@ bool journal_file_rotate_suggested(JournalFile *f, usec_t max_file_usec, int log
         /* If we gained new header fields we gained new features,
          * hence suggest a rotation */
         if (le64toh(f->header->header_size) < sizeof(Header)) {
-                log_full(log_level, "%s uses an outdated header, suggesting rotation.", f->path);
+                log_ratelimit_full(log_level, JOURNAL_LOG_RATELIMIT,
+                                   "%s uses an outdated header, suggesting rotation.", f->path);
                 return true;
         }
 
@@ -4165,25 +4276,27 @@ bool journal_file_rotate_suggested(JournalFile *f, usec_t max_file_usec, int log
 
         if (JOURNAL_HEADER_CONTAINS(f->header, n_data))
                 if (le64toh(f->header->n_data) * 4ULL > (le64toh(f->header->data_hash_table_size) / sizeof(HashItem)) * 3ULL) {
-                        log_full(log_level,
-                                 "Data hash table of %s has a fill level at %.1f (%"PRIu64" of %"PRIu64" items, %llu file size, %"PRIu64" bytes per hash table item), suggesting rotation.",
-                                 f->path,
-                                 100.0 * (double) le64toh(f->header->n_data) / ((double) (le64toh(f->header->data_hash_table_size) / sizeof(HashItem))),
-                                 le64toh(f->header->n_data),
-                                 le64toh(f->header->data_hash_table_size) / sizeof(HashItem),
-                                 (unsigned long long) f->last_stat.st_size,
-                                 f->last_stat.st_size / le64toh(f->header->n_data));
+                        log_ratelimit_full(
+                                log_level, JOURNAL_LOG_RATELIMIT,
+                                "Data hash table of %s has a fill level at %.1f (%"PRIu64" of %"PRIu64" items, %"PRIu64" file size, %"PRIu64" bytes per hash table item), suggesting rotation.",
+                                f->path,
+                                100.0 * (double) le64toh(f->header->n_data) / ((double) (le64toh(f->header->data_hash_table_size) / sizeof(HashItem))),
+                                le64toh(f->header->n_data),
+                                le64toh(f->header->data_hash_table_size) / sizeof(HashItem),
+                                (uint64_t) f->last_stat.st_size,
+                                f->last_stat.st_size / le64toh(f->header->n_data));
                         return true;
                 }
 
         if (JOURNAL_HEADER_CONTAINS(f->header, n_fields))
                 if (le64toh(f->header->n_fields) * 4ULL > (le64toh(f->header->field_hash_table_size) / sizeof(HashItem)) * 3ULL) {
-                        log_full(log_level,
-                                 "Field hash table of %s has a fill level at %.1f (%"PRIu64" of %"PRIu64" items), suggesting rotation.",
-                                 f->path,
-                                 100.0 * (double) le64toh(f->header->n_fields) / ((double) (le64toh(f->header->field_hash_table_size) / sizeof(HashItem))),
-                                 le64toh(f->header->n_fields),
-                                 le64toh(f->header->field_hash_table_size) / sizeof(HashItem));
+                        log_ratelimit_full(
+                                log_level, JOURNAL_LOG_RATELIMIT,
+                                "Field hash table of %s has a fill level at %.1f (%"PRIu64" of %"PRIu64" items), suggesting rotation.",
+                                f->path,
+                                100.0 * (double) le64toh(f->header->n_fields) / ((double) (le64toh(f->header->field_hash_table_size) / sizeof(HashItem))),
+                                le64toh(f->header->n_fields),
+                                le64toh(f->header->field_hash_table_size) / sizeof(HashItem));
                         return true;
                 }
 
@@ -4191,17 +4304,19 @@ bool journal_file_rotate_suggested(JournalFile *f, usec_t max_file_usec, int log
          * longest chain is longer than some threshold, let's suggest rotation. */
         if (JOURNAL_HEADER_CONTAINS(f->header, data_hash_chain_depth) &&
             le64toh(f->header->data_hash_chain_depth) > HASH_CHAIN_DEPTH_MAX) {
-                log_full(log_level,
-                         "Data hash table of %s has deepest hash chain of length %" PRIu64 ", suggesting rotation.",
-                         f->path, le64toh(f->header->data_hash_chain_depth));
+                log_ratelimit_full(
+                        log_level, JOURNAL_LOG_RATELIMIT,
+                        "Data hash table of %s has deepest hash chain of length %" PRIu64 ", suggesting rotation.",
+                        f->path, le64toh(f->header->data_hash_chain_depth));
                 return true;
         }
 
         if (JOURNAL_HEADER_CONTAINS(f->header, field_hash_chain_depth) &&
             le64toh(f->header->field_hash_chain_depth) > HASH_CHAIN_DEPTH_MAX) {
-                log_full(log_level,
-                         "Field hash table of %s has deepest hash chain of length at %" PRIu64 ", suggesting rotation.",
-                         f->path, le64toh(f->header->field_hash_chain_depth));
+                log_ratelimit_full(
+                        log_level, JOURNAL_LOG_RATELIMIT,
+                        "Field hash table of %s has deepest hash chain of length at %" PRIu64 ", suggesting rotation.",
+                        f->path, le64toh(f->header->field_hash_chain_depth));
                 return true;
         }
 
@@ -4210,9 +4325,10 @@ bool journal_file_rotate_suggested(JournalFile *f, usec_t max_file_usec, int log
             JOURNAL_HEADER_CONTAINS(f->header, n_fields) &&
             le64toh(f->header->n_data) > 0 &&
             le64toh(f->header->n_fields) == 0) {
-                log_full(log_level,
-                         "Data objects of %s are not indexed by field objects, suggesting rotation.",
-                         f->path);
+                log_ratelimit_full(
+                        log_level, JOURNAL_LOG_RATELIMIT,
+                        "Data objects of %s are not indexed by field objects, suggesting rotation.",
+                        f->path);
                 return true;
         }
 
@@ -4223,9 +4339,10 @@ bool journal_file_rotate_suggested(JournalFile *f, usec_t max_file_usec, int log
                 t = now(CLOCK_REALTIME);
 
                 if (h > 0 && t > h + max_file_usec) {
-                        log_full(log_level,
-                                 "Oldest entry in %s is older than the configured file retention duration (%s), suggesting rotation.",
-                                 f->path, FORMAT_TIMESPAN(max_file_usec, USEC_PER_SEC));
+                        log_ratelimit_full(
+                                log_level, JOURNAL_LOG_RATELIMIT,
+                                "Oldest entry in %s is older than the configured file retention duration (%s), suggesting rotation.",
+                                f->path, FORMAT_TIMESPAN(max_file_usec, USEC_PER_SEC));
                         return true;
                 }
         }

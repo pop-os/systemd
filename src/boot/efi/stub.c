@@ -9,7 +9,9 @@
 #include "graphics.h"
 #include "linux.h"
 #include "measure.h"
+#include "part-discovery.h"
 #include "pe.h"
+#include "random-seed.h"
 #include "secure-boot.h"
 #include "splash.h"
 #include "tpm-pcr.h"
@@ -19,11 +21,11 @@
 _used_ _section_(".sdmagic") static const char magic[] = "#### LoaderInfo: systemd-stub " GIT_VERSION " ####";
 
 static EFI_STATUS combine_initrd(
-                EFI_PHYSICAL_ADDRESS initrd_base, UINTN initrd_size,
+                EFI_PHYSICAL_ADDRESS initrd_base, size_t initrd_size,
                 const void * const extra_initrds[], const size_t extra_initrd_sizes[], size_t n_extra_initrds,
-                Pages *ret_initr_pages, UINTN *ret_initrd_size) {
+                Pages *ret_initr_pages, size_t *ret_initrd_size) {
 
-        UINTN n;
+        size_t n;
 
         assert(ret_initr_pages);
         assert(ret_initrd_size);
@@ -36,7 +38,7 @@ static EFI_STATUS combine_initrd(
                 if (!extra_initrds[i])
                         continue;
 
-                if (n > UINTN_MAX - extra_initrd_sizes[i])
+                if (n > SIZE_MAX - extra_initrd_sizes[i])
                         return EFI_OUT_OF_RESOURCES;
 
                 n += extra_initrd_sizes[i];
@@ -49,7 +51,7 @@ static EFI_STATUS combine_initrd(
                         UINT32_MAX /* Below 4G boundary. */);
         uint8_t *p = PHYSICAL_ADDRESS_TO_POINTER(pages.addr);
         if (initrd_base != 0) {
-                UINTN pad;
+                size_t pad;
 
                 /* Order matters, the real initrd must come first, since it might include microcode updates
                  * which the kernel only looks for in the first cpio archive */
@@ -84,6 +86,7 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
                 EFI_STUB_FEATURE_PICK_UP_CREDENTIALS |      /* We pick up credentials from the boot partition */
                 EFI_STUB_FEATURE_PICK_UP_SYSEXTS |          /* We pick up system extensions from the boot partition */
                 EFI_STUB_FEATURE_THREE_PCRS |               /* We can measure kernel image, parameters and sysext */
+                EFI_STUB_FEATURE_RANDOM_SEED |              /* We pass a random seed to the kernel */
                 0;
 
         char16_t uuid[37];
@@ -91,9 +94,9 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
         assert(loaded_image);
 
         /* Export the device path this image is started from, if it's not set yet */
-        if (efivar_get_raw(LOADER_GUID, L"LoaderDevicePartUUID", NULL, NULL) != EFI_SUCCESS)
+        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", NULL, NULL) != EFI_SUCCESS)
                 if (disk_get_part_uuid(loaded_image->DeviceHandle, uuid) == EFI_SUCCESS)
-                        efivar_set(LOADER_GUID, L"LoaderDevicePartUUID", uuid, 0);
+                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", uuid, 0);
 
         /* If LoaderImageIdentifier is not set, assume the image with this stub was loaded directly from the
          * UEFI firmware without any boot loader, and hence set the LoaderImageIdentifier ourselves. Note
@@ -101,33 +104,33 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
          * in which case there's simple nothing to set for us. (The UEFI spec doesn't really say who's wrong
          * here, i.e. whether FilePath may be NULL or not, hence handle this gracefully and check if FilePath
          * is non-NULL explicitly.) */
-        if (efivar_get_raw(LOADER_GUID, L"LoaderImageIdentifier", NULL, NULL) != EFI_SUCCESS &&
+        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderImageIdentifier", NULL, NULL) != EFI_SUCCESS &&
             loaded_image->FilePath) {
                 _cleanup_free_ char16_t *s = NULL;
                 if (device_path_to_str(loaded_image->FilePath, &s) == EFI_SUCCESS)
-                        efivar_set(LOADER_GUID, L"LoaderImageIdentifier", s, 0);
+                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderImageIdentifier", s, 0);
         }
 
         /* if LoaderFirmwareInfo is not set, let's set it */
-        if (efivar_get_raw(LOADER_GUID, L"LoaderFirmwareInfo", NULL, NULL) != EFI_SUCCESS) {
+        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareInfo", NULL, NULL) != EFI_SUCCESS) {
                 _cleanup_free_ char16_t *s = NULL;
-                s = xpool_print(L"%s %u.%02u", ST->FirmwareVendor, ST->FirmwareRevision >> 16, ST->FirmwareRevision & 0xffff);
-                efivar_set(LOADER_GUID, L"LoaderFirmwareInfo", s, 0);
+                s = xasprintf("%ls %u.%02u", ST->FirmwareVendor, ST->FirmwareRevision >> 16, ST->FirmwareRevision & 0xffff);
+                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareInfo", s, 0);
         }
 
         /* ditto for LoaderFirmwareType */
-        if (efivar_get_raw(LOADER_GUID, L"LoaderFirmwareType", NULL, NULL) != EFI_SUCCESS) {
+        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareType", NULL, NULL) != EFI_SUCCESS) {
                 _cleanup_free_ char16_t *s = NULL;
-                s = xpool_print(L"UEFI %u.%02u", ST->Hdr.Revision >> 16, ST->Hdr.Revision & 0xffff);
-                efivar_set(LOADER_GUID, L"LoaderFirmwareType", s, 0);
+                s = xasprintf("UEFI %u.%02u", ST->Hdr.Revision >> 16, ST->Hdr.Revision & 0xffff);
+                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareType", s, 0);
         }
 
 
         /* add StubInfo (this is one is owned by the stub, hence we unconditionally override this with our
          * own data) */
-        (void) efivar_set(LOADER_GUID, L"StubInfo", L"systemd-stub " GIT_VERSION, 0);
+        (void) efivar_set(MAKE_GUID_PTR(LOADER), u"StubInfo", u"systemd-stub " GIT_VERSION, 0);
 
-        (void) efivar_set_uint64_le(LOADER_GUID, L"StubFeatures", stub_features, 0);
+        (void) efivar_set_uint64_le(MAKE_GUID_PTR(LOADER), u"StubFeatures", stub_features, 0);
 }
 
 static bool use_load_options(
@@ -153,7 +156,7 @@ static bool use_load_options(
         /* The UEFI shell registers EFI_SHELL_PARAMETERS_PROTOCOL onto images it runs. This lets us know that
          * LoadOptions starts with the stub binary path which we want to strip off. */
         EFI_SHELL_PARAMETERS_PROTOCOL *shell;
-        if (BS->HandleProtocol(stub_image, &(EFI_GUID) EFI_SHELL_PARAMETERS_PROTOCOL_GUID, (void **) &shell)
+        if (BS->HandleProtocol(stub_image, MAKE_GUID_PTR(EFI_SHELL_PARAMETERS_PROTOCOL), (void **) &shell)
             != EFI_SUCCESS) {
                 /* Not running from EFI shell, use entire LoadOptions. Note that LoadOptions is a void*, so
                  * it could be anything! */
@@ -170,14 +173,14 @@ static bool use_load_options(
         *ret = xstrdup16(shell->Argv[1]);
         for (size_t i = 2; i < shell->Argc; i++) {
                 _cleanup_free_ char16_t *old = *ret;
-                *ret = xpool_print(u"%s %s", old, shell->Argv[i]);
+                *ret = xasprintf("%ls %ls", old, shell->Argv[i]);
         }
 
         mangle_stub_cmdline(*ret);
         return true;
 }
 
-EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+static EFI_STATUS run(EFI_HANDLE image) {
         _cleanup_free_ void *credential_initrd = NULL, *global_credential_initrd = NULL, *sysext_initrd = NULL, *pcrsig_initrd = NULL, *pcrpkey_initrd = NULL;
         size_t credential_initrd_size = 0, global_credential_initrd_size = 0, sysext_initrd_size = 0, pcrsig_initrd_size = 0, pcrpkey_initrd_size = 0;
         size_t linux_size, initrd_size, dt_size;
@@ -188,28 +191,33 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
         _cleanup_free_ char16_t *cmdline = NULL;
         int sections_measured = -1, parameters_measured = -1;
         bool sysext_measured = false, m;
+        uint64_t loader_features = 0;
         EFI_STATUS err;
-
-        InitializeLib(image, sys_table);
-        debug_hook(L"systemd-stub");
-        /* Uncomment the next line if you need to wait for debugger. */
-        // debug_break();
 
         err = BS->OpenProtocol(
                         image,
-                        &LoadedImageProtocol,
-                        (void **)&loaded_image,
+                        MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL),
+                        (void **) &loaded_image,
                         image,
                         NULL,
                         EFI_OPEN_PROTOCOL_GET_PROTOCOL);
         if (err != EFI_SUCCESS)
-                return log_error_status_stall(err, L"Error getting a LoadedImageProtocol handle: %r", err);
+                return log_error_status(err, "Error getting a LoadedImageProtocol handle: %m");
+
+        if (efivar_get_uint64_le(MAKE_GUID_PTR(LOADER), u"LoaderFeatures", &loader_features) != EFI_SUCCESS ||
+            !FLAGS_SET(loader_features, EFI_LOADER_FEATURE_RANDOM_SEED)) {
+                _cleanup_(file_closep) EFI_FILE *esp_dir = NULL;
+
+                err = partition_open(MAKE_GUID_PTR(ESP), loaded_image->DeviceHandle, NULL, &esp_dir);
+                if (err == EFI_SUCCESS) /* Non-fatal on failure, so that we still boot without it. */
+                        (void) process_random_seed(esp_dir);
+        }
 
         err = pe_memory_locate_sections(loaded_image->ImageBase, unified_sections, addrs, szs);
         if (err != EFI_SUCCESS || szs[UNIFIED_SECTION_LINUX] == 0) {
                 if (err == EFI_SUCCESS)
                         err = EFI_NOT_FOUND;
-                return log_error_status_stall(err, L"Unable to locate embedded .linux section: %r", err);
+                return log_error_status(err, "Unable to locate embedded .linux section: %m");
         }
 
         /* Measure all "payload" of this PE image into a separate PCR (i.e. where nothing else is written
@@ -249,7 +257,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
         /* After we are done, set an EFI variable that tells userspace this was done successfully, and encode
          * in it which PCR was used. */
         if (sections_measured > 0)
-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrKernelImage", TPM_PCR_INDEX_KERNEL_IMAGE, 0);
+                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrKernelImage", TPM_PCR_INDEX_KERNEL_IMAGE, 0);
 
         /* Show splash screen as early as possible */
         graphics_splash((const uint8_t*) loaded_image->ImageBase + addrs[UNIFIED_SECTION_SPLASH], szs[UNIFIED_SECTION_SPLASH]);
@@ -273,27 +281,25 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
 
         if (pack_cpio(loaded_image,
                       NULL,
-                      L".cred",
+                      u".cred",
                       ".extra/credentials",
                       /* dir_mode= */ 0500,
                       /* access_mode= */ 0400,
-                      /* tpm_pcr= */ (uint32_t[]) { TPM_PCR_INDEX_KERNEL_PARAMETERS, TPM_PCR_INDEX_KERNEL_PARAMETERS_COMPAT },
-                      /* n_tpm_pcr= */ 2,
-                      L"Credentials initrd",
+                      /* tpm_pcr= */ TPM_PCR_INDEX_KERNEL_PARAMETERS,
+                      u"Credentials initrd",
                       &credential_initrd,
                       &credential_initrd_size,
                       &m) == EFI_SUCCESS)
                 parameters_measured = parameters_measured < 0 ? m : (parameters_measured && m);
 
         if (pack_cpio(loaded_image,
-                      L"\\loader\\credentials",
-                      L".cred",
+                      u"\\loader\\credentials",
+                      u".cred",
                       ".extra/global_credentials",
                       /* dir_mode= */ 0500,
                       /* access_mode= */ 0400,
-                      /* tpm_pcr= */ (uint32_t[]) { TPM_PCR_INDEX_KERNEL_PARAMETERS, TPM_PCR_INDEX_KERNEL_PARAMETERS_COMPAT },
-                      /* n_tpm_pcr= */ 2,
-                      L"Global credentials initrd",
+                      /* tpm_pcr= */ TPM_PCR_INDEX_KERNEL_PARAMETERS,
+                      u"Global credentials initrd",
                       &global_credential_initrd,
                       &global_credential_initrd_size,
                       &m) == EFI_SUCCESS)
@@ -301,22 +307,21 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
 
         if (pack_cpio(loaded_image,
                       NULL,
-                      L".raw",
+                      u".raw",
                       ".extra/sysext",
                       /* dir_mode= */ 0555,
                       /* access_mode= */ 0444,
-                      /* tpm_pcr= */ (uint32_t[]) { TPM_PCR_INDEX_INITRD_SYSEXTS },
-                      /* n_tpm_pcr= */ 1,
-                      L"System extension initrd",
+                      /* tpm_pcr= */ TPM_PCR_INDEX_INITRD_SYSEXTS,
+                      u"System extension initrd",
                       &sysext_initrd,
                       &sysext_initrd_size,
                       &m) == EFI_SUCCESS)
                 sysext_measured = m;
 
         if (parameters_measured > 0)
-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrKernelParameters", TPM_PCR_INDEX_KERNEL_PARAMETERS, 0);
+                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrKernelParameters", TPM_PCR_INDEX_KERNEL_PARAMETERS, 0);
         if (sysext_measured)
-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrInitRDSysExts", TPM_PCR_INDEX_INITRD_SYSEXTS, 0);
+                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrInitRDSysExts", TPM_PCR_INDEX_INITRD_SYSEXTS, 0);
 
         /* If the PCR signature was embedded in the PE image, then let's wrap it in a cpio and also pass it
          * to the kernel, so that it can be read from /.extra/tpm2-pcr-signature.json. Note that this section
@@ -328,11 +333,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
                                 (uint8_t*) loaded_image->ImageBase + addrs[UNIFIED_SECTION_PCRSIG],
                                 szs[UNIFIED_SECTION_PCRSIG],
                                 ".extra",
-                                L"tpm2-pcr-signature.json",
+                                u"tpm2-pcr-signature.json",
                                 /* dir_mode= */ 0555,
                                 /* access_mode= */ 0444,
-                                /* tpm_pcr= */ NULL,
-                                /* n_tpm_pcr= */ 0,
+                                /* tpm_pcr= */ UINT32_MAX,
                                 /* tpm_description= */ NULL,
                                 &pcrsig_initrd,
                                 &pcrsig_initrd_size,
@@ -347,11 +351,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
                                 (uint8_t*) loaded_image->ImageBase + addrs[UNIFIED_SECTION_PCRPKEY],
                                 szs[UNIFIED_SECTION_PCRPKEY],
                                 ".extra",
-                                L"tpm2-pcr-public-key.pem",
+                                u"tpm2-pcr-public-key.pem",
                                 /* dir_mode= */ 0555,
                                 /* access_mode= */ 0444,
-                                /* tpm_pcr= */ NULL,
-                                /* n_tpm_pcr= */ 0,
+                                /* tpm_pcr= */ UINT32_MAX,
                                 /* tpm_description= */ NULL,
                                 &pcrpkey_initrd,
                                 &pcrpkey_initrd_size,
@@ -404,7 +407,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
                 err = devicetree_install_from_memory(
                                 &dt_state, PHYSICAL_ADDRESS_TO_POINTER(dt_base), dt_size);
                 if (err != EFI_SUCCESS)
-                        log_error_stall(L"Error loading embedded devicetree: %r", err);
+                        log_error_status(err, "Error loading embedded devicetree: %m");
         }
 
         err = linux_exec(image, cmdline,
@@ -412,4 +415,11 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
                          PHYSICAL_ADDRESS_TO_POINTER(initrd_base), initrd_size);
         graphics_mode(false);
         return err;
+}
+
+DEFINE_EFI_MAIN_FUNCTION(run, "systemd-stub", /*wait_for_debugger=*/false);
+
+/* See comment in boot.c. */
+EFI_STATUS _entry(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
+        return efi_main(image, system_table);
 }

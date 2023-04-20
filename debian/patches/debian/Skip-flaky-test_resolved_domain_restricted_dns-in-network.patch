@@ -11,7 +11,7 @@ Closes: #1025908
  1 file changed, 1 insertion(+)
 
 diff --git a/test/networkd-test.py b/test/networkd-test.py
-index 0a5ba11..4740de2 100755
+index 9e7233d..0746424 100755
 --- a/test/networkd-test.py
 +++ b/test/networkd-test.py
 @@ -618,6 +618,7 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):

@@ -13,6 +13,7 @@
 #include "mkdir-label.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
+#include "namespace-util.h"
 #include "nspawn-mount.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -510,6 +511,9 @@ int mount_sysfs(const char *dest, MountSettingsMask mount_settings) {
                                       MS_BIND|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT|extra_flags, NULL);
 }
 
+#define PROC_DEFAULT_MOUNT_FLAGS (MS_NOSUID|MS_NOEXEC|MS_NODEV)
+#define SYS_DEFAULT_MOUNT_FLAGS  (MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV)
+
 int mount_all(const char *dest,
               MountSettingsMask mount_settings,
               uid_t uid_shift,
@@ -538,7 +542,7 @@ int mount_all(const char *dest,
 
         static const MountPoint mount_table[] = {
                 /* First we list inner child mounts (i.e. mounts applied *after* entering user namespacing) */
-                { "proc",            "/proc",           "proc",  NULL,        MS_NOSUID|MS_NOEXEC|MS_NODEV,
+                { "proc",            "/proc",           "proc",  NULL,        PROC_DEFAULT_MOUNT_FLAGS,
                   MOUNT_FATAL|MOUNT_IN_USERNS|MOUNT_MKDIR|MOUNT_FOLLOW_SYMLINKS }, /* we follow symlinks here since not following them requires /proc/ already being mounted, which we don't have here. */
 
                 { "/proc/sys",       "/proc/sys",       NULL,    NULL,        MS_BIND,
@@ -572,19 +576,19 @@ int mount_all(const char *dest,
                   MOUNT_IN_USERNS|MOUNT_MKDIR },
 
                 /* Then we list outer child mounts (i.e. mounts applied *before* entering user namespacing) */
-                { "tmpfs",                  "/tmp",                         "tmpfs", "mode=1777" NESTED_TMPFS_LIMITS,  MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+                { "tmpfs",                  "/tmp",                         "tmpfs", "mode=01777" NESTED_TMPFS_LIMITS, MS_NOSUID|MS_NODEV|MS_STRICTATIME,
                   MOUNT_FATAL|MOUNT_APPLY_TMPFS_TMP|MOUNT_MKDIR },
-                { "tmpfs",                  "/sys",                         "tmpfs", "mode=555" TMPFS_LIMITS_SYS,      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+                { "tmpfs",                  "/sys",                         "tmpfs", "mode=0555" TMPFS_LIMITS_SYS,     MS_NOSUID|MS_NOEXEC|MS_NODEV,
                   MOUNT_FATAL|MOUNT_APPLY_APIVFS_NETNS|MOUNT_MKDIR },
-                { "sysfs",                  "/sys",                         "sysfs", NULL,                             MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV,
+                { "sysfs",                  "/sys",                         "sysfs", NULL,                             SYS_DEFAULT_MOUNT_FLAGS,
                   MOUNT_FATAL|MOUNT_APPLY_APIVFS_RO|MOUNT_MKDIR },    /* skipped if above was mounted */
                 { "sysfs",                  "/sys",                         "sysfs", NULL,                             MS_NOSUID|MS_NOEXEC|MS_NODEV,
                   MOUNT_FATAL|MOUNT_MKDIR },                          /* skipped if above was mounted */
-                { "tmpfs",                  "/dev",                         "tmpfs", "mode=755" TMPFS_LIMITS_PRIVATE_DEV, MS_NOSUID|MS_STRICTATIME,
+                { "tmpfs",                  "/dev",                         "tmpfs", "mode=0755" TMPFS_LIMITS_PRIVATE_DEV, MS_NOSUID|MS_STRICTATIME,
                   MOUNT_FATAL|MOUNT_MKDIR },
-                { "tmpfs",                  "/dev/shm",                     "tmpfs", "mode=1777" NESTED_TMPFS_LIMITS,  MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+                { "tmpfs",                  "/dev/shm",                     "tmpfs", "mode=01777" NESTED_TMPFS_LIMITS, MS_NOSUID|MS_NODEV|MS_STRICTATIME,
                   MOUNT_FATAL|MOUNT_MKDIR },
-                { "tmpfs",                  "/run",                         "tmpfs", "mode=755" TMPFS_LIMITS_RUN,      MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+                { "tmpfs",                  "/run",                         "tmpfs", "mode=0755" TMPFS_LIMITS_RUN,     MS_NOSUID|MS_NODEV|MS_STRICTATIME,
                   MOUNT_FATAL|MOUNT_MKDIR },
                 { "/run/host",              "/run/host",                    NULL,    NULL,                             MS_BIND,
                   MOUNT_FATAL|MOUNT_MKDIR|MOUNT_PREFIX_ROOT }, /* Prepare this so that we can make it read-only when we are done */
@@ -790,7 +794,7 @@ static int mount_bind(const char *dest, CustomMount *m, uid_t uid_shift, uid_t u
                                                m->source, where);
 
         } else { /* Path doesn't exist yet? */
-                r = mkdir_parents_label(where, 0755);
+                r = mkdir_parents_safe_label(dest, where, 0755, uid_shift, uid_shift, MKDIR_IGNORE_EXISTING);
                 if (r < 0)
                         return log_error_errno(r, "Failed to make parents of %s: %m", where);
 
@@ -804,6 +808,9 @@ static int mount_bind(const char *dest, CustomMount *m, uid_t uid_shift, uid_t u
                         r = touch(where);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create mount point %s: %m", where);
+
+                if (chown(where, uid_shift, uid_shift) < 0)
+                        return log_error_errno(errno, "Failed to chown %s: %m", where);
         }
 
         r = mount_nofollow_verbose(LOG_ERR, m->source, where, NULL, mount_flags, mount_opts);
@@ -1039,7 +1046,7 @@ static int setup_volatile_state(const char *directory, uid_t uid_shift, const ch
         if (r < 0 && errno != EEXIST)
                 return log_error_errno(errno, "Failed to create %s: %m", directory);
 
-        options = "mode=755" TMPFS_LIMITS_VOLATILE_STATE;
+        options = "mode=0755" TMPFS_LIMITS_VOLATILE_STATE;
         r = tmpfs_patch_options(options, uid_shift == 0 ? UID_INVALID : uid_shift, selinux_apifs_context, &buf);
         if (r < 0)
                 return log_oom();
@@ -1083,7 +1090,7 @@ static int setup_volatile_yes(const char *directory, uid_t uid_shift, const char
         if (!mkdtemp(template))
                 return log_error_errno(errno, "Failed to create temporary directory: %m");
 
-        options = "mode=755" TMPFS_LIMITS_ROOTFS;
+        options = "mode=0755" TMPFS_LIMITS_ROOTFS;
         r = tmpfs_patch_options(options, uid_shift == 0 ? UID_INVALID : uid_shift, selinux_apifs_context, &buf);
         if (r < 0)
                 goto fail;
@@ -1150,7 +1157,7 @@ static int setup_volatile_overlay(const char *directory, uid_t uid_shift, const 
         if (!mkdtemp(template))
                 return log_error_errno(errno, "Failed to create temporary directory: %m");
 
-        options = "mode=755" TMPFS_LIMITS_ROOTFS;
+        options = "mode=0755" TMPFS_LIMITS_ROOTFS;
         r = tmpfs_patch_options(options, uid_shift == 0 ? UID_INVALID : uid_shift, selinux_apifs_context, &buf);
         if (r < 0)
                 goto finish;
@@ -1335,4 +1342,61 @@ done:
                 (void) rmdir(pivot_tmp);
 
         return r;
+}
+
+#define NSPAWN_PRIVATE_FULLY_VISIBLE_PROCFS "/run/host/proc"
+#define NSPAWN_PRIVATE_FULLY_VISIBLE_SYSFS "/run/host/sys"
+
+int pin_fully_visible_fs(void) {
+        int r;
+
+        (void) mkdir_p(NSPAWN_PRIVATE_FULLY_VISIBLE_PROCFS, 0755);
+        (void) mkdir_p(NSPAWN_PRIVATE_FULLY_VISIBLE_SYSFS, 0755);
+
+        r = mount_follow_verbose(LOG_ERR, "proc", NSPAWN_PRIVATE_FULLY_VISIBLE_PROCFS, "proc", PROC_DEFAULT_MOUNT_FLAGS, NULL);
+        if (r < 0)
+                return r;
+
+        r = mount_follow_verbose(LOG_ERR, "sysfs", NSPAWN_PRIVATE_FULLY_VISIBLE_SYSFS, "sysfs", SYS_DEFAULT_MOUNT_FLAGS, NULL);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+static int do_wipe_fully_visible_fs(void) {
+        if (umount2(NSPAWN_PRIVATE_FULLY_VISIBLE_PROCFS, MNT_DETACH) < 0)
+                return log_error_errno(errno, "Failed to unmount temporary proc: %m");
+
+        if (rmdir(NSPAWN_PRIVATE_FULLY_VISIBLE_PROCFS) < 0)
+                return log_error_errno(errno, "Failed to remove temporary proc mountpoint: %m");
+
+        if (umount2(NSPAWN_PRIVATE_FULLY_VISIBLE_SYSFS, MNT_DETACH) < 0)
+                return log_error_errno(errno, "Failed to unmount temporary sys: %m");
+
+        if (rmdir(NSPAWN_PRIVATE_FULLY_VISIBLE_SYSFS) < 0)
+                return log_error_errno(errno, "Failed to remove temporary sys mountpoint: %m");
+
+        return 0;
+}
+
+int wipe_fully_visible_fs(int mntns_fd) {
+        _cleanup_close_ int orig_mntns_fd = -EBADF;
+        int r, rr;
+
+        r = namespace_open(0, NULL, &orig_mntns_fd, NULL, NULL, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to pin originating mount namespace: %m");
+
+        r = namespace_enter(-EBADF, mntns_fd, -EBADF, -EBADF, -EBADF);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enter mount namespace: %m");
+
+        rr = do_wipe_fully_visible_fs();
+
+        r = namespace_enter(-EBADF, orig_mntns_fd, -EBADF, -EBADF, -EBADF);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enter original mount namespace: %m");
+
+        return rr;
 }

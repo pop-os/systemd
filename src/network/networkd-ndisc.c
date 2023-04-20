@@ -143,6 +143,28 @@ static int ndisc_route_handler(sd_netlink *rtnl, sd_netlink_message *m, Request 
         return 1;
 }
 
+static void ndisc_set_route_priority(Link *link, Route *route) {
+        assert(link);
+        assert(route);
+
+        if (route->priority_set)
+                return; /* explicitly configured. */
+
+        switch (route->pref) {
+        case SD_NDISC_PREFERENCE_LOW:
+                route->priority = link->network->ipv6_accept_ra_route_metric_low;
+                break;
+        case SD_NDISC_PREFERENCE_MEDIUM:
+                route->priority = link->network->ipv6_accept_ra_route_metric_medium;
+                break;
+        case SD_NDISC_PREFERENCE_HIGH:
+                route->priority = link->network->ipv6_accept_ra_route_metric_high;
+                break;
+        default:
+                assert_not_reached();
+        }
+}
+
 static int ndisc_request_route(Route *in, Link *link, sd_ndisc_router *rt) {
         _cleanup_(route_freep) Route *route = in;
         struct in6_addr router;
@@ -151,6 +173,7 @@ static int ndisc_request_route(Route *in, Link *link, sd_ndisc_router *rt) {
 
         assert(route);
         assert(link);
+        assert(link->network);
         assert(rt);
 
         r = sd_ndisc_router_get_address(rt, &router);
@@ -161,10 +184,11 @@ static int ndisc_request_route(Route *in, Link *link, sd_ndisc_router *rt) {
         route->provider.in6 = router;
         if (!route->table_set)
                 route->table = link_get_ipv6_accept_ra_route_table(link);
-        if (!route->priority_set)
-                route->priority = link->network->ipv6_accept_ra_route_metric;
+        ndisc_set_route_priority(link, route);
         if (!route->protocol_set)
                 route->protocol = RTPROT_RA;
+        if (route->quickack < 0)
+                route->quickack = link->network->ipv6_accept_ra_quickack;
 
         is_new = route_get(NULL, link, route, NULL) < 0;
 
@@ -433,7 +457,6 @@ static int ndisc_router_process_onlink_prefix(Link *link, sd_ndisc_router *rt) {
                 return log_oom();
 
         route->family = AF_INET6;
-        route->flags = RTM_F_PREFIX;
         route->dst.in6 = prefix;
         route->dst_prefixlen = prefixlen;
         route->lifetime_usec = sec_to_usec(lifetime_sec, timestamp_usec);

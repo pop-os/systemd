@@ -19,22 +19,23 @@ EFI_STATUS graphics_mode(bool on) {
         BOOLEAN stdin_locked;
         EFI_STATUS err;
 
-        err = BS->LocateProtocol((EFI_GUID *) EFI_CONSOLE_CONTROL_GUID, NULL, (void **) &ConsoleControl);
+        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_CONSOLE_CONTROL), NULL, (void **) &ConsoleControl);
         if (err != EFI_SUCCESS)
                 /* console control protocol is nonstandard and might not exist. */
                 return err == EFI_NOT_FOUND ? EFI_SUCCESS : err;
 
         /* check current mode */
-        err =ConsoleControl->GetMode(ConsoleControl, &current, &uga_exists, &stdin_locked);
+        err = ConsoleControl->GetMode(ConsoleControl, &current, &uga_exists, &stdin_locked);
         if (err != EFI_SUCCESS)
                 return err;
 
         /* do not touch the mode */
-        new  = on ? EfiConsoleControlScreenGraphics : EfiConsoleControlScreenText;
+        new = on ? EfiConsoleControlScreenGraphics : EfiConsoleControlScreenText;
         if (new == current)
                 return EFI_SUCCESS;
 
-        err =ConsoleControl->SetMode(ConsoleControl, new);
+        log_wait();
+        err = ConsoleControl->SetMode(ConsoleControl, new);
 
         /* some firmware enables the cursor when switching modes */
         ST->ConOut->EnableCursor(ST->ConOut, false);

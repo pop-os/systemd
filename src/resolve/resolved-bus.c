@@ -159,7 +159,7 @@ static int reply_query_state(DnsQuery *q) {
         case DNS_TRANSACTION_NOT_FOUND:
                 /* We return this as NXDOMAIN. This is only generated when a host doesn't implement LLMNR/TCP, and we
                  * thus quickly know that we cannot resolve an in-addr.arpa or ip6.arpa address. */
-                return reply_method_errorf(q, _BUS_ERROR_DNS "NXDOMAIN", "'%s' not found", dns_query_string(q));
+                return reply_method_errorf(q, BUS_ERROR_DNS_NXDOMAIN, "'%s' not found", dns_query_string(q));
 
         case DNS_TRANSACTION_NO_SOURCE:
                 return reply_method_errorf(q, BUS_ERROR_NO_SOURCE, "All suitable resolution sources turned off");
@@ -176,7 +176,7 @@ static int reply_query_state(DnsQuery *q) {
                         return 0;
 
                 if (q->answer_rcode == DNS_RCODE_NXDOMAIN)
-                        sd_bus_error_setf(&error, _BUS_ERROR_DNS "NXDOMAIN", "'%s' not found", dns_query_string(q));
+                        sd_bus_error_setf(&error, BUS_ERROR_DNS_NXDOMAIN, "Name '%s' not found", dns_query_string(q));
                 else {
                         const char *rc, *n;
 
@@ -1371,7 +1371,11 @@ static int bus_method_resolve_service(sd_bus_message *message, void *userdata, s
         return 1;
 }
 
-int bus_dns_server_append(sd_bus_message *reply, DnsServer *s, bool with_ifindex, bool extended) {
+int bus_dns_server_append(
+                sd_bus_message *reply,
+                DnsServer *s,
+                bool with_ifindex, /* include "ifindex" field */
+                bool extended) {   /* also include port number and server name */
         int r;
 
         assert(reply);
@@ -1390,7 +1394,11 @@ int bus_dns_server_append(sd_bus_message *reply, DnsServer *s, bool with_ifindex
                 }
         }
 
-        r = sd_bus_message_open_container(reply, 'r', with_ifindex ? (extended ? "iiayqs" : "iiay") : (extended ? "iayqs" : "iay"));
+        r = sd_bus_message_open_container(
+                        reply,
+                        'r',
+                        with_ifindex ? (extended ? "iiayqs" : "iiay") :
+                                       (extended ? "iayqs" : "iay"));
         if (r < 0)
                 return r;
 

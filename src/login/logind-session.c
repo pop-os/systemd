@@ -38,7 +38,6 @@
 #include "tmpfile-util.h"
 #include "uid-alloc-range.h"
 #include "user-util.h"
-#include "util.h"
 
 #define RELEASE_USEC (20*USEC_PER_SEC)
 
@@ -62,8 +61,8 @@ int session_new(Session **ret, Manager *m, const char *id) {
 
         *s = (Session) {
                 .manager = m,
-                .fifo_fd = -1,
-                .vtfd = -1,
+                .fifo_fd = -EBADF,
+                .vtfd = -EBADF,
                 .audit_id = AUDIT_SESSION_INVALID,
                 .tty_validity = _TTY_VALIDITY_INVALID,
         };

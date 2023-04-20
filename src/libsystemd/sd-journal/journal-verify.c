@@ -18,7 +18,6 @@
 #include "macro.h"
 #include "terminal-util.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 static void draw_progress(uint64_t p, usec_t *last_usec) {
         unsigned n, i, j, k;
@@ -824,7 +823,7 @@ int journal_file_verify(
         bool entry_seqnum_set = false, entry_monotonic_set = false, entry_realtime_set = false, found_main_entry_array = false;
         uint64_t n_objects = 0, n_entries = 0, n_data = 0, n_fields = 0, n_data_hash_tables = 0, n_field_hash_tables = 0, n_entry_arrays = 0, n_tags = 0;
         usec_t last_usec = 0;
-        _cleanup_close_ int data_fd = -1, entry_fd = -1, entry_array_fd = -1;
+        _cleanup_close_ int data_fd = -EBADF, entry_fd = -EBADF, entry_array_fd = -EBADF;
         _cleanup_fclose_ FILE *data_fp = NULL, *entry_fp = NULL, *entry_array_fp = NULL;
         MMapFileDescriptor *cache_data_fd = NULL, *cache_entry_fd = NULL, *cache_entry_array_fd = NULL;
         unsigned i;
@@ -1378,11 +1377,11 @@ fail:
         if (show_progress)
                 flush_progress();
 
-        log_error("File corruption detected at %s:"OFSfmt" (of %llu bytes, %"PRIu64"%%).",
+        log_error("File corruption detected at %s:%"PRIu64" (of %"PRIu64" bytes, %"PRIu64"%%).",
                   f->path,
                   p,
-                  (unsigned long long) f->last_stat.st_size,
-                  100 * p / f->last_stat.st_size);
+                  (uint64_t) f->last_stat.st_size,
+                  100U * p / (uint64_t) f->last_stat.st_size);
 
         if (cache_data_fd)
                 mmap_cache_fd_free(cache_data_fd);

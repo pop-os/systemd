@@ -212,7 +212,7 @@ object. The following fields are currently defined:
 
 `userName` → The UNIX user name for this record. Takes a string with a valid
 UNIX user name. This field is the only mandatory field, all others are
-optional. Corresponds with the `pw_name` field of of `struct passwd` and the
+optional. Corresponds with the `pw_name` field of `struct passwd` and the
 `sp_namp` field of `struct spwd` (i.e. the shadow user record stored in
 `/etc/shadow`). See [User/Group Name Syntax](USER_NAMES.md) for
 the (relaxed) rules the various systemd components enforce on user/group names.
@@ -490,9 +490,12 @@ the PBKDF operation for the LUKS storage mechanism.
 
 `luksPbkdfType` → A string, indicating the PBKDF type to use for the LUKS storage mechanism.
 
+`luksPbkdfForceIterations` → An unsigned 64bit integer, indicating the intended
+number of iterations for the PBKDF operation, when LUKS storage is used.
+
 `luksPbkdfTimeCostUSec` → An unsigned 64bit integer, indicating the intended
 time cost for the PBKDF operation, when the LUKS storage mechanism is used, in
-µs.
+µs. Ignored when `luksPbkdfForceIterations` is set.
 
 `luksPbkdfMemoryCost` → An unsigned 64bit integer, indicating the intended
 memory cost for the PBKDF operation, when LUKS storage is used, in bytes.
@@ -737,7 +740,7 @@ that may be used in this section are identical to the equally named ones in the
 `gid`, `memberOf`, `fileSystemType`, `partitionUuid`, `luksUuid`,
 `fileSystemUuid`, `luksDiscard`, `luksOfflineDiscard`, `luksCipher`,
 `luksCipherMode`, `luksVolumeKeySize`, `luksPbkdfHashAlgorithm`,
-`luksPbkdfType`, `luksPbkdfTimeCostUSec`, `luksPbkdfMemoryCost`,
+`luksPbkdfType`, `luksPbkdfForceIterations`, `luksPbkdfTimeCostUSec`, `luksPbkdfMemoryCost`,
 `luksPbkdfParallelThreads`, `luksSectorSize`, `autoResizeMode`, `rebalanceWeight`,
 `rateLimitIntervalUSec`, `rateLimitBurst`, `enforcePasswordPolicy`,
 `autoLogin`, `stopDelayUSec`, `killProcesses`, `passwordChangeMinUSec`,

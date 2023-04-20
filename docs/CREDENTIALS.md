@@ -34,7 +34,7 @@ purpose. Specifically, the following features are provided:
    environment variables the credential data is not propagated down the process
    tree. Instead each time a credential is accessed an access check is enforced
    by the kernel. If the service is using file system namespacing the loaded
-   credential data is invisible to any other services.
+   credential data is invisible to all other services.
 
 4. Service credentials may be acquired from files on disk, specified as literal
    strings in unit files, acquired from another service dynamically via an
@@ -162,7 +162,7 @@ When invoked from service context, `systemd-creds` passed without further
 parameters will list passed credentials. The `systemd-creds cat xyz` command
 may be used to write the contents of credential `xyz` to standard output. If
 these calls are combined with the `--system` switch credentials passed to the
-system as a whole are shown, instead of the those passed to the service the
+system as a whole are shown, instead of those passed to the service the
 command is invoked from.
 
 Example use:
@@ -179,17 +179,17 @@ via `systemd-creds cat`.
 
 Credentials are supposed to be useful for carrying sensitive information, such
 as cryptographic key material. For this kind of data (symmetric) encryption and
-authentication is provided to make storage of the data at rest safer. The data
+authentication are provided to make storage of the data at rest safer. The data
 may be encrypted and authenticated with AES256-GCM. The encryption key can
 either be one derived from the local TPM2 device, or one stored in
 `/var/lib/systemd/credential.secret`, or a combination of both. If a TPM2
-device is available and `/var/` resides on persistent storage the default
+device is available and `/var/` resides on a persistent storage, the default
 behaviour is to use the combination of both for encryption, thus ensuring that
 credentials protected this way can only be decrypted and validated on the
 local hardware and OS installation. Encrypted credentials stored on disk thus
 cannot be decrypted without access to the TPM2 chip and the aforementioned key
 file `/var/lib/systemd/credential.secret`. Moreover, credentials cannot be
-prepared on another machine than the local one.
+prepared on a machine other than the local one.
 
 The `systemd-creds` tool provides the commands `encrypt` and `decrypt` to
 encrypt and decrypt/authenticate credentials. Example:
@@ -330,12 +330,22 @@ systemd-run -p LoadCredential=mycred -P --wait systemd-creds cat mycred
 
 Various services shipped with `systemd` consume credentials for tweaking behaviour:
 
+* [`systemd(1)`](https://www.freedesktop.org/software/systemd/man/systemd.html)
+  (I.E.: PID1, the system manager) will look for the credential `vmm.notify_socket`
+  and will use it to send a `READY=1` datagram when the system has finished
+  booting. This is useful for hypervisors/VMMs or other processes on the host
+  to receive a notification via VSOCK when a virtual machine has finished booting.
+  Note that in case the hypervisor does not support `SOCK_DGRAM` over `AF_VSOCK`,
+  `SOCK_SEQPACKET` will be tried instead. The credential payload should be in the
+  form: `vsock:<CID>:<PORT>`. Also note that this requires support for VHOST to be
+  built-in both the guest and the host kernels, and the kernel modules to be loaded.
+
 * [`systemd-sysusers(8)`](https://www.freedesktop.org/software/systemd/man/systemd-sysusers.html)
   will look for the credentials `passwd.hashed-password.<username>`,
   `passwd.plaintext-password.<username>` and `passwd.shell.<username>` to
   configure the password (either in UNIX hashed form, or plaintext) or shell of
   system users created. Replace `<username>` with the system user of your
-  choice, for example `root`.
+  choice, for example, `root`.
 
 * [`systemd-firstboot(1)`](https://www.freedesktop.org/software/systemd/man/systemd-firstboot.html)
   will look for the credentials `firstboot.locale`, `firstboot.locale-messages`,
@@ -382,7 +392,8 @@ qemu-system-x86_64 \
 ```
 
 This boots the specified disk image via qemu, provisioning public key SSH access
-for the root user from the caller's key:
+for the root user from the caller's key, and sends a notification when booting
+has finished to a process on the host:
 
 ```
 qemu-system-x86_64 \
@@ -396,8 +407,18 @@ qemu-system-x86_64 \
         -drive if=none,id=hd,file=test.raw,format=raw \
         -device virtio-scsi-pci,id=scsi \
         -device scsi-hd,drive=hd,bootindex=1 \
+        -device vhost-vsock-pci,id=vhost-vsock-pci0,guest-cid=42 \
+        -smbios type=11,value=io.systemd.credential:vmm.notify_socket=vsock:2:1234 \
         -smbios type=11,value=io.systemd.credential.binary:tmpfiles.extra=$(echo "f~ /root/.ssh/authorized_keys 700 root root - $(ssh-add -L | base64 -w 0)" | base64 -w 0)
 ```
+
+A process on the host can listen for the notification, for example:
+
+```
+$ socat - VSOCK-LISTEN:1234,socktype=5
+READY=1
+```
+
 ## Relevant Paths
 
 From *service* perspective the runtime path to find loaded credentials in is
@@ -421,5 +442,5 @@ hence a great place to store credentials to load on the system.
 ## Conditionalizing Services
 
 Sometimes it makes sense to conditionalize system services and invoke them only
-if the right system credential is passed to the system. use the
+if the right system credential is passed to the system. Use the
 `ConditionCredential=` and `AssertCredential=` unit file settings for that.

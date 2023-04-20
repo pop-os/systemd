@@ -12,7 +12,9 @@
 #include "fileio.h"
 #include "fs-util.h"
 #include "io-util.h"
+#include "journal-internal.h"
 #include "journal-util.h"
+#include "journald-client.h"
 #include "journald-context.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -179,6 +181,9 @@ static void client_context_reset(Server *s, ClientContext *c) {
 
         c->log_ratelimit_interval = s->ratelimit_interval;
         c->log_ratelimit_burst = s->ratelimit_burst;
+
+        c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
+        c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
 }
 
 static ClientContext* client_context_free(Server *s, ClientContext *c) {
@@ -288,6 +293,8 @@ static int client_context_read_cgroup(Server *s, ClientContext *c, const char *u
 
                 return r;
         }
+
+        (void) client_context_read_log_filter_patterns(c, t);
 
         /* Let's shortcut this if the cgroup path didn't change */
         if (streq_ptr(c->cgroup, t))
@@ -533,7 +540,7 @@ static void client_context_really_refresh(
 
         if (c->in_lru) {
                 assert(c->n_ref == 0);
-                assert_se(prioq_reshuffle(s->client_contexts_lru, c, &c->lru_index) >= 0);
+                prioq_reshuffle(s->client_contexts_lru, c, &c->lru_index);
         }
 }
 
@@ -771,7 +778,8 @@ void client_context_acquire_default(Server *s) {
 
                 r = client_context_acquire(s, ucred.pid, &ucred, NULL, 0, NULL, &s->my_context);
                 if (r < 0)
-                        log_warning_errno(r, "Failed to acquire our own context, ignoring: %m");
+                        log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                    "Failed to acquire our own context, ignoring: %m");
         }
 
         if (!s->namespace && !s->pid1_context) {
@@ -780,7 +788,8 @@ void client_context_acquire_default(Server *s) {
 
                 r = client_context_acquire(s, 1, NULL, NULL, 0, NULL, &s->pid1_context);
                 if (r < 0)
-                        log_warning_errno(r, "Failed to acquire PID1's context, ignoring: %m");
+                        log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                    "Failed to acquire PID1's context, ignoring: %m");
 
         }
 }

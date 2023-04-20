@@ -17,8 +17,10 @@
 
 #include "alloc-util.h"
 #include "blockdev-util.h"
+#include "data-fd-util.h"
 #include "device-util.h"
 #include "devnum-util.h"
+#include "dissect-image.h"
 #include "env-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -72,7 +74,7 @@ static int get_current_uevent_seqnum(uint64_t *ret) {
 }
 
 static int open_lock_fd(int primary_fd, int operation) {
-        _cleanup_close_ int lock_fd = -1;
+        _cleanup_close_ int lock_fd = -EBADF;
 
         assert(primary_fd >= 0);
         assert(IN_SET(operation & ~LOCK_NB, LOCK_SH, LOCK_EX));
@@ -124,14 +126,16 @@ static int loop_configure_verify(int fd, const struct loop_config *c) {
         assert(c);
 
         if (c->block_size != 0) {
-                int z;
+                uint32_t ssz;
 
-                if (ioctl(fd, BLKSSZGET, &z) < 0)
-                        return -errno;
+                r = blockdev_get_sector_size(fd, &ssz);
+                if (r < 0)
+                        return r;
 
-                assert(z >= 0);
-                if ((uint32_t) z != c->block_size)
-                        log_debug("LOOP_CONFIGURE didn't honour requested block size %u, got %i instead. Ignoring.", c->block_size, z);
+                if (ssz != c->block_size) {
+                        log_debug("LOOP_CONFIGURE didn't honour requested block size %" PRIu32 ", got %" PRIu32 " instead. Ignoring.", c->block_size, ssz);
+                        broken = true;
+                }
         }
 
         if (c->info.lo_sizelimit != 0) {
@@ -172,6 +176,7 @@ static int loop_configure_verify(int fd, const struct loop_config *c) {
 
 static int loop_configure_fallback(int fd, const struct loop_config *c) {
         struct loop_info64 info_copy;
+        int r;
 
         assert(fd >= 0);
         assert(c);
@@ -219,6 +224,21 @@ static int loop_configure_fallback(int fd, const struct loop_config *c) {
                 if (ioctl(fd, BLKFLSBUF, 0) < 0)
                         log_debug_errno(errno, "Failed to issue BLKFLSBUF ioctl, ignoring: %m");
 
+        /* If a block size is requested then try to configure it. If that doesn't work, ignore errors, but
+         * afterwards, let's validate what is in effect, and if it doesn't match what we want, fail */
+        if (c->block_size != 0) {
+                uint32_t ssz;
+
+                if (ioctl(fd, LOOP_SET_BLOCK_SIZE, (unsigned long) c->block_size) < 0)
+                        log_debug_errno(errno, "Failed to set sector size, ignoring: %m");
+
+                r = blockdev_get_sector_size(fd, &ssz);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to read sector size: %m");
+                if (ssz != c->block_size)
+                        return log_debug_errno(SYNTHETIC_ERRNO(EIO), "Sector size of loopback device doesn't match what we requested, refusing.");
+        }
+
         /* LO_FLAGS_DIRECT_IO is a flags we need to configure via explicit ioctls. */
         if (FLAGS_SET(c->info.lo_flags, LO_FLAGS_DIRECT_IO))
                 if (ioctl(fd, LOOP_SET_DIRECT_IO, 1UL) < 0)
@@ -237,8 +257,8 @@ static int loop_configure(
         static bool loop_configure_broken = false;
 
         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
-        _cleanup_(cleanup_clear_loop_close) int loop_with_fd = -1; /* This must be declared before lock_fd. */
-        _cleanup_close_ int fd = -1, lock_fd = -1;
+        _cleanup_(cleanup_clear_loop_close) int loop_with_fd = -EBADF; /* This must be declared before lock_fd. */
+        _cleanup_close_ int fd = -EBADF, lock_fd = -EBADF;
         _cleanup_free_ char *node = NULL;
         uint64_t diskseq = 0, seqnum = UINT64_MAX;
         usec_t timestamp = USEC_INFINITY;
@@ -390,6 +410,7 @@ static int loop_configure(
                 .diskseq = diskseq,
                 .uevent_seqnum_not_before = seqnum,
                 .timestamp_not_before = timestamp,
+                .sector_size = c->block_size,
         };
 
         *ret = TAKE_PTR(d);
@@ -402,13 +423,13 @@ static int loop_device_make_internal(
                 int open_flags,
                 uint64_t offset,
                 uint64_t size,
-                uint32_t block_size,
+                uint32_t sector_size,
                 uint32_t loop_flags,
                 int lock_op,
                 LoopDevice **ret) {
 
         _cleanup_(loop_device_unrefp) LoopDevice *d = NULL;
-        _cleanup_close_ int direct_io_fd = -1, control = -1;
+        _cleanup_close_ int direct_io_fd = -EBADF, control = -EBADF;
         _cleanup_free_ char *backing_file = NULL;
         struct loop_config config;
         int r, f_flags;
@@ -473,9 +494,50 @@ static int loop_device_make_internal(
         if (control < 0)
                 return -errno;
 
+        if (sector_size == 0)
+                /* If no sector size is specified, default to the classic default */
+                sector_size = 512;
+        else if (sector_size == UINT32_MAX) {
+
+                if (S_ISBLK(st.st_mode))
+                        /* If the sector size is specified as UINT32_MAX we'll propagate the sector size of
+                         * the underlying block device. */
+                        r = blockdev_get_sector_size(fd, &sector_size);
+                else {
+                        _cleanup_close_ int non_direct_io_fd = -1;
+                        int probe_fd;
+
+                        assert(S_ISREG(st.st_mode));
+
+                        /* If sector size is specified as UINT32_MAX, we'll try to probe the right sector
+                         * size of the image in question by looking for the GPT partition header at various
+                         * offsets. This of course only works if the image already has a disk label.
+                         *
+                         * So here we actually want to read the file contents ourselves. This is quite likely
+                         * not going to work if we managed to enable O_DIRECT, because in such a case there
+                         * are some pretty strict alignment requirements to offset, size and target, but
+                         * there's no way to query what alignment specifically is actually required. Hence,
+                         * let's avoid the mess, and temporarily open an fd without O_DIRECT for the probing
+                         * logic. */
+
+                        if (FLAGS_SET(loop_flags, LO_FLAGS_DIRECT_IO)) {
+                                non_direct_io_fd = fd_reopen(fd, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
+                                if (non_direct_io_fd < 0)
+                                        return non_direct_io_fd;
+
+                                probe_fd = non_direct_io_fd;
+                        } else
+                                probe_fd = fd;
+
+                        r = probe_sector_size(probe_fd, &sector_size);
+                }
+                if (r < 0)
+                        return r;
+        }
+
         config = (struct loop_config) {
                 .fd = fd,
-                .block_size = block_size,
+                .block_size = sector_size,
                 .info = {
                         /* Use the specified flags, but configure the read-only flag from the open flags, and force autoclear */
                         .lo_flags = (loop_flags & ~LO_FLAGS_READ_ONLY) | ((open_flags & O_ACCMODE) == O_RDONLY ? LO_FLAGS_READ_ONLY : 0) | LO_FLAGS_AUTOCLEAR,
@@ -559,7 +621,7 @@ int loop_device_make(
                 int open_flags,
                 uint64_t offset,
                 uint64_t size,
-                uint32_t block_size,
+                uint32_t sector_size,
                 uint32_t loop_flags,
                 int lock_op,
                 LoopDevice **ret) {
@@ -573,7 +635,7 @@ int loop_device_make(
                         open_flags,
                         offset,
                         size,
-                        block_size,
+                        sector_size,
                         loop_flags_mangle(loop_flags),
                         lock_op,
                         ret);
@@ -582,12 +644,13 @@ int loop_device_make(
 int loop_device_make_by_path(
                 const char *path,
                 int open_flags,
+                uint32_t sector_size,
                 uint32_t loop_flags,
                 int lock_op,
                 LoopDevice **ret) {
 
         int r, basic_flags, direct_flags, rdwr_flags;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         bool direct = false;
 
         assert(path);
@@ -637,11 +700,53 @@ int loop_device_make_by_path(
                   direct ? "enabled" : "disabled",
                   direct != (direct_flags != 0) ? " (O_DIRECT was requested but not supported)" : "");
 
-        return loop_device_make_internal(path, fd, open_flags, 0, 0, 0, loop_flags, lock_op, ret);
+        return loop_device_make_internal(path, fd, open_flags, 0, 0, sector_size, loop_flags, lock_op, ret);
+}
+
+int loop_device_make_by_path_memory(
+                const char *path,
+                int open_flags,
+                uint32_t sector_size,
+                uint32_t loop_flags,
+                int lock_op,
+                LoopDevice **ret) {
+
+        _cleanup_close_ int fd = -EBADF, mfd = -EBADF;
+        _cleanup_free_ char *fn = NULL;
+        struct stat st;
+        int r;
+
+        assert(path);
+        assert(IN_SET(open_flags, O_RDWR, O_RDONLY));
+        assert(ret);
+
+        loop_flags &= ~LO_FLAGS_DIRECT_IO; /* memfds don't support O_DIRECT, hence LO_FLAGS_DIRECT_IO can't be used either */
+
+        fd = open(path, O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_RDONLY);
+        if (fd < 0)
+                return -errno;
+
+        if (fstat(fd, &st) < 0)
+                return -errno;
+
+        if (!S_ISREG(st.st_mode) && !S_ISBLK(st.st_mode))
+                return -EBADF;
+
+        r = path_extract_filename(path, &fn);
+        if (r < 0)
+                return r;
+
+        mfd = memfd_clone_fd(fd, fn, open_flags|O_CLOEXEC);
+        if (mfd < 0)
+                return mfd;
+
+        fd = safe_close(fd); /* Let's close the original early */
+
+        return loop_device_make_internal(NULL, mfd, open_flags, 0, 0, sector_size, loop_flags, lock_op, ret);
 }
 
 static LoopDevice* loop_device_free(LoopDevice *d) {
-        _cleanup_close_ int control = -1;
+        _cleanup_close_ int control = -EBADF;
         int r;
 
         if (!d)
@@ -734,7 +839,7 @@ int loop_device_open(
                 int lock_op,
                 LoopDevice **ret) {
 
-        _cleanup_close_ int fd = -1, lock_fd = -1;
+        _cleanup_close_ int fd = -EBADF, lock_fd = -EBADF;
         _cleanup_free_ char *node = NULL, *backing_file = NULL;
         struct loop_info64 info;
         uint64_t diskseq = 0;
@@ -779,6 +884,11 @@ int loop_device_open(
         if (r < 0 && r != -EOPNOTSUPP)
                 return r;
 
+        uint32_t sector_size;
+        r = blockdev_get_sector_size(fd, &sector_size);
+        if (r < 0)
+                return r;
+
         r = sd_device_get_devnum(dev, &devnum);
         if (r < 0)
                 return r;
@@ -808,6 +918,7 @@ int loop_device_open(
                 .diskseq = diskseq,
                 .uevent_seqnum_not_before = UINT64_MAX,
                 .timestamp_not_before = USEC_INFINITY,
+                .sector_size = sector_size,
         };
 
         *ret = d;
@@ -854,7 +965,7 @@ static int resize_partition(int partition_fd, uint64_t offset, uint64_t size) {
         char sysfs[STRLEN("/sys/dev/block/:/partition") + 2*DECIMAL_STR_MAX(dev_t) + 1];
         _cleanup_free_ char *buffer = NULL;
         uint64_t current_offset, current_size, partno;
-        _cleanup_close_ int whole_fd = -1;
+        _cleanup_close_ int whole_fd = -EBADF;
         struct stat st;
         dev_t devno;
         int r;

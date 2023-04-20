@@ -28,6 +28,7 @@
 #include "base-filesystem.h"
 #include "blkid-util.h"
 #include "btrfs-util.h"
+#include "build.h"
 #include "bus-error.h"
 #include "bus-util.h"
 #include "cap-list.h"
@@ -110,10 +111,10 @@
 #include "umask-util.h"
 #include "unit-name.h"
 #include "user-util.h"
-#include "util.h"
 
 /* The notify socket inside the container it can use to talk to nspawn using the sd_notify(3) protocol */
 #define NSPAWN_NOTIFY_SOCKET_PATH "/run/host/notify"
+#define NSPAWN_MOUNT_TUNNEL "/run/host/incoming"
 
 #define EXIT_FORCE_RESTART 133
 
@@ -1249,7 +1250,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 arg_uid_range = UINT32_C(0x10000);
 
                         } else if (streq(optarg, "identity")) {
-                                /* identitiy: User namespaces on, UID range is map the 0…0xFFFF range to
+                                /* identity: User namespaces on, UID range is map the 0…0xFFFF range to
                                  * itself, i.e. we don't actually map anything, but do take benefit of
                                  * isolation of capability sets. */
                                 arg_userns_mode = USER_NAMESPACE_FIXED;
@@ -1716,7 +1717,16 @@ static int parse_argv(int argc, char *argv[]) {
                  * --directory=". */
                 arg_directory = TAKE_PTR(arg_template);
 
-        arg_caps_retain = (arg_caps_retain | plus | (arg_private_network ? UINT64_C(1) << CAP_NET_ADMIN : 0)) & ~minus;
+        arg_caps_retain |= plus;
+        arg_caps_retain |= arg_private_network ? UINT64_C(1) << CAP_NET_ADMIN : 0;
+
+        /* If we're not unsharing the network namespace and are unsharing the user namespace, we won't have
+         * permissions to bind ports in the container, so let's drop the CAP_NET_BIND_SERVICE capability to
+         * indicate that. */
+        if (!arg_private_network && arg_userns_mode != USER_NAMESPACE_NO && arg_uid_shift > 0)
+                arg_caps_retain &= ~(UINT64_C(1) << CAP_NET_BIND_SERVICE);
+
+        arg_caps_retain &= ~minus;
 
         /* Make sure to parse environment before we reset the settings mask below */
         r = parse_environment();
@@ -2195,7 +2205,7 @@ static int setup_boot_id(void) {
         if (r < 0)
                 return log_error_errno(r, "Failed to generate random boot id: %m");
 
-        r = id128_write(path, ID128_FORMAT_UUID, rnd, false);
+        r = id128_write(path, ID128_FORMAT_UUID, rnd);
         if (r < 0)
                 return log_error_errno(r, "Failed to write boot id: %m");
 
@@ -2219,7 +2229,6 @@ static int copy_devnodes(const char *dest) {
                 "tty\0"
                 "net/tun\0";
 
-        const char *d;
         int r = 0;
 
         assert(dest);
@@ -2376,7 +2385,7 @@ static int setup_pts(const char *dest) {
 }
 
 static int setup_stdio_as_dev_console(void) {
-        _cleanup_close_ int terminal = -1;
+        _cleanup_close_ int terminal = -EBADF;
         int r;
 
         /* We open the TTY in O_NOCTTY mode, so that we do not become controller yet. We'll do that later
@@ -2459,7 +2468,7 @@ static int setup_credentials(const char *root) {
 
         for (size_t i = 0; i < arg_n_credentials; i++) {
                 _cleanup_free_ char *j = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 j = path_join(q, arg_credentials[i].id);
                 if (!j)
@@ -2497,17 +2506,17 @@ static int setup_credentials(const char *root) {
         return mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, "mode=0500");
 }
 
-static int setup_kmsg(int kmsg_socket) {
+static int setup_kmsg(int fd_inner_socket) {
         _cleanup_(unlink_and_freep) char *from = NULL;
         _cleanup_free_ char *fifo = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
-        assert(kmsg_socket >= 0);
+        assert(fd_inner_socket >= 0);
 
         BLOCK_WITH_UMASK(0000);
 
-        /* We create the kmsg FIFO as as temporary file in /run, but immediately delete it after bind mounting it to
+        /* We create the kmsg FIFO as a temporary file in /run, but immediately delete it after bind mounting it to
          * /proc/kmsg. While FIFOs on the reading side behave very similar to /proc/kmsg, their writing side behaves
          * differently from /dev/kmsg in that writing blocks when nothing is reading. In order to avoid any problems
          * with containers deadlocking due to this we simply make /dev/kmsg unavailable to the container. */
@@ -2530,7 +2539,7 @@ static int setup_kmsg(int kmsg_socket) {
                 return log_error_errno(errno, "Failed to open fifo: %m");
 
         /* Store away the fd in the socket, so that it stays open as long as we run the child */
-        r = send_one_fd(kmsg_socket, fd, 0);
+        r = send_one_fd(fd_inner_socket, fd, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to send FIFO fd: %m");
 
@@ -2777,7 +2786,7 @@ static int reset_audit_loginuid(void) {
         return 0;
 }
 
-static int setup_propagate(const char *root) {
+static int mount_tunnel_dig(const char *root) {
         const char *p, *q;
         int r;
 
@@ -2790,11 +2799,11 @@ static int setup_propagate(const char *root) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create /run/host: %m");
 
-        r = userns_mkdir(root, "/run/host/incoming", 0600, 0, 0);
+        r = userns_mkdir(root, NSPAWN_MOUNT_TUNNEL, 0600, 0, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to create /run/host/incoming: %m");
+                return log_error_errno(r, "Failed to create "NSPAWN_MOUNT_TUNNEL": %m");
 
-        q = prefix_roota(root, "/run/host/incoming");
+        q = prefix_roota(root, NSPAWN_MOUNT_TUNNEL);
         r = mount_nofollow_verbose(LOG_ERR, p, q, NULL, MS_BIND, NULL);
         if (r < 0)
                 return r;
@@ -2803,8 +2812,17 @@ static int setup_propagate(const char *root) {
         if (r < 0)
                 return r;
 
-        /* machined will MS_MOVE into that directory, and that's only supported for non-shared mounts. */
-        return mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_SLAVE, NULL);
+        return 0;
+}
+
+static int mount_tunnel_open(void) {
+        int r;
+
+        r = mount_follow_verbose(LOG_ERR, NULL, NSPAWN_MOUNT_TUNNEL, NULL, MS_SLAVE, NULL);
+        if (r < 0)
+                return r;
+
+        return 0;
 }
 
 static int setup_machine_id(const char *directory) {
@@ -2823,7 +2841,7 @@ static int setup_machine_id(const char *directory) {
 
         r = id128_read(etc_machine_id, ID128_FORMAT_PLAIN, &id);
         if (r < 0) {
-                if (!IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG)) /* If the file is missing, empty, or uninitialized, we don't mind */
+                if (!ERRNO_IS_MACHINE_ID_UNSET(r)) /* If the file is missing, empty, or uninitialized, we don't mind */
                         return log_error_errno(r, "Failed to read machine ID from container image: %m");
 
                 if (sd_id128_is_null(arg_uuid)) {
@@ -3036,16 +3054,19 @@ static int determine_names(void) {
                 else if (arg_image) {
                         char *e;
 
-                        arg_machine = strdup(basename(arg_image));
+                        r = path_extract_filename(arg_image, &arg_machine);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract file name from '%s': %m", arg_image);
 
                         /* Truncate suffix if there is one */
                         e = endswith(arg_machine, ".raw");
                         if (e)
                                 *e = 0;
-                } else
-                        arg_machine = strdup(basename(arg_directory));
-                if (!arg_machine)
-                        return log_oom();
+                } else {
+                        r = path_extract_filename(arg_directory, &arg_machine);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract file name from '%s': %m", arg_directory);
+                }
 
                 hostname_cleanup(arg_machine);
                 if (!hostname_is_valid(arg_machine, 0))
@@ -3201,9 +3222,7 @@ static int inner_child(
                 Barrier *barrier,
                 const char *directory,
                 bool secondary,
-                int kmsg_socket,
-                int rtnl_socket,
-                int master_pty_socket,
+                int fd_inner_socket,
                 FDSet *fds,
                 char **os_release_pairs) {
 
@@ -3241,7 +3260,7 @@ static int inner_child(
 
         assert(barrier);
         assert(directory);
-        assert(kmsg_socket >= 0);
+        assert(fd_inner_socket >= 0);
 
         log_debug("Inner child is initializing.");
 
@@ -3313,10 +3332,9 @@ static int inner_child(
         if (r < 0)
                 return r;
 
-        r = setup_kmsg(kmsg_socket);
+        r = setup_kmsg(fd_inner_socket);
         if (r < 0)
                 return r;
-        kmsg_socket = safe_close(kmsg_socket);
 
         r = mount_custom(
                         "/",
@@ -3336,14 +3354,13 @@ static int inner_child(
                 (void) loopback_setup();
 
         if (arg_expose_ports) {
-                r = expose_port_send_rtnl(rtnl_socket);
+                r = expose_port_send_rtnl(fd_inner_socket);
                 if (r < 0)
                         return r;
-                rtnl_socket = safe_close(rtnl_socket);
         }
 
         if (arg_console_mode != CONSOLE_PIPE) {
-                _cleanup_close_ int master = -1;
+                _cleanup_close_ int master = -EBADF;
                 _cleanup_free_ char *console = NULL;
 
                 /* Allocate a pty and make it available as /dev/console. */
@@ -3355,10 +3372,9 @@ static int inner_child(
                 if (r < 0)
                         return log_error_errno(r, "Failed to set up /dev/console: %m");
 
-                r = send_one_fd(master_pty_socket, master, 0);
+                r = send_one_fd(fd_inner_socket, master, 0);
                 if (r < 0)
                         return log_error_errno(r, "Failed to send master fd: %m");
-                master_pty_socket = safe_close(master_pty_socket);
 
                 r = setup_stdio_as_dev_console();
                 if (r < 0)
@@ -3586,7 +3602,7 @@ static int inner_child(
 }
 
 static int setup_notify_child(void) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         static const union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
                 .un.sun_path = NSPAWN_NOTIFY_SOCKET_PATH,
@@ -3620,20 +3636,14 @@ static int outer_child(
                 const char *directory,
                 DissectedImage *dissected_image,
                 bool secondary,
-                int pid_socket,
-                int uuid_socket,
-                int notify_socket,
-                int kmsg_socket,
-                int rtnl_socket,
-                int uid_shift_socket,
-                int master_pty_socket,
-                int unified_cgroup_hierarchy_socket,
+                int fd_outer_socket,
+                int fd_inner_socket,
                 FDSet *fds,
                 int netns_fd) {
 
         _cleanup_(bind_user_context_freep) BindUserContext *bind_user_context = NULL;
         _cleanup_strv_free_ char **os_release_pairs = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF, mntns_fd = -EBADF;
         bool idmap = false;
         const char *p;
         pid_t pid;
@@ -3648,11 +3658,8 @@ static int outer_child(
 
         assert(barrier);
         assert(directory);
-        assert(pid_socket >= 0);
-        assert(uuid_socket >= 0);
-        assert(notify_socket >= 0);
-        assert(master_pty_socket >= 0);
-        assert(kmsg_socket >= 0);
+        assert(fd_outer_socket >= 0);
+        assert(fd_inner_socket >= 0);
 
         log_debug("Outer child is initializing.");
 
@@ -3698,8 +3705,17 @@ static int outer_child(
                 return r;
 
         if (arg_userns_mode != USER_NAMESPACE_NO) {
+                r = namespace_open(0, NULL, &mntns_fd, NULL, NULL, NULL);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to pin outer mount namespace: %m");
+
+                l = send_one_fd(fd_outer_socket, mntns_fd, 0);
+                if (l < 0)
+                        return log_error_errno(l, "Failed to send outer mount namespace fd: %m");
+                mntns_fd = safe_close(mntns_fd);
+
                 /* Let the parent know which UID shift we read from the image */
-                l = send(uid_shift_socket, &arg_uid_shift, sizeof(arg_uid_shift), MSG_NOSIGNAL);
+                l = send(fd_outer_socket, &arg_uid_shift, sizeof(arg_uid_shift), MSG_NOSIGNAL);
                 if (l < 0)
                         return log_error_errno(errno, "Failed to send UID shift: %m");
                 if (l != sizeof(arg_uid_shift))
@@ -3711,7 +3727,7 @@ static int outer_child(
                          * UID shift we just read from the image is available. If yes, it will send the UID
                          * shift back to us, if not it will pick a different one, and send it back to us. */
 
-                        l = recv(uid_shift_socket, &arg_uid_shift, sizeof(arg_uid_shift), 0);
+                        l = recv(fd_outer_socket, &arg_uid_shift, sizeof(arg_uid_shift), 0);
                         if (l < 0)
                                 return log_error_errno(errno, "Failed to recv UID shift: %m");
                         if (l != sizeof(arg_uid_shift))
@@ -3728,7 +3744,7 @@ static int outer_child(
                  * place, so that we can make changes to its mount structure (for example, to implement
                  * --volatile=) without this interfering with our ability to access files such as
                  * /etc/localtime to copy into the container. Note that we use a fixed place for this
-                 * (instead of a temporary directory, since we are living in our own mount namspace here
+                 * (instead of a temporary directory, since we are living in our own mount namespace here
                  * already, and thus don't need to be afraid of colliding with anyone else's mounts). */
                 (void) mkdir_p("/run/systemd/nspawn-root", 0755);
 
@@ -3776,7 +3792,7 @@ static int outer_child(
                                 (uid_t) bind_user_context->data[i].host_group->gid,
                         };
 
-                        l = send(uid_shift_socket, map, sizeof(map), MSG_NOSIGNAL);
+                        l = send(fd_outer_socket, map, sizeof(map), MSG_NOSIGNAL);
                         if (l < 0)
                                 return log_error_errno(errno, "Failed to send user UID map: %m");
                         if (l != sizeof(map))
@@ -3849,28 +3865,13 @@ static int outer_child(
                 if (r < 0)
                         return r;
 
-                l = send(unified_cgroup_hierarchy_socket, &arg_unified_cgroup_hierarchy, sizeof(arg_unified_cgroup_hierarchy), MSG_NOSIGNAL);
+                l = send(fd_outer_socket, &arg_unified_cgroup_hierarchy, sizeof(arg_unified_cgroup_hierarchy), MSG_NOSIGNAL);
                 if (l < 0)
                         return log_error_errno(errno, "Failed to send cgroup mode: %m");
                 if (l != sizeof(arg_unified_cgroup_hierarchy))
                         return log_error_errno(SYNTHETIC_ERRNO(EIO),
                                                "Short write while sending cgroup mode.");
-
-                unified_cgroup_hierarchy_socket = safe_close(unified_cgroup_hierarchy_socket);
         }
-
-        /* Mark everything as shared so our mounts get propagated down. This is required to make new bind
-         * mounts available in systemd services inside the container that create a new mount namespace.  See
-         * https://github.com/systemd/systemd/issues/3860 Further submounts (such as /dev) done after this
-         * will inherit the shared propagation mode.
-         *
-         * IMPORTANT: Do not overmount the root directory anymore from now on to enable moving the root
-         * directory mount to root later on.
-         * https://github.com/systemd/systemd/issues/3847#issuecomment-562735251
-         */
-        r = mount_nofollow_verbose(LOG_ERR, NULL, directory, NULL, MS_SHARED|MS_REC, NULL);
-        if (r < 0)
-                return r;
 
         r = recursive_chown(directory, arg_uid_shift, arg_uid_range);
         if (r < 0)
@@ -3911,7 +3912,7 @@ static int outer_child(
         if (r < 0)
                 return r;
 
-        r = setup_propagate(directory);
+        r = mount_tunnel_dig(directory);
         if (r < 0)
                 return r;
 
@@ -3975,9 +3976,39 @@ static int outer_child(
                         return r;
         }
 
-        r = mount_move_root(directory);
+        /* Mark everything as shared so our mounts get propagated down. This is required to make new bind
+         * mounts available in systemd services inside the container that create a new mount namespace.  See
+         * https://github.com/systemd/systemd/issues/3860 Further submounts (such as /dev) done after this
+         * will inherit the shared propagation mode.
+         *
+         * IMPORTANT: Do not overmount the root directory anymore from now on to enable moving the root
+         * directory mount to root later on.
+         * https://github.com/systemd/systemd/issues/3847#issuecomment-562735251
+         */
+        r = mount_switch_root(directory, MS_SHARED);
         if (r < 0)
                 return log_error_errno(r, "Failed to move root directory: %m");
+
+        /* We finished setting up the rootfs which is a shared mount. The mount tunnel needs to be a
+         * dependent mount otherwise we can't MS_MOVE mounts that were propagated from the host into
+         * the container. */
+        r = mount_tunnel_open();
+        if (r < 0)
+                return r;
+
+        if (arg_userns_mode != USER_NAMESPACE_NO) {
+                /* In order to mount procfs and sysfs in an unprivileged container the kernel
+                 * requires that a fully visible instance is already present in the target mount
+                 * namespace. Mount one here so the inner child can mount its own instances. Later
+                 * we umount the temporary instances created here before we actually exec the
+                 * payload. Since the rootfs is shared the umount will propagate into the container.
+                 * Note, the inner child wouldn't be able to unmount the instances on its own since
+                 * it doesn't own the originating mount namespace. IOW, the outer child needs to do
+                 * this. */
+                r = pin_fully_visible_fs();
+                if (r < 0)
+                        return r;
+        }
 
         fd = setup_notify_child();
         if (fd < 0)
@@ -3989,10 +4020,7 @@ static int outer_child(
         if (pid < 0)
                 return log_error_errno(errno, "Failed to fork inner child: %m");
         if (pid == 0) {
-                pid_socket = safe_close(pid_socket);
-                uuid_socket = safe_close(uuid_socket);
-                notify_socket = safe_close(notify_socket);
-                uid_shift_socket = safe_close(uid_shift_socket);
+                fd_outer_socket = safe_close(fd_outer_socket);
 
                 /* The inner child has all namespaces that are requested, so that we all are owned by the
                  * user if user namespaces are turned on. */
@@ -4003,37 +4031,33 @@ static int outer_child(
                                 return log_error_errno(r, "Failed to join network namespace: %m");
                 }
 
-                r = inner_child(barrier, directory, secondary, kmsg_socket, rtnl_socket, master_pty_socket, fds, os_release_pairs);
+                r = inner_child(barrier, directory, secondary, fd_inner_socket, fds, os_release_pairs);
                 if (r < 0)
                         _exit(EXIT_FAILURE);
 
                 _exit(EXIT_SUCCESS);
         }
 
-        l = send(pid_socket, &pid, sizeof(pid), MSG_NOSIGNAL);
+        l = send(fd_outer_socket, &pid, sizeof(pid), MSG_NOSIGNAL);
         if (l < 0)
                 return log_error_errno(errno, "Failed to send PID: %m");
         if (l != sizeof(pid))
                 return log_error_errno(SYNTHETIC_ERRNO(EIO),
                                        "Short write while sending PID.");
 
-        l = send(uuid_socket, &arg_uuid, sizeof(arg_uuid), MSG_NOSIGNAL);
+        l = send(fd_outer_socket, &arg_uuid, sizeof(arg_uuid), MSG_NOSIGNAL);
         if (l < 0)
                 return log_error_errno(errno, "Failed to send machine ID: %m");
         if (l != sizeof(arg_uuid))
                 return log_error_errno(SYNTHETIC_ERRNO(EIO),
                                        "Short write while sending machine ID.");
 
-        l = send_one_fd(notify_socket, fd, 0);
+        l = send_one_fd(fd_outer_socket, fd, 0);
         if (l < 0)
                 return log_error_errno(l, "Failed to send notify fd: %m");
 
-        pid_socket = safe_close(pid_socket);
-        uuid_socket = safe_close(uuid_socket);
-        notify_socket = safe_close(notify_socket);
-        master_pty_socket = safe_close(master_pty_socket);
-        kmsg_socket = safe_close(kmsg_socket);
-        rtnl_socket = safe_close(rtnl_socket);
+        fd_outer_socket = safe_close(fd_outer_socket);
+        fd_inner_socket = safe_close(fd_inner_socket);
         netns_fd = safe_close(netns_fd);
 
         return 0;
@@ -4666,13 +4690,13 @@ static int load_settings(void) {
                  * actual image we shall boot. */
 
                 if (arg_image) {
-                        p = file_in_same_dir(arg_image, arg_settings_filename);
-                        if (!p)
-                                return log_oom();
-                } else if (arg_directory && !path_equal(arg_directory, "/")) {
-                        p = file_in_same_dir(arg_directory, arg_settings_filename);
-                        if (!p)
-                                return log_oom();
+                        r = file_in_same_dir(arg_image, arg_settings_filename, &p);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to generate settings path from image path: %m");
+                } else if (arg_directory) {
+                        r = file_in_same_dir(arg_directory, arg_settings_filename, &p);
+                        if (r < 0 && r != -EADDRNOTAVAIL) /* if directory is root fs, don't complain */
+                                return log_error_errno(r, "Failed to generate settings path from directory path: %m");
                 }
 
                 if (p) {
@@ -4730,18 +4754,12 @@ static int run_container(
         };
 
         _cleanup_(release_lock_file) LockFile uid_shift_lock = LOCK_FILE_INIT;
-        _cleanup_close_ int etc_passwd_lock = -1;
+        _cleanup_close_ int etc_passwd_lock = -EBADF;
         _cleanup_close_pair_ int
-                kmsg_socket_pair[2] = { -1, -1 },
-                rtnl_socket_pair[2] = { -1, -1 },
-                pid_socket_pair[2] = { -1, -1 },
-                uuid_socket_pair[2] = { -1, -1 },
-                notify_socket_pair[2] = { -1, -1 },
-                uid_shift_socket_pair[2] = { -1, -1 },
-                master_pty_socket_pair[2] = { -1, -1 },
-                unified_cgroup_hierarchy_socket_pair[2] = { -1, -1};
+                fd_inner_socket_pair[2] = PIPE_EBADF,
+                fd_outer_socket_pair[2] = PIPE_EBADF;
 
-        _cleanup_close_ int notify_socket = -1;
+        _cleanup_close_ int notify_socket = -EBADF, mntns_fd = -EBADF, fd_kmsg_fifo = -EBADF;
         _cleanup_(barrier_destroy) Barrier barrier = BARRIER_NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *notify_event_source = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
@@ -4754,7 +4772,7 @@ static int run_container(
         int ifi = 0, r;
         ssize_t l;
         sigset_t mask_chld;
-        _cleanup_close_ int child_netns_fd = -1;
+        _cleanup_close_ int child_netns_fd = -EBADF;
 
         assert_se(sigemptyset(&mask_chld) == 0);
         assert_se(sigaddset(&mask_chld, SIGCHLD) == 0);
@@ -4776,31 +4794,11 @@ static int run_container(
         if (r < 0)
                 return log_error_errno(r, "Cannot initialize IPC barrier: %m");
 
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, kmsg_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create kmsg socket pair: %m");
+        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, fd_inner_socket_pair) < 0)
+                return log_error_errno(errno, "Failed to create inner socket pair: %m");
 
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, rtnl_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create rtnl socket pair: %m");
-
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, pid_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create pid socket pair: %m");
-
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, uuid_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create id socket pair: %m");
-
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, notify_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create notify socket pair: %m");
-
-        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, master_pty_socket_pair) < 0)
-                return log_error_errno(errno, "Failed to create console socket pair: %m");
-
-        if (arg_userns_mode != USER_NAMESPACE_NO)
-                if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, uid_shift_socket_pair) < 0)
-                        return log_error_errno(errno, "Failed to create uid shift socket pair: %m");
-
-        if (arg_unified_cgroup_hierarchy == CGROUP_UNIFIED_UNKNOWN)
-                if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, unified_cgroup_hierarchy_socket_pair) < 0)
-                        return log_error_errno(errno, "Failed to create unified cgroup socket pair: %m");
+        if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, fd_outer_socket_pair) < 0)
+                return log_error_errno(errno, "Failed to create outer socket pair: %m");
 
         /* Child can be killed before execv(), so handle SIGCHLD in order to interrupt
          * parent's blocking calls and give it a chance to call wait() and terminate. */
@@ -4837,14 +4835,8 @@ static int run_container(
                 /* The outer child only has a file system namespace. */
                 barrier_set_role(&barrier, BARRIER_CHILD);
 
-                kmsg_socket_pair[0] = safe_close(kmsg_socket_pair[0]);
-                rtnl_socket_pair[0] = safe_close(rtnl_socket_pair[0]);
-                pid_socket_pair[0] = safe_close(pid_socket_pair[0]);
-                uuid_socket_pair[0] = safe_close(uuid_socket_pair[0]);
-                notify_socket_pair[0] = safe_close(notify_socket_pair[0]);
-                master_pty_socket_pair[0] = safe_close(master_pty_socket_pair[0]);
-                uid_shift_socket_pair[0] = safe_close(uid_shift_socket_pair[0]);
-                unified_cgroup_hierarchy_socket_pair[0] = safe_close(unified_cgroup_hierarchy_socket_pair[0]);
+                fd_inner_socket_pair[0] = safe_close(fd_inner_socket_pair[0]);
+                fd_outer_socket_pair[0] = safe_close(fd_outer_socket_pair[0]);
 
                 (void) reset_all_signal_handlers();
                 (void) reset_signal_mask();
@@ -4853,14 +4845,8 @@ static int run_container(
                                 arg_directory,
                                 dissected_image,
                                 secondary,
-                                pid_socket_pair[1],
-                                uuid_socket_pair[1],
-                                notify_socket_pair[1],
-                                kmsg_socket_pair[1],
-                                rtnl_socket_pair[1],
-                                uid_shift_socket_pair[1],
-                                master_pty_socket_pair[1],
-                                unified_cgroup_hierarchy_socket_pair[1],
+                                fd_outer_socket_pair[1],
+                                fd_inner_socket_pair[1],
                                 fds,
                                 child_netns_fd);
                 if (r < 0)
@@ -4873,18 +4859,16 @@ static int run_container(
 
         fdset_close(fds);
 
-        kmsg_socket_pair[1] = safe_close(kmsg_socket_pair[1]);
-        rtnl_socket_pair[1] = safe_close(rtnl_socket_pair[1]);
-        pid_socket_pair[1] = safe_close(pid_socket_pair[1]);
-        uuid_socket_pair[1] = safe_close(uuid_socket_pair[1]);
-        notify_socket_pair[1] = safe_close(notify_socket_pair[1]);
-        master_pty_socket_pair[1] = safe_close(master_pty_socket_pair[1]);
-        uid_shift_socket_pair[1] = safe_close(uid_shift_socket_pair[1]);
-        unified_cgroup_hierarchy_socket_pair[1] = safe_close(unified_cgroup_hierarchy_socket_pair[1]);
+        fd_inner_socket_pair[1] = safe_close(fd_inner_socket_pair[1]);
+        fd_outer_socket_pair[1] = safe_close(fd_outer_socket_pair[1]);
 
         if (arg_userns_mode != USER_NAMESPACE_NO) {
+                mntns_fd = receive_one_fd(fd_outer_socket_pair[0], 0);
+                if (mntns_fd < 0)
+                        return log_error_errno(mntns_fd, "Failed to receive mount namespace fd from outer child: %m");
+
                 /* The child just let us know the UID shift it might have read from the image. */
-                l = recv(uid_shift_socket_pair[0], &arg_uid_shift, sizeof arg_uid_shift, 0);
+                l = recv(fd_outer_socket_pair[0], &arg_uid_shift, sizeof arg_uid_shift, 0);
                 if (l < 0)
                         return log_error_errno(errno, "Failed to read UID shift: %m");
                 if (l != sizeof arg_uid_shift)
@@ -4899,7 +4883,7 @@ static int run_container(
                         if (r < 0)
                                 return log_error_errno(r, "Failed to pick suitable UID/GID range: %m");
 
-                        l = send(uid_shift_socket_pair[0], &arg_uid_shift, sizeof arg_uid_shift, MSG_NOSIGNAL);
+                        l = send(fd_outer_socket_pair[0], &arg_uid_shift, sizeof arg_uid_shift, MSG_NOSIGNAL);
                         if (l < 0)
                                 return log_error_errno(errno, "Failed to send UID shift: %m");
                         if (l != sizeof arg_uid_shift)
@@ -4916,7 +4900,7 @@ static int run_container(
                                 return log_oom();
 
                         for (size_t i = 0; i < n_bind_user_uid; i++) {
-                                l = recv(uid_shift_socket_pair[0], bind_user_uid + i*4, sizeof(uid_t)*4, 0);
+                                l = recv(fd_outer_socket_pair[0], bind_user_uid + i*4, sizeof(uid_t)*4, 0);
                                 if (l < 0)
                                         return log_error_errno(errno, "Failed to read user UID map pair: %m");
                                 if (l != sizeof(uid_t)*4)
@@ -4929,7 +4913,7 @@ static int run_container(
 
         if (arg_unified_cgroup_hierarchy == CGROUP_UNIFIED_UNKNOWN) {
                 /* The child let us know the support cgroup mode it might have read from the image. */
-                l = recv(unified_cgroup_hierarchy_socket_pair[0], &arg_unified_cgroup_hierarchy, sizeof(arg_unified_cgroup_hierarchy), 0);
+                l = recv(fd_outer_socket_pair[0], &arg_unified_cgroup_hierarchy, sizeof(arg_unified_cgroup_hierarchy), 0);
                 if (l < 0)
                         return log_error_errno(errno, "Failed to read cgroup mode: %m");
                 if (l != sizeof(arg_unified_cgroup_hierarchy))
@@ -4945,21 +4929,21 @@ static int run_container(
                 return -EIO;
 
         /* And now retrieve the PID of the inner child. */
-        l = recv(pid_socket_pair[0], pid, sizeof *pid, 0);
+        l = recv(fd_outer_socket_pair[0], pid, sizeof *pid, 0);
         if (l < 0)
                 return log_error_errno(errno, "Failed to read inner child PID: %m");
         if (l != sizeof *pid)
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Short read while reading inner child PID.");
 
         /* We also retrieve container UUID in case it was generated by outer child */
-        l = recv(uuid_socket_pair[0], &arg_uuid, sizeof arg_uuid, 0);
+        l = recv(fd_outer_socket_pair[0], &arg_uuid, sizeof arg_uuid, 0);
         if (l < 0)
                 return log_error_errno(errno, "Failed to read container machine ID: %m");
         if (l != sizeof(arg_uuid))
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Short read while reading container machined ID.");
 
         /* We also retrieve the socket used for notifications generated by outer child */
-        notify_socket = receive_one_fd(notify_socket_pair[0], 0);
+        notify_socket = receive_one_fd(fd_outer_socket_pair[0], 0);
         if (notify_socket < 0)
                 return log_error_errno(notify_socket,
                                        "Failed to receive notification socket from the outer child: %m");
@@ -5144,6 +5128,13 @@ static int run_container(
         if (r < 0)
                 return r;
 
+        if (arg_userns_mode != USER_NAMESPACE_NO) {
+                r = wipe_fully_visible_fs(mntns_fd);
+                if (r < 0)
+                        return r;
+                mntns_fd = safe_close(mntns_fd);
+        }
+
         /* Let the child know that we are ready and wait that the child is completely ready now. */
         if (!barrier_place_and_sync(&barrier)) /* #5 */
                 return log_error_errno(SYNTHETIC_ERRNO(ESRCH), "Child died too early.");
@@ -5174,8 +5165,13 @@ static int run_container(
         /* Exit when the child exits */
         (void) sd_event_add_signal(event, NULL, SIGCHLD, on_sigchld, PID_TO_PTR(*pid));
 
+        /* Retrieve the kmsg fifo allocated by inner child */
+        fd_kmsg_fifo = receive_one_fd(fd_inner_socket_pair[0], 0);
+        if (fd_kmsg_fifo < 0)
+                return log_error_errno(fd_kmsg_fifo, "Failed to receive kmsg fifo from inner child: %m");
+
         if (arg_expose_ports) {
-                r = expose_port_watch_rtnl(event, rtnl_socket_pair[0], on_address_change, expose_args, &rtnl);
+                r = expose_port_watch_rtnl(event, fd_inner_socket_pair[0], on_address_change, expose_args, &rtnl);
                 if (r < 0)
                         return r;
 
@@ -5183,14 +5179,12 @@ static int run_container(
                 (void) expose_port_execute(rtnl, &expose_args->fw_ctx, arg_expose_ports, AF_INET6, &expose_args->address6);
         }
 
-        rtnl_socket_pair[0] = safe_close(rtnl_socket_pair[0]);
-
         if (arg_console_mode != CONSOLE_PIPE) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 PTYForwardFlags flags = 0;
 
                 /* Retrieve the master pty allocated by inner child */
-                fd = receive_one_fd(master_pty_socket_pair[0], 0);
+                fd = receive_one_fd(fd_inner_socket_pair[0], 0);
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to receive master pty from the inner child: %m");
 
@@ -5221,6 +5215,8 @@ static int run_container(
                 *master = TAKE_FD(fd);
         }
 
+        fd_inner_socket_pair[0] = safe_close(fd_inner_socket_pair[0]);
+
         r = sd_event_loop(event);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
@@ -5242,6 +5238,8 @@ static int run_container(
         /* Normally redundant, but better safe than sorry */
         (void) kill(*pid, SIGKILL);
 
+        fd_kmsg_fifo = safe_close(fd_kmsg_fifo);
+
         if (arg_private_network) {
                 /* Move network interfaces back to the parent network namespace. We use `safe_fork`
                  * to avoid having to move the parent to the child network namespace. */
@@ -5250,7 +5248,7 @@ static int run_container(
                         return r;
 
                 if (r == 0) {
-                        _cleanup_close_ int parent_netns_fd = -1;
+                        _cleanup_close_ int parent_netns_fd = -EBADF;
 
                         r = namespace_open(getpid(), NULL, NULL, &parent_netns_fd, NULL, NULL);
                         if (r < 0) {
@@ -5387,7 +5385,7 @@ static int initialize_rlimits(void) {
 }
 
 static int cant_be_in_netns(void) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct ucred ucred;
         int r;
 
@@ -5427,7 +5425,7 @@ static int cant_be_in_netns(void) {
 static int run(int argc, char *argv[]) {
         bool secondary = false, remove_directory = false, remove_image = false,
                 veth_created = false, remove_tmprootdir = false;
-        _cleanup_close_ int master = -1;
+        _cleanup_close_ int master = -EBADF;
         _cleanup_fdset_free_ FDSet *fds = NULL;
         int r, n_fd_passed, ret = EXIT_SUCCESS;
         char veth_name[IFNAMSIZ] = "";
@@ -5737,6 +5735,7 @@ static int run(int argc, char *argv[]) {
                 r = loop_device_make_by_path(
                                 arg_image,
                                 arg_read_only ? O_RDONLY : O_RDWR,
+                                /* sector_size= */ UINT32_MAX,
                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
                                 LOCK_SH,
                                 &loop);
@@ -5756,7 +5755,7 @@ static int run(int argc, char *argv[]) {
                         log_notice("Note that the disk image needs to\n"
                                    "    a) either contain only a single MBR partition of type 0x83 that is marked bootable\n"
                                    "    b) or contain a single GPT partition of type 0FC63DAF-8483-4772-8E79-3D69D8477DE4\n"
-                                   "    c) or follow https://systemd.io/DISCOVERABLE_PARTITIONS\n"
+                                   "    c) or follow https://uapi-group.org/specifications/specs/discoverable_partitions_specification\n"
                                    "    d) or contain a file system without a partition table\n"
                                    "in order to be bootable with systemd-nspawn.");
                         goto finish;
@@ -5801,7 +5800,7 @@ static int run(int argc, char *argv[]) {
                 arg_quiet = true;
 
         if (!arg_quiet)
-                log_info("Spawning container %s on %s.\nPress ^] three times within 1s to kill container.",
+                log_info("Spawning container %s on %s.\nPress Ctrl-] three times within 1s to kill container.",
                          arg_machine, arg_image ?: arg_directory);
 
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, SIGWINCH, SIGTERM, SIGINT, -1) >= 0);

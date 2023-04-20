@@ -5,19 +5,17 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "def.h"
+#include "constants.h"
 #include "errno.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "mkdir.h"
 #include "nspawn-setuid.h"
 #include "process-util.h"
-#include "rlimit-util.h"
 #include "signal-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "user-util.h"
-#include "util.h"
 
 static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
         int pipe_fds[2], r;
@@ -30,7 +28,7 @@ static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
         if (pipe2(pipe_fds, O_CLOEXEC) < 0)
                 return log_error_errno(errno, "Failed to allocate pipe: %m");
 
-        r = safe_fork("(getent)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        r = safe_fork("(getent)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE, &pid);
         if (r < 0) {
                 safe_close_pair(pipe_fds);
                 return r;
@@ -40,12 +38,10 @@ static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
 
                 pipe_fds[0] = safe_close(pipe_fds[0]);
 
-                if (rearrange_stdio(-1, TAKE_FD(pipe_fds[1]), -1) < 0)
+                if (rearrange_stdio(-EBADF, TAKE_FD(pipe_fds[1]), -EBADF) < 0)
                         _exit(EXIT_FAILURE);
 
                 (void) close_all_fds(NULL, 0);
-
-                (void) rlimit_nofile_safe();
 
                 execle("/usr/bin/getent", "getent", database, key, NULL, &empty_env);
                 execle("/bin/getent", "getent", database, key, NULL, &empty_env);
@@ -94,7 +90,7 @@ int change_uid_gid(const char *user, bool chown_stdio, char **ret_home) {
         _cleanup_free_ gid_t *gids = NULL;
         _cleanup_free_ char *home = NULL, *line = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         unsigned n_gids = 0;
         uid_t uid;
         gid_t gid;

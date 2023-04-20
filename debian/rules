@@ -101,6 +101,7 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
+	-Dukify=false \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -214,6 +215,9 @@ execute_after_dh_install:
 		mkdir -p debian/systemd-standalone-$$pkg/bin; \
 		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
 	done
+	# We don't want repart and shutdown standalone binaries for now
+	rm -f debian/systemd/bin/systemd-repart.standalone
+	rm -f debian/systemd/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/

@@ -294,8 +294,8 @@ static int userdb_on_query_reply(
                 } membership_data = {};
 
                 static const JsonDispatch dispatch_table[] = {
-                        { "userName",  JSON_VARIANT_STRING, json_dispatch_const_string, offsetof(struct membership_data, user_name),  JSON_SAFE },
-                        { "groupName", JSON_VARIANT_STRING, json_dispatch_const_string, offsetof(struct membership_data, group_name), JSON_SAFE },
+                        { "userName",  JSON_VARIANT_STRING, json_dispatch_user_group_name, offsetof(struct membership_data, user_name),  JSON_RELAX },
+                        { "groupName", JSON_VARIANT_STRING, json_dispatch_user_group_name, offsetof(struct membership_data, group_name), JSON_RELAX },
                         {}
                 };
 
@@ -469,7 +469,7 @@ static int userdb_start_query(
                     streq(de->d_name, "io.systemd.DynamicUser"))
                         continue;
 
-                /* Avoid NSS is this is requested. Note that we also skip NSS when we were asked to skip the
+                /* Avoid NSS if this is requested. Note that we also skip NSS when we were asked to skip the
                  * multiplexer, since in that case it's safer to do NSS in the client side emulation below
                  * (and when we run as part of systemd-userdbd.service we don't want to talk to ourselves
                  * anyway). */

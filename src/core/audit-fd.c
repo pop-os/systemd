@@ -12,7 +12,6 @@
 #include "capability-util.h"
 #include "fd-util.h"
 #include "log.h"
-#include "util.h"
 
 static bool initialized = false;
 static int audit_fd;
@@ -20,7 +19,7 @@ static int audit_fd;
 int get_audit_fd(void) {
 
         if (!initialized) {
-                if (have_effective_cap(CAP_AUDIT_WRITE) == 0) {
+                if (have_effective_cap(CAP_AUDIT_WRITE) <= 0) {
                         audit_fd = -EPERM;
                         initialized = true;
 

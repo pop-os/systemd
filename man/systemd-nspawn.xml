@@ -288,7 +288,7 @@
           a server data partition which are mounted to the appropriate
           places in the container. All these partitions must be
           identified by the partition types defined by the <ulink
-          url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable
+          url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable
           Partitions Specification</ulink>.</para></listitem>
 
           <listitem><para>No partition table, and a single file system spanning the whole image.</para></listitem>
@@ -425,7 +425,7 @@
         <term><option>--verity-data=</option></term>
 
         <listitem><para>Takes the path to a data integrity (dm-verity) file. This option enables data integrity checks
-        using dm-verity, if a root-hash is passed and if the used image itself does not contains the integrity data.
+        using dm-verity, if a root-hash is passed and if the used image itself does not contain the integrity data.
         The integrity data must be matched by the root hash. If this option is not specified, but a file with the
         <filename>.verity</filename> suffix is found next to the image file, bearing otherwise the same name (except if
         the image has the <filename>.raw</filename> suffix, in which case the verity data file must not have it in its name),
@@ -1374,7 +1374,7 @@ After=sys-subsystem-net-devices-ens1.device</programlisting>
         <itemizedlist>
           <listitem><para>If <option>noidmap</option> is used, any user <option>z</option> in the range
           <option>0 … y</option> seen from inside of the container is mapped to <option>x + z</option> in the
-          <option>x … x + y</option> range on the host. All host users outside of that range are mapped to
+          <option>x … x + y</option> range on the host. Other host users are mapped to
           <option>nobody</option> inside the container.</para></listitem>
           <listitem><para>If <option>idmap</option> is used, any user <option>z</option> in the UID range
           <option>0 … y</option> as seen from inside the container is mapped to the same <option>z</option>
@@ -1386,7 +1386,7 @@ After=sys-subsystem-net-devices-ens1.device</programlisting>
         </itemizedlist></para>
 
         <para>Whichever ID mapping option is used, the same mapping will be used for users and groups IDs. If
-        <option>rootidmap</option> is used, the group owning the bind mounted directory will have no effect</para>
+        <option>rootidmap</option> is used, the group owning the bind mounted directory will have no effect.</para>
 
         <para>Note that when this option is used in combination with <option>--private-users</option>, the resulting
         mount points will be owned by the <constant>nobody</constant> user. That's because the mount and its files and
@@ -1405,7 +1405,7 @@ After=sys-subsystem-net-devices-ens1.device</programlisting>
 
         <orderedlist>
           <listitem><para>The user's home directory is bind mounted from the host into
-          <filename>/run/hosts/home/</filename>.</para></listitem>
+          <filename>/run/host/home/</filename>.</para></listitem>
 
           <listitem><para>An additional UID/GID mapping is added that maps the host user's UID/GID to a
           container UID/GID, allocated from the 60514…60577 range.</para></listitem>

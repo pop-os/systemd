@@ -6,6 +6,7 @@
 
 #include "sd-daemon.h"
 
+#include "build.h"
 #include "bus-util.h"
 #include "dissect-image.h"
 #include "install.h"
@@ -17,9 +18,11 @@
 #include "path-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
+#include "reboot-util.h"
 #include "rlimit-util.h"
 #include "sigbus.h"
 #include "signal-util.h"
+#include "stat-util.h"
 #include "string-table.h"
 #include "systemctl-add-dependency.h"
 #include "systemctl-cancel-job.h"
@@ -82,6 +85,7 @@ bool arg_show_types = false;
 int arg_check_inhibitors = -1;
 bool arg_dry_run = false;
 bool arg_quiet = false;
+bool arg_no_warn = false;
 bool arg_full = false;
 bool arg_recursive = false;
 bool arg_with_dependencies = false;
@@ -114,6 +118,7 @@ TimestampStyle arg_timestamp_style = TIMESTAMP_PRETTY;
 bool arg_read_only = false;
 bool arg_mkdir = false;
 bool arg_marked = false;
+const char *arg_drop_in = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_types, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_states, strv_freep);
@@ -127,6 +132,7 @@ STATIC_DESTRUCTOR_REGISTER(arg_reboot_argument, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_host, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_boot_loader_entry, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_clean_what, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_drop_in, unsetp);
 
 static int systemctl_help(void) {
         _cleanup_free_ char *link = NULL;
@@ -275,6 +281,7 @@ static int systemctl_help(void) {
                "                             kexec, suspend, hibernate, suspend-then-hibernate,\n"
                "                             hybrid-sleep, default, rescue, emergency, and exit.\n"
                "  -q --quiet             Suppress output\n"
+               "     --no-warn           Suppress several warnings shown by default\n"
                "     --wait              For (re)start, wait until service stopped again\n"
                "                         For is-system-running, wait until startup is completed\n"
                "     --no-block          Do not wait until operation finished\n"
@@ -310,6 +317,7 @@ static int systemctl_help(void) {
                "     --read-only         Create read-only bind mount\n"
                "     --mkdir             Create directory before mounting, if missing\n"
                "     --marked            Restart/reload previously marked units\n"
+               "     --drop-in=NAME      Edit unit files using the specified drop-in file name\n"
                "\nSee the %2$s for details.\n",
                program_invocation_short_name,
                link,
@@ -431,6 +439,8 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 ARG_READ_ONLY,
                 ARG_MKDIR,
                 ARG_MARKED,
+                ARG_NO_WARN,
+                ARG_DROP_IN,
         };
 
         static const struct option options[] = {
@@ -463,6 +473,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "no-wall",             no_argument,       NULL, ARG_NO_WALL             },
                 { "dry-run",             no_argument,       NULL, ARG_DRY_RUN             },
                 { "quiet",               no_argument,       NULL, 'q'                     },
+                { "no-warn",             no_argument,       NULL, ARG_NO_WARN             },
                 { "root",                required_argument, NULL, ARG_ROOT                },
                 { "image",               required_argument, NULL, ARG_IMAGE               },
                 { "force",               no_argument,       NULL, 'f'                     },
@@ -492,6 +503,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "read-only",           no_argument,       NULL, ARG_READ_ONLY           },
                 { "mkdir",               no_argument,       NULL, ARG_MKDIR               },
                 { "marked",              no_argument,       NULL, ARG_MARKED              },
+                { "drop-in",             required_argument, NULL, ARG_DROP_IN             },
                 {}
         };
 
@@ -924,6 +936,14 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                         arg_marked = true;
                         break;
 
+                case ARG_NO_WARN:
+                        arg_no_warn = true;
+                        break;
+
+                case ARG_DROP_IN:
+                        arg_drop_in = optarg;
+                        break;
+
                 case '.':
                         /* Output an error mimicking getopt, and print a hint afterwards */
                         log_error("%s: invalid option -- '.'", program_invocation_name);
@@ -1085,7 +1105,7 @@ static int systemctl_main(int argc, char *argv[]) {
                 { "import-environment",    VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_import_environment      },
                 { "halt",                  VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "poweroff",              VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
-                { "reboot",                VERB_ANY, 2,        VERB_ONLINE_ONLY, verb_start_system_special    },
+                { "reboot",                VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "kexec",                 VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "suspend",               VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "hibernate",             VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
@@ -1145,6 +1165,14 @@ static int run(int argc, char *argv[]) {
         r = systemctl_dispatch_parse_argv(argc, argv);
         if (r <= 0)
                 goto finish;
+
+        if (proc_mounted() == 0)
+                log_full(arg_no_warn ? LOG_DEBUG : LOG_WARNING,
+                         "%s%s/proc/ is not mounted. This is not a supported mode of operation. Please fix\n"
+                         "your invocation environment to mount /proc/ and /sys/ properly. Proceeding anyway.\n"
+                         "Your mileage may vary.",
+                         emoji_enabled() ? special_glyph(SPECIAL_GLYPH_WARNING_SIGN) : "",
+                         emoji_enabled() ? " " : "");
 
         if (arg_action != ACTION_SYSTEMCTL && running_in_chroot() > 0) {
                 if (!arg_quiet)
