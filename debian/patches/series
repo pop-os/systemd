@@ -13,9 +13,6 @@ debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
-debian/UBUNTU-Support-system-image-read-only-etc.patch
-debian/timedatectl-lp1650688.patch
-debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch
 debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
 debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
@@ -26,7 +23,7 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 test-increase-QEMU_MEM-for-some-tests.patch
-lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
+debian/UBUNTU-read-only-etc-hacks.patch
