@@ -11,7 +11,6 @@ debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
-debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
 debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
