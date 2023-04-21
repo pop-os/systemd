@@ -7,9 +7,11 @@ LP: #1878051
  src/test/test-mount-util.c | 11 +++++++++++
  1 file changed, 11 insertions(+)
 
+diff --git a/src/test/test-mount-util.c b/src/test/test-mount-util.c
+index fddf705..533cc1a 100644
 --- a/src/test/test-mount-util.c
 +++ b/src/test/test-mount-util.c
-@@ -19,6 +19,7 @@
+@@ -20,6 +20,7 @@
  #include "strv.h"
  #include "tests.h"
  #include "tmpfile-util.h"
@@ -17,7 +19,7 @@ LP: #1878051
  
  TEST(mount_option_mangle) {
          char *opts = NULL;
-@@ -129,6 +130,11 @@
+@@ -130,6 +131,11 @@ TEST(bind_remount_recursive) {
          _cleanup_(rm_rf_physical_and_freep) char *tmp = NULL;
          _cleanup_free_ char *subdir = NULL;
  
@@ -29,7 +31,7 @@ LP: #1878051
          if (geteuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0) {
                  (void) log_tests_skipped("not running privileged");
                  return;
-@@ -187,6 +193,11 @@
+@@ -188,6 +194,11 @@ TEST(bind_remount_one) {
                  return;
          }
  

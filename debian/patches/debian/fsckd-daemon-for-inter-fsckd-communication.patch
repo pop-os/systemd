@@ -1004,7 +1004,7 @@ index 8378df8..4b1cd43 100644
  OnFailure=emergency.target
  OnFailureJobMode=replace-irreversibly
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 06b91ae..de0b767 100644
+index 06b91aea..de0b767 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
 @@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)

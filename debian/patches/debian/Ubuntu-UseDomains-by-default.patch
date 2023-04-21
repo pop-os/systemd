@@ -18,10 +18,12 @@ Therefore we are enabling UseDomains by default on Ubuntu.
 Users may override this setting in the .network files by specifying
 [DHCP|IPv6AcceptRA] UseDomains=no|route options.
 ---
- man/systemd.network.xml        | 6 +++---
+ man/systemd.network.xml        | 8 ++++----
  src/network/networkd-network.c | 2 ++
- 2 files changed, 5 insertions(+), 3 deletions(-)
+ 2 files changed, 6 insertions(+), 4 deletions(-)
 
+diff --git a/man/systemd.network.xml b/man/systemd.network.xml
+index 01d8897..9df3ac7 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
 @@ -334,8 +334,8 @@
@@ -35,7 +37,7 @@ Users may override this setting in the .network files by specifying
  
            <para>See the [DHCPv4] or [DHCPv6] sections below for further configuration options for the
            DHCP client support.</para>
-@@ -1970,7 +1970,7 @@
+@@ -1989,7 +1989,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
            effect of the <option>Domains=</option> setting. If set to <option>route</option>, the domain name
            received from the DHCP server will be used for routing DNS queries only, but not for searching,
            similarly to the effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -44,7 +46,7 @@ Users may override this setting in the .network files by specifying
  
            <para>It is recommended to enable this option only on trusted networks, as setting this
            affects resolution of all hostnames, in particular of single-label names. It is generally
-@@ -2489,7 +2489,7 @@
+@@ -2517,7 +2517,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
            similarly to the effect of the <option>Domains=</option> setting. If set to
            <literal>route</literal>, the domain name received via IPv6 RA will be used for routing DNS queries
            only, but not for searching, similarly to the effect of the <option>Domains=</option> setting when
@@ -53,9 +55,11 @@ Users may override this setting in the .network files by specifying
  
            <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
            of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index 7c5d691..394bbc0 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -403,6 +403,7 @@
+@@ -402,6 +402,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .dhcp_use_gateway = -1,
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
@@ -63,7 +67,7 @@ Users may override this setting in the .network files by specifying
                  .dhcp_route_metric = DHCP_ROUTE_METRIC,
                  .dhcp_client_identifier = _DHCP_CLIENT_ID_INVALID,
                  .dhcp_route_table = RT_TABLE_MAIN,
-@@ -475,6 +476,7 @@
+@@ -475,6 +476,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
  
                  .ipv6_accept_ra = -1,
                  .ipv6_accept_ra_use_dns = true,

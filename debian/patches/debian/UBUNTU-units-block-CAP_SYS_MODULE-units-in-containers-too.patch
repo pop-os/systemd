@@ -12,9 +12,11 @@ start non-degraded.
  units/systemd-modules-load.service.in | 1 +
  2 files changed, 2 insertions(+)
 
+diff --git a/units/sys-kernel-config.mount b/units/sys-kernel-config.mount
+index dca94a8..6921cab 100644
 --- a/units/sys-kernel-config.mount
 +++ b/units/sys-kernel-config.mount
-@@ -14,6 +14,7 @@
+@@ -14,6 +14,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/APIFileSystems
  DefaultDependencies=no
  ConditionPathExists=/sys/kernel/config
  ConditionCapability=CAP_SYS_RAWIO
@@ -22,9 +24,11 @@ start non-degraded.
  Before=sysinit.target
  
  # These dependencies are used to make certain that the module is fully
+diff --git a/units/systemd-modules-load.service.in b/units/systemd-modules-load.service.in
+index 604d871..8999369 100644
 --- a/units/systemd-modules-load.service.in
 +++ b/units/systemd-modules-load.service.in
-@@ -14,6 +14,7 @@
+@@ -14,6 +14,7 @@ DefaultDependencies=no
  Conflicts=shutdown.target
  Before=sysinit.target shutdown.target
  ConditionCapability=CAP_SYS_MODULE

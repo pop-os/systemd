@@ -5,12 +5,14 @@ Subject: src/test/test-execute.c: Skip the parts of test-execute in LXC which
 
 LP: #1878051
 ---
- src/test/test-execute.c | 36 ++++++++++++++++++++++++++++++++++++
- 1 file changed, 36 insertions(+)
+ src/test/test-execute.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
 
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 52a38f7..ea6750e 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
-@@ -230,6 +230,10 @@
+@@ -229,6 +229,10 @@ static void _test_service(const char *file, unsigned line, const char *func,
          _test_service(PROJECT_FILE, __LINE__, __func__, m, unit_name, result_expected)
  
  static void test_exec_bindpaths(Manager *m) {
@@ -21,7 +23,7 @@ LP: #1878051
          assert_se(mkdir_p("/tmp/test-exec-bindpaths", 0755) >= 0);
          assert_se(mkdir_p("/tmp/test-exec-bindreadonlypaths", 0755) >= 0);
  
-@@ -390,6 +394,11 @@
+@@ -389,6 +393,11 @@ static void test_exec_ignoresigpipe(Manager *m) {
  }
  
  static void test_exec_privatetmp(Manager *m) {
@@ -33,7 +35,7 @@ LP: #1878051
          assert_se(touch("/tmp/test-exec_privatetmp") >= 0);
  
          test(m, "exec-privatetmp-yes.service", can_unshare ? 0 : EXIT_FAILURE, CLD_EXITED);
-@@ -436,6 +445,11 @@
+@@ -435,6 +444,11 @@ static void test_exec_protecthome(Manager *m) {
                  return;
          }
  
@@ -45,7 +47,7 @@ LP: #1878051
          test(m, "exec-protecthome-tmpfs-vs-protectsystem-strict.service", 0, CLD_EXITED);
  }
  
-@@ -464,6 +478,11 @@
+@@ -463,6 +477,11 @@ static void test_exec_protectkernelmodules(Manager *m) {
  
  static void test_exec_readonlypaths(Manager *m) {
  
@@ -57,7 +59,7 @@ LP: #1878051
          test(m, "exec-readonlypaths-simple.service", can_unshare ? 0 : EXIT_FAILURE, CLD_EXITED);
  
          if (path_is_read_only_fs("/var") > 0) {
-@@ -493,6 +512,11 @@
+@@ -492,6 +511,11 @@ static void test_exec_inaccessiblepaths(Manager *m) {
                  return;
          }
  
@@ -69,7 +71,7 @@ LP: #1878051
          test(m, "exec-inaccessiblepaths-sys.service", can_unshare ? 0 : EXIT_FAILURE, CLD_EXITED);
  
          if (path_is_read_only_fs("/") > 0) {
-@@ -687,11 +711,19 @@
+@@ -686,11 +710,19 @@ static void test_exec_mount_apivfs(Manager *m) {
  
  static void test_exec_noexecpaths(Manager *m) {
  
@@ -89,7 +91,7 @@ LP: #1878051
          test(m, "exec-temporaryfilesystem-options.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
          test(m, "exec-temporaryfilesystem-ro.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
          test(m, "exec-temporaryfilesystem-rw.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
-@@ -864,6 +896,10 @@
+@@ -863,6 +895,10 @@ static void test_exec_dynamicuser(Manager *m) {
                  return;
          }
  
@@ -100,7 +102,7 @@ LP: #1878051
          test(m, "exec-dynamicuser-fixeduser.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
          if (check_user_has_group_with_same_name("adm"))
                  test(m, "exec-dynamicuser-fixeduser-adm.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
-@@ -1080,6 +1116,11 @@
+@@ -1079,6 +1115,11 @@ static void test_exec_specifier(Manager *m) {
          test(m, "exec-specifier.service", 0, CLD_EXITED);
          test(m, "exec-specifier@foo-bar.service", 0, CLD_EXITED);
          test(m, "exec-specifier-interpolation.service", 0, CLD_EXITED);

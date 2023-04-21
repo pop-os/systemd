@@ -6,6 +6,8 @@ Subject: Don't override Ubuntu's default sysctl values (LP: #1962038)
  sysctl.d/50-default.conf | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)
 
+diff --git a/sysctl.d/50-default.conf b/sysctl.d/50-default.conf
+index 69de91a..49b0650 100644
 --- a/sysctl.d/50-default.conf
 +++ b/sysctl.d/50-default.conf
 @@ -16,7 +16,7 @@
@@ -17,7 +19,7 @@ Subject: Don't override Ubuntu's default sysctl values (LP: #1962038)
  
  # Append the PID to the core filename
  kernel.core_uses_pid = 1
-@@ -24,7 +24,7 @@
+@@ -24,7 +24,7 @@ kernel.core_uses_pid = 1
  # Source route verification
  net.ipv4.conf.default.rp_filter = 2
  net.ipv4.conf.*.rp_filter = 2

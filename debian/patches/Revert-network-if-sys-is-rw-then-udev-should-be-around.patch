@@ -8,20 +8,22 @@ This reverts commit 96d7083c5499b264ecebd6a30a92e0e8fda14cd5.
 
 LP: #1857123
 ---
- src/network/networkd-link.c | 6 +++---
- 1 file changed, 3 insertions(+), 3 deletions(-)
+ src/network/networkd-link.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
 
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 019bef0..693e4ad 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -67,6 +67,7 @@
+@@ -68,6 +68,7 @@
+ #include "tmpfile-util.h"
  #include "tuntap.h"
  #include "udev-util.h"
- #include "util.h"
 +#include "virt.h"
  #include "vrf.h"
  
  bool link_ipv6_enabled(Link *link) {
-@@ -1437,7 +1438,7 @@
+@@ -1399,7 +1400,7 @@ static int link_check_initialized(Link *link) {
  
          assert(link);
  
