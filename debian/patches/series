@@ -121,3 +121,4 @@ system76-usb.patch
 hp-dev-one.patch
 timesyncd-disable.patch
 pang12.patch
+systemd-resolvconf.patch
