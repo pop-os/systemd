@@ -83,14 +83,6 @@ Depends: systemd-sysv,
   python3
 Restrictions: needs-root, isolation-container, breaks-testbed, allow-stderr
 
-Tests: udev
-Depends: systemd-tests,
-  python3,
-  tree,
-  perl,
-  xz-utils,
-Restrictions: needs-root, allow-stderr, isolation-container, skippable
-
 Tests: unit-tests
 Depends: systemd-tests,
   libpam-systemd,
