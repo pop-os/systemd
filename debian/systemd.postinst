@@ -61,19 +61,6 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-# skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
-if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
-    _systemctl daemon-reexec || true
-    # do not restart logind; this can be done again once this gets implemented:
-    # https://github.com/systemd/systemd/issues/1163
-    if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
-        # the socket configuration changed
-        _systemctl stop systemd-networkd.socket || true
-    fi
-    _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-journald.service || true
-fi
-
 # Process all tmpfiles that we ship, including any overrides in
 # runtime-dir/sysadmin-dir/other packages (e.g. rsyslog)
 #
@@ -98,7 +85,8 @@ fi
 
 #DEBHELPER#
 
-if [ -n "$2" ]; then
+# skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
+if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _systemctl daemon-reexec || true
     # do not restart logind
     # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
