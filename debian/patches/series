@@ -24,3 +24,4 @@ test-denylist-TEST-29-PORTABLE-again.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
 debian/UBUNTU-read-only-etc-hacks.patch
+test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
