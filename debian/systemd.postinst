@@ -61,12 +61,6 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-# Process all tmpfiles that we ship, including any overrides in
-# runtime-dir/sysadmin-dir/other packages (e.g. rsyslog)
-#
-# Ignore if this fails, because e.g. %b will fail on WSL
-systemd-tmpfiles --create || :
-
 if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
     # systemd-pstore.service is now enabled via sysinit.target
     rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
@@ -82,6 +76,12 @@ fi
 if [ -f /etc/default/locale ] && [ ! -L /etc/default/locale ] && [ ! -f /etc/locale.conf ]; then
     mv /etc/default/locale /etc/locale.conf
 fi
+
+# Process all tmpfiles that we ship, including any overrides in
+# runtime-dir/sysadmin-dir/other packages (e.g. rsyslog)
+#
+# Ignore if this fails, because e.g. %b will fail on WSL
+systemd-tmpfiles --create || :
 
 #DEBHELPER#
 
