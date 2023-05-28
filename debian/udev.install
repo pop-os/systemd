@@ -9,7 +9,6 @@ bin/systemd-hwdb
 usr/lib/tmpfiles.d/static-nodes-permissions.conf
 usr/share/bash-completion/completions/udevadm
 usr/share/zsh/vendor-completions/_udevadm
-usr/share/pkgconfig/udev.pc
 ../extra/initramfs-tools usr/share/
 ../extra/rules/*.rules lib/udev/rules.d/
 ../extra/network/*.link lib/systemd/network/
