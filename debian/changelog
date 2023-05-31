@@ -1,3 +1,9 @@
+systemd (245.4-4ubuntu3.22pop0) focal; urgency=medium
+
+  * Pop!_OS Patches
+
+ -- Brock Szuszczewicz <brock@system76.com>  Wed, 31 May 2023 11:34:55 -0600
+
 systemd (245.4-4ubuntu3.22) focal; urgency=medium
 
   * resolve: fix potential memleak and use-after-free (LP: #2012943)
