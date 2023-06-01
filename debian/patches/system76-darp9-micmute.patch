@@ -1,0 +1,14 @@
+Index: systemd/hwdb.d/60-keyboard.hwdb
+===================================================================
+--- systemd.orig/hwdb.d/60-keyboard.hwdb	2023-05-31 18:30:01.573917581 -0600
++++ systemd/hwdb.d/60-keyboard.hwdb	2023-05-31 18:31:50.606054938 -0600
+@@ -1697,6 +1697,9 @@
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnSystem76*:pnPangolin*:pvrpang12*
+  KEYBOARD_KEY_76=f21                                    # Touchpad toggle
+ 
++evdev:atkbd:dmi:bvn*:bvr*:bd:*:svnSystem76*:pnDarter Pro*:pvrdarp9
++ KEYBOARD_KEY_??=f20                                    # Fn+F2; Mic mute
++
+ ###########################################################
+ # T-bao
+ ###########################################################
