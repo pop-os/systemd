@@ -47,7 +47,7 @@ if [ -d ../../binaries ]; then
 fi
 
 lxc stop systemd-lxc
-lxc publish systemd-lxc --alias $IMAGE
+lxc publish systemd-lxc --reuse --alias $IMAGE
 
 # Only test unprivileged LXD containers, since privileged LXD containers cause LoadCredential= (LP: #1950787),
 # and other things to break. According to upstream LXD, we should not worry to much about privileged LXD
