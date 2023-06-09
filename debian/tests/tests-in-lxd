@@ -52,7 +52,7 @@ lxc exec systemd-lxc -- sh -c "echo [Service] > /etc/systemd/system/systemd-sysu
 lxc exec systemd-lxc -- sh -c "echo LoadCredential= >> /etc/systemd/system/systemd-sysusers.service.d/override.conf"
 
 lxc stop systemd-lxc
-lxc publish systemd-lxc --alias $IMAGE
+lxc publish systemd-lxc --reuse --alias $IMAGE
 
 for t in unit-tests boot-and-services; do
     autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
