@@ -812,6 +812,9 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
+        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
+         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
+        optind = 0;
         while ((c = getopt_long(argc, argv, "+hD:u:abL:M:jS:Z:qi:xp:nUE:P", options, NULL)) >= 0)
                 switch (c) {
 
@@ -3540,6 +3543,7 @@ static int inner_child(
          * it again. Note that the other fds closed here are at least the locking and barrier fds. */
         log_close();
         log_set_open_when_needed(true);
+        log_settle_target();
 
         (void) fdset_close_others(fds);
 
@@ -4629,6 +4633,7 @@ static int merge_settings(Settings *settings, const char *path) {
         device_node_array_free(arg_extra_nodes, arg_n_extra_nodes);
         arg_extra_nodes = TAKE_PTR(settings->extra_nodes);
         arg_n_extra_nodes = settings->n_extra_nodes;
+        settings->n_extra_nodes = 0;
 
         return 0;
 }

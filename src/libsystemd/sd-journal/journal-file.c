@@ -838,7 +838,7 @@ static int check_object(JournalFile *f, Object *o, uint64_t offset) {
         }
 
         case OBJECT_ENTRY_ARRAY: {
-                uint64_t sz;
+                uint64_t sz, next;
 
                 sz = le64toh(READ_NOW(o->object.size));
                 if (sz < offsetof(Object, entry_array.items) ||
@@ -848,11 +848,12 @@ static int check_object(JournalFile *f, Object *o, uint64_t offset) {
                                                "Invalid object entry array size: %" PRIu64 ": %" PRIu64,
                                                sz,
                                                offset);
-
-                if (!VALID64(le64toh(o->entry_array.next_entry_array_offset)))
+                /* Here, we request that the offset of each entry array object is in strictly increasing order. */
+                next = le64toh(o->entry_array.next_entry_array_offset);
+                if (!VALID64(next) || (next > 0 && next <= offset))
                         return log_debug_errno(SYNTHETIC_ERRNO(EBADMSG),
-                                               "Invalid object entry array next_entry_array_offset: " OFSfmt ": %" PRIu64,
-                                               le64toh(o->entry_array.next_entry_array_offset),
+                                               "Invalid object entry array next_entry_array_offset: %" PRIu64 ": %" PRIu64,
+                                               next,
                                                offset);
 
                 break;
@@ -2410,7 +2411,8 @@ static int bump_entry_array(
 
         if (direction == DIRECTION_DOWN) {
                 assert(o);
-                return le64toh(o->entry_array.next_entry_array_offset);
+                *ret = le64toh(o->entry_array.next_entry_array_offset);
+                return 0;
         }
 
         /* Entry array chains are a singly linked list, so to find the previous array in the chain, we have
@@ -3986,8 +3988,8 @@ int journal_file_dispose(int dir_fd, const char *fname) {
 int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint64_t p) {
         _cleanup_free_ EntryItem *items_alloc = NULL;
         EntryItem *items;
-        uint64_t q, n, xor_hash = 0;
-        const sd_id128_t *boot_id;
+        uint64_t n, m = 0, xor_hash = 0;
+        sd_id128_t boot_id;
         dual_timestamp ts;
         int r;
 
@@ -4003,9 +4005,11 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                 .monotonic = le64toh(o->entry.monotonic),
                 .realtime = le64toh(o->entry.realtime),
         };
-        boot_id = &o->entry.boot_id;
+        boot_id = o->entry.boot_id;
 
         n = journal_file_entry_n_items(from, o);
+        if (n == 0)
+                return 0;
 
         if (n < ALLOCA_MAX / sizeof(EntryItem) / 2)
                 items = newa(EntryItem, n);
@@ -4018,7 +4022,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
         }
 
         for (uint64_t i = 0; i < n; i++) {
-                uint64_t h;
+                uint64_t h, q;
                 void *data;
                 size_t l;
                 Object *u;
@@ -4045,7 +4049,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                 else
                         xor_hash ^= le64toh(u->data.hash);
 
-                items[i] = (EntryItem) {
+                items[m++] = (EntryItem) {
                         .object_offset = h,
                         .hash = le64toh(u->data.hash),
                 };
@@ -4058,7 +4062,10 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
                         return r;
         }
 
-        r = journal_file_append_entry_internal(to, &ts, boot_id, xor_hash, items, n, NULL, NULL, NULL);
+        if (m == 0)
+                return 0;
+
+        r = journal_file_append_entry_internal(to, &ts, &boot_id, xor_hash, items, m, NULL, NULL, NULL);
 
         if (mmap_cache_fd_got_sigbus(to->cache_fd))
                 return -EIO;
