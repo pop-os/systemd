@@ -1,9 +1,9 @@
-systemd (252.7-1) UNRELEASED; urgency=medium
+systemd (252.11-1) unstable; urgency=medium
 
-  * New upstream version 252.7
+  * New upstream version 252.11
   * Refresh patches
 
- -- Luca Boccassi <bluca@debian.org>  Sat, 11 Mar 2023 17:28:42 +0000
+ -- Luca Boccassi <bluca@debian.org>  Sun, 11 Jun 2023 23:05:40 +0100
 
 systemd (252.6-1) unstable; urgency=medium
 
