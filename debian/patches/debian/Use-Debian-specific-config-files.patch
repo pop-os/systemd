@@ -46,7 +46,7 @@ index 63db78b..4d45a7b 100644
                          if (r < 0)
                                  return log_error_errno(r, "Failed to copy %s: %m", etc_localeconf);
 diff --git a/src/locale/localed-util.c b/src/locale/localed-util.c
-index dd2bbf5..e1625df 100644
+index 4d021fb..d9050c0 100644
 --- a/src/locale/localed-util.c
 +++ b/src/locale/localed-util.c
 @@ -128,7 +128,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {

@@ -30,7 +30,7 @@ index 24cee4c..185e1dc 100644
          <literal>systemd.journald.forward_to_kmsg</literal>,
          <literal>systemd.journald.forward_to_console</literal>, and
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index b4ffd38..9e44ec7 100644
+index 6faf48d..bced165 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
 @@ -2285,6 +2285,7 @@ int server_init(Server *s, const char *namespace) {

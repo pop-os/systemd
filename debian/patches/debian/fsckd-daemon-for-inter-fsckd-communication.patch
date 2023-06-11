@@ -59,12 +59,12 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index bb77990..8609433 100644
+index 4819b15..4b52db1 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
 @@ -892,6 +892,7 @@ manpages = [
    '8',
-   ['systemd-fsck', 'systemd-fsck-root.service'],
+   ['systemd-fsck', 'systemd-fsck-root.service', 'systemd-fsck-usr.service'],
    ''],
 + ['systemd-fsckd.service', '8', ['systemd-fsckd.socket', 'systemd-fsckd'], ''],
   ['systemd-fstab-generator', '8', [], ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index b7768d9..2f6d9c8 100644
+index 39b101b..e5cdd1e 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3348,6 +3348,15 @@ executable(
+@@ -3351,6 +3351,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
