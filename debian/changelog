@@ -1,3 +1,12 @@
+systemd (253-2) experimental; urgency=medium
+
+  * Add systemd-dev package for pkg-config files. Move systemd.pc and
+    udev.pc to systemd-dev, so that packages can build-depend on a small
+    package instead of the whole set of binaries. (Closes: #945922,
+    #917549)
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 12 Jun 2023 00:22:52 +0100
+
 systemd (253-1) experimental; urgency=medium
 
   * New upstream version 253. For a full list of changes, see:
