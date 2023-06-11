@@ -206,8 +206,8 @@ restore_keymap() {
 
 wait_vconsole_setup() {
     local i ss
-    for ((i = 0; i < 20; i++)); do
-        if (( i != 0 )); then sleep .5; fi
+    for i in {1..20}; do
+        (( i > 1 )) && sleep 0.5
         ss="$(systemctl --property SubState --value show systemd-vconsole-setup.service)"
         if [[ "$ss" == "exited" || "$ss" == "dead" || "$ss" == "condition" ]]; then
             return 0
@@ -392,6 +392,11 @@ XKBMODEL=pc105+inet"
 }
 
 : >/failed
+
+# Make sure the content of kbd-model-map is the one that the tests expect
+# regardless of the version intalled on the distro where the testsuite is
+# running on.
+export SYSTEMD_KBD_MODEL_MAP=/usr/lib/systemd/tests/testdata/test-keymap-util/kbd-model-map
 
 enable_debug
 test_locale

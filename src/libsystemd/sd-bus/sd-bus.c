@@ -37,6 +37,7 @@
 #include "macro.h"
 #include "memory-util.h"
 #include "missing_syscall.h"
+#include "missing_threads.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -4155,8 +4156,6 @@ _public_ int sd_bus_get_description(sd_bus *bus, const char **description) {
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(description, -EINVAL);
-        assert_return(bus->description, -ENXIO);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
 
         if (bus->description)
                 *description = bus->description;
@@ -4165,7 +4164,7 @@ _public_ int sd_bus_get_description(sd_bus *bus, const char **description) {
         else if (bus->is_user)
                 *description = "user";
         else
-                *description = NULL;
+                return -ENXIO;
 
         return 0;
 }

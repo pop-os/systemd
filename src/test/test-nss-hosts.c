@@ -367,7 +367,9 @@ static int make_addresses(struct local_address **addresses) {
                                               .address.in = { htobe32(0x7F000002) } };
         addrs[n++] = (struct local_address) { .family = AF_INET6,
                                               .address.in6 = in6addr_loopback };
-        return 0;
+
+        *addresses = TAKE_PTR(addrs);
+        return n;
 }
 
 static int test_one_module(const char *dir,
@@ -447,7 +449,7 @@ static int parse_argv(int argc, char **argv,
                         }
                 }
         } else {
-                _cleanup_free_ char *hostname;
+                _cleanup_free_ char *hostname = NULL;
                 assert_se(hostname = gethostname_malloc());
                 assert_se(names = strv_new("localhost", "_gateway", "_outbound", "foo_no_such_host", hostname));
 

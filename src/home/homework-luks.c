@@ -213,6 +213,7 @@ static int block_get_size_by_path(const char *path, uint64_t *ret) {
 static int run_fsck(const char *node, const char *fstype) {
         int r, exit_status;
         pid_t fsck_pid;
+        _cleanup_free_ char *fsck_path = NULL;
 
         assert(node);
         assert(fstype);
@@ -225,6 +226,14 @@ static int run_fsck(const char *node, const char *fstype) {
                 return 0;
         }
 
+        r = find_executable("fsck", &fsck_path);
+        /* We proceed anyway if we can't determine whether the fsck
+         * binary for some specific fstype exists,
+         * but the lack of the main fsck binary should be considered
+         * an error. */
+        if (r < 0)
+                return log_error_errno(r, "Cannot find fsck binary: %m");
+
         r = safe_fork("(fsck)",
                       FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
                       &fsck_pid);
@@ -232,7 +241,7 @@ static int run_fsck(const char *node, const char *fstype) {
                 return r;
         if (r == 0) {
                 /* Child */
-                execl("/sbin/fsck", "/sbin/fsck", "-aTl", node, NULL);
+                execl(fsck_path, fsck_path, "-aTl", node, NULL);
                 log_open();
                 log_error_errno(errno, "Failed to execute fsck: %m");
                 _exit(FSCK_OPERATIONAL_ERROR);
@@ -1230,7 +1239,7 @@ int home_setup_luks(
                 PasswordCache *cache,
                 UserRecord **ret_luks_home) {
 
-        sd_id128_t found_partition_uuid, found_fs_uuid, found_luks_uuid = SD_ID128_NULL;
+        sd_id128_t found_partition_uuid, found_fs_uuid = SD_ID128_NULL, found_luks_uuid = SD_ID128_NULL;
         _cleanup_(user_record_unrefp) UserRecord *luks_home = NULL;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
         size_t volume_key_size = 0;

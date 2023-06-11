@@ -981,7 +981,7 @@ static int service_load_pid_file(Service *s, bool may_warn) {
                 r = chase_symlinks(s->pid_file, NULL, 0, NULL, &fd);
         }
         if (r < 0)
-                return log_unit_full_errno(UNIT(s), prio, fd,
+                return log_unit_full_errno(UNIT(s), prio, r,
                                            "Can't open PID file %s (yet?) after %s: %m", s->pid_file, service_state_to_string(s->state));
 
         /* Let's read the PID file now that we chased it down. But we need to convert the O_PATH fd
@@ -2461,6 +2461,7 @@ static void service_run_next_control(Service *s) {
                           s->control_command,
                           timeout,
                           EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_IS_CONTROL|
+                          (IN_SET(s->state, SERVICE_CONDITION, SERVICE_START_PRE, SERVICE_START, SERVICE_START_POST, SERVICE_RUNNING, SERVICE_RELOAD) ? EXEC_WRITE_CREDENTIALS : 0)|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_CONDITION, SERVICE_EXEC_START_PRE, SERVICE_EXEC_STOP_POST) ? EXEC_APPLY_TTY_STDIN : 0)|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_STOP, SERVICE_EXEC_STOP_POST) ? EXEC_SETENV_RESULT : 0)|
                           (IN_SET(s->control_command_id, SERVICE_EXEC_START_PRE, SERVICE_EXEC_START) ? EXEC_SETENV_MONITOR_RESULT : 0)|
@@ -2500,7 +2501,7 @@ static void service_run_next_main(Service *s) {
         r = service_spawn(s,
                           s->main_command,
                           s->timeout_start_usec,
-                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_SETENV_MONITOR_RESULT,
+                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_SETENV_MONITOR_RESULT|EXEC_WRITE_CREDENTIALS,
                           &pid);
         if (r < 0)
                 goto fail;
@@ -3010,6 +3011,11 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
 
         } else if (streq(key, "accept-socket")) {
                 Unit *socket;
+
+                if (u->type != UNIT_SOCKET) {
+                        log_unit_debug(u, "Failed to deserialize accept-socket: unit is not a socket");
+                        return 0;
+                }
 
                 r = manager_load_unit(u->manager, value, NULL, NULL, &socket);
                 if (r < 0)
@@ -3523,6 +3529,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                         return;
 
                 s->main_pid = 0;
+                s->main_pid_known = false;
                 exec_status_exit(&s->main_exec_status, &s->exec_context, pid, code, status);
 
                 if (s->main_command) {
