@@ -522,8 +522,10 @@ Architecture: all
 Multi-Arch: foreign
 Section: devel
 Depends: ${misc:Depends},
-Breaks: systemd (<< 253-2~)
-Replaces: systemd (<< 253-2~)
+Breaks: systemd (<< 253-2~),
+        udev (<< 253-2~),
+Replaces: systemd (<< 253-2~),
+          udev (<< 253-2~),
 Description: systemd development files
  This package contains the systemd and udev pkg-config files. Note that these
  are different from the libsystemd's and libudev's pkg-config files, which can
