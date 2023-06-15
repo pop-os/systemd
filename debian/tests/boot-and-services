@@ -558,6 +558,9 @@ def pre_boot_setup():
         Driver "dummy"
 EndSection''')
 
+    # accounts-daemon.service fails if /usr/share/accountsservice/interfaces does not exist
+    os.makedirs('/usr/share/accountsservice/interfaces', exist_ok=True)
+
 
 if __name__ == '__main__':
     if not os.getenv('AUTOPKGTEST_REBOOT_MARK'):
