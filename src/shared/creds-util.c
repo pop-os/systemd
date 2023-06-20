@@ -11,8 +11,8 @@
 #include "blockdev-util.h"
 #include "capability-util.h"
 #include "chattr-util.h"
+#include "constants.h"
 #include "creds-util.h"
-#include "def.h"
 #include "efi-api.h"
 #include "env-util.h"
 #include "fd-util.h"
@@ -85,6 +85,56 @@ int read_credential(const char *name, void **ret, size_t *ret_size) {
                         READ_FULL_FILE_SECURE,
                         NULL,
                         (char**) ret, ret_size);
+}
+
+int read_credential_strings_many_internal(
+                const char *first_name, char **first_value,
+                ...) {
+
+        _cleanup_free_ void *b = NULL;
+        int r, ret = 0;
+
+        /* Reads a bunch of credentials into the specified buffers. If the specified buffers are already
+         * non-NULL frees them if a credential is found. Only supports string-based credentials
+         * (i.e. refuses embedded NUL bytes) */
+
+        if (!first_name)
+                return 0;
+
+        r = read_credential(first_name, &b, NULL);
+        if (r == -ENXIO) /* no creds passed at all? propagate this */
+                return r;
+        if (r < 0)
+                ret = r;
+        else
+                free_and_replace(*first_value, b);
+
+        va_list ap;
+        va_start(ap, first_value);
+
+        for (;;) {
+                _cleanup_free_ void *bb = NULL;
+                const char *name;
+                char **value;
+
+                name = va_arg(ap, const char *);
+                if (!name)
+                        break;
+
+                value = va_arg(ap, char **);
+                if (*value)
+                        continue;
+
+                r = read_credential(name, &bb, NULL);
+                if (r < 0) {
+                        if (ret >= 0)
+                                ret = r;
+                } else
+                        free_and_replace(*value, bb);
+        }
+
+        va_end(ap);
+        return ret;
 }
 
 int get_credential_user_password(const char *username, char **ret_password, bool *ret_is_hashed) {
@@ -166,9 +216,8 @@ static int make_credential_host_secret(
                 void **ret_data,
                 size_t *ret_size) {
 
-        struct credential_host_secret_format buf;
         _cleanup_free_ char *t = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(dfd >= 0);
@@ -195,21 +244,23 @@ static int make_credential_host_secret(
         if (r < 0)
                 log_debug_errno(r, "Failed to set file attributes for secrets file, ignoring: %m");
 
-        buf = (struct credential_host_secret_format) {
+        struct credential_host_secret_format buf = {
                 .machine_id = machine_id,
         };
 
+        CLEANUP_ERASE(buf);
+
         r = crypto_random_bytes(buf.data, sizeof(buf.data));
         if (r < 0)
-                goto finish;
+                goto fail;
 
         r = loop_write(fd, &buf, sizeof(buf), false);
         if (r < 0)
-                goto finish;
+                goto fail;
 
         if (fsync(fd) < 0) {
                 r = -errno;
-                goto finish;
+                goto fail;
         }
 
         warn_not_encrypted(fd, flags, dirname, fn);
@@ -217,17 +268,17 @@ static int make_credential_host_secret(
         if (t) {
                 r = rename_noreplace(dfd, t, dfd, fn);
                 if (r < 0)
-                        goto finish;
+                        goto fail;
 
                 t = mfree(t);
         } else if (linkat(fd, "", dfd, fn, AT_EMPTY_PATH) < 0) {
                 r = -errno;
-                goto finish;
+                goto fail;
         }
 
         if (fsync(dfd) < 0) {
                 r = -errno;
-                goto finish;
+                goto fail;
         }
 
         if (ret_data) {
@@ -236,7 +287,7 @@ static int make_credential_host_secret(
                 copy = memdup(buf.data, sizeof(buf.data));
                 if (!copy) {
                         r = -ENOMEM;
-                        goto finish;
+                        goto fail;
                 }
 
                 *ret_data = copy;
@@ -245,19 +296,18 @@ static int make_credential_host_secret(
         if (ret_size)
                 *ret_size = sizeof(buf.data);
 
-        r = 0;
+        return 0;
 
-finish:
+fail:
         if (t && unlinkat(dfd, t, 0) < 0)
                 log_debug_errno(errno, "Failed to remove temporary credential key: %m");
 
-        explicit_bzero_safe(&buf, sizeof(buf));
         return r;
 }
 
 int get_credential_host_secret(CredentialSecretFlags flags, void **ret, size_t *ret_size) {
         _cleanup_free_ char *_dirname = NULL, *_filename = NULL;
-        _cleanup_close_ int dfd = -1;
+        _cleanup_close_ int dfd = -EBADF;
         sd_id128_t machine_id;
         const char *dirname, *filename;
         int r;
@@ -304,7 +354,7 @@ int get_credential_host_secret(CredentialSecretFlags flags, void **ret, size_t *
 
         for (unsigned attempt = 0;; attempt++) {
                 _cleanup_(erase_and_freep) struct credential_host_secret_format *f = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 size_t l = 0;
                 ssize_t n = 0;
                 struct stat st;
@@ -940,9 +990,9 @@ int decrypt_credential_and_warn(
 
                 if (!TPM2_PCR_MASK_VALID(t->pcr_mask))
                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 PCR mask out of range.");
-                if (!tpm2_pcr_bank_to_string(le16toh(t->pcr_bank)))
+                if (!tpm2_hash_alg_to_string(le16toh(t->pcr_bank)))
                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 PCR bank invalid or not supported");
-                if (!tpm2_primary_alg_to_string(le16toh(t->primary_alg)))
+                if (!tpm2_asym_alg_to_string(le16toh(t->primary_alg)))
                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 primary key algorithm invalid or not supported.");
                 if (le32toh(t->blob_size) > CREDENTIAL_FIELD_SIZE_MAX)
                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Unexpected TPM2 blob size.");
@@ -1096,12 +1146,9 @@ int decrypt_credential_and_warn(
         if (le32toh(m->name_size) > 0) {
                 _cleanup_free_ char *embedded_name = NULL;
 
-                if (memchr(m->name, 0, le32toh(m->name_size)))
-                        return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Embedded credential name contains NUL byte, refusing.");
-
-                embedded_name = memdup_suffix0(m->name, le32toh(m->name_size));
-                if (!embedded_name)
-                        return log_oom();
+                r = make_cstring(m->name, le32toh(m->name_size), MAKE_CSTRING_REFUSE_TRAILING_NUL, &embedded_name);
+                if (r < 0)
+                        return log_error_errno(r, "Unable to convert embedded credential name to C string: %m");
 
                 if (!credential_name_valid(embedded_name))
                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Embedded credential name is not valid, refusing.");

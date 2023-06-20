@@ -38,6 +38,7 @@ struct Manager {
         bool manage_foreign_rules;
 
         Set *dirty_links;
+        Set *new_wlan_ifindices;
 
         char *state_file;
         LinkOperationalState operational_state;
@@ -114,5 +115,7 @@ int manager_enumerate(Manager *m);
 
 int manager_set_hostname(Manager *m, const char *hostname);
 int manager_set_timezone(Manager *m, const char *timezone);
+
+int manager_reload(Manager *m);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);

@@ -140,7 +140,7 @@ static int acquire_user_record(
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_free_ char *generic_field = NULL, *json_copy = NULL;
 
-                r = pam_acquire_bus_connection(handle, "pam-systemd-home", &bus);
+                r = pam_acquire_bus_connection(handle, &bus);
                 if (r != PAM_SUCCESS)
                         return r;
 
@@ -477,7 +477,7 @@ static int acquire_home(
         _cleanup_(user_record_unrefp) UserRecord *ur = NULL, *secret = NULL;
         bool do_auth = please_authenticate, home_not_active = false, home_locked = false;
         _cleanup_(sd_bus_unrefp) sd_bus *bus = NULL;
-        _cleanup_close_ int acquired_fd = -1;
+        _cleanup_close_ int acquired_fd = -EBADF;
         _cleanup_free_ char *fd_field = NULL;
         const void *home_fd_ptr = NULL;
         const char *username = NULL;
@@ -513,7 +513,7 @@ static int acquire_home(
         if (r == PAM_SUCCESS && PTR_TO_FD(home_fd_ptr) >= 0)
                 return PAM_SUCCESS;
 
-        r = pam_acquire_bus_connection(handle, "pam-systemd-home", &bus);
+        r = pam_acquire_bus_connection(handle, &bus);
         if (r != PAM_SUCCESS)
                 return r;
 
@@ -727,7 +727,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         r = acquire_home(handle, /* please_authenticate = */ false, suspend_please, debug);
         if (r == PAM_USER_UNKNOWN) /* Not managed by us? Don't complain. */
-                goto success; /* Need to free the bus resource, as acquire_home() takes a reference. */
+                return PAM_SUCCESS;
         if (r != PAM_SUCCESS)
                 return r;
 
@@ -741,11 +741,10 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 return pam_syslog_pam_error(handle, LOG_ERR, r,
                                             "Failed to set PAM environment variable $SYSTEMD_HOME_SUSPEND: @PAMERR@");
 
-success:
         /* Let's release the D-Bus connection, after all the session might live quite a long time, and we are
          * not going to process the bus connection in that time, so let's better close before the daemon
          * kicks us off because we are not processing anything. */
-        (void) pam_release_bus_connection(handle, "pam-systemd-home");
+        (void) pam_release_bus_connection(handle);
         return PAM_SUCCESS;
 }
 
@@ -785,7 +784,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
         if (r != PAM_SUCCESS)
                 return r;
 
-        r = pam_acquire_bus_connection(handle, "pam-systemd-home", &bus);
+        r = pam_acquire_bus_connection(handle, &bus);
         if (r != PAM_SUCCESS)
                 return r;
 
@@ -944,7 +943,7 @@ _public_ PAM_EXTERN int pam_sm_chauthtok(
         if (debug)
                 pam_syslog(handle, LOG_DEBUG, "pam-systemd-homed account management");
 
-        r = pam_acquire_bus_connection(handle, "pam-systemd-home", &bus);
+        r = pam_acquire_bus_connection(handle, &bus);
         if (r != PAM_SUCCESS)
                 return r;
 

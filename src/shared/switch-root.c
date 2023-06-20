@@ -11,6 +11,7 @@
 #include "base-filesystem.h"
 #include "chase-symlinks.h"
 #include "fd-util.h"
+#include "initrd-util.h"
 #include "log.h"
 #include "missing_syscall.h"
 #include "mkdir-label.h"
@@ -23,7 +24,6 @@
 #include "strv.h"
 #include "switch-root.h"
 #include "user-util.h"
-#include "util.h"
 
 int switch_root(const char *new_root,
                 const char *old_root_after, /* path below the new root, where to place the old root after the transition */
@@ -31,7 +31,7 @@ int switch_root(const char *new_root,
                 unsigned long mount_flags) {  /* MS_MOVE or MS_BIND */
 
         _cleanup_free_ char *resolved_old_root_after = NULL;
-        _cleanup_close_ int old_root_fd = -1;
+        _cleanup_close_ int old_root_fd = -EBADF;
         int r;
 
         assert(new_root);

@@ -5,6 +5,7 @@
 #include "sd-bus.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-dump.h"
 #include "bus-internal.h"
 #include "bus-message.h"
@@ -37,7 +38,7 @@
 static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
 static PagerFlags arg_pager_flags = 0;
 static bool arg_legend = true;
-static int arg_full = -1;
+static bool arg_full = false;
 static const char *arg_address = NULL;
 static bool arg_unique = false;
 static bool arg_acquired = false;
@@ -74,8 +75,6 @@ static int acquire_bus(bool set_monitor, sd_bus **ret) {
         r = sd_bus_new(&bus);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate bus: %m");
-
-        (void) sd_bus_set_description(bus, "busctl");
 
         if (set_monitor) {
                 r = sd_bus_set_monitor(bus, true);
@@ -204,7 +203,7 @@ static int list_bus_names(int argc, char **argv, void *userdata) {
         if (!table)
                 return log_oom();
 
-        if (arg_full > 0)
+        if (arg_full)
                 table_set_width(table, 0);
 
         r = table_set_align_percent(table, table_get_cell(table, 0, COLUMN_PID), 100);
@@ -358,6 +357,9 @@ static int list_bus_names(int argc, char **argv, void *userdata) {
 }
 
 static void print_subtree(const char *prefix, const char *path, char **l) {
+        const char *vertical, *space;
+        char **n;
+
         /* We assume the list is sorted. Let's first skip over the
          * entry we are looking at. */
         for (;;) {
@@ -370,13 +372,11 @@ static void print_subtree(const char *prefix, const char *path, char **l) {
                 l++;
         }
 
-        const char
-                *vertical = strjoina(prefix, special_glyph(SPECIAL_GLYPH_TREE_VERTICAL)),
-                *space = strjoina(prefix, special_glyph(SPECIAL_GLYPH_TREE_SPACE));
+        vertical = strjoina(prefix, special_glyph(SPECIAL_GLYPH_TREE_VERTICAL));
+        space = strjoina(prefix, special_glyph(SPECIAL_GLYPH_TREE_SPACE));
 
         for (;;) {
                 bool has_more = false;
-                char **n;
 
                 if (!*l || !path_startswith(*l, path))
                         break;
@@ -961,8 +961,8 @@ static int introspect(int argc, char **argv, void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply_xml = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(member_set_freep) Set *members = NULL;
-        unsigned name_width, type_width, signature_width, result_width;
-        Member *m;
+        unsigned name_width, type_width, signature_width, result_width, j, k = 0;
+        Member *m, **sorted = NULL;
         const char *xml;
         int r;
 
@@ -1022,17 +1022,16 @@ static int introspect(int argc, char **argv, void *userdata) {
                         return bus_log_parse_error(r);
 
                 for (;;) {
-                        Member *z;
-                        _cleanup_free_ char *buf = NULL, *signature = NULL;
                         _cleanup_fclose_ FILE *mf = NULL;
-                        size_t sz = 0;
+                        _cleanup_free_ char *buf = NULL;
                         const char *name, *contents;
+                        size_t sz = 0;
+                        Member *z;
                         char type;
 
                         r = sd_bus_message_enter_container(reply, 'e', "sv");
                         if (r < 0)
                                 return bus_log_parse_error(r);
-
                         if (r == 0)
                                 break;
 
@@ -1040,24 +1039,15 @@ static int introspect(int argc, char **argv, void *userdata) {
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        r = sd_bus_message_enter_container(reply, 'v', NULL);
+                        r = sd_bus_message_peek_type(reply, &type, &contents);
                         if (r < 0)
                                 return bus_log_parse_error(r);
+                        if (type != 'v')
+                                return bus_log_parse_error(EINVAL);
 
-                        r = sd_bus_message_peek_type(reply, &type, &contents);
-                        if (r <= 0)
-                                return bus_log_parse_error(r == 0 ? EINVAL : r);
-
-                        if (type == SD_BUS_TYPE_STRUCT_BEGIN)
-                                signature = strjoin(CHAR_TO_STR(SD_BUS_TYPE_STRUCT_BEGIN), contents, CHAR_TO_STR(SD_BUS_TYPE_STRUCT_END));
-                        else if (type == SD_BUS_TYPE_DICT_ENTRY_BEGIN)
-                                signature = strjoin(CHAR_TO_STR(SD_BUS_TYPE_DICT_ENTRY_BEGIN), contents, CHAR_TO_STR(SD_BUS_TYPE_DICT_ENTRY_END));
-                        else if (contents)
-                                signature = strjoin(CHAR_TO_STR(type), contents);
-                        else
-                                signature = strdup(CHAR_TO_STR(type));
-                        if (!signature)
-                                return log_oom();
+                        r = sd_bus_message_enter_container(reply, 'v', contents);
+                        if (r < 0)
+                                return bus_log_parse_error(r);
 
                         mf = open_memstream_unlocked(&buf, &sz);
                         if (!mf)
@@ -1072,7 +1062,7 @@ static int introspect(int argc, char **argv, void *userdata) {
                         z = set_get(members, &((Member) {
                                                 .type = "property",
                                                 .interface = m->interface,
-                                                .signature = signature,
+                                                .signature = (char*) contents,
                                                 .name = (char*) name }));
                         if (z)
                                 free_and_replace(z->value, buf);
@@ -1096,8 +1086,7 @@ static int introspect(int argc, char **argv, void *userdata) {
         signature_width = strlen("SIGNATURE");
         result_width = strlen("RESULT/VALUE");
 
-        Member **sorted = newa(Member*, set_size(members));
-        size_t k = 0;
+        sorted = newa(Member*, set_size(members));
 
         SET_FOREACH(m, members) {
                 if (argv[3] && !streq(argv[3], m->interface))
@@ -1119,7 +1108,7 @@ static int introspect(int argc, char **argv, void *userdata) {
                 sorted[k++] = m;
         }
 
-        if (result_width > 40 && arg_full <= 0)
+        if (result_width > 40)
                 result_width = 40;
 
         typesafe_qsort(sorted, k, member_compare_funcp);
@@ -1134,7 +1123,7 @@ static int introspect(int argc, char **argv, void *userdata) {
                        (int) result_width, "RESULT/VALUE",
                        "FLAGS");
 
-        for (size_t j = 0; j < k; j++) {
+        for (j = 0; j < k; j++) {
                 _cleanup_free_ char *ellipsized = NULL;
                 const char *rv;
                 bool is_interface;
@@ -2306,7 +2295,6 @@ static int help(void) {
                "     --verbose             Show result values in long format\n"
                "     --json=MODE           Output as JSON\n"
                "  -j                       Same as --json=pretty on tty, --json=short otherwise\n"
-               "     --xml-interface       Dump the XML description in introspect command\n"
                "     --expect-reply=BOOL   Expect a method call reply\n"
                "     --auto-start=BOOL     Auto-start destination service\n"
                "     --allow-interactive-authorization=BOOL\n"
@@ -2549,9 +2537,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached();
                 }
-
-        if (arg_full < 0)
-                arg_full = terminal_is_dumb();
 
         return 1;
 }

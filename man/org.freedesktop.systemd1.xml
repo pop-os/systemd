@@ -65,6 +65,10 @@ node /org/freedesktop/systemd1 {
                             out o unit);
       GetUnitByControlGroup(in  s cgroup,
                             out o unit);
+      GetUnitByPIDFD(in  h pidfd,
+                     out o unit,
+                     out s unit_id,
+                     out ay invocation_id);
       LoadUnit(in  s name,
                out o unit);
       StartUnit(in  s name,
@@ -209,6 +213,10 @@ node /org/freedesktop/systemd1 {
       DisableUnitFilesWithFlags(in  as files,
                                 in  t flags,
                                 out a(sss) changes);
+      DisableUnitFilesWithFlagsAndInstallInfo(in  as files,
+                                              in  t flags,
+                                              out b carries_install_info,
+                                              out a(sss) changes);
       ReenableUnitFiles(in  as files,
                         in  b runtime,
                         in  b force,
@@ -792,6 +800,8 @@ node /org/freedesktop/systemd1 {
 
     <variablelist class="dbus-method" generated="True" extra-ref="GetUnitByControlGroup()"/>
 
+    <variablelist class="dbus-method" generated="True" extra-ref="GetUnitByPIDFD()"/>
+
     <variablelist class="dbus-method" generated="True" extra-ref="LoadUnit()"/>
 
     <variablelist class="dbus-method" generated="True" extra-ref="StartUnit()"/>
@@ -915,6 +925,8 @@ node /org/freedesktop/systemd1 {
     <variablelist class="dbus-method" generated="True" extra-ref="EnableUnitFilesWithFlags()"/>
 
     <variablelist class="dbus-method" generated="True" extra-ref="DisableUnitFilesWithFlags()"/>
+
+    <variablelist class="dbus-method" generated="True" extra-ref="DisableUnitFilesWithFlagsAndInstallInfo()"/>
 
     <variablelist class="dbus-method" generated="True" extra-ref="ReenableUnitFiles()"/>
 
@@ -1213,7 +1225,11 @@ node /org/freedesktop/systemd1 {
       will fail.</para>
 
       <para><function>GetUnitByPID()</function> may be used to get the unit object path of the unit a process
-      ID belongs to. It takes a UNIX PID and returns the object path. The PID must refer to an existing system process.</para>
+      ID belongs to. It takes a UNIX PID and returns the object path. The PID must refer to an existing system process.
+      <function>GetUnitByPIDFD()</function> may be used to query with a Linux PIDFD (see:
+      <citerefentry><refentrytitle>pidfd_open</refentrytitle><manvolnum>2</manvolnum></citerefentry>) instead
+      of a PID, which is safer as UNIX PIDs can be recycled. The latter method returns the unit id and the
+      invocation id together with the unit object path.</para>
 
       <para><function>LoadUnit()</function> is similar to <function>GetUnit()</function> but will load the
       unit from disk if possible.</para>
@@ -1357,8 +1373,7 @@ node /org/freedesktop/systemd1 {
       <function>DumpByFileDescriptor()</function>/<function>DumpUnitsMatchingPatternsByFileDescriptor()</function>
       are usually the preferred interface, since it ensures the data can be passed reliably from the service
       manager to the client. Note though that they cannot work when communicating with the service manager
-      remotely, as file descriptors are strictly local to a system. All the <function>Dump*()</function>
-      methods are rate limited for unprivileged users.</para>
+      remotely, as file descriptors are strictly local to a system.</para>
 
       <para><function>Reload()</function> may be invoked to reload all unit files.</para>
 
@@ -1418,7 +1433,7 @@ node /org/freedesktop/systemd1 {
       enabled for runtime only (true, <filename>/run/</filename>), or persistently (false,
       <filename>/etc/</filename>). The second one controls whether symlinks pointing to other units shall be
       replaced if necessary. This method returns one boolean and an array of the changes made. The boolean
-      signals whether the unit files contained any enablement information (i.e. an [Install]) section. The
+      signals whether the unit files contained any enablement information (i.e. an [Install] section). The
       changes array consists of structures with three strings: the type of the change (one of
       <literal>symlink</literal> or <literal>unlink</literal>), the file name of the symlink and the
       destination of the symlink. Note that most of the following calls return a changes list in the same
@@ -1440,6 +1455,11 @@ node /org/freedesktop/systemd1 {
       <varname>SD_SYSTEMD_UNIT_FORCE</varname> controls whether symlinks pointing to other units shall be
       replaced if necessary. <varname>SD_SYSTEMD_UNIT_PORTABLE</varname> will add or remove the symlinks in
       <filename>/etc/systemd/system.attached</filename> and <filename>/run/systemd/system.attached</filename>.</para>
+
+      <para><function>DisableUnitFilesWithFlagsAndInstallInfo()</function> is similar to
+      <function>DisableUnitFilesWithFlags()</function> and takes the same arguments, but returns
+      a boolean to indicate whether the unit files contain any enablement information, like
+      <function>EnableUnitFiles()</function>. The changes made are still returned in an array.</para>
 
       <para>Similarly, <function>ReenableUnitFiles()</function> applies the changes to one or more units that
       would result from disabling and enabling the unit quickly one after the other in an atomic
@@ -1722,9 +1742,7 @@ node /org/freedesktop/systemd1 {
       <function>UnsetAndSetEnvironment()</function>) require
       <interfacename>org.freedesktop.systemd1.set-environment</interfacename>. <function>Reload()</function>
       and <function>Reexecute()</function> require
-      <interfacename>org.freedesktop.systemd1.reload-daemon</interfacename>. Operations which dump internal
-      state require <interfacename>org.freedesktop.systemd1.bypass-dump-ratelimit</interfacename> to avoid
-      rate limits.
+      <interfacename>org.freedesktop.systemd1.reload-daemon</interfacename>.
       </para>
     </refsect2>
   </refsect1>
@@ -2409,6 +2427,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       <varname>IgnoreOnIsolate</varname>, <varname>IgnoreOnSnapshot</varname> map directly to the
       corresponding configuration booleans in the unit file.</para>
 
+      <para><varname>DefaultControlGroup</varname> contains the main control group of this unit as a
+      string. This refers to a group in systemd's own <literal>name=systemd</literal> hierarchy, which
+      systemd uses to watch and manipulate the unit and all its processes.</para>
+
       <para><varname>NeedDaemonReload</varname> is a boolean that indicates whether the configuration file
       this unit is loaded from (i.e. <varname>FragmentPath</varname> or <varname>SourcePath</varname>) has
       changed since the configuration was read and hence whether a configuration reload is recommended.
@@ -2564,6 +2586,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       readonly u NRestarts = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s OOMPolicy = '...';
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly a(sst) OpenFile = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly i ReloadSignal = ...;
       readonly t ExecMainStartTimestamp = ...;
       readonly t ExecMainStartTimestampMonotonic = ...;
       readonly t ExecMainExitTimestamp = ...;
@@ -2705,6 +2731,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       readonly t MemoryMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
@@ -2913,6 +2941,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       readonly u LogRateLimitBurst = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly aay LogExtraFields = [[...], ...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly a(bs) LogFilterPatterns = [...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s LogNamespace = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -3157,6 +3187,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
 
     <!--property OOMPolicy is not documented!-->
 
+    <!--property OpenFile is not documented!-->
+
+    <!--property ReloadSignal is not documented!-->
+
     <!--property ExecCondition is not documented!-->
 
     <!--property ExecConditionEx is not documented!-->
@@ -3276,6 +3310,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <!--property MemoryMax is not documented!-->
 
     <!--property MemorySwapMax is not documented!-->
+
+    <!--property MemoryZSwapMax is not documented!-->
 
     <!--property MemoryLimit is not documented!-->
 
@@ -3462,6 +3498,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <!--property LogRateLimitBurst is not documented!-->
 
     <!--property LogExtraFields is not documented!-->
+
+    <!--property LogFilterPatterns is not documented!-->
 
     <!--property LogNamespace is not documented!-->
 
@@ -3709,6 +3747,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
 
     <variablelist class="dbus-property" generated="True" extra-ref="OOMPolicy"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="OpenFile"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="ReloadSignal"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="ExecMainStartTimestamp"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="ExecMainStartTimestampMonotonic"/>
@@ -3856,6 +3898,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 
@@ -4064,6 +4108,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <variablelist class="dbus-property" generated="True" extra-ref="LogRateLimitBurst"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogExtraFields"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="LogFilterPatterns"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogNamespace"/>
 
@@ -4594,6 +4640,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly s DevicePolicy = '...';
@@ -4801,6 +4849,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
       readonly u LogRateLimitBurst = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly aay LogExtraFields = [[...], ...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly a(bs) LogFilterPatterns = [...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s LogNamespace = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -5189,6 +5239,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
 
     <!--property MemorySwapMax is not documented!-->
 
+    <!--property MemoryZSwapMax is not documented!-->
+
     <!--property MemoryLimit is not documented!-->
 
     <!--property DevicePolicy is not documented!-->
@@ -5374,6 +5426,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
     <!--property LogRateLimitBurst is not documented!-->
 
     <!--property LogExtraFields is not documented!-->
+
+    <!--property LogFilterPatterns is not documented!-->
 
     <!--property LogNamespace is not documented!-->
 
@@ -5763,6 +5817,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DevicePolicy"/>
@@ -5970,6 +6026,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
     <variablelist class="dbus-property" generated="True" extra-ref="LogRateLimitBurst"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogExtraFields"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="LogFilterPatterns"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogNamespace"/>
 
@@ -6389,6 +6447,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly s DevicePolicy = '...';
@@ -6596,6 +6656,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
       readonly u LogRateLimitBurst = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly aay LogExtraFields = [[...], ...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly a(bs) LogFilterPatterns = [...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s LogNamespace = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -6912,6 +6974,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
 
     <!--property MemorySwapMax is not documented!-->
 
+    <!--property MemoryZSwapMax is not documented!-->
+
     <!--property MemoryLimit is not documented!-->
 
     <!--property DevicePolicy is not documented!-->
@@ -7097,6 +7161,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
     <!--property LogRateLimitBurst is not documented!-->
 
     <!--property LogExtraFields is not documented!-->
+
+    <!--property LogFilterPatterns is not documented!-->
 
     <!--property LogNamespace is not documented!-->
 
@@ -7404,6 +7470,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DevicePolicy"/>
@@ -7611,6 +7679,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
     <variablelist class="dbus-property" generated="True" extra-ref="LogRateLimitBurst"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogExtraFields"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="LogFilterPatterns"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogNamespace"/>
 
@@ -8157,6 +8227,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly s DevicePolicy = '...';
@@ -8364,6 +8436,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
       readonly u LogRateLimitBurst = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly aay LogExtraFields = [[...], ...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly a(bs) LogFilterPatterns = [...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s LogNamespace = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -8666,6 +8740,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
 
     <!--property MemorySwapMax is not documented!-->
 
+    <!--property MemoryZSwapMax is not documented!-->
+
     <!--property MemoryLimit is not documented!-->
 
     <!--property DevicePolicy is not documented!-->
@@ -8851,6 +8927,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
     <!--property LogRateLimitBurst is not documented!-->
 
     <!--property LogExtraFields is not documented!-->
+
+    <!--property LogFilterPatterns is not documented!-->
 
     <!--property LogNamespace is not documented!-->
 
@@ -9144,6 +9222,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DevicePolicy"/>
@@ -9351,6 +9431,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
     <variablelist class="dbus-property" generated="True" extra-ref="LogRateLimitBurst"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogExtraFields"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="LogFilterPatterns"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="LogNamespace"/>
 
@@ -9756,6 +9838,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly s DevicePolicy = '...';
@@ -9906,6 +9990,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
     <!--property MemoryMax is not documented!-->
 
     <!--property MemorySwapMax is not documented!-->
+
+    <!--property MemoryZSwapMax is not documented!-->
 
     <!--property MemoryLimit is not documented!-->
 
@@ -10064,6 +10150,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 
@@ -10247,6 +10335,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemorySwapMax = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly t MemoryZSwapMax = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryLimit = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly s DevicePolicy = '...';
@@ -10417,6 +10507,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
     <!--property MemoryMax is not documented!-->
 
     <!--property MemorySwapMax is not documented!-->
+
+    <!--property MemoryZSwapMax is not documented!-->
 
     <!--property MemoryLimit is not documented!-->
 
@@ -10605,6 +10697,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemorySwapMax"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="MemoryZSwapMax"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryLimit"/>
 

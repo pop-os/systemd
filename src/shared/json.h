@@ -75,6 +75,7 @@ int json_variant_new_array_strv(JsonVariant **ret, char **l);
 int json_variant_new_object(JsonVariant **ret, JsonVariant **array, size_t n);
 int json_variant_new_null(JsonVariant **ret);
 int json_variant_new_id128(JsonVariant **ret, sd_id128_t id);
+int json_variant_new_uuid(JsonVariant **ret, sd_id128_t id);
 
 static inline int json_variant_new_string(JsonVariant **ret, const char *s) {
         return json_variant_new_stringn(ret, s, SIZE_MAX);
@@ -193,7 +194,8 @@ typedef enum JsonFormatFlags {
         JSON_FORMAT_SSE         = 1 << 6, /* prefix/suffix with W3C server-sent events */
         JSON_FORMAT_SEQ         = 1 << 7, /* prefix/suffix with RFC 7464 application/json-seq */
         JSON_FORMAT_FLUSH       = 1 << 8, /* call fflush() after dumping JSON */
-        JSON_FORMAT_OFF         = 1 << 9, /* make json_variant_format() fail with -ENOEXEC */
+        JSON_FORMAT_EMPTY_ARRAY = 1 << 9, /* output "[]" for empty input */
+        JSON_FORMAT_OFF         = 1 << 10, /* make json_variant_format() fail with -ENOEXEC */
 } JsonFormatFlags;
 
 int json_variant_format(JsonVariant *v, JsonFormatFlags flags, char **ret);
@@ -208,7 +210,10 @@ int json_variant_set_field_unsigned(JsonVariant **v, const char *field, uint64_t
 int json_variant_set_field_boolean(JsonVariant **v, const char *field, bool b);
 int json_variant_set_field_strv(JsonVariant **v, const char *field, char **l);
 
+JsonVariant *json_variant_find(JsonVariant *haystack, JsonVariant *needle);
+
 int json_variant_append_array(JsonVariant **v, JsonVariant *element);
+int json_variant_append_array_nodup(JsonVariant **v, JsonVariant *element);
 
 int json_variant_merge(JsonVariant **v, JsonVariant *m);
 
@@ -221,8 +226,16 @@ typedef enum JsonParseFlags {
         JSON_PARSE_SENSITIVE = 1 << 0, /* mark variant as "sensitive", i.e. something containing secret key material or such */
 } JsonParseFlags;
 
-int json_parse(const char *string, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column);
-int json_parse_continue(const char **p, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column);
+int json_parse_with_source(const char *string, const char *source, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column);
+int json_parse_with_source_continue(const char **p, const char *source, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column);
+
+static inline int json_parse(const char *string, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column) {
+        return json_parse_with_source(string, NULL, flags, ret, ret_line, ret_column);
+}
+static inline int json_parse_continue(const char **p, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column) {
+        return json_parse_with_source_continue(p, NULL, flags, ret, ret_line, ret_column);
+}
+
 int json_parse_file_at(FILE *f, int dir_fd, const char *path, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column);
 
 static inline int json_parse_file(FILE *f, const char *path, JsonParseFlags flags, JsonVariant **ret, unsigned *ret_line, unsigned *ret_column) {
@@ -251,6 +264,7 @@ enum {
         _JSON_BUILD_HEX,
         _JSON_BUILD_OCTESCAPE,
         _JSON_BUILD_ID128,
+        _JSON_BUILD_UUID,
         _JSON_BUILD_BYTE_ARRAY,
         _JSON_BUILD_HW_ADDR,
         _JSON_BUILD_PAIR_UNSIGNED_NON_ZERO,
@@ -288,6 +302,7 @@ enum {
 #define JSON_BUILD_HEX(p, n) _JSON_BUILD_HEX, (const void*) { p }, (size_t) { n }
 #define JSON_BUILD_OCTESCAPE(p, n) _JSON_BUILD_OCTESCAPE, (const void*) { p }, (size_t) { n }
 #define JSON_BUILD_ID128(id) _JSON_BUILD_ID128, (const sd_id128_t*) { &(id) }
+#define JSON_BUILD_UUID(id) _JSON_BUILD_UUID, (const sd_id128_t*) { &(id) }
 #define JSON_BUILD_BYTE_ARRAY(v, n) _JSON_BUILD_BYTE_ARRAY, (const void*) { v }, (size_t) { n }
 #define JSON_BUILD_CONST_STRING(s) _JSON_BUILD_VARIANT, JSON_VARIANT_STRING_CONST(s)
 #define JSON_BUILD_IN4_ADDR(v) JSON_BUILD_BYTE_ARRAY((const struct in_addr*) { v }, sizeof(struct in_addr))
@@ -313,6 +328,7 @@ enum {
 #define JSON_BUILD_PAIR_BASE64(name, p, n) JSON_BUILD_PAIR(name, JSON_BUILD_BASE64(p, n))
 #define JSON_BUILD_PAIR_HEX(name, p, n) JSON_BUILD_PAIR(name, JSON_BUILD_HEX(p, n))
 #define JSON_BUILD_PAIR_ID128(name, id) JSON_BUILD_PAIR(name, JSON_BUILD_ID128(id))
+#define JSON_BUILD_PAIR_UUID(name, id) JSON_BUILD_PAIR(name, JSON_BUILD_UUID(id))
 #define JSON_BUILD_PAIR_BYTE_ARRAY(name, v, n) JSON_BUILD_PAIR(name, JSON_BUILD_BYTE_ARRAY(v, n))
 #define JSON_BUILD_PAIR_IN4_ADDR(name, v) JSON_BUILD_PAIR(name, JSON_BUILD_IN4_ADDR(v))
 #define JSON_BUILD_PAIR_IN6_ADDR(name, v) JSON_BUILD_PAIR(name, JSON_BUILD_IN6_ADDR(v))

@@ -6,7 +6,7 @@
 #include "sd-messages.h"
 
 #include "alloc-util.h"
-#include "bus-common-errors.h"
+#include "bus-error.h"
 #include "dbus-device.h"
 #include "dbus-unit.h"
 #include "device-private.h"
@@ -612,8 +612,7 @@ static int device_add_udev_wants(Unit *u, sd_device *dev) {
 
                         r = manager_add_job_by_name(u->manager, JOB_START, *i, JOB_FAIL, NULL, &error, NULL);
                         if (r < 0)
-                                log_unit_full_errno(u, sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT) ? LOG_DEBUG : LOG_WARNING, r,
-                                                    "Failed to enqueue %s job, ignoring: %s", property, bus_error_message(&error, r));
+                                log_unit_warning_errno(u, r, "Failed to enqueue SYSTEMD_WANTS= job, ignoring: %s", bus_error_message(&error, r));
                 }
 
         return strv_free_and_replace(d->wants_property, added);
@@ -685,7 +684,7 @@ static int device_setup_unit(Manager *m, sd_device *dev, const char *path, bool 
                  * serialize the sysfs path across reloads/reexecs. Hence, when coming back from a reload/restart we
                  * might have the state valid, but not the sysfs path. Also, there is another possibility; when multiple
                  * devices have the same devlink (e.g. /dev/disk/by-uuid/xxxx), adding/updating/removing one of the
-                 * device causes syspath change. Hence, let's always update sysfs path.*/
+                 * device causes syspath change. Hence, let's always update sysfs path. */
 
                 /* Let's remove all dependencies generated due to udev properties. We'll re-add whatever is configured
                  * now below. */
@@ -893,7 +892,7 @@ static int device_setup_units(Manager *m, sd_device *dev, Set **ready_units, Set
 
         /* First, process the main (that is, points to the syspath) and (real, not symlink) devnode units. */
         if (device_for_action(dev, SD_DEVICE_REMOVE))
-                /* If the device is removed, the main and devnode units units will be removed by
+                /* If the device is removed, the main and devnode units will be removed by
                  * device_update_found_by_sysfs() in device_dispatch_io(). Hence, it is not necessary to
                  * store them to not_ready_units, and we have nothing to do here.
                  *
@@ -1125,18 +1124,37 @@ static int device_dispatch_io(sd_device_monitor *monitor, sd_device *dev, void *
 
         r = sd_device_get_syspath(dev, &sysfs);
         if (r < 0) {
-                log_device_error_errno(dev, r, "Failed to get device syspath, ignoring: %m");
+                log_device_warning_errno(dev, r, "Failed to get device syspath, ignoring: %m");
                 return 0;
         }
 
         r = sd_device_get_action(dev, &action);
         if (r < 0) {
-                log_device_error_errno(dev, r, "Failed to get udev action, ignoring: %m");
+                log_device_warning_errno(dev, r, "Failed to get udev action, ignoring: %m");
                 return 0;
         }
 
         if (action == SD_DEVICE_MOVE)
                 device_remove_old_on_move(m, dev);
+
+        /* When udevd failed to process the device, SYSTEMD_ALIAS or any other properties may contain invalid
+         * values. Let's refuse to handle the uevent. */
+        if (sd_device_get_property_value(dev, "UDEV_WORKER_FAILED", NULL) >= 0) {
+                int v;
+
+                if (device_get_property_int(dev, "UDEV_WORKER_ERRNO", &v) >= 0)
+                        log_device_warning_errno(dev, v, "systemd-udevd failed to process the device, ignoring: %m");
+                else if (device_get_property_int(dev, "UDEV_WORKER_EXIT_STATUS", &v) >= 0)
+                        log_device_warning(dev, "systemd-udevd failed to process the device with exit status %i, ignoring.", v);
+                else if (device_get_property_int(dev, "UDEV_WORKER_SIGNAL", &v) >= 0) {
+                        const char *s;
+                        (void) sd_device_get_property_value(dev, "UDEV_WORKER_SIGNAL_NAME", &s);
+                        log_device_warning(dev, "systemd-udevd failed to process the device with signal %i(%s), ignoring.", v, strna(s));
+                } else
+                        log_device_warning(dev, "systemd-udevd failed to process the device with unknown result, ignoring.");
+
+                return 0;
+        }
 
         /* A change event can signal that a device is becoming ready, in particular if the device is using
          * the SYSTEMD_READY logic in udev so we need to reach the else block of the following if, even for

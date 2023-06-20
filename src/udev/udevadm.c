@@ -14,7 +14,6 @@
 #include "udev-util.h"
 #include "udevadm.h"
 #include "udevd.h"
-#include "util.h"
 #include "verbs.h"
 
 static int help(void) {
@@ -62,9 +61,6 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, "+dhV", options, NULL)) >= 0)
                 switch (c) {
 

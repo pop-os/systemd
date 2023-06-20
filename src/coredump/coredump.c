@@ -21,6 +21,7 @@
 #include "compress.h"
 #include "conf-parser.h"
 #include "copy.h"
+#include "coredump-util.h"
 #include "coredump-vacuum.h"
 #include "dirent-util.h"
 #include "elf-util.h"
@@ -48,7 +49,6 @@
 #include "sync-util.h"
 #include "tmpfile-util.h"
 #include "uid-alloc-range.h"
-#include "unaligned.h"
 #include "user-util.h"
 
 /* The maximum size up to which we process coredumps. We use 1G on 32bit systems, and 32G on 64bit systems */
@@ -340,65 +340,95 @@ static int make_filename(const Context *context, char **ret) {
         return 0;
 }
 
-#define _DEFINE_PARSE_AUXV(size, type, unaligned_read)                  \
-        static int parse_auxv##size(                                    \
-                        const void *auxv,                               \
-                        size_t size_bytes,                              \
-                        int *at_secure,                                 \
-                        uid_t *uid,                                     \
-                        uid_t *euid,                                    \
-                        gid_t *gid,                                     \
-                        gid_t *egid) {                                  \
-                                                                        \
-                assert(auxv || size_bytes == 0);                        \
-                                                                        \
-                if (size_bytes % (2 * sizeof(type)) != 0)               \
-                        return log_warning_errno(SYNTHETIC_ERRNO(EIO),  \
-                                                 "Incomplete auxv structure (%zu bytes).", \
-                                                 size_bytes);           \
-                                                                        \
-                size_t words = size_bytes / sizeof(type);               \
-                                                                        \
-                /* Note that we set output variables even on error. */  \
-                                                                        \
-                for (size_t i = 0; i + 1 < words; i += 2) {             \
-                        type key, val;                                  \
-                                                                        \
-                        key = unaligned_read((uint8_t*) auxv + i * sizeof(type)); \
-                        val = unaligned_read((uint8_t*) auxv + (i + 1) * sizeof(type)); \
-                                                                        \
-                        switch (key) {                                  \
-                        case AT_SECURE:                                 \
-                                *at_secure = val != 0;                  \
-                                break;                                  \
-                        case AT_UID:                                    \
-                                *uid = val;                             \
-                                break;                                  \
-                        case AT_EUID:                                   \
-                                *euid = val;                            \
-                                break;                                  \
-                        case AT_GID:                                    \
-                                *gid = val;                             \
-                                break;                                  \
-                        case AT_EGID:                                   \
-                                *egid = val;                            \
-                                break;                                  \
-                        case AT_NULL:                                   \
-                                if (val != 0)                           \
-                                        goto error;                     \
-                                return 0;                               \
-                        }                                               \
-                }                                                       \
-        error:                                                          \
-                return log_warning_errno(SYNTHETIC_ERRNO(ENODATA),      \
-                                         "AT_NULL terminator not found, cannot parse auxv structure."); \
-        }
+static int parse_auxv64(
+                const uint64_t *auxv,
+                size_t size_bytes,
+                int *at_secure,
+                uid_t *uid,
+                uid_t *euid,
+                gid_t *gid,
+                gid_t *egid) {
 
-#define DEFINE_PARSE_AUXV(size)\
-        _DEFINE_PARSE_AUXV(size, uint##size##_t, unaligned_read_ne##size)
+        assert(auxv || size_bytes == 0);
 
-DEFINE_PARSE_AUXV(32);
-DEFINE_PARSE_AUXV(64);
+        if (size_bytes % (2 * sizeof(uint64_t)) != 0)
+                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "Incomplete auxv structure (%zu bytes).", size_bytes);
+
+        size_t words = size_bytes / sizeof(uint64_t);
+
+        /* Note that we set output variables even on error. */
+
+        for (size_t i = 0; i + 1 < words; i += 2)
+                switch (auxv[i]) {
+                case AT_SECURE:
+                        *at_secure = auxv[i + 1] != 0;
+                        break;
+                case AT_UID:
+                        *uid = auxv[i + 1];
+                        break;
+                case AT_EUID:
+                        *euid = auxv[i + 1];
+                        break;
+                case AT_GID:
+                        *gid = auxv[i + 1];
+                        break;
+                case AT_EGID:
+                        *egid = auxv[i + 1];
+                        break;
+                case AT_NULL:
+                        if (auxv[i + 1] != 0)
+                                goto error;
+                        return 0;
+                }
+ error:
+        return log_warning_errno(SYNTHETIC_ERRNO(ENODATA),
+                                 "AT_NULL terminator not found, cannot parse auxv structure.");
+}
+
+static int parse_auxv32(
+                const uint32_t *auxv,
+                size_t size_bytes,
+                int *at_secure,
+                uid_t *uid,
+                uid_t *euid,
+                gid_t *gid,
+                gid_t *egid) {
+
+        assert(auxv || size_bytes == 0);
+
+        size_t words = size_bytes / sizeof(uint32_t);
+
+        if (size_bytes % (2 * sizeof(uint32_t)) != 0)
+                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "Incomplete auxv structure (%zu bytes).", size_bytes);
+
+        /* Note that we set output variables even on error. */
+
+        for (size_t i = 0; i + 1 < words; i += 2)
+                switch (auxv[i]) {
+                case AT_SECURE:
+                        *at_secure = auxv[i + 1] != 0;
+                        break;
+                case AT_UID:
+                        *uid = auxv[i + 1];
+                        break;
+                case AT_EUID:
+                        *euid = auxv[i + 1];
+                        break;
+                case AT_GID:
+                        *gid = auxv[i + 1];
+                        break;
+                case AT_EGID:
+                        *egid = auxv[i + 1];
+                        break;
+                case AT_NULL:
+                        if (auxv[i + 1] != 0)
+                                goto error;
+                        return 0;
+                }
+ error:
+        return log_warning_errno(SYNTHETIC_ERRNO(ENODATA),
+                                 "AT_NULL terminator not found, cannot parse auxv structure.");
+}
 
 static int grant_user_access(int core_fd, const Context *context) {
         int at_secure = -1;
@@ -435,11 +465,11 @@ static int grant_user_access(int core_fd, const Context *context) {
                                       "Core file has non-native endianness, not adjusting permissions.");
 
         if (elf[EI_CLASS] == ELFCLASS64)
-                r = parse_auxv64(context->meta[META_PROC_AUXV],
+                r = parse_auxv64((const uint64_t*) context->meta[META_PROC_AUXV],
                                  context->meta_size[META_PROC_AUXV],
                                  &at_secure, &uid, &euid, &gid, &egid);
         else
-                r = parse_auxv32(context->meta[META_PROC_AUXV],
+                r = parse_auxv32((const uint32_t*) context->meta[META_PROC_AUXV],
                                  context->meta_size[META_PROC_AUXV],
                                  &at_secure, &uid, &euid, &gid, &egid);
         if (r < 0)
@@ -469,7 +499,7 @@ static int save_external_coredump(
 
         _cleanup_(unlink_and_freep) char *tmp = NULL;
         _cleanup_free_ char *fn = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         uint64_t rlimit, process_limit, max_size;
         bool truncated, storage_on_tmpfs;
         struct stat st;
@@ -567,7 +597,7 @@ static int save_external_coredump(
                 /* tmpfs might get full quickly, so check the available space too.
                  * But don't worry about errors here, failing to access the storage
                  * location will be better logged when writing to it. */
-                if (statvfs("/var/lib/systemd/coredump/", &sv) >= 0)
+                if (fstatvfs(fd, &sv) >= 0)
                         max_size = MIN((uint64_t)sv.f_frsize * (uint64_t)sv.f_bfree, max_size);
 
                 log_debug("Limiting core file size to %" PRIu64 " bytes due to cgroup memory limits.", max_size);
@@ -585,7 +615,7 @@ static int save_external_coredump(
         if (arg_compress) {
                 _cleanup_(unlink_and_freep) char *tmp_compressed = NULL;
                 _cleanup_free_ char *fn_compressed = NULL;
-                _cleanup_close_ int fd_compressed = -1;
+                _cleanup_close_ int fd_compressed = -EBADF;
                 uint64_t uncompressed_size = 0;
 
                 if (lseek(fd, 0, SEEK_SET) == (off_t) -1)
@@ -711,7 +741,7 @@ static int allocate_journal_field(int fd, size_t size, char **ret, size_t *ret_s
  */
 static int compose_open_fds(pid_t pid, char **open_fds) {
         _cleanup_closedir_ DIR *proc_fd_dir = NULL;
-        _cleanup_close_ int proc_fdinfo_fd = -1;
+        _cleanup_close_ int proc_fdinfo_fd = -EBADF;
         _cleanup_free_ char *buffer = NULL;
         _cleanup_fclose_ FILE *stream = NULL;
         const char *fddelim = "", *path;
@@ -737,7 +767,7 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
         FOREACH_DIRENT(de, proc_fd_dir, return -errno) {
                 _cleanup_fclose_ FILE *fdinfo = NULL;
                 _cleanup_free_ char *fdname = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 r = readlinkat_malloc(dirfd(proc_fd_dir), de->d_name, &fdname);
                 if (r < 0)
@@ -783,7 +813,7 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
 static int get_process_ns(pid_t pid, const char *namespace, ino_t *ns) {
         const char *p;
         struct stat stbuf;
-        _cleanup_close_ int proc_ns_dir_fd = -1;
+        _cleanup_close_ int proc_ns_dir_fd = -EBADF;
 
         p = procfs_file_alloca(pid, "ns");
 
@@ -898,7 +928,7 @@ static int submit_coredump(
                 int input_fd) {
 
         _cleanup_(json_variant_unrefp) JsonVariant *json_metadata = NULL;
-        _cleanup_close_ int coredump_fd = -1, coredump_node_fd = -1;
+        _cleanup_close_ int coredump_fd = -EBADF, coredump_node_fd = -EBADF;
         _cleanup_free_ char *filename = NULL, *coredump_data = NULL;
         _cleanup_free_ char *stacktrace = NULL;
         char *core_message;
@@ -1102,7 +1132,7 @@ static int save_context(Context *context, const struct iovec_wrapper *iovw) {
 }
 
 static int process_socket(int fd) {
-        _cleanup_close_ int input_fd = -1;
+        _cleanup_close_ int input_fd = -EBADF;
         Context context = {};
         struct iovec_wrapper iovw = {};
         struct iovec iovec;
@@ -1200,7 +1230,7 @@ finish:
 }
 
 static int send_iovec(const struct iovec_wrapper *iovw, int input_fd) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(iovw);
@@ -1433,7 +1463,7 @@ static int process_kernel(int argc, char* argv[]) {
         /* When we're invoked by the kernel, stdout/stderr are closed which is dangerous because the fds
          * could get reallocated. To avoid hard to debug issues, let's instead bind stdout/stderr to
          * /dev/null. */
-        r = rearrange_stdio(STDIN_FILENO, -1, -1);
+        r = rearrange_stdio(STDIN_FILENO, -EBADF, -EBADF);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect stdout/stderr to /dev/null: %m");
 

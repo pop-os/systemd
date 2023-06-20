@@ -71,7 +71,7 @@ int dns_scope_new(Manager *m, DnsScope **ret, Link *l, DnsProtocol protocol, int
         log_debug("New scope on link %s, protocol %s, family %s", l ? l->ifname : "*", dns_protocol_to_string(protocol), family == AF_UNSPEC ? "*" : af_to_name(family));
 
         /* Enforce ratelimiting for the multicast protocols */
-        s->ratelimit = (RateLimit) { MULTICAST_RATELIMIT_INTERVAL_USEC, MULTICAST_RATELIMIT_BURST };
+        s->ratelimit = (const RateLimit) { MULTICAST_RATELIMIT_INTERVAL_USEC, MULTICAST_RATELIMIT_BURST };
 
         *ret = s;
         return 0;
@@ -351,7 +351,7 @@ static int dns_scope_socket(
                 uint16_t port,
                 union sockaddr_union *ret_socket_address) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         union sockaddr_union sa;
         socklen_t salen;
         int r, ifindex;
@@ -636,8 +636,11 @@ DnsScopeMatch dns_scope_good_domain(
         if (dns_name_dont_resolve(domain))
                 return DNS_SCOPE_NO;
 
-        /* Never go to network for the _gateway or _outbound domain — they're something special, synthesized locally. */
-        if (is_gateway_hostname(domain) || is_outbound_hostname(domain))
+        /* Never go to network for the _gateway, _outbound, _localdnsstub, _localdnsproxy domain — they're something special, synthesized locally. */
+        if (is_gateway_hostname(domain) ||
+            is_outbound_hostname(domain) ||
+            is_dns_stub_hostname(domain) ||
+            is_dns_proxy_stub_hostname(domain))
                 return DNS_SCOPE_NO;
 
         switch (s->protocol) {
@@ -647,11 +650,11 @@ DnsScopeMatch dns_scope_good_domain(
                 DnsScopeMatch m;
                 int n_best = -1;
 
-                if (dns_name_is_empty(domain)) {
+                if (dns_name_is_root(domain)) {
                         DnsResourceKey *t;
                         bool found = false;
 
-                        /* Refuse empty name if only A and/or AAAA records are requested. */
+                        /* Refuse root name if only A and/or AAAA records are requested. */
 
                         DNS_QUESTION_FOREACH(t, question)
                                 if (!IN_SET(t->type, DNS_TYPE_A, DNS_TYPE_AAAA)) {
@@ -688,7 +691,7 @@ DnsScopeMatch dns_scope_good_domain(
                 }
 
                 /* If there's a true search domain defined for this scope, and the query is single-label,
-                 * then let's resolve things here, prefereably. Note that LLMNR considers itself
+                 * then let's resolve things here, preferably. Note that LLMNR considers itself
                  * authoritative for single-label names too, at the same preference, see below. */
                 if (has_search_domains && dns_name_is_single_label(domain))
                         return DNS_SCOPE_YES_BASE + 1;
@@ -765,8 +768,6 @@ DnsScopeMatch dns_scope_good_domain(
                         return DNS_SCOPE_MAYBE;
 
                 if ((dns_name_is_single_label(domain) && /* only resolve single label names via LLMNR */
-                     !is_gateway_hostname(domain) && /* don't resolve "_gateway" with LLMNR, let local synthesizing logic handle that */
-                     !is_outbound_hostname(domain) && /* similar for "_outbound" */
                      dns_name_equal(domain, "local") == 0 && /* don't resolve "local" with LLMNR, it's the top-level domain of mDNS after all, see above */
                      manager_is_own_hostname(s->manager, domain) <= 0))  /* never resolve the local hostname via LLMNR */
                         return DNS_SCOPE_YES_BASE + 1; /* Return +1, as we consider ourselves authoritative
@@ -1117,7 +1118,7 @@ DnsTransaction *dns_scope_find_transaction(
                     !(t->query_flags & SD_RESOLVED_NO_CACHE))
                         continue;
 
-                /* If we are asked to clamp ttls an the existing transaction doesn't do it, we can't
+                /* If we are asked to clamp ttls and the existing transaction doesn't do it, we can't
                  * reuse */
                 if ((query_flags & SD_RESOLVED_CLAMP_TTL) &&
                     !(t->query_flags & SD_RESOLVED_CLAMP_TTL))

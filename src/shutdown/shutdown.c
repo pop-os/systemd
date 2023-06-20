@@ -19,11 +19,13 @@
 #include "binfmt-util.h"
 #include "cgroup-setup.h"
 #include "cgroup-util.h"
-#include "def.h"
+#include "coredump-util.h"
+#include "constants.h"
 #include "errno-util.h"
 #include "exec-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "initrd-util.h"
 #include "killall.h"
 #include "log.h"
 #include "parse-util.h"
@@ -36,7 +38,6 @@
 #include "sysctl-util.h"
 #include "terminal-util.h"
 #include "umount.h"
-#include "util.h"
 #include "virt.h"
 #include "watchdog.h"
 
@@ -73,10 +74,6 @@ static int parse_argv(int argc, char *argv[]) {
 
         assert(argc >= 1);
         assert(argv);
-
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
 
         /* "-" prevents getopt from permuting argv[] and moving the verb away
          * from argv[1]. Our interface to initrd promises it'll be there. */
@@ -402,6 +399,11 @@ int main(int argc, char *argv[]) {
 
         /* Lock us into memory */
         (void) mlockall(MCL_CURRENT|MCL_FUTURE);
+
+        /* We need to make mounts private so that we can MS_MOVE in unmount_all(). Kernel does not allow
+         * MS_MOVE when parent mountpoints have shared propagation. */
+        if (mount(NULL, "/", NULL, MS_REC|MS_PRIVATE, NULL) < 0)
+                log_warning_errno(errno, "Failed to make mounts private, ignoring: %m");
 
         /* Synchronize everything that is not written to disk yet at this point already. This is a good idea so that
          * slow IO is processed here already and the final process killing spree is not impacted by processes

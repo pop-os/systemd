@@ -1001,7 +1001,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
         }
 
         /* A special check to make sure we take down anything RequisiteOf= if we aren't active. This is when
-         * the verify-active job merges with a satisfying job type, and then loses its invalidation effect,
+         * the verify-active job merges with a satisfying job type, and then loses it's invalidation effect,
          * as the result there is JOB_DONE for the start job we merged into, while we should be failing the
          * depending job if the said unit isn't in fact active. Oneshots are an example of this, where going
          * directly from activating to inactive is success.
@@ -1050,12 +1050,6 @@ finish:
                         job_add_to_run_queue(other->job);
                         job_add_to_gc_queue(other->job);
                 }
-
-        /* Ensure that when an upheld/unneeded/bound unit activation job fails we requeue it, if it still
-         * necessary. If there are no state changes in the triggerer, it would not be retried otherwise. */
-        unit_submit_to_start_when_upheld_queue(u);
-        unit_submit_to_stop_when_bound_queue(u);
-        unit_submit_to_stop_when_unneeded_queue(u);
 
         manager_check_finished(u->manager);
 

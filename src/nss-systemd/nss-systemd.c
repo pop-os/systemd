@@ -9,7 +9,6 @@
 #include "fd-util.h"
 #include "log.h"
 #include "macro.h"
-#include "missing_threads.h"
 #include "nss-systemd.h"
 #include "nss-util.h"
 #include "pthread-util.h"

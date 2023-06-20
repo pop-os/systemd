@@ -1,3 +1,28 @@
+systemd (253~rc2-1) experimental; urgency=medium
+
+  TuxOnIce is no longer supported directly (via an out-of-tree patch)
+  for hibernation. TuxOnIce users should instead use the environment
+  variable $SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK=1 (i.e.: set it on
+  the kernel command line).
+
+  The Debian-specific /etc/default/locale will now be made into a
+  symlink to the distribution-agnostic /etc/locale.conf. The content
+  format is compatible, so at upgrade time if /etc/default/locale
+  exists it will be copied to /etc/locale.conf, if the latter does not
+  exist.
+  The Debian-specific /etc/timezone will no longer be supported by
+  systemd-timedated, as it is no longer useful and its functionality
+  has been subsumed into /etc/localtime, and tzdata will no longer
+  create it.
+
+  The journal 'audit' feature is no longer patched to be disabled by
+  default, and instead we rely on the fact that the unit
+  'systemd-journald-audit.socket' is disabled by default. If you enabled
+  this in the past by setting 'Audit=yes' in a configuration file, you
+  will also need to enable the socket unit.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 08 Feb 2023 20:36:58 +0000
+
 systemd (251.3-2) unstable; urgency=medium
 
   systemd-resolved has been split into a separate package.

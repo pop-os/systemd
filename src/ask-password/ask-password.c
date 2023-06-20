@@ -6,7 +6,8 @@
 #include <unistd.h>
 
 #include "ask-password-api.h"
-#include "def.h"
+#include "build.h"
+#include "constants.h"
 #include "log.h"
 #include "macro.h"
 #include "main-func.h"
@@ -107,10 +108,6 @@ static int parse_argv(int argc, char *argv[]) {
 
         /* Note the asymmetry: the long option --echo= allows an optional argument, the short option does
          * not. */
-
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, "+hen", options, NULL)) >= 0)
 
                 switch (c) {

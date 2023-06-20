@@ -10,7 +10,6 @@
 #include "dbus-path.h"
 #include "dbus-unit.h"
 #include "escape.h"
-#include "event-util.h"
 #include "fd-util.h"
 #include "glob-util.h"
 #include "inotify-util.h"
@@ -27,10 +26,10 @@
 #include "unit.h"
 
 static const UnitActiveState state_translation_table[_PATH_STATE_MAX] = {
-        [PATH_DEAD]    = UNIT_INACTIVE,
+        [PATH_DEAD] = UNIT_INACTIVE,
         [PATH_WAITING] = UNIT_ACTIVE,
         [PATH_RUNNING] = UNIT_ACTIVE,
-        [PATH_FAILED]  = UNIT_FAILED,
+        [PATH_FAILED] = UNIT_FAILED,
 };
 
 static int path_dispatch_io(sd_event_source *source, int fd, uint32_t revents, void *userdata);
@@ -266,7 +265,7 @@ static void path_spec_dump(PathSpec *s, FILE *f, const char *prefix) {
 
 void path_spec_done(PathSpec *s) {
         assert(s);
-        assert(s->inotify_fd == -1);
+        assert(s->inotify_fd == -EBADF);
 
         free(s->path);
 }
@@ -301,7 +300,6 @@ static void path_done(Unit *u) {
 
         assert(p);
 
-        p->trigger_notify_event_source = sd_event_source_disable_unref(p->trigger_notify_event_source);
         path_free_specs(p);
 }
 
@@ -577,9 +575,6 @@ static void path_enter_waiting(Path *p, bool initial, bool from_trigger_notify) 
         Unit *trigger;
         int r;
 
-        if (p->trigger_notify_event_source)
-                (void) event_source_disable(p->trigger_notify_event_source);
-
         /* If the triggered unit is already running, so are we */
         trigger = UNIT_TRIGGER(UNIT(p));
         if (trigger && !UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(trigger))) {
@@ -804,28 +799,8 @@ fail:
         return 0;
 }
 
-static void path_trigger_notify_impl(Unit *u, Unit *other, bool on_defer);
-
-static int path_trigger_notify_on_defer(sd_event_source *s, void *userdata) {
-        Path *p = ASSERT_PTR(userdata);
-        Unit *trigger;
-
-        assert(s);
-
-        trigger = UNIT_TRIGGER(UNIT(p));
-        if (!trigger) {
-                log_unit_error(UNIT(p), "Unit to trigger vanished.");
-                path_enter_dead(p, PATH_FAILURE_RESOURCES);
-                return 0;
-        }
-
-        path_trigger_notify_impl(UNIT(p), trigger, /* on_defer = */ true);
-        return 0;
-}
-
-static void path_trigger_notify_impl(Unit *u, Unit *other, bool on_defer) {
+static void path_trigger_notify(Unit *u, Unit *other) {
         Path *p = PATH(u);
-        int r;
 
         assert(u);
         assert(other);
@@ -851,46 +826,13 @@ static void path_trigger_notify_impl(Unit *u, Unit *other, bool on_defer) {
 
         if (p->state == PATH_RUNNING &&
             UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(other))) {
-                if (!on_defer)
-                        log_unit_debug(u, "Got notified about unit deactivation.");
+                log_unit_debug(UNIT(p), "Got notified about unit deactivation.");
+                path_enter_waiting(p, false, true);
         } else if (p->state == PATH_WAITING &&
                    !UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(other))) {
-                if (!on_defer)
-                        log_unit_debug(u, "Got notified about unit activation.");
-        } else
-                return;
-
-        if (on_defer) {
-                path_enter_waiting(p, /* initial = */ false, /* from_trigger_notify = */ true);
-                return;
+                log_unit_debug(UNIT(p), "Got notified about unit activation.");
+                path_enter_waiting(p, false, true);
         }
-
-        /* Do not call path_enter_waiting() directly from path_trigger_notify(), as this may be called by
-         * job_install() -> job_finish_and_invalidate() -> unit_trigger_notify(), and path_enter_waiting()
-         * may install another job and will trigger assertion in job_install().
-         * https://github.com/systemd/systemd/issues/24577#issuecomment-1522628906
-         * Hence, first setup defer event source here, and call path_enter_waiting() slightly later. */
-        if (p->trigger_notify_event_source) {
-                r = sd_event_source_set_enabled(p->trigger_notify_event_source, SD_EVENT_ONESHOT);
-                if (r < 0) {
-                        log_unit_warning_errno(u, r, "Failed to enable event source for triggering notify: %m");
-                        path_enter_dead(p, PATH_FAILURE_RESOURCES);
-                        return;
-                }
-        } else {
-                r = sd_event_add_defer(u->manager->event, &p->trigger_notify_event_source, path_trigger_notify_on_defer, p);
-                if (r < 0) {
-                        log_unit_warning_errno(u, r, "Failed to allocate event source for triggering notify: %m");
-                        path_enter_dead(p, PATH_FAILURE_RESOURCES);
-                        return;
-                }
-
-                (void) sd_event_source_set_description(p->trigger_notify_event_source, "path-trigger-notify");
-        }
-}
-
-static void path_trigger_notify(Unit *u, Unit *other) {
-        path_trigger_notify_impl(u, other, /* on_defer = */ false);
 }
 
 static void path_reset_failed(Unit *u) {

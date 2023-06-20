@@ -22,6 +22,7 @@
 #include "fs-util.h"
 #include "list.h"
 #include "log.h"
+#include "logarithm.h"
 #include "network-util.h"
 #include "ratelimit.h"
 #include "resolve-private.h"
@@ -32,7 +33,6 @@
 #include "timesyncd-conf.h"
 #include "timesyncd-manager.h"
 #include "user-util.h"
-#include "util.h"
 
 #ifndef ADJ_SETOFFSET
 #define ADJ_SETOFFSET                   0x0100  /* add 'time' to current time */
@@ -972,10 +972,10 @@ static int manager_network_read_link_servers(Manager *m) {
         assert(m);
 
         r = sd_network_get_ntp(&ntp);
-        if (r < 0 && r != -ENODATA) {
+        if (r < 0) {
                 if (r == -ENOMEM)
                         log_oom();
-                else
+                else if (r != -ENODATA)
                         log_debug_errno(r, "Failed to get link NTP servers: %m");
                 goto clear;
         }
@@ -1113,9 +1113,9 @@ int manager_new(Manager **ret) {
 
                 .connection_retry_usec = DEFAULT_CONNECTION_RETRY_USEC,
 
-                .server_socket = -1,
+                .server_socket = -EBADF,
 
-                .ratelimit = (RateLimit) {
+                .ratelimit = (const RateLimit) {
                         RATELIMIT_INTERVAL_USEC,
                         RATELIMIT_BURST
                 },

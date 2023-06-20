@@ -15,6 +15,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "fstab-util.h"
+#include "initrd-util.h"
 #include "libmount-util.h"
 #include "log.h"
 #include "manager.h"
@@ -484,17 +485,10 @@ static int mount_add_default_ordering_dependencies(Mount *m, MountParameters *p,
         if (e && in_initrd()) {
                 /* All mounts under /sysroot need to happen later, at initrd-fs.target time. IOW,
                  * it's not technically part of the basic initrd filesystem itself, and so
-                 * shouldn't inherit the default Before=local-fs.target dependency. However,
-                 * these mounts still need to start after local-fs-pre.target, as a sync point
-                 * for things like systemd-hibernate-resume@.service that should start before
-                 * any mounts. */
+                 * shouldn't inherit the default Before=local-fs.target dependency. */
 
-                after = SPECIAL_LOCAL_FS_PRE_TARGET;
+                after = NULL;
                 before = isempty(e) ? SPECIAL_INITRD_ROOT_FS_TARGET : SPECIAL_INITRD_FS_TARGET;
-
-        } else if (in_initrd() && path_startswith(m->where, "/sysusr/usr")) {
-                after = SPECIAL_LOCAL_FS_PRE_TARGET;
-                before = SPECIAL_INITRD_USR_FS_TARGET;
 
         } else if (mount_is_network(p)) {
                 after = SPECIAL_REMOTE_FS_PRE_TARGET;
@@ -511,9 +505,11 @@ static int mount_add_default_ordering_dependencies(Mount *m, MountParameters *p,
                         return r;
         }
 
-        r = unit_add_dependency_by_name(UNIT(m), UNIT_AFTER, after, /* add_reference= */ true, mask);
-        if (r < 0)
-                return r;
+        if (after) {
+                r = unit_add_dependency_by_name(UNIT(m), UNIT_AFTER, after, /* add_reference= */ true, mask);
+                if (r < 0)
+                        return r;
+        }
 
         return unit_add_two_dependencies_by_name(UNIT(m), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET,
                                                  /* add_reference= */ true, mask);
@@ -892,10 +888,10 @@ static int mount_spawn(Mount *m, ExecCommand *c, pid_t *_pid) {
 
         _cleanup_(exec_params_clear) ExecParameters exec_params = {
                 .flags     = EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN,
-                .stdin_fd  = -1,
-                .stdout_fd = -1,
-                .stderr_fd = -1,
-                .exec_fd   = -1,
+                .stdin_fd  = -EBADF,
+                .stdout_fd = -EBADF,
+                .stderr_fd = -EBADF,
+                .exec_fd   = -EBADF,
         };
         pid_t pid;
         int r;

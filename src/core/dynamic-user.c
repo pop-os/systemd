@@ -74,7 +74,7 @@ static int dynamic_user_add(Manager *m, const char *name, int storage_socket[sta
 }
 
 static int dynamic_user_acquire(Manager *m, const char *name, DynamicUser** ret) {
-        _cleanup_close_pair_ int storage_socket[2] = { -1, -1 };
+        _cleanup_close_pair_ int storage_socket[2] = PIPE_EBADF;
         DynamicUser *d;
         int r;
 
@@ -127,7 +127,7 @@ static int dynamic_user_acquire(Manager *m, const char *name, DynamicUser** ret)
         if (r < 0)
                 return r;
 
-        storage_socket[0] = storage_socket[1] = -1;
+        storage_socket[0] = storage_socket[1] = -EBADF;
 
         if (ret) {
                 d->n_ref++;
@@ -211,7 +211,7 @@ static int pick_uid(char **suggested_paths, const char *name, uid_t *ret_uid) {
 
         for (;;) {
                 char lock_path[STRLEN("/run/systemd/dynamic-uid/") + DECIMAL_STR_MAX(uid_t) + 1];
-                _cleanup_close_ int lock_fd = -1;
+                _cleanup_close_ int lock_fd = -EBADF;
                 uid_t candidate;
                 ssize_t l;
 
@@ -373,7 +373,7 @@ static void unlockfp(int *fd_lock) {
         if (*fd_lock < 0)
                 return;
         lockf(*fd_lock, F_ULOCK, 0);
-        *fd_lock = -1;
+        *fd_lock = -EBADF;
 }
 
 static int dynamic_user_realize(
@@ -382,9 +382,9 @@ static int dynamic_user_realize(
                 uid_t *ret_uid, gid_t *ret_gid,
                 bool is_user) {
 
-        _cleanup_(unlockfp) int storage_socket0_lock = -1;
-        _cleanup_close_ int uid_lock_fd = -1;
-        _cleanup_close_ int etc_passwd_lock_fd = -1;
+        _cleanup_(unlockfp) int storage_socket0_lock = -EBADF;
+        _cleanup_close_ int uid_lock_fd = -EBADF;
+        _cleanup_close_ int etc_passwd_lock_fd = -EBADF;
         uid_t num = UID_INVALID; /* a uid if is_user, and a gid otherwise */
         gid_t gid = GID_INVALID; /* a gid if is_user, ignored otherwise */
         bool flush_cache = false;
@@ -524,8 +524,8 @@ static int dynamic_user_realize(
 }
 
 int dynamic_user_current(DynamicUser *d, uid_t *ret) {
-        _cleanup_(unlockfp) int storage_socket0_lock = -1;
-        _cleanup_close_ int lock_fd = -1;
+        _cleanup_(unlockfp) int storage_socket0_lock = -EBADF;
+        _cleanup_close_ int lock_fd = -EBADF;
         uid_t uid;
         int r;
 
@@ -567,8 +567,8 @@ static DynamicUser* dynamic_user_unref(DynamicUser *d) {
 }
 
 static int dynamic_user_close(DynamicUser *d) {
-        _cleanup_(unlockfp) int storage_socket0_lock = -1;
-        _cleanup_close_ int lock_fd = -1;
+        _cleanup_(unlockfp) int storage_socket0_lock = -EBADF;
+        _cleanup_close_ int lock_fd = -EBADF;
         uid_t uid;
         int r;
 

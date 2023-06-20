@@ -1,11 +1,65 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "ask-password-api.h"
 #include "cryptenroll-fido2.h"
+#include "cryptsetup-fido2.h"
 #include "hexdecoct.h"
 #include "json.h"
 #include "libfido2-util.h"
 #include "memory-util.h"
 #include "random-util.h"
+
+int load_volume_key_fido2(
+                struct crypt_device *cd,
+                const char *cd_node,
+                const char *device,
+                void *ret_vk,
+                size_t *ret_vks) {
+
+        _cleanup_(erase_and_freep) void *decrypted_key = NULL;
+        _cleanup_(erase_and_freep) char *passphrase = NULL;
+        size_t decrypted_key_size;
+        ssize_t passphrase_size;
+        int r;
+
+        assert_se(cd);
+        assert_se(cd_node);
+        assert_se(ret_vk);
+        assert_se(ret_vks);
+
+        r = acquire_fido2_key_auto(
+                        cd,
+                        cd_node,
+                        cd_node,
+                        device,
+                        /* until= */ 0,
+                        /* headless= */ false,
+                        &decrypted_key,
+                        &decrypted_key_size,
+                        ASK_PASSWORD_PUSH_CACHE|ASK_PASSWORD_ACCEPT_CACHED);
+        if (r == -EAGAIN)
+                return log_error_errno(r, "FIDO2 token does not exist, or UV is blocked. Please try again.");
+        if (r < 0)
+                return r;
+
+        /* Because cryptenroll requires a LUKS header, we can assume that this device is not
+         * a PLAIN device. In this case, we need to base64 encode the secret to use as the passphrase */
+        passphrase_size = base64mem(decrypted_key, decrypted_key_size, &passphrase);
+        if (passphrase_size < 0)
+                return log_oom();
+
+        r = crypt_volume_key_get(
+                        cd,
+                        CRYPT_ANY_SLOT,
+                        ret_vk,
+                        ret_vks,
+                        passphrase,
+                        passphrase_size);
+        if (r < 0)
+                return log_error_errno(r, "Unlocking via FIDO2 device failed: %m");
+
+        return r;
+}
 
 int enroll_fido2(
                 struct crypt_device *cd,
@@ -21,6 +75,7 @@ int enroll_fido2(
         _cleanup_free_ char *keyslot_as_string = NULL;
         size_t cid_size, salt_size, secret_size;
         _cleanup_free_ void *cid = NULL;
+        ssize_t base64_encoded_size;
         const char *node, *un;
         int r, keyslot;
 
@@ -53,9 +108,9 @@ int enroll_fido2(
                 return r;
 
         /* Before we use the secret, we base64 encode it, for compat with homed, and to make it easier to type in manually */
-        r = base64mem(secret, secret_size, &base64_encoded);
-        if (r < 0)
-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
+        base64_encoded_size = base64mem(secret, secret_size, &base64_encoded);
+        if (base64_encoded_size < 0)
+                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
 
         r = cryptsetup_set_minimal_pbkdf(cd);
         if (r < 0)
@@ -67,7 +122,7 @@ int enroll_fido2(
                         volume_key,
                         volume_key_size,
                         base64_encoded,
-                        strlen(base64_encoded));
+                        base64_encoded_size);
         if (keyslot < 0)
                 return log_error_errno(keyslot, "Failed to add new FIDO2 key to %s: %m", node);
 

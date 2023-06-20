@@ -11,13 +11,7 @@
 Description=Userspace Out-Of-Memory (OOM) Killer Socket
 Documentation=man:systemd-oomd.service(8)
 DefaultDependencies=no
-Before=sockets.target shutdown.target
-Conflicts=shutdown.target
-ConditionControlGroupController=v2
-ConditionControlGroupController=memory
-ConditionPathExists=/proc/pressure/cpu
-ConditionPathExists=/proc/pressure/io
-ConditionPathExists=/proc/pressure/memory
+Before=sockets.target
 
 [Socket]
 ListenStream=/run/systemd/oom/io.system.ManagedOOM

@@ -10,19 +10,19 @@
 [Unit]
 Description=User Manager for UID %i
 Documentation=man:user@.service(5)
-After=user-runtime-dir@%i.service dbus.service systemd-oomd.service
+After=user-runtime-dir@%i.service dbus.service
 Requires=user-runtime-dir@%i.service
 IgnoreOnIsolate=yes
 
 [Service]
 User=%i
 PAMName=systemd-user
-Type=notify
+Type=notify-reload
 ExecStart={{ROOTLIBEXECDIR}}/systemd --user
 Slice=user-%i.slice
 KillMode=mixed
 Delegate=pids memory cpu
 TasksMax=infinity
-TimeoutStopSec=120s
+TimeoutStopSec={{ DEFAULT_USER_TIMEOUT_SEC*4//3 }}s
 KeyringMode=inherit
 OOMScoreAdjust=100

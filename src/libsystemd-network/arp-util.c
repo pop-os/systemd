@@ -12,7 +12,6 @@
 #include "fd-util.h"
 #include "in-addr-util.h"
 #include "unaligned.h"
-#include "util.h"
 
 int arp_update_filter(int fd, const struct in_addr *a, const struct ether_addr *mac) {
         struct sock_filter filter[] = {
@@ -74,7 +73,7 @@ int arp_network_bind_raw_socket(int ifindex, const struct in_addr *a, const stru
                 .ll.sll_halen    = ETH_ALEN,
                 .ll.sll_addr     = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
         };
-        _cleanup_close_ int s = -1;
+        _cleanup_close_ int s = -EBADF;
         int r;
 
         assert(ifindex > 0);

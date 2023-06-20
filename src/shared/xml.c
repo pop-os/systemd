@@ -87,26 +87,26 @@ int xml_tokenize(const char **p, char **name, void **state, unsigned *line) {
 
                         if (startswith(b, "!--")) {
                                 /* A comment */
-                                e = strstrafter(b + 3, "-->");
+                                e = strstr(b + 3, "-->");
                                 if (!e)
                                         return -EINVAL;
 
-                                inc_lines(line, b, e - b);
+                                inc_lines(line, b, e + 3 - b);
 
-                                c = e;
+                                c = e + 3;
                                 continue;
                         }
 
                         if (*b == '?') {
                                 /* Processing instruction */
 
-                                e = strstrafter(b + 1, "?>");
+                                e = strstr(b + 1, "?>");
                                 if (!e)
                                         return -EINVAL;
 
-                                inc_lines(line, b, e - b);
+                                inc_lines(line, b, e + 2 - b);
 
-                                c = e;
+                                c = e + 2;
                                 continue;
                         }
 

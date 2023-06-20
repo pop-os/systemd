@@ -27,12 +27,10 @@
 #include "path-util.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
-#include "rlimit-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
 #include "special.h"
 #include "stdio-util.h"
-#include "util.h"
 
 static bool arg_skip = false;
 static bool arg_force = false;
@@ -226,7 +224,7 @@ static int process_progress(int fd, FILE* console) {
 }
 
 static int fsck_progress_socket(void) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -242,7 +240,7 @@ static int fsck_progress_socket(void) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_close_pair_ int progress_pipe[2] = { -1, -1 };
+        _cleanup_close_pair_ int progress_pipe[2] = PIPE_EBADF;
         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
         _cleanup_free_ char *dpath = NULL;
         _cleanup_fclose_ FILE *console = NULL;
@@ -347,13 +345,12 @@ static int run(int argc, char *argv[]) {
             pipe(progress_pipe) < 0)
                 return log_error_errno(errno, "pipe(): %m");
 
-        r = safe_fork("(fsck)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        r = safe_fork("(fsck)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
                 char dash_c[STRLEN("-C") + DECIMAL_STR_MAX(int) + 1];
                 int progress_socket = -1;
-                _cleanup_free_ char *fsck_path = NULL;
                 const char *cmdline[9];
                 int i = 0;
 
@@ -374,13 +371,7 @@ static int run(int argc, char *argv[]) {
                 } else
                         dash_c[0] = 0;
 
-                r = find_executable("fsck", &fsck_path);
-                if (r < 0) {
-                        log_error_errno(r, "Cannot find fsck binary: %m");
-                        _exit(FSCK_OPERATIONAL_ERROR);
-                }
-
-                cmdline[i++] = fsck_path;
+                cmdline[i++] = "/sbin/fsck";
                 cmdline[i++] =  arg_repair;
                 cmdline[i++] = "-T";
 
@@ -402,8 +393,6 @@ static int run(int argc, char *argv[]) {
 
                 cmdline[i++] = device;
                 cmdline[i++] = NULL;
-
-                (void) rlimit_nofile_safe();
 
                 execv(cmdline[0], (char**) cmdline);
                 _exit(FSCK_OPERATIONAL_ERROR);

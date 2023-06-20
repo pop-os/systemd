@@ -8,7 +8,7 @@
 #include "bus-error.h"
 #include "bus-kernel.h"
 #include "bus-match.h"
-#include "def.h"
+#include "constants.h"
 #include "hashmap.h"
 #include "list.h"
 #include "prioq.h"
@@ -361,7 +361,7 @@ bool path_complex_pattern(const char *pattern, const char *value) _pure_;
 bool namespace_simple_pattern(const char *pattern, const char *value) _pure_;
 bool path_simple_pattern(const char *pattern, const char *value) _pure_;
 
-int bus_message_type_from_string(const char *s, uint8_t *u);
+int bus_message_type_from_string(const char *s, uint8_t *u) _pure_;
 const char *bus_message_type_to_string(uint8_t u) _pure_;
 
 #define error_name_is_valid interface_name_is_valid

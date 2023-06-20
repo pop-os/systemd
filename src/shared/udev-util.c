@@ -347,10 +347,11 @@ int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
         str += is_escaped;
         if (str[0] != '"')
                 return -EINVAL;
+        str++;
 
         if (!is_escaped) {
                 /* unescape double quotation '\"'->'"' */
-                for (j = str, i = str + 1; *i != '"'; i++, j++) {
+                for (i = j = str; *i != '"'; i++, j++) {
                         if (*i == '\0')
                                 return -EINVAL;
                         if (i[0] == '\\' && i[1] == '"')
@@ -358,17 +359,12 @@ int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
                         *j = *i;
                 }
                 j[0] = '\0';
-                /*
-                 * The return value must be terminated by two subsequent NULs
-                 * so it could be safely interpreted as nulstr.
-                 */
-                j[1] = '\0';
         } else {
                 _cleanup_free_ char *unescaped = NULL;
                 ssize_t l;
 
                 /* find the end position of value */
-                for (i = str + 1; *i != '"'; i++) {
+                for (i = str; *i != '"'; i++) {
                         if (i[0] == '\\')
                                 i++;
                         if (*i == '\0')
@@ -376,17 +372,12 @@ int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
                 }
                 i[0] = '\0';
 
-                l = cunescape_length(str + 1, i - (str + 1), 0, &unescaped);
+                l = cunescape_length(str, i - str, 0, &unescaped);
                 if (l < 0)
                         return l;
 
-                assert(l <= i - (str + 1));
+                assert(l <= i - str);
                 memcpy(str, unescaped, l + 1);
-                /*
-                 * The return value must be terminated by two subsequent NULs
-                 * so it could be safely interpreted as nulstr.
-                 */
-                str[l + 1] = '\0';
         }
 
         *ret_value = str;
@@ -579,7 +570,7 @@ int udev_queue_is_empty(void) {
 }
 
 int udev_queue_init(void) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = inotify_init1(IN_CLOEXEC);
         if (fd < 0)

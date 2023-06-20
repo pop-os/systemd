@@ -3,14 +3,11 @@ set -e
 
 . `dirname $0`/assert.sh
 
-if [ -n "$TEST_UPSTREAM" ]; then
-    LOCALE_CONF=/etc/locale.conf
-else
-    LOCALE_CONF=/etc/default/locale
+if [ -f /etc/locale.conf ]; then
+    cp /etc/locale.conf /etc/locale.conf.orig
 fi
-
-if [ -f "$LOCALE_CONF" ]; then
-    cp "$LOCALE_CONF" "${LOCALE_CONF}.orig"
+if  [ -f /etc/vconsole.conf ]; then
+    mv /etc/vconsole.conf /etc/vconsole.conf.orig
 fi
 
 # ensure tested locale exist
@@ -18,9 +15,7 @@ mv /etc/locale.gen /etc/locale.gen.orig
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen en_US.UTF-8
 
-if ! [ -e /etc/default/keyboard ]; then
-    /bin/echo -e 'XKBMODEL=us\nXKBLAYOUT=pc105' > /etc/default/keyboard
-fi
+/bin/echo -e 'XKBMODEL=us\nXKBLAYOUT=pc105' > /etc/vconsole.conf
 
 # should activate daemon and work
 assert_in "System Locale:" "`localectl --no-pager`"
@@ -28,12 +23,8 @@ assert_in "System Locale:" "`localectl --no-pager`"
 # change locale
 assert_eq "`localectl --no-pager set-locale LANG=C LC_CTYPE=en_US.UTF-8 2>&1`" ""
 sync
-assert_eq "`cat $LOCALE_CONF`" "LANG=C
+assert_eq "`cat /etc/locale.conf`" "LANG=C
 LC_CTYPE=en_US.UTF-8"
-
-if [ -z "$TEST_UPSTREAM" ]; then
-    ! [ -f /etc/locale.conf ]
-fi
 
 STATUS=`localectl`
 assert_in "System Locale: LANG=C" "$STATUS"
@@ -47,17 +38,22 @@ assert_rc 1 validlocale de_DE.UTF-8 2>&1
 # change locale
 assert_eq "`localectl --no-pager set-locale de_DE.UTF-8 2>&1`" ""
 sync
-assert_eq "`cat $LOCALE_CONF`" "LANG=de_DE.UTF-8
+assert_eq "`cat /etc/locale.conf`" "LANG=de_DE.UTF-8
 LC_CTYPE=en_US.UTF-8"
 
 # ensure tested locale exists and works now
 assert_rc 0 validlocale de_DE.UTF-8 2>&1
 
 # reset locale to original
-if [ -f "${LOCALE_CONF}.orig" ]; then
-    mv "${LOCALE_CONF}.orig" "$LOCALE_CONF"
+if [ -f /etc/locale.conf.orig ]; then
+    mv /etc/locale.conf.orig /etc/locale.conf
 else
-    rm "$LOCALE_CONF"
+    rm -f /etc/locale.conf
+fi
+if [ -f /etc/vconsole.conf.orig ]; then
+    mv /etc/vconsole.conf.orig /etc/vconsole.conf
+else
+    rm /etc/vconsole.conf
 fi
 mv /etc/locale.gen.orig /etc/locale.gen
 locale-gen

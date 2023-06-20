@@ -158,7 +158,7 @@ test_issue_20329() {
     unit=$(systemd-escape --suffix mount --path "$tmpdir")
 
     # Set up test mount unit
-    cat > /run/systemd/system/"$unit" <<EOF
+    cat >/run/systemd/system/"$unit" <<EOF
 [Mount]
 What=tmpfs
 Where=$tmpdir
@@ -181,7 +181,7 @@ EOF
     # Trigger the mount ratelimiting
     cd "$(mktemp -d)"
     mkdir foo
-    for _ in {1..50}; do
+    for ((i = 0; i < 50; i++)); do
         mount --bind foo foo
         umount foo
     done
@@ -225,7 +225,7 @@ EOF
     # shellcheck disable=SC2064
     trap "rm -f /run/systemd/system/tmp-hoge.mount '$mount_mytmpfs'" RETURN
 
-    for _ in {1..10}; do
+    for ((i = 0; i < 10; i++)); do
         systemctl --no-block start tmp-hoge.mount
         sleep ".$RANDOM"
         systemctl daemon-reexec

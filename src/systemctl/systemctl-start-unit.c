@@ -162,14 +162,7 @@ fail:
         if (arg_action != ACTION_SYSTEMCTL)
                 return r;
 
-        if (sd_bus_error_has_name(error, BUS_ERROR_UNIT_MASKED) &&
-            STR_IN_SET(method, "TryRestartUnit", "ReloadOrTryRestartUnit")) {
-                /* Ignore masked unit if try-* is requested */
-
-                log_debug_errno(r, "Failed to %s %s, ignoring: %s", job_type, name, bus_error_message(error, r));
-                return 0;
-        } else
-                log_error_errno(r, "Failed to %s %s: %s", job_type, name, bus_error_message(error, r));
+        log_error_errno(r, "Failed to %s %s: %s", job_type, name, bus_error_message(error, r));
 
         if (!sd_bus_error_has_names(error, BUS_ERROR_NO_SUCH_UNIT,
                                            BUS_ERROR_UNIT_MASKED,
@@ -306,7 +299,7 @@ int verb_start(int argc, char *argv[], void *userdata) {
                                 mode = "isolate";
                                 suffix = ".target";
                         } else if (!arg_marked) {
-                                /* A command in style of "systemctl start <unit1> <unit2> …", "sysemctl stop <unit1> <unit2> …" and so on */
+                                /* A command in style of "systemctl start <unit1> <unit2> …", "systemctl stop <unit1> <unit2> …" and so on */
                                 method = verb_to_method(argv[0]);
                                 job_type = verb_to_job_type(argv[0]);
                                 mode = arg_job_mode();
@@ -366,6 +359,7 @@ int verb_start(int argc, char *argv[], void *userdata) {
 
         if (arg_marked)
                 ret = enqueue_marked_jobs(bus, w);
+
         else
                 STRV_FOREACH(name, names) {
                         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;

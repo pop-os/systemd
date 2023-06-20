@@ -16,8 +16,8 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-resolver
 
 DefaultDependencies=no
 After=systemd-sysusers.service
-Before=sysinit.target network.target nss-lookup.target shutdown.target initrd-switch-root.target
-Conflicts=shutdown.target initrd-switch-root.target
+Before=sysinit.target network.target nss-lookup.target shutdown.target
+Conflicts=shutdown.target
 Wants=nss-lookup.target
 
 [Service]
@@ -30,7 +30,6 @@ MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
 PrivateDevices=yes
 PrivateTmp=yes
-ProtectProc=invisible
 ProtectClock=yes
 ProtectControlGroups=yes
 ProtectHome=yes
@@ -51,6 +50,8 @@ SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
 Type=notify
 User=systemd-resolve
+LoadCredential=network.dns
+LoadCredential=network.search_domains
 {{SERVICE_WATCHDOG}}
 
 [Install]

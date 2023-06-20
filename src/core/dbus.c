@@ -649,7 +649,7 @@ static int bus_setup_disconnected_match(Manager *m, sd_bus *bus) {
 
 static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(sd_bus_close_unrefp) sd_bus *bus = NULL;
-        _cleanup_close_ int nfd = -1;
+        _cleanup_close_ int nfd = -EBADF;
         Manager *m = ASSERT_PTR(userdata);
         sd_id128_t id;
         int r;
@@ -684,7 +684,7 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
                 return 0;
         }
 
-        nfd = -1;
+        nfd = -EBADF;
 
         r = bus_check_peercred(bus);
         if (r < 0) {
@@ -897,7 +897,7 @@ int bus_init_system(Manager *m) {
 }
 
 int bus_init_private(Manager *m) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         union sockaddr_union sa;
         socklen_t sa_len;
         sd_event_source *s;
@@ -941,7 +941,7 @@ int bus_init_private(Manager *m) {
         if (fd < 0)
                 return log_error_errno(errno, "Failed to allocate private socket: %m");
 
-        RUN_WITH_UMASK(0077)
+        WITH_UMASK(0077)
                 r = bind(fd, &sa.sa, sa_len);
         if (r < 0)
                 return log_error_errno(errno, "Failed to bind private socket: %m");
@@ -998,8 +998,8 @@ static void destroy_bus(Manager *m, sd_bus **bus) {
                         u->bus_track = sd_bus_track_unref(u->bus_track);
 
                 /* Get rid of pending freezer messages on this bus */
-                if (u->pending_freezer_message && sd_bus_message_get_bus(u->pending_freezer_message) == *bus)
-                        u->pending_freezer_message = sd_bus_message_unref(u->pending_freezer_message);
+                if (u->pending_freezer_invocation && sd_bus_message_get_bus(u->pending_freezer_invocation) == *bus)
+                        u->pending_freezer_invocation = sd_bus_message_unref(u->pending_freezer_invocation);
         }
 
         /* Get rid of queued message on this bus */
@@ -1176,9 +1176,6 @@ int bus_verify_reload_daemon_async(Manager *m, sd_bus_message *call, sd_bus_erro
 
 int bus_verify_set_environment_async(Manager *m, sd_bus_message *call, sd_bus_error *error) {
         return bus_verify_polkit_async(call, CAP_SYS_ADMIN, "org.freedesktop.systemd1.set-environment", NULL, false, UID_INVALID, &m->polkit_registry, error);
-}
-int bus_verify_bypass_dump_ratelimit_async(Manager *m, sd_bus_message *call, sd_bus_error *error) {
-        return bus_verify_polkit_async(call, CAP_SYS_ADMIN, "org.freedesktop.systemd1.bypass-dump-ratelimit", NULL, false, UID_INVALID, &m->polkit_registry, error);
 }
 
 uint64_t manager_bus_n_queued_write(Manager *m) {

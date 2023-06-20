@@ -65,8 +65,6 @@ struct Path {
         PathResult result;
 
         RateLimit trigger_limit;
-
-        sd_event_source *trigger_notify_event_source;
 };
 
 struct ActivationDetailsPath {

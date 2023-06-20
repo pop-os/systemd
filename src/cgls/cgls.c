@@ -8,6 +8,7 @@
 #include "sd-bus.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-util.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
@@ -21,7 +22,6 @@
 #include "pretty-print.h"
 #include "strv.h"
 #include "unit-name.h"
-#include "util.h"
 
 static PagerFlags arg_pager_flags = 0;
 static OutputFlags arg_output_flags = OUTPUT_CGROUP_XATTRS | OUTPUT_CGROUP_ID;
@@ -95,9 +95,6 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 1);
         assert(argv);
 
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, "-hkalM:u::", options, NULL)) >= 0)
 
                 switch (c) {

@@ -239,7 +239,7 @@ typedef struct Unit {
         FILE *transient_file;
 
         /* Freezer state */
-        sd_bus_message *pending_freezer_message;
+        sd_bus_message *pending_freezer_invocation;
         FreezerState freezer_state;
 
         /* Job timeout and action to take */
@@ -347,7 +347,6 @@ typedef struct Unit {
 
         /* Make sure we never enter endless loops with the StopWhenUnneeded=, BindsTo=, Uphold= logic */
         RateLimit auto_start_stop_ratelimit;
-        sd_event_source *auto_start_stop_event_source;
 
         /* Reference to a specific UID/GID */
         uid_t ref_uid;

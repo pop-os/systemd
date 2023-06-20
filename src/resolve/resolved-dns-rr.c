@@ -1222,10 +1222,8 @@ int dns_resource_record_to_wire_format(DnsResourceRecord *rr, bool canonical) {
                 return 0;
 
         r = dns_packet_append_rr(&packet, rr, 0, &start, &rds);
-        if (r < 0) {
-                dns_packet_unref(&packet);
+        if (r < 0)
                 return r;
-        }
 
         assert(start == 0);
         assert(packet._data);
@@ -1803,10 +1801,8 @@ DnsTxtItem *dns_txt_item_copy(DnsTxtItem *first) {
                 DnsTxtItem *j;
 
                 j = memdup(i, offsetof(DnsTxtItem, data) + i->length + 1);
-                if (!j) {
-                        dns_txt_item_free_all(copy);
-                        return NULL;
-                }
+                if (!j)
+                        return dns_txt_item_free_all(copy);
 
                 LIST_INSERT_AFTER(items, copy, end, j);
                 end = j;
@@ -1818,6 +1814,8 @@ DnsTxtItem *dns_txt_item_copy(DnsTxtItem *first) {
 int dns_txt_item_new_empty(DnsTxtItem **ret) {
         DnsTxtItem *i;
 
+        assert(ret);
+
         /* RFC 6763, section 6.1 suggests to treat
          * empty TXT RRs as equivalent to a TXT record
          * with a single empty string. */
@@ -1827,7 +1825,6 @@ int dns_txt_item_new_empty(DnsTxtItem **ret) {
                 return -ENOMEM;
 
         *ret = i;
-
         return 0;
 }
 

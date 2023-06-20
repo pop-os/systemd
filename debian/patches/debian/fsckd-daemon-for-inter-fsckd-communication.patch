@@ -59,12 +59,12 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index 4819b15..4b52db1 100644
+index c5b457b..96bc180 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -892,6 +892,7 @@ manpages = [
+@@ -903,6 +903,7 @@ manpages = [
    '8',
-   ['systemd-fsck', 'systemd-fsck-root.service', 'systemd-fsck-usr.service'],
+   ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
 + ['systemd-fsckd.service', '8', ['systemd-fsckd.socket', 'systemd-fsckd'], ''],
   ['systemd-fstab-generator', '8', [], ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 39b101b..e5cdd1e 100644
+index bfc8685..1ac0522 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3351,6 +3351,15 @@ executable(
+@@ -3466,6 +3466,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -269,7 +269,7 @@ index e045852..131e4bc 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..8a85b69
+index 0000000..d758e0b
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,697 @@
@@ -311,7 +311,7 @@ index 0000000..8a85b69
 +
 +#include "sd-daemon.h"
 +#include "build.h"
-+#include "def.h"
++#include "constants.h"
 +#include "sd-event.h"
 +#include "log.h"
 +#include "list.h"
@@ -321,9 +321,9 @@ index 0000000..8a85b69
 +#include "fd-util.h"
 +#include "string-util.h"
 +#include "io-util.h"
-+#include "util.h"
 +#include "alloc-util.h"
 +#include "locale-util.h"
++#include "logarithm.h"
 +
 +#define FSCKD_SOCKET_PATH "/run/systemd/fsck.progress"
 +#define IDLE_TIME_SECONDS 30
@@ -971,7 +971,7 @@ index 0000000..8a85b69
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index 25e9209..8d3bef3 100644
+index c7939a1..6dff4fa 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -113,6 +113,7 @@ units = [
@@ -982,7 +982,7 @@ index 25e9209..8d3bef3 100644
          ['systemd-halt.service',                ''],
          ['systemd-homed-activate.service',      'ENABLE_HOMED'],
          ['systemd-initctl.socket',              'HAVE_SYSV_COMPAT',
-@@ -194,6 +195,7 @@ in_units = [
+@@ -193,6 +194,7 @@ in_units = [
          ['systemd-pstore.service',               'ENABLE_PSTORE'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],

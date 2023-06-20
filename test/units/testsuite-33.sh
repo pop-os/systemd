@@ -5,13 +5,13 @@
 set -eux
 set -o pipefail
 
-cat >/run/systemd/system/test-service.service <<EOF
+cat >/etc/systemd/system/testservice.service <<EOF
 [Service]
-ConfigurationDirectory=test-service
-RuntimeDirectory=test-service
-StateDirectory=test-service
-CacheDirectory=test-service
-LogsDirectory=test-service
+ConfigurationDirectory=testservice
+RuntimeDirectory=testservice
+StateDirectory=testservice
+CacheDirectory=testservice
+LogsDirectory=testservice
 RuntimeDirectoryPreserve=yes
 ExecStart=/bin/sleep infinity
 Type=exec
@@ -19,70 +19,70 @@ EOF
 
 systemctl daemon-reload
 
-test ! -e /etc/test-service
-test ! -e /run/test-service
-test ! -e /var/lib/test-service
-test ! -e /var/cache/test-service
-test ! -e /var/log/test-service
+test ! -e /etc/testservice
+test ! -e /run/testservice
+test ! -e /var/lib/testservice
+test ! -e /var/cache/testservice
+test ! -e /var/log/testservice
 
-systemctl start test-service
+systemctl start testservice
 
-test -d /etc/test-service
-test -d /run/test-service
-test -d /var/lib/test-service
-test -d /var/cache/test-service
-test -d /var/log/test-service
+test -d /etc/testservice
+test -d /run/testservice
+test -d /var/lib/testservice
+test -d /var/cache/testservice
+test -d /var/log/testservice
 
-(! systemctl clean test-service)
+systemctl clean testservice && { echo 'unexpected success'; exit 1; }
 
-systemctl stop test-service
+systemctl stop testservice
 
-test -d /etc/test-service
-test -d /run/test-service
-test -d /var/lib/test-service
-test -d /var/cache/test-service
-test -d /var/log/test-service
+test -d /etc/testservice
+test -d /run/testservice
+test -d /var/lib/testservice
+test -d /var/cache/testservice
+test -d /var/log/testservice
 
-systemctl clean test-service --what=configuration
+systemctl clean testservice --what=configuration
 
-test ! -e /etc/test-service
-test -d /run/test-service
-test -d /var/lib/test-service
-test -d /var/cache/test-service
-test -d /var/log/test-service
+test ! -e /etc/testservice
+test -d /run/testservice
+test -d /var/lib/testservice
+test -d /var/cache/testservice
+test -d /var/log/testservice
 
-systemctl clean test-service
+systemctl clean testservice
 
-test ! -e /etc/test-service
-test ! -e /run/test-service
-test -d /var/lib/test-service
-test ! -e /var/cache/test-service
-test -d /var/log/test-service
+test ! -e /etc/testservice
+test ! -e /run/testservice
+test -d /var/lib/testservice
+test ! -e /var/cache/testservice
+test -d /var/log/testservice
 
-systemctl clean test-service --what=logs
+systemctl clean testservice --what=logs
 
-test ! -e /etc/test-service
-test ! -e /run/test-service
-test -d /var/lib/test-service
-test ! -e /var/cache/test-service
-test ! -e /var/log/test-service
+test ! -e /etc/testservice
+test ! -e /run/testservice
+test -d /var/lib/testservice
+test ! -e /var/cache/testservice
+test ! -e /var/log/testservice
 
-systemctl clean test-service --what=all
+systemctl clean testservice --what=all
 
-test ! -e /etc/test-service
-test ! -e /run/test-service
-test ! -e /var/lib/test-service
-test ! -e /var/cache/test-service
-test ! -e /var/log/test-service
+test ! -e /etc/testservice
+test ! -e /run/testservice
+test ! -e /var/lib/testservice
+test ! -e /var/cache/testservice
+test ! -e /var/log/testservice
 
-cat >/run/systemd/system/test-service.service <<EOF
+cat >/etc/systemd/system/testservice.service <<EOF
 [Service]
 DynamicUser=yes
-ConfigurationDirectory=test-service
-RuntimeDirectory=test-service
-StateDirectory=test-service
-CacheDirectory=test-service
-LogsDirectory=test-service
+ConfigurationDirectory=testservice
+RuntimeDirectory=testservice
+StateDirectory=testservice
+CacheDirectory=testservice
+LogsDirectory=testservice
 RuntimeDirectoryPreserve=yes
 ExecStart=/bin/sleep infinity
 Type=exec
@@ -90,87 +90,87 @@ EOF
 
 systemctl daemon-reload
 
-test ! -e /etc/test-service
-test ! -e /run/test-service
-test ! -e /var/lib/test-service
-test ! -e /var/cache/test-service
-test ! -e /var/log/test-service
+test ! -e /etc/testservice
+test ! -e /run/testservice
+test ! -e /var/lib/testservice
+test ! -e /var/cache/testservice
+test ! -e /var/log/testservice
 
-systemctl restart test-service
+systemctl restart testservice
 
-test -d /etc/test-service
-test -d /run/private/test-service
-test -d /var/lib/private/test-service
-test -d /var/cache/private/test-service
-test -d /var/log/private/test-service
-test -L /run/test-service
-test -L /var/lib/test-service
-test -L /var/cache/test-service
-test -L /var/log/test-service
+test -d /etc/testservice
+test -d /run/private/testservice
+test -d /var/lib/private/testservice
+test -d /var/cache/private/testservice
+test -d /var/log/private/testservice
+test -L /run/testservice
+test -L /var/lib/testservice
+test -L /var/cache/testservice
+test -L /var/log/testservice
 
-(! systemctl clean test-service)
+systemctl clean testservice && { echo 'unexpected success'; exit 1; }
 
-systemctl stop test-service
+systemctl stop testservice
 
-test -d /etc/test-service
-test -d /run/private/test-service
-test -d /var/lib/private/test-service
-test -d /var/cache/private/test-service
-test -d /var/log/private/test-service
-test -L /run/test-service
-test -L /var/lib/test-service
-test -L /var/cache/test-service
-test -L /var/log/test-service
+test -d /etc/testservice
+test -d /run/private/testservice
+test -d /var/lib/private/testservice
+test -d /var/cache/private/testservice
+test -d /var/log/private/testservice
+test -L /run/testservice
+test -L /var/lib/testservice
+test -L /var/cache/testservice
+test -L /var/log/testservice
 
-systemctl clean test-service --what=configuration
+systemctl clean testservice --what=configuration
 
-test ! -d /etc/test-service
-test -d /run/private/test-service
-test -d /var/lib/private/test-service
-test -d /var/cache/private/test-service
-test -d /var/log/private/test-service
-test -L /run/test-service
-test -L /var/lib/test-service
-test -L /var/cache/test-service
-test -L /var/log/test-service
+test ! -d /etc/testservice
+test -d /run/private/testservice
+test -d /var/lib/private/testservice
+test -d /var/cache/private/testservice
+test -d /var/log/private/testservice
+test -L /run/testservice
+test -L /var/lib/testservice
+test -L /var/cache/testservice
+test -L /var/log/testservice
 
-systemctl clean test-service
+systemctl clean testservice
 
-test ! -d /etc/test-service
-test ! -d /run/private/test-service
-test -d /var/lib/private/test-service
-test ! -d /var/cache/private/test-service
-test -d /var/log/private/test-service
-test ! -L /run/test-service
-test -L /var/lib/test-service
-test ! -L /var/cache/test-service
-test -L /var/log/test-service
+test ! -d /etc/testservice
+test ! -d /run/private/testservice
+test -d /var/lib/private/testservice
+test ! -d /var/cache/private/testservice
+test -d /var/log/private/testservice
+test ! -L /run/testservice
+test -L /var/lib/testservice
+test ! -L /var/cache/testservice
+test -L /var/log/testservice
 
-systemctl clean test-service --what=logs
+systemctl clean testservice --what=logs
 
-test ! -d /etc/test-service
-test ! -d /run/private/test-service
-test -d /var/lib/private/test-service
-test ! -d /var/cache/private/test-service
-test ! -d /var/log/private/test-service
-test ! -L /run/test-service
-test -L /var/lib/test-service
-test ! -L /var/cache/test-service
-test ! -L /var/log/test-service
+test ! -d /etc/testservice
+test ! -d /run/private/testservice
+test -d /var/lib/private/testservice
+test ! -d /var/cache/private/testservice
+test ! -d /var/log/private/testservice
+test ! -L /run/testservice
+test -L /var/lib/testservice
+test ! -L /var/cache/testservice
+test ! -L /var/log/testservice
 
-systemctl clean test-service --what=all
+systemctl clean testservice --what=all
 
-test ! -d /etc/test-service
-test ! -d /run/private/test-service
-test ! -d /var/lib/private/test-service
-test ! -d /var/cache/private/test-service
-test ! -d /var/log/private/test-service
-test ! -L /run/test-service
-test ! -L /var/lib/test-service
-test ! -L /var/cache/test-service
-test ! -L /var/log/test-service
+test ! -d /etc/testservice
+test ! -d /run/private/testservice
+test ! -d /var/lib/private/testservice
+test ! -d /var/cache/private/testservice
+test ! -d /var/log/private/testservice
+test ! -L /run/testservice
+test ! -L /var/lib/testservice
+test ! -L /var/cache/testservice
+test ! -L /var/log/testservice
 
-cat >/run/systemd/system/tmp-hoge.mount <<EOF
+cat >/etc/systemd/system/tmp-hoge.mount <<EOF
 [Mount]
 What=tmpfs
 Type=tmpfs
@@ -197,7 +197,7 @@ test -d /var/lib/hoge
 test -d /var/cache/hoge
 test -d /var/log/hoge
 
-(! systemctl clean tmp-hoge.mount)
+systemctl clean tmp-hoge.mount && { echo 'unexpected success'; exit 1; }
 
 test -d /etc/hoge
 test -d /run/hoge
@@ -245,75 +245,75 @@ test ! -d /var/lib/hoge
 test ! -d /var/cache/hoge
 test ! -d /var/log/hoge
 
-cat >/run/systemd/system/test-service.socket <<EOF
+cat >/etc/systemd/system/testservice.socket <<EOF
 [Socket]
-ListenSequentialPacket=/run/test-service.socket
+ListenSequentialPacket=/run/testservice.socket
 RemoveOnStop=yes
 ExecStartPre=true
-ConfigurationDirectory=test-socket
-RuntimeDirectory=test-socket
-StateDirectory=test-socket
-CacheDirectory=test-socket
-LogsDirectory=test-socket
+ConfigurationDirectory=testsocket
+RuntimeDirectory=testsocket
+StateDirectory=testsocket
+CacheDirectory=testsocket
+LogsDirectory=testsocket
 EOF
 
 systemctl daemon-reload
 
-test ! -e /etc/test-socket
-test ! -e /run/test-socket
-test ! -e /var/lib/test-socket
-test ! -e /var/cache/test-socket
-test ! -e /var/log/test-socket
+test ! -e /etc/testsocket
+test ! -e /run/testsocket
+test ! -e /var/lib/testsocket
+test ! -e /var/cache/testsocket
+test ! -e /var/log/testsocket
 
-systemctl start test-service.socket
+systemctl start testservice.socket
 
-test -d /etc/test-socket
-test -d /run/test-socket
-test -d /var/lib/test-socket
-test -d /var/cache/test-socket
-test -d /var/log/test-socket
+test -d /etc/testsocket
+test -d /run/testsocket
+test -d /var/lib/testsocket
+test -d /var/cache/testsocket
+test -d /var/log/testsocket
 
-(! systemctl clean test-service.socket)
+systemctl clean testservice.socket && { echo 'unexpected success'; exit 1; }
 
-systemctl stop test-service.socket
+systemctl stop testservice.socket
 
-test -d /etc/test-socket
-test ! -d /run/test-socket
-test -d /var/lib/test-socket
-test -d /var/cache/test-socket
-test -d /var/log/test-socket
+test -d /etc/testsocket
+test ! -d /run/testsocket
+test -d /var/lib/testsocket
+test -d /var/cache/testsocket
+test -d /var/log/testsocket
 
-systemctl clean test-service.socket --what=configuration
+systemctl clean testservice.socket --what=configuration
 
-test ! -e /etc/test-socket
-test ! -d /run/test-socket
-test -d /var/lib/test-socket
-test -d /var/cache/test-socket
-test -d /var/log/test-socket
+test ! -e /etc/testsocket
+test ! -d /run/testsocket
+test -d /var/lib/testsocket
+test -d /var/cache/testsocket
+test -d /var/log/testsocket
 
-systemctl clean test-service.socket
+systemctl clean testservice.socket
 
-test ! -e /etc/test-socket
-test ! -e /run/test-socket
-test -d /var/lib/test-socket
-test ! -e /var/cache/test-socket
-test -d /var/log/test-socket
+test ! -e /etc/testsocket
+test ! -e /run/testsocket
+test -d /var/lib/testsocket
+test ! -e /var/cache/testsocket
+test -d /var/log/testsocket
 
-systemctl clean test-service.socket --what=logs
+systemctl clean testservice.socket --what=logs
 
-test ! -e /etc/test-socket
-test ! -e /run/test-socket
-test -d /var/lib/test-socket
-test ! -e /var/cache/test-socket
-test ! -e /var/log/test-socket
+test ! -e /etc/testsocket
+test ! -e /run/testsocket
+test -d /var/lib/testsocket
+test ! -e /var/cache/testsocket
+test ! -e /var/log/testsocket
 
-systemctl clean test-service.socket --what=all
+systemctl clean testservice.socket --what=all
 
-test ! -e /etc/test-socket
-test ! -e /run/test-socket
-test ! -e /var/lib/test-socket
-test ! -e /var/cache/test-socket
-test ! -e /var/log/test-socket
+test ! -e /etc/testsocket
+test ! -e /run/testsocket
+test ! -e /var/lib/testsocket
+test ! -e /var/cache/testsocket
+test ! -e /var/log/testsocket
 
 echo OK >/testok
 

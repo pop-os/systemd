@@ -5,6 +5,7 @@
 
 #include "alloc-util.h"
 #include "firewall-util.h"
+#include "logarithm.h"
 #include "memory-util.h"
 #include "netlink-util.h"
 #include "networkd-address-pool.h"
@@ -494,13 +495,8 @@ static int address_add(Link *link, Address *address) {
 }
 
 static int address_update(Address *address) {
-        Link *link;
+        Link *link = ASSERT_PTR(ASSERT_PTR(address)->link);
         int r;
-
-        assert(address);
-        assert(address->link);
-
-        link = address->link;
 
         if (address_is_ready(address) &&
             address->family == AF_INET6 &&
@@ -517,7 +513,7 @@ static int address_update(Address *address) {
         if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
                 return 0;
 
-        r = address_set_masquerade(address, true);
+        r = address_set_masquerade(address, /* add = */ true);
         if (r < 0)
                 return log_link_warning_errno(link, r, "Could not enable IP masquerading: %m");
 
@@ -529,23 +525,16 @@ static int address_update(Address *address) {
                         return r;
         }
 
-        link_update_operstate(link, true);
+        link_update_operstate(link, /* also_update_master = */ true);
         link_check_ready(link);
         return 0;
 }
 
 static int address_drop(Address *address) {
-        Link *link;
-        bool ready;
+        Link *link = ASSERT_PTR(ASSERT_PTR(address)->link);
         int r;
 
-        assert(address);
-        assert(address->link);
-
-        ready = address_is_ready(address);
-        link = address->link;
-
-        r = address_set_masquerade(address, false);
+        r = address_set_masquerade(address, /* add = */ false);
         if (r < 0)
                 log_link_warning_errno(link, r, "Failed to disable IP masquerading, ignoring: %m");
 
@@ -554,11 +543,8 @@ static int address_drop(Address *address) {
         if (address->state == 0)
                 address_free(address);
 
-        link_update_operstate(link, true);
-
-        if (link && !ready)
-                link_check_ready(link);
-
+        link_update_operstate(link, /* also_update_master = */ true);
+        link_check_ready(link);
         return 0;
 }
 
@@ -1697,12 +1683,11 @@ int config_parse_address(
         /* Address=address/prefixlen */
         r = in_addr_prefix_from_string_auto_internal(rvalue, PREFIXLEN_REFUSE, &f, &buffer, &prefixlen);
         if (r == -ENOANO) {
-                log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "An address '%s' is specified without prefix length. "
-                           "The behavior of parsing addresses without prefix length will be changed in the future release. "
-                           "Please specify prefix length explicitly.", rvalue);
-
-                r = in_addr_prefix_from_string_auto_internal(rvalue, PREFIXLEN_LEGACY, &f, &buffer, &prefixlen);
+                r = in_addr_prefix_from_string_auto(rvalue, &f, &buffer, &prefixlen);
+                if (r >= 0)
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "An address '%s' is specified without prefix length. Assuming the prefix length is %u."
+                                   "Please specify the prefix length explicitly.", rvalue, prefixlen);
         }
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Invalid address '%s', ignoring assignment: %m", rvalue);

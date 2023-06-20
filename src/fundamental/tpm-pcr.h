@@ -14,16 +14,11 @@
 /* This TPM PCR is where sd-stub extends the kernel command line and any passed credentials into. */
 #define TPM_PCR_INDEX_KERNEL_PARAMETERS 12U
 
-/* sd-stub used to write the kernel command line/credentials into PCR 8, in systemd <= 250. Let's provide for
- * some compatibility. (Remove in 2023!) */
-#if EFI_TPM_PCR_COMPAT
-#define TPM_PCR_INDEX_KERNEL_PARAMETERS_COMPAT 8U
-#else
-#define TPM_PCR_INDEX_KERNEL_PARAMETERS_COMPAT UINT32_MAX
-#endif
-
 /* This TPM PCR is where we extend the initrd sysext images into which we pass to the booted kernel */
 #define TPM_PCR_INDEX_INITRD_SYSEXTS 13U
+
+/* This TPM PCR is where we measure the root fs volume key (and maybe /var/'s) if it is split off */
+#define TPM_PCR_INDEX_VOLUME_KEY 15U
 
 /* List of PE sections that have special meaning for us in unified kernels. This is the canonical order in
  * which we measure the sections into TPM PCR 11 (see above). PLEASE DO NOT REORDER! */

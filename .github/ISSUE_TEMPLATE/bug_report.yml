@@ -18,7 +18,7 @@ body:
         If a distro build is used, please just paste the package version, e.g. `systemd-250.7-1.fc36.x86_64`.
         See https://github.com/systemd/systemd-stable/tags for the list of most recent releases.
         For older version please use distribution trackers (see https://systemd.io/CONTRIBUTING#filing-issues).
-      placeholder: '251'
+      placeholder: '252'
     validations:
       required: true
 
@@ -26,7 +26,7 @@ body:
     id: distro
     attributes:
       label: Used distribution
-      description: Used distribution and its version
+      description: Used distribution and it's version
       placeholder: Fedora 36
     validations:
       required: false

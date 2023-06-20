@@ -74,10 +74,6 @@ int fdset_put(FDSet *s, int fd) {
         assert(s);
         assert(fd >= 0);
 
-        /* Avoid integer overflow in FD_TO_PTR() */
-        if (fd == INT_MAX)
-                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Refusing invalid fd: %d", fd);
-
         return set_put(MAKE_SET(s), FD_TO_PTR(fd));
 }
 
@@ -104,12 +100,6 @@ bool fdset_contains(FDSet *s, int fd) {
         assert(s);
         assert(fd >= 0);
 
-        /* Avoid integer overflow in FD_TO_PTR() */
-        if (fd == INT_MAX) {
-                log_debug("Refusing invalid fd: %d", fd);
-                return false;
-        }
-
         return !!set_get(MAKE_SET(s), FD_TO_PTR(fd));
 }
 
@@ -117,16 +107,10 @@ int fdset_remove(FDSet *s, int fd) {
         assert(s);
         assert(fd >= 0);
 
-        /* Avoid integer overflow in FD_TO_PTR() */
-        if (fd == INT_MAX)
-                return log_debug_errno(SYNTHETIC_ERRNO(ENOENT), "Refusing invalid fd: %d", fd);
-
         return set_remove(MAKE_SET(s), FD_TO_PTR(fd)) ? fd : -ENOENT;
 }
 
-int fdset_new_fill(
-                int filter_cloexec, /* if < 0 takes all fds, otherwise only those with O_CLOEXEC set (1) or unset (0) */
-                FDSet **_s) {
+int fdset_new_fill(FDSet **_s) {
         _cleanup_closedir_ DIR *d = NULL;
         int r = 0;
         FDSet *s;
@@ -147,7 +131,7 @@ int fdset_new_fill(
         }
 
         FOREACH_DIRENT(de, d, return -errno) {
-                int fd = -1;
+                int fd = -EBADF;
 
                 r = safe_atoi(de->d_name, &fd);
                 if (r < 0)
@@ -158,20 +142,6 @@ int fdset_new_fill(
 
                 if (fd == dirfd(d))
                         continue;
-
-                if (filter_cloexec >= 0) {
-                        int fl;
-
-                        /* If user asked for that filter by O_CLOEXEC. This is useful so that fds that have
-                         * been passed in can be collected and fds which have been created locally can be
-                         * ignored, under the assumption that only the latter have O_CLOEXEC set. */
-                        fl = fcntl(fd, F_GETFD);
-                        if (fl < 0)
-                                return -errno;
-
-                        if (FLAGS_SET(fl, FD_CLOEXEC) != !!filter_cloexec)
-                                continue;
-                }
 
                 r = fdset_put(s, fd);
                 if (r < 0)

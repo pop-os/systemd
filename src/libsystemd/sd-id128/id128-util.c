@@ -43,6 +43,7 @@ bool id128_is_valid(const char *s) {
 int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
         ssize_t l;
+        int r;
 
         assert(fd >= 0);
 
@@ -54,7 +55,7 @@ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
          * This returns the following:
          *     -ENOMEDIUM: an empty string,
          *     -ENOPKG:    "uninitialized" or "uninitialized\n",
-         *     -EINVAL:    other invalid strings. */
+         *     -EUCLEAN:   other invalid strings. */
 
         l = loop_read(fd, buffer, sizeof(buffer), false); /* we expect a short read of either 32/33 or 36/37 chars */
         if (l < 0)
@@ -70,37 +71,38 @@ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
 
         case SD_ID128_STRING_MAX: /* plain UUID with trailing newline */
                 if (buffer[SD_ID128_STRING_MAX-1] != '\n')
-                        return -EINVAL;
+                        return -EUCLEAN;
 
                 _fallthrough_;
         case SD_ID128_STRING_MAX-1: /* plain UUID without trailing newline */
                 if (!FLAGS_SET(f, ID128_FORMAT_PLAIN))
-                        return -EINVAL;
+                        return -EUCLEAN;
 
                 buffer[SD_ID128_STRING_MAX-1] = 0;
                 break;
 
         case SD_ID128_UUID_STRING_MAX: /* RFC UUID with trailing newline */
                 if (buffer[SD_ID128_UUID_STRING_MAX-1] != '\n')
-                        return -EINVAL;
+                        return -EUCLEAN;
 
                 _fallthrough_;
         case SD_ID128_UUID_STRING_MAX-1: /* RFC UUID without trailing newline */
                 if (!FLAGS_SET(f, ID128_FORMAT_UUID))
-                        return -EINVAL;
+                        return -EUCLEAN;
 
                 buffer[SD_ID128_UUID_STRING_MAX-1] = 0;
                 break;
 
         default:
-                return -EINVAL;
+                return -EUCLEAN;
         }
 
-        return sd_id128_from_string(buffer, ret);
+        r = sd_id128_from_string(buffer, ret);
+        return r == -EINVAL ? -EUCLEAN : r;
 }
 
 int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open(p, O_RDONLY|O_CLOEXEC|O_NOCTTY);
         if (fd < 0)
@@ -109,7 +111,7 @@ int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
         return id128_read_fd(fd, f, ret);
 }
 
-int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
+int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id) {
         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
         size_t sz;
         int r;
@@ -130,7 +132,7 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
         if (r < 0)
                 return r;
 
-        if (do_sync) {
+        if (FLAGS_SET(f, ID128_SYNC_ON_WRITE)) {
                 r = fsync_full(fd);
                 if (r < 0)
                         return r;
@@ -139,14 +141,14 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
         return 0;
 }
 
-int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
-        _cleanup_close_ int fd = -1;
+int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id) {
+        _cleanup_close_ int fd = -EBADF;
 
         fd = open(p, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, 0444);
         if (fd < 0)
                 return -errno;
 
-        return id128_write_fd(fd, f, id, do_sync);
+        return id128_write_fd(fd, f, id);
 }
 
 void id128_hash_func(const sd_id128_t *p, struct siphash *state) {
@@ -171,6 +173,7 @@ sd_id128_t id128_make_v4_uuid(sd_id128_t id) {
 }
 
 DEFINE_HASH_OPS(id128_hash_ops, sd_id128_t, id128_hash_func, id128_compare_func);
+DEFINE_HASH_OPS_WITH_KEY_DESTRUCTOR(id128_hash_ops_free, sd_id128_t, id128_hash_func, id128_compare_func, free);
 
 int id128_get_product(sd_id128_t *ret) {
         sd_id128_t uuid;

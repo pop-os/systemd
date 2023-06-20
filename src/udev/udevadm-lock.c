@@ -75,9 +75,6 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, arg_print ? "hVd:b:t:p" : "+hVd:b:t:p", options, NULL)) >= 0)
 
                 switch (c) {
@@ -179,7 +176,7 @@ static int lock_device(
                 dev_t devno,
                 usec_t deadline) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
         int r;
 
@@ -331,7 +328,7 @@ int lock_main(int argc, char *argv[], void *userdata) {
                 if (arg_print)
                         printf("%s\n", node);
                 else {
-                        _cleanup_close_ int fd = -1;
+                        _cleanup_close_ int fd = -EBADF;
 
                         fd = lock_device(node, devnos[i], deadline);
                         if (fd < 0)

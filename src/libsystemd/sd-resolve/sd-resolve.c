@@ -22,7 +22,6 @@
 #include "list.h"
 #include "memory-util.h"
 #include "missing_syscall.h"
-#include "missing_threads.h"
 #include "process-util.h"
 #include "resolve-private.h"
 #include "socket-util.h"
@@ -495,7 +494,7 @@ _public_ int sd_resolve_new(sd_resolve **ret) {
         resolve->original_pid = getpid_cached();
 
         for (i = 0; i < _FD_MAX; i++)
-                resolve->fds[i] = -1;
+                resolve->fds[i] = -EBADF;
 
         if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, resolve->fds + REQUEST_RECV_FD) < 0)
                 return -errno;

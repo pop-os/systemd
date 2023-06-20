@@ -188,7 +188,7 @@ static int socket_from_display(const char *display) {
         char *c;
         union sockaddr_union sa;
         socklen_t sa_len;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(display);
@@ -236,7 +236,7 @@ static int socket_from_display(const char *display) {
 
 static int get_seat_from_display(const char *display, const char **seat, uint32_t *vtnr) {
         _cleanup_free_ char *sys_path = NULL, *tty = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct ucred ucred;
         int v, r;
         dev_t display_ctty;
@@ -671,7 +671,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 *memory_max = NULL, *tasks_max = NULL, *cpu_weight = NULL, *io_weight = NULL, *runtime_max_sec = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(user_record_unrefp) UserRecord *ur = NULL;
-        int session_fd = -1, existing, r;
+        int session_fd = -EBADF, existing, r;
         bool debug = false, remote;
         uint32_t vtnr = 0;
         uid_t original_uid;
@@ -815,7 +815,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         /* Talk to logind over the message bus */
 
-        r = pam_acquire_bus_connection(handle, "pam-systemd", &bus);
+        r = pam_acquire_bus_connection(handle, &bus);
         if (r != PAM_SUCCESS)
                 return r;
 
@@ -979,7 +979,7 @@ success:
         /* Let's release the D-Bus connection, after all the session might live quite a long time, and we are
          * not going to use the bus connection in that time, so let's better close before the daemon kicks us
          * off because we are not processing anything. */
-        (void) pam_release_bus_connection(handle, "pam-systemd");
+        (void) pam_release_bus_connection(handle);
         return PAM_SUCCESS;
 }
 
@@ -1021,7 +1021,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                 /* Before we go and close the FIFO we need to tell logind that this is a clean session
                  * shutdown, so that it doesn't just go and slaughter us immediately after closing the fd */
 
-                r = pam_acquire_bus_connection(handle, "pam-systemd", &bus);
+                r = pam_acquire_bus_connection(handle, &bus);
                 if (r != PAM_SUCCESS)
                         return r;
 

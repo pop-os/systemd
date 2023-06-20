@@ -5,7 +5,6 @@
 #include "strv.h"
 #include "tests.h"
 #include "utf8.h"
-#include "util.h"
 
 TEST(utf8_is_printable) {
         assert_se(utf8_is_printable("ascii is valid\tunicode", 22));
@@ -100,7 +99,7 @@ TEST(utf8_encoded_valid_unichar) {
 }
 
 TEST(utf8_escape_invalid) {
-        _cleanup_free_ char *p1 = NULL, *p2 = NULL, *p3 = NULL;
+        _cleanup_free_ char *p1, *p2, *p3;
 
         p1 = utf8_escape_invalid("goo goo goo");
         log_debug("\"%s\"", p1);
@@ -116,7 +115,7 @@ TEST(utf8_escape_invalid) {
 }
 
 TEST(utf8_escape_non_printable) {
-        _cleanup_free_ char *p1 = NULL, *p2 = NULL, *p3 = NULL, *p4 = NULL, *p5 = NULL, *p6 = NULL;
+        _cleanup_free_ char *p1, *p2, *p3, *p4, *p5, *p6;
 
         p1 = utf8_escape_non_printable("goo goo goo");
         log_debug("\"%s\"", p1);
@@ -149,7 +148,7 @@ TEST(utf8_escape_non_printable_full) {
                        "\001 \019\20\a",    /* control characters */
                        "\xef\xbf\x30\x13")  /* misplaced continuation bytes followed by a digit and cc */
                 for (size_t cw = 0; cw < 22; cw++) {
-                        _cleanup_free_ char *p = NULL, *q = NULL;
+                        _cleanup_free_ char *p, *q;
                         size_t ew;
 
                         p = utf8_escape_non_printable_full(s, cw, false);

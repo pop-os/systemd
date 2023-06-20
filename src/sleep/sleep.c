@@ -18,10 +18,11 @@
 #include "sd-messages.h"
 
 #include "btrfs-util.h"
+#include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-util.h"
-#include "def.h"
+#include "constants.h"
 #include "exec-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -37,9 +38,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "time-util.h"
-#include "util.h"
-
-#define DEFAULT_HIBERNATE_DELAY_USEC_NO_BATTERY (2 * USEC_PER_HOUR)
 
 static SleepOperation arg_operation = _SLEEP_OPERATION_INVALID;
 
@@ -276,9 +274,9 @@ static int custom_timer_suspend(const SleepConfig *sleep_config) {
 
         hibernate_timestamp = usec_add(now(CLOCK_BOOTTIME), sleep_config->hibernate_delay_usec);
 
-        while (battery_is_discharging_and_low() == 0) {
+        while (battery_is_low() == 0) {
                 _cleanup_hashmap_free_ Hashmap *last_capacity = NULL, *current_capacity = NULL;
-                _cleanup_close_ int tfd = -1;
+                _cleanup_close_ int tfd = -EBADF;
                 struct itimerspec ts = {};
                 usec_t suspend_interval;
                 bool woken_by_timer;
@@ -294,8 +292,7 @@ static int custom_timer_suspend(const SleepConfig *sleep_config) {
 
                 if (hashmap_isempty(last_capacity))
                         /* In case of no battery, system suspend interval will be set to HibernateDelaySec= or 2 hours. */
-                        suspend_interval = timestamp_is_set(hibernate_timestamp)
-                                           ? sleep_config->hibernate_delay_usec : DEFAULT_HIBERNATE_DELAY_USEC_NO_BATTERY;
+                        suspend_interval = timestamp_is_set(hibernate_timestamp) ? sleep_config->hibernate_delay_usec : DEFAULT_SUSPEND_ESTIMATION_USEC;
                 else {
                         r = get_total_suspend_interval(last_capacity, &suspend_interval);
                         if (r < 0) {

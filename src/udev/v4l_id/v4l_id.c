@@ -27,14 +27,13 @@
 #include <linux/videodev2.h>
 
 #include "fd-util.h"
-#include "util.h"
 
 int main(int argc, char *argv[]) {
         static const struct option options[] = {
                 { "help", no_argument, NULL, 'h' },
                 {}
         };
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         char *device;
         struct v4l2_capability v2cap;
         int c;

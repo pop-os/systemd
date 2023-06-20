@@ -7,27 +7,6 @@ set -o pipefail
 # shellcheck source=test/units/assert.sh
 . "$(dirname "$0")"/assert.sh
 
-test_timedatectl() {
-    timedatectl --no-pager --help
-    timedatectl --version
-
-    timedatectl
-    timedatectl --no-ask-password
-    timedatectl status --machine=testuser@.host
-    timedatectl status
-    timedatectl show
-    timedatectl show --all
-    timedatectl show -p NTP
-    timedatectl show -p NTP --value
-    timedatectl list-timezones
-
-    if ! systemd-detect-virt -qc; then
-        systemctl enable --runtime --now systemd-timesyncd
-        timedatectl timesync-status
-        timedatectl show-timesync
-    fi
-}
-
 restore_timezone() {
     if [[ -f /tmp/timezone.bak ]]; then
         mv /tmp/timezone.bak /etc/timezone
@@ -107,7 +86,7 @@ LOCAL"
     check_adjtime_not_exist
 
     echo 'UTC set in adjtime file'
-    printf '0.0 0 0\n0\nUTC\n' > /etc/adjtime
+    printf '0.0 0 0\n0\nUTC\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
@@ -118,7 +97,7 @@ UTC"
 LOCAL"
 
     echo 'non-zero values in adjtime file'
-    printf '0.1 123 0\n0\nLOCAL\n' > /etc/adjtime
+    printf '0.1 123 0\n0\nLOCAL\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     assert_eq "$(cat /etc/adjtime)" "0.1 123 0
 0
@@ -129,7 +108,7 @@ UTC"
 LOCAL"
 
     echo 'fourth line adjtime file'
-    printf '0.0 0 0\n0\nLOCAL\nsomethingelse\n' > /etc/adjtime
+    printf '0.0 0 0\n0\nLOCAL\nsomethingelse\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
@@ -142,60 +121,60 @@ LOCAL
 somethingelse"
 
     echo 'no final newline in adjtime file'
-    printf '0.0 0 0\n0\nUTC' > /etc/adjtime
+    printf '0.0 0 0\n0\nUTC' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0\n0\nUTC' > /etc/adjtime
+    printf '0.0 0 0\n0\nUTC' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
 LOCAL"
 
     echo 'only one line in adjtime file'
-    printf '0.0 0 0\n' > /etc/adjtime
+    printf '0.0 0 0\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0\n' > /etc/adjtime
+    printf '0.0 0 0\n' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
 LOCAL"
 
     echo 'only one line in adjtime file, no final newline'
-    printf '0.0 0 0' > /etc/adjtime
+    printf '0.0 0 0' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0' > /etc/adjtime
+    printf '0.0 0 0' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
 LOCAL"
 
     echo 'only two lines in adjtime file'
-    printf '0.0 0 0\n0\n' > /etc/adjtime
+    printf '0.0 0 0\n0\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0\n0\n' > /etc/adjtime
+    printf '0.0 0 0\n0\n' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
 LOCAL"
 
     echo 'only two lines in adjtime file, no final newline'
-    printf '0.0 0 0\n0' > /etc/adjtime
+    printf '0.0 0 0\n0' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0\n0' > /etc/adjtime
+    printf '0.0 0 0\n0' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
 LOCAL"
 
     echo 'unknown value in 3rd line of adjtime file'
-    printf '0.0 0 0\n0\nFOO\n' > /etc/adjtime
+    printf '0.0 0 0\n0\nFOO\n' >/etc/adjtime
     timedatectl set-local-rtc 0
     check_adjtime_not_exist
-    printf '0.0 0 0\n0\nFOO\n' > /etc/adjtime
+    printf '0.0 0 0\n0\nFOO\n' >/etc/adjtime
     timedatectl set-local-rtc 1
     assert_eq "$(cat /etc/adjtime)" "0.0 0 0
 0
@@ -212,8 +191,8 @@ start_mon() {
 }
 
 wait_mon() {
-    for i in {1..10}; do
-        (( i > 1 )) && sleep 1
+    for ((i = 0; i < 10; i++)); do
+        if (( i != 0 )); then sleep 1; fi
         if grep -q "$1" "$mon"; then break; fi
     done
     assert_in "$2" "$(cat "$mon")"
@@ -243,8 +222,8 @@ EOF
 
     echo 'disable NTP'
     timedatectl set-ntp false
-    for i in {1..10}; do
-        (( i > 1 )) && sleep 1
+    for ((i = 0; i < 10; i++)); do
+        if (( i != 0 )); then sleep 1; fi
         if [[ "$(systemctl show systemd-timesyncd --property ActiveState)" == "ActiveState=inactive" ]]; then
             break;
         fi
@@ -258,8 +237,8 @@ EOF
     timedatectl set-ntp true
     wait_mon "NTP" "BOOLEAN true"
     assert_ntp "true"
-    for i in {1..10}; do
-        (( i > 1 )) && sleep 1
+    for ((i = 0; i < 10; i++)); do
+        if (( i != 0 )); then sleep 1; fi
         if [[ "$(systemctl show systemd-timesyncd --property ActiveState)" == "ActiveState=active" ]]; then
             break;
         fi
@@ -277,7 +256,6 @@ EOF
 
 : >/failed
 
-test_timedatectl
 test_timezone
 test_adjtime
 test_ntp

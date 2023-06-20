@@ -3,6 +3,7 @@
 #include <getopt.h>
 #include <utmp.h>
 
+#include "build.h"
 #include "dirent-util.h"
 #include "errno-list.h"
 #include "escape.h"
@@ -930,7 +931,7 @@ static int display_services(int argc, char *argv[], void *userdata) {
 
         FOREACH_DIRENT(de, d, return -errno) {
                 _cleanup_free_ char *j = NULL, *no = NULL;
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 j = path_join("/run/systemd/userdb/", de->d_name);
                 if (!j)
@@ -961,7 +962,7 @@ static int display_services(int argc, char *argv[], void *userdata) {
                         return table_log_print_error(r);
         }
 
-        if (arg_legend && arg_output != OUTPUT_JSON) {
+        if (arg_legend) {
                 if (table_get_rows(t) > 1)
                         printf("\n%zu services listed.\n", table_get_rows(t) - 1);
                 else
@@ -1037,7 +1038,6 @@ static int ssh_authorized_keys(int argc, char *argv[], void *userdata) {
                         log_debug("Chain invoking: %s", s);
                 }
 
-                fflush(stdout);
                 execv(chain_invocation[0], chain_invocation);
                 if (errno == ENOENT) /* Let's handle ENOENT gracefully */
                         log_warning_errno(errno, "Chain executable '%s' does not exist, ignoring chain invocation.", chain_invocation[0]);
@@ -1148,10 +1148,6 @@ static int parse_argv(int argc, char *argv[]) {
                 strv_free(arg_services);
                 arg_services = l;
         }
-
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
 
         for (;;) {
                 int c;

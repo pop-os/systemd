@@ -59,6 +59,7 @@ Build-Depends: debhelper-compat (= 13),
                libp11-kit-dev <!stage1>,
                libssl-dev <!stage1>,
                libqrencode-dev <!stage1>,
+               libxen-dev [amd64 arm64 armhf] <!stage1>,
                linux-base <!nocheck>,
                acl <!nocheck>,
                python3:native,
@@ -96,6 +97,7 @@ Pre-Depends: ${shlibs:Pre-Depends},
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
+         systemd-dev (>= ${source:Version}),
          mount,
 Conflicts: consolekit,
            libpam-ck-connector,
@@ -336,6 +338,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
          libudev1 (= ${binary:Version}),
+         systemd-dev (>= ${source:Version}),
          s390-tools [s390],
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
@@ -513,3 +516,18 @@ Description: systemd DNS resolver
  .
  Installing this package automatically overwrites /etc/resolv.conf and switches
  it to be managed by systemd-resolved.
+
+Package: systemd-dev
+Architecture: all
+Multi-Arch: foreign
+Section: devel
+Depends: ${misc:Depends},
+Breaks: systemd (<< 253-2~),
+        udev (<< 253-2~),
+Replaces: systemd (<< 253-2~),
+          udev (<< 253-2~),
+Description: systemd development files
+ This package contains the systemd and udev pkg-config files. Note that these
+ are different from the libsystemd's and libudev's pkg-config files, which can
+ still be found in the respective dev packages, but instead provide data such as
+ the installation directories for units, and more.

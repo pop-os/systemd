@@ -32,7 +32,7 @@ int socket_address_listen(
                 mode_t socket_mode,
                 const char *label) {
 
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         const char *p;
         int r;
 
@@ -101,7 +101,7 @@ int socket_address_listen(
                 (void) mkdir_parents_label(p, directory_mode);
 
                 /* Enforce the right access mode for the socket */
-                RUN_WITH_UMASK(~socket_mode) {
+                WITH_UMASK(~socket_mode) {
                         r = mac_selinux_bind(fd, &a->sockaddr.sa, a->size);
                         if (r == -EADDRINUSE) {
                                 /* Unlink and try again */

@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+if [ -z "$TEST_UPSTREAM" ]; then
+    echo "keymapping not supported for now, SKIP test"
+    exit 77
+fi
+
 . `dirname $0`/assert.sh
 
 if [ -f /etc/default/keyboard ]; then

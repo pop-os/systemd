@@ -14,7 +14,6 @@
 #include "terminal-util.h"
 #include "tests.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 #define LOREM_IPSUM "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor " \
         "incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation " \
@@ -67,7 +66,7 @@ TEST(read_one_char) {
 
 TEST(getttyname_malloc) {
         _cleanup_free_ char *ttyname = NULL;
-        _cleanup_close_ int master = -1;
+        _cleanup_close_ int master = -EBADF;
 
         assert_se((master = posix_openpt(O_RDWR|O_NOCTTY)) >= 0);
         assert_se(getttyname_malloc(master, &ttyname) >= 0);

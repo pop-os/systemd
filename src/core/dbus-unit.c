@@ -782,12 +782,12 @@ static int bus_unit_method_freezer_generic(sd_bus_message *message, void *userda
         if (r == 0)
                 reply_no_delay = true;
 
-        if (u->pending_freezer_message) {
+        if (u->pending_freezer_invocation) {
                 bus_unit_send_pending_freezer_message(u, true);
-                assert(!u->pending_freezer_message);
+                assert(!u->pending_freezer_invocation);
         }
 
-        u->pending_freezer_message = sd_bus_message_ref(message);
+        u->pending_freezer_invocation = sd_bus_message_ref(message);
 
         if (reply_no_delay) {
                 r = bus_unit_send_pending_freezer_message(u, false);
@@ -1668,17 +1668,17 @@ int bus_unit_send_pending_freezer_message(Unit *u, bool cancelled) {
 
         assert(u);
 
-        if (!u->pending_freezer_message)
+        if (!u->pending_freezer_invocation)
                 return 0;
 
         if (cancelled)
                 r = sd_bus_message_new_method_error(
-                                u->pending_freezer_message,
+                                u->pending_freezer_invocation,
                                 &reply,
                                 &SD_BUS_ERROR_MAKE_CONST(
                                                 BUS_ERROR_FREEZE_CANCELLED, "Freeze operation aborted"));
         else
-                r = sd_bus_message_new_method_return(u->pending_freezer_message, &reply);
+                r = sd_bus_message_new_method_return(u->pending_freezer_invocation, &reply);
         if (r < 0)
                 return r;
 
@@ -1686,7 +1686,7 @@ int bus_unit_send_pending_freezer_message(Unit *u, bool cancelled) {
         if (r < 0)
                 log_warning_errno(r, "Failed to send queued message, ignoring: %m");
 
-        u->pending_freezer_message = sd_bus_message_unref(u->pending_freezer_message);
+        u->pending_freezer_invocation = sd_bus_message_unref(u->pending_freezer_invocation);
 
         return 0;
 }
@@ -2397,7 +2397,7 @@ int bus_unit_set_properties(
 
         r = sd_bus_message_enter_container(message, 'a', "(sv)");
         if (r < 0)
-                goto error;
+                return r;
 
         for (;;) {
                 const char *name;
@@ -2405,7 +2405,7 @@ int bus_unit_set_properties(
 
                 r = sd_bus_message_enter_container(message, 'r', "sv");
                 if (r < 0)
-                        goto error;
+                        return r;
                 if (r == 0) {
                         if (for_real || UNIT_WRITE_FLAGS_NOOP(flags))
                                 break;
@@ -2413,7 +2413,7 @@ int bus_unit_set_properties(
                         /* Reached EOF. Let's try again, and this time for realz... */
                         r = sd_bus_message_rewind(message, false);
                         if (r < 0)
-                                goto error;
+                                return r;
 
                         for_real = true;
                         continue;
@@ -2421,11 +2421,11 @@ int bus_unit_set_properties(
 
                 r = sd_bus_message_read(message, "s", &name);
                 if (r < 0)
-                        goto error;
+                        return r;
 
                 r = sd_bus_message_enter_container(message, 'v', NULL);
                 if (r < 0)
-                        goto error;
+                        return r;
 
                 /* If not for real, then mask out the two target flags */
                 f = for_real ? flags : (flags & ~(UNIT_RUNTIME|UNIT_PERSISTENT));
@@ -2439,7 +2439,7 @@ int bus_unit_set_properties(
                 if (r == 0)
                         r = bus_unit_set_live_property(u, name, message, f, error);
                 if (r < 0)
-                        goto error;
+                        return r;
 
                 if (r == 0)
                         return sd_bus_error_setf(error, SD_BUS_ERROR_PROPERTY_READ_ONLY,
@@ -2447,32 +2447,23 @@ int bus_unit_set_properties(
 
                 r = sd_bus_message_exit_container(message);
                 if (r < 0)
-                        goto error;
+                        return r;
 
                 r = sd_bus_message_exit_container(message);
                 if (r < 0)
-                        goto error;
+                        return r;
 
                 n += for_real;
         }
 
         r = sd_bus_message_exit_container(message);
         if (r < 0)
-                goto error;
+                return r;
 
         if (commit && n > 0 && UNIT_VTABLE(u)->bus_commit_properties)
                 UNIT_VTABLE(u)->bus_commit_properties(u);
 
         return n;
-
- error:
-        /* Pretty much any of the calls above can fail if the message is not formed properly
-         * or if it has unexpected contents. Fill in a more informative error message here. */
-        if (sd_bus_error_is_set(error))
-                return r;
-        return sd_bus_error_set_errnof(error, r,
-                                       r == -ENXIO ? "Failed to set unit properties: Unexpected message contents"
-                                                   : "Failed to set unit properties: %m");
 }
 
 int bus_unit_validate_load_state(Unit *u, sd_bus_error *error) {

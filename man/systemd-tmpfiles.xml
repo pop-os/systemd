@@ -142,10 +142,8 @@
 
       <varlistentry>
         <term><option>--boot</option></term>
-        <listitem><para>Also execute lines with an exclamation mark. Lines that are not safe to be executed
-        on a running system may be marked in this way. <command>systemd-tmpfiles</command> is executed in
-        early boot with <option>--boot</option> specified and will execute those lines. When invoked again
-        later, it should be called without <option>--boot</option>.</para></listitem>
+        <listitem><para>Also execute lines with an exclamation mark.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -194,7 +192,7 @@
         are applied to file system in the indicated disk image. This is similar to <option>--root=</option>
         but operates on file systems stored in disk images or block devices. The disk image should either
         contain just a file system or a set of file systems within a GPT partition table, following the
-        <ulink url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable Partitions
+        <ulink url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable Partitions
         Specification</ulink>. For further information on supported disk images, see
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         switch of the same name.</para>

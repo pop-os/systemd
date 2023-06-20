@@ -6,12 +6,6 @@ set -eux
 # shellcheck source=test/units/assert.sh
 . "$(dirname "$0")"/assert.sh
 
-runas() {
-    declare userid=$1
-    shift
-    XDG_RUNTIME_DIR=/run/user/"$(id -u "$userid")" setpriv --reuid="$userid" --init-groups "$@"
-}
-
 systemctl log-level debug
 export SYSTEMD_LOG_LEVEL=debug
 
@@ -24,7 +18,16 @@ systemd-analyze || :
 systemd-analyze time || :
 systemd-analyze blame || :
 systemd-analyze critical-chain || :
+# plot
 systemd-analyze plot >/dev/null || :
+systemd-analyze plot --json=pretty >/dev/null || :
+systemd-analyze plot --json=short >/dev/null || :
+systemd-analyze plot --json=off >/dev/null || :
+systemd-analyze plot --json=pretty --no-legend >/dev/null || :
+systemd-analyze plot --json=short --no-legend >/dev/null || :
+systemd-analyze plot --json=off --no-legend >/dev/null || :
+systemd-analyze plot --table >/dev/null || :
+systemd-analyze plot --table --no-legend >/dev/null || :
 # legacy/deprecated options (moved to systemctl, but still usable from analyze)
 systemd-analyze log-level
 systemd-analyze log-level "$(systemctl log-level)"
@@ -48,21 +51,6 @@ systemd-analyze dot --require systemd-journald.service systemd-logind.service >/
 systemd-analyze dot "systemd-*.service" >/dev/null
 (! systemd-analyze dot systemd-journald.service systemd-logind.service "*" bbb ccc)
 # dump
-# this should be rate limited to 10 calls in 10 minutes for unprivileged callers
-for _ in {1..10}; do
-    runas testuser systemd-analyze dump systemd-journald.service >/dev/null
-done
-(! runas testuser systemd-analyze dump >/dev/null)
-# still limited after a reload
-systemctl daemon-reload
-(! runas testuser systemd-analyze dump >/dev/null)
-# and a re-exec
-systemctl daemon-reexec
-(! runas testuser systemd-analyze dump >/dev/null)
-# privileged call, so should not be rate limited
-for _ in {1..10}; do
-    systemd-analyze dump systemd-journald.service >/dev/null
-done
 systemd-analyze dump >/dev/null
 systemd-analyze dump "*" >/dev/null
 systemd-analyze dump "*.socket" >/dev/null
@@ -159,11 +147,6 @@ systemd-analyze cat-config /etc/systemd/system.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf systemd/journald.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf foo/bar systemd/journald.conf >/dev/null
 systemd-analyze cat-config foo/bar
-# security
-systemd-analyze security
-systemd-analyze security --json=off
-systemd-analyze security --json=pretty | jq
-systemd-analyze security --json=short | jq
 
 if [[ ! -v ASAN_OPTIONS ]]; then
     # check that systemd-analyze cat-config paths work in a chroot
@@ -188,13 +171,16 @@ EOF
 
 set +e
 # Default behaviour is to recurse through all dependencies when unit is loaded
-(! systemd-analyze verify --root=/tmp/img/ testfile.service)
+systemd-analyze verify --root=/tmp/img/ testfile.service \
+    && { echo 'unexpected success'; exit 1; }
 
 # As above, recurses through all dependencies when unit is loaded
-(! systemd-analyze verify --recursive-errors=yes --root=/tmp/img/ testfile.service)
+systemd-analyze verify --recursive-errors=yes --root=/tmp/img/ testfile.service \
+    && { echo 'unexpected success'; exit 1; }
 
 # Recurses through unit file and its direct dependencies when unit is loaded
-(! systemd-analyze verify --recursive-errors=one --root=/tmp/img/ testfile.service)
+systemd-analyze verify --recursive-errors=one --root=/tmp/img/ testfile.service \
+    && { echo 'unexpected success'; exit 1; }
 
 set -e
 
@@ -224,7 +210,8 @@ systemd-analyze verify --recursive-errors=no /tmp/testfile2.service
 
 set +e
 # Non-zero exit status since all associated dependencies are recursively loaded when the unit file is loaded
-(! systemd-analyze verify --recursive-errors=yes /tmp/testfile2.service)
+systemd-analyze verify --recursive-errors=yes /tmp/testfile2.service \
+    && { echo 'unexpected success'; exit 1; }
 set -e
 
 rm /tmp/testfile.service
@@ -246,15 +233,19 @@ rm /tmp/.testfile.service
 # Alias a unit file's name on disk (see #20061)
 cp /tmp/testfile.service /tmp/testsrvc
 
-(! systemd-analyze verify /tmp/testsrvc)
+systemd-analyze verify /tmp/testsrvc \
+    && { echo 'unexpected success'; exit 1; }
 
 systemd-analyze verify /tmp/testsrvc:alias.service
 
 # Zero exit status since the value used for comparison determine exposure to security threats is by default 100
 systemd-analyze security --offline=true /tmp/testfile.service
 
+set +e
 #The overall exposure level assigned to the unit is greater than the set threshold
-(! systemd-analyze security --threshold=90 --offline=true /tmp/testfile.service)
+systemd-analyze security --threshold=90 --offline=true /tmp/testfile.service \
+    && { echo 'unexpected success'; exit 1; }
+set -e
 
 # Ensure we print the list of ACLs, see https://github.com/systemd/systemd/issues/23185
 systemd-analyze security --offline=true /tmp/testfile.service | grep -q -F "/dev/sda"
@@ -745,15 +736,19 @@ systemd-analyze security --threshold=25 --offline=true \
                            --profile=strict \
                            --root=/tmp/img/ testfile.service
 
+set +e
 # The trusted profile doesn't add any sanboxing options
-(! systemd-analyze security --threshold=25 --offline=true \
+systemd-analyze security --threshold=25 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --profile=/usr/lib/systemd/portable/profile/trusted/service.conf \
-                           --root=/tmp/img/ testfile.service)
+                           --root=/tmp/img/ testfile.service \
+    && { echo 'unexpected success'; exit 1; }
 
-(! systemd-analyze security --threshold=50 --offline=true \
+systemd-analyze security --threshold=50 --offline=true \
                            --security-policy=/tmp/testfile.json \
-                           --root=/tmp/img/ testfile.service)
+                           --root=/tmp/img/ testfile.service \
+    && { echo 'unexpected success'; exit 1; }
+set -e
 
 rm /tmp/img/usr/lib/systemd/system/testfile.service
 

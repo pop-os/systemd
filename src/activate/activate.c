@@ -9,6 +9,7 @@
 #include "sd-daemon.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "env-util.h"
 #include "errno-util.h"
 #include "escape.h"
@@ -23,7 +24,6 @@
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "util.h"
 
 static char **arg_listen = NULL;
 static bool arg_accept = false;
@@ -76,9 +76,6 @@ static int open_sockets(int *epoll_fd, bool accept) {
                         except[i] = SD_LISTEN_FDS_START + i;
 
                 log_close();
-                log_set_open_when_needed(true);
-                log_settle_target();
-
                 r = close_all_fds(except, n);
                 if (r < 0)
                         return log_error_errno(r, "Failed to close all file descriptors: %m");
@@ -91,17 +88,17 @@ static int open_sockets(int *epoll_fd, bool accept) {
 
         STRV_FOREACH(address, arg_listen) {
                 r = make_socket_fd(LOG_DEBUG, *address, arg_socket_type, (arg_accept * SOCK_CLOEXEC));
-                if (r < 0)
+                if (r < 0) {
+                        log_open();
                         return log_error_errno(r, "Failed to open '%s': %m", *address);
+                }
 
                 assert(r == SD_LISTEN_FDS_START + count);
                 count++;
         }
 
-        if (arg_listen) {
+        if (arg_listen)
                 log_open();
-                log_set_open_when_needed(false);
-        }
 
         *epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (*epoll_fd < 0)
@@ -236,7 +233,7 @@ static int fork_and_exec_process(const char *child, char **argv, int fd) {
 
 static int do_accept(const char *name, char **argv, int fd) {
         _cleanup_free_ char *local = NULL, *peer = NULL;
-        _cleanup_close_ int fd_accepted = -1;
+        _cleanup_close_ int fd_accepted = -EBADF;
 
         fd_accepted = accept4(fd, NULL, NULL, 0);
         if (fd_accepted < 0) {
@@ -344,9 +341,6 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, "+hl:aE:d", options, NULL)) >= 0)
                 switch (c) {
                 case 'h':
@@ -440,7 +434,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 int main(int argc, char **argv) {
         int r, n;
-        int epoll_fd = -1;
+        int epoll_fd = -EBADF;
 
         log_show_color(true);
         log_parse_environment();

@@ -14,8 +14,8 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "cgroup-util.h"
+#include "constants.h"
 #include "daemon-util.h"
-#include "def.h"
 #include "device-util.h"
 #include "dirent-util.h"
 #include "escape.h"
@@ -53,8 +53,8 @@ static int manager_new(Manager **ret) {
                 return -ENOMEM;
 
         *m = (Manager) {
-                .console_active_fd = -1,
-                .reserve_vt_fd = -1,
+                .console_active_fd = -EBADF,
+                .reserve_vt_fd = -EBADF,
                 .enable_wall_messages = true,
                 .idle_action_not_before_usec = now(CLOCK_MONOTONIC),
         };
@@ -701,7 +701,7 @@ static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo
 
         active = m->seat0->active;
         if (!active || active->vtnr < 1) {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
                 int r;
 
                 /* We are requested to acknowledge the VT-switch signal by the kernel but
@@ -1020,6 +1020,11 @@ static int manager_dispatch_reload_signal(sd_event_source *s, const struct signa
         Manager *m = userdata;
         int r;
 
+        (void) sd_notifyf(/* unset= */ false,
+                          "RELOADING=1\n"
+                          "STATUS=Reloading configuration...\n"
+                          "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
+
         manager_reset_config(m);
         r = manager_parse_config_file(m);
         if (r < 0)
@@ -1027,6 +1032,7 @@ static int manager_dispatch_reload_signal(sd_event_source *s, const struct signa
         else
                 log_info("Config file reloaded.");
 
+        (void) sd_notify(/* unset= */ false, NOTIFY_READY);
         return 0;
 }
 

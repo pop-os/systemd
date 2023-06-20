@@ -14,6 +14,7 @@
 #include "sd-journal.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -30,7 +31,6 @@
 #include "pretty-print.h"
 #include "sigbus.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 #define JOURNAL_WAIT_TIMEOUT (10*USEC_PER_SEC)
 
@@ -127,7 +127,7 @@ static int request_meta_ensure_tmp(RequestMeta *m) {
         if (m->tmp)
                 rewind(m->tmp);
         else {
-                _cleanup_close_ int fd = -1;
+                _cleanup_close_ int fd = -EBADF;
 
                 fd = open_tmpfile_unlinkable("/tmp", O_RDWR|O_CLOEXEC);
                 if (fd < 0)
@@ -670,7 +670,7 @@ static int request_handler_file(
                 const char *mime_type) {
 
         _cleanup_(MHD_destroy_responsep) struct MHD_Response *response = NULL;
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         struct stat st;
 
         assert(connection);
@@ -732,7 +732,7 @@ static int request_handler_machine(
         _cleanup_(MHD_destroy_responsep) struct MHD_Response *response = NULL;
         RequestMeta *m = ASSERT_PTR(connection_cls);
         int r;
-        _cleanup_free_ char* hostname = NULL, *os_name = NULL;
+        _cleanup_free_ char* hostname = NULL, *pretty_name = NULL, *os_name = NULL;
         uint64_t cutoff_from = 0, cutoff_to = 0, usage = 0;
         sd_id128_t mid, bid;
         _cleanup_free_ char *v = NULL, *json = NULL;
@@ -763,7 +763,10 @@ static int request_handler_machine(
         if (r < 0)
                 return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %m");
 
-        (void) parse_os_release(NULL, "PRETTY_NAME", &os_name);
+        (void) parse_os_release(
+                        NULL,
+                        "PRETTY_NAME", &pretty_name,
+                        "NAME=", &os_name);
         (void) get_virtualization(&v);
 
         r = asprintf(&json,
@@ -778,7 +781,7 @@ static int request_handler_machine(
                      SD_ID128_FORMAT_VAL(mid),
                      SD_ID128_FORMAT_VAL(bid),
                      hostname_cleanup(hostname),
-                     os_name ? os_name : "Linux",
+                     os_release_pretty_name(pretty_name, os_name),
                      v ? v : "bare",
                      usage,
                      cutoff_from,

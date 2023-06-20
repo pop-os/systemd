@@ -10,6 +10,7 @@
 #include "sd-event.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
@@ -241,9 +242,6 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        /* Resetting to 0 forces the invocation of an internal initialization routine of getopt_long()
-         * that checks for GNU extensions in optstring ('-' or '+' at the beginning). */
-        optind = 0;
         while ((c = getopt_long(argc, argv, "+hrH:M:E:p:tPqGdSu:", options, NULL)) >= 0)
 
                 switch (c) {
@@ -1109,7 +1107,7 @@ static int start_transient_service(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *w = NULL;
         _cleanup_free_ char *service = NULL, *pty_path = NULL;
-        _cleanup_close_ int master = -1;
+        _cleanup_close_ int master = -EBADF;
         int r;
 
         assert(bus);

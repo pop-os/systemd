@@ -200,9 +200,9 @@ int sd_dhcp_server_new(sd_dhcp_server **ret, int ifindex) {
 
         *server = (sd_dhcp_server) {
                 .n_ref = 1,
-                .fd_raw = -1,
-                .fd = -1,
-                .fd_broadcast = -1,
+                .fd_raw = -EBADF,
+                .fd = -EBADF,
+                .fd_broadcast = -EBADF,
                 .address = htobe32(INADDR_ANY),
                 .netmask = htobe32(INADDR_ANY),
                 .ifindex = ifindex,
@@ -1533,7 +1533,7 @@ int sd_dhcp_server_set_router(sd_dhcp_server *server, const struct in_addr *rout
 
         /* router is NULL: router option will not be appended.
          * router is null address (0.0.0.0): the server address will be used as the router address.
-         * otherwise: the specified address will be used as the router address.*/
+         * otherwise: the specified address will be used as the router address. */
 
         server->emit_router = router;
         if (router)

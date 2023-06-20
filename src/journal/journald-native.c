@@ -11,7 +11,9 @@
 #include "fs-util.h"
 #include "io-util.h"
 #include "journal-importer.h"
+#include "journal-internal.h"
 #include "journal-util.h"
+#include "journald-client.h"
 #include "journald-console.h"
 #include "journald-kmsg.h"
 #include "journald-native.h"
@@ -260,6 +262,13 @@ static int server_process_entry(
                 goto finish;
 
         if (message) {
+                /* Ensure message is not NULL, otherwise strlen(message) would crash. This check needs to
+                 * be here until server_process_entry() is able to process messages containing \0 characters,
+                 * as we would have access to the actual size of message. */
+                r = client_context_check_keep_log(context, message, strlen(message));
+                if (r <= 0)
+                        goto finish;
+
                 if (s->forward_to_syslog)
                         server_forward_syslog(s, syslog_fixup_facility(priority), identifier, message, ucred, tv);
 
@@ -309,7 +318,9 @@ void server_process_native_message(
         if (ucred && pid_is_valid(ucred->pid)) {
                 r = client_context_get(s, ucred->pid, ucred, label, label_len, NULL, &context);
                 if (r < 0)
-                        log_warning_errno(r, "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m", ucred->pid);
+                        log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                    "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m",
+                                                    ucred->pid);
         }
 
         do {
@@ -348,29 +359,34 @@ void server_process_native_file(
 
                 r = fd_get_path(fd, &k);
                 if (r < 0) {
-                        log_error_errno(r, "readlink(/proc/self/fd/%i) failed: %m", fd);
+                        log_ratelimit_error_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                  "readlink(/proc/self/fd/%i) failed: %m", fd);
                         return;
                 }
 
                 e = PATH_STARTSWITH_SET(k, "/dev/shm/", "/tmp/", "/var/tmp/");
                 if (!e) {
-                        log_error("Received file outside of allowed directories. Refusing.");
+                        log_ratelimit_error(JOURNAL_LOG_RATELIMIT,
+                                            "Received file outside of allowed directories. Refusing.");
                         return;
                 }
 
                 if (!filename_is_valid(e)) {
-                        log_error("Received file in subdirectory of allowed directories. Refusing.");
+                        log_ratelimit_error(JOURNAL_LOG_RATELIMIT,
+                                            "Received file in subdirectory of allowed directories. Refusing.");
                         return;
                 }
         }
 
         if (fstat(fd, &st) < 0) {
-                log_error_errno(errno, "Failed to stat passed file, ignoring: %m");
+                log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT,
+                                          "Failed to stat passed file, ignoring: %m");
                 return;
         }
 
         if (!S_ISREG(st.st_mode)) {
-                log_error("File passed is not regular. Ignoring.");
+                log_ratelimit_error(JOURNAL_LOG_RATELIMIT,
+                                    "File passed is not regular. Ignoring.");
                 return;
         }
 
@@ -380,7 +396,9 @@ void server_process_native_file(
         /* When !sealed, set a lower memory limit. We have to read the file,
          * effectively doubling memory use. */
         if (st.st_size > ENTRY_SIZE_MAX / (sealed ? 1 : 2)) {
-                log_error("File passed too large (%"PRIu64" bytes). Ignoring.", (uint64_t) st.st_size);
+                log_ratelimit_error(JOURNAL_LOG_RATELIMIT,
+                                    "File passed too large (%"PRIu64" bytes). Ignoring.",
+                                    (uint64_t) st.st_size);
                 return;
         }
 
@@ -393,7 +411,8 @@ void server_process_native_file(
                 ps = PAGE_ALIGN(st.st_size);
                 p = mmap(NULL, ps, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (p == MAP_FAILED) {
-                        log_error_errno(errno, "Failed to map memfd, ignoring: %m");
+                        log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT,
+                                                  "Failed to map memfd, ignoring: %m");
                         return;
                 }
 
@@ -405,7 +424,8 @@ void server_process_native_file(
                 ssize_t n;
 
                 if (fstatvfs(fd, &vfs) < 0) {
-                        log_error_errno(errno, "Failed to stat file system of passed file, not processing it: %m");
+                        log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT,
+                                                  "Failed to stat file system of passed file, not processing it: %m");
                         return;
                 }
 
@@ -415,7 +435,8 @@ void server_process_native_file(
                  * https://github.com/systemd/systemd/issues/1822
                  */
                 if (vfs.f_flag & ST_MANDLOCK) {
-                        log_error("Received file descriptor from file system with mandatory locking enabled, not processing it.");
+                        log_ratelimit_error(JOURNAL_LOG_RATELIMIT,
+                                            "Received file descriptor from file system with mandatory locking enabled, not processing it.");
                         return;
                 }
 
@@ -428,7 +449,8 @@ void server_process_native_file(
                  * and so is SMB. */
                 r = fd_nonblock(fd, true);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to make fd non-blocking, not processing it: %m");
+                        log_ratelimit_error_errno(r, JOURNAL_LOG_RATELIMIT,
+                                                  "Failed to make fd non-blocking, not processing it: %m");
                         return;
                 }
 
@@ -444,7 +466,8 @@ void server_process_native_file(
 
                 n = pread(fd, p, st.st_size, 0);
                 if (n < 0)
-                        log_error_errno(errno, "Failed to read file, ignoring: %m");
+                        log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT,
+                                                  "Failed to read file, ignoring: %m");
                 else if (n > 0)
                         server_process_native_message(s, p, n, ucred, tv, label, label_len);
         }

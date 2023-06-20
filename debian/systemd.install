@@ -23,7 +23,6 @@ usr/share/bash-completion/
 usr/share/zsh/vendor-completions/
 usr/share/dbus-1/
 usr/share/doc/
-usr/share/pkgconfig/systemd.pc
 usr/share/polkit-1/
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
@@ -35,3 +34,4 @@ var/lib
 ../extra/units/* lib/systemd/system/
 ../extra/kernel-install.d/* usr/lib/kernel/install.d
 ../extra/pam.d/* usr/lib/pam.d/
+../extra/journald.conf.d lib/systemd/

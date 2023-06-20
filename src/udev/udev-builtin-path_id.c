@@ -545,7 +545,7 @@ static sd_device *handle_ap(sd_device *parent, char **path) {
 
 static int find_real_nvme_parent(sd_device *dev, sd_device **ret) {
         _cleanup_(sd_device_unrefp) sd_device *nvme = NULL;
-        const char *sysname, *end, *devpath;
+        const char *sysname, *end;
         int r;
 
         /* If the device belongs to "nvme-subsystem" (not to be confused with "nvme"), which happens when
@@ -576,14 +576,6 @@ static int find_real_nvme_parent(sd_device *dev, sd_device **ret) {
         r = sd_device_new_from_subsystem_sysname(&nvme, "nvme", sysname);
         if (r < 0)
                 return r;
-
-        r = sd_device_get_devpath(nvme, &devpath);
-        if (r < 0)
-                return r;
-
-        /* If the 'real parent' is (still) virtual, e.g. for nvmf disks, refuse to set ID_PATH. */
-        if (path_startswith(devpath, "/devices/virtual/"))
-                return -ENXIO;
 
         *ret = TAKE_PTR(nvme);
         return 0;
@@ -637,6 +629,13 @@ static int builtin_path_id(sd_device *dev, sd_netlink **rtnl, int argc, char *ar
                         if (compat_path)
                                 path_prepend(&compat_path, "platform-%s", sysname);
                         parent = skip_subsystem(parent, "platform");
+                        supported_transport = true;
+                        supported_parent = true;
+                } else if (streq(subsys, "amba")) {
+                        path_prepend(&path, "amba-%s", sysname);
+                        if (compat_path)
+                                path_prepend(&compat_path, "amba-%s", sysname);
+                        parent = skip_subsystem(parent, "amba");
                         supported_transport = true;
                         supported_parent = true;
                 } else if (streq(subsys, "acpi")) {

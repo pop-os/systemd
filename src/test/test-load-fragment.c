@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "sd-id128.h"
+
 #include "all-units.h"
 #include "alloc-util.h"
 #include "capability-util.h"
@@ -20,6 +22,8 @@
 #include "load-fragment.h"
 #include "macro.h"
 #include "memory-util.h"
+#include "open-file.h"
+#include "pcre2-util.h"
 #include "rm-rf.h"
 #include "specifier.h"
 #include "string-util.h"
@@ -518,7 +522,7 @@ TEST(install_printf, .sd_booted = true) {
 
         _cleanup_free_ char *mid = NULL, *bid = NULL, *host = NULL, *gid = NULL, *group = NULL, *uid = NULL, *user = NULL;
 
-        if (access("/etc/machine-id", F_OK) >= 0)
+        if (sd_id128_get_machine(NULL) >= 0)
                 assert_se(specifier_machine_id('m', NULL, NULL, NULL, &mid) >= 0 && mid);
         if (sd_booted() > 0)
                 assert_se(specifier_boot_id('b', NULL, NULL, NULL, &bid) >= 0 && bid);
@@ -993,6 +997,100 @@ TEST(unit_is_recursive_template_dependency) {
         assert_se(unit_is_likely_recursive_template_dependency(u, "quux@foobar@123.service", "quux@%n.service") == 0);
         /* Test that a dependency of a different type is not detected as recursive. */
         assert_se(unit_is_likely_recursive_template_dependency(u, "foobar@foobar@123.mount", "foobar@%n.mount") == 0);
+}
+
+#define TEST_PATTERN(_regex, _allowed_patterns_count, _denied_patterns_count)   \
+        {                                                                       \
+                .regex = _regex,                                                \
+                .allowed_patterns_count = _allowed_patterns_count,              \
+                .denied_patterns_count = _denied_patterns_count                 \
+        }
+
+TEST(config_parse_log_filter_patterns) {
+        ExecContext c = {};
+
+        static const struct {
+                const char *regex;
+                size_t allowed_patterns_count;
+                size_t denied_patterns_count;
+        } regex_tests[] = {
+                TEST_PATTERN("", 0, 0),
+                TEST_PATTERN(".*", 1, 0),
+                TEST_PATTERN("~.*", 1, 1),
+                TEST_PATTERN("", 0, 0),
+                TEST_PATTERN("~.*", 0, 1),
+                TEST_PATTERN("[.*", 0, 1),              /* Invalid pattern. */
+                TEST_PATTERN(".*gg.*", 1, 1),
+                TEST_PATTERN("~.*", 1, 1),              /* Already in the patterns list. */
+                TEST_PATTERN("[.*", 1, 1),              /* Invalid pattern. */
+                TEST_PATTERN("\\x7ehello", 2, 1),
+                TEST_PATTERN("", 0, 0),
+                TEST_PATTERN("~foobar", 0, 1),
+        };
+
+        if (ERRNO_IS_NOT_SUPPORTED(dlopen_pcre2()))
+                return (void) log_tests_skipped("PCRE2 support is not available");
+
+        for (size_t i = 0; i < ELEMENTSOF(regex_tests); i++) {
+                assert_se(config_parse_log_filter_patterns(NULL, "fake", 1, "section", 1, "LogFilterPatterns", 1,
+                                                           regex_tests[i].regex, &c, NULL) >= 0);
+
+                assert_se(set_size(c.log_filter_allowed_patterns) == regex_tests[i].allowed_patterns_count);
+                assert_se(set_size(c.log_filter_denied_patterns) == regex_tests[i].denied_patterns_count);
+
+                /* Ensure `~` is properly removed */
+                const char *p;
+                SET_FOREACH(p, c.log_filter_allowed_patterns)
+                        assert_se(p && p[0] != '~');
+                SET_FOREACH(p, c.log_filter_denied_patterns)
+                        assert_se(p && p[0] != '~');
+        }
+
+        exec_context_done(&c);
+}
+
+TEST(config_parse_open_file) {
+        _cleanup_(manager_freep) Manager *m = NULL;
+        _cleanup_(unit_freep) Unit *u = NULL;
+        _cleanup_(open_file_freep) OpenFile *of = NULL;
+        int r;
+
+        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        if (manager_errno_skip_test(r)) {
+                log_notice_errno(r, "Skipping test: manager_new: %m");
+                return;
+        }
+
+        assert_se(r >= 0);
+        assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
+
+        assert_se(u = unit_new(m, sizeof(Service)));
+        assert_se(unit_add_name(u, "foobar.service") == 0);
+
+        r = config_parse_open_file(NULL, "fake", 1, "section", 1,
+                                   "OpenFile", 0, "/proc/1/ns/mnt:host-mount-namespace:read-only",
+                                   &of, u);
+        assert_se(r >= 0);
+        assert_se(of);
+        assert_se(streq(of->path, "/proc/1/ns/mnt"));
+        assert_se(streq(of->fdname, "host-mount-namespace"));
+        assert_se(of->flags == OPENFILE_READ_ONLY);
+
+        of = open_file_free(of);
+        r = config_parse_open_file(NULL, "fake", 1, "section", 1,
+                                   "OpenFile", 0, "/proc/1/ns/mnt::read-only",
+                                   &of, u);
+        assert_se(r >= 0);
+        assert_se(of);
+        assert_se(streq(of->path, "/proc/1/ns/mnt"));
+        assert_se(streq(of->fdname, "mnt"));
+        assert_se(of->flags == OPENFILE_READ_ONLY);
+
+        r = config_parse_open_file(NULL, "fake", 1, "section", 1,
+                                   "OpenFile", 0, "",
+                                   &of, u);
+        assert_se(r >= 0);
+        assert_se(!of);
 }
 
 static int intro(void) {

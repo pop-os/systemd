@@ -25,7 +25,6 @@
 #include "rm-rf.h"
 #include "string-util.h"
 #include "tmpfile-util.h"
-#include "util.h"
 
 struct RawImport {
         sd_event *event;
@@ -106,8 +105,8 @@ int raw_import_new(
                 return -ENOMEM;
 
         *i = (RawImport) {
-                .input_fd = -1,
-                .output_fd = -1,
+                .input_fd = -EBADF,
+                .output_fd = -EBADF,
                 .on_finished = on_finished,
                 .userdata = userdata,
                 .last_percent = UINT_MAX,
@@ -155,7 +154,7 @@ static void raw_import_report_progress(RawImport *i) {
 }
 
 static int raw_import_maybe_convert_qcow2(RawImport *i) {
-        _cleanup_close_ int converted_fd = -1;
+        _cleanup_close_ int converted_fd = -EBADF;
         _cleanup_(unlink_and_freep) char *t = NULL;
         _cleanup_free_ char *f = NULL;
         int r;

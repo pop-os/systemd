@@ -323,28 +323,22 @@ _pure_ static bool unit_matters_to_anchor(Unit *u, Job *job) {
         return false;
 }
 
-static char* merge_unit_ids(const char* unit_log_field, char * const* pairs) {
-        _cleanup_free_ char *ans = NULL;
-        size_t size = 0;
+static char* merge_unit_ids(const char* unit_log_field, char **pairs) {
+        char *ans = NULL;
+        size_t size = 0, next;
 
         STRV_FOREACH_PAIR(unit_id, job_type, pairs) {
-                size_t next;
-
-                if (size > 0)
-                        ans[size - 1] = '\n';
-
                 next = strlen(unit_log_field) + strlen(*unit_id);
                 if (!GREEDY_REALLOC(ans, size + next + 1))
-                        return NULL;
+                        return mfree(ans);
 
                 sprintf(ans + size, "%s%s", unit_log_field, *unit_id);
+                if (*(unit_id+1))
+                        ans[size + next] =  '\n';
                 size += next + 1;
         }
 
-        if (!ans)
-                return strdup("");
-
-        return TAKE_PTR(ans);
+        return ans;
 }
 
 static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsigned generation, sd_bus_error *e) {
@@ -400,7 +394,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                                                     "Found %s on %s/%s",
                                                     unit_id == array ? "ordering cycle" : "dependency",
                                                     *unit_id, *job_type),
-                                   "%s", strna(unit_ids));
+                                   "%s", unit_ids);
 
                 if (delete) {
                         const char *status;
@@ -410,7 +404,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                                                     "Job %s/%s deleted to break ordering cycle starting with %s/%s",
                                                     delete->unit->id, job_type_to_string(delete->type),
                                                     j->unit->id, job_type_to_string(j->type)),
-                                   "%s", strna(unit_ids));
+                                   "%s", unit_ids);
 
                         if (log_get_show_color())
                                 status = ANSI_HIGHLIGHT_RED " SKIP " ANSI_NORMAL;
@@ -429,7 +423,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                 log_struct(LOG_ERR,
                            LOG_UNIT_MESSAGE(j->unit, "Unable to break cycle starting with %s/%s",
                                             j->unit->id, job_type_to_string(j->type)),
-                           "%s", strna(unit_ids));
+                           "%s", unit_ids);
 
                 return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_ORDER_IS_CYCLIC,
                                          "Transaction order is cyclic. See system logs for details.");
@@ -662,7 +656,7 @@ static int transaction_apply(
                         /* j has been merged into a previously installed job */
                         if (tr->anchor_job == j)
                                 tr->anchor_job = installed_job;
-                        hashmap_remove_value(m->jobs, UINT32_TO_PTR(j->id), j);
+                        hashmap_remove(m->jobs, UINT32_TO_PTR(j->id));
                         job_free(j);
                         j = installed_job;
                 }
@@ -683,7 +677,7 @@ static int transaction_apply(
 rollback:
 
         HASHMAP_FOREACH(j, tr->jobs)
-                hashmap_remove_value(m->jobs, UINT32_TO_PTR(j->id), j);
+                hashmap_remove(m->jobs, UINT32_TO_PTR(j->id));
 
         return r;
 }
@@ -982,11 +976,11 @@ int transaction_add_job_and_dependencies(
         }
 
         if (is_new && !ignore_requirements && type != JOB_NOP) {
-                Set *following;
+                _cleanup_set_free_ Set *following = NULL;
 
                 /* If we are following some other unit, make sure we
                  * add all dependencies of everybody following. */
-                if (unit_following_set(ret->unit, &following) > 0) {
+                if (unit_following_set(ret->unit, &following) > 0)
                         SET_FOREACH(dep, following) {
                                 r = transaction_add_job_and_dependencies(tr, type, dep, ret, false, false, false, ignore_order, e);
                                 if (r < 0) {
@@ -997,16 +991,13 @@ int transaction_add_job_and_dependencies(
                                 }
                         }
 
-                        set_free(following);
-                }
-
                 /* Finally, recursively add in all dependencies. */
                 if (IN_SET(type, JOB_START, JOB_RESTART)) {
                         UNIT_FOREACH_DEPENDENCY(dep, ret->unit, UNIT_ATOM_PULL_IN_START) {
                                 r = transaction_add_job_and_dependencies(tr, JOB_START, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
                                         if (r != -EBADR) /* job type not applicable */
-                                                goto fail;
+                                                return r;
 
                                         sd_bus_error_free(e);
                                 }
@@ -1028,7 +1019,7 @@ int transaction_add_job_and_dependencies(
                                 r = transaction_add_job_and_dependencies(tr, JOB_VERIFY_ACTIVE, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
                                         if (r != -EBADR) /* job type not applicable */
-                                                goto fail;
+                                                return r;
 
                                         sd_bus_error_free(e);
                                 }
@@ -1038,7 +1029,7 @@ int transaction_add_job_and_dependencies(
                                 r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, true, true, false, ignore_order, e);
                                 if (r < 0) {
                                         if (r != -EBADR) /* job type not applicable */
-                                                goto fail;
+                                                return r;
 
                                         sd_bus_error_free(e);
                                 }
@@ -1056,30 +1047,42 @@ int transaction_add_job_and_dependencies(
                 }
 
                 if (IN_SET(type, JOB_STOP, JOB_RESTART)) {
-                        UnitDependencyAtom atom;
-                        JobType ptype;
-
+                        _cleanup_set_free_ Set *propagated_restart = NULL;
                         /* We propagate STOP as STOP, but RESTART only as TRY_RESTART, in order not to start
                          * dependencies that are not around. */
-                        if (type == JOB_RESTART) {
-                                atom = UNIT_ATOM_PROPAGATE_RESTART;
-                                ptype = JOB_TRY_RESTART;
-                        } else {
-                                ptype = JOB_STOP;
-                                atom = UNIT_ATOM_PROPAGATE_STOP;
-                        }
 
-                        UNIT_FOREACH_DEPENDENCY(dep, ret->unit, atom) {
-                                JobType nt;
+                        if (type == JOB_RESTART)
+                                UNIT_FOREACH_DEPENDENCY(dep, ret->unit, UNIT_ATOM_PROPAGATE_RESTART) {
+                                        JobType nt;
 
-                                nt = job_type_collapse(ptype, dep);
-                                if (nt == JOB_NOP)
+                                        r = set_ensure_put(&propagated_restart, NULL, dep);
+                                        if (r < 0)
+                                                return r;
+
+                                        nt = job_type_collapse(JOB_TRY_RESTART, dep);
+                                        if (nt == JOB_NOP)
+                                                continue;
+
+                                        r = transaction_add_job_and_dependencies(tr, nt, dep, ret, true, false, false, ignore_order, e);
+                                        if (r < 0) {
+                                                if (r != -EBADR) /* job type not applicable */
+                                                        return r;
+
+                                                sd_bus_error_free(e);
+                                        }
+                                }
+
+                        /* The 'stop' part of a restart job is also propagated to
+                         * units with UNIT_ATOM_PROPAGATE_STOP */
+                        UNIT_FOREACH_DEPENDENCY(dep, ret->unit, UNIT_ATOM_PROPAGATE_STOP) {
+                                /* Units experienced restart propagation are skipped */
+                                if (set_contains(propagated_restart, dep))
                                         continue;
 
-                                r = transaction_add_job_and_dependencies(tr, nt, dep, ret, true, false, false, ignore_order, e);
+                                r = transaction_add_job_and_dependencies(tr, JOB_STOP, dep, ret, true, false, false, ignore_order, e);
                                 if (r < 0) {
                                         if (r != -EBADR) /* job type not applicable */
-                                                goto fail;
+                                                return r;
 
                                         sd_bus_error_free(e);
                                 }
@@ -1093,9 +1096,6 @@ int transaction_add_job_and_dependencies(
         }
 
         return 0;
-
-fail:
-        return r;
 }
 
 static bool shall_stop_on_isolate(Transaction *tr, Unit *u) {

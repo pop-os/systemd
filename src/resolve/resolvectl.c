@@ -9,6 +9,7 @@
 
 #include "af-list.h"
 #include "alloc-util.h"
+#include "build.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-locator.h"
@@ -32,6 +33,7 @@
 #include "pretty-print.h"
 #include "process-util.h"
 #include "resolvconf-compat.h"
+#include "resolve-util.h"
 #include "resolvectl.h"
 #include "resolved-def.h"
 #include "resolved-dns-packet.h"
@@ -485,7 +487,11 @@ static bool single_label_nonsynthetic(const char *name) {
         if (!dns_name_is_single_label(name))
                 return false;
 
-        if (is_localhost(name) || is_gateway_hostname(name))
+        if (is_localhost(name) ||
+            is_gateway_hostname(name) ||
+            is_outbound_hostname(name) ||
+            is_dns_stub_hostname(name) ||
+            is_dns_proxy_stub_hostname(name))
                 return false;
 
         r = resolve_system_hostname(NULL, &first_label);
@@ -1120,49 +1126,49 @@ static int show_statistics(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        table = table_new("key", "value");
+        table = table_new_vertical();
         if (!table)
                 return log_oom();
-
-        table_set_header(table, false);
 
         r = table_add_many(table,
                            TABLE_STRING, "Transactions",
                            TABLE_SET_COLOR, ansi_highlight(),
+                           TABLE_SET_ALIGN_PERCENT, 0,
                            TABLE_EMPTY,
-                           TABLE_STRING, "Current Transactions:",
+                           TABLE_FIELD, "Current Transactions",
                            TABLE_SET_ALIGN_PERCENT, 100,
                            TABLE_UINT64, n_current_transactions,
-                           TABLE_STRING, "Total Transactions:",
+                           TABLE_SET_ALIGN_PERCENT, 100,
+                           TABLE_FIELD, "Total Transactions",
                            TABLE_UINT64, n_total_transactions,
                            TABLE_EMPTY, TABLE_EMPTY,
                            TABLE_STRING, "Cache",
                            TABLE_SET_COLOR, ansi_highlight(),
                            TABLE_SET_ALIGN_PERCENT, 0,
                            TABLE_EMPTY,
-                           TABLE_STRING, "Current Cache Size:",
+                           TABLE_FIELD, "Current Cache Size",
                            TABLE_SET_ALIGN_PERCENT, 100,
                            TABLE_UINT64, cache_size,
-                           TABLE_STRING, "Cache Hits:",
+                           TABLE_FIELD, "Cache Hits",
                            TABLE_UINT64, n_cache_hit,
-                           TABLE_STRING, "Cache Misses:",
+                           TABLE_FIELD, "Cache Misses",
                            TABLE_UINT64, n_cache_miss,
                            TABLE_EMPTY, TABLE_EMPTY,
                            TABLE_STRING, "DNSSEC Verdicts",
                            TABLE_SET_COLOR, ansi_highlight(),
                            TABLE_SET_ALIGN_PERCENT, 0,
                            TABLE_EMPTY,
-                           TABLE_STRING, "Secure:",
+                           TABLE_FIELD, "Secure",
                            TABLE_SET_ALIGN_PERCENT, 100,
                            TABLE_UINT64, n_dnssec_secure,
-                           TABLE_STRING, "Insecure:",
+                           TABLE_FIELD, "Insecure",
                            TABLE_UINT64, n_dnssec_insecure,
-                           TABLE_STRING, "Bogus:",
+                           TABLE_FIELD, "Bogus",
                            TABLE_UINT64, n_dnssec_bogus,
-                           TABLE_STRING, "Indeterminate:",
+                           TABLE_FIELD, "Indeterminate:",
                            TABLE_UINT64, n_dnssec_indeterminate);
         if (r < 0)
-                table_log_add_error(r);
+                return table_log_add_error(r);
 
         r = table_print(table, NULL);
         if (r < 0)
@@ -1225,7 +1231,11 @@ static int read_dns_server_one(
         assert(m);
         assert(ret);
 
-        r = sd_bus_message_enter_container(m, 'r', with_ifindex ? (extended ? "iiayqs" : "iiay") : (extended ? "iayqs" : "iay"));
+        r = sd_bus_message_enter_container(
+                        m,
+                        'r',
+                        with_ifindex ? (extended ? "iiayqs" : "iiay") :
+                                       (extended ? "iayqs" : "iay"));
         if (r <= 0)
                 return r;
 
@@ -1270,7 +1280,6 @@ static int read_dns_server_one(
                 return r;
 
         *ret = TAKE_PTR(pretty);
-
         return 1;
 }
 
@@ -1489,14 +1498,14 @@ static void global_info_clear(GlobalInfo *p) {
         strv_free(p->ntas);
 }
 
-static int dump_list(Table *table, const char *prefix, char * const *l) {
+static int dump_list(Table *table, const char *field, char * const *l) {
         int r;
 
         if (strv_isempty(l))
                 return 0;
 
         r = table_add_many(table,
-                           TABLE_STRING, prefix,
+                           TABLE_FIELD, field,
                            TABLE_STRV_WRAPPED, l);
         if (r < 0)
                 return table_log_add_error(r);
@@ -1668,15 +1677,13 @@ static int status_ifindex(sd_bus *bus, int ifindex, const char *name, StatusMode
         printf("%sLink %i (%s)%s\n",
                ansi_highlight(), ifindex, name, ansi_normal());
 
-        table = table_new("key", "value");
+        table = table_new_vertical();
         if (!table)
                 return log_oom();
 
-        table_set_header(table, false);
-
         r = table_add_many(table,
-                           TABLE_STRING, "Current Scopes:",
-                           TABLE_SET_ALIGN_PERCENT, 100);
+                           TABLE_FIELD, "Current Scopes",
+                           TABLE_SET_MINIMUM_WIDTH, 19);
         if (r < 0)
                 return table_log_add_error(r);
 
@@ -1708,24 +1715,24 @@ static int status_ifindex(sd_bus *bus, int ifindex, const char *name, StatusMode
                 return log_oom();
 
         r = table_add_many(table,
-                           TABLE_STRING,       "Protocols:",
+                           TABLE_FIELD,       "Protocols",
                            TABLE_STRV_WRAPPED, pstatus);
         if (r < 0)
                 return table_log_add_error(r);
 
         if (link_info.current_dns) {
                 r = table_add_many(table,
-                                   TABLE_STRING, "Current DNS Server:",
+                                   TABLE_FIELD, "Current DNS Server",
                                    TABLE_STRING, link_info.current_dns_ex ?: link_info.current_dns);
                 if (r < 0)
                         return table_log_add_error(r);
         }
 
-        r = dump_list(table, "DNS Servers:", link_info.dns_ex ?: link_info.dns);
+        r = dump_list(table, "DNS Servers", link_info.dns_ex ?: link_info.dns);
         if (r < 0)
                 return r;
 
-        r = dump_list(table, "DNS Domain:", link_info.domains);
+        r = dump_list(table, "DNS Domain", link_info.domains);
         if (r < 0)
                 return r;
 
@@ -1739,7 +1746,14 @@ static int status_ifindex(sd_bus *bus, int ifindex, const char *name, StatusMode
         return 0;
 }
 
-static int map_global_dns_servers_internal(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata, bool extended) {
+static int map_global_dns_servers_internal(
+                sd_bus *bus,
+                const char *member,
+                sd_bus_message *m,
+                sd_bus_error *error,
+                void *userdata,
+                bool extended) {
+
         char ***l = ASSERT_PTR(userdata);
         int r;
 
@@ -1776,11 +1790,11 @@ static int map_global_dns_servers_internal(sd_bus *bus, const char *member, sd_b
 }
 
 static int map_global_dns_servers(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata) {
-        return map_global_dns_servers_internal(bus, member, m, error, userdata, false);
+        return map_global_dns_servers_internal(bus, member, m, error, userdata, /* extended= */ false);
 }
 
 static int map_global_dns_servers_ex(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata) {
-        return map_global_dns_servers_internal(bus, member, m, error, userdata, true);
+        return map_global_dns_servers_internal(bus, member, m, error, userdata, /* extended= */ true);
 }
 
 static int map_global_current_dns_server(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata) {
@@ -1908,26 +1922,24 @@ static int status_global(sd_bus *bus, StatusMode mode, bool *empty_line) {
 
         printf("%sGlobal%s\n", ansi_highlight(), ansi_normal());
 
-        table = table_new("key", "value");
+        table = table_new_vertical();
         if (!table)
                 return log_oom();
-
-        table_set_header(table, false);
 
         _cleanup_strv_free_ char **pstatus = global_protocol_status(&global_info);
         if (!pstatus)
                 return log_oom();
 
         r = table_add_many(table,
-                           TABLE_STRING,            "Protocols:",
-                           TABLE_SET_ALIGN_PERCENT, 100,
+                           TABLE_FIELD,            "Protocols",
+                           TABLE_SET_MINIMUM_WIDTH, 19,
                            TABLE_STRV_WRAPPED,      pstatus);
         if (r < 0)
                 return table_log_add_error(r);
 
         if (global_info.resolv_conf_mode) {
                 r = table_add_many(table,
-                                   TABLE_STRING, "resolv.conf mode:",
+                                   TABLE_FIELD, "resolv.conf mode",
                                    TABLE_STRING, global_info.resolv_conf_mode);
                 if (r < 0)
                         return table_log_add_error(r);
@@ -1935,7 +1947,7 @@ static int status_global(sd_bus *bus, StatusMode mode, bool *empty_line) {
 
         if (global_info.current_dns) {
                 r = table_add_many(table,
-                                   TABLE_STRING, "Current DNS Server:",
+                                   TABLE_FIELD, "Current DNS Server",
                                    TABLE_STRING, global_info.current_dns_ex ?: global_info.current_dns);
                 if (r < 0)
                         return table_log_add_error(r);
@@ -2284,6 +2296,8 @@ static int verb_default_route(int argc, char **argv, void *userdata) {
 
 static int verb_llmnr(int argc, char **argv, void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_free_ char *global_llmnr_support_str = NULL;
+        ResolveSupport global_llmnr_support, llmnr_support;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -2298,6 +2312,22 @@ static int verb_llmnr(int argc, char **argv, void *userdata) {
 
         if (argc < 3)
                 return status_ifindex(bus, arg_ifindex, NULL, STATUS_LLMNR, NULL);
+
+        llmnr_support = resolve_support_from_string(argv[2]);
+        if (llmnr_support < 0)
+                return log_error_errno(llmnr_support, "Invalid LLMNR setting: %s", argv[2]);
+
+        r = bus_get_property_string(bus, bus_resolve_mgr, "LLMNR", &error, &global_llmnr_support_str);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get the global LLMNR support state: %s", bus_error_message(&error, r));
+
+        global_llmnr_support = resolve_support_from_string(global_llmnr_support_str);
+        if (global_llmnr_support < 0)
+                return log_error_errno(global_llmnr_support, "Received invalid global LLMNR setting: %s", global_llmnr_support_str);
+
+        if (global_llmnr_support < llmnr_support)
+                log_warning("Setting LLMNR support level \"%s\" for \"%s\", but the global support level is \"%s\".",
+                            argv[2], arg_ifname, global_llmnr_support_str);
 
         r = bus_call_method(bus, bus_resolve_mgr, "SetLinkLLMNR", &error, NULL, "is", arg_ifindex, argv[2]);
         if (r < 0 && sd_bus_error_has_name(&error, BUS_ERROR_LINK_BUSY)) {
@@ -2318,6 +2348,8 @@ static int verb_llmnr(int argc, char **argv, void *userdata) {
 
 static int verb_mdns(int argc, char **argv, void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_free_ char *global_mdns_support_str = NULL;
+        ResolveSupport global_mdns_support, mdns_support;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
 
@@ -2332,6 +2364,22 @@ static int verb_mdns(int argc, char **argv, void *userdata) {
 
         if (argc < 3)
                 return status_ifindex(bus, arg_ifindex, NULL, STATUS_MDNS, NULL);
+
+        mdns_support = resolve_support_from_string(argv[2]);
+        if (mdns_support < 0)
+                return log_error_errno(mdns_support, "Invalid mDNS setting: %s", argv[2]);
+
+        r = bus_get_property_string(bus, bus_resolve_mgr, "MulticastDNS", &error, &global_mdns_support_str);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get the global mDNS support state: %s", bus_error_message(&error, r));
+
+        global_mdns_support = resolve_support_from_string(global_mdns_support_str);
+        if (global_mdns_support < 0)
+                return log_error_errno(global_mdns_support, "Received invalid global mDNS setting: %s", global_mdns_support_str);
+
+        if (global_mdns_support < mdns_support)
+                log_warning("Setting mDNS support level \"%s\" for \"%s\", but the global support level is \"%s\".",
+                            argv[2], arg_ifname, global_mdns_support_str);
 
         r = bus_call_method(bus, bus_resolve_mgr, "SetLinkMulticastDNS", &error, NULL, "is", arg_ifindex, argv[2]);
         if (r < 0 && sd_bus_error_has_name(&error, BUS_ERROR_LINK_BUSY)) {

@@ -45,7 +45,7 @@ static const BaseFilesystem table[] = {
          * been mounted into) it is thus necessary to create a symlink pointing to the right subdirectory of
          * /usr/ first — otherwise we couldn't invoke any dynamic binary. Let's detect this case here, and
          * create the symlink as needed should it be missing. We prefer doing this consistently with Debian's
-         * multiarch logic, but support Fedora-style multilib too.*/
+         * multiarch logic, but support Fedora-style multilib too. */
 #if defined(__aarch64__)
         /* aarch64 ELF ABI actually says dynamic loader is in /lib/, but Fedora puts it in /lib64/ anyway and
          * just symlinks /lib/ld-linux-aarch64.so.1 to ../lib64/ld-linux-aarch64.so.1. For this to work
@@ -123,7 +123,7 @@ static const BaseFilesystem table[] = {
 #endif
 
 int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
-        _cleanup_close_ int fd = -1;
+        _cleanup_close_ int fd = -EBADF;
         int r;
 
         fd = open(root, O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
@@ -135,7 +135,7 @@ int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
                         continue;
 
                 if (table[i].target) {
-                        const char *target = NULL, *s;
+                        const char *target = NULL;
 
                         /* check if one of the targets exists */
                         NULSTR_FOREACH(s, table[i].target) {
@@ -178,7 +178,7 @@ int base_filesystem_create(const char *root, uid_t uid, gid_t gid) {
                         continue;
                 }
 
-                RUN_WITH_UMASK(0000)
+                WITH_UMASK(0000)
                         r = mkdirat(fd, table[i].dir, table[i].mode);
                 if (r < 0) {
                         log_full_errno(IN_SET(errno, EEXIST, EROFS) || table[i].ignore_failure ? LOG_DEBUG : LOG_ERR, errno,

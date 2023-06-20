@@ -3,11 +3,12 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "chase-symlinks.h"
 #include "conf-files.h"
-#include "def.h"
+#include "constants.h"
 #include "dirent-util.h"
 #include "dissect-image.h"
 #include "fd-util.h"
@@ -1183,7 +1184,7 @@ static int verb_help(int argc, char **argv, void *userdata) {
         _cleanup_free_ char *link = NULL;
         int r;
 
-        r = terminal_urlify_man("systemd-sysupdate", "8", &link);
+        r = terminal_urlify_man("systemd-sysupdate", "1", &link);
         if (r < 0)
                 return log_oom();
 

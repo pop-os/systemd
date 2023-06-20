@@ -171,9 +171,6 @@ sensor:modalias:acpi:SMO8500*:dmi:*svn*ASUSTeK*:*pn*TP300LAB:*
 sensor:modalias:acpi:BOSC0200*:dmi:*svn*ASUSTeK*:*pn*TP412UA:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; 1, 0, 0; 0, 0, 1
 
-sensor:modalias:acpi:BOSC0200*:dmi:*svn*ASUSTeK*:pn*BR1100FKA:*
- ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, -1
-
 #########################################
 # Axxo
 #########################################
@@ -191,15 +188,6 @@ sensor:modalias:acpi:BMI0160*:dmi:*:svnAYANEO:pnAIR*:*
 # AYANEO NEXT
 sensor:modalias:acpi:BMI0160*:dmi:*:svnAYANEO:pn*NEXT*:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
-
-#########################################
-# BMAX
-#########################################
-
-# BMAX Y13
-sensor:modalias:acpi:KIOX010A:*:dmi:*:svnAMI:*:skuH2M6:*
- ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
- ACCEL_LOCATION=display
 
 #########################################
 # Chuwi
@@ -639,10 +627,6 @@ sensor:modalias:acpi:KIOX000A*:dmi:bvnLENOVO:bvr1HCN4?WW:*:svnLENOVO:pn80SG:*
 sensor:modalias:acpi:KIOX000A*:dmi:bvnLENOVO:bvr1HCN2?WW:*:svnLENOVO:pn80SG:*
  ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
 
-# IdeaPad Miix 310 BIOS version bvr1HCN3?WW (variant 3)
-sensor:modalias:acpi:KIOX000A*:dmi:bvnLENOVO:bvr1HCN3?WW:*:svnLENOVO:pn80SG:*
- ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
-
 # IdeaPad Miix 320, different batches use a different sensor
 sensor:modalias:acpi:*BOSC0200*:dmi:*:svnLENOVO*:pn80XF:*
 sensor:modalias:acpi:SMO8840*:dmi:*:svnLENOVO:pn80XF:pvrLenovoMIIX320:*
@@ -663,10 +647,6 @@ sensor:modalias:acpi:DUAL250E*:dmi:*:svnLENOVO:*:pvrLenovoYoga300-11IBR:*
 sensor:modalias:i2c:bmc150_accel:dmi:*:svnLENOVO:*:pvrLenovoYoga300-11IBR:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, 1, 0; 0, 0, -1
  ACCEL_LOCATION=base
-
-# Yoga Tablet 2 851F/L
-sensor:modalias:acpi:ACCL0001*:dmi:*:svnLENOVO:pn60072:pvr851*:*
- ACCEL_MOUNT_MATRIX=0, 1, 0; -1, 0, 0; 0, 0, 1
 
 # IdeaPad Duet 3 10IGL5 (82AT)
 sensor:modalias:acpi:SMO8B30*:dmi:*:svnLENOVO*:pn82AT:*
@@ -724,15 +704,12 @@ sensor:modalias:acpi:KIOX000A*:dmi:*svnMEDION:pnE2215TMD60198:*
 sensor:modalias:acpi:KIOX010A*:dmi:*:svnMEDION:pnE*:*
 # Medion Akoya E3222 MD62450
 sensor:modalias:acpi:KIOX010A*:dmi:*:svnMEDION:pnMEDION*:*
-# and rebrands of the above
-sensor:modalias:acpi:KIOX010A*:dmi:*:rvnMEDION:rnMEDION*:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
  ACCEL_LOCATION=display
 
 # Same as above, but for base sensor
 sensor:modalias:acpi:KIOX020A*:dmi:*:svnMEDION:pnE*:*
 sensor:modalias:acpi:KIOX020A*:dmi:*:svnMEDION:pnMEDION*:*
-sensor:modalias:acpi:KIOX020A*:dmi:*:rvnMEDION:rnMEDION*:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, -1
  ACCEL_LOCATION=base
 
@@ -827,14 +804,6 @@ sensor:modalias:acpi:BOSC0200*:dmi:bvnAmericanMegatrendsInc.:bvr5.12:bd07/17/201
 # One-Netbook OneXPlayer Mini (and maybe others)
 sensor:modalias:acpi:BMI0160*:dmi:*:rnONEXPLAYER:rvrV01:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, -1
-
-#########################################
-# Passion
-#########################################
-
-# Passion P612F
-sensor:modalias:acpi:MXC6655*:dmi:*:svnDefaultstring*:pnP612F:*
- ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 #########################################
 # Peaq
@@ -989,10 +958,6 @@ sensor:modalias:acpi:INVN6500*:dmi:*:svnTOSHIBA:pnTOSHIBAENCORE2WT8-B:*
 
 # Toshiba Encore WT10A tablet
 sensor:modalias:acpi:INVN6500*:dmi:*:svnTOSHIBA:pnTOSHIBAWT10-A-103:*
- ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
-
-# Toshiba Encore WT10A-102 tablet
-sensor:modalias:acpi:INVN6500*:dmi:*:svnTOSHIBA:pnTOSHIBAWT10-A-102:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 #########################################
