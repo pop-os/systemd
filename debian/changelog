@@ -1,3 +1,11 @@
+systemd (253-3) unstable; urgency=medium
+
+  * systemd-dev: add missing breaks/replaces with udev. (Closes: #1037924)
+  * Run the systemd-binfmt trigger unconditionally.
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 20 Jun 2023 11:45:22 +0100
+
 systemd (253-2) experimental; urgency=medium
 
   * Add systemd-dev package for pkg-config files. Move systemd.pc and
