@@ -187,6 +187,7 @@ Depends: systemd-tests,
   xkb-data,
   locales,
   locales-all,
+  stress,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
