@@ -1,3 +1,12 @@
+systemd (253-4) unstable; urgency=medium
+
+  * Stop localed from writing to /etc/default/keyboard and symlink it to
+    /etc/vconsole.conf. Integration is not set up for now, but GDM needs
+    to query the configured values. Allow reading, but disallow setting
+    keymaps. (Closes: #1038762)
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 24 Jun 2023 20:21:24 +0100
+
 systemd (253-3) unstable; urgency=medium
 
   * systemd-dev: add missing breaks/replaces with udev. (Closes: #1037924)
