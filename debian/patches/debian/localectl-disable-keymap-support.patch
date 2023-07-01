@@ -6,12 +6,14 @@ We no longer support old debianisms such as /etc/default/keyboard,
 so disable the keymap interface in localectl until a definitive
 solution is found.
 ---
- src/locale/localectl.c | 29 ++++++++++++-----------------
- 1 file changed, 12 insertions(+), 17 deletions(-)
+ src/locale/localectl.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
 
+diff --git a/src/locale/localectl.c b/src/locale/localectl.c
+index fb83881..4f96b10 100644
 --- a/src/locale/localectl.c
 +++ b/src/locale/localectl.c
-@@ -386,6 +386,10 @@
+@@ -386,6 +386,10 @@ static int list_x11_keymaps(int argc, char **argv, void *userdata) {
          return 0;
  }
  
@@ -22,7 +24,7 @@ solution is found.
  static int help(void) {
          _cleanup_free_ char *link = NULL;
          int r;
-@@ -400,10 +404,7 @@
+@@ -400,10 +404,7 @@ static int help(void) {
                 "  status                   Show current locale settings\n"
                 "  set-locale LOCALE...     Set system locale\n"
                 "  list-locales             Show known locales\n"
@@ -33,7 +35,7 @@ solution is found.
                 "  list-x11-keymap-models   Show known X11 keyboard mapping models\n"
                 "  list-x11-keymap-layouts  Show known X11 keyboard mapping layouts\n"
                 "  list-x11-keymap-variants [LAYOUT]\n"
-@@ -503,9 +504,9 @@
+@@ -503,9 +504,9 @@ static int localectl_main(sd_bus *bus, int argc, char *argv[]) {
                  { "status",                   VERB_ANY, 1,        VERB_DEFAULT, show_status           },
                  { "set-locale",               2,        VERB_ANY, 0,            set_locale            },
                  { "list-locales",             VERB_ANY, 1,        0,            list_locales          },
