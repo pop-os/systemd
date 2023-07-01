@@ -110,19 +110,19 @@
     <para>Unit files are loaded from a set of paths determined during compilation, described in the next
     section.</para>
 
-    <para>Valid unit names consist of a "name prefix" and a dot and a suffix specifying the unit type. The
-    "unit prefix" must consist of one or more valid characters (ASCII letters, digits, <literal>:</literal>,
-    <literal>-</literal>, <literal>_</literal>, <literal>.</literal>, and <literal>\</literal>). The total
-    length of the unit name including the suffix must not exceed 256 characters. The type suffix must be one
-    of <literal>.service</literal>, <literal>.socket</literal>, <literal>.device</literal>,
-    <literal>.mount</literal>, <literal>.automount</literal>, <literal>.swap</literal>,
-    <literal>.target</literal>, <literal>.path</literal>, <literal>.timer</literal>,
-    <literal>.slice</literal>, or <literal>.scope</literal>.</para>
+    <para>Valid unit names consist of a "unit name prefix", and a suffix specifying the unit type which
+    begins with a dot. The "unit name prefix" must consist of one or more valid characters (ASCII letters,
+    digits, <literal>:</literal>, <literal>-</literal>, <literal>_</literal>, <literal>.</literal>, and
+    <literal>\</literal>). The total length of the unit name including the suffix must not exceed 255
+    characters. The unit type suffix must be one of <literal>.service</literal>, <literal>.socket</literal>,
+    <literal>.device</literal>, <literal>.mount</literal>, <literal>.automount</literal>,
+    <literal>.swap</literal>, <literal>.target</literal>, <literal>.path</literal>,
+    <literal>.timer</literal>, <literal>.slice</literal>, or <literal>.scope</literal>.</para>
 
-    <para>Units names can be parameterized by a single argument called the "instance name". The unit is then
+    <para>Unit names can be parameterized by a single argument called the "instance name". The unit is then
     constructed based on a "template file" which serves as the definition of multiple services or other
-    units. A template unit must have a single <literal>@</literal> at the end of the name (right before the
-    type suffix). The name of the full unit is formed by inserting the instance name between
+    units. A template unit must have a single <literal>@</literal> at the end of the unit name prefix (right
+    before the type suffix). The name of the full unit is formed by inserting the instance name between
     <literal>@</literal> and the unit type suffix. In the unit file itself, the instance parameter may be
     referred to using <literal>%i</literal> and other specifiers, see below.</para>
 
@@ -823,8 +823,7 @@
         <term><varname>OnFailure=</varname></term>
 
         <listitem><para>A space-separated list of one or more units that are activated when this unit enters
-        the <literal>failed</literal> state.  A service unit using <varname>Restart=</varname> enters the
-        failed state only after the start limits are reached.</para></listitem>
+        the <literal>failed</literal> state.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1602,14 +1601,23 @@
           <term><varname>ConditionControlGroupController=</varname></term>
 
           <listitem><para>Check whether given cgroup controllers (e.g. <literal>cpu</literal>) are available
-          for use on the system.</para>
+          for use on the system or whether the legacy v1 cgroup or the modern v2 cgroup hierarchy is used.
+          </para>
 
           <para>Multiple controllers may be passed with a space separating them; in this case the condition
           will only pass if all listed controllers are available for use. Controllers unknown to systemd are
-          ignored. Valid controllers are <literal>cpu</literal>, <literal>cpuset</literal>,
-          <literal>io</literal>, <literal>memory</literal>, and <literal>pids</literal>. Even if available in
-          the kernel, a particular controller may not be available if it was disabled on the kernel command
-          line with <varname>cgroup_disable=controller</varname>.</para></listitem>
+          ignored. Valid controllers are <literal>cpu</literal>, <literal>io</literal>,
+          <literal>memory</literal>, and <literal>pids</literal>. Even if available in the kernel, a
+          particular controller may not be available if it was disabled on the kernel command line with
+          <varname>cgroup_disable=controller</varname>.</para>
+
+          <para>Alternatively, two special strings <literal>v1</literal> and <literal>v2</literal> may be
+          specified (without any controller names). <literal>v2</literal> will pass if the unified v2 cgroup
+          hierarchy is used, and <literal>v1</literal> will pass if the legacy v1 hierarchy or the hybrid
+          hierarchy are used. Note that legacy or hybrid hierarchies have been deprecated. See
+          <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
+          more information.</para>
+          </listitem>
         </varlistentry>
 
         <varlistentry>

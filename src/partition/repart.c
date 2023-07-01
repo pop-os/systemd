@@ -1955,6 +1955,28 @@ static int derive_uuid(sd_id128_t base, const char *token, sd_id128_t *ret) {
         return 0;
 }
 
+static int context_open_and_lock_backing_fd(Context *context, const char *node) {
+        _cleanup_close_ int fd = -EBADF;
+
+        assert(context);
+        assert(node);
+
+        if (context->backing_fd >= 0)
+                return 0;
+
+        fd = open(node, O_RDONLY|O_CLOEXEC);
+        if (fd < 0)
+                return log_error_errno(errno, "Failed to open device '%s': %m", node);
+
+        /* Tell udev not to interfere while we are processing the device */
+        if (flock(fd, arg_dry_run ? LOCK_SH : LOCK_EX) < 0)
+                return log_error_errno(errno, "Failed to lock device '%s': %m", node);
+
+        log_debug("Device %s opened and locked.", node);
+        context->backing_fd = TAKE_FD(fd);
+        return 1;
+}
+
 static int context_load_partition_table(Context *context) {
         _cleanup_(fdisk_unref_contextp) struct fdisk_context *c = NULL;
         _cleanup_(fdisk_unref_tablep) struct fdisk_table *t = NULL;
@@ -1983,11 +2005,9 @@ static int context_load_partition_table(Context *context) {
         else {
                 uint32_t ssz;
 
-                if (context->backing_fd < 0) {
-                        context->backing_fd = open(context->node, O_RDONLY|O_CLOEXEC);
-                        if (context->backing_fd < 0)
-                                return log_error_errno(errno, "Failed to open device '%s': %m", context->node);
-                }
+                r = context_open_and_lock_backing_fd(context, context->node);
+                if (r < 0)
+                        return r;
 
                 /* Auto-detect sector size if not specified. */
                 r = probe_sector_size_prefer_ioctl(context->backing_fd, &ssz);
@@ -2032,13 +2052,9 @@ static int context_load_partition_table(Context *context) {
 
         if (context->backing_fd < 0) {
                 /* If we have no fd referencing the device yet, make a copy of the fd now, so that we have one */
-                context->backing_fd = fd_reopen(fdisk_get_devfd(c), O_RDONLY|O_CLOEXEC);
-                if (context->backing_fd < 0)
-                        return log_error_errno(context->backing_fd, "Failed to duplicate fdisk fd: %m");
-
-                /* Tell udev not to interfere while we are processing the device */
-                if (flock(context->backing_fd, arg_dry_run ? LOCK_SH : LOCK_EX) < 0)
-                        return log_error_errno(errno, "Failed to lock block device: %m");
+                r = context_open_and_lock_backing_fd(context, FORMAT_PROC_FD_PATH(fdisk_get_devfd(c)));
+                if (r < 0)
+                        return r;
         }
 
         /* The offsets/sizes libfdisk returns to us will be in multiple of the sector size of the
@@ -3222,8 +3238,21 @@ static int partition_target_sync(Context *context, Partition *p, PartitionTarget
                 if (r < 0)
                         return log_error_errno(r, "Failed to sync loopback device: %m");
         } else if (t->fd >= 0) {
+                struct stat st;
+
                 if (lseek(whole_fd, p->offset, SEEK_SET) == (off_t) -1)
                         return log_error_errno(errno, "Failed to seek to partition offset: %m");
+
+                if (lseek(t->fd, 0, SEEK_SET) == (off_t) -1)
+                        return log_error_errno(errno, "Failed to seek to start of temporary file: %m");
+
+                if (fstat(t->fd, &st) < 0)
+                        return log_error_errno(errno, "Failed to stat temporary file: %m");
+
+                if (st.st_size > (off_t) p->new_size)
+                        return log_error_errno(SYNTHETIC_ERRNO(ENOSPC),
+                                               "Partition %" PRIu64 "'s contents (%s) don't fit in the partition (%s)",
+                                               p->partno, FORMAT_BYTES(st.st_size), FORMAT_BYTES(p->new_size));
 
                 r = copy_bytes(t->fd, whole_fd, UINT64_MAX, COPY_REFLINK|COPY_HOLES|COPY_FSYNC);
                 if (r < 0)
@@ -3509,6 +3538,8 @@ static int partition_format_verity_hash(
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate libcryptsetup context: %m");
 
+        cryptsetup_enable_logging(cd);
+
         r = sym_crypt_format(
                         cd, CRYPT_VERITY, NULL, NULL, NULL, NULL, 0,
                         &(struct crypt_params_verity){
@@ -3520,8 +3551,17 @@ static int partition_format_verity_hash(
                                 .hash_block_size = context->sector_size,
                                 .salt_size = 32,
                         });
-        if (r < 0)
+        if (r < 0) {
+                /* libcryptsetup reports non-descriptive EIO errors for every I/O failure. Luckily, it
+                 * doesn't clobber errno so let's check for ENOSPC so we can report a better error if the
+                 * partition is too small. */
+                if (r == -EIO && errno == ENOSPC)
+                        return log_error_errno(errno,
+                                               "Verity hash data does not fit in partition %"PRIu64" with size %s",
+                                               p->partno, FORMAT_BYTES(p->new_size));
+
                 return log_error_errno(r, "Failed to setup verity hash data: %m");
+        }
 
         r = partition_target_sync(context, p, t);
         if (r < 0)
@@ -3612,7 +3652,7 @@ static int partition_format_verity_sig(Context *context, Partition *p) {
         _cleanup_free_ char *text = NULL;
         Partition *hp;
         uint8_t fp[X509_FINGERPRINT_SIZE];
-        size_t sigsz = 0, padsz; /* avoid false maybe-uninitialized warning */
+        size_t sigsz = 0; /* avoid false maybe-uninitialized warning */
         int whole_fd, r;
 
         assert(p->verity == VERITY_SIG);
@@ -3658,17 +3698,14 @@ static int partition_format_verity_sig(Context *context, Partition *p) {
         if (r < 0)
                 return log_error_errno(r, "Failed to format JSON object: %m");
 
-        padsz = round_up_size(strlen(text), 4096);
-        assert_se(padsz <= p->new_size);
-
-        r = strgrowpad0(&text, padsz);
+        r = strgrowpad0(&text, p->new_size);
         if (r < 0)
-                return log_error_errno(r, "Failed to pad string to %s", FORMAT_BYTES(padsz));
+                return log_error_errno(r, "Failed to pad string to %s", FORMAT_BYTES(p->new_size));
 
         if (lseek(whole_fd, p->offset, SEEK_SET) == (off_t) -1)
                 return log_error_errno(errno, "Failed to seek to partition offset: %m");
 
-        r = loop_write(whole_fd, text, padsz, /*do_poll=*/ false);
+        r = loop_write(whole_fd, text, p->new_size, /*do_poll=*/ false);
         if (r < 0)
                 return log_error_errno(r, "Failed to write verity signature to partition: %m");
 
@@ -3872,17 +3909,22 @@ static bool partition_needs_populate(Partition *p) {
 
 static int partition_populate_directory(Partition *p, const Set *denylist, char **ret) {
         _cleanup_(rm_rf_physical_and_freep) char *root = NULL;
-        _cleanup_close_ int rfd = -EBADF;
+        const char *vt;
         int r;
 
         assert(ret);
 
-        rfd = mkdtemp_open("/var/tmp/repart-XXXXXX", 0, &root);
-        if (rfd < 0)
-                return log_error_errno(rfd, "Failed to create temporary directory: %m");
+        r = var_tmp_dir(&vt);
+        if (r < 0)
+                return log_error_errno(r, "Could not determine temporary directory: %m");
 
-        if (fchmod(rfd, 0755) < 0)
-                return log_error_errno(errno, "Failed to change mode of temporary directory: %m");
+        r = tempfn_random_child(vt, "repart", &root);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate temporary directory: %m");
+
+        r = mkdir(root, 0755);
+        if (r < 0)
+                return log_error_errno(errno, "Failed to create temporary directory: %m");
 
         r = do_copy_files(p, root, denylist);
         if (r < 0)
@@ -5486,7 +5528,7 @@ static int help(void) {
         _cleanup_free_ char *link = NULL;
         int r;
 
-        r = terminal_urlify_man("systemd-repart", "1", &link);
+        r = terminal_urlify_man("systemd-repart", "8", &link);
         if (r < 0)
                 return log_oom();
 
@@ -6032,7 +6074,7 @@ static int acquire_root_devno(
                 char **ret,
                 int *ret_fd) {
 
-        _cleanup_free_ char *found_path = NULL;
+        _cleanup_free_ char *found_path = NULL, *node = NULL;
         dev_t devno, fd_devno = MODE_INVALID;
         _cleanup_close_ int fd = -EBADF;
         struct stat st;
@@ -6087,13 +6129,22 @@ static int acquire_root_devno(
         if (r < 0)
                 log_debug_errno(r, "Failed to find whole disk block device for '%s', ignoring: %m", p);
 
-        r = devname_from_devnum(S_IFBLK, devno, ret);
+        r = devname_from_devnum(S_IFBLK, devno, &node);
         if (r < 0)
                 return log_debug_errno(r, "Failed to determine canonical path for '%s': %m", p);
 
         /* Only if we still look at the same block device we can reuse the fd. Otherwise return an
          * invalidated fd. */
-        *ret_fd = fd_devno != MODE_INVALID && fd_devno == devno ? TAKE_FD(fd) : -1;
+        if (fd_devno != MODE_INVALID && fd_devno == devno) {
+                /* Tell udev not to interfere while we are processing the device */
+                if (flock(fd, arg_dry_run ? LOCK_SH : LOCK_EX) < 0)
+                        return log_error_errno(errno, "Failed to lock device '%s': %m", node);
+
+                *ret_fd = TAKE_FD(fd);
+        } else
+                *ret_fd = -EBADF;
+
+        *ret = TAKE_PTR(node);
         return 0;
 }
 

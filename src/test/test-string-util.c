@@ -259,7 +259,7 @@ TEST(strextend_with_separator) {
 }
 
 TEST(strrep) {
-        _cleanup_free_ char *one, *three, *zero;
+        _cleanup_free_ char *one = NULL, *three = NULL, *zero = NULL;
         one = strrep("waldo", 1);
         three = strrep("waldo", 3);
         zero = strrep("waldo", 0);
@@ -1216,6 +1216,23 @@ TEST(make_cstring) {
         TEST_MAKE_CSTRING_ONE(test8, 0, MAKE_CSTRING_REFUSE_TRAILING_NUL, "xyz");
         TEST_MAKE_CSTRING_ONE(test8, 0, MAKE_CSTRING_ALLOW_TRAILING_NUL, "xyz");
         TEST_MAKE_CSTRING_ONE(test8, -EINVAL, MAKE_CSTRING_REQUIRE_TRAILING_NUL, NULL);
+}
+
+TEST(strstrafter) {
+        static const char buffer[] = "abcdefghijklmnopqrstuvwxyz";
+
+        assert_se(!strstrafter(NULL, NULL));
+        assert_se(!strstrafter("", NULL));
+        assert_se(!strstrafter(NULL, ""));
+        assert_se(streq_ptr(strstrafter("", ""), ""));
+
+        assert_se(strstrafter(buffer, "a") == buffer + 1);
+        assert_se(strstrafter(buffer, "") == buffer);
+        assert_se(strstrafter(buffer, "ab") == buffer + 2);
+        assert_se(strstrafter(buffer, "cde") == buffer + 5);
+        assert_se(strstrafter(buffer, "xyz") == strchr(buffer, 0));
+        assert_se(strstrafter(buffer, buffer) == strchr(buffer, 0));
+        assert_se(!strstrafter(buffer, "-"));
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

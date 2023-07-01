@@ -206,8 +206,8 @@ restore_keymap() {
 
 wait_vconsole_setup() {
     local i ss
-    for ((i = 0; i < 20; i++)); do
-        if (( i != 0 )); then sleep .5; fi
+    for i in {1..20}; do
+        (( i > 1 )) && sleep 0.5
         ss="$(systemctl --property SubState --value show systemd-vconsole-setup.service)"
         if [[ "$ss" == "exited" || "$ss" == "dead" || "$ss" == "condition" ]]; then
             return 0
@@ -264,12 +264,12 @@ test_vc_keymap() {
             assert_in "XKBOPTIONS=terminate:ctrl_alt_bksp" "$vc"
         elif [[ "$i" == "us-acentos" ]]; then
             assert_in "X11 Layout: us" "$output"
-            assert_in 'X11 Model: pc105$' "$output"
+            assert_in "X11 Model: pc105" "$output"
             assert_in "X11 Variant: intl" "$output"
             assert_in "X11 Options: terminate:ctrl_alt_bksp" "$output"
 
             assert_in "XKBLAYOUT=us" "$vc"
-            assert_in "XKBMODEL=pc105$" "$vc"
+            assert_in "XKBMODEL=pc105" "$vc"
             assert_in "XKBVARIANT=intl" "$vc"
             assert_in "XKBOPTIONS=terminate:ctrl_alt_bksp" "$vc"
         elif [[ "$i" =~ ^us-.* ]]; then
@@ -553,6 +553,11 @@ test_convert() {
 }
 
 : >/failed
+
+# Make sure the content of kbd-model-map is the one that the tests expect
+# regardless of the version intalled on the distro where the testsuite is
+# running on.
+export SYSTEMD_KBD_MODEL_MAP=/usr/lib/systemd/tests/testdata/test-keymap-util/kbd-model-map
 
 enable_debug
 test_locale

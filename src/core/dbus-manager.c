@@ -1413,17 +1413,47 @@ static int dump_impl(
 
         assert(message);
 
-        /* Anyone can call this method */
-
+        /* 'status' access is the bare minimum always needed for this, as the policy might straight out
+         * forbid a client from querying any information from systemd, regardless of any rate limiting. */
         r = mac_selinux_access_check(message, "status", error);
         if (r < 0)
                 return r;
+
+        /* Rate limit reached? Check if the caller is privileged/allowed by policy to bypass this. We
+         * check the rate limit first to avoid the expensive roundtrip to polkit when not needed. */
+        if (!ratelimit_below(&m->dump_ratelimit)) {
+                /* We need a way for SELinux to constrain the operation when the rate limit is active, even
+                 * if polkit would allow it, but we cannot easily add new named permissions, so we need to
+                 * use an existing one. Reload/reexec are also slow but non-destructive/modifying
+                 * operations, and can cause PID1 to stall. So it seems similar enough in terms of security
+                 * considerations and impact, and thus use the same access check for dumps which, given the
+                 * large amount of data to fetch, can stall PID1 for quite some time. */
+                r = mac_selinux_access_check(message, "reload", error);
+                if (r < 0)
+                        goto ratelimited;
+
+                r = bus_verify_bypass_dump_ratelimit_async(m, message, error);
+                if (r < 0)
+                        goto ratelimited;
+                if (r == 0)
+                        /* No authorization for now, but the async polkit stuff will call us again when it
+                         * has it */
+                        return 1;
+        }
 
         r = manager_get_dump_string(m, patterns, &dump);
         if (r < 0)
                 return r;
 
         return reply(message, dump);
+
+ratelimited:
+        log_warning("Dump request rejected due to rate limit on unprivileged callers, blocked for %s.",
+                    FORMAT_TIMESPAN(ratelimit_left(&m->dump_ratelimit), USEC_PER_SEC));
+        return sd_bus_error_setf(error,
+                                 SD_BUS_ERROR_LIMITS_EXCEEDED,
+                                 "Dump request rejected due to rate limit on unprivileged callers, blocked for %s.",
+                                 FORMAT_TIMESPAN(ratelimit_left(&m->dump_ratelimit), USEC_PER_SEC));
 }
 
 static int reply_dump(sd_bus_message *message, char *dump) {
@@ -1530,7 +1560,7 @@ static void log_caller(sd_bus_message *message, Manager *manager, const char *me
         log_info("%s requested from client PID " PID_FMT "%s%s%s%s%s%s...",
                  method, pid,
                  comm ? " ('" : "", strempty(comm), comm ? "')" : "",
-                 caller ? " (unit " : "", caller ? caller->id : NULL, caller ? ")" : "");
+                 caller ? " (unit " : "", caller ? caller->id : "", caller ? ")" : "");
 }
 
 static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -2200,6 +2230,8 @@ static int method_get_default_target(sd_bus_message *message, void *userdata, sd
                 return r;
 
         r = unit_file_get_default(m->unit_file_scope, NULL, &default_target);
+        if (r == -ERFKILL)
+                sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED, "Unit file is masked.");
         if (r < 0)
                 return r;
 
