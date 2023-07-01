@@ -1,3 +1,10 @@
+systemd (253.5-1) unstable; urgency=medium
+
+  * New upstream version 253.5 (Closes: #1040035)
+  * Refresh patches for 253.5
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 01 Jul 2023 11:57:46 +0100
+
 systemd (253-4) unstable; urgency=medium
 
   * Stop localed from writing to /etc/default/keyboard and symlink it to
