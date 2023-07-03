@@ -8,7 +8,6 @@ debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Ubuntu-UseDomains-by-default.patch
-debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
