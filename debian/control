@@ -99,6 +99,7 @@ Pre-Depends: ${shlibs:Pre-Depends},
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
+         systemd-dev (>= ${source:Version}),
          mount,
 Replaces: systemd-repart (<< 250.2-3~)
 Conflicts: consolekit,
@@ -343,6 +344,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
          libudev1 (= ${binary:Version}),
+         systemd-dev (>= ${source:Version}),
          s390-tools [s390],
 Recommends: systemd-hwe-hwdb,
 Breaks: systemd (<< ${binary:Version}),
@@ -481,7 +483,7 @@ Description: simple UEFI boot manager - tools and services
  textual menu to select the entry to boot and an editor for the kernel command
  line. It supports systems with UEFI firmware only.
  .
- Installing systemd-boot will not automatically switch your boot loader.
+ Installing systemd-boot will configure and install it in the ESP.
  .
  This package contains various tools and services to manage systems using
  systemd-boot.
@@ -521,3 +523,18 @@ Description: systemd DNS resolver
  .
  Installing this package automatically overwrites /etc/resolv.conf and switches
  it to be managed by systemd-resolved.
+
+Package: systemd-dev
+Architecture: all
+Multi-Arch: foreign
+Section: devel
+Depends: ${misc:Depends},
+Breaks: systemd (<< 253-2~),
+        udev (<< 253-2~),
+Replaces: systemd (<< 253-2~),
+          udev (<< 253-2~),
+Description: systemd development files
+ This package contains the systemd and udev pkg-config files. Note that these
+ are different from the libsystemd's and libudev's pkg-config files, which can
+ still be found in the respective dev packages, but instead provide data such as
+ the installation directories for units, and more.

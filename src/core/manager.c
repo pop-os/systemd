@@ -869,6 +869,11 @@ int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager *
                 .test_run_flags = test_run_flags,
 
                 .default_oom_policy = OOM_STOP,
+
+                .dump_ratelimit = {
+                        .interval = 10 * USEC_PER_MINUTE,
+                        .burst = 10,
+                },
         };
 
 #if ENABLE_EFI
@@ -1341,6 +1346,48 @@ static unsigned manager_dispatch_gc_job_queue(Manager *m) {
         return n;
 }
 
+static int manager_ratelimit_requeue(sd_event_source *s, uint64_t usec, void *userdata) {
+        Unit *u = userdata;
+
+        assert(u);
+        assert(s == u->auto_start_stop_event_source);
+
+        u->auto_start_stop_event_source = sd_event_source_unref(u->auto_start_stop_event_source);
+
+        /* Re-queue to all queues, if the rate limit hit we might have been throttled on any of them. */
+        unit_submit_to_stop_when_unneeded_queue(u);
+        unit_submit_to_start_when_upheld_queue(u);
+        unit_submit_to_stop_when_bound_queue(u);
+
+        return 0;
+}
+
+static int manager_ratelimit_check_and_queue(Unit *u) {
+        int r;
+
+        assert(u);
+
+        if (ratelimit_below(&u->auto_start_stop_ratelimit))
+                return 1;
+
+        /* Already queued, no need to requeue */
+        if (u->auto_start_stop_event_source)
+                return 0;
+
+        r = sd_event_add_time(
+                        u->manager->event,
+                        &u->auto_start_stop_event_source,
+                        CLOCK_MONOTONIC,
+                        ratelimit_end(&u->auto_start_stop_ratelimit),
+                        0,
+                        manager_ratelimit_requeue,
+                        u);
+        if (r < 0)
+                return log_unit_error_errno(u, r, "Failed to queue timer on event loop: %m");
+
+        return 0;
+}
+
 static unsigned manager_dispatch_stop_when_unneeded_queue(Manager *m) {
         unsigned n = 0;
         Unit *u;
@@ -1365,8 +1412,11 @@ static unsigned manager_dispatch_stop_when_unneeded_queue(Manager *m) {
                 /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
                  * service being unnecessary after a while. */
 
-                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
-                        log_unit_warning(u, "Unit not needed anymore, but not stopping since we tried this too often recently.");
+                r = manager_ratelimit_check_and_queue(u);
+                if (r <= 0) {
+                        log_unit_warning(u,
+                                         "Unit not needed anymore, but not stopping since we tried this too often recently.%s",
+                                         r == 0 ? " Will retry later." : "");
                         continue;
                 }
 
@@ -1404,8 +1454,12 @@ static unsigned manager_dispatch_start_when_upheld_queue(Manager *m) {
                 /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
                  * service being unnecessary after a while. */
 
-                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
-                        log_unit_warning(u, "Unit needs to be started because active unit %s upholds it, but not starting since we tried this too often recently.", culprit->id);
+                r = manager_ratelimit_check_and_queue(u);
+                if (r <= 0) {
+                        log_unit_warning(u,
+                                         "Unit needs to be started because active unit %s upholds it, but not starting since we tried this too often recently.%s",
+                                         culprit->id,
+                                         r == 0 ? " Will retry later." : "");
                         continue;
                 }
 
@@ -1442,8 +1496,12 @@ static unsigned manager_dispatch_stop_when_bound_queue(Manager *m) {
                 /* If stopping a unit fails continuously we might enter a stop loop here, hence stop acting on the
                  * service being unnecessary after a while. */
 
-                if (!ratelimit_below(&u->auto_start_stop_ratelimit)) {
-                        log_unit_warning(u, "Unit needs to be stopped because it is bound to inactive unit %s it, but not stopping since we tried this too often recently.", culprit->id);
+                r = manager_ratelimit_check_and_queue(u);
+                if (r <= 0) {
+                        log_unit_warning(u,
+                                         "Unit needs to be stopped because it is bound to inactive unit %s it, but not stopping since we tried this too often recently.%s",
+                                         culprit->id,
+                                         r == 0 ? " Will retry later." : "");
                         continue;
                 }
 
@@ -1699,7 +1757,11 @@ static bool manager_dbus_is_running(Manager *m, bool deserialized) {
         u = manager_get_unit(m, SPECIAL_DBUS_SERVICE);
         if (!u)
                 return false;
-        if (!IN_SET((deserialized ? SERVICE(u)->deserialized_state : SERVICE(u)->state), SERVICE_RUNNING, SERVICE_RELOAD))
+        if (!IN_SET((deserialized ? SERVICE(u)->deserialized_state : SERVICE(u)->state),
+                    SERVICE_RUNNING,
+                    SERVICE_RELOAD,
+                    SERVICE_RELOAD_NOTIFY,
+                    SERVICE_RELOAD_SIGNAL))
                 return false;
 
         return true;
@@ -1811,6 +1873,10 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *roo
         {
                 /* This block is (optionally) done with the reloading counter bumped */
                 _unused_ _cleanup_(manager_reloading_stopp) Manager *reloading = NULL;
+
+                /* Make sure we don't have a left-over from a previous run */
+                if (!serialization)
+                        (void) rm_rf(m->lookup_paths.transient, 0);
 
                 /* If we will deserialize make sure that during enumeration this is already known, so we increase the
                  * counter here already */
@@ -3798,6 +3864,7 @@ static int manager_execute_generators(Manager *m, char **paths, bool remount_ro)
 }
 
 static int manager_run_generators(Manager *m) {
+        ForkFlags flags = FORK_RESET_SIGNALS | FORK_WAIT | FORK_NEW_MOUNTNS | FORK_MOUNTNS_SLAVE;
         _cleanup_strv_free_ char **paths = NULL;
         int r;
 
@@ -3828,12 +3895,28 @@ static int manager_run_generators(Manager *m) {
                 goto finish;
         }
 
-        r = safe_fork("(sd-gens)",
-                      FORK_RESET_SIGNALS | FORK_LOG | FORK_WAIT | FORK_NEW_MOUNTNS | FORK_MOUNTNS_SLAVE | FORK_PRIVATE_TMP,
-                      NULL);
+        /* On some systems /tmp/ doesn't exist, and on some other systems we cannot create it at all. Avoid
+         * trying to mount a private tmpfs on it as there's no one size fits all. */
+        if (is_dir("/tmp", /* follow= */ false) > 0)
+                flags |= FORK_PRIVATE_TMP;
+
+        r = safe_fork("(sd-gens)", flags, NULL);
         if (r == 0) {
                 r = manager_execute_generators(m, paths, /* remount_ro= */ true);
                 _exit(r >= 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+        }
+        if (r < 0) {
+                if (!ERRNO_IS_PRIVILEGE(r)) {
+                        log_error_errno(r, "Failed to fork off sandboxing environment for executing generators: %m");
+                        goto finish;
+                }
+
+                /* Failed to fork with new mount namespace? Maybe, running in a container environment with
+                 * seccomp or without capability. */
+                log_debug_errno(r,
+                                "Failed to fork off sandboxing environment for executing generators. "
+                                "Falling back to execute generators without sandboxing: %m");
+                r = manager_execute_generators(m, paths, /* remount_ro= */ false);
         }
 
 finish:

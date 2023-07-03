@@ -1285,12 +1285,14 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
         output = check_output('ip -d link show vlan99')
         print(output)
-        self.assertRegex(output, ' mtu 2000 ')
-        self.assertRegex(output, 'REORDER_HDR')
-        self.assertRegex(output, 'LOOSE_BINDING')
-        self.assertRegex(output, 'GVRP')
-        self.assertRegex(output, 'MVRP')
-        self.assertRegex(output, ' id 99 ')
+        self.assertIn(' mtu 2000 ', output)
+        self.assertIn('REORDER_HDR', output)
+        self.assertIn('LOOSE_BINDING', output)
+        self.assertIn('GVRP', output)
+        self.assertIn('MVRP', output)
+        self.assertIn(' id 99 ', output)
+        self.assertIn('ingress-qos-map { 4:100 7:13 }', output)
+        self.assertIn('egress-qos-map { 0:1 1:3 6:6 7:7 10:3 }', output)
 
         output = check_output('ip -4 address show dev test1')
         print(output)
@@ -3636,10 +3638,14 @@ class NetworkdTCTests(unittest.TestCase, Utilities):
 
         output = check_output('tc -d class show dev dummy98')
         print(output)
-        self.assertRegex(output, 'class htb 2:37 root leaf 37:')
-        self.assertRegex(output, 'class htb 2:3a root leaf 3a:')
-        self.assertRegex(output, 'class htb 2:3b root leaf 3b:')
-        self.assertRegex(output, 'class htb 2:3c root leaf 3c:')
+        # Here (:|prio) is a workaround for a bug in iproute2 v6.2.0 caused by
+        # https://github.com/shemminger/iproute2/commit/010a8388aea11e767ba3a2506728b9ad9760df0e
+        # which is fixed in v6.3.0 by
+        # https://github.com/shemminger/iproute2/commit/4e0e56e0ef05387f7f5d8ab41fe6ec6a1897b26d
+        self.assertRegex(output, 'class htb 2:37 root leaf 37(:|prio) ')
+        self.assertRegex(output, 'class htb 2:3a root leaf 3a(:|prio) ')
+        self.assertRegex(output, 'class htb 2:3b root leaf 3b(:|prio) ')
+        self.assertRegex(output, 'class htb 2:3c root leaf 3c(:|prio) ')
         self.assertRegex(output, 'prio 1 quantum 4000 rate 1Mbit overhead 100 ceil 500Kbit')
         self.assertRegex(output, 'burst 123456')
         self.assertRegex(output, 'cburst 123457')

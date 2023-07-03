@@ -361,6 +361,7 @@ int make_filesystem(
                                 "-m", "0",
                                 "-E", discard ? "discard,lazy_itable_init=1" : "nodiscard,lazy_itable_init=1",
                                 "-b", "4096",
+                                "-T", "default",
                                 node);
                 if (!argv)
                         return log_oom();
@@ -378,6 +379,7 @@ int make_filesystem(
                                 "-m", "0",
                                 "-E", discard ? "discard,lazy_itable_init=1" : "nodiscard,lazy_itable_init=1",
                                 "-b", "4096",
+                                "-T", "default",
                                 node);
 
                 if (root && strv_extend_strv(&argv, STRV_MAKE("-d", root), false) < 0)
@@ -471,7 +473,6 @@ int make_filesystem(
 
                 argv = strv_new(mkfs,
                                 root, node,
-                                "-quiet",
                                 "-noappend");
 
         else if (streq(fstype, "erofs"))

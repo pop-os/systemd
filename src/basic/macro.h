@@ -249,6 +249,10 @@ static inline int __coverity_check_and_return__(int condition) {
 
 #define sizeof_field(struct_type, member) sizeof(((struct_type *) 0)->member)
 
+/* Maximum buffer size needed for formatting an unsigned integer type as hex, including space for '0x'
+ * prefix and trailing NUL suffix. */
+#define HEXADECIMAL_STR_MAX(type) (2 + sizeof(type) * 2 + 1)
+
 /* Returns the number of chars needed to format variables of the specified type as a decimal string. Adds in
  * extra space for a negative '-' prefix for signed types. Includes space for the trailing NUL. */
 #define DECIMAL_STR_MAX(type)                                           \
@@ -295,20 +299,6 @@ static inline int __coverity_check_and_return__(int condition) {
         for (typeof(p) *_l = (typeof(p)[]) { ({ p = x; }), ##__VA_ARGS__, POINTER_MAX }; \
              p != (typeof(p)) POINTER_MAX;                                               \
              p = *(++_l))
-
-/* Define C11 thread_local attribute even on older gcc compiler
- * version */
-#ifndef thread_local
-/*
- * Don't break on glibc < 2.16 that doesn't define __STDC_NO_THREADS__
- * see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53769
- */
-#if __STDC_VERSION__ >= 201112L && !(defined(__STDC_NO_THREADS__) || (defined(__GNU_LIBRARY__) && __GLIBC__ == 2 && __GLIBC_MINOR__ < 16))
-#define thread_local _Thread_local
-#else
-#define thread_local __thread
-#endif
-#endif
 
 #define DEFINE_TRIVIAL_DESTRUCTOR(name, type, func)             \
         static inline void name(type *p) {                      \

@@ -209,7 +209,7 @@ execute_before_dh_install:
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
 
-execute_after_dh_install:
+execute_after_dh_install-arch:
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
 		mkdir -p debian/systemd-standalone-$$pkg/bin; \
@@ -249,7 +249,7 @@ ifeq ($(DEB_HOST_ARCH),i386)
 	rm -f debian/systemd-boot-efi/usr/lib/systemd/boot/efi/linuxia32.elf.stub
 endif
 
-execute_after_dh_installman:
+execute_after_dh_installman-arch:
 	# remove duplicate files shipped by systemd-*/udev
 	# run after dh_installman, which runs after dh_install, to include manpages
 	echo "Removing duplicate files in systemd package:"

@@ -1,3 +1,36 @@
+systemd (253.5-1) unstable; urgency=medium
+
+  * New upstream version 253.5 (Closes: #1040035)
+  * Refresh patches for 253.5
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 01 Jul 2023 11:57:46 +0100
+
+systemd (253-4) unstable; urgency=medium
+
+  * Stop localed from writing to /etc/default/keyboard and symlink it to
+    /etc/vconsole.conf. Integration is not set up for now, but GDM needs
+    to query the configured values. Allow reading, but disallow setting
+    keymaps. (Closes: #1038762)
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 24 Jun 2023 20:21:24 +0100
+
+systemd (253-3) unstable; urgency=medium
+
+  * systemd-dev: add missing breaks/replaces with udev. (Closes: #1037924)
+  * Run the systemd-binfmt trigger unconditionally.
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 20 Jun 2023 11:45:22 +0100
+
+systemd (253-2) experimental; urgency=medium
+
+  * Add systemd-dev package for pkg-config files. Move systemd.pc and
+    udev.pc to systemd-dev, so that packages can build-depend on a small
+    package instead of the whole set of binaries. (Closes: #945922,
+    #917549)
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 12 Jun 2023 00:22:52 +0100
+
 systemd (253-1) experimental; urgency=medium
 
   * New upstream version 253. For a full list of changes, see:
@@ -55,6 +88,28 @@ systemd (253~rc2-1) experimental; urgency=medium
   * Refresh patches
 
  -- Luca Boccassi <bluca@debian.org>  Wed, 08 Feb 2023 20:36:58 +0000
+
+systemd (252.11-1) unstable; urgency=medium
+
+  * New upstream version 252.11
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 11 Jun 2023 23:05:40 +0100
+
+systemd (252.6-1) unstable; urgency=medium
+
+  * Update timedated autopkgtest. We no longer support /etc/timezone, as
+    /etc/localtime is always available (cherry picked from commit
+    6ef7bb0ce0f89e732a8b95624af059e52c3712b5)
+  * Stop supporting /etc/timezone and just rely on /etc/localtime
+  * systemd-boot: update on package upgrade, if installed
+  * Override Lintian warning in systemd-coredump
+  * d/watch: restrict to v252.x for bookworm
+  * New upstream version 252.6
+  * Refresh patches
+  * systemd-boot: enable on install (Closes: #1031118)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 28 Feb 2023 11:15:45 +0000
 
 systemd (252.5-2ubuntu3) lunar; urgency=medium
 

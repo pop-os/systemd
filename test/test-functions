@@ -207,6 +207,7 @@ BASICTOOLS=(
     seq
     setfattr
     setfont
+    setpriv
     setsid
     sfdisk
     sh
@@ -872,8 +873,8 @@ INNER_EOF
 # Let's make one to prevent unexpected "<bin> not found" issues in the future
 export PATH="/sbin:/bin:/usr/sbin:/usr/bin"
 
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys || mount -t sysfs sysfs /sys
 mount -o remount,rw /
 
 DEFAULT_ENVIRONMENT="\$DEFAULT_ENVIRONMENT ASAN_RT_PATH=$ASAN_RT_PATH"
@@ -1144,7 +1145,7 @@ install_debian_systemd() {
         ddebug "Install debian files from package $deb"
         for file in $files; do
             [ -e "$file" ] || continue
-            [ -d "$file" ] && continue
+            [ ! -L "$file" ] && [ -d "$file" ] && continue
             inst "$file"
         done
     done < <(grep -E '^Package:' "${SOURCE_DIR}/debian/control" | cut -d ':' -f 2)
@@ -1174,7 +1175,7 @@ install_suse_systemd() {
         ddebug "Install files from package $p"
         while read -r f; do
             [ -e "$f" ] || continue
-            [ -d "$f" ] && continue
+            [ ! -L "$f" ] && [ -d "$f" ] && continue
             inst "$f"
         done < <(rpm -ql "$p")
     done
@@ -1239,11 +1240,14 @@ install_systemd() {
         mkdir -p "$initdir/etc/systemd/system/service.d/"
         echo -e "[Service]\nProtectSystem=no\nProtectHome=no\n" >"$initdir/etc/systemd/system/service.d/99-gcov-override.conf"
         # Similarly, set ReadWritePaths= to the $BUILD_DIR in the test image
-        # to make the coverage work with units utilizing DynamicUser=yes. Do
-        # this only for services from TEST-20, as setting this system-wide
-        # has many undesirable side-effects
-        mkdir -p "$initdir/etc/systemd/system/test20-.service.d/"
-        echo -e "[Service]\nReadWritePaths=${BUILD_DIR:?}\n" >"$initdir/etc/systemd/system/test20-.service.d/99-gcov-rwpaths-override.conf"
+        # to make the coverage work with units using DynamicUser=yes. Do this
+        # only for services with test- prefix, as setting this system-wide
+        # has many undesirable side-effects, as it creates its own namespace.
+        mkdir -p "$initdir/etc/systemd/system/test-.service.d/"
+        echo -e "[Service]\nReadWritePaths=${BUILD_DIR:?}\n" >"$initdir/etc/systemd/system/test-.service.d/99-gcov-rwpaths-override.conf"
+        # Ditto, but for the user daemon
+        mkdir -p "$initdir/etc/systemd/user/test-.service.d/"
+        echo -e "[Service]\nReadWritePaths=${BUILD_DIR:?}\n" >"$initdir/etc/systemd/user/test-.service.d/99-gcov-rwpaths-override.conf"
     fi
 
     # If we're built with -Dportabled=false, tests with systemd-analyze
@@ -1940,12 +1944,12 @@ EOF
 <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
         "https://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
-    <limit name="service_start_timeout">60000</limit>
+    <limit name="service_start_timeout">120000</limit>
 </busconfig>
 EOF
         # Bump the client-side timeout in sd-bus as well
         mkdir -p "$initdir/etc/systemd/system.conf.d"
-        echo -e '[Manager]\nDefaultEnvironment=SYSTEMD_BUS_TIMEOUT=60' >"$initdir/etc/systemd/system.conf.d/bus-timeout.conf"
+        echo -e '[Manager]\nDefaultEnvironment=SYSTEMD_BUS_TIMEOUT=120' >"$initdir/etc/systemd/system.conf.d/bus-timeout.conf"
     fi
 }
 
@@ -2638,12 +2642,14 @@ inst_binary() {
 
     # Same as above, but we need to wrap certain libraries unconditionally
     #
-    # chown, getent, login, su, useradd, userdel - dlopen()s (not only) systemd's PAM modules
-    # ls, stat - pulls in nss_systemd with certain options (like ls -l) when
-    #            nsswitch.conf uses [SUCCESS=merge] (like on Arch Linux)
-    # delv, dig - pulls in nss_resolve if `resolve` is in nsswitch.conf
+    # chown, getent, login, su, useradd, userdel - dlopen() (not only) systemd's PAM modules
+    # ls, mkfs.*, mksquashfs, mkswap, setpriv, stat
+    #       - pull in nss_systemd with certain options (like ls -l) when
+    #         nsswitch.conf uses [SUCCESS=merge] (like on Arch Linux)
+    # delv, dig - pull in nss_resolve if `resolve` is in nsswitch.conf
     # tar - called by machinectl in TEST-25
-    if get_bool "$IS_BUILT_WITH_ASAN" && [[ "$bin" =~ /(chown|delv|dig|getent|login|ls|stat|su|tar|useradd|userdel)$ ]]; then
+    bin_rx='/(chown|delv|dig|getent|login|ls|mkfs\.[a-z0-9]+|mksquashfs|mkswap|setpriv|stat|su|tar|useradd|userdel)$'
+    if get_bool "$IS_BUILT_WITH_ASAN" && [[ "$bin" =~ $bin_rx ]]; then
         wrap_binary=1
     fi
 
@@ -3233,7 +3239,8 @@ do_test() {
                 fi
                 test_cleanup
                 if [ $ret -eq 0 ]; then
-                    rm "$TESTLOG"
+                    # $TESTLOG is in $STATEDIR, so clean it up only on success
+                    [[ -n "$STATEDIR" ]] && rm -vfr "$STATEDIR"
                     echo "[OK]"
                 else
                     echo "[FAILED]"

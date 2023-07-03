@@ -36,6 +36,7 @@
 #include "memory-util.h"
 #include "missing_sched.h"
 #include "missing_syscall.h"
+#include "missing_threads.h"
 #include "mountpoint-util.h"
 #include "namespace-util.h"
 #include "nulstr-util.h"
@@ -1185,7 +1186,7 @@ int safe_fork_full(
         else
                 pid = fork();
         if (pid < 0)
-                return log_full_errno(prio, errno, "Failed to fork: %m");
+                return log_full_errno(prio, errno, "Failed to fork off '%s': %m", strna(name));
         if (pid > 0) {
                 /* We are in the parent process */
 
@@ -1221,6 +1222,7 @@ int safe_fork_full(
                 /* Close the logs if requested, before we log anything. And make sure we reopen it if needed. */
                 log_close();
                 log_set_open_when_needed(true);
+                log_settle_target();
         }
 
         if (name) {
