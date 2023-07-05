@@ -1,0 +1,33 @@
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Wed, 5 Jul 2023 09:59:21 -0400
+Subject: test: skip tests for unsupported localectl features
+
+Forwarded: no
+---
+ test/units/testsuite-73.sh | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/test/units/testsuite-73.sh b/test/units/testsuite-73.sh
+index 0f0dda8..fa3490d 100755
+--- a/test/units/testsuite-73.sh
++++ b/test/units/testsuite-73.sh
+@@ -225,6 +225,9 @@ wait_vconsole_setup() {
+ test_vc_keymap() {
+     local i output vc
+
++    echo "Setting X11 and console keymaps is not supported in Debian, skipping test."
++    return
++
+     if [[ -z "$(localectl list-keymaps)" ]]; then
+         echo "No vconsole keymap installed, skipping test."
+         return
+@@ -295,6 +298,9 @@ test_vc_keymap() {
+ test_x11_keymap() {
+     local output
+
++    echo "Setting X11 and console keymaps is not supported in Debian, skipping test."
++    return
++
+     if [[ -z "$(localectl list-x11-keymap-layouts)" ]]; then
+         echo "No x11 keymap installed, skipping test."
+         return
