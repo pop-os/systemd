@@ -96,8 +96,7 @@
               <varlistentry>
                 <term>degraded-carrier</term>
                 <listitem>
-                  <para>for bond or bridge master, one of the bonding or bridge slave network interfaces is
-                  in off, no-carrier, or dormant state</para>
+                  <para>one of the bonding or bridge slave network interfaces is in off, no-carrier, or dormant state, and the master interface has no address.</para>
                 </listitem>
               </varlistentry>
               <varlistentry>
@@ -110,7 +109,9 @@
               <varlistentry>
                 <term>degraded</term>
                 <listitem>
-                  <para>the link has carrier and addresses valid on the local link configured</para>
+                  <para>the link has carrier and addresses valid on the local link configured. For bond or
+                  bridge master this means that not all slave network interfaces have carrier but at least
+                  one does.</para>
                 </listitem>
               </varlistentry>
               <varlistentry>
@@ -122,7 +123,8 @@
               <varlistentry>
                 <term>routable</term>
                 <listitem>
-                  <para>the link has carrier and routable address configured</para>
+                  <para>the link has carrier and routable address configured. For bond or bridge master it is
+                  not necessary for all slave network interfaces to have carrier, but at least one must.</para>
                 </listitem>
               </varlistentry>
             </variablelist>
@@ -355,6 +357,38 @@ s - Service VLAN, m - Two-port MAC Relay (TPMR)
         which match the file are reconfigured.</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term>
+          <command>edit</command>
+          <replaceable>FILE</replaceable>|<replaceable>@DEVICE</replaceable>…
+        </term>
+        <listitem><para>Edit network configuration files, which include <filename>.network</filename>,
+        <filename>.netdev</filename>, and <filename>.link</filename> files. If no network config file
+        matching the given name is found, a new one will be created under <filename>/etc/</filename>.
+        Specially, if the name is prefixed by <literal>@</literal>, it will be treated as
+        a network interface, and editing will be performed on the network config files associated
+        with it. Additionally, the interface name can be suffixed with <literal>:network</literal> (default)
+        or <literal>:link</literal>, in order to choose the type of network config to operate on.</para>
+
+        <para>If <option>--drop-in=</option> is specified, edit the drop-in file instead of
+        the main configuration file. Unless <option>--no-reload</option> is specified,
+        <command>systemd-networkd</command> will be reloaded after the edit of the
+        <filename>.network</filename> or <filename>.netdev</filename> files finishes.
+        The same applies for <filename>.link</filename> files and <command>systemd-udevd</command>.
+        Note that the changed link settings are not automatically applied after reloading.
+        To achieve that, trigger uevents for the corresponding interface. Refer to
+        <citerefentry><refentrytitle>systemd.link</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for more information.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term>
+          <command>cat</command>
+          <replaceable>FILE</replaceable>|<replaceable>@DEVICE</replaceable>…
+        </term>
+        <listitem><para>Show network configuration files. This command honors
+        the <literal>@</literal> prefix in the same way as <command>edit</command>.</para></listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -402,6 +436,25 @@ s - Service VLAN, m - Two-port MAC Relay (TPMR)
         <listitem>
           <para>When used with <command>status</command>, controls the number of journal lines to show,
           counting from the most recent ones. Takes a positive integer argument. Defaults to 10.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--drop-in=</option></term>
+        <replaceable>NAME</replaceable>
+
+        <listitem>
+          <para>When used with <command>edit</command>, edit the drop-in file <replaceable>NAME</replaceable>
+          instead of the main configuration file.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--no-reload</option></term>
+
+        <listitem>
+          <para>When used with <command>edit</command>, <command>systemd-networkd</command>
+          or <command>systemd-udevd</command> will not be reloaded after the editing finishes.</para>
         </listitem>
       </varlistentry>
 

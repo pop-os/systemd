@@ -81,7 +81,7 @@
 
     <para>For a longer rationale for <filename>os-release</filename>
     please refer to the <ulink
-    url="http://0pointer.de/blog/projects/os-release">Announcement of <filename>/etc/os-release</filename></ulink>.</para>
+    url="https://0pointer.de/blog/projects/os-release">Announcement of <filename>/etc/os-release</filename></ulink>.</para>
 
     <refsect2>
       <title><filename>/etc/initrd-release</filename></title>
@@ -110,6 +110,11 @@
       match, and either <varname>SYSEXT_LEVEL=</varname> exists and matches too, or if it is not present,
       <varname>VERSION_ID=</varname> exists and matches. This ensures ABI/API compatibility between the
       layers and prevents merging of an incompatible image in an overlay.</para>
+
+      <para>In order to identify the extension image itself, the same fields defined below can be added to the
+      <filename>extension-release</filename> file with a <varname>SYSEXT_</varname> prefix (to disambiguate
+      from fields used to match on the base image). E.g.: <varname>SYSEXT_ID=myext</varname>,
+      <varname>SYSEXT_VERSION_ID=1.2.3</varname>.</para>
 
       <para>In the <filename>extension-release.<replaceable>IMAGE</replaceable></filename> filename, the
       <replaceable>IMAGE</replaceable> part must exactly match the file name of the containing image with the
@@ -387,6 +392,35 @@
           for light blue, or <literal>ANSI_COLOR="0;38;2;60;110;180"</literal> for Fedora blue.
           </para></listitem>
         </varlistentry>
+
+        <varlistentry>
+          <term><varname>VENDOR_NAME=</varname></term>
+
+          <listitem><para>The name of the OS vendor. This is the name of the organization or company which
+          produces the OS. This field is optional.</para>
+
+          <para>This name is intended to be exposed in "About this system" UIs or software update UIs when
+          needed to distinguish the OS vendor from the OS itself. It is intended to be human readable.</para>
+
+          <para>Examples: <literal>VENDOR_NAME="Fedora Project"</literal> for Fedora Linux,
+          <literal>VENDOR_NAME="Canonical"</literal> for Ubuntu.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VENDOR_URL=</varname></term>
+
+          <listitem><para>The homepage of the OS vendor. This field is optional. The
+          <varname>VENDOR_NAME=</varname> field should be set if this one is, although clients must be
+          robust against either field not being set.</para>
+
+          <para>The value should be in <ulink
+          url="https://tools.ietf.org/html/rfc3986">RFC3986 format</ulink>, and should be
+          <literal>http:</literal> or <literal>https:</literal> URLs. Only one URL shall be listed in the
+          setting.</para>
+
+          <para>Examples: <literal>VENDOR_URL="https://fedoraproject.org/"</literal>,
+          <literal>VENDOR_URL="https://canonical.com/"</literal>.</para></listitem>
+        </varlistentry>
       </variablelist>
     </refsect2>
 
@@ -438,6 +472,17 @@
         </varlistentry>
 
         <varlistentry>
+          <term><varname>CONFEXT_LEVEL=</varname></term>
+
+          <listitem><para>Semantically the same as <varname>SYSEXT_LEVEL=</varname> but for confext images.
+          See <filename>/etc/extension-release.d/extension-release.<replaceable>IMAGE</replaceable></filename>
+          for more information.</para>
+
+          <para>Examples: <literal>CONFEXT_LEVEL=2</literal>, <literal>CONFEXT_LEVEL=15.14</literal>.
+          </para></listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><varname>SYSEXT_SCOPE=</varname></term>
           <listitem><para>Takes a space-separated list of one or more of the strings
           <literal>system</literal>, <literal>initrd</literal> and <literal>portable</literal>. This field is
@@ -446,6 +491,12 @@
           images. If unspecified, <literal>SYSEXT_SCOPE=system portable</literal> is implied, i.e. any system
           extension without this field is applicable to regular systems and to portable service environments,
           but not to initrd environments.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>CONFEXT_SCOPE=</varname></term>
+
+          <listitem><para>Semantically the same as <varname>SYSEXT_SCOPE=</varname> but for confext images.</para></listitem>
         </varlistentry>
 
         <varlistentry>

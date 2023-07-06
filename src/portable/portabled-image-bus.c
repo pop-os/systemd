@@ -60,7 +60,7 @@ int bus_image_common_get_os_release(
                 return 1;
 
         if (!image->metadata_valid) {
-                r = image_read_metadata(image);
+                r = image_read_metadata(image, &image_policy_service);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Failed to read image metadata: %m");
         }
@@ -83,9 +83,9 @@ static int append_fd(sd_bus_message *m, PortableMetadata *d) {
         if (d) {
                 assert(d->fd >= 0);
 
-                f = take_fdopen(&d->fd, "r");
-                if (!f)
-                        return -errno;
+                r = fdopen_independent(d->fd, "r", &f);
+                if (r < 0)
+                        return r;
 
                 r = read_full_stream(f, &buf, &n);
                 if (r < 0)
@@ -163,6 +163,7 @@ int bus_image_common_get_metadata(
                         image->path,
                         matches,
                         extension_images,
+                        /* image_policy= */ NULL,
                         flags,
                         &os_release,
                         &extension_releases,
@@ -316,6 +317,8 @@ int bus_image_common_attach(
         assert(message);
         assert(name_or_path || image);
 
+        CLEANUP_ARRAY(changes, n_changes, portable_changes_free);
+
         if (!m) {
                 assert(image);
                 m = image->userdata;
@@ -385,18 +388,15 @@ int bus_image_common_attach(
                         matches,
                         profile,
                         extension_images,
+                        /* image_policy= */ NULL,
                         flags,
                         &changes,
                         &n_changes,
                         error);
         if (r < 0)
-                goto finish;
+                return r;
 
-        r = reply_portable_changes(message, changes, n_changes);
-
-finish:
-        portable_changes_free(changes, n_changes);
-        return r;
+        return reply_portable_changes(message, changes, n_changes);
 }
 
 static int bus_image_method_attach(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -417,6 +417,8 @@ static int bus_image_method_detach(
         int r;
 
         assert(message);
+
+        CLEANUP_ARRAY(changes, n_changes, portable_changes_free);
 
         if (sd_bus_message_is_method_call(message, NULL, "DetachWithExtensions")) {
                 r = sd_bus_message_read_strv(message, &extension_images);
@@ -470,13 +472,9 @@ static int bus_image_method_detach(
                         &n_changes,
                         error);
         if (r < 0)
-                goto finish;
+                return r;
 
-        r = reply_portable_changes(message, changes, n_changes);
-
-finish:
-        portable_changes_free(changes, n_changes);
-        return r;
+        return reply_portable_changes(message, changes, n_changes);
 }
 
 int bus_image_common_remove(
@@ -574,7 +572,6 @@ static int normalize_portable_changes(
 
         PortableChange *changes = NULL;
         size_t n_changes = 0;
-        int r = 0;
 
         assert(ret_n_changes);
         assert(ret_changes);
@@ -586,12 +583,13 @@ static int normalize_portable_changes(
         if (!changes)
                 return -ENOMEM;
 
+        CLEANUP_ARRAY(changes, n_changes, portable_changes_free);
+
         /* Corner case: only detached, nothing attached */
         if (n_changes_attached == 0) {
                 memcpy(changes, changes_detached, sizeof(PortableChange) * n_changes_detached);
                 *ret_changes = TAKE_PTR(changes);
                 *ret_n_changes = n_changes_detached;
-
                 return 0;
         }
 
@@ -608,17 +606,13 @@ static int normalize_portable_changes(
                         _cleanup_free_ char *path = NULL, *source = NULL;
 
                         path = strdup(changes_detached[i].path);
-                        if (!path) {
-                                r = -ENOMEM;
-                                goto fail;
-                        }
+                        if (!path)
+                                return -ENOMEM;
 
                         if (changes_detached[i].source) {
                                 source = strdup(changes_detached[i].source);
-                                if (!source) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!source)
+                                        return -ENOMEM;
                         }
 
                         changes[n_changes++] = (PortableChange) {
@@ -633,10 +627,6 @@ static int normalize_portable_changes(
         *ret_changes = TAKE_PTR(changes);
 
         return 0;
-
-fail:
-        portable_changes_free(changes, n_changes);
-        return r;
 }
 
 int bus_image_common_reattach(
@@ -655,6 +645,10 @@ int bus_image_common_reattach(
 
         assert(message);
         assert(name_or_path || image);
+
+        CLEANUP_ARRAY(changes_detached, n_changes_detached, portable_changes_free);
+        CLEANUP_ARRAY(changes_attached, n_changes_attached, portable_changes_free);
+        CLEANUP_ARRAY(changes_gone, n_changes_gone, portable_changes_free);
 
         if (!m) {
                 assert(image);
@@ -729,7 +723,7 @@ int bus_image_common_reattach(
                         &n_changes_detached,
                         error);
         if (r < 0)
-                goto finish;
+                return r;
 
         r = portable_attach(
                         sd_bus_message_get_bus(message),
@@ -737,12 +731,13 @@ int bus_image_common_reattach(
                         matches,
                         profile,
                         extension_images,
+                        /* image_policy= */ NULL,
                         flags,
                         &changes_attached,
                         &n_changes_attached,
                         error);
         if (r < 0)
-                goto finish;
+                return r;
 
         /* We want to return the list of units really removed by the detach,
          * and not added again by the attach */
@@ -750,22 +745,14 @@ int bus_image_common_reattach(
                                        changes_detached, n_changes_detached,
                                        &changes_gone, &n_changes_gone);
         if (r < 0)
-                goto finish;
+                return r;
 
         /* First, return the units that are gone (so that the caller can stop them)
          * Then, return the units that are changed/added (so that the caller can
          * start/restart/enable them) */
-        r = reply_portable_changes_pair(message,
-                                        changes_gone, n_changes_gone,
-                                        changes_attached, n_changes_attached);
-        if (r < 0)
-                goto finish;
-
-finish:
-        portable_changes_free(changes_detached, n_changes_detached);
-        portable_changes_free(changes_attached, n_changes_attached);
-        portable_changes_free(changes_gone, n_changes_gone);
-        return r;
+        return reply_portable_changes_pair(message,
+                                           changes_gone, n_changes_gone,
+                                           changes_attached, n_changes_attached);
 }
 
 static int bus_image_method_reattach(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -947,7 +934,7 @@ const sd_bus_vtable image_vtable[] = {
                                               "a(sss)", changes_updated),
                                 bus_image_method_reattach,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD_WITH_ARGS("ReattacheWithExtensions",
+        SD_BUS_METHOD_WITH_ARGS("ReattachWithExtensions",
                                 SD_BUS_ARGS("as", extensions,
                                             "as", matches,
                                             "s", profile,
@@ -972,6 +959,17 @@ const sd_bus_vtable image_vtable[] = {
                                 SD_BUS_NO_RESULT,
                                 bus_image_method_set_limit,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        /* Deprecated silly typo */
+        SD_BUS_METHOD_WITH_ARGS("ReattacheWithExtensions",
+                                SD_BUS_ARGS("as", extensions,
+                                            "as", matches,
+                                            "s", profile,
+                                            "s", copy_mode,
+                                            "t", flags),
+                                SD_BUS_RESULT("a(sss)", changes_removed,
+                                              "a(sss)", changes_updated),
+                                bus_image_method_reattach,
+                                SD_BUS_VTABLE_UNPRIVILEGED|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_VTABLE_END
 };
 

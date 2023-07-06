@@ -242,14 +242,14 @@ _public_ int sd_device_monitor_stop(sd_device_monitor *m) {
 
 static int device_monitor_event_handler(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(sd_device_unrefp) sd_device *device = NULL;
-        _unused_ _cleanup_(log_context_freep) LogContext *c = NULL;
+        _unused_ _cleanup_(log_context_unrefp) LogContext *c = NULL;
         sd_device_monitor *m = ASSERT_PTR(userdata);
 
         if (device_monitor_receive_device(m, &device) <= 0)
                 return 0;
 
         if (log_context_enabled())
-                c = log_context_new_consume(device_make_log_fields(device));
+                c = log_context_new_strv_consume(device_make_log_fields(device));
 
         if (m->callback)
                 return m->callback(m, device, m->userdata);
@@ -503,7 +503,6 @@ int device_monitor_receive_device(sd_device_monitor *m, sd_device **ret) {
                 .msg_name = &snl,
                 .msg_namelen = sizeof(snl),
         };
-        struct cmsghdr *cmsg;
         struct ucred *cred;
         size_t offset;
         ssize_t n;
@@ -559,12 +558,11 @@ int device_monitor_receive_device(sd_device_monitor *m, sd_device **ret) {
                                                  snl.nl.nl_pid);
         }
 
-        cmsg = CMSG_FIRSTHDR(&smsg);
-        if (!cmsg || cmsg->cmsg_type != SCM_CREDENTIALS)
+        cred = CMSG_FIND_DATA(&smsg, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
+        if (!cred)
                 return log_monitor_errno(m, SYNTHETIC_ERRNO(EAGAIN),
                                          "No sender credentials received, ignoring message.");
 
-        cred = (struct ucred*) CMSG_DATA(cmsg);
         if (!check_sender_uid(m, cred->uid))
                 return log_monitor_errno(m, SYNTHETIC_ERRNO(EAGAIN),
                                          "Sender uid="UID_FMT", message ignored.", cred->uid);

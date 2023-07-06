@@ -14,6 +14,7 @@
 #define SPECIAL_HALT_TARGET "halt.target"
 #define SPECIAL_POWEROFF_TARGET "poweroff.target"
 #define SPECIAL_REBOOT_TARGET "reboot.target"
+#define SPECIAL_SOFT_REBOOT_TARGET "soft-reboot.target"
 #define SPECIAL_KEXEC_TARGET "kexec.target"
 #define SPECIAL_EXIT_TARGET "exit.target"
 #define SPECIAL_SUSPEND_TARGET "suspend.target"
@@ -85,12 +86,14 @@
 #define SPECIAL_QUOTACHECK_SERVICE "systemd-quotacheck.service"
 #define SPECIAL_QUOTAON_SERVICE "quotaon.service"
 #define SPECIAL_REMOUNT_FS_SERVICE "systemd-remount-fs.service"
+#define SPECIAL_VCONSOLE_SETUP_SERVICE "systemd-vconsole-setup.service"
 #define SPECIAL_VOLATILE_ROOT_SERVICE "systemd-volatile-root.service"
 #define SPECIAL_UDEVD_SERVICE "systemd-udevd.service"
 #define SPECIAL_GROWFS_SERVICE "systemd-growfs@.service"
 #define SPECIAL_GROWFS_ROOT_SERVICE "systemd-growfs-root.service"
 #define SPECIAL_PCRFS_SERVICE "systemd-pcrfs@.service"
 #define SPECIAL_PCRFS_ROOT_SERVICE "systemd-pcrfs-root.service"
+#define SPECIAL_HIBERNATE_RESUME_SERVICE "systemd-hibernate-resume.service"
 
 /* Services systemd relies on */
 #define SPECIAL_DBUS_SERVICE "dbus.service"

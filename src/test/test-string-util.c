@@ -1218,6 +1218,35 @@ TEST(make_cstring) {
         TEST_MAKE_CSTRING_ONE(test8, -EINVAL, MAKE_CSTRING_REQUIRE_TRAILING_NUL, NULL);
 }
 
+TEST(find_line_startswith) {
+        static const char text[] =
+                "foobar\n"
+                "this is a test\n"
+                "foobar: waldo\n"
+                "more\n"
+                "\n"
+                "piff\n"
+                "foobarfoobar\n"
+                "iff\n";
+        static const char emptystring[] = "";
+
+        assert_se(find_line_startswith(text, "") == text);
+        assert_se(find_line_startswith(text, "f") == text+1);
+        assert_se(find_line_startswith(text, "foobar") == text+6);
+        assert_se(!find_line_startswith(text, "foobarx"));
+        assert_se(!find_line_startswith(text, "oobar"));
+        assert_se(find_line_startswith(text, "t") == text + 8);
+        assert_se(find_line_startswith(text, "th") == text + 9);
+        assert_se(find_line_startswith(text, "this") == text + 11);
+        assert_se(find_line_startswith(text, "foobarf") == text + 54);
+        assert_se(find_line_startswith(text, "more\n") == text + 41);
+        assert_se(find_line_startswith(text, "\n") == text + 42);
+        assert_se(find_line_startswith(text, "iff") == text + 63);
+
+        assert_se(find_line_startswith(emptystring, "") == emptystring);
+        assert_se(!find_line_startswith(emptystring, "x"));
+}
+
 TEST(strstrafter) {
         static const char buffer[] = "abcdefghijklmnopqrstuvwxyz";
 
@@ -1233,6 +1262,34 @@ TEST(strstrafter) {
         assert_se(strstrafter(buffer, "xyz") == strchr(buffer, 0));
         assert_se(strstrafter(buffer, buffer) == strchr(buffer, 0));
         assert_se(!strstrafter(buffer, "-"));
+}
+
+TEST(version_is_valid) {
+        assert_se(!version_is_valid(NULL));
+        assert_se(!version_is_valid(""));
+        assert_se(version_is_valid("0"));
+        assert_se(version_is_valid("5"));
+        assert_se(version_is_valid("999999"));
+        assert_se(version_is_valid("999999.5"));
+        assert_se(version_is_valid("6.2.12-300.fc38.x86_64"));
+}
+
+TEST(strextendn) {
+        _cleanup_free_ char *x = NULL;
+
+        assert_se(streq_ptr(strextendn(&x, NULL, 0), ""));
+        x = mfree(x);
+
+        assert_se(streq_ptr(strextendn(&x, "", 0), ""));
+        x = mfree(x);
+
+        assert_se(streq_ptr(strextendn(&x, "xxx", 3), "xxx"));
+        assert_se(streq_ptr(strextendn(&x, "xxx", 3), "xxxxxx"));
+        assert_se(streq_ptr(strextendn(&x, "...", 1), "xxxxxx."));
+        assert_se(streq_ptr(strextendn(&x, "...", 2), "xxxxxx..."));
+        assert_se(streq_ptr(strextendn(&x, "...", 3), "xxxxxx......"));
+        assert_se(streq_ptr(strextendn(&x, "...", 4), "xxxxxx........."));
+        x = mfree(x);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

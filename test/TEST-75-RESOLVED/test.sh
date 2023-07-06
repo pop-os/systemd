@@ -9,10 +9,7 @@ NSPAWN_ARGUMENTS="--private-network"
 # shellcheck source=test/test-functions
 . "${TEST_BASE_DIR:?}/test-functions"
 
-if ! command -v knotd >/dev/null; then
-    echo "This test requires Knot DNS server, skipping..."
-    exit 0
-fi
+test_require_bin knotd
 
 # We need at least Knot 3.0 which support (among others) the ds-push directive
 if ! knotc -c "${TEST_BASE_DIR:?}/knot-data/knot.conf" conf-check; then
@@ -39,6 +36,11 @@ test_append_files() {
 
     # Install DNS-related utilities (usually found in the bind-utils package)
     image_install delv dig host nslookup
+
+    if command -v nft >/dev/null; then
+        # Install nftables
+        image_install nft
+    fi
 }
 
 do_test "$@"

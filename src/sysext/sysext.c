@@ -9,13 +9,13 @@
 
 #include "build.h"
 #include "capability-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "devnum-util.h"
 #include "discover-image.h"
 #include "dissect-image.h"
 #include "env-util.h"
 #include "escape.h"
-#include "extension-release.h"
+#include "extension-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-table.h"
@@ -39,15 +39,57 @@
 #include "user-util.h"
 #include "verbs.h"
 
-static char **arg_hierarchies = NULL; /* "/usr" + "/opt" by default */
+static char **arg_hierarchies = NULL; /* "/usr" + "/opt" by default for sysext and /etc by default for confext */
 static char *arg_root = NULL;
 static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
 static PagerFlags arg_pager_flags = 0;
 static bool arg_legend = true;
 static bool arg_force = false;
+static int arg_noexec = -1;
+static ImagePolicy *arg_image_policy = NULL;
+
+/* Is set to IMAGE_CONFEXT when systemd is called with the confext functionality instead of the default */
+static ImageClass arg_image_class = IMAGE_SYSEXT;
 
 STATIC_DESTRUCTOR_REGISTER(arg_hierarchies, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
+
+/* Helper struct for naming simplicity and reusability */
+static const struct {
+        const char *dot_directory_name;
+        const char *directory_name;
+        const char *short_identifier;
+        const char *short_identifier_plural;
+        const char *level_env;
+        const char *scope_env;
+        const char *name_env;
+        const ImagePolicy *default_image_policy;
+        unsigned long default_mount_flags;
+} image_class_info[_IMAGE_CLASS_MAX] = {
+        [IMAGE_SYSEXT] = {
+                .dot_directory_name = ".systemd-sysext",
+                .directory_name = "systemd-sysext",
+                .short_identifier = "sysext",
+                .short_identifier_plural = "extensions",
+                .level_env = "SYSEXT_LEVEL",
+                .scope_env = "SYSEXT_SCOPE",
+                .name_env = "SYSTEMD_SYSEXT_HIERARCHIES",
+                .default_image_policy = &image_policy_sysext,
+                .default_mount_flags = MS_RDONLY|MS_NODEV,
+        },
+        [IMAGE_CONFEXT] = {
+                .dot_directory_name = ".systemd-confext",
+                .directory_name = "systemd-confext",
+                .short_identifier = "confext",
+                .short_identifier_plural = "confexts",
+                .level_env = "CONFEXT_LEVEL",
+                .scope_env = "CONFEXT_SCOPE",
+                .name_env = "SYSTEMD_CONFEXT_HIERARCHIES",
+                .default_image_policy = &image_policy_confext,
+                .default_mount_flags = MS_RDONLY|MS_NODEV|MS_NOSUID|MS_NOEXEC,
+        }
+};
 
 static int is_our_mount_point(const char *p) {
         _cleanup_free_ char *buf = NULL, *f = NULL;
@@ -70,26 +112,26 @@ static int is_our_mount_point(const char *p) {
         /* So we know now that it's a mount point. Now let's check if it's one of ours, so that we don't
          * accidentally unmount the user's own /usr/ but just the mounts we established ourselves. We do this
          * check by looking into the metadata directory we place in merged mounts: if the file
-         * .systemd-sysext/dev contains the major/minor device pair of the mount we have a good reason to
+         * ../dev contains the major/minor device pair of the mount we have a good reason to
          * believe this is one of our mounts. This thorough check has the benefit that we aren't easily
          * confused if people tar up one of our merged trees and untar them elsewhere where we might mistake
          * them for a live sysext tree. */
 
-        f = path_join(p, ".systemd-sysext/dev");
+        f = path_join(p, image_class_info[arg_image_class].dot_directory_name, "dev");
         if (!f)
                 return log_oom();
 
         r = read_one_line_file(f, &buf);
         if (r == -ENOENT) {
-                log_debug("Hierarchy '%s' does not carry a .systemd-sysext/dev file, not a sysext merged tree.", p);
+                log_debug("Hierarchy '%s' does not carry a %s/dev file, not a merged tree.", p, image_class_info[arg_image_class].dot_directory_name);
                 return false;
         }
         if (r < 0)
-                return log_error_errno(r, "Failed to determine whether hierarchy '%s' contains '.systemd-sysext/dev': %m", p);
+                return log_error_errno(r, "Failed to determine whether hierarchy '%s' contains '%s/dev': %m", p, image_class_info[arg_image_class].dot_directory_name);
 
         r = parse_devnum(buf, &dev);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse device major/minor stored in '.systemd-sysext/dev' file on '%s': %m", p);
+                return log_error_errno(r, "Failed to parse device major/minor stored in '%s/dev' file on '%s': %m", image_class_info[arg_image_class].dot_directory_name, p);
 
         if (lstat(p, &st) < 0)
                 return log_error_errno(r, "Failed to stat %s: %m", p);
@@ -131,7 +173,7 @@ static int unmerge(void) {
         STRV_FOREACH(p, arg_hierarchies) {
                 _cleanup_free_ char *resolved = NULL;
 
-                r = chase_symlinks(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
+                r = chase(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
                 if (r == -ENOENT) {
                         log_debug_errno(r, "Hierarchy '%s%s' does not exist, ignoring.", strempty(arg_root), *p);
                         continue;
@@ -179,7 +221,7 @@ static int verb_status(int argc, char **argv, void *userdata) {
                 _cleanup_strv_free_ char **l = NULL;
                 struct stat st;
 
-                r = chase_symlinks(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
+                r = chase(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
                 if (r == -ENOENT) {
                         log_debug_errno(r, "Hierarchy '%s%s' does not exist, ignoring.", strempty(arg_root), *p);
                         continue;
@@ -205,7 +247,7 @@ static int verb_status(int argc, char **argv, void *userdata) {
                         continue;
                 }
 
-                f = path_join(*p, ".systemd-sysext/extensions");
+                f = path_join(*p, image_class_info[arg_image_class].dot_directory_name, image_class_info[arg_image_class].short_identifier_plural);
                 if (!f)
                         return log_oom();
 
@@ -250,6 +292,7 @@ static int mount_overlayfs(
 
         _cleanup_free_ char *options = NULL;
         bool separator = false;
+        unsigned long flags;
         int r;
 
         assert(where);
@@ -271,8 +314,12 @@ static int mount_overlayfs(
                 separator = true;
         }
 
+        flags = image_class_info[arg_image_class].default_mount_flags;
+        if (arg_noexec >= 0)
+                SET_FLAG(flags, MS_NOEXEC, arg_noexec);
+
         /* Now mount the actual overlayfs */
-        r = mount_nofollow_verbose(LOG_ERR, "sysext", where, "overlay", MS_RDONLY, options);
+        r = mount_nofollow_verbose(LOG_ERR, image_class_info[arg_image_class].short_identifier, where, "overlay", flags, options);
         if (r < 0)
                 return r;
 
@@ -297,7 +344,7 @@ static int merge_hierarchy(
 
         /* Resolve the path of the host's version of the hierarchy, i.e. what we want to use as lowest layer
          * in the overlayfs stack. */
-        r = chase_symlinks(hierarchy, arg_root, CHASE_PREFIX_ROOT, &resolved_hierarchy, NULL);
+        r = chase(hierarchy, arg_root, CHASE_PREFIX_ROOT, &resolved_hierarchy, NULL);
         if (r == -ENOENT)
                 log_debug_errno(r, "Hierarchy '%s' on host doesn't exist, not merging.", hierarchy);
         else if (r < 0)
@@ -315,7 +362,7 @@ static int merge_hierarchy(
         /* Let's generate a metadata file that lists all extensions we took into account for this
          * hierarchy. We include this in the final fs, to make things nicely discoverable and
          * recognizable. */
-        f = path_join(meta_path, ".systemd-sysext/extensions");
+        f = path_join(meta_path, image_class_info[arg_image_class].dot_directory_name, image_class_info[arg_image_class].short_identifier_plural);
         if (!f)
                 return log_oom();
 
@@ -336,7 +383,7 @@ static int merge_hierarchy(
         STRV_FOREACH(p, paths) {
                 _cleanup_free_ char *resolved = NULL;
 
-                r = chase_symlinks(hierarchy, *p, CHASE_PREFIX_ROOT, &resolved, NULL);
+                r = chase(hierarchy, *p, CHASE_PREFIX_ROOT, &resolved, NULL);
                 if (r == -ENOENT) {
                         log_debug_errno(r, "Hierarchy '%s' in extension '%s' doesn't exist, not merging.", hierarchy, *p);
                         continue;
@@ -383,16 +430,16 @@ static int merge_hierarchy(
         /* Now we have mounted the new file system. Let's now figure out its .st_dev field, and make that
          * available in the metadata directory. This is useful to detect whether the metadata dir actually
          * belongs to the fs it is found on: if .st_dev of the top-level mount matches it, it's pretty likely
-         * we are looking at a live sysext tree, and not an unpacked tar or so of one. */
+         * we are looking at a live tree, and not an unpacked tar or so of one. */
         if (stat(overlay_path, &st) < 0)
                 return log_error_errno(r, "Failed to stat mount '%s': %m", overlay_path);
 
         free(f);
-        f = path_join(meta_path, ".systemd-sysext/dev");
+        f = path_join(meta_path, image_class_info[arg_image_class].dot_directory_name, "dev");
         if (!f)
                 return log_oom();
 
-        r = write_string_filef(f, WRITE_STRING_FILE_CREATE, "%u:%u", major(st.st_dev), minor(st.st_dev));
+        r = write_string_file(f, FORMAT_DEVNUM(st.st_dev), WRITE_STRING_FILE_CREATE);
         if (r < 0)
                 return log_error_errno(r, "Failed to write '%s': %m", f);
 
@@ -408,50 +455,27 @@ static int strverscmp_improvedp(char *const* a, char *const* b) {
         return strverscmp_improved(*a, *b);
 }
 
-static int validate_version(
-                const char *root,
-                const Image *img,
-                const char *host_os_release_id,
-                const char *host_os_release_version_id,
-                const char *host_os_release_sysext_level) {
-
-        int r;
-
-        assert(root);
+static const ImagePolicy *pick_image_policy(const Image *img) {
         assert(img);
+        assert(img->path);
 
-        if (arg_force) {
-                log_debug("Force mode enabled, skipping version validation.");
-                return 1;
-        }
+        /* Explicitly specified policy always wins */
+        if (arg_image_policy)
+                return arg_image_policy;
 
-        /* Insist that extension images do not overwrite the underlying OS release file (it's fine if
-         * they place one in /etc/os-release, i.e. where things don't matter, as they aren't
-         * merged.) */
-        r = chase_symlinks("/usr/lib/os-release", root, CHASE_PREFIX_ROOT, NULL, NULL);
-        if (r < 0) {
-                if (r != -ENOENT)
-                        return log_error_errno(r, "Failed to determine whether /usr/lib/os-release exists in the extension image: %m");
-        } else
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Extension image contains /usr/lib/os-release file, which is not allowed (it may carry /etc/os-release), refusing.");
+        /* If located in /.extra/sysext/ in the initrd, then it was placed there by systemd-stub, and was
+         * picked up from an untrusted ESP. Thus, require a stricter policy by default for them. (For the
+         * other directories we assume the appropriate level of trust was already established already.  */
 
-        r = extension_release_validate(
-                        img->name,
-                        host_os_release_id,
-                        host_os_release_version_id,
-                        host_os_release_sysext_level,
-                        in_initrd() ? "initrd" : "system",
-                        img->extension_release);
-        if (r < 0)
-                return log_error_errno(r, "Failed to validate extension release information: %m");
+        if (in_initrd() && path_startswith(img->path, "/.extra/sysext/"))
+                return &image_policy_sysext_strict;
 
-        return r;
+        return image_class_info[img->class].default_image_policy;
 }
 
 static int merge_subprocess(Hashmap *images, const char *workspace) {
         _cleanup_free_ char *host_os_release_id = NULL, *host_os_release_version_id = NULL, *host_os_release_sysext_level = NULL,
-                *buf = NULL;
+            *host_os_release_confext_level = NULL, *buf = NULL;
         _cleanup_strv_free_ char **extensions = NULL, **paths = NULL;
         size_t n_extensions = 0;
         unsigned n_ignored = 0;
@@ -478,11 +502,13 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                 return r;
 
         /* Acquire host OS release info, so that we can compare it with the extension's data */
+        char **host_os_release_level = (arg_image_class == IMAGE_CONFEXT) ? &host_os_release_confext_level : &host_os_release_sysext_level;
         r = parse_os_release(
                         arg_root,
                         "ID", &host_os_release_id,
                         "VERSION_ID", &host_os_release_version_id,
-                        "SYSEXT_LEVEL", &host_os_release_sysext_level);
+                        image_class_info[arg_image_class].level_env,
+                        host_os_release_level);
         if (r < 0)
                 return log_error_errno(r, "Failed to acquire 'os-release' data of OS tree '%s': %m", empty_to_root(arg_root));
         if (isempty(host_os_release_id))
@@ -494,7 +520,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
         HASHMAP_FOREACH(img, images) {
                 _cleanup_free_ char *p = NULL;
 
-                p = path_join(workspace, "extensions", img->name);
+                p = path_join(workspace, image_class_info[arg_image_class].short_identifier_plural, img->name);
                 if (!p)
                         return log_oom();
 
@@ -505,6 +531,17 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                 switch (img->type) {
                 case IMAGE_DIRECTORY:
                 case IMAGE_SUBVOLUME:
+
+                        if (!arg_force) {
+                                r = extension_has_forbidden_content(p);
+                                if (r < 0)
+                                        return r;
+                                if (r > 0) {
+                                        n_ignored++;
+                                        continue;
+                                }
+                        }
+
                         r = mount_nofollow_verbose(LOG_ERR, img->path, p, NULL, MS_BIND, NULL);
                         if (r < 0)
                                 return r;
@@ -537,6 +574,9 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         if (verity_settings.data_path)
                                 flags |= DISSECT_IMAGE_NO_PARTITION_TABLE;
 
+                        if (!arg_force)
+                                flags |= DISSECT_IMAGE_VALIDATE_OS_EXT;
+
                         r = loop_device_make_by_path(
                                         img->path,
                                         O_RDONLY,
@@ -550,7 +590,8 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         r = dissect_loop_device_and_warn(
                                         d,
                                         &verity_settings,
-                                        NULL,
+                                        /* mount_options= */ NULL,
+                                        pick_image_policy(img),
                                         flags,
                                         &m);
                         if (r < 0)
@@ -576,8 +617,12 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                                         UID_INVALID,
                                         UID_INVALID,
                                         flags);
-                        if (r < 0)
+                        if (r < 0 && r != -ENOMEDIUM)
                                 return r;
+                        if (r == -ENOMEDIUM && !arg_force) {
+                                n_ignored++;
+                                continue;
+                        }
 
                         r = dissected_image_relinquish(m);
                         if (r < 0)
@@ -588,17 +633,23 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         assert_not_reached();
                 }
 
-                r = validate_version(
-                                p,
-                                img,
-                                host_os_release_id,
-                                host_os_release_version_id,
-                                host_os_release_sysext_level);
-                if (r < 0)
-                        return r;
-                if (r == 0) {
-                        n_ignored++;
-                        continue;
+                if (arg_force)
+                        log_debug("Force mode enabled, skipping version validation.");
+                else {
+                        r = extension_release_validate(
+                                        img->name,
+                                        host_os_release_id,
+                                        host_os_release_version_id,
+                                        host_os_release_sysext_level,
+                                        in_initrd() ? "initrd" : "system",
+                                        img->extension_release,
+                                        arg_image_class);
+                        if (r < 0)
+                                return r;
+                        if (r == 0) {
+                                n_ignored++;
+                                continue;
+                        }
                 }
 
                 /* Nice! This one is an extension we want. */
@@ -612,7 +663,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
         /* Nothing left? Then shortcut things */
         if (n_extensions == 0) {
                 if (n_ignored > 0)
-                        log_info("No suitable extensions found (%u ignored due to incompatible version).", n_ignored);
+                        log_info("No suitable extensions found (%u ignored due to incompatible image(s)).", n_ignored);
                 else
                         log_info("No extensions found.");
                 return 0;
@@ -637,7 +688,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
 
                 assert_se(img = hashmap_get(images, extensions[n_extensions - 1 - k]));
 
-                p = path_join(workspace, "extensions", img->name);
+                p = path_join(workspace, image_class_info[arg_image_class].short_identifier_plural, img->name);
                 if (!p)
                         return log_oom();
 
@@ -649,7 +700,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
         STRV_FOREACH(h, arg_hierarchies) {
                 _cleanup_free_ char *resolved = NULL;
 
-                r = chase_symlinks(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
+                r = chase(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve hierarchy '%s%s': %m", strempty(arg_root), *h);
 
@@ -691,7 +742,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
                         continue;
                 }
 
-                r = chase_symlinks(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
+                r = chase(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve hierarchy '%s%s': %m", strempty(arg_root), *h);
 
@@ -713,7 +764,7 @@ static int merge(Hashmap *images) {
         pid_t pid;
         int r;
 
-        r = safe_fork("(sd-sysext)", FORK_DEATHSIG|FORK_LOG|FORK_NEW_MOUNTNS, &pid);
+        r = safe_fork("(sd-merge)", FORK_DEATHSIG|FORK_LOG|FORK_NEW_MOUNTNS, &pid);
         if (r < 0)
                 return log_error_errno(r, "Failed to fork off child: %m");
         if (r == 0) {
@@ -729,7 +780,7 @@ static int merge(Hashmap *images) {
                 _exit(r > 0 ? EXIT_SUCCESS : 123); /* 123 means: didn't find any extensions */
         }
 
-        r = wait_for_terminate_and_check("(sd-sysext)", pid, WAIT_LOG_ABNORMAL);
+        r = wait_for_terminate_and_check("(sd-merge)", pid, WAIT_LOG_ABNORMAL);
         if (r < 0)
                 return r;
 
@@ -737,7 +788,7 @@ static int merge(Hashmap *images) {
 }
 
 static int image_discover_and_read_metadata(Hashmap **ret_images) {
-        _cleanup_(hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         Image *img;
         int r;
 
@@ -747,12 +798,12 @@ static int image_discover_and_read_metadata(Hashmap **ret_images) {
         if (!images)
                 return log_oom();
 
-        r = image_discover(IMAGE_EXTENSION, arg_root, images);
+        r = image_discover(arg_image_class, arg_root, images);
         if (r < 0)
-                return log_error_errno(r, "Failed to discover extension images: %m");
+                return log_error_errno(r, "Failed to discover images: %m");
 
         HASHMAP_FOREACH(img, images) {
-                r = image_read_metadata(img);
+                r = image_read_metadata(img, &image_policy_sysext);
                 if (r < 0)
                         return log_error_errno(r, "Failed to read metadata for image %s: %m", img->name);
         }
@@ -763,7 +814,7 @@ static int image_discover_and_read_metadata(Hashmap **ret_images) {
 }
 
 static int verb_merge(int argc, char **argv, void *userdata) {
-        _cleanup_(hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         int r;
 
         r = have_effective_cap(CAP_SYS_ADMIN);
@@ -781,7 +832,7 @@ static int verb_merge(int argc, char **argv, void *userdata) {
         STRV_FOREACH(p, arg_hierarchies) {
                 _cleanup_free_ char *resolved = NULL;
 
-                r = chase_symlinks(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
+                r = chase(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
                 if (r == -ENOENT) {
                         log_debug_errno(r, "Hierarchy '%s%s' does not exist, ignoring.", strempty(arg_root), *p);
                         continue;
@@ -801,7 +852,7 @@ static int verb_merge(int argc, char **argv, void *userdata) {
 }
 
 static int verb_refresh(int argc, char **argv, void *userdata) {
-        _cleanup_(hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         int r;
 
         r = have_effective_cap(CAP_SYS_ADMIN);
@@ -841,7 +892,7 @@ static int verb_refresh(int argc, char **argv, void *userdata) {
 }
 
 static int verb_list(int argc, char **argv, void *userdata) {
-        _cleanup_(hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         _cleanup_(table_unrefp) Table *t = NULL;
         Image *img;
         int r;
@@ -850,9 +901,9 @@ static int verb_list(int argc, char **argv, void *userdata) {
         if (!images)
                 return log_oom();
 
-        r = image_discover(IMAGE_EXTENSION, arg_root, images);
+        r = image_discover(arg_image_class, arg_root, images);
         if (r < 0)
-                return log_error_errno(r, "Failed to discover extension images: %m");
+                return log_error_errno(r, "Failed to discover images: %m");
 
         if ((arg_json_format_flags & JSON_FORMAT_OFF) && hashmap_isempty(images)) {
                 log_info("No OS extensions found.");
@@ -888,11 +939,11 @@ static int verb_help(int argc, char **argv, void *userdata) {
                 return log_oom();
 
         printf("%1$s [OPTIONS...] COMMAND\n"
-               "\n%5$sMerge extension images into /usr/ and /opt/ hierarchies.%6$s\n"
-               "\n%3$sCommands:%4$s\n"
+                "\n%5$sMerge extension images into /usr/ and /opt/ hierarchies for\n"
+               " sysext and into the /etc/ hierarchy for confext.%6$s\n"
                "  status                  Show current merge status (default)\n"
-               "  merge                   Merge extensions into /usr/ and /opt/\n"
-               "  unmerge                 Unmerge extensions from /usr/ and /opt/\n"
+               "  merge                   Merge extensions into relevant hierarchies\n"
+               "  unmerge                 Unmerge extensions from relevant hierarchies\n"
                "  refresh                 Unmerge/merge extensions again\n"
                "  list                    List installed extensions\n"
                "  -h --help               Show this help\n"
@@ -904,6 +955,9 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "     --json=pretty|short|off\n"
                "                          Generate JSON output\n"
                "     --force              Ignore version incompatibilities\n"
+               "     --image-policy=POLICY\n"
+               "                          Specify disk image dissection policy\n"
+               "     --noexec=BOOL        Whether to mount extension overlay with noexec\n"
                "\nSee the %2$s for details.\n",
                program_invocation_short_name,
                link,
@@ -924,16 +978,20 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_ROOT,
                 ARG_JSON,
                 ARG_FORCE,
+                ARG_IMAGE_POLICY,
+                ARG_NOEXEC,
         };
 
         static const struct option options[] = {
-                { "help",      no_argument,       NULL, 'h'           },
-                { "version",   no_argument,       NULL, ARG_VERSION   },
-                { "no-pager",  no_argument,       NULL, ARG_NO_PAGER  },
-                { "no-legend", no_argument,       NULL, ARG_NO_LEGEND },
-                { "root",      required_argument, NULL, ARG_ROOT      },
-                { "json",      required_argument, NULL, ARG_JSON      },
-                { "force",     no_argument,       NULL, ARG_FORCE     },
+                { "help",         no_argument,       NULL, 'h'              },
+                { "version",      no_argument,       NULL, ARG_VERSION      },
+                { "no-pager",     no_argument,       NULL, ARG_NO_PAGER     },
+                { "no-legend",    no_argument,       NULL, ARG_NO_LEGEND    },
+                { "root",         required_argument, NULL, ARG_ROOT         },
+                { "json",         required_argument, NULL, ARG_JSON         },
+                { "force",        no_argument,       NULL, ARG_FORCE        },
+                { "image-policy", required_argument, NULL, ARG_IMAGE_POLICY },
+                { "noexec",       required_argument, NULL, ARG_NOEXEC       },
                 {}
         };
 
@@ -977,6 +1035,20 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_force = true;
                         break;
 
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
+
+                case ARG_NOEXEC:
+                        r = parse_boolean_argument("--noexec", optarg, NULL);
+                        if (r < 0)
+                                return r;
+
+                        arg_noexec = r;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -1004,6 +1076,7 @@ static int sysext_main(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         int r;
+        arg_image_class = invoked_as(argv, "systemd-confext") ? IMAGE_CONFEXT : IMAGE_SYSEXT;
 
         log_setup();
 
@@ -1014,9 +1087,9 @@ static int run(int argc, char *argv[]) {
         /* For debugging purposes it might make sense to do this for other hierarchies than /usr/ and
          * /opt/, but let's make that a hacker/debugging feature, i.e. env var instead of cmdline
          * switch. */
-        r = parse_env_extension_hierarchies(&arg_hierarchies);
+        r = parse_env_extension_hierarchies(&arg_hierarchies, image_class_info[arg_image_class].name_env);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse $SYSTEMD_SYSEXT_HIERARCHIES environment variable: %m");
+                return log_error_errno(r, "Failed to parse environment variable: %m");
 
         return sysext_main(argc, argv);
 }

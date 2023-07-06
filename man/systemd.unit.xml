@@ -749,8 +749,7 @@
 
         <para>When <varname>Upholds=b.service</varname> is used on <filename>a.service</filename>, this
         dependency will show as <varname>UpheldBy=a.service</varname> in the property listing of
-        <filename>b.service</filename>. The <varname>UpheldBy=</varname> dependency cannot be specified
-        directly.</para>
+        <filename>b.service</filename>.</para>
         </listitem>
       </varlistentry>
 
@@ -857,16 +856,18 @@
         <term><varname>JoinsNamespaceOf=</varname></term>
 
         <listitem><para>For units that start processes (such as service units), lists one or more other units
-        whose network and/or temporary file namespace to join. This only applies to unit types which support
-        the <varname>PrivateNetwork=</varname>, <varname>NetworkNamespacePath=</varname>,
+        whose network and/or temporary file namespace to join. If this is specified on a unit (say, a.service
+        has <varname>JoinsNamespaceOf=b.service</varname>), then this the inverse dependency
+        (<varname>JoinsNamespaceOf=a.service</varname> for b.service) is implied. This only applies to unit
+        types which support the <varname>PrivateNetwork=</varname>, <varname>NetworkNamespacePath=</varname>,
         <varname>PrivateIPC=</varname>, <varname>IPCNamespacePath=</varname>, and
         <varname>PrivateTmp=</varname> directives (see
         <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
         details). If a unit that has this setting set is started, its processes will see the same
         <filename>/tmp/</filename>, <filename>/var/tmp/</filename>, IPC namespace and network namespace as
-        one listed unit that is started. If multiple listed units are already started, it is not defined
-        which namespace is joined. Note that this setting only has an effect if
-        <varname>PrivateNetwork=</varname>/<varname>NetworkNamespacePath=</varname>,
+        one listed unit that is started. If multiple listed units are already started and these do not share
+        their namespace, then it is not defined which namespace is joined. Note that this setting only has an
+        effect if <varname>PrivateNetwork=</varname>/<varname>NetworkNamespacePath=</varname>,
         <varname>PrivateIPC=</varname>/<varname>IPCNamespacePath=</varname> and/or
         <varname>PrivateTmp=</varname> is enabled for both the unit that joins the namespace and the unit
         whose namespace is joined.</para></listitem>
@@ -887,6 +888,7 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>OnSuccessJobMode=</varname></term>
         <term><varname>OnFailureJobMode=</varname></term>
 
         <listitem><para>Takes a value of
@@ -898,12 +900,12 @@
         <literal>ignore-dependencies</literal> or
         <literal>ignore-requirements</literal>. Defaults to
         <literal>replace</literal>. Specifies how the units listed in
-        <varname>OnFailure=</varname> will be enqueued. See
+        <varname>OnSuccess=</varname>/<varname>OnFailure=</varname> will be enqueued. See
         <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         <option>--job-mode=</option> option for details on the
         possible values. If this is set to <literal>isolate</literal>,
         only a single unit may be listed in
-        <varname>OnFailure=</varname>.</para></listitem>
+        <varname>OnSuccess=</varname>/<varname>OnFailure=</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -998,27 +1000,38 @@
         <term><varname>FailureAction=</varname></term>
         <term><varname>SuccessAction=</varname></term>
 
-        <listitem><para>Configure the action to take when the unit stops and enters a failed state or inactive state.
-        Takes one of <option>none</option>, <option>reboot</option>, <option>reboot-force</option>,
-        <option>reboot-immediate</option>, <option>poweroff</option>, <option>poweroff-force</option>,
-        <option>poweroff-immediate</option>, <option>exit</option>, and <option>exit-force</option>. In system mode,
-        all options are allowed. In user mode, only <option>none</option>, <option>exit</option>, and
-        <option>exit-force</option> are allowed. Both options default to <option>none</option>.</para>
+        <listitem><para>Configure the action to take when the unit stops and enters a failed state or
+        inactive state.  Takes one of <option>none</option>, <option>reboot</option>,
+        <option>reboot-force</option>, <option>reboot-immediate</option>, <option>poweroff</option>,
+        <option>poweroff-force</option>, <option>poweroff-immediate</option>, <option>exit</option>,
+        <option>exit-force</option>, <option>soft-reboot</option>, <option>soft-reboot-force</option>,
+        <option>kexec</option>, <option>kexec-force</option>, <option>halt</option>,
+        <option>halt-force</option> and <option>halt-immediate</option>. In system mode, all options are
+        allowed. In user mode, only <option>none</option>, <option>exit</option>,
+        <option>exit-force</option>, <option>soft-reboot</option> and <option>soft-reboot-force</option> are
+        allowed. Both options default to <option>none</option>.</para>
 
-        <para>If <option>none</option> is set, no action will be triggered. <option>reboot</option> causes a reboot
-        following the normal shutdown procedure (i.e. equivalent to <command>systemctl reboot</command>).
-        <option>reboot-force</option> causes a forced reboot which will terminate all processes forcibly but should
-        cause no dirty file systems on reboot (i.e. equivalent to <command>systemctl reboot -f</command>) and
-        <option>reboot-immediate</option> causes immediate execution of the
-        <citerefentry><refentrytitle>reboot</refentrytitle><manvolnum>2</manvolnum></citerefentry> system call, which
-        might result in data loss (i.e. equivalent to <command>systemctl reboot -ff</command>). Similarly,
-        <option>poweroff</option>, <option>poweroff-force</option>, <option>poweroff-immediate</option> have the effect
-        of powering down the system with similar semantics. <option>exit</option> causes the manager to exit following
-        the normal shutdown procedure, and <option>exit-force</option> causes it terminate without shutting down
-        services. When <option>exit</option> or <option>exit-force</option> is used by default the exit status of the
-        main process of the unit (if this applies) is returned from the service manager. However, this may be overridden
-        with <varname>FailureActionExitStatus=</varname>/<varname>SuccessActionExitStatus=</varname>, see
-        below.</para></listitem>
+        <para>If <option>none</option> is set, no action will be triggered. <option>reboot</option> causes a
+        reboot following the normal shutdown procedure (i.e. equivalent to <command>systemctl
+        reboot</command>).  <option>reboot-force</option> causes a forced reboot which will terminate all
+        processes forcibly but should cause no dirty file systems on reboot (i.e. equivalent to
+        <command>systemctl reboot -f</command>) and <option>reboot-immediate</option> causes immediate
+        execution of the
+        <citerefentry><refentrytitle>reboot</refentrytitle><manvolnum>2</manvolnum></citerefentry> system
+        call, which might result in data loss (i.e. equivalent to <command>systemctl reboot -ff</command>).
+        Similarly, <option>poweroff</option>, <option>poweroff-force</option>,
+        <option>poweroff-immediate</option>, <option>kexec</option>, <option>kexec-force</option>,
+        <option>halt</option>, <option>halt-force</option> and <option>halt-immediate</option> have the
+        effect of powering down the system, executing kexec, and halting the system respectively with similar
+        semantics. <option>exit</option> causes the manager to exit following the normal shutdown procedure,
+        and <option>exit-force</option> causes it terminate without shutting down services. When
+        <option>exit</option> or <option>exit-force</option> is used by default the exit status of the main
+        process of the unit (if this applies) is returned from the service manager. However, this may be
+        overridden with
+        <varname>FailureActionExitStatus=</varname>/<varname>SuccessActionExitStatus=</varname>, see below.
+        <option>soft-reboot</option> will trigger a userspace reboot operation.
+        <option>soft-reboot-force</option> does that too, but does not go through the shutdown transaction
+        beforehand.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1391,8 +1404,8 @@
           security technology is enabled on the system. Currently, the recognized values are
           <literal>selinux</literal>, <literal>apparmor</literal>, <literal>tomoyo</literal>,
           <literal>ima</literal>, <literal>smack</literal>, <literal>audit</literal>,
-          <literal>uefi-secureboot</literal> and <literal>tpm2</literal>. The test may be negated by prepending
-          an exclamation mark.</para>
+          <literal>uefi-secureboot</literal>, <literal>tpm2</literal> and <literal>cvm</literal>.
+          The test may be negated by prepending an exclamation mark.</para>
           </listitem>
         </varlistentry>
 
@@ -1848,6 +1861,12 @@
             <entry>[Install] section</entry>
           </row>
           <row>
+            <entry><varname>Upholds=</varname></entry>
+            <entry><varname>UpheldBy=</varname></entry>
+            <entry>[Unit] section</entry>
+            <entry>[Install] section</entry>
+          </row>
+          <row>
             <entry><varname>PartOf=</varname></entry>
             <entry><varname>ConsistsOf=</varname></entry>
             <entry>[Unit] section</entry>
@@ -1894,10 +1913,10 @@
       </tgroup>
     </table>
 
-    <para>Note: <varname>WantedBy=</varname> and <varname>RequiredBy=</varname> are
-    used in the [Install] section to create symlinks in <filename>.wants/</filename>
-    and <filename>.requires/</filename> directories. They cannot be used directly as a
-    unit configuration setting.</para>
+    <para>Note: <varname>WantedBy=</varname>, <varname>RequiredBy=</varname>, and <varname>UpheldBy=</varname>
+    are used in the [Install] section to create symlinks in <filename>.wants/</filename>,
+    <filename>.requires/</filename>, and <filename>.upholds/</filename> directories. They cannot be used
+    directly as a unit configuration setting.</para>
 
     <para>Note: <varname>ConsistsOf=</varname>, <varname>BoundBy=</varname>,
     <varname>RequisiteOf=</varname>, <varname>ConflictedBy=</varname> are created
@@ -1946,23 +1965,23 @@
       <varlistentry>
         <term><varname>WantedBy=</varname></term>
         <term><varname>RequiredBy=</varname></term>
+        <term><varname>UpheldBy=</varname></term>
 
         <listitem><para>This option may be used more than once, or a space-separated list of unit names may
-        be given. A symbolic link is created in the <filename>.wants/</filename> or
-        <filename>.requires/</filename> directory of each of the listed units when this unit is installed by
-        <command>systemctl enable</command>. This has the effect of a dependency of type
-        <varname>Wants=</varname> or <varname>Requires=</varname> being added from the listed unit to the
-        current unit. The primary result is that the current unit will be started when the listed unit is
-        started, see the description of <varname>Wants=</varname> and <varname>Requires=</varname> in the
-        [Unit] section for details.</para>
+        be given. A symbolic link is created in the <filename>.wants/</filename>, <filename>.requires/</filename>,
+        or <filename>.upholds/</filename> directory of each of the listed units when this unit is installed
+        by <command>systemctl enable</command>. This has the effect of a dependency of type
+        <varname>Wants=</varname>, <varname>Requires=</varname>, or <varname>Upholds=</varname> being added
+        from the listed unit to the current unit. See the description of the mentioned dependency types
+        in the [Unit] section for details.</para>
 
         <para>In case of template units listing non template units, the listing unit must have
         <varname>DefaultInstance=</varname> set, or <command>systemctl enable</command> must be called with
         an instance name. The instance (default or specified) will be added to the
-        <filename>.wants/</filename> or <filename>.requires/</filename> list of the listed unit. For example,
-        <command>WantedBy=getty.target</command> in a service <filename>getty@.service</filename> will result
-        in <command>systemctl enable getty@tty2.service</command> creating a
-        <filename>getty.target.wants/getty@tty2.service</filename> link to
+        <filename>.wants/</filename>, <filename>.requires/</filename>, or <filename>.upholds/</filename>
+        list of the listed unit. For example, <command>WantedBy=getty.target</command> in a service
+        <filename>getty@.service</filename> will result in <command>systemctl enable getty@tty2.service</command>
+        creating a <filename>getty.target.wants/getty@tty2.service</filename> link to
         <filename>getty@.service</filename>. This also applies to listing specific instances of templated
         units: this specific instance will gain the dependency. A template unit may also list a template
         unit, in which case a generic dependency will be added where each instance of the listing unit will
@@ -2112,7 +2131,7 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
           <row>
             <entry><literal>%L</literal></entry>
             <entry>Log directory root</entry>
-            <entry>This is either <filename>/var/log</filename> (for the system manager) or the path <literal>$XDG_CONFIG_HOME</literal> resolves to with <filename index="false">/log</filename> appended (for user managers).</entry>
+            <entry>This is either <filename>/var/log</filename> (for the system manager) or the path <varname>$XDG_STATE_HOME</varname> resolves to with <filename index="false">/log</filename> appended (for user managers).</entry>
           </row>
           <xi:include href="standard-specifiers.xml" xpointer="m"/>
           <xi:include href="standard-specifiers.xml" xpointer="M"/>
@@ -2152,7 +2171,7 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
           <row>
             <entry><literal>%S</literal></entry>
             <entry>State directory root</entry>
-            <entry>This is either <filename>/var/lib</filename> (for the system manager) or the path <literal>$XDG_CONFIG_HOME</literal> resolves to (for user managers).</entry>
+            <entry>This is either <filename>/var/lib</filename> (for the system manager) or the path <varname>$XDG_STATE_HOME</varname> resolves to (for user managers).</entry>
           </row>
           <row>
             <entry><literal>%t</literal></entry>

@@ -6,6 +6,7 @@
 #include "env-util.h"
 #include "escape.h"
 #include "fileio.h"
+#include "memfd-util.h"
 #include "missing_mman.h"
 #include "missing_syscall.h"
 #include "parse-util.h"
@@ -130,6 +131,20 @@ int serialize_strv(FILE *f, const char *key, char **l) {
         return ret;
 }
 
+int deserialize_strv(char ***l, const char *value) {
+        ssize_t unescaped_len;
+        char *unescaped;
+
+        assert(l);
+        assert(value);
+
+        unescaped_len = cunescape(value, 0, &unescaped);
+        if (unescaped_len < 0)
+                return unescaped_len;
+
+        return strv_consume(l, unescaped);
+}
+
 int deserialize_usec(const char *value, usec_t *ret) {
         int r;
 
@@ -197,7 +212,7 @@ int deserialize_environment(const char *value, char ***list) {
 int open_serialization_fd(const char *ident) {
         int fd;
 
-        fd = memfd_create(ident, MFD_CLOEXEC);
+        fd = memfd_create_wrapper(ident, MFD_CLOEXEC | MFD_NOEXEC_SEAL);
         if (fd < 0) {
                 const char *path;
 

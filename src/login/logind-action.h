@@ -9,6 +9,7 @@ typedef enum HandleAction {
         HANDLE_REBOOT,
         HANDLE_HALT,
         HANDLE_KEXEC,
+        HANDLE_SOFT_REBOOT,
         HANDLE_SUSPEND,
         HANDLE_HIBERNATE,
         HANDLE_HYBRID_SLEEP,
@@ -23,7 +24,7 @@ typedef struct HandleActionData HandleActionData;
 
 #include "logind-inhibit.h"
 #include "logind.h"
-#include "sleep-config.h"
+#include "sleep-util.h"
 
 static inline bool handle_action_valid(HandleAction a) {
         return a >= 0 && a < _HANDLE_ACTION_MAX;

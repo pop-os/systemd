@@ -22,6 +22,9 @@
 #define ALPHANUMERICAL      LETTERS DIGITS
 #define HEXDIGITS           DIGITS "abcdefABCDEF"
 #define LOWERCASE_HEXDIGITS DIGITS "abcdef"
+#define URI_RESERVED        ":/?#[]@!$&'()*+;="         /* [RFC3986] */
+#define URI_UNRESERVED      ALPHANUMERICAL "-._~"       /* [RFC3986] */
+#define URI_VALID           URI_RESERVED URI_UNRESERVED /* [RFC3986] */
 
 static inline char* strstr_ptr(const char *haystack, const char *needle) {
         if (!haystack || !needle)
@@ -121,7 +124,10 @@ char *strjoin_real(const char *x, ...) _sentinel_;
 char *strstrip(char *s);
 char *delete_chars(char *s, const char *bad);
 char *delete_trailing_chars(char *s, const char *bad);
-char *truncate_nl(char *s);
+char *truncate_nl_full(char *s, size_t *ret_len);
+static inline char *truncate_nl(char *s) {
+        return truncate_nl_full(s, NULL);
+}
 
 static inline char *skip_leading_chars(const char *s, const char *bad) {
         if (!s)
@@ -182,6 +188,8 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]);
 char *strextend_with_separator_internal(char **x, const char *separator, ...) _sentinel_;
 #define strextend_with_separator(x, separator, ...) strextend_with_separator_internal(x, separator, __VA_ARGS__, NULL)
 #define strextend(x, ...) strextend_with_separator_internal(x, NULL, __VA_ARGS__, NULL)
+
+char *strextendn(char **x, const char *s, size_t l);
 
 int strextendf_with_separator(char **x, const char *separator, const char *format, ...) _printf_(3,4);
 #define strextendf(x, ...) strextendf_with_separator(x, NULL, __VA_ARGS__)
@@ -265,3 +273,12 @@ size_t strspn_from_end(const char *str, const char *accept);
 
 char *strdupspn(const char *a, const char *accept);
 char *strdupcspn(const char *a, const char *reject);
+
+char *find_line_startswith(const char *haystack, const char *needle);
+
+char *startswith_strv(const char *string, char **strv);
+
+#define STARTSWITH_SET(p, ...)                                  \
+        startswith_strv(p, STRV_MAKE(__VA_ARGS__))
+
+bool version_is_valid(const char *s);

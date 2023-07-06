@@ -17,7 +17,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
-#include "label.h"
+#include "label-util.h"
 #include "log.h"
 #include "macro.h"
 #include "mkdir-label.h"
@@ -61,6 +61,21 @@ typedef struct MountPoint {
 #define N_EARLY_MOUNT 4
 #endif
 
+static bool check_recursiveprot_supported(void) {
+        int r;
+
+        if (!cg_is_unified_wanted())
+                return false;
+
+        r = mount_option_supported("cgroup2", "memory_recursiveprot", NULL);
+        if (r < 0)
+                log_debug_errno(r, "Failed to determiner whether the 'memory_recursiveprot' mount option is supported, assuming not: %m");
+        else if (r == 0)
+                log_debug("This kernel version does not support 'memory_recursiveprot', not using mount option.");
+
+        return r > 0;
+}
+
 static const MountPoint mount_table[] = {
         { "proc",        "/proc",                     "proc",       NULL,                                       MS_NOSUID|MS_NOEXEC|MS_NODEV,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER|MNT_FOLLOW_SYMLINK },
@@ -87,7 +102,7 @@ static const MountPoint mount_table[] = {
         { "tmpfs",       "/run",                      "tmpfs",      "mode=0755" TMPFS_LIMITS_RUN,               MS_NOSUID|MS_NODEV|MS_STRICTATIME,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
         { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    "nsdelegate,memory_recursiveprot",          MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
+          check_recursiveprot_supported, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    "nsdelegate",                               MS_NOSUID|MS_NOEXEC|MS_NODEV,
           cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    NULL,                                       MS_NOSUID|MS_NOEXEC|MS_NODEV,
@@ -114,13 +129,13 @@ static const MountPoint mount_table[] = {
           NULL,          MNT_NONE,                  },
 };
 
-bool mount_point_is_api(const char *path) {
-        unsigned i;
+assert_cc(N_EARLY_MOUNT <= ELEMENTSOF(mount_table));
 
+bool mount_point_is_api(const char *path) {
         /* Checks if this mount point is considered "API", and hence
          * should be ignored */
 
-        for (i = 0; i < ELEMENTSOF(mount_table); i ++)
+        for (size_t i = 0; i < ELEMENTSOF(mount_table); i ++)
                 if (path_equal(path, mount_table[i].where))
                         return true;
 
@@ -188,13 +203,11 @@ static int mount_one(const MountPoint *p, bool relabel) {
                   strna(p->options));
 
         if (FLAGS_SET(p->mode, MNT_FOLLOW_SYMLINK))
-                r = RET_NERRNO(mount(p->what, p->where, p->type, p->flags, p->options));
+                r = mount_follow_verbose(priority, p->what, p->where, p->type, p->flags, p->options);
         else
-                r = mount_nofollow(p->what, p->where, p->type, p->flags, p->options);
-        if (r < 0) {
-                log_full_errno(priority, r, "Failed to mount %s at %s: %m", p->type, p->where);
+                r = mount_nofollow_verbose(priority, p->what, p->where, p->type, p->flags, p->options);
+        if (r < 0)
                 return (p->mode & MNT_FATAL) ? r : 0;
-        }
 
         /* Relabel again, since we now mounted something fresh here */
         if (relabel)
@@ -207,7 +220,7 @@ static int mount_one(const MountPoint *p, bool relabel) {
                         (void) umount2(p->where, UMOUNT_NOFOLLOW);
                         (void) rmdir(p->where);
 
-                        log_full_errno(priority, r, "Mount point %s not writable after mounting: %m", p->where);
+                        log_full_errno(priority, r, "Mount point %s not writable after mounting, undoing: %m", p->where);
                         return (p->mode & MNT_FATAL) ? r : 0;
                 }
         }
@@ -215,27 +228,23 @@ static int mount_one(const MountPoint *p, bool relabel) {
         return 1;
 }
 
-static int mount_points_setup(unsigned n, bool loaded_policy) {
-        unsigned i;
-        int r = 0;
+static int mount_points_setup(size_t n, bool loaded_policy) {
+        int ret = 0, r;
 
-        for (i = 0; i < n; i ++) {
-                int j;
+        assert(n <= ELEMENTSOF(mount_table));
 
-                j = mount_one(mount_table + i, loaded_policy);
-                if (j != 0 && r >= 0)
-                        r = j;
+        FOREACH_ARRAY(mp, mount_table, n) {
+                r = mount_one(mp, loaded_policy);
+                if (r != 0 && ret >= 0)
+                        ret = r;
         }
 
-        return r;
+        return ret;
 }
 
 int mount_setup_early(void) {
-        assert_cc(N_EARLY_MOUNT <= ELEMENTSOF(mount_table));
-
-        /* Do a minimal mount of /proc and friends to enable the most
-         * basic stuff, such as SELinux */
-        return mount_points_setup(N_EARLY_MOUNT, false);
+        /* Do a minimal mount of /proc and friends to enable the most basic stuff, such as SELinux */
+        return mount_points_setup(N_EARLY_MOUNT, /* loaded_policy= */ false);
 }
 
 static const char *join_with(const char *controller) {
@@ -281,7 +290,7 @@ static int symlink_controller(const char *target, const char *alias) {
         p = strjoina("/sys/fs/cgroup/", target);
 
         r = mac_smack_copy(a, p);
-        if (r < 0 && r != -EOPNOTSUPP)
+        if (r < 0 && !ERRNO_IS_NOT_SUPPORTED(r))
                 return log_error_errno(r, "Failed to copy smack label from %s to %s: %m", p, a);
 #endif
 
@@ -382,8 +391,9 @@ static int relabel_cb(
                 return RECURSE_DIR_CONTINUE;
 
         case RECURSE_DIR_ENTER:
-                /* /run/initramfs is static data and big, no need to dynamically relabel its contents at boot... */
-                if (path_equal(path, "/run/initramfs"))
+                /* /run/initramfs/ + /run/nextroot/ are static data and big, no need to dynamically relabel
+                 * its contents at boot... */
+                if (PATH_STARTSWITH_SET(path, "/run/initramfs", "/run/nextroot"))
                         return RECURSE_DIR_SKIP_ENTRY;
 
                 _fallthrough_;
@@ -529,7 +539,7 @@ int mount_setup(bool loaded_policy, bool leave_propagation) {
 
                 after_relabel = now(CLOCK_MONOTONIC);
 
-                log_info("Relabelled /dev, /dev/shm, /run, /sys/fs/cgroup%s in %s.",
+                log_info("Relabeled /dev, /dev/shm, /run, /sys/fs/cgroup%s in %s.",
                          n_extra > 0 ? ", additional files" : "",
                          FORMAT_TIMESPAN(after_relabel - before_relabel, 0));
         }
@@ -555,6 +565,11 @@ int mount_setup(bool loaded_policy, bool leave_propagation) {
          * misdetect systemd. */
         (void) mkdir_label("/run/systemd", 0755);
         (void) mkdir_label("/run/systemd/system", 0755);
+
+        /* Make sure there's always a place where sandboxed environments can mount root file systems they are
+         * about to move into, even when unprivileged, without having to create a temporary one in /tmp/
+         * (which they then have to keep track of and clean) */
+        (void) mkdir_label("/run/systemd/mount-rootfs", 0555);
 
         /* Make sure we have a mount point to hide in sandboxes */
         (void) mkdir_label("/run/credentials", 0755);

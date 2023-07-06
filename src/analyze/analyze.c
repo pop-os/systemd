@@ -17,14 +17,18 @@
 #include "analyze-calendar.h"
 #include "analyze-capability.h"
 #include "analyze-cat-config.h"
+#include "analyze-compare-versions.h"
 #include "analyze-condition.h"
 #include "analyze-critical-chain.h"
 #include "analyze-dot.h"
 #include "analyze-dump.h"
 #include "analyze-exit-status.h"
+#include "analyze-fdstore.h"
 #include "analyze-filesystems.h"
 #include "analyze-inspect-elf.h"
 #include "analyze-log-control.h"
+#include "analyze-malloc.h"
+#include "analyze-pcrs.h"
 #include "analyze-plot.h"
 #include "analyze-security.h"
 #include "analyze-service-watchdogs.h"
@@ -35,8 +39,8 @@
 #include "analyze-timestamp.h"
 #include "analyze-unit-files.h"
 #include "analyze-unit-paths.h"
-#include "analyze-compare-versions.h"
 #include "analyze-verify.h"
+#include "analyze-image-policy.h"
 #include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
@@ -90,7 +94,7 @@ usec_t arg_fuzz = 0;
 PagerFlags arg_pager_flags = 0;
 BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 const char *arg_host = NULL;
-LookupScope arg_scope = LOOKUP_SCOPE_SYSTEM;
+RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 RecursiveErrors arg_recursive_errors = _RECURSIVE_ERRORS_INVALID;
 bool arg_man = true;
 bool arg_generators = false;
@@ -107,6 +111,7 @@ bool arg_quiet = false;
 char *arg_profile = NULL;
 bool arg_legend = true;
 bool arg_table = false;
+ImagePolicy *arg_image_policy = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_dot_from_patterns, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_dot_to_patterns, strv_freep);
@@ -115,20 +120,20 @@ STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_security_policy, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_unit, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_profile, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 int acquire_bus(sd_bus **bus, bool *use_full_bus) {
-        bool user = arg_scope != LOOKUP_SCOPE_SYSTEM;
         int r;
 
         if (use_full_bus && *use_full_bus) {
-                r = bus_connect_transport(arg_transport, arg_host, user, bus);
+                r = bus_connect_transport(arg_transport, arg_host, arg_runtime_scope, bus);
                 if (IN_SET(r, 0, -EHOSTDOWN))
                         return r;
 
                 *use_full_bus = false;
         }
 
-        return bus_connect_transport_systemd(arg_transport, arg_host, user, bus);
+        return bus_connect_transport_systemd(arg_transport, arg_host, arg_runtime_scope, bus);
 }
 
 int bus_get_unit_property_strv(sd_bus *bus, const char *path, const char *property, char ***strv) {
@@ -164,6 +169,23 @@ void time_parsing_hint(const char *p, bool calendar, bool timestamp, bool timesp
         if (timespan && parse_time(p, NULL, USEC_PER_SEC) >= 0)
                 log_notice("Hint: this expression is a valid timespan. "
                            "Use 'systemd-analyze timespan \"%s\"' instead?", p);
+}
+
+int dump_fd_reply(sd_bus_message *message) {
+        int fd, r;
+
+        assert(message);
+
+        r = sd_bus_message_read(message, "h", &fd);
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        fflush(stdout);
+        r = copy_bytes(fd, STDOUT_FILENO, UINT64_MAX, 0);
+        if (r < 0)
+                return r;
+
+        return 1;  /* Success */
 }
 
 static int help(int argc, char *argv[], void *userdata) {
@@ -211,6 +233,9 @@ static int help(int argc, char *argv[], void *userdata) {
                "  timespan SPAN...           Validate a time span\n"
                "  security [UNIT...]         Analyze security of unit\n"
                "  inspect-elf FILE...        Parse and print ELF package metadata\n"
+               "  malloc [D-BUS SERVICE...]  Dump malloc stats of a D-Bus service\n"
+               "  fdstore SERVICE...         Show file descriptor store contents of service\n"
+               "  pcrs [PCR...]              Show TPM2 PCRs and their names\n"
                "\nOptions:\n"
                "     --recursive-errors=MODE Control which units are verified\n"
                "     --offline=BOOL          Perform a security review on unit file(s)\n"
@@ -248,6 +273,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "  -q --quiet                 Do not emit hints\n"
                "     --root=PATH             Operate on an alternate filesystem root\n"
                "     --image=PATH            Operate on disk image as filesystem root\n"
+               "     --image-policy=POLICY   Specify disk image dissection policy\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                ansi_highlight(),
@@ -268,6 +294,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_REQUIRE,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_SYSTEM,
                 ARG_USER,
                 ARG_GLOBAL,
@@ -297,6 +324,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "require",          no_argument,       NULL, ARG_REQUIRE          },
                 { "root",             required_argument, NULL, ARG_ROOT             },
                 { "image",            required_argument, NULL, ARG_IMAGE            },
+                { "image-policy",     required_argument, NULL, ARG_IMAGE_POLICY     },
                 { "recursive-errors", required_argument, NULL, ARG_RECURSIVE_ERRORS },
                 { "offline",          required_argument, NULL, ARG_OFFLINE          },
                 { "threshold",        required_argument, NULL, ARG_THRESHOLD        },
@@ -364,16 +392,22 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
+
                 case ARG_SYSTEM:
-                        arg_scope = LOOKUP_SCOPE_SYSTEM;
+                        arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
                         break;
 
                 case ARG_USER:
-                        arg_scope = LOOKUP_SCOPE_USER;
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
                         break;
 
                 case ARG_GLOBAL:
-                        arg_scope = LOOKUP_SCOPE_GLOBAL;
+                        arg_runtime_scope = RUNTIME_SCOPE_GLOBAL;
                         break;
 
                 case ARG_ORDER:
@@ -513,20 +547,20 @@ static int parse_argv(int argc, char *argv[]) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Option --offline= is only supported for security right now.");
 
-        if (arg_json_format_flags != JSON_FORMAT_OFF && !STRPTR_IN_SET(argv[optind], "security", "inspect-elf", "plot"))
+        if (arg_json_format_flags != JSON_FORMAT_OFF && !STRPTR_IN_SET(argv[optind], "security", "inspect-elf", "plot", "fdstore", "pcrs"))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Option --json= is only supported for security, inspect-elf, and plot right now.");
+                                       "Option --json= is only supported for security, inspect-elf, plot, fdstore, pcrs right now.");
 
         if (arg_threshold != 100 && !streq_ptr(argv[optind], "security"))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Option --threshold= is only supported for security right now.");
 
-        if (arg_scope == LOOKUP_SCOPE_GLOBAL &&
+        if (arg_runtime_scope == RUNTIME_SCOPE_GLOBAL &&
             !STR_IN_SET(argv[optind] ?: "time", "dot", "unit-paths", "verify"))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Option --global only makes sense with verbs dot, unit-paths, verify.");
 
-        if (streq_ptr(argv[optind], "cat-config") && arg_scope == LOOKUP_SCOPE_USER)
+        if (streq_ptr(argv[optind], "cat-config") && arg_runtime_scope == RUNTIME_SCOPE_USER)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Option --user is not supported for cat-config right now.");
 
@@ -567,7 +601,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
 
         static const Verb verbs[] = {
                 { "help",              VERB_ANY, VERB_ANY, 0,            help                   },
@@ -601,6 +635,10 @@ static int run(int argc, char *argv[]) {
                 { "timespan",          2,        VERB_ANY, 0,            verb_timespan          },
                 { "security",          VERB_ANY, VERB_ANY, 0,            verb_security          },
                 { "inspect-elf",       2,        VERB_ANY, 0,            verb_elf_inspection    },
+                { "malloc",            VERB_ANY, VERB_ANY, 0,            verb_malloc            },
+                { "fdstore",           2,        VERB_ANY, 0,            verb_fdstore           },
+                { "image-policy",      2,        2,        0,            verb_image_policy      },
+                { "pcrs",              VERB_ANY, VERB_ANY, 0,            verb_pcrs              },
                 {}
         };
 
@@ -621,15 +659,17 @@ static int run(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_READ_ONLY,
-                                &unlink_dir,
+                                &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;
 
-                arg_root = strdup(unlink_dir);
+                arg_root = strdup(mounted_dir);
                 if (!arg_root)
                         return log_oom();
         }

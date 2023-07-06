@@ -97,6 +97,7 @@ typedef enum MountState {
         MOUNT_REMOUNTING_SIGKILL,
         MOUNT_UNMOUNTING_SIGTERM,
         MOUNT_UNMOUNTING_SIGKILL,
+        MOUNT_UNMOUNTING_CATCHUP,
         MOUNT_FAILED,
         MOUNT_CLEANING,
         _MOUNT_STATE_MAX,
@@ -144,7 +145,11 @@ typedef enum ServiceState {
         SERVICE_FINAL_SIGTERM,     /* In case the STOP_POST executable hangs, we shoot that down, too */
         SERVICE_FINAL_SIGKILL,
         SERVICE_FAILED,
+        SERVICE_DEAD_BEFORE_AUTO_RESTART,
+        SERVICE_FAILED_BEFORE_AUTO_RESTART,
+        SERVICE_DEAD_RESOURCES_PINNED,  /* Like SERVICE_DEAD, but with pinned resources */
         SERVICE_AUTO_RESTART,
+        SERVICE_AUTO_RESTART_QUEUED,
         SERVICE_CLEANING,
         _SERVICE_STATE_MAX,
         _SERVICE_STATE_INVALID = -EINVAL,

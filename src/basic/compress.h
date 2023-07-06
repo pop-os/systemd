@@ -2,6 +2,7 @@
 #pragma once
 
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
 
@@ -16,6 +17,8 @@ typedef enum Compression {
 
 const char* compression_to_string(Compression compression);
 Compression compression_from_string(const char *compression);
+
+bool compression_supported(Compression c);
 
 int compress_blob_xz(const void *src, uint64_t src_size,
                      void *dst, size_t dst_alloc_size, size_t *dst_size);
@@ -60,7 +63,7 @@ int decompress_stream_xz(int fdf, int fdt, uint64_t max_size);
 int decompress_stream_lz4(int fdf, int fdt, uint64_t max_size);
 int decompress_stream_zstd(int fdf, int fdt, uint64_t max_size);
 
-static inline int compress_blob_explicit(
+static inline int compress_blob(
                 Compression compression,
                 const void *src, uint64_t src_size,
                 void *dst, size_t dst_alloc_size, size_t *dst_size) {
@@ -76,12 +79,6 @@ static inline int compress_blob_explicit(
                 return -EOPNOTSUPP;
         }
 }
-
-#define compress_blob(src, src_size, dst, dst_alloc_size, dst_size) \
-        compress_blob_explicit(                                     \
-                DEFAULT_COMPRESSION,                                \
-                src, src_size,                                      \
-                dst, dst_alloc_size, dst_size)
 
 static inline int compress_stream(int fdf, int fdt, uint64_t max_bytes, uint64_t *ret_uncompressed_size) {
         switch (DEFAULT_COMPRESSION) {

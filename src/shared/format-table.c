@@ -7,6 +7,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "devnum-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-table.h"
@@ -17,6 +18,7 @@
 #include "id128-util.h"
 #include "in-addr-util.h"
 #include "memory-util.h"
+#include "memstream-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -24,6 +26,7 @@
 #include "process-util.h"
 #include "signal-util.h"
 #include "sort-util.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "strxcpyx.h"
 #include "terminal-util.h"
@@ -107,6 +110,7 @@ typedef struct TableData {
                 gid_t gid;
                 pid_t pid;
                 mode_t mode;
+                dev_t devnum;
                 /* … add more here as we start supporting more cell data types … */
         };
 } TableData;
@@ -297,6 +301,8 @@ static size_t table_data_size(TableDataType type, const void *data) {
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE:
         case TABLE_TIMESPAN:
         case TABLE_TIMESPAN_MSEC:
@@ -347,7 +353,11 @@ static size_t table_data_size(TableDataType type, const void *data) {
                 return sizeof(pid_t);
 
         case TABLE_MODE:
+        case TABLE_MODE_INODE_TYPE:
                 return sizeof(mode_t);
+
+        case TABLE_DEVNUM:
+                return sizeof(dev_t);
 
         default:
                 assert_not_reached();
@@ -866,6 +876,7 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         gid_t gid;
                         pid_t pid;
                         mode_t mode;
+                        dev_t devnum;
                 } buffer;
 
                 switch (type) {
@@ -896,6 +907,8 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                 case TABLE_TIMESTAMP:
                 case TABLE_TIMESTAMP_UTC:
                 case TABLE_TIMESTAMP_RELATIVE:
+                case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+                case TABLE_TIMESTAMP_LEFT:
                 case TABLE_TIMESTAMP_DATE:
                 case TABLE_TIMESPAN:
                 case TABLE_TIMESPAN_MSEC:
@@ -1020,8 +1033,14 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         break;
 
                 case TABLE_MODE:
+                case TABLE_MODE_INODE_TYPE:
                         buffer.mode = va_arg(ap, mode_t);
                         data = &buffer.mode;
+                        break;
+
+                case TABLE_DEVNUM:
+                        buffer.devnum = va_arg(ap, dev_t);
+                        data = &buffer.devnum;
                         break;
 
                 case TABLE_SET_MINIMUM_WIDTH: {
@@ -1271,6 +1290,8 @@ int table_hide_column_from_display_internal(Table *t, ...) {
 }
 
 static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t index_b) {
+        int r;
+
         assert(a);
         assert(b);
 
@@ -1304,6 +1325,8 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                 case TABLE_TIMESTAMP:
                 case TABLE_TIMESTAMP_UTC:
                 case TABLE_TIMESTAMP_RELATIVE:
+                case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+                case TABLE_TIMESTAMP_LEFT:
                 case TABLE_TIMESTAMP_DATE:
                         return CMP(a->timestamp, b->timestamp);
 
@@ -1374,7 +1397,15 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                         return CMP(a->pid, b->pid);
 
                 case TABLE_MODE:
+                case TABLE_MODE_INODE_TYPE:
                         return CMP(a->mode, b->mode);
+
+                case TABLE_DEVNUM:
+                        r = CMP(major(a->devnum), major(b->devnum));
+                        if (r != 0)
+                                return r;
+
+                        return CMP(minor(a->devnum), minor(b->devnum));
 
                 default:
                         ;
@@ -1416,11 +1447,10 @@ static int table_data_compare(const size_t *a, const size_t *b, Table *t) {
 }
 
 static char* format_strv_width(char **strv, size_t column_width) {
-        _cleanup_free_ char *buf = NULL; /* buf must be freed after f */
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t sz = 0;
+        _cleanup_(memstream_done) MemStream m = {};
+        FILE *f;
 
-        f = open_memstream_unlocked(&buf, &sz);
+        f = memstream_init(&m);
         if (!f)
                 return NULL;
 
@@ -1441,11 +1471,11 @@ static char* format_strv_width(char **strv, size_t column_width) {
                 }
         }
 
-        if (fflush_and_check(f) < 0)
+        char *buf;
+        if (memstream_finalize(&m, &buf, NULL) < 0)
                 return NULL;
 
-        f = safe_fclose(f);
-        return TAKE_PTR(buf);
+        return buf;
 }
 
 static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercasing, size_t column_width, bool *have_soft) {
@@ -1537,11 +1567,15 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE: {
                 _cleanup_free_ char *p = NULL;
                 char *ret;
 
-                p = new(char, d->type == TABLE_TIMESTAMP_RELATIVE ? FORMAT_TIMESTAMP_RELATIVE_MAX : FORMAT_TIMESTAMP_MAX);
+                p = new(char,
+                        IN_SET(d->type, TABLE_TIMESTAMP_RELATIVE, TABLE_TIMESTAMP_RELATIVE_MONOTONIC, TABLE_TIMESTAMP_LEFT) ?
+                                FORMAT_TIMESTAMP_RELATIVE_MAX : FORMAT_TIMESTAMP_MAX);
                 if (!p)
                         return NULL;
 
@@ -1551,8 +1585,14 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_UTC);
                 else if (d->type == TABLE_TIMESTAMP_DATE)
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_DATE);
+                else if (d->type == TABLE_TIMESTAMP_RELATIVE_MONOTONIC)
+                        ret = format_timestamp_relative_full(p, FORMAT_TIMESTAMP_RELATIVE_MAX,
+                                                             d->timestamp, CLOCK_MONOTONIC,
+                                                             /* implicit_left = */ false);
                 else
-                        ret = format_timestamp_relative(p, FORMAT_TIMESTAMP_RELATIVE_MAX, d->timestamp);
+                        ret = format_timestamp_relative_full(p, FORMAT_TIMESTAMP_RELATIVE_MAX,
+                                                             d->timestamp, CLOCK_REALTIME,
+                                                             /* implicit_left = */ d->type == TABLE_TIMESTAMP_LEFT);
                 if (!ret)
                         return "-";
 
@@ -1873,6 +1913,22 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 d->formatted = p;
                 break;
         }
+
+        case TABLE_MODE_INODE_TYPE:
+
+                if (d->mode == MODE_INVALID)
+                        return table_ersatz_string(t);
+
+                return inode_type_to_string(d->mode);
+
+        case TABLE_DEVNUM:
+                if (devnum_is_zero(d->devnum))
+                        return table_ersatz_string(t);
+
+                if (asprintf(&d->formatted, DEVNUM_FORMAT_STR, DEVNUM_FORMAT_VAL(d->devnum)) < 0)
+                        return NULL;
+
+                break;
 
         default:
                 assert_not_reached();
@@ -2474,12 +2530,14 @@ int table_print(Table *t, FILE *f) {
 }
 
 int table_format(Table *t, char **ret) {
-        _cleanup_free_ char *buf = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t sz = 0;
+        _cleanup_(memstream_done) MemStream m = {};
+        FILE *f;
         int r;
 
-        f = open_memstream_unlocked(&buf, &sz);
+        assert(t);
+        assert(ret);
+
+        f = memstream_init(&m);
         if (!f)
                 return -ENOMEM;
 
@@ -2487,11 +2545,7 @@ int table_format(Table *t, char **ret) {
         if (r < 0)
                 return r;
 
-        f = safe_fclose(f);
-
-        *ret = TAKE_PTR(buf);
-
-        return 0;
+        return memstream_finalize(&m, ret, NULL);
 }
 
 size_t table_get_rows(Table *t) {
@@ -2589,6 +2643,8 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE:
                 if (d->timestamp == USEC_INFINITY)
                         return json_variant_new_null(ret);
@@ -2687,10 +2743,19 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
                 return json_variant_new_integer(ret, d->int_val);
 
         case TABLE_MODE:
+        case TABLE_MODE_INODE_TYPE:
                 if (d->mode == MODE_INVALID)
                         return json_variant_new_null(ret);
 
                 return json_variant_new_unsigned(ret, d->mode);
+
+        case TABLE_DEVNUM:
+                if (devnum_is_zero(d->devnum))
+                        return json_variant_new_null(ret);
+
+                return json_build(ret, JSON_BUILD_ARRAY(
+                                                  JSON_BUILD_UNSIGNED(major(d->devnum)),
+                                                  JSON_BUILD_UNSIGNED(minor(d->devnum))));
 
         default:
                 return -EINVAL;

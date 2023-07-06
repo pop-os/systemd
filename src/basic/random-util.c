@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/random.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -26,6 +25,7 @@
 #include "missing_syscall.h"
 #include "missing_threads.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "random-util.h"
 #include "sha256.h"
 #include "time-util.h"
@@ -48,7 +48,7 @@ static void fallback_random_bytes(void *p, size_t n) {
                 .call_id = fallback_counter++,
                 .stamp_mono = now(CLOCK_MONOTONIC),
                 .stamp_real = now(CLOCK_REALTIME),
-                .pid = getpid(),
+                .pid = getpid_cached(),
                 .tid = gettid(),
         };
 

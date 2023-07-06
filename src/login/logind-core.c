@@ -8,7 +8,9 @@
 #include "sd-device.h"
 
 #include "alloc-util.h"
+#include "battery-util.h"
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-util.h"
 #include "cgroup-util.h"
 #include "conf-parser.h"
@@ -78,13 +80,9 @@ void manager_reset_config(Manager *m) {
 int manager_parse_config_file(Manager *m) {
         assert(m);
 
-        return config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/logind.conf",
-                        CONF_PATHS_NULSTR("systemd/logind.conf.d"),
-                        "Login\0",
-                        config_item_perf_lookup, logind_gperf_lookup,
-                        CONFIG_PARSE_WARN, m,
-                        NULL);
+        return config_parse_config_file("logind.conf", "Login\0",
+                                        config_item_perf_lookup, logind_gperf_lookup,
+                                        CONFIG_PARSE_WARN, m);
 }
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **ret_device) {
@@ -326,15 +324,11 @@ int manager_process_button_device(Manager *m, sd_device *d) {
                 return r;
 
         if (device_for_action(d, SD_DEVICE_REMOVE) ||
-            sd_device_has_current_tag(d, "power-switch") <= 0) {
+            sd_device_has_current_tag(d, "power-switch") <= 0)
 
-                b = hashmap_get(m->buttons, sysname);
-                if (!b)
-                        return 0;
+                button_free(hashmap_get(m->buttons, sysname));
 
-                button_free(b);
-
-        } else {
+        else {
                 const char *sn;
 
                 r = manager_add_button(m, sysname, &b);
@@ -542,15 +536,7 @@ int manager_spawn_autovt(Manager *m, unsigned vtnr) {
         }
 
         xsprintf(name, "autovt@tty%u.service", vtnr);
-        r = sd_bus_call_method(
-                        m->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StartUnit",
-                        &error,
-                        NULL,
-                        "ss", name, "fail");
+        r = bus_call_method(m->bus, bus_systemd_mgr, "StartUnit", &error, NULL, "ss", name, "fail");
         if (r < 0)
                 return log_error_errno(r, "Failed to start %s: %s", name, bus_error_message(&error, r));
 

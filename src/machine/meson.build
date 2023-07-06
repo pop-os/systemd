@@ -18,7 +18,8 @@ libmachine_core = static_library(
         'machine-core',
         libmachine_core_sources,
         include_directories : includes,
-        dependencies : threads,
+        dependencies : [threads,
+                        userspace],
         build_by_default : false)
 
 if conf.get('ENABLE_MACHINED') == 1
@@ -31,8 +32,12 @@ if conf.get('ENABLE_MACHINED') == 1
 endif
 
 tests += [
-        [files('test-machine-tables.c'),
-         [libmachine_core,
-          libshared],
-         [threads]],
+        {
+                'sources' : files('test-machine-tables.c'),
+                'link_with': [
+                        libmachine_core,
+                        libshared
+                ],
+                'dependencies': threads,
+        },
 ]

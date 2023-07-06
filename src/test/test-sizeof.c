@@ -3,8 +3,9 @@
 #include <sched.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/types.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 
 #define __STDC_WANT_IEC_60559_TYPES_EXT__
 #include <float.h>
@@ -17,16 +18,28 @@
 DISABLE_WARNING_TYPE_LIMITS;
 
 #define info_no_sign(t)                                                 \
-        printf("%s → %zu bits, %zu byte alignment\n", STRINGIFY(t),     \
+        printf("%s → %zu bits, %zu byte alignment\n", STRINGIFY(t),    \
                sizeof(t)*CHAR_BIT,                                      \
-               __alignof__(t))
+               alignof(t))
 
 #define info(t)                                                         \
-        printf("%s → %zu bits%s, %zu byte alignment\n", STRINGIFY(t),   \
+        printf("%s → %zu bits%s, %zu byte alignment\n", STRINGIFY(t),  \
                sizeof(t)*CHAR_BIT,                                      \
                strstr(STRINGIFY(t), "signed") ? "" :                    \
                (t)-1 < (t)0 ? ", signed" : ", unsigned",                \
-               __alignof__(t))
+               alignof(t))
+
+#define check_no_sign(t, size)                  \
+        do {                                    \
+                info_no_sign(t);                \
+                assert_se(sizeof(t) == size);   \
+        } while (false)
+
+#define check(t, size)                          \
+        do {                                    \
+                info(t);                        \
+                assert_se(sizeof(t) == size);   \
+        } while (false)
 
 enum Enum {
         enum_value,
@@ -44,7 +57,13 @@ enum BigEnum2 {
 int main(void) {
         int (*function_pointer)(void);
 
-        info_no_sign(function_pointer);
+        check_no_sign(dev_t, SIZEOF_DEV_T);
+        check_no_sign(ino_t, SIZEOF_INO_T);
+        check_no_sign(rlim_t, SIZEOF_RLIM_T);
+        check(time_t, SIZEOF_TIME_T);
+        check(typeof(((struct timex *)0)->freq), SIZEOF_TIMEX_MEMBER);
+
+        info_no_sign(typeof(function_pointer));
         info_no_sign(void*);
         info(char*);
 
@@ -55,8 +74,10 @@ int main(void) {
         info(unsigned);
         info(unsigned long);
         info(unsigned long long);
+#ifdef __GLIBC__
         info(__syscall_ulong_t);
         info(__syscall_slong_t);
+#endif
         info(intmax_t);
         info(uintmax_t);
 
@@ -74,15 +95,18 @@ int main(void) {
 
         info(size_t);
         info(ssize_t);
-        info(time_t);
         info(usec_t);
+#ifdef __GLIBC__
         info(__time_t);
+#endif
         info(pid_t);
         info(uid_t);
         info(gid_t);
         info(socklen_t);
 
+#ifdef __GLIBC__
         info(__cpu_mask);
+#endif
 
         info(enum Enum);
         info(enum BigEnum);

@@ -2,31 +2,37 @@
 
 #include <fcntl.h>
 #include <sys/eventfd.h>
+#include <sys/mount.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "data-fd-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "macro.h"
 #include "memory-util.h"
 #include "missing_syscall.h"
+#include "mkdir.h"
 #include "mount-util.h"
+#include "namespace-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "random-util.h"
 #include "rlimit-util.h"
+#include "rm-rf.h"
 #include "seccomp-util.h"
 #include "serialize.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "tests.h"
 #include "tmpfile-util.h"
 
 TEST(close_many) {
         int fds[3];
-        char name0[] = "/tmp/test-close-many.XXXXXX";
-        char name1[] = "/tmp/test-close-many.XXXXXX";
-        char name2[] = "/tmp/test-close-many.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name0[] = "/tmp/test-close-many.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name1[] = "/tmp/test-close-many.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name2[] = "/tmp/test-close-many.XXXXXX";
 
         fds[0] = mkostemp_safe(name0);
         fds[1] = mkostemp_safe(name1);
@@ -39,22 +45,16 @@ TEST(close_many) {
         assert_se(fcntl(fds[2], F_GETFD) >= 0);
 
         safe_close(fds[2]);
-
-        unlink(name0);
-        unlink(name1);
-        unlink(name2);
 }
 
 TEST(close_nointr) {
-        char name[] = "/tmp/test-test-close_nointr.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-test-close_nointr.XXXXXX";
         int fd;
 
         fd = mkostemp_safe(name);
         assert_se(fd >= 0);
         assert_se(close_nointr(fd) >= 0);
         assert_se(close_nointr(fd) < 0);
-
-        unlink(name);
 }
 
 TEST(same_fd) {
@@ -406,13 +406,16 @@ TEST(fd_reopen) {
         assert_se(FLAGS_SET(fl, O_DIRECTORY));
         assert_se(FLAGS_SET(fl, O_PATH));
 
+        /* fd_reopen() with O_NOFOLLOW will systematically fail, since it is implemented via a symlink in /proc/self/fd/ */
+        assert_se(fd_reopen(fd1, O_RDONLY|O_CLOEXEC|O_NOFOLLOW) == -ELOOP);
+        assert_se(fd_reopen(fd1, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW) == -ELOOP);
+
         fd2 = fd_reopen(fd1, O_RDONLY|O_DIRECTORY|O_CLOEXEC);  /* drop the O_PATH */
         assert_se(fd2 >= 0);
 
         assert_se(fstat(fd2, &st2) >= 0);
         assert_se(S_ISDIR(st2.st_mode));
-        assert_se(st1.st_ino == st2.st_ino);
-        assert_se(st1.st_rdev == st2.st_rdev);
+        assert_se(stat_inode_same(&st1, &st2));
 
         fl = fcntl(fd2, F_GETFL);
         assert_se(fl >= 0);
@@ -426,8 +429,7 @@ TEST(fd_reopen) {
 
         assert_se(fstat(fd1, &st1) >= 0);
         assert_se(S_ISDIR(st1.st_mode));
-        assert_se(st1.st_ino == st2.st_ino);
-        assert_se(st1.st_rdev == st2.st_rdev);
+        assert_se(stat_inode_same(&st1, &st2));
 
         fl = fcntl(fd1, F_GETFL);
         assert_se(fl >= 0);
@@ -454,8 +456,7 @@ TEST(fd_reopen) {
 
         assert_se(fstat(fd2, &st2) >= 0);
         assert_se(S_ISREG(st2.st_mode));
-        assert_se(st1.st_ino == st2.st_ino);
-        assert_se(st1.st_rdev == st2.st_rdev);
+        assert_se(stat_inode_same(&st1, &st2));
 
         fl = fcntl(fd2, F_GETFL);
         assert_se(fl >= 0);
@@ -470,8 +471,7 @@ TEST(fd_reopen) {
 
         assert_se(fstat(fd1, &st1) >= 0);
         assert_se(S_ISREG(st1.st_mode));
-        assert_se(st1.st_ino == st2.st_ino);
-        assert_se(st1.st_rdev == st2.st_rdev);
+        assert_se(stat_inode_same(&st1, &st2));
 
         fl = fcntl(fd1, F_GETFL);
         assert_se(fl >= 0);
@@ -482,6 +482,23 @@ TEST(fd_reopen) {
         safe_close(fd1);
         assert_se(fd_reopen(fd1, O_RDONLY|O_CLOEXEC) == -EBADF);
         fd1 = -EBADF;
+
+        /* Validate what happens if we reopen a symlink */
+        fd1 = open("/proc/self", O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        assert_se(fd1 >= 0);
+        assert_se(fstat(fd1, &st1) >= 0);
+        assert_se(S_ISLNK(st1.st_mode));
+
+        fd2 = fd_reopen(fd1, O_PATH|O_CLOEXEC);
+        assert_se(fd2 >= 0);
+        assert_se(fstat(fd2, &st2) >= 0);
+        assert_se(S_ISLNK(st2.st_mode));
+        assert_se(stat_inode_same(&st1, &st2));
+        fd2 = safe_close(fd2);
+
+        /* So here's the thing: if we have an O_PATH fd to a symlink, we *cannot* convert it to a regular fd
+         * with that. i.e. you cannot have the VFS follow a symlink pinned via an O_PATH fd. */
+        assert_se(fd_reopen(fd1, O_RDONLY|O_CLOEXEC) == -ELOOP);
 }
 
 TEST(fd_reopen_condition) {
@@ -568,6 +585,170 @@ TEST(take_fd) {
         assert_se(fd1 >= 0);
         assert_se(array[0] == -EBADF);
         assert_se(array[1] == -EBADF);
+}
+
+TEST(dir_fd_is_root) {
+        _cleanup_close_ int fd = -EBADF;
+        int r;
+
+        assert_se(dir_fd_is_root_or_cwd(AT_FDCWD) > 0);
+
+        assert_se((fd = open("/", O_CLOEXEC|O_PATH|O_DIRECTORY|O_NOFOLLOW)) >= 0);
+        assert_se(dir_fd_is_root(fd) > 0);
+        assert_se(dir_fd_is_root_or_cwd(fd) > 0);
+
+        fd = safe_close(fd);
+
+        assert_se((fd = open("/usr", O_CLOEXEC|O_PATH|O_DIRECTORY|O_NOFOLLOW)) >= 0);
+        assert_se(dir_fd_is_root(fd) == 0);
+        assert_se(dir_fd_is_root_or_cwd(fd) == 0);
+
+        r = detach_mount_namespace();
+        if (r < 0)
+                return (void) log_tests_skipped_errno(r, "Failed to detach mount namespace");
+
+        _cleanup_(rm_rf_physical_and_freep) char *tmp = NULL;
+        _cleanup_free_ char *x = NULL, *y = NULL;
+
+        assert_se(mkdtemp_malloc("/tmp/test-mkdir-XXXXXX", &tmp) >= 0);
+        assert_se(x = path_join(tmp, "x"));
+        assert_se(y = path_join(tmp, "x/y"));
+        assert_se(mkdir_p(y, 0755) >= 0);
+        assert_se(mount_nofollow_verbose(LOG_DEBUG, x, y, NULL, MS_BIND, NULL) >= 0);
+
+        fd = safe_close(fd);
+
+        assert_se((fd = open(tmp, O_CLOEXEC|O_PATH|O_DIRECTORY|O_NOFOLLOW)) >= 0);
+        assert_se(dir_fd_is_root(fd) == 0);
+        assert_se(dir_fd_is_root_or_cwd(fd) == 0);
+
+        fd = safe_close(fd);
+
+        assert_se((fd = open(x, O_CLOEXEC|O_PATH|O_DIRECTORY|O_NOFOLLOW)) >= 0);
+        assert_se(dir_fd_is_root(fd) == 0);
+        assert_se(dir_fd_is_root_or_cwd(fd) == 0);
+
+        fd = safe_close(fd);
+
+        assert_se((fd = open(y, O_CLOEXEC|O_PATH|O_DIRECTORY|O_NOFOLLOW)) >= 0);
+        assert_se(dir_fd_is_root(fd) == 0);
+        assert_se(dir_fd_is_root_or_cwd(fd) == 0);
+}
+
+TEST(fd_get_path) {
+        _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
+        _cleanup_close_ int tfd = -EBADF, fd = -EBADF;
+        _cleanup_free_ char *p = NULL, *q = NULL, *saved_cwd = NULL;
+
+        tfd = mkdtemp_open(NULL, O_PATH, &t);
+        assert_se(tfd >= 0);
+        assert_se(fd_get_path(tfd, &p) >= 0);
+        assert_se(streq(p, t));
+
+        p = mfree(p);
+
+        assert_se(safe_getcwd(&saved_cwd) >= 0);
+        assert_se(chdir(t) >= 0);
+
+        assert_se(fd_get_path(AT_FDCWD, &p) >= 0);
+        assert_se(streq(p, t));
+
+        p = mfree(p);
+
+        assert_se(q = path_join(t, "regular"));
+        assert_se(touch(q) >= 0);
+        assert_se(mkdirat_parents(tfd, "subdir/symlink", 0755) >= 0);
+        assert_se(symlinkat("../regular", tfd, "subdir/symlink") >= 0);
+        assert_se(symlinkat("subdir", tfd, "symdir") >= 0);
+
+        fd = openat(tfd, "regular", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(AT_FDCWD, "regular", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(tfd, "subdir/symlink", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(AT_FDCWD, "subdir/symlink", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(tfd, "symdir//./symlink", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(AT_FDCWD, "symdir//./symlink", O_CLOEXEC|O_PATH);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) >= 0);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        q = mfree(q);
+        fd = safe_close(fd);
+
+        assert_se(q = path_join(t, "subdir/symlink"));
+        fd = openat(tfd, "subdir/symlink", O_CLOEXEC|O_PATH|O_NOFOLLOW);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) == -ELOOP);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(AT_FDCWD, "subdir/symlink", O_CLOEXEC|O_PATH|O_NOFOLLOW);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) == -ELOOP);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(tfd, "symdir//./symlink", O_CLOEXEC|O_PATH|O_NOFOLLOW);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) == -ELOOP);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        p = mfree(p);
+        fd = safe_close(fd);
+
+        fd = openat(AT_FDCWD, "symdir//./symlink", O_CLOEXEC|O_PATH|O_NOFOLLOW);
+        assert_se(fd >= 0);
+        assert_se(fd_verify_regular(fd) == -ELOOP);
+        assert_se(fd_get_path(fd, &p) >= 0);
+        assert_se(streq(p, q));
+
+        assert_se(chdir(saved_cwd) >= 0);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

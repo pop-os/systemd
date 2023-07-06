@@ -138,7 +138,7 @@ static int raw_export_process(RawExport *e) {
                  * reflink source to destination directly. Let's see
                  * if this works. */
 
-                r = btrfs_reflink(e->input_fd, e->output_fd);
+                r = reflink(e->input_fd, e->output_fd);
                 if (r >= 0) {
                         r = 0;
                         goto finish;
@@ -216,7 +216,7 @@ static int raw_export_process(RawExport *e) {
 finish:
         if (r >= 0) {
                 (void) copy_times(e->input_fd, e->output_fd, COPY_CRTIME);
-                (void) copy_xattr(e->input_fd, e->output_fd, 0);
+                (void) copy_xattr(e->input_fd, NULL, e->output_fd, NULL, 0);
         }
 
         if (e->on_finished)
@@ -257,7 +257,7 @@ static int reflink_snapshot(int fd, const char *path) {
                 (void) unlink(t);
         }
 
-        r = btrfs_reflink(fd, new_fd);
+        r = reflink(fd, new_fd);
         if (r < 0) {
                 safe_close(new_fd);
                 return r;

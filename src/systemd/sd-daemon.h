@@ -195,6 +195,10 @@ int sd_is_mq(int fd, const char *path);
                   readable error message. Example: "STATUS=Completed
                   66% of file system check..."
 
+     NOTIFYACCESS=...
+                  Reset the access to the service status notification socket.
+                  Example: "NOTIFYACCESS=main"
+
      ERRNO=...    If a daemon fails, the errno-style error code,
                   formatted as string. Example: "ERRNO=2" for ENOENT.
 
@@ -287,9 +291,14 @@ int sd_pid_notifyf(pid_t pid, int unset_environment, const char *format, ...) _s
 int sd_pid_notify_with_fds(pid_t pid, int unset_environment, const char *state, const int *fds, unsigned n_fds);
 
 /*
+  Combination of sd_pid_notifyf() and sd_pid_notify_with_fds()
+*/
+int sd_pid_notifyf_with_fds(pid_t pid, int unset_environment, const int *fds, size_t n_fds, const char *format, ...) _sd_printf_(5,6);
+
+/*
   Returns > 0 if synchronization with systemd succeeded.  Returns < 0
   on error. Returns 0 if $NOTIFY_SOCKET was not set. Note that the
-  timeout parameter of this function call takes the timeout in µs, and
+  timeout parameter of this function call takes the timeout in μs, and
   will be passed to ppoll(2), hence the behaviour will be similar to
   ppoll(2). This function can be called after sending a status message
   to systemd, if one needs to synchronize against reception of the
@@ -298,6 +307,11 @@ int sd_pid_notify_with_fds(pid_t pid, int unset_environment, const char *state, 
   successfully, but to only synchronize against its consumption.
 */
 int sd_notify_barrier(int unset_environment, uint64_t timeout);
+
+/*
+  Just like sd_notify_barrier() but also takes a PID to send the barrier message from.
+*/
+int sd_pid_notify_barrier(pid_t pid, int unset_environment, uint64_t timeout);
 
 /*
   Returns > 0 if the system was booted with systemd. Returns < 0 on
@@ -316,7 +330,7 @@ int sd_booted(void);
   Returns > 0 if the service manager expects watchdog keep-alive
   events to be sent regularly via sd_notify(0, "WATCHDOG=1"). Returns
   0 if it does not expect this. If the usec argument is non-NULL
-  returns the watchdog timeout in µs after which the service manager
+  returns the watchdog timeout in μs after which the service manager
   will act on a process that has not sent a watchdog keep alive
   message. This function is useful to implement services that
   recognize automatically if they are being run under supervision of

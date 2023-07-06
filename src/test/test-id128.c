@@ -11,6 +11,8 @@
 #include "fd-util.h"
 #include "id128-util.h"
 #include "macro.h"
+#include "path-util.h"
+#include "rm-rf.h"
 #include "string-util.h"
 #include "tests.h"
 #include "tmpfile-util.h"
@@ -212,7 +214,109 @@ TEST(benchmark_sd_id128_get_machine_app_specific) {
 
         q = now(CLOCK_MONOTONIC) - t;
 
-        log_info("%lf µs each\n", (double) q / iterations);
+        log_info("%lf μs each\n", (double) q / iterations);
+}
+
+TEST(id128_at) {
+        _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
+        _cleanup_close_ int tfd = -EBADF;
+        _cleanup_free_ char *p = NULL;
+        sd_id128_t id, i;
+
+        tfd = mkdtemp_open(NULL, O_PATH, &t);
+        assert_se(tfd >= 0);
+        assert_se(mkdirat(tfd, "etc", 0755) >= 0);
+        assert_se(symlinkat("etc", tfd, "etc2") >= 0);
+        assert_se(symlinkat("machine-id", tfd, "etc/hoge-id") >= 0);
+
+        assert_se(sd_id128_randomize(&id) == 0);
+
+        assert_se(id128_write_at(tfd, "etc/machine-id", ID128_FORMAT_PLAIN, id) >= 0);
+        if (geteuid() == 0)
+                assert_se(id128_write_at(tfd, "etc/machine-id", ID128_FORMAT_PLAIN, id) >= 0);
+        else
+                assert_se(id128_write_at(tfd, "etc/machine-id", ID128_FORMAT_PLAIN, id) == -EACCES);
+        assert_se(unlinkat(tfd, "etc/machine-id", 0) >= 0);
+        assert_se(id128_write_at(tfd, "etc2/machine-id", ID128_FORMAT_PLAIN, id) >= 0);
+        assert_se(unlinkat(tfd, "etc/machine-id", 0) >= 0);
+        assert_se(id128_write_at(tfd, "etc/hoge-id", ID128_FORMAT_PLAIN, id) >= 0);
+        assert_se(unlinkat(tfd, "etc/machine-id", 0) >= 0);
+        assert_se(id128_write_at(tfd, "etc2/hoge-id", ID128_FORMAT_PLAIN, id) >= 0);
+
+        /* id128_read_at() */
+        i = SD_ID128_NULL; /* Not necessary in real code, but for testing that the id is really assigned. */
+        assert_se(id128_read_at(tfd, "etc/machine-id", ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read_at(tfd, "etc2/machine-id", ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read_at(tfd, "etc/hoge-id", ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read_at(tfd, "etc2/hoge-id", ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        /* id128_read() */
+        assert_se(p = path_join(t, "/etc/machine-id"));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read(p, ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        free(p);
+        assert_se(p = path_join(t, "/etc2/machine-id"));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read(p, ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        free(p);
+        assert_se(p = path_join(t, "/etc/hoge-id"));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read(p, ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        free(p);
+        assert_se(p = path_join(t, "/etc2/hoge-id"));
+
+        i = SD_ID128_NULL;
+        assert_se(id128_read(p, ID128_FORMAT_PLAIN, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        /* id128_get_machine_at() */
+        i = SD_ID128_NULL;
+        assert_se(id128_get_machine_at(tfd, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+
+        /* id128_get_machine() */
+        i = SD_ID128_NULL;
+        assert_se(id128_get_machine(t, &i) >= 0);
+        assert_se(sd_id128_equal(id, i));
+}
+
+TEST(ID128_REFUSE_NULL) {
+        _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
+        _cleanup_close_ int tfd = -EBADF;
+        sd_id128_t id;
+
+        tfd = mkdtemp_open(NULL, O_PATH, &t);
+        assert_se(tfd >= 0);
+
+        assert_se(id128_write_at(tfd, "zero-id", ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, (sd_id128_t) {}) == -ENOMEDIUM);
+        assert_se(unlinkat(tfd, "zero-id", 0) >= 0);
+        assert_se(id128_write_at(tfd, "zero-id", ID128_FORMAT_PLAIN, (sd_id128_t) {}) >= 0);
+
+        assert_se(sd_id128_randomize(&id) == 0);
+        assert_se(!sd_id128_equal(id, SD_ID128_NULL));
+        assert_se(id128_read_at(tfd, "zero-id", ID128_FORMAT_PLAIN, &id) >= 0);
+        assert_se(sd_id128_equal(id, SD_ID128_NULL));
+
+        assert_se(id128_read_at(tfd, "zero-id", ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, &id) == -ENOMEDIUM);
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

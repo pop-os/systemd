@@ -15,6 +15,7 @@
 #include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "label.h"
 #include "log.h"
 #include "macro.h"
 #include "path-util.h"
@@ -67,8 +68,8 @@ int mac_smack_read_fd(int fd, SmackAttr attr, char **label) {
         return fgetxattr_malloc(fd, smack_attr_to_string(attr), label);
 }
 
-int mac_smack_apply(const char *path, SmackAttr attr, const char *label) {
-        int r;
+int mac_smack_apply_at(int dir_fd, const char *path, SmackAttr attr, const char *label) {
+        _cleanup_close_ int fd = -EBADF;
 
         assert(path);
         assert(attr >= 0 && attr < _SMACK_ATTR_MAX);
@@ -76,14 +77,11 @@ int mac_smack_apply(const char *path, SmackAttr attr, const char *label) {
         if (!mac_smack_use())
                 return 0;
 
-        if (label)
-                r = lsetxattr(path, smack_attr_to_string(attr), label, strlen(label), 0);
-        else
-                r = lremovexattr(path, smack_attr_to_string(attr));
-        if (r < 0)
+        fd = openat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        if (fd < 0)
                 return -errno;
 
-        return 0;
+        return mac_smack_apply_fd(fd, attr, label);
 }
 
 int mac_smack_apply_fd(int fd, SmackAttr attr, const char *label) {
@@ -256,7 +254,7 @@ int mac_smack_read_fd(int fd, SmackAttr attr, char **label) {
         return -EOPNOTSUPP;
 }
 
-int mac_smack_apply(const char *path, SmackAttr attr, const char *label) {
+int mac_smack_apply_at(int dir_fd, const char *path, SmackAttr attr, const char *label) {
         return 0;
 }
 
@@ -277,14 +275,37 @@ int mac_smack_copy(const char *dest, const char *src) {
 }
 #endif
 
-int rename_and_apply_smack_floor_label(const char *from, const char *to) {
+int renameat_and_apply_smack_floor_label(int fdf, const char *from, int fdt, const char *to) {
 
-        if (rename(from, to) < 0)
+        assert(fdf >= 0 || fdf == AT_FDCWD);
+        assert(fdt >= 0 || fdt == AT_FDCWD);
+
+        if (renameat(fdf, from, fdt, to) < 0)
                 return -errno;
 
 #if HAVE_SMACK_RUN_LABEL
-        return mac_smack_apply(to, SMACK_ATTR_ACCESS, SMACK_FLOOR_LABEL);
+        return mac_smack_apply_at(fdt, to, SMACK_ATTR_ACCESS, SMACK_FLOOR_LABEL);
 #else
         return 0;
 #endif
+}
+
+static int mac_smack_label_pre(int dir_fd, const char *path, mode_t mode) {
+        return 0;
+}
+
+static int mac_smack_label_post(int dir_fd, const char *path) {
+        return mac_smack_fix_full(dir_fd, path, NULL, 0);
+}
+
+int mac_smack_init(void) {
+        static const LabelOps label_ops = {
+                .pre = mac_smack_label_pre,
+                .post = mac_smack_label_post,
+        };
+
+        if (!mac_smack_use())
+                return 0;
+
+        return label_ops_set(&label_ops);
 }

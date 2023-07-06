@@ -287,7 +287,7 @@ static int lock_device(
 }
 
 int lock_main(int argc, char *argv[], void *userdata) {
-        _cleanup_(fdset_freep) FDSet *fds = NULL;
+        _cleanup_fdset_free_ FDSet *fds = NULL;
         _cleanup_free_ dev_t *devnos = NULL;
         size_t n_devnos = 0;
         usec_t deadline;
@@ -316,7 +316,7 @@ int lock_main(int argc, char *argv[], void *userdata) {
         if (!fds)
                 return log_oom();
 
-        if (IN_SET(arg_timeout_usec, 0, USEC_INFINITY))
+        if (!timestamp_is_set(arg_timeout_usec))
                 deadline = arg_timeout_usec;
         else
                 deadline = usec_add(now(CLOCK_MONOTONIC), arg_timeout_usec);
@@ -337,11 +337,9 @@ int lock_main(int argc, char *argv[], void *userdata) {
                         if (fd < 0)
                                 return fd;
 
-                        r = fdset_put(fds, fd);
+                        r = fdset_consume(fds, TAKE_FD(fd));
                         if (r < 0)
                                 return log_oom();
-
-                        TAKE_FD(fd);
                 }
         }
 

@@ -79,6 +79,7 @@ enum JobMode {
         JOB_IGNORE_DEPENDENCIES, /* Ignore both requirement and ordering dependencies */
         JOB_IGNORE_REQUIREMENTS, /* Ignore requirement dependencies */
         JOB_TRIGGERING,          /* Adds TRIGGERED_BY dependencies to the same transaction */
+        JOB_RESTART_DEPENDENCIES,/* A "start" job for the specified unit becomes "restart" for depending units */
         _JOB_MODE_MAX,
         _JOB_MODE_INVALID = -EINVAL,
 };
@@ -98,8 +99,6 @@ enum JobResult {
         _JOB_RESULT_MAX,
         _JOB_RESULT_INVALID = -EINVAL,
 };
-
-#include "unit.h"
 
 struct JobDependency {
         /* Encodes that the 'subject' job needs the 'object' job in
@@ -170,7 +169,7 @@ Job* job_new(Unit *unit, JobType type);
 Job* job_new_raw(Unit *unit);
 void job_unlink(Job *job);
 Job* job_free(Job *job);
-Job* job_install(Job *j);
+Job* job_install(Job *j, JobMode mode);
 int job_install_deserialized(Job *j);
 void job_uninstall(Job *j);
 void job_dump(Job *j, FILE *f, const char *prefix);
@@ -222,7 +221,7 @@ char *job_dbus_path(Job *j);
 
 void job_shutdown_magic(Job *j);
 
-int job_get_timeout(Job *j, usec_t *timeout);
+int job_get_timeout(Job *j, usec_t *ret);
 
 bool job_may_gc(Job *j);
 void job_add_to_gc_queue(Job *j);

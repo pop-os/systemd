@@ -4,7 +4,7 @@
 
 #include "bootspec-fundamental.h"
 #include "bootspec.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "conf-files.h"
 #include "devnum-util.h"
 #include "dirent-util.h"
@@ -33,6 +33,15 @@ static const char* const boot_entry_type_table[_BOOT_ENTRY_TYPE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_TO_STRING(boot_entry_type, BootEntryType);
+
+static const char* const boot_entry_type_json_table[_BOOT_ENTRY_TYPE_MAX] = {
+        [BOOT_ENTRY_CONF]        = "type1",
+        [BOOT_ENTRY_UNIFIED]     = "type2",
+        [BOOT_ENTRY_LOADER]      = "loader",
+        [BOOT_ENTRY_LOADER_AUTO] = "auto",
+};
+
+DEFINE_STRING_TABLE_LOOKUP_TO_STRING(boot_entry_type_json, BootEntryType);
 
 static void boot_entry_free(BootEntry *entry) {
         assert(entry);
@@ -380,8 +389,7 @@ static int boot_entry_load_type1(
                         return log_syntax(NULL, LOG_ERR, tmp.path, line, r, "Error while parsing: %m");
         }
 
-        *entry = tmp;
-        tmp = (BootEntry) {};
+        *entry = TAKE_STRUCT(tmp);
         return 0;
 }
 
@@ -507,7 +515,7 @@ static int boot_loader_read_conf_path(BootConfig *config, const char *root, cons
         assert(config);
         assert(path);
 
-        r = chase_symlinks_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, "re", &full, &f);
+        r = chase_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, "re", &full, &f);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -592,7 +600,7 @@ static int boot_entries_find_type1(
         assert(root);
         assert(dir);
 
-        dir_fd = chase_symlinks_and_open(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY|O_CLOEXEC, &full);
+        dir_fd = chase_and_open(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY|O_CLOEXEC, &full);
         if (dir_fd == -ENOENT)
                 return 0;
         if (dir_fd < 0)
@@ -735,8 +743,7 @@ static int boot_entry_load_unified(
                         return log_oom();
         }
 
-        *ret = tmp;
-        tmp = (BootEntry) {};
+        *ret = TAKE_STRUCT(tmp);
         return 0;
 }
 
@@ -847,14 +854,14 @@ static int boot_entries_find_unified(
                 const char *root,
                 const char *dir) {
 
-        _cleanup_(closedirp) DIR *d = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
         _cleanup_free_ char *full = NULL;
         int r;
 
         assert(config);
         assert(dir);
 
-        r = chase_symlinks_and_opendir(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &full, &d);
+        r = chase_and_opendir(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &full, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -1269,7 +1276,7 @@ static void boot_entry_file_list(
         assert(p);
         assert(ret_status);
 
-        int status = chase_symlinks_and_access(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL, NULL);
+        int status = chase_and_access(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
 
         /* Note that this shows two '/' between the root and the file. This is intentional to highlight (in
          * the absence of color support) to the user that the boot loader is only interested in the second
@@ -1422,6 +1429,7 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                         }
 
                         r = json_append(&v, JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR("type", JSON_BUILD_STRING(boot_entry_type_json_to_string(e->type))),
                                                        JSON_BUILD_PAIR_CONDITION(e->id, "id", JSON_BUILD_STRING(e->id)),
                                                        JSON_BUILD_PAIR_CONDITION(e->path, "path", JSON_BUILD_STRING(e->path)),
                                                        JSON_BUILD_PAIR_CONDITION(e->root, "root", JSON_BUILD_STRING(e->root)),
@@ -1444,6 +1452,7 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                          * arguments and trigger false positive warnings. Let's not add too many json objects
                          * at once. */
                         r = json_append(&v, JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR("isReported", JSON_BUILD_BOOLEAN(e->reported_by_loader)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_left != UINT_MAX, "triesLeft", JSON_BUILD_UNSIGNED(e->tries_left)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_done != UINT_MAX, "triesDone", JSON_BUILD_UNSIGNED(e->tries_done)),
                                                        JSON_BUILD_PAIR_CONDITION(config->default_entry >= 0, "isDefault", JSON_BUILD_BOOLEAN(i == (size_t) config->default_entry)),

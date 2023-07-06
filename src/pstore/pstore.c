@@ -77,14 +77,9 @@ static int parse_config(void) {
                 {}
         };
 
-        return config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/pstore.conf",
-                        CONF_PATHS_NULSTR("systemd/pstore.conf.d"),
-                        "PStore\0",
-                        config_item_table_lookup, items,
-                        CONFIG_PARSE_WARN,
-                        NULL,
-                        NULL);
+        return config_parse_config_file("pstore.conf", "PStore\0",
+                                        config_item_table_lookup, items,
+                                        CONFIG_PARSE_WARN, NULL);
 }
 
 /* File list handling - PStoreEntry is the struct and
@@ -157,7 +152,7 @@ static int move_file(PStoreEntry *pe, const char *subdir1, const char *subdir2) 
                 r = mkdir_parents(ofd_path, 0755);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create directory %s: %m", ofd_path);
-                r = copy_file_atomic(ifd_path, ofd_path, 0600, 0, 0, COPY_REPLACE);
+                r = copy_file_atomic(ifd_path, ofd_path, 0600, COPY_REPLACE);
                 if (r < 0)
                         return log_error_errno(r, "Failed to copy_file_atomic: %s to %s", ifd_path, ofd_path);
         }
@@ -286,7 +281,7 @@ static int process_dmesg_files(PStoreList *list) {
 }
 
 static int list_files(PStoreList *list, const char *sourcepath) {
-        _cleanup_(closedirp) DIR *dirp = NULL;
+        _cleanup_closedir_ DIR *dirp = NULL;
         int r;
 
         dirp = opendir(sourcepath);

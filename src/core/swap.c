@@ -170,11 +170,9 @@ static void swap_done(Unit *u) {
         s->parameters_fragment.what = mfree(s->parameters_fragment.what);
         s->parameters_fragment.options = mfree(s->parameters_fragment.options);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, false);
+        s->exec_runtime = exec_runtime_free(s->exec_runtime);
         exec_command_done_array(s->exec_command, _SWAP_EXEC_COMMAND_MAX);
         s->control_command = NULL;
-
-        dynamic_creds_unref(&s->dynamic_creds);
 
         swap_unwatch_control_pid(s);
 
@@ -272,7 +270,11 @@ static int swap_add_default_dependencies(Swap *s) {
         if (r < 0)
                 return r;
 
-        return unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        if (r < 0)
+                return r;
+
+        return exec_context_add_default_dependencies(UNIT(s), &s->exec_context);
 }
 
 static int swap_verify(Swap *s) {
@@ -552,7 +554,7 @@ static void swap_set_state(Swap *s, SwapState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(s), "Changed %s -> %s", swap_state_to_string(old_state), swap_state_to_string(state));
 
-        unit_notify(UNIT(s), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(s), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 
         /* If there other units for the same device node have a job
            queued it might be worth checking again if it is runnable
@@ -593,10 +595,8 @@ static int swap_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(new_state, SWAP_DEAD, SWAP_FAILED)) {
-                (void) unit_setup_dynamic_creds(u);
+        if (!IN_SET(new_state, SWAP_DEAD, SWAP_FAILED))
                 (void) unit_setup_exec_runtime(u);
-        }
 
         swap_set_state(s, new_state);
         return 0;
@@ -689,7 +689,7 @@ static int swap_spawn(Swap *s, ExecCommand *c, pid_t *_pid) {
                        &s->exec_context,
                        &exec_params,
                        s->exec_runtime,
-                       &s->dynamic_creds,
+                       &s->cgroup_context,
                        &pid);
         if (r < 0)
                 goto fail;
@@ -718,13 +718,11 @@ static void swap_enter_dead(Swap *s, SwapResult f) {
         unit_warn_leftover_processes(UNIT(s), unit_log_leftover_process_stop);
         swap_set_state(s, s->result != SWAP_SUCCESS ? SWAP_FAILED : SWAP_DEAD);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
+        s->exec_runtime = exec_runtime_destroy(s->exec_runtime);
 
         unit_destroy_runtime_data(UNIT(s), &s->exec_context);
 
         unit_unref_uid_gid(UNIT(s), true);
-
-        dynamic_creds_destroy(&s->dynamic_creds);
 }
 
 static void swap_enter_active(Swap *s, SwapResult f) {
@@ -1480,8 +1478,8 @@ static void swap_reset_failed(Unit *u) {
         s->clean_result = SWAP_SUCCESS;
 }
 
-static int swap_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, -1, SWAP(u)->control_pid, error);
+static int swap_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
+        return unit_kill_common(u, who, signo, code, value, -1, SWAP(u)->control_pid, error);
 }
 
 static int swap_get_timeout(Unit *u, usec_t *timeout) {
@@ -1618,7 +1616,6 @@ const UnitVTable swap_vtable = {
         .cgroup_context_offset = offsetof(Swap, cgroup_context),
         .kill_context_offset = offsetof(Swap, kill_context),
         .exec_runtime_offset = offsetof(Swap, exec_runtime),
-        .dynamic_creds_offset = offsetof(Swap, dynamic_creds),
 
         .sections =
                 "Unit\0"
@@ -1690,4 +1687,6 @@ const UnitVTable swap_vtable = {
         },
 
         .can_start = swap_can_start,
+
+        .notify_plymouth = true,
 };

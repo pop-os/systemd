@@ -142,6 +142,7 @@ static bool validate_and_mangle_flags(
                        SD_RESOLVED_NO_ZONE|
                        SD_RESOLVED_NO_TRUST_ANCHOR|
                        SD_RESOLVED_NO_NETWORK|
+                       SD_RESOLVED_NO_STALE|
                        ok))
                 return false;
 
@@ -563,6 +564,40 @@ static int vl_method_subscribe_dns_resolves(Varlink *link, JsonVariant *paramete
         return 1;
 }
 
+static int vl_method_dump_cache(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+        _cleanup_(json_variant_unrefp) JsonVariant *list = NULL;
+        Manager *m;
+        int r;
+
+        assert(link);
+
+        if (json_variant_elements(parameters) > 0)
+                return varlink_error_invalid_parameter(link, parameters);
+
+        m = ASSERT_PTR(varlink_server_get_userdata(varlink_get_server(link)));
+
+        LIST_FOREACH(scopes, s, m->dns_scopes) {
+                _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
+
+                r = dns_scope_dump_cache_to_json(s, &j);
+                if (r < 0)
+                        return r;
+
+                r = json_variant_append_array(&list, j);
+                if (r < 0)
+                        return r;
+        }
+
+        if (!list) {
+                r = json_variant_new_array(&list, NULL, 0);
+                if (r < 0)
+                        return r;
+        }
+
+        return varlink_replyb(link, JSON_BUILD_OBJECT(
+                                              JSON_BUILD_PAIR("dump", JSON_BUILD_VARIANT(list))));
+}
+
 static int varlink_monitor_server_init(Manager *m) {
         _cleanup_(varlink_server_unrefp) VarlinkServer *server = NULL;
         int r;
@@ -578,10 +613,10 @@ static int varlink_monitor_server_init(Manager *m) {
 
         varlink_server_set_userdata(server, m);
 
-        r = varlink_server_bind_method(
+        r = varlink_server_bind_method_many(
                         server,
-                        "io.systemd.Resolve.Monitor.SubscribeQueryResults",
-                        vl_method_subscribe_dns_resolves);
+                        "io.systemd.Resolve.Monitor.SubscribeQueryResults", vl_method_subscribe_dns_resolves,
+                        "io.systemd.Resolve.Monitor.DumpCache", vl_method_dump_cache);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 

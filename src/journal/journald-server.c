@@ -238,13 +238,6 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
                               NULL);
 }
 
-static bool uid_for_system_journal(uid_t uid) {
-
-        /* Returns true if the specified UID shall get its data stored in the system journal. */
-
-        return uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY;
-}
-
 static void server_add_acls(ManagedJournalFile *f, uid_t uid) {
         assert(f);
 
@@ -836,7 +829,7 @@ static bool shall_try_append_again(JournalFile *f, int r) {
         case -EFBIG:           /* Hit fs limit                  */
         case -EDQUOT:          /* Quota limit hit               */
         case -ENOSPC:          /* Disk full                     */
-                log_debug("%s: Allocation limit reached, rotating.", f->path);
+                log_debug_errno(r, "%s: Allocation limit reached, rotating.", f->path);
                 return true;
 
         case -EROFS: /* Read-only file system */
@@ -844,55 +837,54 @@ static bool shall_try_append_again(JournalFile *f, int r) {
                  * rotated. If the FS is read-only, rotation will fail and s->system_journal will be set to
                  * NULL. After that, when find_journal will try to open the journal since s->system_journal
                  * will be NULL, it will open the runtime journal. */
-                log_ratelimit_warning(JOURNAL_LOG_RATELIMIT, "%s: Read-only file system, rotating.", f->path);
+                log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Read-only file system, rotating.", f->path);
                 return true;
 
         case -EIO:             /* I/O error of some kind (mmap) */
-                log_ratelimit_warning(JOURNAL_LOG_RATELIMIT, "%s: IO error, rotating.", f->path);
+                log_ratelimit_warning_errno(r, JOURNAL_LOG_RATELIMIT, "%s: IO error, rotating.", f->path);
                 return true;
 
         case -EHOSTDOWN:       /* Other machine                 */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Journal file from other machine, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Journal file from other machine, rotating.", f->path);
                 return true;
 
         case -EBUSY:           /* Unclean shutdown              */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Unclean shutdown, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Unclean shutdown, rotating.", f->path);
                 return true;
 
         case -EPROTONOSUPPORT: /* Unsupported feature           */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Unsupported feature, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Unsupported feature, rotating.", f->path);
                 return true;
 
         case -EBADMSG:         /* Corrupted                     */
         case -ENODATA:         /* Truncated                     */
         case -ESHUTDOWN:       /* Already archived              */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Journal file corrupted, rotating.", f->path);
+        case -EADDRNOTAVAIL:   /* Referenced object offset out of bounds */
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Journal file corrupted, rotating.", f->path);
                 return true;
 
         case -EIDRM:           /* Journal file has been deleted */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Journal file has been deleted, rotating.", f->path);
-                return true;
-
-        case -ETXTBSY:         /* Journal file is from the future */
-                log_ratelimit_warning(JOURNAL_LOG_RATELIMIT, "%s: Journal file is from the future, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Journal file has been deleted, rotating.", f->path);
                 return true;
 
         case -EREMCHG:         /* Wallclock time (CLOCK_REALTIME) jumped backwards relative to last journal entry */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Realtime clock jumped backwards relative to last journal entry, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Realtime clock jumped backwards relative to last journal entry, rotating.", f->path);
                 return true;
 
         case -EREMOTE:         /* Boot ID different from the one of the last entry */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Boot ID changed since last record, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Boot ID changed since last record, rotating.", f->path);
                 return true;
 
         case -ENOTNAM:         /* Monotonic time (CLOCK_MONOTONIC) jumped backwards relative to last journal entry */
-                log_ratelimit_info(JOURNAL_LOG_RATELIMIT, "%s: Monotonic clock jumped backwards relative to last journal entry, rotating.", f->path);
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Monotonic clock jumped backwards relative to last journal entry, rotating.", f->path);
+                return true;
+
+        case -EILSEQ:          /* seqnum ID last used in the file doesn't match the one we'd passed when writing an entry to it */
+                log_ratelimit_info_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Journal file uses a different sequence number ID, rotating.", f->path);
                 return true;
 
         case -EAFNOSUPPORT:
-                log_ratelimit_warning(JOURNAL_LOG_RATELIMIT,
-                                      "%s: underlying file system does not support memory mapping or another required file system feature.",
-                                      f->path);
+                log_ratelimit_error_errno(r, JOURNAL_LOG_RATELIMIT, "%s: Underlying file system does not support memory mapping or another required file system feature.", f->path);
                 return false;
 
         default:
@@ -901,7 +893,13 @@ static bool shall_try_append_again(JournalFile *f, int r) {
         }
 }
 
-static void server_write_to_journal(Server *s, uid_t uid, struct iovec *iovec, size_t n, int priority) {
+static void server_write_to_journal(
+                Server *s,
+                uid_t uid,
+                const struct iovec *iovec,
+                size_t n,
+                int priority) {
+
         bool vacuumed = false, rotate = false;
         struct dual_timestamp ts;
         ManagedJournalFile *f;
@@ -931,10 +929,9 @@ static void server_write_to_journal(Server *s, uid_t uid, struct iovec *iovec, s
                 if (!f)
                         return;
 
-                if (journal_file_rotate_suggested(f->file, s->max_file_usec, LOG_INFO)) {
-                        log_ratelimit_info(JOURNAL_LOG_RATELIMIT,
-                                           "%s: Journal header limits reached or header out-of-date, rotating.",
-                                           f->file->path);
+                if (journal_file_rotate_suggested(f->file, s->max_file_usec, LOG_DEBUG)) {
+                        log_debug("%s: Journal header limits reached or header out-of-date, rotating.",
+                                  f->file->path);
                         rotate = true;
                 }
         }
@@ -951,7 +948,15 @@ static void server_write_to_journal(Server *s, uid_t uid, struct iovec *iovec, s
 
         s->last_realtime_clock = ts.realtime;
 
-        r = journal_file_append_entry(f->file, &ts, NULL, iovec, n, &s->seqnum, NULL, NULL);
+        r = journal_file_append_entry(
+                        f->file,
+                        &ts,
+                        /* boot_id= */ NULL,
+                        iovec, n,
+                        &s->seqnum->seqnum,
+                        &s->seqnum->id,
+                        /* ret_object= */ NULL,
+                        /* ret_offset= */ NULL);
         if (r >= 0) {
                 server_schedule_sync(s, priority);
                 return;
@@ -975,7 +980,15 @@ static void server_write_to_journal(Server *s, uid_t uid, struct iovec *iovec, s
                 return;
 
         log_debug_errno(r, "Retrying write.");
-        r = journal_file_append_entry(f->file, &ts, NULL, iovec, n, &s->seqnum, NULL, NULL);
+        r = journal_file_append_entry(
+                        f->file,
+                        &ts,
+                        /* boot_id= */ NULL,
+                        iovec, n,
+                        &s->seqnum->seqnum,
+                        &s->seqnum->id,
+                        /* ret_object= */ NULL,
+                        /* ret_offset= */ NULL);
         if (r < 0)
                 log_ratelimit_error_errno(r, FAILED_TO_WRITE_ENTRY_RATELIMIT,
                                           "Failed to write entry to %s (%zu items, %zu bytes) despite vacuuming, ignoring: %m",
@@ -1287,7 +1300,13 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
                         goto finish;
                 }
 
-                r = journal_file_copy_entry(f, s->system_journal->file, o, f->current_offset);
+                r = journal_file_copy_entry(
+                                f,
+                                s->system_journal->file,
+                                o,
+                                f->current_offset,
+                                &s->seqnum->seqnum,
+                                &s->seqnum->id);
                 if (r >= 0)
                         continue;
 
@@ -1309,7 +1328,13 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
                 }
 
                 log_debug("Retrying write.");
-                r = journal_file_copy_entry(f, s->system_journal->file, o, f->current_offset);
+                r = journal_file_copy_entry(
+                                f,
+                                s->system_journal->file,
+                                o,
+                                f->current_offset,
+                                &s->seqnum->seqnum,
+                                &s->seqnum->id);
                 if (r < 0) {
                         log_ratelimit_error_errno(r, JOURNAL_LOG_RATELIMIT, "Can't write entry: %m");
                         goto finish;
@@ -1385,7 +1410,7 @@ int server_process_datagram(
         size_t label_len = 0, m;
         Server *s = ASSERT_PTR(userdata);
         struct ucred *ucred = NULL;
-        struct timeval *tv = NULL;
+        struct timeval tv_buf, *tv = NULL;
         struct cmsghdr *cmsg;
         char *label = NULL;
         struct iovec iovec;
@@ -1454,21 +1479,21 @@ int server_process_datagram(
                     cmsg->cmsg_type == SCM_CREDENTIALS &&
                     cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred))) {
                         assert(!ucred);
-                        ucred = (struct ucred*) CMSG_DATA(cmsg);
+                        ucred = CMSG_TYPED_DATA(cmsg, struct ucred);
                 } else if (cmsg->cmsg_level == SOL_SOCKET &&
                          cmsg->cmsg_type == SCM_SECURITY) {
                         assert(!label);
-                        label = (char*) CMSG_DATA(cmsg);
+                        label = CMSG_TYPED_DATA(cmsg, char);
                         label_len = cmsg->cmsg_len - CMSG_LEN(0);
                 } else if (cmsg->cmsg_level == SOL_SOCKET &&
-                           cmsg->cmsg_type == SO_TIMESTAMP &&
+                           cmsg->cmsg_type == SCM_TIMESTAMP &&
                            cmsg->cmsg_len == CMSG_LEN(sizeof(struct timeval))) {
                         assert(!tv);
-                        tv = (struct timeval*) CMSG_DATA(cmsg);
+                        tv = memcpy(&tv_buf, CMSG_DATA(cmsg), sizeof(struct timeval));
                 } else if (cmsg->cmsg_level == SOL_SOCKET &&
                          cmsg->cmsg_type == SCM_RIGHTS) {
                         assert(!fds);
-                        fds = (int*) CMSG_DATA(cmsg);
+                        fds = CMSG_TYPED_DATA(cmsg, int);
                         n_fds = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
                 }
 
@@ -1675,7 +1700,7 @@ static int server_setup_signals(Server *s) {
 
         assert(s);
 
-        assert_se(sigprocmask_many(SIG_SETMASK, NULL, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGRTMIN+1, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_SETMASK, NULL, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGRTMIN+1, SIGRTMIN+18, -1) >= 0);
 
         r = sd_event_add_signal(s->event, &s->sigusr1_event_source, SIGUSR1, dispatch_sigusr1, s);
         if (r < 0)
@@ -1712,6 +1737,10 @@ static int server_setup_signals(Server *s) {
                 return r;
 
         r = sd_event_source_set_priority(s->sigrtmin1_event_source, SD_EVENT_PRIORITY_NORMAL+15);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_signal(s->event, NULL, SIGRTMIN+18, sigrtmin18_handler, &s->sigrtmin18_info);
         if (r < 0)
                 return r;
 
@@ -1817,36 +1846,16 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 }
 
 static int server_parse_config_file(Server *s) {
-        int r;
+        const char *conf_file = "journald.conf";
 
         assert(s);
 
-        if (s->namespace) {
-                const char *namespaced, *dropin_dirname;
+        if (s->namespace)
+                conf_file = strjoina("journald@", s->namespace, ".conf");
 
-                /* If we are running in namespace mode, load the namespace specific configuration file, and nothing else */
-                namespaced = strjoina(PKGSYSCONFDIR "/journald@", s->namespace, ".conf");
-                dropin_dirname = strjoina("journald@", s->namespace, ".conf.d");
-
-                r = config_parse_many(
-                                STRV_MAKE_CONST(namespaced),
-                                (const char* const*) CONF_PATHS_STRV("systemd"),
-                                dropin_dirname,
-                                "Journal\0",
-                                config_item_perf_lookup, journald_gperf_lookup,
-                                CONFIG_PARSE_WARN, s, NULL, NULL);
-                if (r < 0)
-                        return r;
-
-                return 0;
-        }
-
-        return config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/journald.conf",
-                        CONF_PATHS_NULSTR("systemd/journald.conf.d"),
-                        "Journal\0",
-                        config_item_perf_lookup, journald_gperf_lookup,
-                        CONFIG_PARSE_WARN, s, NULL);
+        return config_parse_config_file(conf_file, "Journal\0",
+                                        config_item_perf_lookup, journald_gperf_lookup,
+                                        CONFIG_PARSE_WARN, s);
 }
 
 static int server_dispatch_sync(sd_event_source *es, usec_t t, void *userdata) {
@@ -2247,6 +2256,51 @@ static int server_open_varlink(Server *s, const char *socket, int fd) {
         return 0;
 }
 
+int server_map_seqnum_file(
+                Server *s,
+                const char *fname,
+                size_t size,
+                void **ret) {
+
+        _cleanup_free_ char *fn = NULL;
+        _cleanup_close_ int fd = -EBADF;
+        uint64_t *p;
+        int r;
+
+        assert(s);
+        assert(fname);
+        assert(size > 0);
+        assert(ret);
+
+        fn = path_join(s->runtime_directory, fname);
+        if (!fn)
+                return -ENOMEM;
+
+        fd = open(fn, O_RDWR|O_CREAT|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, 0644);
+        if (fd < 0)
+                return -errno;
+
+        r = posix_fallocate_loop(fd, 0, size);
+        if (r < 0)
+                return r;
+
+        p = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+        if (p == MAP_FAILED)
+                return -errno;
+
+        *ret = p;
+        return 0;
+}
+
+void server_unmap_seqnum_file(void *p, size_t size) {
+        assert(size > 0);
+
+        if (!p)
+                return;
+
+        assert_se(munmap(p, size) >= 0);
+}
+
 static bool server_is_idle(Server *s) {
         assert(s);
 
@@ -2343,6 +2397,42 @@ static int server_set_namespace(Server *s, const char *namespace) {
         return 1;
 }
 
+static int server_memory_pressure(sd_event_source *es, void *userdata) {
+        Server *s = ASSERT_PTR(userdata);
+
+        log_info("Under memory pressure, flushing caches.");
+
+        /* Flushed the cached info we might have about client processes */
+        client_context_flush_regular(s);
+
+        /* Let's also close all user files (but keep the system/runtime one open) */
+        for (;;) {
+                ManagedJournalFile *first = ordered_hashmap_steal_first(s->user_journals);
+
+                if (!first)
+                        break;
+
+                (void) managed_journal_file_close(first);
+        }
+
+        sd_event_trim_memory();
+
+        return 0;
+}
+
+static int server_setup_memory_pressure(Server *s) {
+        int r;
+
+        assert(s);
+
+        r = sd_event_add_memory_pressure(s->event, NULL, server_memory_pressure, s);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || (r == -EHOSTDOWN) ? LOG_DEBUG : LOG_NOTICE, r,
+                               "Failed to install memory pressure event source, ignoring: %m");
+
+        return 0;
+}
+
 int server_init(Server *s, const char *namespace) {
         const char *native_socket, *syslog_socket, *stdout_socket, *varlink_socket, *e;
         _cleanup_fdset_free_ FDSet *fds = NULL;
@@ -2393,6 +2483,9 @@ int server_init(Server *s, const char *namespace) {
                         .interval = DEFAULT_KMSG_OWN_INTERVAL,
                         .burst = DEFAULT_KMSG_OWN_BURST,
                 },
+
+                .sigrtmin18_info.memory_pressure_handler = server_memory_pressure,
+                .sigrtmin18_info.memory_pressure_userdata = s,
         };
 
         r = server_set_namespace(s, namespace);
@@ -2559,6 +2652,10 @@ int server_init(Server *s, const char *namespace) {
         if (r < 0)
                 return r;
 
+        r = server_map_seqnum_file(s, "seqnum", sizeof(SeqnumData), (void**) &s->seqnum);
+        if (r < 0)
+                return log_error_errno(r, "Failed to map main seqnum file: %m");
+
         r = server_open_kernel_seqnum(s);
         if (r < 0)
                 return r;
@@ -2568,6 +2665,10 @@ int server_init(Server *s, const char *namespace) {
                 return r;
 
         r = server_setup_signals(s);
+        if (r < 0)
+                return r;
+
+        r = server_setup_memory_pressure(s);
         if (r < 0)
                 return r;
 
@@ -2675,8 +2776,8 @@ void server_done(Server *s) {
         if (s->ratelimit)
                 journal_ratelimit_free(s->ratelimit);
 
-        if (s->kernel_seqnum)
-                munmap(s->kernel_seqnum, sizeof(uint64_t));
+        server_unmap_seqnum_file(s->seqnum, sizeof(*s->seqnum));
+        server_unmap_seqnum_file(s->kernel_seqnum, sizeof(*s->kernel_seqnum));
 
         free(s->buffer);
         free(s->tty_path);

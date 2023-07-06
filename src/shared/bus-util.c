@@ -18,6 +18,9 @@
 #include "bus-internal.h"
 #include "bus-label.h"
 #include "bus-util.h"
+#include "data-fd-util.h"
+#include "fd-util.h"
+#include "memstream-util.h"
 #include "path-util.h"
 #include "socket-util.h"
 #include "stdio-util.h"
@@ -97,6 +100,7 @@ int bus_event_loop_with_idle(
                 usec_t timeout,
                 check_idle_t check_idle,
                 void *userdata) {
+
         bool exiting = false;
         int r, code;
 
@@ -132,7 +136,6 @@ int bus_event_loop_with_idle(
                                 return r;
 
                         exiting = true;
-                        continue;
                 }
         }
 
@@ -267,7 +270,7 @@ int bus_connect_user_systemd(sd_bus **ret_bus) {
 int bus_connect_transport(
                 BusTransport transport,
                 const char *host,
-                bool user,
+                RuntimeScope runtime_scope,
                 sd_bus **ret) {
 
         _cleanup_(sd_bus_close_unrefp) sd_bus *bus = NULL;
@@ -278,19 +281,28 @@ int bus_connect_transport(
         assert(ret);
 
         assert_return((transport == BUS_TRANSPORT_LOCAL) == !host, -EINVAL);
-        assert_return(transport != BUS_TRANSPORT_REMOTE || !user, -EOPNOTSUPP);
+        assert_return(transport != BUS_TRANSPORT_REMOTE || runtime_scope == RUNTIME_SCOPE_SYSTEM, -EOPNOTSUPP);
 
         switch (transport) {
 
         case BUS_TRANSPORT_LOCAL:
-                if (user)
+
+                switch (runtime_scope) {
+
+                case RUNTIME_SCOPE_USER:
                         r = sd_bus_default_user(&bus);
-                else {
+                        break;
+
+                case RUNTIME_SCOPE_SYSTEM:
                         if (sd_booted() <= 0)
                                 /* Print a friendly message when the local system is actually not running systemd as PID 1. */
                                 return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
                                                        "System has not been booted with systemd as init system (PID 1). Can't operate.");
                         r = sd_bus_default_system(&bus);
+                        break;
+
+                default:
+                        assert_not_reached();
                 }
                 break;
 
@@ -299,10 +311,21 @@ int bus_connect_transport(
                 break;
 
         case BUS_TRANSPORT_MACHINE:
-                if (user)
+
+                switch (runtime_scope) {
+
+                case RUNTIME_SCOPE_USER:
                         r = sd_bus_open_user_machine(&bus, host);
-                else
+                        break;
+
+                case RUNTIME_SCOPE_SYSTEM:
                         r = sd_bus_open_system_machine(&bus, host);
+                        break;
+
+                default:
+                        assert_not_reached();
+                }
+
                 break;
 
         default:
@@ -319,25 +342,34 @@ int bus_connect_transport(
         return 0;
 }
 
-int bus_connect_transport_systemd(BusTransport transport, const char *host, bool user, sd_bus **bus) {
+int bus_connect_transport_systemd(BusTransport transport, const char *host, RuntimeScope runtime_scope, sd_bus **bus) {
         assert(transport >= 0);
         assert(transport < _BUS_TRANSPORT_MAX);
         assert(bus);
 
         assert_return((transport == BUS_TRANSPORT_LOCAL) == !host, -EINVAL);
-        assert_return(transport == BUS_TRANSPORT_LOCAL || !user, -EOPNOTSUPP);
+        assert_return(transport == BUS_TRANSPORT_LOCAL || runtime_scope == RUNTIME_SCOPE_SYSTEM, -EOPNOTSUPP);
 
         switch (transport) {
 
         case BUS_TRANSPORT_LOCAL:
-                if (user)
+                switch (runtime_scope) {
+
+                case RUNTIME_SCOPE_USER:
                         return bus_connect_user_systemd(bus);
 
-                if (sd_booted() <= 0)
-                        /* Print a friendly message when the local system is actually not running systemd as PID 1. */
-                        return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
-                                               "System has not been booted with systemd as init system (PID 1). Can't operate.");
-                return bus_connect_system_systemd(bus);
+                case RUNTIME_SCOPE_SYSTEM:
+                        if (sd_booted() <= 0)
+                                /* Print a friendly message when the local system is actually not running systemd as PID 1. */
+                                return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                                       "System has not been booted with systemd as init system (PID 1). Can't operate.");
+                        return bus_connect_system_systemd(bus);
+
+                default:
+                        assert_not_reached();
+                }
+
+                break;
 
         case BUS_TRANSPORT_REMOTE:
                 return sd_bus_open_system_remote(bus, host);
@@ -578,6 +610,65 @@ int bus_reply_pair_array(sd_bus_message *m, char **l) {
         return sd_bus_send(NULL, reply, NULL);
 }
 
+static int method_dump_memory_state_by_fd(sd_bus_message *message, void *userdata, sd_bus_error *ret_error) {
+        _cleanup_(memstream_done) MemStream m = {};
+        _cleanup_free_ char *dump = NULL;
+        _cleanup_close_ int fd = -EBADF;
+        size_t dump_size;
+        FILE *f;
+        int r;
+
+        assert(message);
+
+        f = memstream_init(&m);
+        if (!f)
+                return -ENOMEM;
+
+        r = RET_NERRNO(malloc_info(/* options= */ 0, f));
+        if (r < 0)
+                return r;
+
+        r = memstream_finalize(&m, &dump, &dump_size);
+        if (r < 0)
+                return r;
+
+        fd = acquire_data_fd(dump, dump_size, 0);
+        if (fd < 0)
+                return fd;
+
+        r = sd_bus_reply_method_return(message, "h", fd);
+        if (r < 0)
+                return r;
+
+        return 1; /* Stop further processing */
+}
+
+/* The default install callback will fail and disconnect the bus if it cannot register the match, but this
+ * is only a debug method, we definitely don't want to fail in case there's some permission issue. */
+static int dummy_install_callback(sd_bus_message *message, void *userdata, sd_bus_error *ret_error) {
+        return 1;
+}
+
+int bus_register_malloc_status(sd_bus *bus, const char *destination) {
+        const char *match;
+        int r;
+
+        assert(bus);
+        assert(!isempty(destination));
+
+        match = strjoina("type='method_call',"
+                         "interface='org.freedesktop.MemoryAllocation1',"
+                         "path='/org/freedesktop/MemoryAllocation1',"
+                         "destination='", destination, "',",
+                         "member='GetMallocInfo'");
+
+        r = sd_bus_add_match_async(bus, NULL, match, method_dump_memory_state_by_fd, dummy_install_callback, NULL);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to subscribe to GetMallocInfo() calls on MemoryAllocation1 interface: %m");
+
+        return 0;
+}
+
 static void bus_message_unref_wrapper(void *m) {
         sd_bus_message_unref(m);
 }
@@ -587,3 +678,40 @@ const struct hash_ops bus_message_hash_ops = {
         .compare = trivial_compare_func,
         .free_value = bus_message_unref_wrapper,
 };
+
+int bus_message_append_string_set(sd_bus_message *m, Set *set) {
+        const char *s;
+        int r;
+
+        assert(m);
+
+        r = sd_bus_message_open_container(m, 'a', "s");
+        if (r < 0)
+                return r;
+
+        SET_FOREACH(s, set) {
+                r = sd_bus_message_append(m, "s", s);
+                if (r < 0)
+                        return r;
+        }
+
+        return sd_bus_message_close_container(m);
+}
+
+int bus_property_get_string_set(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Set **s = ASSERT_PTR(userdata);
+
+        assert(bus);
+        assert(property);
+        assert(reply);
+
+        return bus_message_append_string_set(reply, *s);
+}

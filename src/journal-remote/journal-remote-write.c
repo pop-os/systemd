@@ -21,36 +21,39 @@ static int do_rotate(ManagedJournalFile **f, MMapCache *m, JournalFileFlags file
         return r;
 }
 
-Writer* writer_new(RemoteServer *server) {
+int writer_new(RemoteServer *server, Writer **ret) {
         _cleanup_(writer_unrefp) Writer *w = NULL;
         int r;
 
-        w = new0(Writer, 1);
-        if (!w)
-                return NULL;
+        assert(server);
+        assert(ret);
 
-        w->n_ref = 1;
-        w->metrics = server->metrics;
+        w = new(Writer, 1);
+        if (!w)
+                return -ENOMEM;
+
+        *w = (Writer) {
+                .n_ref = 1,
+                .metrics = server->metrics,
+                .server = server,
+        };
 
         w->mmap = mmap_cache_new();
         if (!w->mmap)
-                return NULL;
-
-        w->server = server;
+                return -ENOMEM;
 
         if (is_dir(server->output, /* follow = */ true) > 0) {
                 w->output = strdup(server->output);
                 if (!w->output)
-                        return NULL;
+                        return -ENOMEM;
         } else {
                 r = path_extract_directory(server->output, &w->output);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to find directory of file \"%s\": %m", server->output);
-                        return NULL;
-                }
+                if (r < 0)
+                        return r;
         }
 
-        return TAKE_PTR(w);
+        *ret = TAKE_PTR(w);
+        return 0;
 }
 
 static Writer* writer_free(Writer *w) {
@@ -99,9 +102,16 @@ int writer_write(Writer *w,
                         return r;
         }
 
-        r = journal_file_append_entry(w->journal->file, ts, boot_id,
-                                      iovw->iovec, iovw->count,
-                                      &w->seqnum, NULL, NULL);
+        r = journal_file_append_entry(
+                        w->journal->file,
+                        ts,
+                        boot_id,
+                        iovw->iovec,
+                        iovw->count,
+                        &w->seqnum,
+                        /* seqnum_id= */ NULL,
+                        /* ret_object= */ NULL,
+                        /* ret_offset= */ NULL);
         if (r >= 0) {
                 if (w->server)
                         w->server->event_count += 1;
@@ -120,9 +130,15 @@ int writer_write(Writer *w,
                 return r;
 
         log_debug("Retrying write.");
-        r = journal_file_append_entry(w->journal->file, ts, boot_id,
-                                      iovw->iovec, iovw->count,
-                                      &w->seqnum, NULL, NULL);
+        r = journal_file_append_entry(
+                        w->journal->file,
+                        ts,
+                        boot_id,
+                        iovw->iovec, iovw->count,
+                        &w->seqnum,
+                        /* seqnum_id= */ NULL,
+                        /* ret_object= */ NULL,
+                        /* ret_offset= */ NULL);
         if (r < 0)
                 return r;
 

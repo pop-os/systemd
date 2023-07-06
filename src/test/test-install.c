@@ -20,7 +20,7 @@ static void dump_changes(InstallChange *c, unsigned n) {
 }
 
 int main(int argc, char* argv[]) {
-        Hashmap *h;
+        _cleanup_hashmap_free_ Hashmap *h = NULL;
         UnitFileList *p;
         int r;
         const char *const files[] = { "avahi-daemon.service", NULL };
@@ -31,14 +31,14 @@ int main(int argc, char* argv[]) {
 
         test_setup_logging(LOG_DEBUG);
 
-        h = hashmap_new(&string_hash_ops);
-        r = unit_file_get_list(LOOKUP_SCOPE_SYSTEM, NULL, h, NULL, NULL);
+        h = hashmap_new(&unit_file_list_hash_ops_free);
+        r = unit_file_get_list(RUNTIME_SCOPE_SYSTEM, NULL, h, NULL, NULL);
         assert_se(r == 0);
 
         HASHMAP_FOREACH(p, h) {
                 UnitFileState s = _UNIT_FILE_STATE_INVALID;
 
-                r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(p->path), &s);
+                r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(p->path), &s);
 
                 assert_se((r < 0 && p->state == UNIT_FILE_BAD) ||
                           (p->state == s));
@@ -48,22 +48,20 @@ int main(int argc, char* argv[]) {
                         unit_file_state_to_string(p->state));
         }
 
-        unit_file_list_free(h);
-
         log_info("/*** enable **/");
 
-        r = unit_file_enable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_enable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         log_info("/*** enable2 **/");
 
-        r = unit_file_enable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_enable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_ENABLED);
 
@@ -71,13 +69,13 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_DISABLED);
 
@@ -85,16 +83,16 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_mask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_mask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
         log_info("/*** mask2 ***/");
-        r = unit_file_mask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_mask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_MASKED);
 
@@ -102,16 +100,16 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_unmask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_unmask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
         log_info("/*** unmask2 ***/");
-        r = unit_file_unmask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_unmask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_DISABLED);
 
@@ -119,13 +117,13 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_mask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_mask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_MASKED);
 
@@ -133,16 +131,16 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
         log_info("/*** disable2 ***/");
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_MASKED);
 
@@ -150,13 +148,13 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_unmask(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
+        r = unit_file_unmask(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, files[0], &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, files[0], &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_DISABLED);
 
@@ -164,13 +162,13 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_enable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
+        r = unit_file_enable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_ENABLED);
 
@@ -178,26 +176,26 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r < 0);
 
         log_info("/*** link files2 ***/");
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_link(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
+        r = unit_file_link(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_LINKED);
 
@@ -205,26 +203,26 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r < 0);
 
         log_info("/*** link files2 ***/");
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_link(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
+        r = unit_file_link(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_LINKED);
 
@@ -232,13 +230,13 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_reenable(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
+        r = unit_file_reenable(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files2, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_ENABLED);
 
@@ -246,25 +244,25 @@ int main(int argc, char* argv[]) {
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
+        r = unit_file_disable(RUNTIME_SCOPE_SYSTEM, 0, NULL, STRV_MAKE(basename(files2[0])), &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files2[0]), &state);
         assert_se(r < 0);
         log_info("/*** preset files ***/");
         changes = NULL;
         n_changes = 0;
 
-        r = unit_file_preset(LOOKUP_SCOPE_SYSTEM, 0, NULL, (char**) files, UNIT_FILE_PRESET_FULL, &changes, &n_changes);
+        r = unit_file_preset(RUNTIME_SCOPE_SYSTEM, 0, NULL, (char**) files, UNIT_FILE_PRESET_FULL, &changes, &n_changes);
         assert_se(r >= 0);
 
         dump_changes(changes, n_changes);
         install_changes_free(changes, n_changes);
 
-        r = unit_file_get_state(LOOKUP_SCOPE_SYSTEM, NULL, basename(files[0]), &state);
+        r = unit_file_get_state(RUNTIME_SCOPE_SYSTEM, NULL, basename(files[0]), &state);
         assert_se(r >= 0);
         assert_se(state == UNIT_FILE_ENABLED);
 

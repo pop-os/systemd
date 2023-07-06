@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 shared_sources = files(
+        'acl-util.c',
         'acpi-fpdt.c',
         'apparmor-util.c',
         'ask-password-api.c',
+        'async.c',
         'barrier.c',
         'base-filesystem.c',
+        'battery-util.c',
         'binfmt-util.c',
         'bitmap.c',
         'blockdev-util.c',
         'bond-util.c',
+        'boot-entry.c',
         'boot-timestamps.c',
         'bootspec.c',
         'bpf-dlopen.c',
@@ -35,6 +39,7 @@ shared_sources = files(
         'chown-recursive.c',
         'clean-ipc.c',
         'clock-util.c',
+        'common-signal.c',
         'compare-operator.c',
         'condition.c',
         'conf-parser.c',
@@ -53,6 +58,7 @@ shared_sources = files(
         'dm-util.c',
         'dns-domain.c',
         'dropin.c',
+        'edit-util.c',
         'efi-api.c',
         'efi-loader.c',
         'elf-util.c',
@@ -61,7 +67,7 @@ shared_sources = files(
         'ethtool-util.c',
         'exec-util.c',
         'exit-status.c',
-        'extension-release.c',
+        'extension-util.c',
         'fdset.c',
         'fileio-label.c',
         'find-esp.c',
@@ -78,6 +84,7 @@ shared_sources = files(
         'id128-print.c',
         'idn-util.c',
         'ima-util.c',
+        'image-policy.c',
         'import-util.c',
         'in-addr-prefix-util.c',
         'install-file.c',
@@ -89,18 +96,19 @@ shared_sources = files(
         'journal-util.c',
         'json.c',
         'kbd-util.c',
+        'kernel-image.c',
         'keyring-util.c',
         'killall.c',
-        'label.c',
+        'label-util.c',
         'libcrypt-util.c',
         'libfido2-util.c',
         'libmount-util.c',
         'local-addresses.c',
         'locale-setup.c',
-        'lockfile-util.c',
         'logs-show.c',
         'loop-util.c',
         'loopback-setup.c',
+        'lsm-util.c',
         'machine-id-setup.c',
         'machine-pool.c',
         'macvlan-util.c',
@@ -120,12 +128,12 @@ shared_sources = files(
         'pager.c',
         'parse-argument.c',
         'parse-helpers.c',
+        'password-quality-util-passwdqc.c',
+        'password-quality-util-pwquality.c',
         'pcre2-util.c',
         'pkcs11-util.c',
         'pretty-print.c',
-        'psi-util.c',
         'ptyfwd.c',
-        'pwquality-util.c',
         'qrcode-util.c',
         'quota-util.c',
         'reboot-util.c',
@@ -137,7 +145,7 @@ shared_sources = files(
         'selinux-util.c',
         'serialize.c',
         'service-util.c',
-        'sleep-config.c',
+        'sleep-util.c',
         'smack-util.c',
         'socket-label.c',
         'socket-netlink.c',
@@ -149,7 +157,6 @@ shared_sources = files(
         'tomoyo-util.c',
         'tpm2-util.c',
         'udev-util.c',
-        'uid-alloc-range.c',
         'user-record-nss.c',
         'user-record-show.c',
         'user-record.c',
@@ -184,7 +191,6 @@ syscall_list_h = custom_target(
 
 if conf.get('HAVE_ACL') == 1
         shared_sources += files(
-                'acl-util.c',
                 'devnode-acl.c',
         )
 endif
@@ -266,6 +272,24 @@ target2 = custom_target(
 shared_generated_gperf_headers = [target1, target2]
 shared_sources += shared_generated_gperf_headers
 
+fname = 'ethtool-link-mode.h'
+ethtool_link_mode_h = custom_target(
+        fname,
+        input : ['ethtool-link-mode.py', 'linux/ethtool.h'],
+        output : fname,
+        command : [python, '@INPUT0@', '--header', cpp, '@INPUT1@'],
+        capture : true)
+shared_sources += ethtool_link_mode_h
+
+fname = 'ethtool-link-mode.xml'
+ethtool_link_mode_xml = custom_target(
+        fname,
+        input : ['ethtool-link-mode.py', 'linux/ethtool.h'],
+        output : fname,
+        command : [python, '@INPUT0@', '--xml', cpp, '@INPUT1@'],
+        capture : true)
+man_page_depends += ethtool_link_mode_xml
+
 libshared_name = 'systemd-shared-@0@'.format(shared_lib_tag)
 
 libshared_deps = [threads,
@@ -291,12 +315,14 @@ libshared_deps = [threads,
                   versiondep]
 
 libshared_sym_path = '@0@/libshared.sym'.format(meson.current_source_dir())
+libshared_build_dir = meson.current_build_dir()
 
 libshared_static = static_library(
         libshared_name,
         shared_sources,
         include_directories : includes,
-        dependencies : libshared_deps,
+        dependencies : [libshared_deps,
+                        userspace],
         c_args : ['-fvisibility=default'],
         build_by_default : false)
 
@@ -310,7 +336,8 @@ libshared = shared_library(
                       libbasic,
                       libbasic_gcrypt,
                       libsystemd_static],
-        dependencies : libshared_deps,
+        dependencies : [libshared_deps,
+                        userspace],
         install : true,
         install_dir : rootpkglibdir)
 
@@ -323,7 +350,8 @@ if get_option('fdisk') != 'false'
                 'shared-fdisk',
                 shared_fdisk_sources,
                 include_directories : includes,
-                dependencies : [libfdisk],
+                dependencies : [libfdisk,
+                                userspace],
                 c_args : ['-fvisibility=default'],
                 build_by_default : false)
 endif

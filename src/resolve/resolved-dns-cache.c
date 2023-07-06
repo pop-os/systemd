@@ -15,8 +15,11 @@
  * leave DNS caches unbounded, but that's crazy. */
 #define CACHE_MAX 4096
 
-/* We never keep any item longer than 2h in our cache */
+/* We never keep any item longer than 2h in our cache unless StaleRetentionSec is greater than zero. */
 #define CACHE_TTL_MAX_USEC (2 * USEC_PER_HOUR)
+
+/* The max TTL for stale data is set to 30 seconds. See RFC 8767, Section 6. */
+#define CACHE_STALE_TTL_MAX_USEC (30 * USEC_PER_SEC)
 
 /* How long to cache strange rcodes, i.e. rcodes != SUCCESS and != NXDOMAIN (specifically: that's only SERVFAIL for
  * now) */
@@ -42,7 +45,8 @@ struct DnsCacheItem {
         DnsAnswer *answer;       /* The full validated answer, if this is an RRset acquired via a "primary" lookup */
         DnsPacket *full_packet;  /* The full packet this information was acquired with */
 
-        usec_t until;
+        usec_t until;            /* If StaleRetentionSec is greater than zero, until is set to a duration of StaleRetentionSec from the time of TTL expiry. If StaleRetentionSec is zero, both until and until_valid will be set to ttl. */
+        usec_t until_valid;      /* The key is for storing the time when the TTL set to expire. */
         uint64_t query_flags;    /* SD_RESOLVED_AUTHENTICATED and/or SD_RESOLVED_CONFIDENTIAL */
         DnssecResult dnssec_result;
 
@@ -311,7 +315,7 @@ static DnsCacheItem* dns_cache_get(DnsCache *c, DnsResourceRecord *rr) {
         return NULL;
 }
 
-static usec_t calculate_until(
+static usec_t calculate_until_valid(
                 DnsResourceRecord *rr,
                 uint32_t min_ttl,
                 uint32_t nsec_ttl,
@@ -350,6 +354,13 @@ static usec_t calculate_until(
         return timestamp + u;
 }
 
+static usec_t calculate_until(
+                usec_t until_valid,
+                usec_t stale_retention_usec) {
+
+        return stale_retention_usec > 0 ? usec_add(until_valid, stale_retention_usec) : until_valid;
+}
+
 static void dns_cache_item_update_positive(
                 DnsCache *c,
                 DnsCacheItem *i,
@@ -363,7 +374,8 @@ static void dns_cache_item_update_positive(
                 usec_t timestamp,
                 int ifindex,
                 int owner_family,
-                const union in_addr_union *owner_address) {
+                const union in_addr_union *owner_address,
+                usec_t stale_retention_usec) {
 
         assert(c);
         assert(i);
@@ -386,7 +398,8 @@ static void dns_cache_item_update_positive(
 
         DNS_PACKET_REPLACE(i->full_packet, dns_packet_ref(full_packet));
 
-        i->until = calculate_until(rr, min_ttl, UINT32_MAX, timestamp, false);
+        i->until_valid = calculate_until_valid(rr, min_ttl, UINT32_MAX, timestamp, false);
+        i->until = calculate_until(i->until_valid, stale_retention_usec);
         i->query_flags = query_flags & CACHEABLE_QUERY_FLAGS;
         i->shared_owner = shared_owner;
         i->dnssec_result = dnssec_result;
@@ -411,7 +424,8 @@ static int dns_cache_put_positive(
                 usec_t timestamp,
                 int ifindex,
                 int owner_family,
-                const union in_addr_union *owner_address) {
+                const union in_addr_union *owner_address,
+                usec_t stale_retention_usec) {
 
         char key_str[DNS_RESOURCE_KEY_STRING_MAX];
         DnsCacheItem *existing;
@@ -458,7 +472,8 @@ static int dns_cache_put_positive(
                                 timestamp,
                                 ifindex,
                                 owner_family,
-                                owner_address);
+                                owner_address,
+                                stale_retention_usec);
                 return 0;
         }
 
@@ -477,13 +492,19 @@ static int dns_cache_put_positive(
         if (!i)
                 return -ENOMEM;
 
+        /* If StaleRetentionSec is greater than zero, the 'until' property is set to a duration
+         * of StaleRetentionSec from the time of TTL expiry.
+         * If StaleRetentionSec is zero, both the 'until' and 'until_valid' are set to the TTL duration,
+         * leading to the eviction of the record once the TTL expires.*/
+        usec_t until_valid = calculate_until_valid(rr, min_ttl, UINT32_MAX, timestamp, false);
         *i = (DnsCacheItem) {
                 .type = DNS_CACHE_POSITIVE,
                 .key = dns_resource_key_ref(rr->key),
                 .rr = dns_resource_record_ref(rr),
                 .answer = dns_answer_ref(answer),
                 .full_packet = dns_packet_ref(full_packet),
-                .until = calculate_until(rr, min_ttl, UINT32_MAX, timestamp, false),
+                .until = calculate_until(until_valid, stale_retention_usec),
+                .until_valid = until_valid,
                 .query_flags = query_flags & CACHEABLE_QUERY_FLAGS,
                 .shared_owner = shared_owner,
                 .dnssec_result = dnssec_result,
@@ -581,9 +602,9 @@ static int dns_cache_put_negative(
         /* Determine how long to cache this entry. In case we have some RRs in the answer use the lowest TTL
          * of any of them. Typically that's the SOA's TTL, which is OK, but could possibly be lower because
          * of some other RR. Let's better take the lowest option here than a needlessly high one */
-        i->until =
+        i->until = i->until_valid =
                 i->type == DNS_CACHE_RCODE ? timestamp + CACHE_TTL_STRANGE_RCODE_USEC :
-                calculate_until(soa, dns_answer_min_ttl(answer), nsec_ttl, timestamp, true);
+                calculate_until_valid(soa, dns_answer_min_ttl(answer), nsec_ttl, timestamp, true);
 
         if (i->type == DNS_CACHE_NXDOMAIN) {
                 /* NXDOMAIN entries should apply equally to all types, so we use ANY as
@@ -679,7 +700,8 @@ int dns_cache_put(
                 DnssecResult dnssec_result,
                 uint32_t nsec_ttl,
                 int owner_family,
-                const union in_addr_union *owner_address) {
+                const union in_addr_union *owner_address,
+                usec_t stale_retention_usec) {
 
         DnsResourceRecord *soa = NULL;
         bool weird_rcode = false;
@@ -775,7 +797,8 @@ int dns_cache_put(
                                 timestamp,
                                 item->ifindex,
                                 owner_family,
-                                owner_address);
+                                owner_address,
+                                stale_retention_usec);
                 if (r < 0)
                         goto fail;
         }
@@ -831,7 +854,8 @@ int dns_cache_put(
                         nsec_ttl,
                         timestamp,
                         soa,
-                        owner_family, owner_address);
+                        owner_family,
+                        owner_address);
         if (r < 0)
                 goto fail;
 
@@ -1024,6 +1048,14 @@ int dns_cache_lookup(
                         goto miss;
                 }
 
+                /* Skip the next part if ttl is expired and requested with no stale flag. */
+                if (FLAGS_SET(query_flags, SD_RESOLVED_NO_STALE) && j->until_valid < current) {
+                        log_debug("Requested with no stale and TTL expired for %s",
+                                                dns_resource_key_to_string(key, key_str, sizeof key_str));
+
+                        goto miss;
+                }
+
                 if (j->type == DNS_CACHE_NXDOMAIN)
                         nxdomain = true;
                 else if (j->type == DNS_CACHE_RCODE)
@@ -1056,6 +1088,10 @@ int dns_cache_lookup(
                         dnssec_result = _DNSSEC_RESULT_INVALID;
                 }
 
+                /* If the question is being resolved using stale data, the clamp TTL will be set to CACHE_STALE_TTL_MAX_USEC. */
+                usec_t until = FLAGS_SET(query_flags, SD_RESOLVED_NO_STALE) ? j->until_valid
+                                                                            : usec_add(current, CACHE_STALE_TTL_MAX_USEC);
+
                 /* Append the answer RRs to our answer. Ideally we have the answer object, which we
                  * preferably use. But if the cached entry was generated as "side-effect" of a reply,
                  * i.e. from validated auxiliary records rather than from the main reply, then we use the
@@ -1076,7 +1112,7 @@ int dns_cache_lookup(
                                                         item->flags,
                                                         item->rrsig,
                                                         query_flags,
-                                                        j->until,
+                                                        until,
                                                         current);
                                         if (r < 0)
                                                 return r;
@@ -1091,7 +1127,7 @@ int dns_cache_lookup(
                                         FLAGS_SET(j->query_flags, SD_RESOLVED_AUTHENTICATED) ? DNS_ANSWER_AUTHENTICATED : 0,
                                         NULL,
                                         query_flags,
-                                        j->until,
+                                        until,
                                         current);
                         if (r < 0)
                                 return r;
@@ -1349,6 +1385,86 @@ void dns_cache_dump(DnsCache *cache, FILE *f) {
                                 fputc('\n', f);
                         }
                 }
+}
+
+int dns_cache_dump_to_json(DnsCache *cache, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *c = NULL;
+        DnsCacheItem *i;
+        int r;
+
+        assert(cache);
+        assert(ret);
+
+        HASHMAP_FOREACH(i, cache->by_key) {
+                _cleanup_(json_variant_unrefp) JsonVariant *d = NULL, *k = NULL;
+
+                r = dns_resource_key_to_json(i->key, &k);
+                if (r < 0)
+                        return r;
+
+                if (i->rr) {
+                        _cleanup_(json_variant_unrefp) JsonVariant *l = NULL;
+
+                        LIST_FOREACH(by_key, j, i) {
+                                _cleanup_(json_variant_unrefp) JsonVariant *rj = NULL, *item = NULL;
+
+                                assert(j->rr);
+
+                                r = dns_resource_record_to_json(j->rr, &rj);
+                                if (r < 0)
+                                        return r;
+
+                                r = dns_resource_record_to_wire_format(j->rr, /* canonical= */ false); /* don't use DNSSEC canonical format, since it removes casing, but we want that for DNS_SD compat */
+                                if (r < 0)
+                                        return r;
+
+                                r = json_build(&item, JSON_BUILD_OBJECT(
+                                                               JSON_BUILD_PAIR_VARIANT("rr", rj),
+                                                               JSON_BUILD_PAIR_BASE64("raw", j->rr->wire_format, j->rr->wire_format_size)));
+                                if (r < 0)
+                                        return r;
+
+                                r = json_variant_append_array(&l, item);
+                                if (r < 0)
+                                        return r;
+                        }
+
+                        if (!l) {
+                                r = json_variant_new_array(&l, NULL, 0);
+                                if (r < 0)
+                                        return r;
+                        }
+
+                        r = json_build(&d,
+                                       JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR_VARIANT("key", k),
+                                                       JSON_BUILD_PAIR_VARIANT("rrs", l),
+                                                       JSON_BUILD_PAIR_UNSIGNED("until", i->until)));
+                } else if (i->type == DNS_CACHE_NODATA) {
+                        r = json_build(&d,
+                                       JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR_VARIANT("key", k),
+                                                       JSON_BUILD_PAIR_EMPTY_ARRAY("rrs"),
+                                                       JSON_BUILD_PAIR_UNSIGNED("until", i->until)));
+                } else
+                        r = json_build(&d,
+                                       JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR_VARIANT("key", k),
+                                                       JSON_BUILD_PAIR_STRING("type", dns_cache_item_type_to_string(i)),
+                                                       JSON_BUILD_PAIR_UNSIGNED("until", i->until)));
+                if (r < 0)
+                        return r;
+
+                r = json_variant_append_array(&c, d);
+                if (r < 0)
+                        return r;
+        }
+
+        if (!c)
+                return json_variant_new_array(ret, NULL, 0);
+
+        *ret = TAKE_PTR(c);
+        return 0;
 }
 
 bool dns_cache_is_empty(DnsCache *cache) {

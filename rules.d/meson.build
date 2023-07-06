@@ -8,6 +8,7 @@ rules = [
         [files('60-autosuspend.rules',
                '60-block.rules',
                '60-cdrom_id.rules',
+               '60-dmi-id.rules',
                '60-drm.rules',
                '60-evdev.rules',
                '60-fido-id.rules',
@@ -15,7 +16,6 @@ rules = [
                '60-input-id.rules',
                '60-persistent-alsa.rules',
                '60-persistent-input.rules',
-               '60-persistent-storage.rules',
                '60-persistent-storage-tape.rules',
                '60-persistent-v4l.rules',
                '60-sensor.rules',
@@ -29,6 +29,7 @@ rules = [
                '78-sound-card.rules',
                '80-net-setup-link.rules',
                '81-net-dhcp.rules',
+               '90-iocost.rules',
               )],
 
         [files('80-drivers.rules'),
@@ -53,6 +54,7 @@ endforeach
 
 rules_in = [
         ['50-udev-default.rules'],
+        ['60-persistent-storage.rules'],
         ['64-btrfs.rules'],
         ['99-systemd.rules'],
 

@@ -12,27 +12,36 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/timerfd.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-device.h"
+#include "sd-id128.h"
 #include "sd-messages.h"
 
+#include "battery-util.h"
 #include "btrfs-util.h"
 #include "build.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-util.h"
 #include "constants.h"
+#include "devnum-util.h"
+#include "efivars.h"
 #include "exec-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "id128-util.h"
 #include "io-util.h"
+#include "json.h"
 #include "log.h"
 #include "main-func.h"
+#include "os-util.h"
 #include "parse-util.h"
 #include "pretty-print.h"
-#include "sleep-config.h"
+#include "sleep-util.h"
 #include "special.h"
 #include "stdio-util.h"
 #include "string-util.h"
@@ -43,50 +52,86 @@
 
 static SleepOperation arg_operation = _SLEEP_OPERATION_INVALID;
 
-static int write_hibernate_location_info(const HibernateLocation *hibernate_location) {
-        char offset_str[DECIMAL_STR_MAX(uint64_t)];
-        char resume_str[DECIMAL_STR_MAX(unsigned) * 2 + STRLEN(":")];
+static int write_efi_hibernate_location(const HibernateLocation *hibernate_location, bool required) {
+        int log_level = required ? LOG_ERR : LOG_DEBUG,
+            log_level_ignore = required ? LOG_WARNING : LOG_DEBUG;
+
+#if ENABLE_EFI
+        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+        _cleanup_free_ char *formatted = NULL, *id = NULL, *image_id = NULL,
+                       *version_id = NULL, *image_version = NULL;
+        _cleanup_(sd_device_unrefp) sd_device *device = NULL;
+        const char *uuid_str;
+        sd_id128_t uuid;
+        struct utsname uts = {};
         int r;
 
         assert(hibernate_location);
         assert(hibernate_location->swap);
 
-        xsprintf(resume_str, "%u:%u", major(hibernate_location->devno), minor(hibernate_location->devno));
-        r = write_string_file("/sys/power/resume", resume_str, WRITE_STRING_FILE_DISABLE_BUFFER);
+        if (!is_efi_boot())
+                return log_full_errno(log_level, SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                      "Not an EFI boot, passing HibernateLocation via EFI variable is not possible.");
+
+        r = sd_device_new_from_devnum(&device, 'b', hibernate_location->devno);
         if (r < 0)
-                return log_debug_errno(r, "Failed to write partition device to /sys/power/resume for '%s': '%s': %m",
-                                       hibernate_location->swap->device, resume_str);
+                return log_full_errno(log_level, r, "Failed to create sd-device object for '%s': %m",
+                                      hibernate_location->swap->path);
 
-        log_debug("Wrote resume= value for %s to /sys/power/resume: %s", hibernate_location->swap->device, resume_str);
-
-        /* if it's a swap partition, we're done */
-        if (streq(hibernate_location->swap->type, "partition"))
-                return r;
-
-        if (!streq(hibernate_location->swap->type, "file"))
-                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Invalid hibernate type: %s", hibernate_location->swap->type);
-
-        /* Only available in 4.17+ */
-        if (hibernate_location->offset > 0 && access("/sys/power/resume_offset", W_OK) < 0) {
-                if (errno == ENOENT) {
-                        log_debug("Kernel too old, can't configure resume_offset for %s, ignoring: %" PRIu64,
-                                  hibernate_location->swap->device, hibernate_location->offset);
-                        return 0;
-                }
-
-                return log_debug_errno(errno, "/sys/power/resume_offset not writable: %m");
-        }
-
-        xsprintf(offset_str, "%" PRIu64, hibernate_location->offset);
-        r = write_string_file("/sys/power/resume_offset", offset_str, WRITE_STRING_FILE_DISABLE_BUFFER);
+        r = sd_device_get_property_value(device, "ID_FS_UUID", &uuid_str);
         if (r < 0)
-                return log_debug_errno(r, "Failed to write swap file offset to /sys/power/resume_offset for '%s': '%s': %m",
-                                       hibernate_location->swap->device, offset_str);
+                return log_full_errno(log_level, r, "Failed to get filesystem UUID for device '%s': %m",
+                                      hibernate_location->swap->path);
 
-        log_debug("Wrote resume_offset= value for %s to /sys/power/resume_offset: %s", hibernate_location->swap->device, offset_str);
+        r = sd_id128_from_string(uuid_str, &uuid);
+        if (r < 0)
+                return log_full_errno(log_level, r, "Failed to parse ID_FS_UUID '%s' for device '%s': %m",
+                                      uuid_str, hibernate_location->swap->path);
 
+        if (uname(&uts) < 0)
+                log_full_errno(log_level_ignore, errno, "Failed to get kernel info, ignoring: %m");
+
+        r = parse_os_release(NULL,
+                             "ID", &id,
+                             "IMAGE_ID", &image_id,
+                             "VERSION_ID", &version_id,
+                             "IMAGE_VERSION", &image_version);
+        if (r < 0)
+                log_full_errno(log_level_ignore, r, "Failed to parse os-release, ignoring: %m");
+
+        r = json_build(&v, JSON_BUILD_OBJECT(
+                               JSON_BUILD_PAIR_UUID("uuid", uuid),
+                               JSON_BUILD_PAIR_UNSIGNED("offset", hibernate_location->offset),
+                               JSON_BUILD_PAIR_CONDITION(!isempty(uts.release), "kernelVersion", JSON_BUILD_STRING(uts.release)),
+                               JSON_BUILD_PAIR_CONDITION(id, "osReleaseId", JSON_BUILD_STRING(id)),
+                               JSON_BUILD_PAIR_CONDITION(image_id, "osReleaseImageId", JSON_BUILD_STRING(image_id)),
+                               JSON_BUILD_PAIR_CONDITION(version_id, "osReleaseVersionId", JSON_BUILD_STRING(version_id)),
+                               JSON_BUILD_PAIR_CONDITION(image_version, "osReleaseImageVersion", JSON_BUILD_STRING(image_version))));
+        if (r < 0)
+                return log_full_errno(log_level, r, "Failed to build JSON object: %m");
+
+        r = json_variant_format(v, 0, &formatted);
+        if (r < 0)
+                return log_full_errno(log_level, r, "Failed to format JSON object: %m");
+
+        r = efi_set_variable_string(EFI_SYSTEMD_VARIABLE(HibernateLocation), formatted);
+        if (r < 0)
+                return log_full_errno(log_level, r, "Failed to set EFI variable HibernateLocation: %m");
+
+        log_debug("Set EFI variable HibernateLocation to '%s'.", formatted);
         return 0;
+#else
+        return log_full_errno(log_level, SYNTHETIC_ERRNO(EOPNOTSUPP),
+                              "EFI support not enabled, passing HibernateLocation via EFI variable is not possible.");
+#endif
+}
+
+static int write_kernel_hibernate_location(const HibernateLocation *hibernate_location) {
+        assert(hibernate_location);
+        assert(hibernate_location->swap);
+        assert(IN_SET(hibernate_location->swap->type, SWAP_BLOCK, SWAP_FILE));
+
+        return write_resume_config(hibernate_location->devno, hibernate_location->offset, hibernate_location->swap->path);
 }
 
 static int write_mode(char **modes) {
@@ -145,13 +190,7 @@ static int lock_all_homes(void) {
         if (r < 0)
                 return log_warning_errno(r, "Failed to connect to system bus, ignoring: %m");
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.home1",
-                        "/org/freedesktop/home1",
-                        "org.freedesktop.home1.Manager",
-                        "LockAllHomes");
+        r = bus_message_new_method_call(bus, &m, bus_home_mgr, "LockAllHomes");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -217,16 +256,22 @@ static int execute(
 
         /* Configure hibernation settings if we are supposed to hibernate */
         if (!strv_isempty(modes)) {
+                bool resume_set;
+
                 r = find_hibernate_location(&hibernate_location);
                 if (r < 0)
                         return log_error_errno(r, "Failed to find location to hibernate to: %m");
-                if (r == 0) { /* 0 means: no hibernation location was configured in the kernel so far, let's
-                               * do it ourselves then. > 0 means: kernel already had a configured hibernation
-                               * location which we shouldn't touch. */
-                        r = write_hibernate_location_info(hibernate_location);
+                resume_set = r > 0;
+
+                if (!resume_set) {
+                        r = write_kernel_hibernate_location(hibernate_location);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to prepare for hibernation: %m");
                 }
+
+                r = write_efi_hibernate_location(hibernate_location, !resume_set);
+                if (r < 0 && !resume_set)
+                        return r;
 
                 r = write_mode(modes);
                 if (r < 0)
@@ -385,8 +430,7 @@ static int freeze_thaw_user_slice(const char **method) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to open connection to systemd: %m");
 
-        /* Wait for 1.5 seconds at maximum for freeze operation */
-        (void) sd_bus_set_method_call_timeout(bus, 1500 * USEC_PER_MSEC);
+        (void) sd_bus_set_method_call_timeout(bus, FREEZE_TIMEOUT);
 
         r = bus_call_method(bus, bus_systemd_mgr, *method, &error, NULL, "s", SPECIAL_USER_SLICE);
         if (r < 0)

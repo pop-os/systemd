@@ -45,12 +45,12 @@
 #include <getopt.h>
 
 #include "alloc-util.h"
+#include "build.h"
 #include "fileio.h"
 #include "main-func.h"
 #include "string-util.h"
 #include "udev-util.h"
 #include "unaligned.h"
-#include "version.h"
 
 #define SUPPORTED_SMBIOS_VER 0x030300
 
@@ -638,9 +638,10 @@ static int legacy_decode(const uint8_t *buf, const char *devmem, bool no_file_of
 }
 
 static int help(void) {
-        printf("Usage: %s [options]\n"
-               " -F,--from-dump FILE   read DMI information from a binary file\n"
-               " -h,--help             print this help text\n\n",
+        printf("%s [OPTIONS...]\n\n"
+               "  -F --from-dump FILE  Read DMI information from a binary file\n"
+               "  -h --help            Show this help text\n"
+               "     --version         Show package version\n",
                program_invocation_short_name);
         return 0;
 }
@@ -650,6 +651,7 @@ static int parse_argv(int argc, char * const *argv) {
                 { "from-dump", required_argument, NULL, 'F' },
                 { "version",   no_argument,       NULL, 'V' },
                 { "help",      no_argument,       NULL, 'h' },
+                { "version",   no_argument,       NULL, 'v' },
                 {}
         };
         int c;
@@ -660,12 +662,13 @@ static int parse_argv(int argc, char * const *argv) {
                         arg_source_file = optarg;
                         break;
                 case 'V':
-                        printf("%s\n", GIT_VERSION);
-                        return 0;
+                        return version();
                 case 'h':
                         return help();
                 case '?':
                         return -EINVAL;
+                case 'v':
+                        return version();
                 default:
                         assert_not_reached();
                 }

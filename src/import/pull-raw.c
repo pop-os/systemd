@@ -327,7 +327,6 @@ static int raw_pull_copy_auxiliary_file(
                         *path,
                         local,
                         0644,
-                        0, 0,
                         COPY_REFLINK |
                         (FLAGS_SET(i->flags, PULL_FORCE) ? COPY_REPLACE : 0) |
                         (FLAGS_SET(i->flags, PULL_SYNC) ? COPY_FSYNC_FULL : 0));
@@ -396,7 +395,7 @@ static int raw_pull_make_local_copy(RawPull *i) {
                 return log_error_errno(r, "Failed to make writable copy of image: %m");
 
         (void) copy_times(i->raw_job->disk_fd, dfd, COPY_CRTIME);
-        (void) copy_xattr(i->raw_job->disk_fd, dfd, 0);
+        (void) copy_xattr(i->raw_job->disk_fd, NULL, dfd, NULL, 0);
 
         dfd = safe_close(dfd);
 

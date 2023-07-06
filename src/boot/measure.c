@@ -11,6 +11,7 @@
 #include "hexdecoct.h"
 #include "json.h"
 #include "main-func.h"
+#include "memstream-util.h"
 #include "openssl-util.h"
 #include "parse-argument.h"
 #include "parse-util.h"
@@ -83,6 +84,8 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --initrd=PATH       Path to initrd image file              %7$s .initrd\n"
                "     --splash=PATH       Path to splash bitmap file             %7$s .splash\n"
                "     --dtb=PATH          Path to Devicetree file                %7$s .dtb\n"
+               "     --uname=PATH        Path to 'uname -r' file                %7$s .uname\n"
+               "     --sbat=PATH         Path to SBAT file                      %7$s .sbat\n"
                "     --pcrpkey=PATH      Path to public key for PCR signatures  %7$s .pcrpkey\n"
                "\nSee the %2$s for details.\n",
                program_invocation_short_name,
@@ -122,6 +125,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_INITRD,
                 ARG_SPLASH,
                 ARG_DTB,
+                ARG_UNAME,
+                ARG_SBAT,
                 _ARG_PCRSIG, /* the .pcrsig section is not input for signing, hence not actually an argument here */
                 _ARG_SECTION_LAST,
                 ARG_PCRPKEY = _ARG_SECTION_LAST,
@@ -144,6 +149,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "initrd",      required_argument, NULL, ARG_INITRD      },
                 { "splash",      required_argument, NULL, ARG_SPLASH      },
                 { "dtb",         required_argument, NULL, ARG_DTB         },
+                { "uname",       required_argument, NULL, ARG_UNAME       },
+                { "sbat",        required_argument, NULL, ARG_SBAT        },
                 { "pcrpkey",     required_argument, NULL, ARG_PCRPKEY     },
                 { "current",     no_argument,       NULL, 'c'             },
                 { "bank",        required_argument, NULL, ARG_BANK        },
@@ -286,7 +293,8 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_current)
                 for (UnifiedSection us = 0; us < _UNIFIED_SECTION_MAX; us++)
                         if (arg_sections[us])
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "The --current switch cannot be used in combination with --linux= and related switches.");
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "The --current switch cannot be used in combination with --linux= and related switches.");
 
         if (strv_isempty(arg_phase)) {
                 /* If no phases are specifically selected, pick everything from the beginning of the initrd
@@ -448,7 +456,8 @@ static int measure_kernel(PcrState *pcr_states, size_t n) {
                                 return log_oom();
 
                         if (EVP_DigestInit_ex(mdctx[i], pcr_states[i].md, NULL) != 1)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize data %s context.", pcr_states[i].bank);
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to initialize data %s context.", pcr_states[i].bank);
                 }
 
                 for (;;) {
@@ -630,13 +639,14 @@ static void pcr_states_restore(PcrState *pcr_states, size_t n) {
 static int verb_calculate(int argc, char *argv[], void *userdata) {
         _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
         _cleanup_(pcr_state_free_all) PcrState *pcr_states = NULL;
-        size_t n;
         int r;
 
         if (!arg_sections[UNIFIED_SECTION_LINUX] && !arg_current)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Either --linux= or --current must be specified, refusing.");
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Either --linux= or --current must be specified, refusing.");
         if (arg_append)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "The --append= switch is only supported for 'sign', not 'calculate'.");
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "The --append= switch is only supported for 'sign', not 'calculate'.");
 
         assert(!strv_isempty(arg_banks));
         assert(!strv_isempty(arg_phase));
@@ -645,7 +655,7 @@ static int verb_calculate(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return r;
 
-        n = (size_t) r;
+        size_t n = r;
 
         r = measure_kernel(pcr_states, n);
         if (r < 0)
@@ -727,15 +737,16 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
         _cleanup_(pcr_state_free_all) PcrState *pcr_states = NULL;
         _cleanup_(EVP_PKEY_freep) EVP_PKEY *privkey = NULL, *pubkey = NULL;
         _cleanup_fclose_ FILE *privkeyf = NULL;
-        TSS2_RC rc;
         size_t n;
         int r;
 
         if (!arg_sections[UNIFIED_SECTION_LINUX] && !arg_current)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Either --linux= or --current must be specified, refusing.");
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Either --linux= or --current must be specified, refusing.");
 
         if (!arg_private_key)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "No private key specified, use --private-key=.");
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "No private key specified, use --private-key=.");
 
         assert(!strv_isempty(arg_banks));
         assert(!strv_isempty(arg_phase));
@@ -746,7 +757,8 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                         return log_error_errno(r, "Failed to parse '%s': %m", arg_append);
 
                 if (!json_variant_is_object(v))
-                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "File '%s' is not a valid JSON object, refusing.", arg_append);
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "File '%s' is not a valid JSON object, refusing.", arg_append);
         }
 
         /* When signing we only support JSON output */
@@ -771,24 +783,25 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                 if (!pubkey)
                         return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse public key '%s'.", arg_public_key);
         } else {
-                _cleanup_free_ char *data = NULL;
-                _cleanup_fclose_ FILE *tf = NULL;
-                size_t sz;
+                _cleanup_(memstream_done) MemStream m = {};
+                FILE *tf;
 
                 /* No public key was specified, let's derive it automatically, if we can */
 
-                tf = open_memstream_unlocked(&data, &sz);
+                tf = memstream_init(&m);
                 if (!tf)
                         return log_oom();
 
                 if (i2d_PUBKEY_fp(tf, privkey) != 1)
-                        return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to extract public key from private key file '%s'.", arg_private_key);
+                        return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                               "Failed to extract public key from private key file '%s'.", arg_private_key);
 
                 fflush(tf);
                 rewind(tf);
 
                 if (!d2i_PUBKEY_fp(tf, &pubkey))
-                        return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse extracted public key of private key file '%s'.", arg_private_key);
+                        return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                               "Failed to parse extracted public key of private key file '%s'.", arg_private_key);
         }
 
         r = pcr_states_allocate(&pcr_states);
@@ -805,15 +818,6 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return r;
 
-        r = dlopen_tpm2();
-        if (r < 0)
-                return r;
-
-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
-        r = tpm2_context_new(arg_tpm2_device, &c);
-        if (r < 0)
-                return r;
-
         STRV_FOREACH(phase, arg_phase) {
 
                 r = measure_phase(pcr_states, n, *phase);
@@ -821,72 +825,31 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                         return r;
 
                 for (size_t i = 0; i < n; i++) {
-                        static const TPMT_SYM_DEF symmetric = {
-                                .algorithm = TPM2_ALG_AES,
-                                .keyBits.aes = 128,
-                                .mode.aes = TPM2_ALG_CFB,
-                        };
                         PcrState *p = pcr_states + i;
-
-                        _cleanup_tpm2_handle_ Tpm2Handle *session = NULL;
-                        r = tpm2_handle_new(c, &session);
-                        if (r < 0)
-                                return r;
-
-                        rc = sym_Esys_StartAuthSession(
-                                        c->esys_context,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        NULL,
-                                        TPM2_SE_TRIAL,
-                                        &symmetric,
-                                        TPM2_ALG_SHA256,
-                                        &session->esys_handle);
-                        if (rc != TSS2_RC_SUCCESS)
-                                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
-                                                       "Failed to open session in TPM: %s", sym_Tss2_RC_Decode(rc));
-
-                        /* Generate a single hash value from the PCRs included in our policy. Given that that's
-                         * exactly one, the calculation is trivial. */
-                        TPM2B_DIGEST intermediate_digest = {
-                                .size = SHA256_DIGEST_SIZE,
-                        };
-                        assert(sizeof(intermediate_digest.buffer) >= SHA256_DIGEST_SIZE);
-                        sha256_direct(p->value, p->value_size, intermediate_digest.buffer);
 
                         int tpmalg = tpm2_hash_alg_from_string(EVP_MD_name(p->md));
                         if (tpmalg < 0)
                                 return log_error_errno(tpmalg, "Unsupported PCR bank");
 
                         TPML_PCR_SELECTION pcr_selection;
-                        tpm2_pcr_mask_to_selection(1 << TPM_PCR_INDEX_KERNEL_IMAGE, tpmalg, &pcr_selection);
+                        tpm2_tpml_pcr_selection_from_mask(1 << TPM_PCR_INDEX_KERNEL_IMAGE,
+                                                          tpmalg,
+                                                          &pcr_selection);
 
-                        rc = sym_Esys_PolicyPCR(
-                                        c->esys_context,
-                                        session->esys_handle,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        &intermediate_digest,
-                                        &pcr_selection);
-                        if (rc != TSS2_RC_SUCCESS)
-                                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
-                                                       "Failed to push PCR policy into TPM: %s", sym_Tss2_RC_Decode(rc));
+                        TPM2B_DIGEST pcr_values = {
+                                .size = p->value_size,
+                        };
+                        assert(sizeof(pcr_values.buffer) >= p->value_size);
+                        memcpy_safe(pcr_values.buffer, p->value, p->value_size);
 
-                        _cleanup_(Esys_Freep) TPM2B_DIGEST *pcr_policy_digest = NULL;
-                        rc = sym_Esys_PolicyGetDigest(
-                                        c->esys_context,
-                                        session->esys_handle,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        ESYS_TR_NONE,
-                                        &pcr_policy_digest);
-                        if (rc != TSS2_RC_SUCCESS)
-                                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
-                                                       "Failed to get policy digest from TPM: %s", sym_Tss2_RC_Decode(rc));
+                        TPM2B_DIGEST pcr_policy_digest;
+                        r = tpm2_digest_init(TPM2_ALG_SHA256, &pcr_policy_digest);
+                        if (r < 0)
+                                return r;
+
+                        r = tpm2_calculate_policy_pcr(&pcr_selection, &pcr_values, 1, &pcr_policy_digest);
+                        if (r < 0)
+                                return r;
 
                         _cleanup_(EVP_MD_CTX_freep) EVP_MD_CTX* mdctx = NULL;
                         mdctx = EVP_MD_CTX_new();
@@ -897,7 +860,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                                 return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
                                                        "Failed to initialize signature context.");
 
-                        if (EVP_DigestSignUpdate(mdctx, pcr_policy_digest->buffer, pcr_policy_digest->size) != 1)
+                        if (EVP_DigestSignUpdate(mdctx, pcr_policy_digest.buffer, pcr_policy_digest.size) != 1)
                                 return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
                                                        "Failed to sign data.");
 
@@ -929,7 +892,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                         r = json_build(&bv, JSON_BUILD_OBJECT(
                                                        JSON_BUILD_PAIR("pcrs", JSON_BUILD_VARIANT(a)),                                             /* PCR mask */
                                                        JSON_BUILD_PAIR("pkfp", JSON_BUILD_HEX(pubkey_fp, pubkey_fp_size)),                         /* SHA256 fingerprint of public key (DER) used for the signature */
-                                                       JSON_BUILD_PAIR("pol", JSON_BUILD_HEX(pcr_policy_digest->buffer, pcr_policy_digest->size)), /* TPM2 policy hash that is signed */
+                                                       JSON_BUILD_PAIR("pol", JSON_BUILD_HEX(pcr_policy_digest.buffer, pcr_policy_digest.size)),   /* TPM2 policy hash that is signed */
                                                        JSON_BUILD_PAIR("sig", JSON_BUILD_BASE64(sig, ss))));                                       /* signature data */
                         if (r < 0)
                                 return log_error_errno(r, "Failed to build JSON object: %m");

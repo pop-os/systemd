@@ -18,6 +18,7 @@
 
   <refnamediv>
     <refname>systemd-dissect</refname>
+    <refname>mount.ddi</refname>
     <refpurpose>Dissect Discoverable Disk Images (DDIs)</refpurpose>
   </refnamediv>
 
@@ -30,6 +31,12 @@
     </cmdsynopsis>
     <cmdsynopsis>
       <command>systemd-dissect <arg choice="opt" rep="repeat">OPTIONS</arg> <option>--umount</option> <arg choice="plain"><replaceable>PATH</replaceable></arg></command>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-dissect <arg choice="opt" rep="repeat">OPTIONS</arg> <option>--attach</option> <arg choice="plain"><replaceable>IMAGE</replaceable></arg></command>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-dissect <arg choice="opt" rep="repeat">OPTIONS</arg> <option>--detach</option> <arg choice="plain"><replaceable>PATH</replaceable></arg></command>
     </cmdsynopsis>
     <cmdsynopsis>
       <command>systemd-dissect <arg choice="opt" rep="repeat">OPTIONS</arg> <option>--list</option> <arg choice="plain"><replaceable>IMAGE</replaceable></arg></command>
@@ -99,6 +106,14 @@
     what it operates with when mounting the image. To display the complete list of partitions use a tool such
     as <citerefentry
     project='man-pages'><refentrytitle>fdisk</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+
+    <para>The <command>systemd-dissect</command> command may be invoked as <command>mount.ddi</command> in
+    which case it implements the <citerefentry
+    project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry> "external
+    helper" interface. This ensures disk images compatible with <command>systemd-dissect</command> can be
+    mounted directly by <command>mount</command> and <citerefentry
+    project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>. For
+    details see below.</para>
   </refsect1>
 
   <refsect1>
@@ -132,7 +147,13 @@
         <para>All mounted file systems are checked with the appropriate <citerefentry
         project='man-pages'><refentrytitle>fsck</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         implementation in automatic fixing mode, unless explicitly turned off (<option>--fsck=no</option>) or
-        read-only operation is requested (<option>--read-only</option>).</para></listitem>
+        read-only operation is requested (<option>--read-only</option>).</para>
+
+        <para>Note that this functionality is also available in <citerefentry
+        project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry> via a
+        command such as <command>mount -t ddi myimage.raw targetdir/</command>, as well as in <citerefentry
+        project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>. For
+        details, see below.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -159,11 +180,30 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>--attach</option></term>
+
+        <listitem><para>Attach the specified disk image to an automatically allocated loopback block device,
+        and print the path to the loopback block device to standard output. This is similar to an invocation
+        of <command>losetup --find --show</command>, but will validate the image as DDI before attaching, and
+        derive the correct sector size to use automatically. Moreover, it ensures the per-partition block
+        devices are created before returning. Takes a path to a disk image file.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--detach</option></term>
+
+        <listitem><para>Detach the specified disk image from a loopback block device. This undoes the effect
+        of <option>--attach</option> above. This expects either a path to a loopback block device as an
+        argument, or the path to the backing image file. In the latter case it will automatically determine
+        the right device to detach.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--list</option></term>
         <term><option>-l</option></term>
 
-        <listitem><para>Prints the paths of all the files and directories in the specified OS image to
-        standard output.</para></listitem>
+        <listitem><para>Prints the paths of all the files and directories in the specified OS image or
+        directory to standard output.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -172,7 +212,7 @@
 
         <listitem><para>Generates a BSD
         <citerefentry project='die-net'><refentrytitle>mtree</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        compatible file manifest of the specified disk image. This is useful for comparing disk image
+        compatible file manifest of the specified disk image or directory. This is useful for comparing image
         contents in detail, including inode information and other metadata. While the generated manifest will
         contain detailed inode information, it currently excludes extended attributes, file system
         capabilities, MAC labels,
@@ -202,15 +242,16 @@
         <term><option>--copy-from</option></term>
         <term><option>-x</option></term>
 
-        <listitem><para>Copies a file or directory from the specified OS image into the specified location on
-        the host file system. Expects three arguments: a path to an image file, a source path (relative to
-        the image's root directory) and a destination path (relative to the current working directory, or an
-        absolute path, both outside of the image). If the destination path is omitted or specified as dash
-        (<literal>-</literal>), the specified file is written to standard output. If the source path in the
-        image file system refers to a regular file it is copied to the destination path. In this case access
-        mode, extended attributes and timestamps are copied as well, but file ownership is not. If the source
-        path in the image refers to a directory, it is copied to the destination path, recursively with all
-        containing files and directories. In this case the file ownership is copied too.</para></listitem>
+        <listitem><para>Copies a file or directory from the specified OS image or directory into the
+        specified location on the host file system. Expects three arguments: a path to an image file or
+        directory, a source path (relative to the image's root directory) and a destination path (relative to
+        the current working directory, or an absolute path, both outside of the image). If the destination
+        path is omitted or specified as dash (<literal>-</literal>), the specified file is written to
+        standard output. If the source path in the image file system refers to a regular file it is copied to
+        the destination path. In this case access mode, extended attributes and timestamps are copied as
+        well, but file ownership is not. If the source path in the image refers to a directory, it is copied
+        to the destination path, recursively with all containing files and directories. In this case the file
+        ownership is copied too.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -218,15 +259,15 @@
         <term><option>-a</option></term>
 
         <listitem><para>Copies a file or directory from the specified location in the host file system into
-        the specified OS image. Expects three arguments: a path to an image file, a source path (relative to
-        the current working directory, or an absolute path, both outside of the image) and a destination path
-        (relative to the image's root directory). If the source path is omitted or specified as dash
-        (<literal>-</literal>), the data to write is read from standard input. If the source path in the host
-        file system refers to a regular file, it is copied to the destination path. In this case access mode,
-        extended attributes and timestamps are copied as well, but file ownership is not. If the source path
-        in the host file system refers to a directory it is copied to the destination path, recursively with
-        all containing files and directories. In this case the file ownership is copied
-        too.</para>
+        the specified OS image or directory. Expects three arguments: a path to an image file or directory, a
+        source path (relative to the current working directory, or an absolute path, both outside of the
+        image) and a destination path (relative to the image's root directory). If the source path is omitted
+        or specified as dash (<literal>-</literal>), the data to write is read from standard input. If the
+        source path in the host file system refers to a regular file, it is copied to the destination path.
+        In this case access mode, extended attributes and timestamps are copied as well, but file ownership
+        is not. If the source path in the host file system refers to a directory it is copied to the
+        destination path, recursively with all containing files and directories. In this case the file
+        ownership is copied too.</para>
 
         <para>As with <option>--mount</option> file system checks are implicitly run before the copy
         operation begins.</para></listitem>
@@ -236,11 +277,25 @@
         <term><option>--discover</option></term>
 
         <listitem><para>Show a list of DDIs in well-known directories. This will show machine, portable
-        service and system extension disk images in the usual directories
+        service and system/configuration extension disk images in the usual directories
         <filename>/usr/lib/machines/</filename>, <filename>/usr/lib/portables/</filename>,
-        <filename>/usr/lib/extensions/</filename>, <filename>/var/lib/machines/</filename>,
+        <filename>/usr/lib/confexts/</filename>, <filename>/var/lib/machines/</filename>,
         <filename>/var/lib/portables/</filename>, <filename>/var/lib/extensions/</filename> and so
         on.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--validate</option></term>
+
+        <listitem><para>Validates the partition arrangement of a disk image (DDI), and ensures it matches the
+        image policy specified via <option>--image-policy=</option>, if one is specified. This parses the
+        partition table and probes the file systems in the image, but does not attempt to mount them (nor to
+        set up disk encryption/authentication via LUKS/Verity). It does this taking the configured image
+        dissection policy into account. Since this operation does not mount file systems, this command –
+        unlike all other commands implemented by this tool – requires no privileges other than the ability to
+        access the specified file. Prints "OK" and returns zero if the image appears to be in order and
+        matches the specified image dissection policy. Otherwise prints an error message and returns
+        non-zero.</para></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="help" />
@@ -348,6 +403,34 @@
         </para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--loop-ref=</option></term>
+
+        <listitem><para>Configures the "reference" string the kernel shall report as backing file for the
+        loopback block device. While this is supposed to be a path or filename referencing the backing file,
+        this is not enforced and the kernel accepts arbitrary free-form strings, chosen by the user. Accepts
+        arbitrary strings up to a length of 63 characters. This sets the kernel's
+        <literal>.lo_file_name</literal> field for the block device. Note this is distinct from the
+        <filename>/sys/class/block/loopX/loop/backing_file</filename> attribute file that always reports a
+        path referring to the actual backing file. The latter is subject to mount namespace translation, the
+        former is not.</para>
+
+        <para>This setting is particularly useful in combination with the <option>--attach</option> command,
+        as it allows later referencing the allocated loop device via <filename>/dev/loop/by-ref/…</filename>
+        symlinks. Example: first, set up the loopback device via <command>systemd-dissect attach
+        --loop-ref=quux foo.raw</command>, and then reference it in a command via the specified filename:
+        <command>cfdisk /dev/loop/by-ref/quux</command>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--mtree-hash=no</option></term>
+
+        <listitem><para>If combined with <option>--mtree</option>, turns off inclusion of file hashes in the
+        mtree output. This makes the <option>--mtree</option> faster when operating on large images.
+        </para></listitem>
+      </varlistentry>
+
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
       <xi:include href="standard-options.xml" xpointer="no-pager" />
       <xi:include href="standard-options.xml" xpointer="no-legend" />
       <xi:include href="standard-options.xml" xpointer="json" />
@@ -361,6 +444,35 @@
     command is used the exit status of the invoked command is propagated.</para>
   </refsect1>
 
+  <refsect1>
+    <title>Invocation as <command>/sbin/mount.ddi</command></title>
+
+    <para>The <command>systemd-dissect</command> executable may be symlinked to
+    <filename>/sbin/mount.ddi</filename>. If invoked through that it implements <citerefentry
+    project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
+    "external helper" interface for the (pseudo) file system type <literal>ddi</literal>. This means
+    conformant disk images may be mounted directly via</para>
+
+    <programlisting># mount -t ddi myimage.raw targetdir/</programlisting>
+
+    <para>in a fashion mostly equivalent to:</para>
+
+    <programlisting># systemd-dissect --mount myimage.raw targetdir/</programlisting>
+
+    <para>Note that since a single DDI may contain multiple file systems it should later be unmounted with
+    <command>umount -R targetdir/</command>, for recursive operation.</para>
+
+    <para>This functionality is particularly useful to mount DDIs automatically at boot via simple
+    <filename>/etc/fstab</filename> entries. For example:</para>
+
+    <programlisting>/path/to/myimage.raw /images/myimage/ ddi defaults 0 0</programlisting>
+
+    <para>When invoked this way the mount options <literal>ro</literal>, <literal>rw</literal>,
+    <literal>discard</literal>, <literal>nodiscard</literal> map to the corresponding options listed above
+    (i.e. <option>--read-only</option>, <option>--discard=all</option>,
+    <option>--discard=disabled</option>). Mount options are <emphasis>not</emphasis> generically passed on to
+    the file systems inside the images.</para>
+  </refsect1>
 
   <refsect1>
     <title>Examples</title>
@@ -368,7 +480,7 @@
     <example>
       <title>Generate a tarball from an OS disk image</title>
 
-      <programlisting>$ systemd-dissect --with foo.raw tar cz . >foo.tar.gz</programlisting>
+      <programlisting># systemd-dissect --with foo.raw tar cz . >foo.tar.gz</programlisting>
     </example>
   </refsect1>
 
@@ -379,6 +491,7 @@
       <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
       <ulink url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable Partitions Specification</ulink>,
+      <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry project='man-pages'><refentrytitle>umount</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry project='man-pages'><refentrytitle>fdisk</refentrytitle><manvolnum>8</manvolnum></citerefentry>
     </para>

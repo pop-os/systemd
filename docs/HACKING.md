@@ -40,12 +40,14 @@ the [GitHub repository](https://github.com/systemd/mkosi). `mkosi` will build an
 image for the host distro by default. Currently, the latest github commit is
 required. `mkosi` also requires systemd v253 (unreleased) or newer. If systemd v253
 is not available, `mkosi` will automatically use executables from the systemd build
-directory if it's executed from the systemd repository root directory. It is
-sufficient to type `mkosi` in the systemd project directory to generate a disk image
-you can boot either in `systemd-nspawn` or in a UEFI-capable VM:
+directory if it's executed from the systemd repository root directory. First, run
+`mkosi genkey` to generate a key and certificate to be used for secure boot and
+verity signing. After that is done, it is sufficient to type `mkosi` in the systemd
+project directory to generate a disk image you can boot either in `systemd-nspawn`
+or in a UEFI-capable VM:
 
 ```sh
-$ mkosi boot
+$ sudo mkosi boot # nspawn still needs sudo for now
 ```
 
 or:
@@ -55,22 +57,7 @@ $ mkosi qemu
 ```
 
 Every time you rerun the `mkosi` command a fresh image is built, incorporating
-all current changes you made to the project tree. To save time when rebuilding,
-you can use mkosi's incremental mode (`-i`). This instructs mkosi to build a set
-of cache images that make future builds a lot faster. Note that the `-i` flag
-both instructs mkosi to build cached images if they don't exist yet and to use
-cached images if they already exist so make sure to always specify `-i` if you
-want mkosi to use the cached images.
-
-If you're going to build mkosi images that use the same distribution and release
-that you're currently using, you can speed up the initial mkosi run by having it
-reuse the host's package cache. To do this, create a mkosi override file in
-mkosi.default.d/ (e.g 20-local.conf) and add the following contents:
-
-```
-[Content]
-Cache=<full-path-to-package-manager-cache> # (e.g. /var/cache/dnf)
-```
+all current changes you made to the project tree.
 
 If you want to do a local build without mkosi, most distributions also provide
 very simple and convenient ways to install all development packages necessary
@@ -82,7 +69,7 @@ $ sudo dnf builddep systemd
 # Debian/Ubuntu
 $ sudo apt-get build-dep systemd
 # Arch
-$ sudo pacman install asp
+$ sudo pacman -S asp
 $ asp checkout systemd
 $ cd systemd/trunk
 $ makepkg -seoc
@@ -98,14 +85,15 @@ $ git clone https://github.com/systemd/systemd.git
 $ cd systemd
 $ git checkout -b <BRANCH>        # where BRANCH is the name of the branch
 $ vim src/core/main.c             # or wherever you'd like to make your changes
-$ meson build                     # configure the build
+$ meson setup build -Danalyze=true -Drepart=true -Defi=true -Dbootloader=true -Dukify=true # configure the build
 $ ninja -C build                  # build it locally, see if everything compiles fine
 $ meson test -C build             # run some simple regression tests
 $ cd ..
 $ git clone https://github.com/systemd/mkosi.git
+$ ln -s mkosi/bin/mkosi ~/.local/bin/mkosi # Make sure ~/.local/bin is in $PATH
 $ cd systemd
-$ sudo ../mkosi/bin/mkosi         # build the test image
-$ sudo ../mkosi/bin/mkosi boot    # boot up the test image
+$ mkosi                           # build the test image
+$ mkosi qemu                      # boot up the test image in qemu
 $ git add -p                      # interactively put together your patch
 $ git commit                      # commit it
 $ git push -u <REMOTE>            # where REMOTE is your "fork" on GitHub
@@ -197,83 +185,6 @@ For more details on building fuzzers and integrating with OSS-Fuzz, visit:
 - [Setting up a new project - OSS-Fuzz](https://google.github.io/oss-fuzz/getting-started/new-project-guide/)
 - [Tutorials - OSS-Fuzz](https://google.github.io/oss-fuzz/reference/useful-links/#tutorials)
 
-## mkosi + clangd
-
-[clangd](https://clangd.llvm.org/) is a language server that provides code completion, diagnostics and more
-right in your editor of choice (with the right plugin installed). When using mkosi, we can run clangd in the
-mkosi build container to avoid needing to build systemd on the host machine just to make clangd work. To
-achieve this, create a script with the following contents in systemd's project directory on the host:
-
-```sh
-#!/usr/bin/env sh
-tee mkosi-clangd.build >/dev/null <<EOF
-#!/usr/bin/env sh
-exec clangd \\
-        --compile-commands-dir=/root/build \\
-        --path-mappings=\\
-"\\
-$(pwd)=/root/src,\\
-$(pwd)/mkosi.builddir=/root/build,\\
-$(pwd)/mkosi.includedir=/usr/include,\\
-$(pwd)/mkosi.installdir=/root/dest\\
-" \\
-        --header-insertion=never
-EOF
-chmod +x mkosi-clangd.build
-exec pkexec mkosi --source-file-transfer=mount --incremental --skip-final-phase --build-script mkosi-clangd.build build
-```
-
-Next, mark the script as executable and point your editor plugin to use this script to start clangd. For
-vscode's clangd extension, this is done via setting the `clangd.path` option to the path of the
-mkosi-clangd.sh script.
-
-To be able to navigate to include files of systemd's dependencies, we need to make the /usr/include folder of
-the build image available on the host. mkosi supports this by setting the `IncludeDirectory` option in
-mkosi's config. The easiest way to set the option is to create a file 20-local.conf in mkosi.default.d/ and
-add the following contents:
-
-```
-[Content]
-IncludeDirectory=mkosi.includedir
-```
-
-This will make the contents of /usr/include available in mkosi.includedir in the systemd project directory.
-We already configured clangd to map any paths in /usr/include in the build image to mkosi.includedir/ on the
-host in the mkosi-clangd.sh script.
-
-We also need to make sure clangd is installed in the build image. To have mkosi install clangd in the build
-image, edit the 20-local.conf file we created earlier and add the following contents under the `[Content]`
-section:
-
-```
-BuildPackages=<clangd-package>
-```
-
-Note that the exact package containing clangd will differ depending on the distribution used. Some
-distributions have a separate clangd package, others put the clangd binary in a clang-tools-extra package and
-some bundle clangd in the clang package.
-
-Because mkosi needs to run as root, we also need to make sure we can enter the root password when the editor
-plugin tries to run the mkosi-clangd.sh script. To be able to enter the root password in non-interactive
-scripts, we use pkexec instead of sudo. pkexec will launch a graphical interface to let the user enter their
-password, so that the password can be entered by the user even when pkexec is executed from a non-interactive
-shell.
-
-Due to a bug in btrfs, it's currently impossible to mount two mkosi btrfs images at the same time. Because of
-this, trying to do a regular build while the clangd image is running will fail. To circumvent this, use ext4
-instead of btrfs for the images by adding the following contents to 20-local.conf:
-
-```
-[Output]
-Format=gpt_ext4
-```
-
-Finally, to ensure clangd starts up quickly in the editor, run an incremental build with mkosi to make sure
-the cached images are initialized (`mkosi -i`).
-
-Now, your editor will start clangd in the mkosi build image and all of clangd's features will work as
-expected.
-
 ## Debugging binaries that need to run as root in vscode
 
 When trying to debug binaries that need to run as root, we need to do some custom configuration in vscode to
@@ -301,24 +212,25 @@ vscode documentation [here](https://code.visualstudio.com/docs/cpp/launch-json-r
 ## Debugging systemd with mkosi + vscode
 
 To simplify debugging systemd when testing changes using mkosi, we're going to show how to attach
-[VSCode](https://code.visualstudio.com/)'s debugger to an instance of systemd running in a mkosi image
-(either using QEMU or systemd-nspawn).
+[VSCode](https://code.visualstudio.com/)'s debugger to an instance of systemd running in a mkosi image using
+QEMU.
 
 To allow VSCode's debugger to attach to systemd running in a mkosi image, we have to make sure it can access
-the container/virtual machine spawned by mkosi where systemd is running. mkosi makes this possible via a
-handy SSH option that makes the generated image accessible via SSH when booted. Thus you must build
-the image with `mkosi --ssh`. The easiest way to set the
-option is to create a file 20-local.conf in mkosi.default.d/ (in the directory you ran mkosi in) and add
-the following contents:
+the virtual machine spawned by mkosi where systemd is running. mkosi makes this possible via a handy SSH
+option that makes the generated image accessible via SSH when booted. Thus you must build the image with
+`mkosi --ssh`. The easiest way to set the option is to create a file 20-local.conf in mkosi.conf.d/ (in the
+directory you ran mkosi in) and add the following contents:
 
 ```
 [Host]
 Ssh=yes
 ```
 
-Next, make sure systemd-networkd is running on the host system so that it can configure the network interface
-connecting the host system to the container/VM spawned by mkosi. Once systemd-networkd is running, you should
-be able to connect to a running mkosi image by executing `mkosi ssh` in the systemd repo directory.
+Also make sure that the SSH agent is running on your system and that you've added your SSH key to it with
+`ssh-add`.
+
+After rebuilding the image and booting it with `mkosi qemu`, you should now be able to connect to it by
+running `mkosi ssh` from the same directory in another terminal window.
 
 Now we need to configure VSCode. First, make sure the C/C++ extension is installed. If you're already using
 a different extension for code completion and other IDE features for C in VSCode, make sure to disable the
@@ -356,11 +268,11 @@ the directory, and add the following contents:
             },
             "MIMode": "gdb",
             "sourceFileMap": {
-                "/root/build/../src": {
+                "/work/build/../src": {
                     "editorPath": "${workspaceFolder}",
                     "useForBreakpoints": false
                 },
-                "/root/build/*": {
+                "/work/build/*": {
                     "editorPath": "${workspaceFolder}/mkosi.builddir",
                     "useForBreakpoints": false
                 }
@@ -382,24 +294,17 @@ container to figure out the PID and enter it when asked and VSCode will attach t
 
 ## Debugging systemd-boot
 
-During boot, systemd-boot and the stub loader will output a message like `systemd-boot@0x0A,0x0B`,
-providing the location of the text and data sections. These location can then be used to attach
-to a QEMU session (provided it was run with `-s`) with these gdb commands:
+During boot, systemd-boot and the stub loader will output messages like
+`systemd-boot@0x0A` and `systemd-stub@0x0B`, providing the base of the loaded
+code. This location can then be used to attach to a QEMU session (provided it
+was run with `-s`). See `debug-sd-boot.sh` script in the tools folder which
+automates this processes.
 
-```
-    (gdb) file build/src/boot/efi/systemd-bootx64.efi
-    (gdb) add-symbol-file build/src/boot/efi/systemd_boot.so 0x0A -s .data 0x0B
-    (gdb) set architecture i386:x86-64
-    (gdb) target remote :1234
-```
-
-This process can be automated by using the `debug-sd-boot.sh` script in the tools folder. If run
-without arguments it will provide usage information.
-
-If the debugger is too slow to attach to examine an early boot code passage, we can uncomment the
-call to `debug_break()` inside of `efi_main()`. As soon as the debugger has control we can then run
-`set variable wait = 0` or `return` to continue. Once the debugger has attached, setting breakpoints
-will work like usual.
+If the debugger is too slow to attach to examine an early boot code passage,
+the call to `DEFINE_EFI_MAIN_FUNCTION()` can be modified to enable waiting. As
+soon as the debugger has control, we can then run `set variable wait = 0` or
+`return` to continue. Once the debugger has attached, setting breakpoints will
+work like usual.
 
 To debug systemd-boot in an IDE such as VSCode we can use a launch configuration like this:
 ```json
@@ -425,7 +330,7 @@ To debug systemd-boot in an IDE such as VSCode we can use a launch configuration
 If you're hacking on the kernel in tandem with systemd, you can clone a kernel repository in mkosi.kernel/ in
 the systemd repository, and mkosi will automatically build that kernel and install it into the final image.
 To prevent the distribution's kernel from being installed (which isn't necessary since we're building our
-own kernel), you can add the following snippets to mkosi.default.d/20-local.conf:
+own kernel), you can add the following snippets to mkosi.conf.d/20-local.conf:
 
 (This snippet is for Fedora, the list of packages will need to be changed for other distributions)
 

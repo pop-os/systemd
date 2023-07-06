@@ -222,17 +222,11 @@ int get_process_cmdline(pid_t pid, size_t max_columns, ProcessCmdlineFlags flags
 
                 _cleanup_strv_free_ char **args = NULL;
 
-                args = strv_parse_nulstr(t, k);
+                /* Drop trailing NULs, otherwise strv_parse_nulstr() adds additional empty strings at the end.
+                 * See also issue #21186. */
+                args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
                 if (!args)
                         return -ENOMEM;
-
-                /* Drop trailing empty strings. See issue #21186. */
-                STRV_FOREACH_BACKWARDS(p, args) {
-                        if (!isempty(*p))
-                                break;
-
-                        *p = mfree(*p);
-                }
 
                 ans = quote_command_line(args, shflags);
                 if (!ans)
@@ -256,6 +250,28 @@ int get_process_cmdline(pid_t pid, size_t max_columns, ProcessCmdlineFlags flags
         }
 
         *ret = ans;
+        return 0;
+}
+
+int get_process_cmdline_strv(pid_t pid, ProcessCmdlineFlags flags, char ***ret) {
+        _cleanup_free_ char *t = NULL;
+        char **args;
+        size_t k;
+        int r;
+
+        assert(pid >= 0);
+        assert((flags & ~PROCESS_CMDLINE_COMM_FALLBACK) == 0);
+        assert(ret);
+
+        r = get_process_cmdline_nulstr(pid, SIZE_MAX, flags, &t, &k);
+        if (r < 0)
+                return r;
+
+        args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
+        if (!args)
+                return -ENOMEM;
+
+        *ret = args;
         return 0;
 }
 
@@ -930,7 +946,7 @@ int pid_from_same_root_fs(pid_t pid) {
 
         root = procfs_file_alloca(pid, "root");
 
-        return files_same(root, "/proc/1/root", 0);
+        return inode_same(root, "/proc/1/root", 0);
 }
 
 bool is_main_thread(void) {
@@ -1079,7 +1095,7 @@ pid_t getpid_cached(void) {
          * https://sourceware.org/git/gitweb.cgi?p=glibc.git;h=c579f48edba88380635ab98cb612030e3ed8691e
          */
 
-        __atomic_compare_exchange_n(
+        (void) __atomic_compare_exchange_n(
                         &cached_pid,
                         &current_value,
                         CACHED_PID_BUSY,
@@ -1133,8 +1149,44 @@ static void restore_sigsetp(sigset_t **ssp) {
                 (void) sigprocmask(SIG_SETMASK, *ssp, NULL);
 }
 
+pid_t clone_with_nested_stack(int (*fn)(void *), int flags, void *userdata) {
+        size_t ps;
+        pid_t pid;
+        void *mystack;
+
+        /* A wrapper around glibc's clone() call that automatically sets up a "nested" stack. Only supports
+         * invocations without CLONE_VM, so that we can continue to use the parent's stack mapping.
+         *
+         * Note: glibc's clone() wrapper does not synchronize malloc() locks. This means that if the parent
+         * is threaded these locks will be in an undefined state in the child, and hence memory allocations
+         * are likely going to run into deadlocks. Hence: if you use this function make sure your parent is
+         * strictly single-threaded or your child never calls malloc(). */
+
+        assert((flags & (CLONE_VM|CLONE_PARENT_SETTID|CLONE_CHILD_SETTID|
+                         CLONE_CHILD_CLEARTID|CLONE_SETTLS)) == 0);
+
+        /* We allocate some space on the stack to use as the stack for the child (hence "nested"). Note that
+         * the net effect is that the child will have the start of its stack inside the stack of the parent,
+         * but since they are a CoW copy of each other that's fine. We allocate one page-aligned page. But
+         * since we don't want to deal with differences between systems where the stack grows backwards or
+         * forwards we'll allocate one more and place the stack address in the middle. Except that we also
+         * want it page aligned, hence we'll allocate one page more. Makes 3. */
+
+        ps = page_size();
+        mystack = alloca(ps*3);
+        mystack = (uint8_t*) mystack + ps; /* move pointer one page ahead since stacks usually grow backwards */
+        mystack = (void*) ALIGN_TO((uintptr_t) mystack, ps); /* align to page size (moving things further ahead) */
+
+        pid = clone(fn, mystack, flags, userdata);
+        if (pid < 0)
+                return -errno;
+
+        return pid;
+}
+
 int safe_fork_full(
                 const char *name,
+                const int stdio_fds[3],
                 const int except_fds[],
                 size_t n_except_fds,
                 ForkFlags flags,
@@ -1143,8 +1195,11 @@ int safe_fork_full(
         pid_t original_pid, pid;
         sigset_t saved_ss, ss;
         _unused_ _cleanup_(restore_sigsetp) sigset_t *saved_ssp = NULL;
-        bool block_signals = false, block_all = false;
+        bool block_signals = false, block_all = false, intermediary = false;
         int prio, r;
+
+        assert(!FLAGS_SET(flags, FORK_DETACH) || !ret_pid);
+        assert(!FLAGS_SET(flags, FORK_DETACH|FORK_WAIT));
 
         /* A wrapper around fork(), that does a couple of important initializations in addition to mere forking. Always
          * returns the child's PID in *ret_pid. Returns == 0 in the child, and > 0 in the parent. */
@@ -1179,6 +1234,31 @@ int safe_fork_full(
                 saved_ssp = &saved_ss;
         }
 
+        if (FLAGS_SET(flags, FORK_DETACH)) {
+                assert(!FLAGS_SET(flags, FORK_WAIT));
+                assert(!ret_pid);
+
+                /* Fork off intermediary child if needed */
+
+                r = is_reaper_process();
+                if (r < 0)
+                        return log_full_errno(prio, r, "Failed to determine if we are a reaper process: %m");
+
+                if (!r) {
+                        /* Not a reaper process, hence do a double fork() so we are reparented to one */
+
+                        pid = fork();
+                        if (pid < 0)
+                                return log_full_errno(prio, errno, "Failed to fork off '%s': %m", strna(name));
+                        if (pid > 0) {
+                                log_debug("Successfully forked off intermediary '%s' as PID " PID_FMT ".", strna(name), pid);
+                                return 1; /* return in the parent */
+                        }
+
+                        intermediary = true;
+                }
+        }
+
         if ((flags & (FORK_NEW_MOUNTNS|FORK_NEW_USERNS)) != 0)
                 pid = raw_clone(SIGCHLD|
                                 (FLAGS_SET(flags, FORK_NEW_MOUNTNS) ? CLONE_NEWNS : 0) |
@@ -1188,8 +1268,12 @@ int safe_fork_full(
         if (pid < 0)
                 return log_full_errno(prio, errno, "Failed to fork off '%s': %m", strna(name));
         if (pid > 0) {
-                /* We are in the parent process */
 
+                /* If we are in the intermediary process, exit now */
+                if (intermediary)
+                        _exit(EXIT_SUCCESS);
+
+                /* We are in the parent process */
                 log_debug("Successfully forked off '%s' as PID " PID_FMT ".", strna(name), pid);
 
                 if (flags & FORK_WAIT) {
@@ -1294,6 +1378,27 @@ int safe_fork_full(
                 }
         }
 
+        if (flags & FORK_REARRANGE_STDIO) {
+                if (stdio_fds) {
+                        r = rearrange_stdio(stdio_fds[0], stdio_fds[1], stdio_fds[2]);
+                        if (r < 0) {
+                                log_full_errno(prio, r, "Failed to rearrange stdio fds: %m");
+                                _exit(EXIT_FAILURE);
+                        }
+                } else {
+                        r = make_null_stdio();
+                        if (r < 0) {
+                                log_full_errno(prio, r, "Failed to connect stdin/stdout to /dev/null: %m");
+                                _exit(EXIT_FAILURE);
+                        }
+                }
+        } else if (flags & FORK_STDOUT_TO_STDERR) {
+                if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
+                        log_full_errno(prio, errno, "Failed to connect stdout to stderr: %m");
+                        _exit(EXIT_FAILURE);
+                }
+        }
+
         if (flags & FORK_CLOSE_ALL_FDS) {
                 /* Close the logs here in case it got reopened above, as close_all_fds() would close them for us */
                 log_close();
@@ -1319,24 +1424,18 @@ int safe_fork_full(
                 log_set_open_when_needed(false);
         }
 
-        if (flags & FORK_NULL_STDIO) {
-                r = make_null_stdio();
-                if (r < 0) {
-                        log_full_errno(prio, r, "Failed to connect stdin/stdout to /dev/null: %m");
-                        _exit(EXIT_FAILURE);
-                }
-
-        } else if (flags & FORK_STDOUT_TO_STDERR) {
-                if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
-                        log_full_errno(prio, errno, "Failed to connect stdout to stderr: %m");
-                        _exit(EXIT_FAILURE);
-                }
-        }
-
         if (flags & FORK_RLIMIT_NOFILE_SAFE) {
                 r = rlimit_nofile_safe();
                 if (r < 0) {
                         log_full_errno(prio, r, "Failed to lower RLIMIT_NOFILE's soft limit to 1K: %m");
+                        _exit(EXIT_FAILURE);
+                }
+        }
+
+        if (!FLAGS_SET(flags, FORK_KEEP_NOTIFY_SOCKET)) {
+                r = RET_NERRNO(unsetenv("NOTIFY_SOCKET"));
+                if (r < 0) {
+                        log_full_errno(prio, r, "Failed to unset $NOTIFY_SOCKET: %m");
                         _exit(EXIT_FAILURE);
                 }
         }
@@ -1366,7 +1465,10 @@ int namespace_fork(
          * process. This ensures that we are fully a member of the destination namespace, with pidns an all, so that
          * /proc/self/fd works correctly. */
 
-        r = safe_fork_full(outer_name, except_fds, n_except_fds, (flags|FORK_DEATHSIG) & ~(FORK_REOPEN_LOG|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE), ret_pid);
+        r = safe_fork_full(outer_name,
+                           NULL,
+                           except_fds, n_except_fds,
+                           (flags|FORK_DEATHSIG) & ~(FORK_REOPEN_LOG|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE), ret_pid);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -1381,7 +1483,10 @@ int namespace_fork(
                 }
 
                 /* We mask a few flags here that either make no sense for the grandchild, or that we don't have to do again */
-                r = safe_fork_full(inner_name, except_fds, n_except_fds, flags & ~(FORK_WAIT|FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_NULL_STDIO), &pid);
+                r = safe_fork_full(inner_name,
+                                   NULL,
+                                   except_fds, n_except_fds,
+                                   flags & ~(FORK_WAIT|FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_REARRANGE_STDIO), &pid);
                 if (r < 0)
                         _exit(EXIT_FAILURE);
                 if (r == 0) {
@@ -1434,6 +1539,15 @@ int pidfd_get_pid(int fd, pid_t *ret) {
         char *p;
         int r;
 
+        /* Converts a pidfd into a pid. Well known errors:
+         *
+         *    -EBADF   → fd invalid
+         *    -ENOSYS  → /proc/ not mounted
+         *    -ENOTTY  → fd valid, but not a pidfd
+         *    -EREMOTE → fd valid, but pid is in another namespace we cannot translate to the local one
+         *    -ESRCH   → fd valid, but process is already reaped
+         */
+
         if (fd < 0)
                 return -EBADF;
 
@@ -1441,21 +1555,21 @@ int pidfd_get_pid(int fd, pid_t *ret) {
 
         r = read_full_virtual_file(path, &fdinfo, NULL);
         if (r == -ENOENT) /* if fdinfo doesn't exist we assume the process does not exist */
-                return -ESRCH;
+                return proc_mounted() > 0 ? -EBADF : -ENOSYS;
         if (r < 0)
                 return r;
 
-        p = startswith(fdinfo, "Pid:");
-        if (!p) {
-                p = strstr(fdinfo, "\nPid:");
-                if (!p)
-                        return -ENOTTY; /* not a pidfd? */
-
-                p += 5;
-        }
+        p = find_line_startswith(fdinfo, "Pid:");
+        if (!p)
+                return -ENOTTY; /* not a pidfd? */
 
         p += strspn(p, WHITESPACE);
         p[strcspn(p, WHITESPACE)] = 0;
+
+        if (streq(p, "0"))
+                return -EREMOTE; /* PID is in foreign PID namespace? */
+        if (streq(p, "-1"))
+                return -ESRCH;   /* refers to reaped process? */
 
         return parse_pid(p, ret);
 }
@@ -1549,6 +1663,64 @@ _noreturn_ void freeze(void) {
         /* waitid() failed with an unexpected error, things are really borked. Freeze now! */
         for (;;)
                 pause();
+}
+
+int get_process_threads(pid_t pid) {
+        _cleanup_free_ char *t = NULL;
+        const char *p;
+        int n, r;
+
+        if (pid < 0)
+                return -EINVAL;
+
+        p = procfs_file_alloca(pid, "status");
+
+        r = get_proc_field(p, "Threads", WHITESPACE, &t);
+        if (r == -ENOENT)
+                return proc_mounted() == 0 ? -ENOSYS : -ESRCH;
+        if (r < 0)
+                return r;
+
+        r = safe_atoi(t, &n);
+        if (r < 0)
+                return r;
+        if (n < 0)
+                return -EINVAL;
+
+        return n;
+}
+
+int is_reaper_process(void) {
+        int b = 0;
+
+        /* Checks if we are running in a reaper process, i.e. if we are expected to deal with processes
+         * reparented to us. This simply checks if we are PID 1 or if PR_SET_CHILD_SUBREAPER was called. */
+
+        if (getpid_cached() == 1)
+                return true;
+
+        if (prctl(PR_GET_CHILD_SUBREAPER, (unsigned long) &b, 0UL, 0UL, 0UL) < 0)
+                return -errno;
+
+        return b != 0;
+}
+
+int make_reaper_process(bool b) {
+
+        if (getpid_cached() == 1) {
+
+                if (!b)
+                        return -EINVAL;
+
+                return 0;
+        }
+
+        /* Some prctl()s insist that all 5 arguments are specified, others do not. Let's always specify all,
+         * to avoid any ambiguities */
+        if (prctl(PR_SET_CHILD_SUBREAPER, (unsigned long) b, 0UL, 0UL, 0UL) < 0)
+                return -errno;
+
+        return 0;
 }
 
 static const char *const sigchld_code_table[] = {

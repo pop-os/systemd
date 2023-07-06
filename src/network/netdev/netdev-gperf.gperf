@@ -77,7 +77,8 @@ Tunnel.TTL,                               config_parse_unsigned,                
 Tunnel.Key,                               config_parse_tunnel_key,                   0,                             offsetof(Tunnel, key)
 Tunnel.InputKey,                          config_parse_tunnel_key,                   0,                             offsetof(Tunnel, ikey)
 Tunnel.OutputKey,                         config_parse_tunnel_key,                   0,                             offsetof(Tunnel, okey)
-Tunnel.DiscoverPathMTU,                   config_parse_bool,                         0,                             offsetof(Tunnel, pmtudisc)
+Tunnel.DiscoverPathMTU,                   config_parse_tristate,                     0,                             offsetof(Tunnel, pmtudisc)
+Tunnel.IgnoreDontFragment,                config_parse_bool,                         0,                             offsetof(Tunnel, ignore_df)
 Tunnel.Mode,                              config_parse_ip6tnl_mode,                  0,                             offsetof(Tunnel, ip6tnl_mode)
 Tunnel.IPv6FlowLabel,                     config_parse_ipv6_flowlabel,               0,                             0
 Tunnel.CopyDSCP,                          config_parse_bool,                         0,                             offsetof(Tunnel, copy_dscp)
@@ -162,6 +163,7 @@ GENEVE.UDP6ZeroChecksumTx,                config_parse_bool,                    
 GENEVE.DestinationPort,                   config_parse_ip_port,                      0,                             offsetof(Geneve, dest_port)
 GENEVE.IPDoNotFragment,                   config_parse_geneve_df,                    0,                             offsetof(Geneve, geneve_df)
 GENEVE.FlowLabel,                         config_parse_geneve_flow_label,            0,                             0
+GENEVE.InheritInnerProtocol,              config_parse_bool,                         0,                             offsetof(Geneve, inherit_inner_protocol)
 MACsec.Port,                              config_parse_macsec_port,                  0,                             0
 MACsec.Encrypt,                           config_parse_tristate,                     0,                             offsetof(MACsec, encrypt)
 MACsecReceiveChannel.Port,                config_parse_macsec_port,                  0,                             0

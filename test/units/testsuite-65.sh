@@ -3,14 +3,8 @@
 # shellcheck disable=SC2016
 set -eux
 
-# shellcheck source=test/units/assert.sh
-. "$(dirname "$0")"/assert.sh
-
-runas() {
-    declare userid=$1
-    shift
-    XDG_RUNTIME_DIR=/run/user/"$(id -u "$userid")" setpriv --reuid="$userid" --init-groups "$@"
-}
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
 
 systemctl log-level debug
 export SYSTEMD_LOG_LEVEL=debug
@@ -79,6 +73,7 @@ systemd-analyze dump "*" >/dev/null
 systemd-analyze dump "*.socket" >/dev/null
 systemd-analyze dump "*.socket" "*.service" aaaaaaa ... >/dev/null
 systemd-analyze dump systemd-journald.service >/dev/null
+systemd-analyze malloc >/dev/null
 (! systemd-analyze dump "")
 # unit-files
 systemd-analyze unit-files >/dev/null
@@ -830,6 +825,23 @@ name=$(echo "$output" | awk '{ print $4 }')
 
 check deny yes /run/systemd/transient/"$name"
 check deny no "$name"
+
+# Let's also test the "image-policy" verb
+
+systemd-analyze image-policy '*' 2>&1 | grep -q -F "Long form: =verity+signed+encrypted+unprotected+unused+absent"
+systemd-analyze image-policy '-' 2>&1 | grep -q -F "Long form: =unused+absent"
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -F "Long form: usr=verity:home=encrypted:=unused+absent"
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^home \+encrypted \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^usr \+verity \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^root \+ignore \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^usr-verity \+unprotected \+'
+
+(! systemd-analyze image-policy 'doedel')
+
+# Output is very hard to predict, but let's run it for coverage anyway
+systemd-analyze pcrs
+systemd-analyze pcrs --json=pretty
+systemd-analyze pcrs 14 7 0 ima
 
 systemd-analyze log-level info
 

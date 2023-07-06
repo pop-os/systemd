@@ -476,10 +476,9 @@ static void read_credentials(Manager *m) {
         if (!m->read_resolv_conf)
                 return;
 
-        r = read_credential_strings_many(
-                        "network.dns", &dns,
-                        "network.search_domains", &domains);
-        if (r < 0 && !IN_SET(r, -ENXIO, -ENOENT))
+        r = read_credential_strings_many("network.dns", &dns,
+                                         "network.search_domains", &domains);
+        if (r < 0)
                 log_warning_errno(r, "Failed to read credentials, ignoring: %m");
 
         if (dns) {
@@ -563,14 +562,9 @@ int manager_parse_config_file(Manager *m) {
 
         assert(m);
 
-        r = config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/resolved.conf",
-                        CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
-                        "Resolve\0",
-                        config_item_perf_lookup, resolved_gperf_lookup,
-                        CONFIG_PARSE_WARN,
-                        m,
-                        NULL);
+        r = config_parse_config_file("resolved.conf", "Resolve\0",
+                                     config_item_perf_lookup, resolved_gperf_lookup,
+                                     CONFIG_PARSE_WARN, m);
         if (r < 0)
                 return r;
 

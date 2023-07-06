@@ -21,6 +21,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "fs-util.h"
 #include "io-util.h"
 #include "logind-dbus.h"
 #include "logind-seat-dbus.h"
@@ -196,13 +197,13 @@ static void session_save_devices(Session *s, FILE *f) {
         if (!hashmap_isempty(s->devices)) {
                 fprintf(f, "DEVICES=");
                 HASHMAP_FOREACH(sd, s->devices)
-                        fprintf(f, "%u:%u ", major(sd->dev), minor(sd->dev));
+                        fprintf(f, DEVNUM_FORMAT_STR " ", DEVNUM_FORMAT_VAL(sd->dev));
                 fprintf(f, "\n");
         }
 }
 
 int session_save(Session *s) {
-        _cleanup_free_ char *temp_path = NULL;
+        _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -349,13 +350,11 @@ int session_save(Session *s) {
                 goto fail;
         }
 
+        temp_path = mfree(temp_path);
         return 0;
 
 fail:
         (void) unlink(s->state_file);
-
-        if (temp_path)
-                (void) unlink(temp_path);
 
         return log_error_errno(r, "Failed to save session data %s: %m", s->state_file);
 }
@@ -1133,6 +1132,23 @@ int session_set_display(Session *s, const char *display) {
         return 1;
 }
 
+int session_set_tty(Session *s, const char *tty) {
+        int r;
+
+        assert(s);
+        assert(tty);
+
+        r = free_and_strdup(&s->tty, tty);
+        if (r <= 0)  /* 0 means the strings were equal */
+                return r;
+
+        session_save(s);
+
+        session_send_changed(s, "TTY", NULL);
+
+        return 1;
+}
+
 static int session_dispatch_fifo(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
         Session *s = ASSERT_PTR(userdata);
 
@@ -1349,6 +1365,9 @@ error:
 
 static void session_restore_vt(Session *s) {
         int r;
+
+        if (s->vtfd < 0)
+                return;
 
         r = vt_restore(s->vtfd);
         if (r == -EIO) {

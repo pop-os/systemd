@@ -87,6 +87,7 @@ UdevEvent *udev_event_free(UdevEvent *event) {
         ordered_hashmap_free_free_free(event->seclabel_list);
         free(event->program_result);
         free(event->name);
+        strv_free(event->altnames);
 
         return mfree(event);
 }
@@ -810,18 +811,16 @@ int udev_event_spawn(
 
         log_device_debug(event->dev, "Starting '%s'", cmd);
 
-        r = safe_fork("(spawn)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE, &pid);
+        r = safe_fork_full("(spawn)",
+                           (int[]) { -EBADF, outpipe[WRITE_END], errpipe[WRITE_END] },
+                           NULL, 0,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_REARRANGE_STDIO|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE,
+                           &pid);
         if (r < 0)
                 return log_device_error_errno(event->dev, r,
                                               "Failed to fork() to execute command '%s': %m", cmd);
         if (r == 0) {
-                if (rearrange_stdio(-EBADF, TAKE_FD(outpipe[WRITE_END]), TAKE_FD(errpipe[WRITE_END])) < 0)
-                        _exit(EXIT_FAILURE);
-
-                (void) close_all_fds(NULL, 0);
-
                 DEVICE_TRACE_POINT(spawn_exec, event->dev, cmd);
-
                 execve(argv[0], argv, envp);
                 _exit(EXIT_FAILURE);
         }
@@ -916,9 +915,6 @@ static int rename_netif(UdevEvent *event) {
 
         dev = ASSERT_PTR(event->dev);
 
-        if (!device_for_action(dev, SD_DEVICE_ADD))
-                return 0; /* Rename the interface only when it is added. */
-
         r = sd_device_get_ifindex(dev, &ifindex);
         if (r == -ENOENT)
                 return 0; /* Device is not a network interface. */
@@ -978,7 +974,7 @@ static int rename_netif(UdevEvent *event) {
                 goto revert;
         }
 
-        r = rtnl_set_link_name(&event->rtnl, ifindex, event->name);
+        r = rtnl_set_link_name(&event->rtnl, ifindex, event->name, event->altnames);
         if (r < 0) {
                 if (r == -EBUSY) {
                         log_device_info(dev, "Network interface '%s' is already up, cannot rename to '%s'.",
@@ -1007,6 +1003,35 @@ revert:
         (void) device_add_property(dev, "ID_RENAMING", NULL);
 
         return r;
+}
+
+static int assign_altnames(UdevEvent *event) {
+        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+        int ifindex, r;
+        const char *s;
+
+        if (strv_isempty(event->altnames))
+                return 0;
+
+        r = sd_device_get_ifindex(dev, &ifindex);
+        if (r == -ENOENT)
+                return 0; /* Device is not a network interface. */
+        if (r < 0)
+                return log_device_warning_errno(dev, r, "Failed to get ifindex: %m");
+
+        r = sd_device_get_sysname(dev, &s);
+        if (r < 0)
+                return log_device_warning_errno(dev, r, "Failed to get sysname: %m");
+
+        /* Filter out the current interface name. */
+        strv_remove(event->altnames, s);
+
+        r = rtnl_append_link_alternative_names(&event->rtnl, ifindex, event->altnames);
+        if (r < 0)
+                log_device_full_errno(dev, r == -EOPNOTSUPP ? LOG_DEBUG : LOG_WARNING, r,
+                                      "Could not set AlternativeName= or apply AlternativeNamesPolicy=, ignoring: %m");
+
+        return 0;
 }
 
 static int update_devnode(UdevEvent *event) {
@@ -1150,9 +1175,13 @@ int udev_event_execute_rules(
 
         DEVICE_TRACE_POINT(rules_finished, dev);
 
-        r = rename_netif(event);
-        if (r < 0)
-                return r;
+        if (action == SD_DEVICE_ADD) {
+                r = rename_netif(event);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        (void) assign_altnames(event);
+        }
 
         r = update_devnode(event);
         if (r < 0)
@@ -1187,14 +1216,14 @@ void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec, int timeout_s
 
                 if (builtin_cmd != _UDEV_BUILTIN_INVALID) {
                         log_device_debug(event->dev, "Running built-in command \"%s\"", command);
-                        r = udev_builtin_run(event->dev, &event->rtnl, builtin_cmd, command, false);
+                        r = udev_builtin_run(event, builtin_cmd, command, false);
                         if (r < 0)
                                 log_device_debug_errno(event->dev, r, "Failed to run built-in command \"%s\", ignoring: %m", command);
                 } else {
                         if (event->exec_delay_usec > 0) {
                                 log_device_debug(event->dev, "Delaying execution of \"%s\" for %s.",
                                                  command, FORMAT_TIMESPAN(event->exec_delay_usec, USEC_PER_SEC));
-                                (void) usleep(event->exec_delay_usec);
+                                (void) usleep_safe(event->exec_delay_usec);
                         }
 
                         log_device_debug(event->dev, "Running command \"%s\"", command);

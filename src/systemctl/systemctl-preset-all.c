@@ -8,12 +8,15 @@
 #include "systemctl.h"
 
 int verb_preset_all(int argc, char *argv[], void *userdata) {
-        InstallChange *changes = NULL;
-        size_t n_changes = 0;
         int r;
 
         if (install_client_side()) {
-                r = unit_file_preset_all(arg_scope, unit_file_flags_from_args(), arg_root, arg_preset_mode, &changes, &n_changes);
+                InstallChange *changes = NULL;
+                size_t n_changes = 0;
+
+                CLEANUP_ARRAY(changes, n_changes, install_changes_free);
+
+                r = unit_file_preset_all(arg_runtime_scope, unit_file_flags_from_args(), arg_root, arg_preset_mode, &changes, &n_changes);
                 install_changes_dump(r, "preset", changes, n_changes, arg_quiet);
 
                 if (r > 0)
@@ -42,22 +45,16 @@ int verb_preset_all(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to preset all units: %s", bus_error_message(&error, r));
 
-                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
+                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet);
                 if (r < 0)
-                        goto finish;
+                        return r;
 
-                if (arg_no_reload) {
-                        r = 0;
-                        goto finish;
+                if (!arg_no_reload) {
+                        r = daemon_reload(ACTION_RELOAD, /* graceful= */ false);
+                        if (r < 0)
+                                return r;
                 }
-
-                r = daemon_reload(ACTION_RELOAD, /* graceful= */ false);
-                if (r > 0)
-                        r = 0;
         }
 
-finish:
-        install_changes_free(changes, n_changes);
-
-        return r;
+        return 0;
 }

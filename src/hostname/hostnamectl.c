@@ -15,6 +15,7 @@
 #include "build.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-map-properties.h"
 #include "format-table.h"
 #include "hostname-setup.h"
@@ -273,11 +274,22 @@ static int print_status_info(StatusInfo *i) {
         }
 
         if (timestamp_is_set(i->firmware_date)) {
+                usec_t n = now(CLOCK_REALTIME);
+
                 r = table_add_many(table,
                                    TABLE_FIELD, "Firmware Date",
                                    TABLE_TIMESTAMP_DATE, i->firmware_date);
                 if (r < 0)
                         return table_log_add_error(r);
+
+                if (i->firmware_date < n) {
+                        r = table_add_many(table,
+                                           TABLE_FIELD, "Firmware Age",
+                                           TABLE_TIMESPAN_DAY, n - i->firmware_date,
+                                           TABLE_SET_COLOR, n - i->firmware_date > USEC_PER_YEAR*2 ? ANSI_HIGHLIGHT_YELLOW : NULL);
+                        if (r < 0)
+                                return table_log_add_error(r);
+                }
         }
 
         r = table_print(table, NULL);
@@ -298,13 +310,7 @@ static int get_one_name(sd_bus *bus, const char* attr, char **ret) {
 
         /* This obtains one string property, and copy it if 'ret' is set, or print it otherwise. */
 
-        r = sd_bus_get_property(
-                        bus,
-                        "org.freedesktop.hostname1",
-                        "/org/freedesktop/hostname1",
-                        "org.freedesktop.hostname1",
-                        attr,
-                        &error, &reply, "s");
+        r = bus_get_property(bus, bus_hostname, attr, &error, &reply, "s");
         if (r < 0)
                 return log_error_errno(r, "Could not get property: %s", bus_error_message(&error, r));
 
@@ -408,15 +414,7 @@ static int show_status(int argc, char **argv, void *userdata) {
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
                 const char *text = NULL;
 
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.hostname1",
-                                "/org/freedesktop/hostname1",
-                                "org.freedesktop.hostname1",
-                                "Describe",
-                                &error,
-                                &reply,
-                                NULL);
+                r = bus_call_method(bus, bus_hostname, "Describe", &error, &reply, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Could not get description: %s", bus_error_message(&error, r));
 
@@ -448,14 +446,7 @@ static int set_simple_string_internal(sd_bus *bus, sd_bus_error *error, const ch
         if (!error)
                 error = &e;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.hostname1",
-                        "/org/freedesktop/hostname1",
-                        "org.freedesktop.hostname1",
-                        method,
-                        error, NULL,
-                        "sb", value, arg_ask_password);
+        r = bus_call_method(bus, bus_hostname, method, error, NULL, "sb", value, arg_ask_password);
         if (r < 0)
                 return log_error_errno(r, "Could not set %s: %s", target, bus_error_message(error, r));
 
@@ -732,7 +723,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        r = bus_connect_transport(arg_transport, arg_host, false, &bus);
+        r = bus_connect_transport(arg_transport, arg_host, RUNTIME_SCOPE_SYSTEM, &bus);
         if (r < 0)
                 return bus_log_connect_error(r, arg_transport);
 

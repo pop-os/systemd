@@ -1,36 +1,69 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
+#
+# This file is part of systemd.
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <https://www.gnu.org/licenses/>.
 
 # pylint: disable=missing-docstring,invalid-name,import-outside-toplevel
 # pylint: disable=consider-using-with,unspecified-encoding,line-too-long
 # pylint: disable=too-many-locals,too-many-statements,too-many-return-statements
-# pylint: disable=too-many-branches
+# pylint: disable=too-many-branches,too-many-lines,too-many-instance-attributes
+# pylint: disable=too-many-arguments,unnecessary-lambda-assignment,fixme
+# pylint: disable=unused-argument
 
 import argparse
+import configparser
+import contextlib
 import collections
 import dataclasses
+import datetime
 import fnmatch
 import itertools
 import json
 import os
 import pathlib
+import pprint
+import pydoc
 import re
 import shlex
 import shutil
+import socket
 import subprocess
+import sys
 import tempfile
-import typing
+from typing import (Any,
+                    Callable,
+                    IO,
+                    Optional,
+                    Sequence,
+                    Union)
 
+import pefile  # type: ignore
 
 __version__ = '{{PROJECT_VERSION}} ({{GIT_VERSION}})'
 
 EFI_ARCH_MAP = {
-        # host_arch glob : [efi_arch, 32_bit_efi_arch if mixed mode is supported]
-        'x86_64'       : ['x64', 'ia32'],
-        'i[3456]86'    : ['ia32'],
-        'aarch64'      : ['aa64'],
-        'arm[45678]*l' : ['arm'],
-        'riscv64'      : ['riscv64'],
+    # host_arch glob : [efi_arch, 32_bit_efi_arch if mixed mode is supported]
+    'x86_64'       : ['x64', 'ia32'],
+    'i[3456]86'    : ['ia32'],
+    'aarch64'      : ['aa64'],
+    'arm[45678]*l' : ['arm'],
+    'loongarch32'  : ['loongarch32'],
+    'loongarch64'  : ['loongarch64'],
+    'riscv32'      : ['riscv32'],
+    'riscv64'      : ['riscv64'],
 }
 EFI_ARCHES: list[str] = sum(EFI_ARCH_MAP.values(), [])
 
@@ -60,29 +93,18 @@ def guess_efi_arch():
     return efi_arch
 
 
+def page(text: str, enabled: Optional[bool]) -> None:
+    if enabled:
+        # Initialize less options from $SYSTEMD_LESS or provide a suitable fallback.
+        os.environ['LESS'] = os.getenv('SYSTEMD_LESS', 'FRSXMK')
+        pydoc.pager(text)
+    else:
+        print(text)
+
+
 def shell_join(cmd):
     # TODO: drop in favour of shlex.join once shlex.join supports pathlib.Path.
     return ' '.join(shlex.quote(str(x)) for x in cmd)
-
-
-def path_is_readable(s: typing.Optional[str]) -> typing.Optional[pathlib.Path]:
-    """Convert a filename string to a Path and verify access."""
-    if s is None:
-        return None
-    p = pathlib.Path(s)
-    try:
-        p.open().close()
-    except IsADirectoryError:
-        pass
-    return p
-
-
-def pe_next_section_offset(filename):
-    import pefile
-
-    pe = pefile.PE(filename, fast_load=True)
-    section = pe.sections[-1]
-    return pe.OPTIONAL_HEADER.ImageBase + section.VirtualAddress + section.Misc_VirtualSize
 
 
 def round_up(x, blocksize=4096):
@@ -226,9 +248,7 @@ class Uname:
 class Section:
     name: str
     content: pathlib.Path
-    tmpfile: typing.Optional[typing.IO] = None
-    flags: list[str] = dataclasses.field(default_factory=lambda: ['data', 'readonly'])
-    offset: typing.Optional[int] = None
+    tmpfile: Optional[IO] = None
     measure: bool = False
 
     @classmethod
@@ -272,22 +292,13 @@ class Section:
 
 @dataclasses.dataclass
 class UKI:
-    executable: list[typing.Union[pathlib.Path, str]]
+    executable: list[Union[pathlib.Path, str]]
     sections: list[Section] = dataclasses.field(default_factory=list, init=False)
-    offset: typing.Optional[int] = dataclasses.field(default=None, init=False)
-
-    def __post_init__(self):
-        self.offset = round_up(pe_next_section_offset(self.executable))
 
     def add_section(self, section):
-        assert self.offset
-        assert section.offset is None
-
         if section.name in [s.name for s in self.sections]:
             raise ValueError(f'Duplicate section {section.name}')
 
-        section.offset = self.offset
-        self.offset += round_up(section.size())
         self.sections += [section]
 
 
@@ -337,13 +348,26 @@ def check_inputs(opts):
         if name in {'output', 'tools'}:
             continue
 
-        if not isinstance(value, pathlib.Path):
-            continue
-
-        # Open file to check that we can read it, or generate an exception
-        value.open().close()
+        if isinstance(value, pathlib.Path):
+            # Open file to check that we can read it, or generate an exception
+            value.open().close()
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, pathlib.Path):
+                    item.open().close()
 
     check_splash(opts.splash)
+
+
+def check_cert_and_keys_nonexistent(opts):
+    # Raise if any of the keys and certs are found on disk
+    paths = itertools.chain(
+        (opts.sb_key, opts.sb_cert),
+        *((priv_key, pub_key)
+          for priv_key, pub_key, _ in key_path_groups(opts)))
+    for path in paths:
+        if path and path.exists():
+            raise ValueError(f'{path} is present')
 
 
 def find_tool(name, fallback=None, opts=None):
@@ -356,8 +380,10 @@ def find_tool(name, fallback=None, opts=None):
     if shutil.which(name) is not None:
         return name
 
-    return fallback
+    if fallback is None:
+        print(f"Tool {name} not installed!")
 
+    return fallback
 
 def combine_signatures(pcrsigs):
     combined = collections.defaultdict(list)
@@ -367,6 +393,19 @@ def combine_signatures(pcrsigs):
                 if sig not in combined[bank]:
                     combined[bank] += [sig]
     return json.dumps(combined)
+
+
+def key_path_groups(opts):
+    if not opts.pcr_private_keys:
+        return
+
+    n_priv = len(opts.pcr_private_keys)
+    pub_keys = opts.pcr_public_keys or [None] * n_priv
+    pp_groups = opts.phase_path_groups or [None] * n_priv
+
+    yield from zip(opts.pcr_private_keys,
+                   pub_keys,
+                   pp_groups)
 
 
 def call_systemd_measure(uki, linux, opts):
@@ -402,10 +441,6 @@ def call_systemd_measure(uki, linux, opts):
     # PCR signing
 
     if opts.pcr_private_keys:
-        n_priv = len(opts.pcr_private_keys or ())
-        pp_groups = opts.phase_path_groups or [None] * n_priv
-        pub_keys = opts.pcr_public_keys or [None] * n_priv
-
         pcrsigs = []
 
         cmd = [
@@ -419,9 +454,7 @@ def call_systemd_measure(uki, linux, opts):
               for bank in banks),
         ]
 
-        for priv_key, pub_key, group in zip(opts.pcr_private_keys,
-                                            pub_keys,
-                                            pp_groups):
+        for priv_key, pub_key, group in key_path_groups(opts):
             extra = [f'--private-key={priv_key}']
             if pub_key:
                 extra += [f'--public-key={pub_key}']
@@ -437,9 +470,9 @@ def call_systemd_measure(uki, linux, opts):
 
 
 def join_initrds(initrds):
-    if len(initrds) == 0:
+    if not initrds:
         return None
-    elif len(initrds) == 1:
+    if len(initrds) == 1:
         return initrds[0]
 
     seq = []
@@ -458,65 +491,238 @@ def pairwise(iterable):
     return zip(a, b)
 
 
-def pe_validate(filename):
-    import pefile
+class PEError(Exception):
+    pass
 
-    pe = pefile.PE(filename, fast_load=True)
 
-    sections = sorted(pe.sections, key=lambda s: (s.VirtualAddress, s.Misc_VirtualSize))
+def pe_add_sections(uki: UKI, output: str):
+    pe = pefile.PE(uki.executable, fast_load=True)
 
-    for l, r in pairwise(sections):
-        if l.VirtualAddress + l.Misc_VirtualSize > r.VirtualAddress + r.Misc_VirtualSize:
-            raise ValueError(f'Section "{l.Name.decode()}" ({l.VirtualAddress}, {l.Misc_VirtualSize}) overlaps with section "{r.Name.decode()}" ({r.VirtualAddress}, {r.Misc_VirtualSize})')
+    # Old stubs do not have the symbol/string table stripped, even though image files should not have one.
+    if symbol_table := pe.FILE_HEADER.PointerToSymbolTable:
+        symbol_table_size = 18 * pe.FILE_HEADER.NumberOfSymbols
+        if string_table_size := pe.get_dword_from_offset(symbol_table + symbol_table_size):
+            symbol_table_size += string_table_size
 
+        # Let's be safe and only strip it if it's at the end of the file.
+        if symbol_table + symbol_table_size == len(pe.__data__):
+            pe.__data__ = pe.__data__[:symbol_table]
+            pe.FILE_HEADER.PointerToSymbolTable = 0
+            pe.FILE_HEADER.NumberOfSymbols = 0
+            pe.FILE_HEADER.IMAGE_FILE_LOCAL_SYMS_STRIPPED = True
+
+    # Old stubs might have been stripped, leading to unaligned raw data values, so let's fix them up here.
+    # pylint thinks that Structure doesn't have various members that it has…
+    # pylint: disable=no-member
+
+    for i, section in enumerate(pe.sections):
+        oldp = section.PointerToRawData
+        oldsz = section.SizeOfRawData
+        section.PointerToRawData = round_up(oldp, pe.OPTIONAL_HEADER.FileAlignment)
+        section.SizeOfRawData = round_up(oldsz, pe.OPTIONAL_HEADER.FileAlignment)
+        padp = section.PointerToRawData - oldp
+        padsz = section.SizeOfRawData - oldsz
+
+        for later_section in pe.sections[i+1:]:
+            later_section.PointerToRawData += padp + padsz
+
+        pe.__data__ = pe.__data__[:oldp] + bytes(padp) + pe.__data__[oldp:oldp+oldsz] + bytes(padsz) + pe.__data__[oldp+oldsz:]
+
+    # We might not have any space to add new sections. Let's try our best to make some space by padding the
+    # SizeOfHeaders to a multiple of the file alignment. This is safe because the first section's data starts
+    # at a multiple of the file alignment, so all space before that is unused.
+    pe.OPTIONAL_HEADER.SizeOfHeaders = round_up(pe.OPTIONAL_HEADER.SizeOfHeaders, pe.OPTIONAL_HEADER.FileAlignment)
+    pe = pefile.PE(data=pe.write(), fast_load=True)
+
+    warnings = pe.get_warnings()
+    if warnings:
+        raise PEError(f'pefile warnings treated as errors: {warnings}')
+
+    security = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
+    if security.VirtualAddress != 0:
+        # We could strip the signatures, but why would anyone sign the stub?
+        raise PEError('Stub image is signed, refusing.')
+
+    for section in uki.sections:
+        new_section = pefile.SectionStructure(pe.__IMAGE_SECTION_HEADER_format__, pe=pe)
+        new_section.__unpack__(b'\0' * new_section.sizeof())
+
+        offset = pe.sections[-1].get_file_offset() + new_section.sizeof()
+        if offset + new_section.sizeof() > pe.OPTIONAL_HEADER.SizeOfHeaders:
+            raise PEError(f'Not enough header space to add section {section.name}.')
+
+        data = section.content.read_bytes()
+
+        new_section.set_file_offset(offset)
+        new_section.Name = section.name.encode()
+        new_section.Misc_VirtualSize = len(data)
+        # Non-stripped stubs might still have an unaligned symbol table at the end, making their size
+        # unaligned, so we make sure to explicitly pad the pointer to new sections to an aligned offset.
+        new_section.PointerToRawData = round_up(len(pe.__data__), pe.OPTIONAL_HEADER.FileAlignment)
+        new_section.SizeOfRawData = round_up(len(data), pe.OPTIONAL_HEADER.FileAlignment)
+        new_section.VirtualAddress = round_up(
+            pe.sections[-1].VirtualAddress + pe.sections[-1].Misc_VirtualSize,
+            pe.OPTIONAL_HEADER.SectionAlignment,
+        )
+
+        new_section.IMAGE_SCN_MEM_READ = True
+        if section.name == '.linux':
+            # Old kernels that use EFI handover protocol will be executed inline.
+            new_section.IMAGE_SCN_CNT_CODE = True
+        else:
+            new_section.IMAGE_SCN_CNT_INITIALIZED_DATA = True
+
+        # Special case, mostly for .sbat: the stub will already have a .sbat section, but we want to append
+        # the one from the kernel to it. It should be small enough to fit in the existing section, so just
+        # swap the data.
+        for i, s in enumerate(pe.sections):
+            if s.Name.rstrip(b"\x00").decode() == section.name:
+                if new_section.Misc_VirtualSize > s.SizeOfRawData:
+                    raise PEError(f'Not enough space in existing section {section.name} to append new data.')
+
+                padding = bytes(new_section.SizeOfRawData - new_section.Misc_VirtualSize)
+                pe.__data__ = pe.__data__[:s.PointerToRawData] + data + padding + pe.__data__[pe.sections[i+1].PointerToRawData:]
+                s.SizeOfRawData = new_section.SizeOfRawData
+                s.Misc_VirtualSize = new_section.Misc_VirtualSize
+                break
+        else:
+            pe.__data__ = pe.__data__[:] + bytes(new_section.PointerToRawData - len(pe.__data__)) + data + bytes(new_section.SizeOfRawData - len(data))
+
+            pe.FILE_HEADER.NumberOfSections += 1
+            pe.OPTIONAL_HEADER.SizeOfInitializedData += new_section.Misc_VirtualSize
+            pe.__structures__.append(new_section)
+            pe.sections.append(new_section)
+
+    pe.OPTIONAL_HEADER.CheckSum = 0
+    pe.OPTIONAL_HEADER.SizeOfImage = round_up(
+        pe.sections[-1].VirtualAddress + pe.sections[-1].Misc_VirtualSize,
+        pe.OPTIONAL_HEADER.SectionAlignment,
+    )
+
+    pe.write(output)
+
+def merge_sbat(input_pe: [pathlib.Path], input_text: [str]) -> str:
+    sbat = []
+
+    for f in input_pe:
+        try:
+            pe = pefile.PE(f, fast_load=True)
+        except pefile.PEFormatError:
+            print(f"{f} is not a valid PE file, not extracting SBAT section.")
+            continue
+
+        for section in pe.sections:
+            if section.Name.rstrip(b"\x00").decode() == ".sbat":
+                split = section.get_data().rstrip(b"\x00").decode().splitlines()
+                if not split[0].startswith('sbat,'):
+                    print(f"{f} does not contain a valid SBAT section, skipping.")
+                    continue
+                # Filter out the sbat line, we'll add it back later, there needs to be only one and it
+                # needs to be first.
+                sbat += split[1:]
+
+    for t in input_text:
+        if t.startswith('@'):
+            t = pathlib.Path(t[1:]).read_text()
+        split = t.splitlines()
+        if not split[0].startswith('sbat,'):
+            print(f"{t} does not contain a valid SBAT section, skipping.")
+            continue
+        sbat += split[1:]
+
+    return 'sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md\n' + '\n'.join(sbat) + "\n\x00"
+
+def signer_sign(cmd):
+    print('+', shell_join(cmd))
+    subprocess.check_call(cmd)
+
+def find_sbsign(opts=None):
+    return find_tool('sbsign', opts=opts)
+
+def sbsign_sign(sbsign_tool, input_f, output_f, opts=None):
+    sign_invocation = [
+        sbsign_tool,
+        '--key', opts.sb_key,
+        '--cert', opts.sb_cert,
+        input_f,
+        '--output', output_f,
+    ]
+    if opts.signing_engine is not None:
+        sign_invocation += ['--engine', opts.signing_engine]
+    signer_sign(sign_invocation)
+
+def find_pesign(opts=None):
+    return find_tool('pesign', opts=opts)
+
+def pesign_sign(pesign_tool, input_f, output_f, opts=None):
+    sign_invocation = [
+        pesign_tool, '-s', '--force',
+        '-n', opts.sb_certdir,
+        '-c', opts.sb_cert_name,
+        '-i', input_f,
+        '-o', output_f,
+    ]
+    signer_sign(sign_invocation)
+
+SBVERIFY = {
+    'name': 'sbverify',
+    'option': '--list',
+    'output': 'No signature table present',
+}
+
+PESIGCHECK = {
+    'name': 'pesign',
+    'option': '-i',
+    'output': 'No signatures found.',
+    'flags': '-S'
+}
+
+def verify(tool, opts):
+    verify_tool = find_tool(tool['name'], opts=opts)
+    cmd = [
+        verify_tool,
+        tool['option'],
+        opts.linux,
+    ]
+    if 'flags' in tool:
+        cmd.append(tool['flags'])
+
+    print('+', shell_join(cmd))
+    info = subprocess.check_output(cmd, text=True)
+
+    return tool['output'] in info
 
 def make_uki(opts):
     # kernel payload signing
 
-    sbsign_tool = find_tool('sbsign', opts=opts)
-    sbsign_invocation = [
-        sbsign_tool,
-        '--key', opts.sb_key,
-        '--cert', opts.sb_cert,
-    ]
+    sign_tool = None
+    if opts.signtool == 'sbsign':
+        sign_tool = find_sbsign(opts=opts)
+        sign = sbsign_sign
+        verify_tool = SBVERIFY
+    else:
+        sign_tool = find_pesign(opts=opts)
+        sign = pesign_sign
+        verify_tool = PESIGCHECK
 
-    if opts.signing_engine is not None:
-        sbsign_invocation += ['--engine', opts.signing_engine]
+    sign_args_present = opts.sb_key or opts.sb_cert_name
+
+    if sign_tool is None and sign_args_present:
+        raise ValueError(f'{opts.signtool}, required for signing, is not installed')
 
     sign_kernel = opts.sign_kernel
-    if sign_kernel is None and opts.sb_key:
+    if sign_kernel is None and opts.linux is not None and sign_args_present:
         # figure out if we should sign the kernel
-        sbverify_tool = find_tool('sbverify', opts=opts)
-
-        cmd = [
-            sbverify_tool,
-            '--list',
-            opts.linux,
-        ]
-
-        print('+', shell_join(cmd))
-        info = subprocess.check_output(cmd, text=True)
-
-        # sbverify has wonderful API
-        if 'No signature table present' in info:
-            sign_kernel = True
+        sign_kernel = verify(verify_tool, opts)
 
     if sign_kernel:
         linux_signed = tempfile.NamedTemporaryFile(prefix='linux-signed')
-        linux = linux_signed.name
-
-        cmd = [
-            *sbsign_invocation,
-            opts.linux,
-            '--output', linux,
-        ]
-
-        print('+', shell_join(cmd))
-        subprocess.check_call(cmd)
+        linux = pathlib.Path(linux_signed.name)
+        sign(sign_tool, opts.linux, linux, opts=opts)
     else:
         linux = opts.linux
 
-    if opts.uname is None:
+    if opts.uname is None and opts.linux is not None:
         print('Kernel version not specified, starting autodetection 😖.')
         opts.uname = Uname.scrape(opts.linux, opts=opts)
 
@@ -534,10 +740,10 @@ def make_uki(opts):
         ('.osrel',   opts.os_release, True ),
         ('.cmdline', opts.cmdline,    True ),
         ('.dtb',     opts.devicetree, True ),
+        ('.uname',   opts.uname,      True ),
         ('.splash',  opts.splash,     True ),
         ('.pcrpkey', pcrpkey,         True ),
         ('.initrd',  initrd,          True ),
-        ('.uname',   opts.uname,      False),
 
         # linux shall be last to leave breathing room for decompression.
         # We'll add it later.
@@ -555,211 +761,634 @@ def make_uki(opts):
 
     call_systemd_measure(uki, linux, opts=opts)
 
-    # UKI creation
+    # UKI or addon creation - addons don't use the stub so we add SBAT manually
 
-    uki.add_section(
-        Section.create('.linux', linux, measure=True,
-                       flags=['code', 'readonly']))
+    if linux is not None:
+        # Merge the .sbat sections from stub, kernel and parameter, so that revocation can be done on either.
+        uki.add_section(Section.create('.sbat', merge_sbat([opts.stub, linux], opts.sbat), measure=True))
+        uki.add_section(Section.create('.linux', linux, measure=True))
+    else:
+        if not opts.sbat:
+            opts.sbat = ["""sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
+uki,1,UKI,uki,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html
+"""]
+        uki.add_section(Section.create('.sbat', merge_sbat([], opts.sbat), measure=False))
 
-    if opts.sb_key:
+    if sign_args_present:
         unsigned = tempfile.NamedTemporaryFile(prefix='uki')
         output = unsigned.name
     else:
         output = opts.output
 
-    objcopy_tool = find_tool('llvm-objcopy', 'objcopy', opts=opts)
-
-    cmd = [
-        objcopy_tool,
-        opts.stub,
-        *itertools.chain.from_iterable(
-            ('--add-section',       f'{s.name}={s.content}',
-             '--set-section-flags', f"{s.name}={','.join(s.flags)}")
-            for s in uki.sections),
-        output,
-    ]
-
-    if pathlib.Path(objcopy_tool).name != 'llvm-objcopy':
-        cmd += itertools.chain.from_iterable(
-            ('--change-section-vma', f'{s.name}=0x{s.offset:x}') for s in uki.sections)
-
-    print('+', shell_join(cmd))
-    subprocess.check_call(cmd)
-
-    pe_validate(output)
+    pe_add_sections(uki, output)
 
     # UKI signing
 
-    if opts.sb_key:
-        cmd = [
-            *sbsign_invocation,
-            unsigned.name,
-            '--output', opts.output,
-        ]
-        print('+', shell_join(cmd))
-        subprocess.check_call(cmd)
+    if sign_args_present:
+        sign(sign_tool, unsigned.name, opts.output, opts=opts)
 
         # We end up with no executable bits, let's reapply them
         os.umask(umask := os.umask(0))
         os.chmod(opts.output, 0o777 & ~umask)
 
-    print(f"Wrote {'signed' if opts.sb_key else 'unsigned'} {opts.output}")
+    print(f"Wrote {'signed' if sign_args_present else 'unsigned'} {opts.output}")
 
 
-def parse_args(args=None):
+ONE_DAY = datetime.timedelta(1, 0, 0)
+
+
+@contextlib.contextmanager
+def temporary_umask(mask: int):
+    # Drop <mask> bits from umask
+    old = os.umask(0)
+    os.umask(old | mask)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def generate_key_cert_pair(
+        common_name: str,
+        valid_days: int,
+        keylength: int = 2048,
+) -> tuple[bytes]:
+
+    from cryptography import x509
+    import cryptography.hazmat.primitives as hp
+
+    # We use a keylength of 2048 bits. That is what Microsoft documents as
+    # supported/expected:
+    # https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-secure-boot-key-creation-and-management-guidance?view=windows-11#12-public-key-cryptography
+
+    now = datetime.datetime.utcnow()
+
+    key = hp.asymmetric.rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=keylength,
+    )
+    cert = x509.CertificateBuilder(
+    ).subject_name(
+        x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, common_name)])
+    ).issuer_name(
+        x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, common_name)])
+    ).not_valid_before(
+        now,
+    ).not_valid_after(
+        now + ONE_DAY * valid_days
+    ).serial_number(
+        x509.random_serial_number()
+    ).public_key(
+        key.public_key()
+    ).add_extension(
+        x509.BasicConstraints(ca=False, path_length=None),
+        critical=True,
+    ).sign(
+        private_key=key,
+        algorithm=hp.hashes.SHA256(),
+    )
+
+    cert_pem = cert.public_bytes(
+        encoding=hp.serialization.Encoding.PEM,
+    )
+    key_pem = key.private_bytes(
+        encoding=hp.serialization.Encoding.PEM,
+        format=hp.serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=hp.serialization.NoEncryption(),
+    )
+
+    return key_pem, cert_pem
+
+
+def generate_priv_pub_key_pair(keylength : int = 2048) -> tuple[bytes]:
+    import cryptography.hazmat.primitives as hp
+
+    key = hp.asymmetric.rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=keylength,
+    )
+    priv_key_pem = key.private_bytes(
+        encoding=hp.serialization.Encoding.PEM,
+        format=hp.serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=hp.serialization.NoEncryption(),
+    )
+    pub_key_pem = key.public_key().public_bytes(
+        encoding=hp.serialization.Encoding.PEM,
+        format=hp.serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+    return priv_key_pem, pub_key_pem
+
+
+def generate_keys(opts):
+    # This will generate keys and certificates and write them to the paths that
+    # are specified as input paths.
+    if opts.sb_key or opts.sb_cert:
+        fqdn = socket.getfqdn()
+        cn = f'SecureBoot signing key on host {fqdn}'
+        key_pem, cert_pem = generate_key_cert_pair(
+            common_name=cn,
+            valid_days=opts.sb_cert_validity,
+        )
+        print(f'Writing SecureBoot private key to {opts.sb_key}')
+        with temporary_umask(0o077):
+            opts.sb_key.write_bytes(key_pem)
+        print(f'Writing SecureBoot certificate to {opts.sb_cert}')
+        opts.sb_cert.write_bytes(cert_pem)
+
+    for priv_key, pub_key, _ in key_path_groups(opts):
+        priv_key_pem, pub_key_pem = generate_priv_pub_key_pair()
+
+        print(f'Writing private key for PCR signing to {priv_key}')
+        with temporary_umask(0o077):
+            priv_key.write_bytes(priv_key_pem)
+        if pub_key:
+            print(f'Writing public key for PCR signing to {pub_key}')
+            pub_key.write_bytes(pub_key_pem)
+
+
+@dataclasses.dataclass(frozen=True)
+class ConfigItem:
+    @staticmethod
+    def config_list_prepend(
+            namespace: argparse.Namespace,
+            group: Optional[str],
+            dest: str,
+            value: Any,
+    ) -> None:
+        "Prepend value to namespace.<dest>"
+
+        assert not group
+
+        old = getattr(namespace, dest, [])
+        setattr(namespace, dest, value + old)
+
+    @staticmethod
+    def config_set_if_unset(
+            namespace: argparse.Namespace,
+            group: Optional[str],
+            dest: str,
+            value: Any,
+    ) -> None:
+        "Set namespace.<dest> to value only if it was None"
+
+        assert not group
+
+        if getattr(namespace, dest) is None:
+            setattr(namespace, dest, value)
+
+    @staticmethod
+    def config_set_group(
+            namespace: argparse.Namespace,
+            group: Optional[str],
+            dest: str,
+            value: Any,
+    ) -> None:
+        "Set namespace.<dest>[idx] to value, with idx derived from group"
+
+        # pylint: disable=protected-access
+        if group not in namespace._groups:
+            namespace._groups += [group]
+        idx = namespace._groups.index(group)
+
+        old = getattr(namespace, dest, None)
+        if old is None:
+            old = []
+        setattr(namespace, dest,
+                old + ([None] * (idx - len(old))) + [value])
+
+    @staticmethod
+    def parse_boolean(s: str) -> bool:
+        "Parse 1/true/yes/y/t/on as true and 0/false/no/n/f/off/None as false"
+        s_l = s.lower()
+        if s_l in {'1', 'true', 'yes', 'y', 't', 'on'}:
+            return True
+        if s_l in {'0', 'false', 'no', 'n', 'f', 'off'}:
+            return False
+        raise ValueError('f"Invalid boolean literal: {s!r}')
+
+    # arguments for argparse.ArgumentParser.add_argument()
+    name: Union[str, tuple[str, str]]
+    dest: Optional[str] = None
+    metavar: Optional[str] = None
+    type: Optional[Callable] = None
+    nargs: Optional[str] = None
+    action: Optional[Union[str, Callable]] = None
+    default: Any = None
+    version: Optional[str] = None
+    choices: Optional[tuple[str, ...]] = None
+    help: Optional[str] = None
+
+    # metadata for config file parsing
+    config_key: Optional[str] = None
+    config_push: Callable[[argparse.Namespace, Optional[str], str, Any], None] = \
+                    config_set_if_unset
+
+    def _names(self) -> tuple[str, ...]:
+        return self.name if isinstance(self.name, tuple) else (self.name,)
+
+    def argparse_dest(self) -> str:
+        # It'd be nice if argparse exported this, but I don't see that in the API
+        if self.dest:
+            return self.dest
+        return self._names()[0].lstrip('-').replace('-', '_')
+
+    def add_to(self, parser: argparse.ArgumentParser):
+        kwargs = { key:val
+                   for key in dataclasses.asdict(self)
+                   if (key not in ('name', 'config_key', 'config_push') and
+                       (val := getattr(self, key)) is not None) }
+        args = self._names()
+        parser.add_argument(*args, **kwargs)
+
+    def apply_config(self, namespace, section, group, key, value) -> None:
+        assert f'{section}/{key}' == self.config_key
+        dest = self.argparse_dest()
+
+        conv: Callable[[str], Any]
+        if self.action == argparse.BooleanOptionalAction:
+            # We need to handle this case separately: the options are called
+            # --foo and --no-foo, and no argument is parsed. But in the config
+            # file, we have Foo=yes or Foo=no.
+            conv = self.parse_boolean
+        elif self.type:
+            conv = self.type
+        else:
+            conv = lambda s:s
+
+        # This is a bit ugly, but --initrd is the only option which is specified
+        # with multiple args on the command line and a space-separated list in the
+        # config file.
+        if self.name == '--initrd':
+            value = [conv(v) for v in value.split()]
+        else:
+            value = conv(value)
+
+        self.config_push(namespace, group, dest, value)
+
+    def config_example(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        if not self.config_key:
+            return None, None, None
+        section_name, key = self.config_key.split('/', 1)
+        if section_name.endswith(':'):
+            section_name += 'NAME'
+        if self.choices:
+            value = '|'.join(self.choices)
+        else:
+            value = self.metavar or self.argparse_dest().upper()
+        return (section_name, key, value)
+
+
+VERBS = ('build', 'genkey')
+
+CONFIG_ITEMS = [
+    ConfigItem(
+        'positional',
+        metavar = 'VERB',
+        nargs = '*',
+        help = f"operation to perform ({','.join(VERBS)})",
+    ),
+
+    ConfigItem(
+        '--version',
+        action = 'version',
+        version = f'ukify {__version__}',
+    ),
+
+    ConfigItem(
+        '--summary',
+        help = 'print parsed config and exit',
+        action = 'store_true',
+    ),
+
+    ConfigItem(
+        '--linux',
+        type = pathlib.Path,
+        help = 'vmlinuz file [.linux section]',
+        config_key = 'UKI/Linux',
+    ),
+
+    ConfigItem(
+        '--initrd',
+        metavar = 'INITRD',
+        type = pathlib.Path,
+        action = 'append',
+        help = 'initrd file [part of .initrd section]',
+        config_key = 'UKI/Initrd',
+        config_push = ConfigItem.config_list_prepend,
+    ),
+
+    ConfigItem(
+        ('--config', '-c'),
+        metavar = 'PATH',
+        help = 'configuration file',
+    ),
+
+    ConfigItem(
+        '--cmdline',
+        metavar = 'TEXT|@PATH',
+        help = 'kernel command line [.cmdline section]',
+        config_key = 'UKI/Cmdline',
+    ),
+
+    ConfigItem(
+        '--os-release',
+        metavar = 'TEXT|@PATH',
+        help = 'path to os-release file [.osrel section]',
+        config_key = 'UKI/OSRelease',
+    ),
+
+    ConfigItem(
+        '--devicetree',
+        metavar = 'PATH',
+        type = pathlib.Path,
+        help = 'Device Tree file [.dtb section]',
+        config_key = 'UKI/DeviceTree',
+    ),
+    ConfigItem(
+        '--splash',
+        metavar = 'BMP',
+        type = pathlib.Path,
+        help = 'splash image bitmap file [.splash section]',
+        config_key = 'UKI/Splash',
+    ),
+    ConfigItem(
+        '--pcrpkey',
+        metavar = 'KEY',
+        type = pathlib.Path,
+        help = 'embedded public key to seal secrets to [.pcrpkey section]',
+        config_key = 'UKI/PCRPKey',
+    ),
+    ConfigItem(
+        '--uname',
+        metavar='VERSION',
+        help='"uname -r" information [.uname section]',
+        config_key = 'UKI/Uname',
+    ),
+
+    ConfigItem(
+        '--efi-arch',
+        metavar = 'ARCH',
+        choices = ('ia32', 'x64', 'arm', 'aa64', 'riscv64'),
+        help = 'target EFI architecture',
+        config_key = 'UKI/EFIArch',
+    ),
+
+    ConfigItem(
+        '--stub',
+        type = pathlib.Path,
+        help = 'path to the sd-stub file [.text,.data,… sections]',
+        config_key = 'UKI/Stub',
+    ),
+
+    ConfigItem(
+        '--sbat',
+        metavar = 'TEXT|@PATH',
+        help = 'SBAT policy [.sbat section]',
+        default = [],
+        action = 'append',
+        config_key = 'UKI/SBAT',
+    ),
+
+    ConfigItem(
+        '--section',
+        dest = 'sections',
+        metavar = 'NAME:TEXT|@PATH',
+        type = Section.parse_arg,
+        action = 'append',
+        default = [],
+        help = 'additional section as name and contents [NAME section]',
+    ),
+
+    ConfigItem(
+        '--pcr-banks',
+        metavar = 'BANK…',
+        type = parse_banks,
+        config_key = 'UKI/PCRBanks',
+    ),
+
+    ConfigItem(
+        '--signing-engine',
+        metavar = 'ENGINE',
+        help = 'OpenSSL engine to use for signing',
+        config_key = 'UKI/SigningEngine',
+    ),
+    ConfigItem(
+        '--signtool',
+        choices = ('sbsign', 'pesign'),
+        dest = 'signtool',
+        default = 'sbsign',
+        help = 'whether to use sbsign or pesign. Default is sbsign.',
+        config_key = 'UKI/SecureBootSigningTool',
+    ),
+    ConfigItem(
+        '--secureboot-private-key',
+        dest = 'sb_key',
+        help = 'required by --signtool=sbsign. Path to key file or engine-specific designation for SB signing',
+        config_key = 'UKI/SecureBootPrivateKey',
+    ),
+    ConfigItem(
+        '--secureboot-certificate',
+        dest = 'sb_cert',
+        help = 'required by --signtool=sbsign. sbsign needs a path to certificate file or engine-specific designation for SB signing',
+        config_key = 'UKI/SecureBootCertificate',
+    ),
+    ConfigItem(
+        '--secureboot-certificate-dir',
+        dest = 'sb_certdir',
+        default = '/etc/pki/pesign',
+        help = 'required by --signtool=pesign. Path to nss certificate database directory for PE signing. Default is /etc/pki/pesign',
+        config_key = 'UKI/SecureBootCertificateDir',
+    ),
+    ConfigItem(
+        '--secureboot-certificate-name',
+        dest = 'sb_cert_name',
+        help = 'required by --signtool=pesign. pesign needs a certificate nickname of nss certificate database entry to use for PE signing',
+        config_key = 'UKI/SecureBootCertificateName',
+    ),
+    ConfigItem(
+        '--secureboot-certificate-validity',
+        metavar = 'DAYS',
+        dest = 'sb_cert_validity',
+        default = 365 * 10,
+        help = "period of validity (in days) for a certificate created by 'genkey'",
+        config_key = 'UKI/SecureBootCertificateValidity',
+    ),
+
+    ConfigItem(
+        '--sign-kernel',
+        action = argparse.BooleanOptionalAction,
+        help = 'Sign the embedded kernel',
+        config_key = 'UKI/SignKernel',
+    ),
+
+    ConfigItem(
+        '--pcr-private-key',
+        dest = 'pcr_private_keys',
+        metavar = 'PATH',
+        type = pathlib.Path,
+        action = 'append',
+        help = 'private part of the keypair for signing PCR signatures',
+        config_key = 'PCRSignature:/PCRPrivateKey',
+        config_push = ConfigItem.config_set_group,
+    ),
+    ConfigItem(
+        '--pcr-public-key',
+        dest = 'pcr_public_keys',
+        metavar = 'PATH',
+        type = pathlib.Path,
+        action = 'append',
+        help = 'public part of the keypair for signing PCR signatures',
+        config_key = 'PCRSignature:/PCRPublicKey',
+        config_push = ConfigItem.config_set_group,
+    ),
+    ConfigItem(
+        '--phases',
+        dest = 'phase_path_groups',
+        metavar = 'PHASE-PATH…',
+        type = parse_phase_paths,
+        action = 'append',
+        help = 'phase-paths to create signatures for',
+        config_key = 'PCRSignature:/Phases',
+        config_push = ConfigItem.config_set_group,
+    ),
+
+    ConfigItem(
+        '--tools',
+        type = pathlib.Path,
+        action = 'append',
+        help = 'Directories to search for tools (systemd-measure, …)',
+    ),
+
+    ConfigItem(
+        ('--output', '-o'),
+        type = pathlib.Path,
+        help = 'output file path',
+    ),
+
+    ConfigItem(
+        '--measure',
+        action = argparse.BooleanOptionalAction,
+        help = 'print systemd-measure output for the UKI',
+    ),
+]
+
+CONFIGFILE_ITEMS = { item.config_key:item
+                     for item in CONFIG_ITEMS
+                     if item.config_key }
+
+
+def apply_config(namespace, filename=None):
+    if filename is None:
+        filename = namespace.config
+    if filename is None:
+        return
+
+    # Fill in ._groups based on --pcr-public-key=, --pcr-private-key=, and --phases=.
+    assert '_groups' not in namespace
+    n_pcr_priv = len(namespace.pcr_private_keys or ())
+    namespace._groups = list(range(n_pcr_priv))  # pylint: disable=protected-access
+
+    cp = configparser.ConfigParser(
+        comment_prefixes='#',
+        inline_comment_prefixes='#',
+        delimiters='=',
+        empty_lines_in_values=False,
+        interpolation=None,
+        strict=False)
+    # Do not make keys lowercase
+    cp.optionxform = lambda option: option
+
+    cp.read(filename)
+
+    for section_name, section in cp.items():
+        idx = section_name.find(':')
+        if idx >= 0:
+            section_name, group = section_name[:idx+1], section_name[idx+1:]
+            if not section_name or not group:
+                raise ValueError('Section name components cannot be empty')
+            if ':' in group:
+                raise ValueError('Section name cannot contain more than one ":"')
+        else:
+            group = None
+        for key, value in section.items():
+            if item := CONFIGFILE_ITEMS.get(f'{section_name}/{key}'):
+                item.apply_config(namespace, section_name, group, key, value)
+            else:
+                print(f'Unknown config setting [{section_name}] {key}=')
+
+
+def config_example():
+    prev_section = None
+    for item in CONFIG_ITEMS:
+        section, key, value = item.config_example()
+        if section:
+            if prev_section != section:
+                if prev_section:
+                    yield ''
+                yield f'[{section}]'
+                prev_section = section
+            yield f'{key} = {value}'
+
+
+class PagerHelpAction(argparse._HelpAction):  # pylint: disable=protected-access
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Union[str, Sequence[Any], None] = None,
+        option_string: Optional[str] = None
+    ) -> None:
+        page(parser.format_help(), True)
+        parser.exit()
+
+
+def create_parser():
     p = argparse.ArgumentParser(
         description='Build and sign Unified Kernel Images',
         allow_abbrev=False,
+        add_help=False,
         usage='''\
-usage: ukify [options…] linux initrd…
-       ukify -h | --help
-''')
+ukify [options…] VERB
+''',
+        epilog='\n  '.join(('config file:', *config_example())),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    for item in CONFIG_ITEMS:
+        item.add_to(p)
 
     # Suppress printing of usage synopsis on errors
     p.error = lambda message: p.exit(2, f'{p.prog}: error: {message}\n')
 
-    p.add_argument('linux',
-                   type=pathlib.Path,
-                   help='vmlinuz file [.linux section]')
-    p.add_argument('initrd',
-                   type=pathlib.Path,
-                   nargs='*',
-                   help='initrd files [.initrd section]')
+    # Make --help paged
+    p.add_argument(
+        '-h', '--help',
+        action=PagerHelpAction,
+        help='show this help message and exit',
+    )
 
-    p.add_argument('--cmdline',
-                   metavar='TEXT|@PATH',
-                   help='kernel command line [.cmdline section]')
+    return p
 
-    p.add_argument('--os-release',
-                   metavar='TEXT|@PATH',
-                   help='path to os-release file [.osrel section]')
 
-    p.add_argument('--devicetree',
-                   metavar='PATH',
-                   type=pathlib.Path,
-                   help='Device Tree file [.dtb section]')
-    p.add_argument('--splash',
-                   metavar='BMP',
-                   type=pathlib.Path,
-                   help='splash image bitmap file [.splash section]')
-    p.add_argument('--pcrpkey',
-                   metavar='KEY',
-                   type=pathlib.Path,
-                   help='embedded public key to seal secrets to [.pcrpkey section]')
-    p.add_argument('--uname',
-                   metavar='VERSION',
-                   help='"uname -r" information [.uname section]')
+def finalize_options(opts):
+    # Figure out which syntax is being used, one of:
+    # ukify verb --arg --arg --arg
+    # ukify linux initrd…
+    if len(opts.positional) == 1 and opts.positional[0] in VERBS:
+        opts.verb = opts.positional[0]
+    elif opts.linux or opts.initrd:
+        raise ValueError('--linux/--initrd options cannot be used with positional arguments')
+    else:
+        print("Assuming obsolete commandline syntax with no verb. Please use 'build'.")
+        if opts.positional:
+            opts.linux = pathlib.Path(opts.positional[0])
+        # If we have initrds from parsing config files, append our positional args at the end
+        opts.initrd = (opts.initrd or []) + [pathlib.Path(arg) for arg in opts.positional[1:]]
+        opts.verb = 'build'
 
-    p.add_argument('--efi-arch',
-                   metavar='ARCH',
-                   choices=('ia32', 'x64', 'arm', 'aa64', 'riscv64'),
-                   help='target EFI architecture')
-
-    p.add_argument('--stub',
-                   type=pathlib.Path,
-                   help='path to the sd-stub file [.text,.data,… sections]')
-
-    p.add_argument('--section',
-                   dest='sections',
-                   metavar='NAME:TEXT|@PATH',
-                   type=Section.parse_arg,
-                   action='append',
-                   default=[],
-                   help='additional section as name and contents [NAME section]')
-
-    p.add_argument('--pcr-private-key',
-                   dest='pcr_private_keys',
-                   metavar='PATH',
-                   type=pathlib.Path,
-                   action='append',
-                   help='private part of the keypair for signing PCR signatures')
-    p.add_argument('--pcr-public-key',
-                   dest='pcr_public_keys',
-                   metavar='PATH',
-                   type=pathlib.Path,
-                   action='append',
-                   help='public part of the keypair for signing PCR signatures')
-    p.add_argument('--phases',
-                   dest='phase_path_groups',
-                   metavar='PHASE-PATH…',
-                   type=parse_phase_paths,
-                   action='append',
-                   help='phase-paths to create signatures for')
-
-    p.add_argument('--pcr-banks',
-                   metavar='BANK…',
-                   type=parse_banks)
-
-    p.add_argument('--signing-engine',
-                   metavar='ENGINE',
-                   help='OpenSSL engine to use for signing')
-    p.add_argument('--secureboot-private-key',
-                   dest='sb_key',
-                   help='path to key file or engine-specific designation for SB signing')
-    p.add_argument('--secureboot-certificate',
-                   dest='sb_cert',
-                   help='path to certificate file or engine-specific designation for SB signing')
-
-    p.add_argument('--sign-kernel',
-                   action=argparse.BooleanOptionalAction,
-                   help='Sign the embedded kernel')
-
-    p.add_argument('--tools',
-                   type=pathlib.Path,
-                   action='append',
-                   help='Directories to search for tools (systemd-measure, llvm-objcopy, ...)')
-
-    p.add_argument('--output', '-o',
-                   type=pathlib.Path,
-                   help='output file path')
-
-    p.add_argument('--measure',
-                   action=argparse.BooleanOptionalAction,
-                   help='print systemd-measure output for the UKI')
-
-    p.add_argument('--version',
-                   action='version',
-                   version=f'ukify {__version__}')
-
-    opts = p.parse_args(args)
-
-    path_is_readable(opts.linux)
-    for initrd in opts.initrd or ():
-        path_is_readable(initrd)
-    path_is_readable(opts.devicetree)
-    path_is_readable(opts.pcrpkey)
-    for key in opts.pcr_private_keys or ():
-        path_is_readable(key)
-    for key in opts.pcr_public_keys or ():
-        path_is_readable(key)
-
-    if opts.cmdline and opts.cmdline.startswith('@'):
-        opts.cmdline = path_is_readable(opts.cmdline[1:])
-
-    if opts.os_release is not None and opts.os_release.startswith('@'):
-        opts.os_release = path_is_readable(opts.os_release[1:])
-    elif opts.os_release is None:
-        p = pathlib.Path('/etc/os-release')
-        if not p.exists():
-            p = path_is_readable('/usr/lib/os-release')
-        opts.os_release = p
-
-    if opts.efi_arch is None:
-        opts.efi_arch = guess_efi_arch()
-
-    if opts.stub is None:
-        opts.stub = path_is_readable(f'/usr/lib/systemd/boot/efi/linux{opts.efi_arch}.efi.stub')
-
-    if opts.signing_engine is None:
-        opts.sb_key = path_is_readable(opts.sb_key) if opts.sb_key else None
-        opts.sb_cert = path_is_readable(opts.sb_cert) if opts.sb_cert else None
-
-    if bool(opts.sb_key) ^ bool(opts.sb_cert):
-        raise ValueError('--secureboot-private-key= and --secureboot-certificate= must be specified together')
-
-    if opts.sign_kernel and not opts.sb_key:
-        raise ValueError('--sign-kernel requires --secureboot-private-key= and --secureboot-certificate= to be specified')
-
+    # Check that --pcr-public-key=, --pcr-private-key=, and --phases=
+    # have either the same number of arguments are are not specified at all.
     n_pcr_pub = None if opts.pcr_public_keys is None else len(opts.pcr_public_keys)
     n_pcr_priv = None if opts.pcr_private_keys is None else len(opts.pcr_private_keys)
     n_phase_path_groups = None if opts.phase_path_groups is None else len(opts.phase_path_groups)
@@ -768,20 +1397,79 @@ usage: ukify [options…] linux initrd…
     if n_phase_path_groups is not None and n_phase_path_groups != n_pcr_priv:
         raise ValueError('--phases= specifications must match --pcr-private-key=')
 
-    if opts.output is None:
-        suffix = '.efi' if opts.sb_key else '.unsigned.efi'
+    if opts.cmdline and opts.cmdline.startswith('@'):
+        opts.cmdline = pathlib.Path(opts.cmdline[1:])
+    elif opts.cmdline:
+        # Drop whitespace from the commandline. If we're reading from a file,
+        # we copy the contents verbatim. But configuration specified on the commandline
+        # or in the config file may contain additional whitespace that has no meaning.
+        opts.cmdline = ' '.join(opts.cmdline.split())
+
+    if opts.os_release and opts.os_release.startswith('@'):
+        opts.os_release = pathlib.Path(opts.os_release[1:])
+    elif not opts.os_release and opts.linux:
+        p = pathlib.Path('/etc/os-release')
+        if not p.exists():
+            p = pathlib.Path('/usr/lib/os-release')
+        opts.os_release = p
+
+    if opts.efi_arch is None:
+        opts.efi_arch = guess_efi_arch()
+
+    if opts.stub is None:
+        if opts.linux is not None:
+            opts.stub = pathlib.Path(f'/usr/lib/systemd/boot/efi/linux{opts.efi_arch}.efi.stub')
+        else:
+            opts.stub = pathlib.Path(f'/usr/lib/systemd/boot/efi/addon{opts.efi_arch}.efi.stub')
+
+    if opts.signing_engine is None:
+        if opts.sb_key:
+            opts.sb_key = pathlib.Path(opts.sb_key)
+        if opts.sb_cert:
+            opts.sb_cert = pathlib.Path(opts.sb_cert)
+
+    if opts.signtool == 'sbsign':
+        if bool(opts.sb_key) ^ bool(opts.sb_cert):
+            raise ValueError('--secureboot-private-key= and --secureboot-certificate= must be specified together when using --signtool=sbsign')
+    else:
+        if not bool(opts.sb_cert_name):
+            raise ValueError('--certificate-name must be specified when using --signtool=pesign')
+
+    if opts.sign_kernel and not opts.sb_key and not opts.sb_cert_name:
+        raise ValueError('--sign-kernel requires either --secureboot-private-key= and --secureboot-certificate= (for sbsign) or --secureboot-certificate-name= (for pesign) to be specified')
+
+    if opts.verb == 'build' and opts.output is None:
+        if opts.linux is None:
+            raise ValueError('--output= must be specified when building a PE addon')
+        suffix = '.efi' if opts.sb_key or opts.sb_cert_name else '.unsigned.efi'
         opts.output = opts.linux.name + suffix
 
     for section in opts.sections:
         section.check_name()
 
+    if opts.summary:
+        # TODO: replace pprint() with some fancy formatting.
+        pprint.pprint(vars(opts))
+        sys.exit()
+
+
+def parse_args(args=None):
+    opts = create_parser().parse_args(args)
+    apply_config(opts)
+    finalize_options(opts)
     return opts
 
 
 def main():
     opts = parse_args()
-    check_inputs(opts)
-    make_uki(opts)
+    if opts.verb == 'build':
+        check_inputs(opts)
+        make_uki(opts)
+    elif opts.verb == 'genkey':
+        check_cert_and_keys_nonexistent(opts)
+        generate_keys(opts)
+    else:
+        assert False
 
 
 if __name__ == '__main__':

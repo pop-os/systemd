@@ -9,11 +9,14 @@
 #include "alloc-util.h"
 #include "escape.h"
 #include "extract-word.h"
+#include "fd-util.h"
 #include "fileio.h"
 #include "gunicode.h"
 #include "locale-util.h"
 #include "macro.h"
 #include "memory-util.h"
+#include "memstream-util.h"
+#include "path-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
@@ -168,10 +171,15 @@ char *delete_trailing_chars(char *s, const char *bad) {
         return s;
 }
 
-char *truncate_nl(char *s) {
+char *truncate_nl_full(char *s, size_t *ret_len) {
+        size_t n;
+
         assert(s);
 
-        s[strcspn(s, NEWLINE)] = 0;
+        n = strcspn(s, NEWLINE);
+        s[n] = '\0';
+        if (ret_len)
+                *ret_len = n;
         return s;
 }
 
@@ -287,6 +295,62 @@ static int write_ellipsis(char *buf, bool unicode) {
         return 3;
 }
 
+static size_t ansi_sequence_length(const char *s, size_t len) {
+        assert(s);
+
+        if (len < 2)
+                return 0;
+
+        if (s[0] != 0x1B)  /* ASCII 27, aka ESC, aka Ctrl-[ */
+                return 0;  /* Not the start of a sequence */
+
+        if (s[1] == 0x5B) { /* [, start of CSI sequence */
+                size_t i = 2;
+
+                if (i == len)
+                        return 0;
+
+                while (s[i] >= 0x30 && s[i] <= 0x3F) /* Parameter bytes */
+                        if (++i == len)
+                                return 0;
+                while (s[i] >= 0x20 && s[i] <= 0x2F) /* Intermediate bytes */
+                        if (++i == len)
+                                return 0;
+                if (s[i] >= 0x40 && s[i] <= 0x7E) /* Final byte */
+                        return i + 1;
+                return 0;  /* Bad sequence */
+
+        } else if (s[1] >= 0x40 && s[1] <= 0x5F) /* other non-CSI Fe sequence */
+                return 2;
+
+        return 0;  /* Bad escape? */
+}
+
+static bool string_has_ansi_sequence(const char *s, size_t len) {
+        const char *t = s;
+
+        while ((t = memchr(s, 0x1B, len - (t - s))))
+                if (ansi_sequence_length(t, len - (t - s)) > 0)
+                        return true;
+        return false;
+}
+
+static size_t previous_ansi_sequence(const char *s, size_t length, const char **ret_where) {
+        /* Locate the previous ANSI sequence and save its start in *ret_where and return length. */
+
+        for (size_t i = length - 2; i > 0; i--) {  /* -2 because at least two bytes are needed */
+                size_t slen = ansi_sequence_length(s + (i - 1), length - (i - 1));
+                if (slen == 0)
+                        continue;
+
+                *ret_where = s + (i - 1);
+                return slen;
+        }
+
+        *ret_where = NULL;
+        return 0;
+}
+
 static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigned percent) {
         size_t x, need_space, suffix_len;
         char *t;
@@ -346,7 +410,6 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
 char *ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigned percent) {
         size_t x, k, len, len2;
         const char *i, *j;
-        char *e;
         int r;
 
         /* Note that 'old_length' refers to bytes in the string, while 'new_length' refers to character cells taken up
@@ -370,73 +433,117 @@ char *ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigne
         if (new_length == 0)
                 return strdup("");
 
-        /* If no multibyte characters use ascii_ellipsize_mem for speed */
-        if (ascii_is_valid_n(s, old_length))
+        bool has_ansi_seq = string_has_ansi_sequence(s, old_length);
+
+        /* If no multibyte characters or ANSI sequences, use ascii_ellipsize_mem for speed */
+        if (!has_ansi_seq && ascii_is_valid_n(s, old_length))
                 return ascii_ellipsize_mem(s, old_length, new_length, percent);
 
-        x = ((new_length - 1) * percent) / 100;
+        x = (new_length - 1) * percent / 100;
         assert(x <= new_length - 1);
 
         k = 0;
-        for (i = s; i < s + old_length; i = utf8_next_char(i)) {
-                char32_t c;
-                int w;
+        for (i = s; i < s + old_length; ) {
+                size_t slen = has_ansi_seq ? ansi_sequence_length(i, old_length - (i - s)) : 0;
+                if (slen > 0) {
+                        i += slen;
+                        continue;  /* ANSI sequences don't take up any space in output */
+                }
 
+                char32_t c;
                 r = utf8_encoded_to_unichar(i, &c);
                 if (r < 0)
                         return NULL;
 
-                w = unichar_iswide(c) ? 2 : 1;
-                if (k + w <= x)
-                        k += w;
-                else
+                int w = unichar_iswide(c) ? 2 : 1;
+                if (k + w > x)
                         break;
+
+                k += w;
+                i += r;
         }
 
-        for (j = s + old_length; j > i; ) {
+        const char *ansi_start = s + old_length;
+        size_t ansi_len = 0;
+
+        for (const char *t = j = s + old_length; t > i && k < new_length; ) {
                 char32_t c;
                 int w;
-                const char *jj;
+                const char *tt;
 
-                jj = utf8_prev_char(j);
-                r = utf8_encoded_to_unichar(jj, &c);
+                if (has_ansi_seq && ansi_start >= t)
+                        /* Figure out the previous ANSI sequence, if any */
+                        ansi_len = previous_ansi_sequence(s, t - s, &ansi_start);
+
+                /* If the sequence extends all the way to the current position, skip it. */
+                if (has_ansi_seq && ansi_len > 0 && ansi_start + ansi_len == t) {
+                        t = ansi_start;
+                        continue;
+                }
+
+                tt = utf8_prev_char(t);
+                r = utf8_encoded_to_unichar(tt, &c);
                 if (r < 0)
                         return NULL;
 
                 w = unichar_iswide(c) ? 2 : 1;
-                if (k + w <= new_length) {
-                        k += w;
-                        j = jj;
-                } else
+                if (k + w > new_length)
                         break;
-        }
-        assert(i <= j);
 
-        /* we don't actually need to ellipsize */
-        if (i == j)
+                k += w;
+                j = t = tt;  /* j should always point to the first "real" character */
+        }
+
+        /* We don't actually need to ellipsize */
+        if (i >= j)
                 return memdup_suffix0(s, old_length);
 
-        /* make space for ellipsis, if possible */
-        if (j < s + old_length)
-                j = utf8_next_char(j);
-        else if (i > s)
-                i = utf8_prev_char(i);
+        if (k >= new_length) {
+                /* Make space for ellipsis, if required and possible. We know that the edge character is not
+                 * part of an ANSI sequence (because then we'd skip it). If the last character we looked at
+                 * was wide, we don't need to make space. */
+                if (j < s + old_length)
+                        j = utf8_next_char(j);
+                else if (i > s)
+                        i = utf8_prev_char(i);
+        }
 
         len = i - s;
         len2 = s + old_length - j;
-        e = new(char, len + 3 + len2 + 1);
+
+        /* If we have ANSI, allow the same length as the source string + ellipsis. It'd be too involved to
+         * figure out what exact space is needed. Strings with ANSI sequences are most likely to be fairly
+         * short anyway. */
+        size_t alloc_len = has_ansi_seq ? old_length + 3 + 1 : len + 3 + len2 + 1;
+
+        char *e = new(char, alloc_len);
         if (!e)
                 return NULL;
 
         /*
-        printf("old_length=%zu new_length=%zu x=%zu len=%u len2=%u k=%u\n",
+        printf("old_length=%zu new_length=%zu x=%zu len=%zu len2=%zu k=%zu\n",
                old_length, new_length, x, len, len2, k);
         */
 
-        memcpy(e, s, len);
+        memcpy_safe(e, s, len);
         write_ellipsis(e + len, true);
-        memcpy(e + len + 3, j, len2);
-        *(e + len + 3 + len2) = '\0';
+
+        char *dst = e + len + 3;
+
+        if (has_ansi_seq)
+                /* Copy over any ANSI sequences in full */
+                for (const char *p = s + len; p < j; ) {
+                        size_t slen = ansi_sequence_length(p, j - p);
+                        if (slen > 0) {
+                                memcpy(dst, p, slen);
+                                dst += slen;
+                                p += slen;
+                        } else
+                                p = utf8_next_char(p);
+                }
+
+        memcpy_safe(dst, j, len2);
+        dst[len2] = '\0';
 
         return e;
 }
@@ -603,8 +710,8 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                 STATE_CSI,
                 STATE_CSO,
         } state = STATE_OTHER;
-        char *obuf = NULL;
-        size_t osz = 0, isz, shift[2] = {}, n_carriage_returns = 0;
+        _cleanup_(memstream_done) MemStream m = {};
+        size_t isz, shift[2] = {}, n_carriage_returns = 0;
         FILE *f;
 
         assert(ibuf);
@@ -628,7 +735,7 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
 
         /* Note we turn off internal locking on f for performance reasons. It's safe to do so since we
          * created f here and it doesn't leave our scope. */
-        f = open_memstream_unlocked(&obuf, &osz);
+        f = memstream_init(&m);
         if (!f)
                 return NULL;
 
@@ -713,16 +820,11 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                 }
         }
 
-        if (fflush_and_check(f) < 0) {
-                fclose(f);
-                return mfree(obuf);
-        }
-        fclose(f);
+        char *obuf;
+        if (memstream_finalize(&m, &obuf, _isz) < 0)
+                return NULL;
 
         free_and_replace(*ibuf, obuf);
-
-        if (_isz)
-                *_isz = osz;
 
         if (highlight) {
                 highlight[0] += shift[0];
@@ -888,6 +990,33 @@ oom:
         return -ENOMEM;
 }
 
+char *strextendn(char **x, const char *s, size_t l) {
+        assert(x);
+        assert(s || l == 0);
+
+        if (l == SIZE_MAX)
+                l = strlen_ptr(s);
+        else if (l > 0)
+                l = strnlen(s, l); /* ignore trailing noise */
+
+        if (l > 0 || !*x) {
+                size_t q;
+                char *m;
+
+                q = strlen_ptr(*x);
+                m = realloc(*x, q + l + 1);
+                if (!m)
+                        return NULL;
+
+                memcpy_safe(m + q, s, l);
+                m[q + l] = 0;
+
+                *x = m;
+        }
+
+        return *x;
+}
+
 char *strrep(const char *s, unsigned n) {
         char *r, *p;
         size_t l;
@@ -955,8 +1084,7 @@ int free_and_strdup(char **p, const char *s) {
         } else
                 t = NULL;
 
-        free(*p);
-        *p = t;
+        free_and_replace(*p, t);
 
         return 1;
 }
@@ -1259,4 +1387,53 @@ char *strdupcspn(const char *a, const char *reject) {
                 return strdup(a);
 
         return strndup(a, strcspn(a, reject));
+}
+
+char *find_line_startswith(const char *haystack, const char *needle) {
+        char *p;
+
+        assert(haystack);
+        assert(needle);
+
+        /* Finds the first line in 'haystack' that starts with the specified string. Returns a pointer to the
+         * first character after it */
+
+        p = strstr(haystack, needle);
+        if (!p)
+                return NULL;
+
+        if (p > haystack)
+                while (p[-1] != '\n') {
+                        p = strstr(p + 1, needle);
+                        if (!p)
+                                return NULL;
+                }
+
+        return p + strlen(needle);
+}
+
+char *startswith_strv(const char *string, char **strv) {
+        char *found = NULL;
+
+        STRV_FOREACH(i, strv) {
+                found = startswith(string, *i);
+                if (found)
+                        break;
+        }
+
+        return found;
+}
+
+bool version_is_valid(const char *s) {
+        if (isempty(s))
+                return false;
+
+        if (!filename_part_is_valid(s))
+                return false;
+
+        /* This is a superset of the characters used by semver. We additionally allow "," and "_". */
+        if (!in_charset(s, ALPHANUMERICAL ".,_-+"))
+                return false;
+
+        return true;
 }

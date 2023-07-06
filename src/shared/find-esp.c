@@ -9,7 +9,7 @@
 #include "alloc-util.h"
 #include "blkid-util.h"
 #include "btrfs-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "device-util.h"
 #include "devnum-util.h"
 #include "env-util.h"
@@ -17,6 +17,7 @@
 #include "fd-util.h"
 #include "find-esp.h"
 #include "gpt.h"
+#include "mount-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "stat-util.h"
@@ -31,7 +32,7 @@ typedef enum VerifyESPFlags {
 
 static int verify_esp_blkid(
                 dev_t devid,
-                bool searching,
+                VerifyESPFlags flags,
                 uint32_t *ret_part,
                 uint64_t *ret_pstart,
                 uint64_t *ret_psize,
@@ -44,6 +45,7 @@ static int verify_esp_blkid(
 #if HAVE_BLKID
         _cleanup_(blkid_free_probep) blkid_probe b = NULL;
         _cleanup_free_ char *node = NULL;
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING);
         const char *v;
         int r;
 
@@ -65,9 +67,9 @@ static int verify_esp_blkid(
         r = blkid_do_safeprobe(b);
         if (r == -2)
                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "File system \"%s\" is ambiguous.", node);
-        else if (r == 1)
+        if (r == 1)
                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "File system \"%s\" does not contain a label.", node);
-        else if (r != 0)
+        if (r != 0)
                 return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe file system \"%s\": %m", node);
 
         r = blkid_probe_lookup_value(b, "TYPE", &v, NULL);
@@ -146,12 +148,13 @@ static int verify_esp_blkid(
 
 static int verify_esp_udev(
                 dev_t devid,
-                bool searching,
+                VerifyESPFlags flags,
                 uint32_t *ret_part,
                 uint64_t *ret_pstart,
                 uint64_t *ret_psize,
                 sd_id128_t *ret_uuid) {
 
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING);
         _cleanup_(sd_device_unrefp) sd_device *d = NULL;
         sd_id128_t uuid = SD_ID128_NULL;
         uint64_t pstart = 0, psize = 0;
@@ -238,12 +241,14 @@ static int verify_esp_udev(
 }
 
 static int verify_fsroot_dir(
+                int dir_fd,
                 const char *path,
-                bool searching,
-                bool unprivileged_mode,
+                VerifyESPFlags flags,
                 dev_t *ret_dev) {
 
-        _cleanup_close_ int fd = -EBADF;
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING),
+                unprivileged_mode = FLAGS_SET(flags, VERIFY_ESP_UNPRIVILEGED_MODE);
+        _cleanup_free_ char *f = NULL;
         STRUCT_NEW_STATX_DEFINE(sxa);
         STRUCT_NEW_STATX_DEFINE(sxb);
         int r;
@@ -251,24 +256,22 @@ static int verify_fsroot_dir(
         /* Checks if the specified directory is at the root of its file system, and returns device
          * major/minor of the device, if it is. */
 
+        assert(dir_fd >= 0);
         assert(path);
 
-        /* We are using O_PATH here, since that way we can operate on directory inodes we cannot look into,
-         * which is quite likely if we run unprivileged */
-        fd = open(path, O_CLOEXEC|O_DIRECTORY|O_PATH);
-        if (fd < 0)
-                return log_full_errno((searching && errno == ENOENT) ||
-                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(errno)) ? LOG_DEBUG : LOG_ERR, errno,
-                                      "Failed to open directory \"%s\": %m", path);
+        /* We pass the full path from the root directory file descriptor so we can use it for logging, but
+         * dir_fd points to the parent directory of the final component of the given path, so we extract the
+         * filename and operate on that. */
 
-        /* So, the ESP and XBOOTLDR partition are commonly located on an autofs mount. stat() on the
-         * directory won't trigger it, if it is not mounted yet. Let's hence explicitly trigger it here,
-         * before stat()ing */
-        (void) faccessat(fd, "trigger", F_OK, AT_SYMLINK_NOFOLLOW); /* Filename doesn't matter... */
+        r = path_extract_filename(path, &f);
+        if (r < 0 && r != -EADDRNOTAVAIL)
+                return log_error_errno(r, "Failed to extract filename of %s: %m", path);
 
-        r = statx_fallback(fd, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxa.sx);
+        r = statx_fallback(dir_fd, strempty(f), AT_SYMLINK_NOFOLLOW|(isempty(f) ? AT_EMPTY_PATH : 0),
+                           STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxa.sx);
         if (r < 0)
-                return log_full_errno((unprivileged_mode && ERRNO_IS_PRIVILEGE(r)) ? LOG_DEBUG : LOG_ERR, r,
+                return log_full_errno((searching && r == -ENOENT) ||
+                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(r)) ? LOG_DEBUG : LOG_ERR, r,
                                       "Failed to determine block device node of \"%s\": %m", path);
 
         assert(S_ISDIR(sxa.sx.stx_mode)); /* We used O_DIRECTORY above, when opening, so this must hold */
@@ -288,29 +291,7 @@ static int verify_fsroot_dir(
         }
 
         /* Now let's look at the parent */
-        r = statx_fallback(fd, "..", 0, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxb.sx);
-        if (r < 0 && ERRNO_IS_PRIVILEGE(r)) {
-                _cleanup_free_ char *parent = NULL;
-
-                /* If going via ".." didn't work due to EACCESS, then let's determine the parent path
-                 * directly instead. It's not as good, due to symlinks and such, but we can't do anything
-                 * better here.
-                 *
-                 * (In case you wonder where this fallback is useful: consider a classic Fedora setup with
-                 * /boot/ being an ext4 partition and /boot/efi/ being the VFAT ESP. The latter is mounted
-                 * inaccessible for regular users via the dmask= mount option. In that case as unprivileged
-                 * user we can stat() /boot/efi/, and we can stat()/enumerate /boot/. But we cannot look into
-                 * /boot/efi/, and in particular not use /boot/efi/../ – hence this work-around.) */
-
-                if (path_equal(path, "/"))
-                        goto success;
-
-                r = path_extract_directory(path, &parent);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to extract parent path from '%s': %m", path);
-
-                r = statx_fallback(AT_FDCWD, parent, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxb.sx);
-        }
+        r = statx_fallback(dir_fd, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxb.sx);
         if (r < 0)
                 return log_full_errno(unprivileged_mode && ERRNO_IS_PRIVILEGE(r) ? LOG_DEBUG : LOG_ERR, r,
                                       "Failed to determine block device node of parent of \"%s\": %m", path);
@@ -327,25 +308,17 @@ success:
         if (!ret_dev)
                 return 0;
 
-        if (sxa.sx.stx_dev_major == 0) { /* Hmm, maybe a btrfs device, and the caller asked for the backing device? Then let's try to get it. */
-                _cleanup_close_ int real_fd = -EBADF;
-
-                /* The statx() above we can execute on an O_PATH fd. But the btrfs ioctl we cannot. Hence
-                 * acquire a "real" fd first, without the O_PATH flag. */
-
-                real_fd = fd_reopen(fd, O_DIRECTORY|O_CLOEXEC);
-                if (real_fd < 0)
-                        return real_fd;
-
-                return btrfs_get_block_device_fd(real_fd, ret_dev);
-        }
+        if (sxa.sx.stx_dev_major == 0) /* Hmm, maybe a btrfs device, and the caller asked for the backing device? Then let's try to get it. */
+                return btrfs_get_block_device_at(dir_fd, strempty(f), ret_dev);
 
         *ret_dev = makedev(sxa.sx.stx_dev_major, sxa.sx.stx_dev_minor);
         return 0;
 }
 
 static int verify_esp(
-                const char *p,
+                int rfd,
+                const char *path,
+                char **ret_path,
                 uint32_t *ret_part,
                 uint64_t *ret_pstart,
                 uint64_t *ret_psize,
@@ -355,10 +328,13 @@ static int verify_esp(
 
         bool relax_checks, searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING),
              unprivileged_mode = FLAGS_SET(flags, VERIFY_ESP_UNPRIVILEGED_MODE);
+        _cleanup_free_ char *p = NULL;
+        _cleanup_close_ int pfd = -EBADF;
         dev_t devid = 0;
         int r;
 
-        assert(p);
+        assert(rfd >= 0 || rfd == AT_FDCWD);
+        assert(path);
 
         /* This logs about all errors, except:
          *
@@ -374,13 +350,31 @@ static int verify_esp(
         /* Non-root user can only check the status, so if an error occurred in the following, it does not cause any
          * issues. Let's also, silence the error messages. */
 
+        r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT|CHASE_PARENT, &p, &pfd);
+        if (r < 0)
+                return log_full_errno((searching && r == -ENOENT) ||
+                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(r)) ? LOG_DEBUG : LOG_ERR,
+                                      r, "Failed to open parent directory of \"%s\": %m", path);
+
         if (!relax_checks) {
+                _cleanup_free_ char *f = NULL;
                 struct statfs sfs;
 
-                if (statfs(p, &sfs) < 0)
+                r = path_extract_filename(p, &f);
+                if (r < 0 && r != -EADDRNOTAVAIL)
+                        return log_error_errno(r, "Failed to extract filename of %s: %m", p);
+
+                /* Trigger any automounts so that xstatfsat() operates on the mount instead of the mountpoint
+                 * directory. */
+                r = trigger_automount_at(pfd, f);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to trigger automount at %s: %m", p);
+
+                r = xstatfsat(pfd, strempty(f), &sfs);
+                if (r < 0)
                         /* If we are searching for the mount point, don't generate a log message if we can't find the path */
-                        return log_full_errno((searching && errno == ENOENT) ||
-                                              (unprivileged_mode && errno == EACCES) ? LOG_DEBUG : LOG_ERR, errno,
+                        return log_full_errno((searching && r == -ENOENT) ||
+                                              (unprivileged_mode && r == -EACCES) ? LOG_DEBUG : LOG_ERR, r,
                                               "Failed to check file system type of \"%s\": %m", p);
 
                 if (!F_TYPE_EQUAL(sfs.f_type, MSDOS_SUPER_MAGIC))
@@ -393,7 +387,7 @@ static int verify_esp(
                 relax_checks ||
                 detect_container() > 0;
 
-        r = verify_fsroot_dir(p, searching, unprivileged_mode, relax_checks ? NULL : &devid);
+        r = verify_fsroot_dir(pfd, p, flags, relax_checks ? NULL : &devid);
         if (r < 0)
                 return r;
 
@@ -408,18 +402,22 @@ static int verify_esp(
          * however blkid can't work if we have no privileges to access block devices directly, which is why
          * we use udev in that case. */
         if (unprivileged_mode)
-                r = verify_esp_udev(devid, searching, ret_part, ret_pstart, ret_psize, ret_uuid);
+                r = verify_esp_udev(devid, flags, ret_part, ret_pstart, ret_psize, ret_uuid);
         else
-                r = verify_esp_blkid(devid, searching, ret_part, ret_pstart, ret_psize, ret_uuid);
+                r = verify_esp_blkid(devid, flags, ret_part, ret_pstart, ret_psize, ret_uuid);
         if (r < 0)
                 return r;
 
+        if (ret_path)
+                *ret_path = TAKE_PTR(p);
         if (ret_devid)
                 *ret_devid = devid;
 
         return 0;
 
 finish:
+        if (ret_path)
+                *ret_path = TAKE_PTR(p);
         if (ret_part)
                 *ret_part = 0;
         if (ret_pstart)
@@ -434,10 +432,10 @@ finish:
         return 0;
 }
 
-int find_esp_and_warn(
-                const char *root,
+int find_esp_and_warn_at(
+                int rfd,
                 const char *path,
-                bool unprivileged_mode,
+                int unprivileged_mode,
                 char **ret_path,
                 uint32_t *ret_part,
                 uint64_t *ret_pstart,
@@ -445,9 +443,7 @@ int find_esp_and_warn(
                 sd_id128_t *ret_uuid,
                 dev_t *ret_devid) {
 
-        VerifyESPFlags flags = (unprivileged_mode ? VERIFY_ESP_UNPRIVILEGED_MODE : 0) |
-                               (root ? VERIFY_ESP_RELAX_CHECKS : 0);
-        _cleanup_free_ char *p = NULL;
+        VerifyESPFlags flags;
         int r;
 
         /* This logs about all errors except:
@@ -456,48 +452,47 @@ int find_esp_and_warn(
          *   -EACCESS → when unprivileged_mode is true, and we can't access something
          */
 
-        if (path) {
-                r = chase_symlinks(path, root, CHASE_PREFIX_ROOT, &p, NULL);
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to resolve path %s%s%s: %m",
-                                               path,
-                                               root ? " under directory " : "",
-                                               strempty(root));
+        assert(rfd >= 0 || rfd == AT_FDCWD);
 
-                r = verify_esp(p, ret_part, ret_pstart, ret_psize, ret_uuid, ret_devid, flags);
-                if (r < 0)
-                        return r;
+        if (unprivileged_mode < 0)
+                unprivileged_mode = geteuid() != 0;
+        flags = unprivileged_mode > 0 ? VERIFY_ESP_UNPRIVILEGED_MODE : 0;
 
-                goto found;
-        }
+        r = dir_fd_is_root_or_cwd(rfd);
+        if (r < 0)
+                return log_error_errno(r, "Failed to check if directory file descriptor is root: %m");
+        if (r == 0)
+                flags |= VERIFY_ESP_RELAX_CHECKS;
+
+        if (path)
+                return verify_esp(rfd, path, ret_path, ret_part, ret_pstart, ret_psize, ret_uuid, ret_devid, flags);
 
         path = getenv("SYSTEMD_ESP_PATH");
         if (path) {
+                _cleanup_free_ char *p = NULL;
+                _cleanup_close_ int fd = -EBADF;
                 struct stat st;
 
-                r = chase_symlinks(path, root, CHASE_PREFIX_ROOT, &p, NULL);
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to resolve path %s%s%s: %m",
-                                               path,
-                                               root ? " under directory " : "",
-                                               strempty(root));
-
-                if (!path_is_valid(p) || !path_is_absolute(p))
+                if (!path_is_valid(path) || !path_is_absolute(path))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "$SYSTEMD_ESP_PATH does not refer to absolute path, refusing to use it: %s",
-                                               p);
+                                               "$SYSTEMD_ESP_PATH does not refer to an absolute path, refusing to use it: %s",
+                                               path);
+
+                r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT, &p, &fd);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to resolve path %s: %m", path);
 
                 /* Note: when the user explicitly configured things with an env var we won't validate the
                  * path beyond checking it refers to a directory. After all we want this to be useful for
                  * testing. */
 
-                if (stat(p, &st) < 0)
+                if (fstat(fd, &st) < 0)
                         return log_error_errno(errno, "Failed to stat '%s': %m", p);
                 if (!S_ISDIR(st.st_mode))
                         return log_error_errno(SYNTHETIC_ERRNO(ENOTDIR), "ESP path '%s' is not a directory.", p);
 
+                if (ret_path)
+                        *ret_path = TAKE_PTR(p);
                 if (ret_part)
                         *ret_part = 0;
                 if (ret_pstart)
@@ -509,48 +504,83 @@ int find_esp_and_warn(
                 if (ret_devid)
                         *ret_devid = st.st_dev;
 
-                goto found;
+                return 0;
         }
 
         FOREACH_STRING(dir, "/efi", "/boot", "/boot/efi") {
-                r = chase_symlinks(dir, root, CHASE_PREFIX_ROOT, &p, NULL);
-                if (r == -ENOENT)
-                        continue;
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to resolve path %s%s%s: %m",
-                                               dir,
-                                               root ? " under directory " : "",
-                                               strempty(root));
-
-                r = verify_esp(p, ret_part, ret_pstart, ret_psize, ret_uuid, ret_devid,
+                r = verify_esp(rfd, dir, ret_path, ret_part, ret_pstart, ret_psize, ret_uuid, ret_devid,
                                flags | VERIFY_ESP_SEARCHING);
                 if (r >= 0)
-                        goto found;
+                        return 0;
                 if (!IN_SET(r, -ENOENT, -EADDRNOTAVAIL, -ENOTDIR, -ENOTTY)) /* This one is not it */
                         return r;
-
-                p = mfree(p);
         }
 
         /* No logging here */
         return -ENOKEY;
+}
 
-found:
-        if (ret_path)
-                *ret_path = TAKE_PTR(p);
+int find_esp_and_warn(
+                const char *root,
+                const char *path,
+                int unprivileged_mode,
+                char **ret_path,
+                uint32_t *ret_part,
+                uint64_t *ret_pstart,
+                uint64_t *ret_psize,
+                sd_id128_t *ret_uuid,
+                dev_t *ret_devid) {
+
+        _cleanup_close_ int rfd = -EBADF;
+        _cleanup_free_ char *p = NULL;
+        uint32_t part;
+        uint64_t pstart, psize;
+        sd_id128_t uuid;
+        dev_t devid;
+        int r;
+
+        rfd = open(empty_to_root(root), O_PATH|O_DIRECTORY|O_CLOEXEC);
+        if (rfd < 0)
+                return -errno;
+
+        r = find_esp_and_warn_at(rfd, path, unprivileged_mode,
+                                 ret_path ? &p : NULL,
+                                 ret_part ? &part : NULL,
+                                 ret_pstart ? &pstart : NULL,
+                                 ret_psize ? &psize : NULL,
+                                 ret_uuid ? &uuid : NULL,
+                                 ret_devid ? &devid : NULL);
+        if (r < 0)
+                return r;
+
+        if (ret_path) {
+                r = chaseat_prefix_root(p, root, ret_path);
+                if (r < 0)
+                        return r;
+        }
+        if (ret_part)
+                *ret_part = part;
+        if (ret_pstart)
+                *ret_pstart = pstart;
+        if (ret_psize)
+                *ret_psize = psize;
+        if (ret_uuid)
+                *ret_uuid = uuid;
+        if (ret_devid)
+                *ret_devid = devid;
 
         return 0;
 }
 
 static int verify_xbootldr_blkid(
                 dev_t devid,
-                bool searching,
+                VerifyESPFlags flags,
                 sd_id128_t *ret_uuid) {
 
         sd_id128_t uuid = SD_ID128_NULL;
 
 #if HAVE_BLKID
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING);
         _cleanup_(blkid_free_probep) blkid_probe b = NULL;
         _cleanup_free_ char *node = NULL;
         const char *type, *v;
@@ -629,9 +659,10 @@ static int verify_xbootldr_blkid(
 
 static int verify_xbootldr_udev(
                 dev_t devid,
-                bool searching,
+                VerifyESPFlags flags,
                 sd_id128_t *ret_uuid) {
 
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING);
         _cleanup_(sd_device_unrefp) sd_device *d = NULL;
         sd_id128_t uuid = SD_ID128_NULL;
         const char *node, *type, *v;
@@ -701,23 +732,35 @@ static int verify_xbootldr_udev(
 }
 
 static int verify_xbootldr(
-                const char *p,
-                bool searching,
-                bool unprivileged_mode,
+                int rfd,
+                const char *path,
+                VerifyESPFlags flags,
+                char **ret_path,
                 sd_id128_t *ret_uuid,
                 dev_t *ret_devid) {
 
-        bool relax_checks;
+        _cleanup_free_ char *p = NULL;
+        _cleanup_close_ int pfd = -EBADF;
+        bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING),
+                unprivileged_mode = FLAGS_SET(flags, VERIFY_ESP_UNPRIVILEGED_MODE),
+                relax_checks;
         dev_t devid = 0;
         int r;
 
-        assert(p);
+        assert(rfd >= 0 || rfd == AT_FDCWD);
+        assert(path);
+
+        r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT|CHASE_PARENT, &p, &pfd);
+        if (r < 0)
+                return log_full_errno((searching && r == -ENOENT) ||
+                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(r)) ? LOG_DEBUG : LOG_ERR,
+                                      r, "Failed to open parent directory of \"%s\": %m", path);
 
         relax_checks =
                 getenv_bool("SYSTEMD_RELAX_XBOOTLDR_CHECKS") > 0 ||
                 detect_container() > 0;
 
-        r = verify_fsroot_dir(p, searching, unprivileged_mode, relax_checks ? NULL : &devid);
+        r = verify_fsroot_dir(pfd, p, flags, relax_checks ? NULL : &devid);
         if (r < 0)
                 return r;
 
@@ -725,18 +768,22 @@ static int verify_xbootldr(
                 goto finish;
 
         if (unprivileged_mode)
-                r = verify_xbootldr_udev(devid, searching, ret_uuid);
+                r = verify_xbootldr_udev(devid, flags, ret_uuid);
         else
-                r = verify_xbootldr_blkid(devid, searching, ret_uuid);
+                r = verify_xbootldr_blkid(devid, flags, ret_uuid);
         if (r < 0)
                 return r;
 
+        if (ret_path)
+                *ret_path = TAKE_PTR(p);
         if (ret_devid)
                 *ret_devid = devid;
 
         return 0;
 
 finish:
+        if (ret_path)
+                *ret_path = TAKE_PTR(p);
         if (ret_uuid)
                 *ret_uuid = SD_ID128_NULL;
         if (ret_devid)
@@ -745,85 +792,104 @@ finish:
         return 0;
 }
 
-int find_xbootldr_and_warn(
-                const char *root,
+int find_xbootldr_and_warn_at(
+                int rfd,
                 const char *path,
-                bool unprivileged_mode,
+                int unprivileged_mode,
                 char **ret_path,
                 sd_id128_t *ret_uuid,
                 dev_t *ret_devid) {
 
-        _cleanup_free_ char *p = NULL;
+        VerifyESPFlags flags = 0;
         int r;
 
         /* Similar to find_esp_and_warn(), but finds the XBOOTLDR partition. Returns the same errors. */
 
-        if (path) {
-                r = chase_symlinks(path, root, CHASE_PREFIX_ROOT, &p, NULL);
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to resolve path %s%s%s: %m",
-                                               path,
-                                               root ? " under directory " : "",
-                                               strempty(root));
+        assert(rfd >= 0 || rfd == AT_FDCWD);
 
-                r = verify_xbootldr(p, /* searching= */ false, unprivileged_mode, ret_uuid, ret_devid);
-                if (r < 0)
-                        return r;
+        if (unprivileged_mode < 0)
+                unprivileged_mode = geteuid() != 0;
+        if (unprivileged_mode)
+                flags |= VERIFY_ESP_UNPRIVILEGED_MODE;
 
-                goto found;
-        }
+        if (path)
+                return verify_xbootldr(rfd, path, flags, ret_path, ret_uuid, ret_devid);
 
         path = getenv("SYSTEMD_XBOOTLDR_PATH");
         if (path) {
+                _cleanup_free_ char *p = NULL;
+                _cleanup_close_ int fd = -EBADF;
                 struct stat st;
 
-                r = chase_symlinks(path, root, CHASE_PREFIX_ROOT, &p, NULL);
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to resolve path %s%s%s: %m",
-                                               path,
-                                               root ? " under directory " : "",
-                                               strempty(root));
-
-                if (!path_is_valid(p) || !path_is_absolute(p))
+                if (!path_is_valid(path) || !path_is_absolute(path))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "$SYSTEMD_XBOOTLDR_PATH does not refer to absolute path, refusing to use it: %s",
-                                               p);
+                                               "$SYSTEMD_XBOOTLDR_PATH does not refer to an absolute path, refusing to use it: %s",
+                                               path);
 
-                if (stat(p, &st) < 0)
+                r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT, &p, &fd);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to resolve path %s: %m", p);
+
+                if (fstat(fd, &st) < 0)
                         return log_error_errno(errno, "Failed to stat '%s': %m", p);
                 if (!S_ISDIR(st.st_mode))
                         return log_error_errno(SYNTHETIC_ERRNO(ENOTDIR), "XBOOTLDR path '%s' is not a directory.", p);
 
+                if (ret_path)
+                        *ret_path = TAKE_PTR(p);
                 if (ret_uuid)
                         *ret_uuid = SD_ID128_NULL;
                 if (ret_devid)
                         *ret_devid = st.st_dev;
 
-                goto found;
+                return 0;
         }
 
-        r = chase_symlinks("/boot", root, CHASE_PREFIX_ROOT, &p, NULL);
-        if (r == -ENOENT)
-                return -ENOKEY;
-        if (r < 0)
-                return log_error_errno(r,
-                                       "Failed to resolve path /boot%s%s: %m",
-                                       root ? " under directory " : "",
-                                       strempty(root));
+        r = verify_xbootldr(rfd, "/boot", flags | VERIFY_ESP_SEARCHING, ret_path, ret_uuid, ret_devid);
+        if (r < 0) {
+                if (!IN_SET(r, -ENOENT, -EADDRNOTAVAIL, -ENOTDIR, -ENOTTY)) /* This one is not it */
+                        return r;
 
-        r = verify_xbootldr(p, /* searching= */ true, unprivileged_mode, ret_uuid, ret_devid);
-        if (r >= 0)
-                goto found;
-        if (!IN_SET(r, -ENOENT, -EADDRNOTAVAIL, -ENOTDIR)) /* This one is not it */
+                return -ENOKEY;
+        }
+
+        return 0;
+}
+
+int find_xbootldr_and_warn(
+        const char *root,
+        const char *path,
+        int unprivileged_mode,
+        char **ret_path,
+        sd_id128_t *ret_uuid,
+        dev_t *ret_devid) {
+
+        _cleanup_close_ int rfd = -EBADF;
+        _cleanup_free_ char *p = NULL;
+        sd_id128_t uuid;
+        dev_t devid;
+        int r;
+
+        rfd = open(empty_to_root(root), O_PATH|O_DIRECTORY|O_CLOEXEC);
+        if (rfd < 0)
+                return -errno;
+
+        r = find_xbootldr_and_warn_at(rfd, path, unprivileged_mode,
+                                      ret_path ? &p : NULL,
+                                      ret_uuid ? &uuid : NULL,
+                                      ret_devid ? &devid : NULL);
+        if (r < 0)
                 return r;
 
-        return -ENOKEY;
-
-found:
-        if (ret_path)
-                *ret_path = TAKE_PTR(p);
+        if (ret_path) {
+                r = chaseat_prefix_root(p, root, ret_path);
+                if (r < 0)
+                        return r;
+        }
+        if (ret_uuid)
+                *ret_uuid = uuid;
+        if (ret_devid)
+                *ret_devid = devid;
 
         return 0;
 }

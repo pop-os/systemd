@@ -3,6 +3,8 @@
 
 #include <errno.h>
 
+#include "runtime-scope.h"
+
 typedef enum EmergencyAction {
         EMERGENCY_ACTION_NONE,
         EMERGENCY_ACTION_REBOOT,
@@ -14,6 +16,13 @@ typedef enum EmergencyAction {
         EMERGENCY_ACTION_EXIT,
         _EMERGENCY_ACTION_FIRST_USER_ACTION = EMERGENCY_ACTION_EXIT,
         EMERGENCY_ACTION_EXIT_FORCE,
+        EMERGENCY_ACTION_SOFT_REBOOT,
+        EMERGENCY_ACTION_SOFT_REBOOT_FORCE,
+        EMERGENCY_ACTION_KEXEC,
+        EMERGENCY_ACTION_KEXEC_FORCE,
+        EMERGENCY_ACTION_HALT,
+        EMERGENCY_ACTION_HALT_FORCE,
+        EMERGENCY_ACTION_HALT_IMMEDIATE,
         _EMERGENCY_ACTION_MAX,
         _EMERGENCY_ACTION_INVALID = -EINVAL,
 } EmergencyAction;
@@ -33,4 +42,4 @@ void emergency_action(Manager *m,
 const char* emergency_action_to_string(EmergencyAction i) _const_;
 EmergencyAction emergency_action_from_string(const char *s) _pure_;
 
-int parse_emergency_action(const char *value, bool system, EmergencyAction *ret);
+int parse_emergency_action(const char *value, RuntimeScope runtime_scope, EmergencyAction *ret);

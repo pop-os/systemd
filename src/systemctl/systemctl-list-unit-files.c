@@ -49,9 +49,24 @@ static bool output_show_unit_file(const UnitFileList *u, char **states, char **p
         return true;
 }
 
+static const char* preset_action_to_color(PresetAction action, bool underline) {
+        assert(action >= 0);
+
+        switch (action) {
+        case PRESET_ENABLE:
+                return underline ? ansi_highlight_green_underline() : ansi_highlight_green();
+        case PRESET_DISABLE:
+                return underline ? ansi_highlight_red_underline() : ansi_highlight_red();
+        case PRESET_IGNORE:
+                return underline ? ansi_highlight_yellow_underline() : ansi_highlight_yellow();
+        default:
+                return NULL;
+        }
+}
+
 static int output_unit_file_list(const UnitFileList *units, unsigned c) {
         _cleanup_(table_unrefp) Table *table = NULL;
-        _cleanup_(unit_file_presets_freep) UnitFilePresets presets = {};
+        _cleanup_(unit_file_presets_done) UnitFilePresets presets = {};
         int r;
 
         table = table_new("unit file", "state", "preset");
@@ -98,22 +113,14 @@ static int output_unit_file_list(const UnitFileList *units, unsigned c) {
                         return table_log_add_error(r);
 
                 if (show_preset_for_state(u->state)) {
-                        const char *unit_preset_str, *on_preset_color;
+                        const char *on_preset_color = underline ? on_underline : ansi_normal();
 
-                        r = unit_file_query_preset(arg_scope, arg_root, id, &presets);
-                        if (r < 0) {
-                                unit_preset_str = "n/a";
-                                on_preset_color = underline ? on_underline : ansi_normal();
-                        } else if (r == 0) {
-                                unit_preset_str = "disabled";
-                                on_preset_color = underline ? ansi_highlight_red_underline() : ansi_highlight_red();
-                        } else {
-                                unit_preset_str = "enabled";
-                                on_preset_color = underline ? ansi_highlight_green_underline() : ansi_highlight_green();
-                        }
+                        r = unit_file_query_preset(arg_runtime_scope, arg_root, id, &presets);
+                        if (r >= 0)
+                                on_preset_color = preset_action_to_color(r, underline);
 
                         r = table_add_many(table,
-                                           TABLE_STRING, unit_preset_str,
+                                           TABLE_STRING, strna(preset_action_past_tense_to_string(r)),
                                            TABLE_SET_BOTH_COLORS, strempty(on_preset_color));
                 } else
                         r = table_add_many(table,
@@ -136,6 +143,7 @@ static int output_unit_file_list(const UnitFileList *units, unsigned c) {
 int verb_list_unit_files(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ UnitFileList *units = NULL;
+        _cleanup_hashmap_free_ Hashmap *h = NULL;
         unsigned c = 0;
         const char *state;
         char *path;
@@ -143,40 +151,31 @@ int verb_list_unit_files(int argc, char *argv[], void *userdata) {
         bool fallback = false;
 
         if (install_client_side()) {
-                Hashmap *h;
                 UnitFileList *u;
                 unsigned n_units;
 
-                h = hashmap_new(&string_hash_ops);
+                h = hashmap_new(&unit_file_list_hash_ops_free);
                 if (!h)
                         return log_oom();
 
-                r = unit_file_get_list(arg_scope, arg_root, h, arg_states, strv_skip(argv, 1));
-                if (r < 0) {
-                        unit_file_list_free(h);
+                r = unit_file_get_list(arg_runtime_scope, arg_root, h, arg_states, strv_skip(argv, 1));
+                if (r < 0)
                         return log_error_errno(r, "Failed to get unit file list: %m");
-                }
 
                 n_units = hashmap_size(h);
 
-                units = new(UnitFileList, n_units ?: 1); /* avoid malloc(0) */
-                if (!units) {
-                        unit_file_list_free(h);
+                units = new(UnitFileList, n_units);
+                if (!units)
                         return log_oom();
-                }
 
                 HASHMAP_FOREACH(u, h) {
                         if (!output_show_unit_file(u, NULL, NULL))
                                 continue;
 
                         units[c++] = *u;
-                        free(u);
                 }
 
                 assert(c <= n_units);
-                hashmap_free(h);
-
-                r = 0;
         } else {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -261,10 +260,6 @@ int verb_list_unit_files(int argc, char *argv[], void *userdata) {
         r = output_unit_file_list(units, c);
         if (r < 0)
                 return r;
-
-        if (install_client_side())
-                for (UnitFileList *unit = units; unit < units + c; unit++)
-                        free(unit->path);
 
         if (c == 0)
                 return -ENOENT;

@@ -18,11 +18,13 @@
 #include "apparmor-util.h"
 #include "architecture.h"
 #include "audit-util.h"
+#include "battery-util.h"
 #include "blockdev-util.h"
 #include "cap-list.h"
 #include "cgroup-util.h"
 #include "compare-operator.h"
 #include "condition.h"
+#include "confidential-virt.h"
 #include "cpu-set-util.h"
 #include "creds-util.h"
 #include "efi-api.h"
@@ -56,7 +58,6 @@
 #include "string-util.h"
 #include "tomoyo-util.h"
 #include "tpm2-util.h"
-#include "udev-util.h"
 #include "uid-alloc-range.h"
 #include "user-util.h"
 #include "virt.h"
@@ -106,35 +107,28 @@ Condition* condition_free_list_type(Condition *head, ConditionType type) {
 }
 
 static int condition_test_kernel_command_line(Condition *c, char **env) {
-        _cleanup_free_ char *line = NULL;
+        _cleanup_strv_free_ char **args = NULL;
         int r;
 
         assert(c);
         assert(c->parameter);
         assert(c->type == CONDITION_KERNEL_COMMAND_LINE);
 
-        r = proc_cmdline(&line);
+        r = proc_cmdline_strv(&args);
         if (r < 0)
                 return r;
 
         bool equal = strchr(c->parameter, '=');
 
-        for (const char *p = line;;) {
-                _cleanup_free_ char *word = NULL;
+        STRV_FOREACH(word, args) {
                 bool found;
 
-                r = extract_first_word(&p, &word, NULL, EXTRACT_UNQUOTE|EXTRACT_RELAX);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        break;
-
                 if (equal)
-                        found = streq(word, c->parameter);
+                        found = streq(*word, c->parameter);
                 else {
                         const char *f;
 
-                        f = startswith(word, c->parameter);
+                        f = startswith(*word, c->parameter);
                         found = f && IN_SET(*f, 0, '=');
                 }
 
@@ -696,6 +690,8 @@ static int condition_test_security(Condition *c, char **env) {
                 return is_efi_secure_boot();
         if (streq(c->parameter, "tpm2"))
                 return has_tpm2();
+        if (streq(c->parameter, "cvm"))
+                return detect_confidential_virtualization() > 0;
 
         return false;
 }
@@ -828,22 +824,43 @@ static int condition_test_needs_update(Condition *c, char **env) {
         return timespec_load_nsec(&usr.st_mtim) > timestamp;
 }
 
+static bool in_first_boot(void) {
+        static int first_boot = -1;
+        int r;
+
+        if (first_boot >= 0)
+                return first_boot;
+
+        const char *e = secure_getenv("SYSTEMD_FIRST_BOOT");
+        if (e) {
+                r = parse_boolean(e);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to parse $SYSTEMD_FIRST_BOOT, ignoring: %m");
+                else
+                        return (first_boot = r);
+        }
+
+        r = RET_NERRNO(access("/run/systemd/first-boot", F_OK));
+        if (r < 0 && r != -ENOENT)
+                log_debug_errno(r, "Failed to check if /run/systemd/first-boot exists, assuming no: %m");
+        return r >= 0;
+}
+
 static int condition_test_first_boot(Condition *c, char **env) {
-        int r, q;
+        int r;
 
         assert(c);
         assert(c->parameter);
         assert(c->type == CONDITION_FIRST_BOOT);
 
+        // TODO: Parse c->parameter immediately when reading the config.
+        //       Apply negation when parsing too.
+
         r = parse_boolean(c->parameter);
         if (r < 0)
                 return r;
 
-        q = access("/run/systemd/first-boot", F_OK);
-        if (q < 0 && errno != ENOENT)
-                log_debug_errno(errno, "Failed to check if /run/systemd/first-boot exists, assuming no: %m");
-
-        return (q >= 0) == r;
+        return in_first_boot() == r;
 }
 
 static int condition_test_environment(Condition *c, char **env) {
@@ -1191,8 +1208,6 @@ bool condition_test_list(
                 void *userdata) {
 
         int triggered = -1;
-
-        assert(!!logger == !!to_string);
 
         /* If the condition list is empty, then it is true */
         if (!first)

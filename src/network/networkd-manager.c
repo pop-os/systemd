@@ -16,6 +16,7 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "bus-util.h"
+#include "common-signal.h"
 #include "conf-parser.h"
 #include "constants.h"
 #include "daemon-util.h"
@@ -147,12 +148,10 @@ static int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to request match on Connected signal: %m");
 
-        r = sd_bus_match_signal_async(
+        r = bus_match_signal_async(
                         m->bus,
                         NULL,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
+                        bus_login_mgr,
                         "PrepareForSleep",
                         match_prepare_for_sleep, NULL, m);
         if (r < 0)
@@ -521,6 +520,11 @@ int manager_setup(Manager *m) {
         (void) sd_event_add_signal(m->event, NULL, SIGINT | SD_EVENT_SIGNAL_PROCMASK, signal_terminate_callback, m);
         (void) sd_event_add_signal(m->event, NULL, SIGUSR2 | SD_EVENT_SIGNAL_PROCMASK, signal_restart_callback, m);
         (void) sd_event_add_signal(m->event, NULL, SIGHUP | SD_EVENT_SIGNAL_PROCMASK, signal_reload_callback, m);
+        (void) sd_event_add_signal(m->event, NULL, (SIGRTMIN+18) | SD_EVENT_SIGNAL_PROCMASK, sigrtmin18_handler, NULL);
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
 
         r = sd_event_add_post(m->event, NULL, manager_dirty_handler, m);
         if (r < 0)
@@ -585,6 +589,7 @@ int manager_new(Manager **ret, bool test_mode) {
 
         *m = (Manager) {
                 .keep_configuration = _KEEP_CONFIGURATION_INVALID,
+                .ipv6_privacy_extensions = IPV6_PRIVACY_EXTENSIONS_NO,
                 .test_mode = test_mode,
                 .speed_meter_interval_usec = SPEED_METER_DEFAULT_TIME_INTERVAL,
                 .online_state = _LINK_ONLINE_STATE_INVALID,

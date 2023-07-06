@@ -58,6 +58,7 @@ c+    /dev/char-device-to-[re]create           mode user group -           major
 b     /dev/block-device-to-create              mode user group -           major:minor
 b+    /dev/block-device-to-[re]create          mode user group -           major:minor
 C     /target/to/create                        -    -    -     cleanup-age /source/to/copy
+C+    /target/to/create                        -    -    -     cleanup-age /source/to/copy
 x     /path-or-glob/to/ignore/recursively      -    -    -     cleanup-age -
 X     /path-or-glob/to/ignore                  -    -    -     cleanup-age -
 r     /path-or-glob/to/remove                  -    -    -     -           -
@@ -205,11 +206,11 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
         <varlistentry>
           <term><varname>e</varname></term>
           <listitem><para>Adjust the mode and ownership of existing directories and remove their contents
-          based on age.
-          Lines of this type accept shell-style globs in place of normal path names. Contents of the
-          directories are subject to time-based cleanup if the age argument is specified. If the age argument
-          is <literal>0</literal>, contents will be unconditionally deleted every time
-          <command>systemd-tmpfiles --clean</command> is run.</para>
+          based on age. Lines of this type accept shell-style globs in place of normal path names. Contents
+          of the directories are subject to time-based cleanup if the age argument is specified. If the age
+          argument is <literal>0</literal>, contents will be unconditionally deleted every time
+          <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          <option>--clean</option> is run.</para>
 
           <para>For this entry to be useful, at least one of the mode, user, group, or age arguments must be
           specified, since otherwise this entry has no effect. As an exception, an entry with no effect may
@@ -326,15 +327,14 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
 
         <varlistentry>
           <term><varname>C</varname></term>
-          <listitem><para>Recursively copy a file or directory, if the
-          destination files or directories do not exist yet or the
-          destination directory is empty. Note that this command will not
-          descend into subdirectories if the destination directory already
-          exists and is not empty. Instead, the entire copy operation is
-          skipped. If the argument is omitted, files from the source directory
-          <filename>/usr/share/factory/</filename> with the same name
-          are copied. Does not follow symlinks. Contents of the directories
-          are subject to time-based cleanup if the age argument is specified.
+          <term><varname>C+</varname></term>
+          <listitem><para>Recursively copy a file or directory, if the destination files or directories do
+          not exist yet or the destination directory is empty. Note that this command will not descend into
+          subdirectories if the destination directory already exists and is not empty, unless the action is
+          suffixed with <varname>+</varname>. Instead, the entire copy operation is skipped. If the argument
+          is omitted, files from the source directory <filename>/usr/share/factory/</filename> with the same
+          name are copied. Does not follow symlinks. Contents of the directories are subject to time-based
+          cleanup if the age argument is specified.
           </para></listitem>
         </varlistentry>
 
@@ -444,15 +444,18 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
         <varlistentry>
           <term><varname>a</varname></term>
           <term><varname>a+</varname></term>
-          <listitem><para>Set POSIX ACLs (access control lists), see <citerefentry
-          project='man-pages'><refentrytitle>acl</refentrytitle>
-          <manvolnum>5</manvolnum></citerefentry>. If suffixed with <varname>+</varname>, the specified
-          entries will be added to the existing set. <command>systemd-tmpfiles</command> will automatically
-          add the required base entries for user and group based on the access mode of the file, unless base
-          entries already exist or are explicitly specified. The mask will be added if not specified
-          explicitly or already present. Lines of this type accept shell-style globs in place of normal path
-          names. This can be useful for allowing additional access to certain files. Does not follow
-          symlinks.</para></listitem>
+          <listitem><para>Set POSIX ACLs (access control lists), see
+          <citerefentry project='man-pages'><refentrytitle>acl</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          Additionally, if 'X' is used, the execute bit is set only if the file is a directory or already has
+          execute permission for some user, as mentioned in
+          <citerefentry project='man-pages'><refentrytitle>setfacl</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
+          If suffixed with <varname>+</varname>, the specified entries will be added to the existing set.
+          <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          will automatically add the required base entries for user and group based on the access mode of the
+          file, unless base entries already exist or are explicitly specified. The mask will be added if not
+          specified explicitly or already present. Lines of this type accept shell-style globs in place of
+          normal path names. This can be useful for allowing additional access to certain files. Does not
+          follow symlinks.</para></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -470,8 +473,10 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
 
       <para>If the exclamation mark (<literal>!</literal>) is used, this line is only safe to execute during
       boot, and can break a running system. Lines without the exclamation mark are presumed to be safe to
-      execute at any time, e.g. on package upgrades. <command>systemd-tmpfiles</command> will take lines with
-      an exclamation mark only into consideration, if the <option>--boot</option> option is given.</para>
+      execute at any time, e.g. on package upgrades.
+      <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+      will take lines with an exclamation mark only into consideration, if the <option>--boot</option> option
+      is given.</para>
 
       <para>For example:
       <programlisting># Make sure these are created by default so that nobody else can
@@ -557,10 +562,12 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
 
       <para>The user and group to use for this file or directory. This may either be a numeric ID or a
       user/group name. If omitted or when set to <literal>-</literal>, the user and group of the user who
-      invokes <command>systemd-tmpfiles</command> is used. For <varname>z</varname> and <varname>Z</varname>
-      lines, when omitted or when set to <literal>-</literal>, the file ownership will not be modified. These
-      parameters are ignored for <varname>x</varname>, <varname>r</varname>, <varname>R</varname>,
-      <varname>L</varname>, <varname>t</varname>, and <varname>a</varname> lines.</para>
+      invokes
+      <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry> is
+      used. For <varname>z</varname> and <varname>Z</varname> lines, when omitted or when set to
+      <literal>-</literal>, the file ownership will not be modified. These parameters are ignored for
+      <varname>x</varname>, <varname>r</varname>, <varname>R</varname>, <varname>L</varname>,
+      <varname>t</varname>, and <varname>a</varname> lines.</para>
 
       <para>This field should generally only reference system users/groups, i.e. users/groups that are
       guaranteed to be resolvable during early boot. If this field references users/groups that only become
@@ -647,13 +654,21 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
 # an hour ago in "/tmp/foo/bar", are subject to time-based cleanup.
 d /tmp/foo/bar - - - bmA:1h -</programlisting></para>
 
-      <para>Note that while the aging algorithm is run a 'shared' BSD file lock (see <citerefentry
+      <para>Note that while the aging algorithm is run an exclusive BSD file lock (see <citerefentry
       project='man-pages'><refentrytitle>flock</refentrytitle><manvolnum>2</manvolnum></citerefentry>) is
-      taken on each directory the algorithm descends into (and each directory below that, and so on). If the
-      aging algorithm finds a lock is already taken on some directory, it (and everything below it) is
-      skipped. Applications may use this to temporarily exclude certain directory subtrees from the aging
-      algorithm: the applications can take a BSD file lock themselves, and as long as they keep it aging of
-      the directory and everything below it is disabled.</para>
+      taken on each directory/file the algorithm decides to remove. If the aging algorithm finds a lock (
+      shared or exclusive) is already taken on some directory/file, it (and everything below it) is skipped.
+      Applications may use this to temporarily exclude certain directory subtrees from the aging algorithm:
+      the applications can take a BSD file lock themselves, and as long as they keep it aging of the
+      directory/file and everything below it is disabled.</para>
+
+      <para>This behavior can be used to ensure guaranteed cleanup of files or directories whose lifetime
+      should be aligned with the process that created them by having that process create them in a location
+      monitored by <command>systemd-tmpfiles</command> with an age of <literal>0</literal>, and having the
+      process immediately lock the directory or file before using it. Because the BSD lock is process
+      specific, the file is guaranteed to be unlocked as soon as the process exits, meaning that even if the
+      process crashes, those files and directories will be unlocked and cleaned up by
+      <command>systemd-tmpfiles</command>.</para>
     </refsect2>
 
     <refsect2>
@@ -721,7 +736,7 @@ d /tmp/foo/bar - - - bmA:1h -</programlisting></para>
             <row>
               <entry><literal>%L</literal></entry>
               <entry>System or user log directory</entry>
-              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_CONFIG_HOME</varname> with <filename index="false">/log</filename> appended, and <filename>/var/log</filename> otherwise.</entry>
+              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_STATE_HOME</varname> with <filename index="false">/log</filename> appended, and <filename>/var/log</filename> otherwise.</entry>
             </row>
             <xi:include href="standard-specifiers.xml" xpointer="m"/>
             <xi:include href="standard-specifiers.xml" xpointer="M"/>
@@ -729,7 +744,7 @@ d /tmp/foo/bar - - - bmA:1h -</programlisting></para>
             <row>
               <entry><literal>%S</literal></entry>
               <entry>System or user state directory</entry>
-              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_CONFIG_HOME</varname>, and <filename>/var/lib</filename> otherwise.</entry>
+              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_STATE_HOME</varname>, and <filename>/var/lib</filename> otherwise.</entry>
             </row>
             <row>
               <entry><literal>%t</literal></entry>

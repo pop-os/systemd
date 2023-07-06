@@ -22,7 +22,7 @@ extern usec_t arg_fuzz;
 extern PagerFlags arg_pager_flags;
 extern BusTransport arg_transport;
 extern const char *arg_host;
-extern LookupScope arg_scope;
+extern RuntimeScope arg_runtime_scope;
 extern RecursiveErrors arg_recursive_errors;
 extern bool arg_man;
 extern bool arg_generators;
@@ -38,9 +38,12 @@ extern bool arg_quiet;
 extern char *arg_profile;
 extern bool arg_legend;
 extern bool arg_table;
+extern ImagePolicy *arg_image_policy;
 
 int acquire_bus(sd_bus **bus, bool *use_full_bus);
 
 int bus_get_unit_property_strv(sd_bus *bus, const char *path, const char *property, char ***strv);
 
 void time_parsing_hint(const char *p, bool calendar, bool timestamp, bool timespan);
+
+int dump_fd_reply(sd_bus_message *message);

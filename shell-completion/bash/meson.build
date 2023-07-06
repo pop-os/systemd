@@ -4,7 +4,7 @@ bashcompletiondir = get_option('bashcompletiondir')
 if bashcompletiondir == ''
         bash_completion = dependency('bash-completion', required : false)
         if bash_completion.found()
-                bashcompletiondir = bash_completion.get_pkgconfig_variable('completionsdir')
+                bashcompletiondir = bash_completion.get_variable(pkgconfig : 'completionsdir')
         else
                 bashcompletiondir = datadir / 'bash-completion/completions'
         endif
@@ -31,7 +31,7 @@ items = [['busctl',              ''],
          ['systemd-path',        ''],
          ['systemd-run',         ''],
          ['udevadm',             ''],
-         ['bootctl',             'HAVE_GNU_EFI'],
+         ['bootctl',             'ENABLE_BOOTLOADER'],
          ['coredumpctl',         'ENABLE_COREDUMP'],
          ['homectl',             'ENABLE_HOMED'],
          ['hostnamectl',         'ENABLE_HOSTNAMED'],

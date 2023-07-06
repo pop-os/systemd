@@ -10,6 +10,7 @@
 #include "fileio.h"
 #include "fs-util.h"
 #include "network-internal.h"
+#include "networkd-dhcp-common.h"
 #include "networkd-link.h"
 #include "networkd-manager-bus.h"
 #include "networkd-manager.h"
@@ -464,7 +465,8 @@ static void link_save_domains(Link *link, FILE *f, OrderedSet *static_domains, D
 }
 
 int link_save(Link *link) {
-        const char *admin_state, *oper_state, *carrier_state, *address_state, *ipv4_address_state, *ipv6_address_state;
+        const char *admin_state, *oper_state, *carrier_state, *address_state, *ipv4_address_state, *ipv6_address_state,
+                *captive_portal;
         _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
@@ -603,6 +605,15 @@ int link_save(Link *link) {
                                     link->network->dhcp_use_sip,
                                     SD_DHCP_LEASE_SIP,
                                     NULL, false, NULL, NULL);
+
+                /************************************************************/
+
+                r = link_get_captive_portal(link, &captive_portal);
+                if (r < 0)
+                        return r;
+
+                if (captive_portal)
+                        fprintf(f, "CAPTIVE_PORTAL=%s\n", captive_portal);
 
                 /************************************************************/
 

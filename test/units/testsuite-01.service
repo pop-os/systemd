@@ -6,5 +6,5 @@ Wants=systemd-resolved.service systemd-networkd.service
 
 [Service]
 ExecStartPre=rm -f /failed /testok
-ExecStart=sh -e -x -c 'systemctl --state=failed --no-legend --no-pager >/failed ; systemctl daemon-reload ; echo OK >/testok'
+ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
 Type=oneshot

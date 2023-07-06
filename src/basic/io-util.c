@@ -54,8 +54,7 @@ ssize_t loop_read(int fd, void *buf, size_t nbytes, bool do_poll) {
 
         assert(fd >= 0);
 
-        /* If called with nbytes == 0, let's call read() at least
-         * once, to validate the operation */
+        /* If called with nbytes == 0, let's call read() at least once, to validate the operation */
 
         if (nbytes > (size_t) SSIZE_MAX)
                 return -EINVAL;
@@ -361,4 +360,14 @@ size_t iovw_size(struct iovec_wrapper *iovw) {
                 n += iovw->iovec[i].iov_len;
 
         return n;
+}
+
+void iovec_array_free(struct iovec *iov, size_t n) {
+        if (!iov)
+                return;
+
+        for (size_t i = 0; i < n; i++)
+                free(iov[i].iov_base);
+
+        free(iov);
 }

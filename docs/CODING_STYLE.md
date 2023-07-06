@@ -118,7 +118,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   compatibility. Since we typically want to allow adding new enum values to an
   existing enum type with later API versions, please use the
   `_SD_ENUM_FORCE_S64()` macro in the enum definition, which forces the size of
-  the enum to be signed 64bit wide.
+  the enum to be signed 64-bit wide.
 
 - Empty lines to separate code blocks are a good thing, please add them
   abundantly. However, please stick to one at a time, i.e. multiple empty lines
@@ -547,7 +547,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 ## Types
 
 - Think about the types you use. If a value cannot sensibly be negative, do not
-  use `int`, but use `unsigned`.
+  use `int`, but use `unsigned`.  We prefer `unsigned` form to `unsigned int`.
 
 - Use `char` only for actual characters. Use `uint8_t` or `int8_t` when you
   actually mean a byte-sized signed or unsigned integers. When referring to a
@@ -612,6 +612,15 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   `O_NONBLOCK` has a benefit: it bypasses any mandatory lock that might be in
   effect on the regular file. If in doubt consider turning off `O_NONBLOCK`
   again after opening.
+
+- These days we generally prefer `openat()`-style file APIs, i.e. APIs that
+  accept a combination of file descriptor and path string, and where the path
+  (if not absolute) is considered relative to the specified file
+  descriptor. When implementing library calls in similar style, please make
+  sure to imply `AT_EMPTY_PATH` if an empty or `NULL` path argument is
+  specified (and convert that latter to an empty string). This differs from the
+  underlying kernel semantics, where `AT_EMPTY_PATH` must always be specified
+  explicitly, and `NULL` is not acepted as path.
 
 ## Command Line
 
@@ -741,3 +750,32 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 - Reasonable use of non-ASCII Unicode UTF-8 characters in code comments is
   welcome. If your code comment contains an emoji or two this will certainly
   brighten the day of the occasional reviewer of your code. Really! 😊
+
+## Threading
+
+- We generally avoid using threads, to the level this is possible. In
+  particular in the service manager/PID 1 threads are not OK to use. This is
+  because you cannot mix memory allocation in threads with use of glibc's
+  `clone()` call, or manual `clone()`/`clone3()` system call wrappers. Only
+  glibc's own `fork()` call will properly synchronize the memory allocation
+  locks around the process clone operation. This means that if a process is
+  cloned via `clone()`/`clone3()` and another thread currently has the
+  `malloc()` lock taken, it will be cloned in locked state to the child, and
+  thus can never be acquired in the child, leading to deadlocks. Hence, when
+  using `clone()`/`clone3()` there are only two ways out: never use threads in the
+  parent, or never do memory allocation in the child. For our uses we need
+  `clone()`/`clone3()` and hence decided to avoid threads. Of course, sometimes the
+  concurrency threads allow is beneficial, however we suggest forking off
+  worker *processes* rather than worker *threads* for this purpose, ideally
+  even with an `execve()` to remove the CoW trap situation `fork()` easily
+  triggers.
+
+- A corollary of the above is: never use `clone()` where a `fork()` would do
+  too. Also consider using `posix_spawn()` which combines `clone()` +
+  `execve()` into one and has nice properties since it avoids becoming a CoW
+  trap by using `CLONE_VORK` and `CLONE_VM` together.
+
+- While we avoid forking off threads on our own, writing thread-safe code is a
+  good idea where it might end up running inside of libsystemd.so or
+  similar. Hence, use TLS (i.e. `thread_local`) where appropriate, and maybe
+  the occasional `pthread_once()`.

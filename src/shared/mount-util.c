@@ -12,7 +12,7 @@
 #endif
 
 #include "alloc-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "dissect-image.h"
 #include "exec-util.h"
 #include "extract-word.h"
@@ -22,7 +22,7 @@
 #include "glyph-util.h"
 #include "hashmap.h"
 #include "initrd-util.h"
-#include "label.h"
+#include "label-util.h"
 #include "libmount-util.h"
 #include "missing_mount.h"
 #include "missing_syscall.h"
@@ -34,6 +34,7 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "set.h"
+#include "sort-util.h"
 #include "stat-util.h"
 #include "stdio-util.h"
 #include "string-table.h"
@@ -42,24 +43,28 @@
 #include "tmpfile-util.h"
 #include "user-util.h"
 
-int umount_recursive(const char *prefix, int flags) {
+int umount_recursive_full(const char *prefix, int flags, char **keep) {
+        _cleanup_fclose_ FILE *f = NULL;
         int n = 0, r;
-        bool again;
 
         /* Try to umount everything recursively below a directory. Also, take care of stacked mounts, and
          * keep unmounting them until they are gone. */
 
-        do {
+        f = fopen("/proc/self/mountinfo", "re"); /* Pin the file, in case we unmount /proc/ as part of the logic here */
+        if (!f)
+                return log_debug_errno(errno, "Failed to open /proc/self/mountinfo: %m");
+
+        for (;;) {
                 _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
                 _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
+                bool again = false;
 
-                again = false;
-
-                r = libmount_parse("/proc/self/mountinfo", NULL, &table, &iter);
+                r = libmount_parse("/proc/self/mountinfo", f, &table, &iter);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
                 for (;;) {
+                        bool shall_keep = false;
                         struct libmnt_fs *fs;
                         const char *path;
 
@@ -73,8 +78,21 @@ int umount_recursive(const char *prefix, int flags) {
                         if (!path)
                                 continue;
 
-                        if (!path_startswith(path, prefix))
+                        if (prefix && !path_startswith(path, prefix)) {
+                                log_trace("Not unmounting %s, outside of prefix: %s", path, prefix);
                                 continue;
+                        }
+
+                        STRV_FOREACH(k, keep)
+                                /* Match against anything in the path to the dirs to keep, or below the dirs to keep */
+                                if (path_startswith(path, *k) || path_startswith(*k, path)) {
+                                        shall_keep = true;
+                                        break;
+                                }
+                        if (shall_keep) {
+                                log_debug("Not unmounting %s, referenced by keep list.", path);
+                                continue;
+                        }
 
                         if (umount2(path, flags | UMOUNT_NOFOLLOW) < 0) {
                                 log_debug_errno(errno, "Failed to umount %s, ignoring: %m", path);
@@ -88,7 +106,12 @@ int umount_recursive(const char *prefix, int flags) {
 
                         break;
                 }
-        } while (again);
+
+                if (!again)
+                        break;
+
+                rewind(f);
+        }
 
         return n;
 }
@@ -243,7 +266,7 @@ int bind_remount_recursive_with_mountinfo(
 
                                         if (path_startswith(path, *i)) {
                                                 deny_listed = true;
-                                                log_debug("Not remounting %s deny-listed by %s, called for %s", path, *i, prefix);
+                                                log_trace("Not remounting %s deny-listed by %s, called for %s", path, *i, prefix);
                                                 break;
                                         }
                                 }
@@ -430,50 +453,46 @@ int bind_remount_one_with_mountinfo(
         return 0;
 }
 
-static int mount_switch_root_pivot(const char *path, int fd_newroot) {
-        _cleanup_close_ int fd_oldroot = -EBADF;
+static int mount_switch_root_pivot(int fd_newroot, const char *path) {
+        assert(fd_newroot >= 0);
+        assert(path);
 
-        fd_oldroot = open("/", O_PATH|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
-        if (fd_oldroot < 0)
-                return log_debug_errno(errno, "Failed to open old rootfs");
+        /* Change into the new rootfs. */
+        if (fchdir(fd_newroot) < 0)
+                return log_debug_errno(errno, "Failed to chdir into new rootfs '%s': %m", path);
 
         /* Let the kernel tuck the new root under the old one. */
         if (pivot_root(".", ".") < 0)
                 return log_debug_errno(errno, "Failed to pivot root to new rootfs '%s': %m", path);
 
-        /* At this point the new root is tucked under the old root. If we want
-         * to unmount it we cannot be fchdir()ed into it. So escape back to the
-         * old root. */
-        if (fchdir(fd_oldroot) < 0)
-                return log_debug_errno(errno, "Failed to change back to old rootfs: %m");
-
-        /* Note, usually we should set mount propagation up here but we'll
-         * assume that the caller has already done that. */
-
-        /* Get rid of the old root and reveal our brand new root. */
+        /* Get rid of the old root and reveal our brand new root. (This will always operate on the top-most
+         * mount on our cwd, regardless what our current directory actually points to.) */
         if (umount2(".", MNT_DETACH) < 0)
                 return log_debug_errno(errno, "Failed to unmount old rootfs: %m");
 
-        if (fchdir(fd_newroot) < 0)
-                return log_debug_errno(errno, "Failed to switch to new rootfs '%s': %m", path);
-
         return 0;
 }
 
-static int mount_switch_root_move(const char *path) {
-        if (mount(path, "/", NULL, MS_MOVE, NULL) < 0)
+static int mount_switch_root_move(int fd_newroot, const char *path) {
+        assert(fd_newroot >= 0);
+        assert(path);
+
+        /* Change into the new rootfs. */
+        if (fchdir(fd_newroot) < 0)
+                return log_debug_errno(errno, "Failed to chdir into new rootfs '%s': %m", path);
+
+        /* Move the new root fs */
+        if (mount(".", "/", NULL, MS_MOVE, NULL) < 0)
                 return log_debug_errno(errno, "Failed to move new rootfs '%s': %m", path);
 
+        /* Also change root dir */
         if (chroot(".") < 0)
                 return log_debug_errno(errno, "Failed to chroot to new rootfs '%s': %m", path);
 
-        if (chdir("/"))
-                return log_debug_errno(errno, "Failed to chdir to new rootfs '%s': %m", path);
-
         return 0;
 }
 
-int mount_switch_root(const char *path, unsigned long mount_propagation_flag) {
+int mount_switch_root_full(const char *path, unsigned long mount_propagation_flag, bool force_ms_move) {
         _cleanup_close_ int fd_newroot = -EBADF;
         int r;
 
@@ -484,19 +503,20 @@ int mount_switch_root(const char *path, unsigned long mount_propagation_flag) {
         if (fd_newroot < 0)
                 return log_debug_errno(errno, "Failed to open new rootfs '%s': %m", path);
 
-        /* Change into the new rootfs. */
-        if (fchdir(fd_newroot) < 0)
-                return log_debug_errno(errno, "Failed to change into new rootfs '%s': %m", path);
-
-        r = mount_switch_root_pivot(path, fd_newroot);
-        if (r < 0) {
-                /* Failed to pivot_root() fallback to MS_MOVE. For example, this may happen if the
-                 * rootfs is an initramfs in which case pivot_root() isn't supported. */
-                log_debug_errno(r, "Failed to pivot into new rootfs '%s': %m", path);
-                r = mount_switch_root_move(path);
+        if (!force_ms_move) {
+                r = mount_switch_root_pivot(fd_newroot, path);
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to pivot into new rootfs '%s', will try to use MS_MOVE instead: %m", path);
+                        force_ms_move = true;
+                }
         }
-        if (r < 0)
-                return log_debug_errno(r, "Failed to switch to new rootfs '%s': %m", path);
+        if (force_ms_move) {
+                /* Failed to pivot_root() fallback to MS_MOVE. For example, this may happen if the rootfs is
+                 * an initramfs in which case pivot_root() isn't supported. */
+                r = mount_switch_root_move(fd_newroot, path);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to switch to new rootfs '%s' with MS_MOVE: %m", path);
+        }
 
         /* Finally, let's establish the requested propagation flags. */
         if (mount_propagation_flag == 0)
@@ -547,42 +567,21 @@ int mode_to_inaccessible_node(
          * we operate in system context and $XDG_RUNTIME_DIR if we operate in user context. */
 
         _cleanup_free_ char *d = NULL;
-        const char *node = NULL;
+        const char *node;
 
         assert(ret);
 
         if (!runtime_dir)
                 runtime_dir = "/run";
 
-        switch (mode & S_IFMT) {
-                case S_IFREG:
-                        node = "/systemd/inaccessible/reg";
-                        break;
+        if (S_ISLNK(mode))
+                return -EINVAL;
 
-                case S_IFDIR:
-                        node = "/systemd/inaccessible/dir";
-                        break;
-
-                case S_IFCHR:
-                        node = "/systemd/inaccessible/chr";
-                        break;
-
-                case S_IFBLK:
-                        node = "/systemd/inaccessible/blk";
-                        break;
-
-                case S_IFIFO:
-                        node = "/systemd/inaccessible/fifo";
-                        break;
-
-                case S_IFSOCK:
-                        node = "/systemd/inaccessible/sock";
-                        break;
-        }
+        node = inode_type_to_string(mode);
         if (!node)
                 return -EINVAL;
 
-        d = path_join(runtime_dir, node);
+        d = path_join(runtime_dir, "systemd/inaccessible", node);
         if (!d)
                 return -ENOMEM;
 
@@ -685,13 +684,16 @@ int mount_verbose_full(
 
         (void) mount_flags_to_string(f, &fl);
 
-        if ((f & MS_REMOUNT) && !what && !type)
-                log_debug("Remounting %s (%s \"%s\")...",
+        if (FLAGS_SET(f, MS_REMOUNT|MS_BIND))
+                log_debug("Changing mount flags %s (%s \"%s\")...",
                           where, strnull(fl), strempty(o));
-        else if (!what && !type)
-                log_debug("Mounting %s (%s \"%s\")...",
+        else if (f & MS_REMOUNT)
+                log_debug("Remounting superblock %s (%s \"%s\")...",
                           where, strnull(fl), strempty(o));
-        else if ((f & MS_BIND) && !type)
+        else if (f & (MS_SHARED|MS_PRIVATE|MS_SLAVE|MS_UNBINDABLE))
+                log_debug("Changing mount propagation %s (%s \"%s\")",
+                          where, strnull(fl), strempty(o));
+        else if (f & MS_BIND)
                 log_debug("Bind-mounting %s on %s (%s \"%s\")...",
                           what, where, strnull(fl), strempty(o));
         else if (f & MS_MOVE)
@@ -804,6 +806,7 @@ static int mount_in_namespace(
                 bool read_only,
                 bool make_file_or_directory,
                 const MountOptions *options,
+                const ImagePolicy *image_policy,
                 bool is_image) {
 
         _cleanup_close_pair_ int errno_pipe_fd[2] = PIPE_EBADF;
@@ -843,7 +846,7 @@ static int mount_in_namespace(
         if (r < 0)
                 return log_debug_errno(r == -ENOENT ? SYNTHETIC_ERRNO(EOPNOTSUPP) : r, "Target does not allow propagation of mount points");
 
-        r = chase_symlinks(src, NULL, 0, &chased_src_path, &chased_src_fd);
+        r = chase(src, NULL, 0, &chased_src_path, &chased_src_fd);
         if (r < 0)
                 return log_debug_errno(r, "Failed to resolve source path of %s: %m", src);
         log_debug("Chased source path of %s to %s", src, chased_src_path);
@@ -891,7 +894,7 @@ static int mount_in_namespace(
         mount_tmp_created = true;
 
         if (is_image)
-                r = verity_dissect_and_mount(chased_src_fd, chased_src_path, mount_tmp, options, NULL, NULL, NULL, NULL);
+                r = verity_dissect_and_mount(chased_src_fd, chased_src_path, mount_tmp, options, image_policy, NULL, NULL, NULL, NULL);
         else
                 r = mount_follow_verbose(LOG_DEBUG, FORMAT_PROC_FD_PATH(chased_src_fd), mount_tmp, NULL, MS_BIND, NULL);
         if (r < 0)
@@ -1041,7 +1044,7 @@ int bind_mount_in_namespace(
                 bool read_only,
                 bool make_file_or_directory) {
 
-        return mount_in_namespace(target, propagate_path, incoming_path, src, dest, read_only, make_file_or_directory, NULL, false);
+        return mount_in_namespace(target, propagate_path, incoming_path, src, dest, read_only, make_file_or_directory, /* options= */ NULL, /* image_policy= */ NULL, /* is_image= */ false);
 }
 
 int mount_image_in_namespace(
@@ -1052,9 +1055,10 @@ int mount_image_in_namespace(
                 const char *dest,
                 bool read_only,
                 bool make_file_or_directory,
-                const MountOptions *options) {
+                const MountOptions *options,
+                const ImagePolicy *image_policy) {
 
-        return mount_in_namespace(target, propagate_path, incoming_path, src, dest, read_only, make_file_or_directory, options, true);
+        return mount_in_namespace(target, propagate_path, incoming_path, src, dest, read_only, make_file_or_directory, options, image_policy, /* is_image=*/ true);
 }
 
 int make_mount_point(const char *path) {
@@ -1077,12 +1081,33 @@ int make_mount_point(const char *path) {
         return 1;
 }
 
-static int make_userns(uid_t uid_shift, uid_t uid_range, uid_t owner, RemountIdmapping idmapping) {
+int fd_make_mount_point(int fd) {
+        int r;
+
+        assert(fd >= 0);
+
+        r = fd_is_mount_point(fd, NULL, 0);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine whether file descriptor is a mount point: %m");
+        if (r > 0)
+                return 0;
+
+        r = mount_follow_verbose(LOG_DEBUG, FORMAT_PROC_FD_PATH(fd), FORMAT_PROC_FD_PATH(fd), NULL, MS_BIND|MS_REC, NULL);
+        if (r < 0)
+                return r;
+
+        return 1;
+}
+
+int make_userns(uid_t uid_shift, uid_t uid_range, uid_t owner, RemountIdmapping idmapping) {
         _cleanup_close_ int userns_fd = -EBADF;
         _cleanup_free_ char *line = NULL;
 
         /* Allocates a userns file descriptor with the mapping we need. For this we'll fork off a child
          * process whose only purpose is to give us a new user namespace. It's killed when we got it. */
+
+        if (!userns_shift_range_valid(uid_shift, uid_range))
+                return -EINVAL;
 
         if (IN_SET(idmapping, REMOUNT_IDMAPPING_NONE, REMOUNT_IDMAPPING_HOST_ROOT)) {
                 if (asprintf(&line, UID_FMT " " UID_FMT " " UID_FMT "\n", 0u, uid_shift, uid_range) < 0)
@@ -1122,30 +1147,20 @@ static int make_userns(uid_t uid_shift, uid_t uid_range, uid_t owner, RemountIdm
         return TAKE_FD(userns_fd);
 }
 
-int remount_idmap(
+int remount_idmap_fd(
                 const char *p,
-                uid_t uid_shift,
-                uid_t uid_range,
-                uid_t owner,
-                RemountIdmapping idmapping) {
+                int userns_fd) {
 
-        _cleanup_close_ int mount_fd = -EBADF, userns_fd = -EBADF;
+        _cleanup_close_ int mount_fd = -EBADF;
         int r;
 
         assert(p);
-
-        if (!userns_shift_range_valid(uid_shift, uid_range))
-                return -EINVAL;
+        assert(userns_fd >= 0);
 
         /* Clone the mount point */
         mount_fd = open_tree(-1, p, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
         if (mount_fd < 0)
                 return log_debug_errno(errno, "Failed to open tree of mounted filesystem '%s': %m", p);
-
-        /* Create a user namespace mapping */
-        userns_fd = make_userns(uid_shift, uid_range, owner, idmapping);
-        if (userns_fd < 0)
-                return userns_fd;
 
         /* Set the user namespace mapping attribute on the cloned mount point */
         if (mount_setattr(mount_fd, "", AT_EMPTY_PATH | AT_RECURSIVE,
@@ -1165,6 +1180,258 @@ int remount_idmap(
                 return log_debug_errno(errno, "Failed to attach UID mapped mount to '%s': %m", p);
 
         return 0;
+}
+
+int remount_idmap(const char *p, uid_t uid_shift, uid_t uid_range, uid_t owner, RemountIdmapping idmapping) {
+        _cleanup_close_ int userns_fd = -EBADF;
+
+        userns_fd = make_userns(uid_shift, uid_range, owner, idmapping);
+        if (userns_fd < 0)
+                return userns_fd;
+
+        return remount_idmap_fd(p, userns_fd);
+}
+
+typedef struct SubMount {
+        char *path;
+        int mount_fd;
+} SubMount;
+
+static void sub_mount_clear(SubMount *s) {
+        assert(s);
+
+        s->path = mfree(s->path);
+        s->mount_fd = safe_close(s->mount_fd);
+}
+
+static void sub_mount_array_free(SubMount *s, size_t n) {
+        assert(s || n == 0);
+
+        for (size_t i = 0; i < n; i++)
+                sub_mount_clear(s + i);
+
+        free(s);
+}
+
+static int sub_mount_compare(const SubMount *a, const SubMount *b) {
+        assert(a);
+        assert(b);
+        assert(a->path);
+        assert(b->path);
+
+        return path_compare(a->path, b->path);
+}
+
+static void sub_mount_drop(SubMount *s, size_t n) {
+        assert(s || n == 0);
+
+        for (size_t m = 0, i = 1; i < n; i++) {
+                if (path_startswith(s[i].path, s[m].path))
+                        sub_mount_clear(s + i);
+                else
+                        m = i;
+        }
+}
+
+static int get_sub_mounts(
+                const char *prefix,
+                bool clone_tree,
+                SubMount **ret_mounts,
+                size_t *ret_n_mounts) {
+        _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
+        _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
+        SubMount *mounts = NULL;
+        size_t n = 0;
+        int r;
+
+        CLEANUP_ARRAY(mounts, n, sub_mount_array_free);
+
+        assert(prefix);
+        assert(ret_mounts);
+        assert(ret_n_mounts);
+
+        r = libmount_parse("/proc/self/mountinfo", NULL, &table, &iter);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
+
+        for (;;) {
+                _cleanup_close_ int mount_fd = -EBADF;
+                _cleanup_free_ char *p = NULL;
+                struct libmnt_fs *fs;
+                const char *path;
+                int id1, id2;
+
+                r = mnt_table_next_fs(table, iter, &fs);
+                if (r == 1)
+                        break; /* EOF */
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to get next entry from /proc/self/mountinfo: %m");
+
+                path = mnt_fs_get_target(fs);
+                if (!path)
+                        continue;
+
+                if (isempty(path_startswith(path, prefix)))
+                        continue;
+
+                id1 = mnt_fs_get_id(fs);
+                r = path_get_mnt_id(path, &id2);
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to get mount ID of '%s', ignoring: %m", path);
+                        continue;
+                }
+                if (id1 != id2) {
+                        /* The path may be hidden by another over-mount or already remounted. */
+                        log_debug("The mount IDs of '%s' obtained by libmount and path_get_mnt_id() are different (%i vs %i), ignoring.",
+                                  path, id1, id2);
+                        continue;
+                }
+
+                if (clone_tree)
+                        mount_fd = open_tree(AT_FDCWD, path, OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_RECURSIVE);
+                else
+                        mount_fd = open(path, O_CLOEXEC|O_PATH);
+                if (mount_fd < 0) {
+                        if (errno == ENOENT) /* The path may be hidden by another over-mount or already unmounted. */
+                                continue;
+
+                        return log_debug_errno(errno, "Failed to open subtree of mounted filesystem '%s': %m", path);
+                }
+
+                p = strdup(path);
+                if (!p)
+                        return log_oom_debug();
+
+                if (!GREEDY_REALLOC(mounts, n + 1))
+                        return log_oom_debug();
+
+                mounts[n++] = (SubMount) {
+                        .path = TAKE_PTR(p),
+                        .mount_fd = TAKE_FD(mount_fd),
+                };
+        }
+
+        typesafe_qsort(mounts, n, sub_mount_compare);
+        sub_mount_drop(mounts, n);
+
+        *ret_mounts = TAKE_PTR(mounts);
+        *ret_n_mounts = n;
+        return 0;
+}
+
+static int move_sub_mounts(SubMount *mounts, size_t n) {
+        assert(mounts || n == 0);
+
+        for (size_t i = 0; i < n; i++) {
+                if (!mounts[i].path || mounts[i].mount_fd < 0)
+                        continue;
+
+                (void) mkdir_p_label(mounts[i].path, 0755);
+
+                if (move_mount(mounts[i].mount_fd, "", AT_FDCWD, mounts[i].path, MOVE_MOUNT_F_EMPTY_PATH) < 0)
+                        return log_debug_errno(errno, "Failed to move mount_fd to '%s': %m", mounts[i].path);
+        }
+
+        return 0;
+}
+
+int remount_and_move_sub_mounts(
+                const char *what,
+                const char *where,
+                const char *type,
+                unsigned long flags,
+                const char *options) {
+
+        SubMount *mounts = NULL;
+        size_t n = 0;
+        int r;
+
+        CLEANUP_ARRAY(mounts, n, sub_mount_array_free);
+
+        assert(where);
+
+        /* This is useful when creating a new network namespace. Unlike procfs, we need to remount sysfs,
+         * otherwise properties of the network interfaces in the main network namespace are still accessible
+         * through the old sysfs, e.g. /sys/class/net/eth0. All sub-mounts previously mounted on the sysfs
+         * are moved onto the new sysfs mount. */
+
+        r = path_is_mount_point(where, NULL, 0);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine if '%s' is a mountpoint: %m", where);
+        if (r == 0)
+                /* Shortcut. Simply mount the requested filesystem. */
+                return mount_nofollow_verbose(LOG_DEBUG, what, where, type, flags, options);
+
+        /* Get the list of sub-mounts and duplicate them. */
+        r = get_sub_mounts(where, /* clone_tree= */ true, &mounts, &n);
+        if (r < 0)
+                return r;
+
+        /* Then, remount the mount and its sub-mounts. */
+        (void) umount_recursive(where, 0);
+
+        /* Remount the target filesystem. */
+        r = mount_nofollow_verbose(LOG_DEBUG, what, where, type, flags, options);
+        if (r < 0)
+                return r;
+
+        /* Finally, move the all sub-mounts on the new target mount point. */
+        return move_sub_mounts(mounts, n);
+}
+
+int bind_mount_submounts(
+                const char *source,
+                const char *target) {
+
+        SubMount *mounts = NULL;
+        size_t n = 0;
+        int ret = 0, r;
+
+        /* Bind mounts all child mounts of 'source' to 'target'. Useful when setting up a new procfs instance
+         * with new mount options to copy the original submounts over. */
+
+        assert(source);
+        assert(target);
+
+        CLEANUP_ARRAY(mounts, n, sub_mount_array_free);
+
+        r = get_sub_mounts(source, /* clone_tree= */ false, &mounts, &n);
+        if (r < 0)
+                return r;
+
+        FOREACH_ARRAY(m, mounts, n) {
+                _cleanup_free_ char *t = NULL;
+                const char *suffix;
+
+                if (isempty(m->path))
+                        continue;
+
+                assert_se(suffix = path_startswith(m->path, source));
+
+                t = path_join(target, suffix);
+                if (!t)
+                        return -ENOMEM;
+
+                r = path_is_mount_point(t, NULL, 0);
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to detect if '%s' already is a mount point, ignoring: %m", t);
+                        continue;
+                }
+                if (r > 0) {
+                        log_debug("Not bind mounting '%s' from '%s' to '%s', since there's already a mountpoint.", suffix, source, target);
+                        continue;
+                }
+
+                r = mount_follow_verbose(LOG_DEBUG, FORMAT_PROC_FD_PATH(m->mount_fd), t, NULL, MS_BIND|MS_REC, NULL);
+                if (r < 0 && ret == 0)
+                        ret = r;
+        }
+
+        return ret;
+}
+
+int remount_sysfs(const char *where) {
+        return remount_and_move_sub_mounts("sysfs", where, "sysfs", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
 }
 
 int make_mount_point_inode_from_stat(const struct stat *st, const char *dest, mode_t mode) {
@@ -1187,4 +1454,77 @@ int make_mount_point_inode_from_path(const char *source, const char *dest, mode_
                 return -errno;
 
         return make_mount_point_inode_from_stat(&st, dest, mode);
+}
+
+int trigger_automount_at(int dir_fd, const char *path) {
+        _cleanup_free_ char *nested = NULL;
+
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+
+        nested = path_join(path, "a");
+        if (!nested)
+                return -ENOMEM;
+
+        (void) faccessat(dir_fd, nested, F_OK, 0);
+
+        return 0;
+}
+
+unsigned long credentials_fs_mount_flags(bool ro) {
+        /* A tight set of mount flags for credentials mounts */
+        return MS_NODEV|MS_NOEXEC|MS_NOSUID|ms_nosymfollow_supported()|(ro ? MS_RDONLY : 0);
+}
+
+int mount_credentials_fs(const char *path, size_t size, bool ro) {
+        _cleanup_free_ char *opts = NULL;
+        int r, noswap_supported;
+
+        /* Mounts a file system we can place credentials in, i.e. with tight access modes right from the
+         * beginning, and ideally swapping turned off. In order of preference:
+         *
+         *      1. tmpfs if it supports "noswap"
+         *      2. ramfs
+         *      3. tmpfs if it doesn't support "noswap"
+         */
+
+        noswap_supported = mount_option_supported("tmpfs", "noswap", NULL); /* Check explicitly to avoid kmsg noise */
+        if (noswap_supported > 0) {
+                _cleanup_free_ char *noswap_opts = NULL;
+
+                if (asprintf(&noswap_opts, "mode=0700,nr_inodes=1024,size=%zu,noswap", size) < 0)
+                        return -ENOMEM;
+
+                /* Best case: tmpfs with noswap (needs kernel >= 6.3) */
+
+                r = mount_nofollow_verbose(
+                                LOG_DEBUG,
+                                "tmpfs",
+                                path,
+                                "tmpfs",
+                                credentials_fs_mount_flags(ro),
+                                noswap_opts);
+                if (r >= 0)
+                        return r;
+        }
+
+        r = mount_nofollow_verbose(
+                        LOG_DEBUG,
+                        "ramfs",
+                        path,
+                        "ramfs",
+                        credentials_fs_mount_flags(ro),
+                        "mode=0700");
+        if (r >= 0)
+                return r;
+
+        if (asprintf(&opts, "mode=0700,nr_inodes=1024,size=%zu", size) < 0)
+                return -ENOMEM;
+
+        return mount_nofollow_verbose(
+                        LOG_DEBUG,
+                        "tmpfs",
+                        path,
+                        "tmpfs",
+                        credentials_fs_mount_flags(ro),
+                        opts);
 }

@@ -215,7 +215,6 @@ static int block_get_size_by_path(const char *path, uint64_t *ret) {
 static int run_fsck(const char *node, const char *fstype) {
         int r, exit_status;
         pid_t fsck_pid;
-        _cleanup_free_ char *fsck_path = NULL;
 
         assert(node);
         assert(fstype);
@@ -228,14 +227,6 @@ static int run_fsck(const char *node, const char *fstype) {
                 return 0;
         }
 
-        r = find_executable("fsck", &fsck_path);
-        /* We proceed anyway if we can't determine whether the fsck
-         * binary for some specific fstype exists,
-         * but the lack of the main fsck binary should be considered
-         * an error. */
-        if (r < 0)
-                return log_error_errno(r, "Cannot find fsck binary: %m");
-
         r = safe_fork("(fsck)",
                       FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
                       &fsck_pid);
@@ -243,7 +234,7 @@ static int run_fsck(const char *node, const char *fstype) {
                 return r;
         if (r == 0) {
                 /* Child */
-                execl(fsck_path, fsck_path, "-aTl", node, NULL);
+                execlp("fsck", "fsck", "-aTl", node, NULL);
                 log_open();
                 log_error_errno(errno, "Failed to execute fsck: %m");
                 _exit(FSCK_OPERATIONAL_ERROR);
@@ -2128,25 +2119,6 @@ static int home_truncate(
         return !trunc; /* Return == 0 if we managed to truncate, > 0 if we managed to allocate */
 }
 
-static int mkfs_options_for_fstype(const char *fstype, char ***ret) {
-        _cleanup_(strv_freep) char **l = NULL;
-        const char *e;
-        char *n;
-
-        assert(fstype);
-
-        n = strjoina("SYSTEMD_HOME_MKFS_OPTIONS_", fstype);
-        e = getenv(ascii_strupper(n));
-        if (e) {
-                l = strv_split(e, NULL);
-                if (!l)
-                        return -ENOMEM;
-        }
-
-        *ret = TAKE_PTR(l);
-        return 0;
-}
-
 int home_create_luks(
                 UserRecord *h,
                 HomeSetup *setup,
@@ -2236,7 +2208,7 @@ int home_create_luks(
                 uint64_t block_device_size;
                 struct stat st;
 
-                /* Let's place the home directory on a real device, i.e. an USB stick or such */
+                /* Let's place the home directory on a real device, i.e. a USB stick or such */
 
                 setup->image_fd = open_image_file(h, ip, &st);
                 if (setup->image_fd < 0)
@@ -2309,7 +2281,7 @@ int home_create_luks(
 
                 setup->temporary_image_path = TAKE_PTR(t);
 
-                r = chattr_full(t, setup->image_fd, FS_NOCOW_FL|FS_NOCOMP_FL, FS_NOCOW_FL|FS_NOCOMP_FL, NULL, NULL, CHATTR_FALLBACK_BITWISE);
+                r = chattr_full(setup->image_fd, NULL, FS_NOCOW_FL|FS_NOCOMP_FL, FS_NOCOW_FL|FS_NOCOMP_FL, NULL, NULL, CHATTR_FALLBACK_BITWISE);
                 if (r < 0 && r != -ENOANO) /* ENOANO → some bits didn't work; which we skip logging about because chattr_full() already debug logs about those flags */
                         log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) ? LOG_DEBUG : LOG_WARNING, r,
                                        "Failed to set file attributes on %s, ignoring: %m", setup->temporary_image_path);
@@ -2380,10 +2352,19 @@ int home_create_luks(
 
         log_info("Setting up LUKS device %s completed.", setup->dm_node);
 
-        r = mkfs_options_for_fstype(fstype, &extra_mkfs_options);
+        r = mkfs_options_from_env("HOME", fstype, &extra_mkfs_options);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine mkfs command line options for '%s': %m", fstype);
-        r = make_filesystem(setup->dm_node, fstype, user_record_user_name_and_realm(h), NULL, fs_uuid, user_record_luks_discard(h), 0, extra_mkfs_options);
+
+        r = make_filesystem(setup->dm_node,
+                            fstype,
+                            user_record_user_name_and_realm(h),
+                            /* root = */ NULL,
+                            fs_uuid,
+                            user_record_luks_discard(h),
+                            /* quiet = */ true,
+                            /* sector_size = */ 0,
+                            extra_mkfs_options);
         if (r < 0)
                 return r;
 
@@ -2768,6 +2749,43 @@ static int prepare_resize_partition(
         return 1;
 }
 
+static int get_maximum_partition_size(
+                int fd,
+                struct fdisk_partition *p,
+                uint64_t *ret_maximum_partition_size) {
+
+        _cleanup_(fdisk_unref_contextp) struct fdisk_context *c = NULL;
+        uint64_t start_lba, start, last_lba, end;
+        int r;
+
+        assert(fd >= 0);
+        assert(p);
+        assert(ret_maximum_partition_size);
+
+        c = fdisk_new_context();
+        if (!c)
+                return log_oom();
+
+        r = fdisk_assign_device(c, FORMAT_PROC_FD_PATH(fd), 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to open device: %m");
+
+        start_lba = fdisk_partition_get_start(p);
+        assert(start_lba <= UINT64_MAX/512);
+        start = start_lba * 512;
+
+        last_lba = fdisk_get_last_lba(c); /* One sector before boundary where usable space ends */
+        assert(last_lba < UINT64_MAX/512);
+        end = DISK_SIZE_ROUND_DOWN((last_lba + 1) * 512); /* Round down to multiple of 4K */
+
+        if (start > end)
+                return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Last LBA is before partition start.");
+
+        *ret_maximum_partition_size = DISK_SIZE_ROUND_DOWN(end - start);
+
+        return 1;
+}
+
 static int ask_cb(struct fdisk_context *c, struct fdisk_ask *ask, void *userdata) {
         char *result;
 
@@ -2989,8 +3007,8 @@ static int resize_fs_loop(
                                 return r;
 
                         /* For now, when we fail to shrink an ext4 image we'll not try again via the
-                         * bisection logic. We might add that later, but give this involves shelling out
-                         * multiple programs it's a bit too cumbersome to my taste. */
+                         * bisection logic. We might add that later, but given this involves shelling out
+                         * multiple programs, it's a bit too cumbersome for my taste. */
 
                         worked = true;
                         current_fs_size = try_fs_size;
@@ -3233,6 +3251,17 @@ int home_resize_luks(
             setup->partition_offset + setup->partition_size > old_image_size)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Old partition doesn't fit in backing storage, refusing.");
 
+        /* Get target partition information in here for new_partition_size calculation */
+        r = prepare_resize_partition(
+                        image_fd,
+                        setup->partition_offset,
+                        setup->partition_size,
+                        &disk_uuid,
+                        &table,
+                        &partition);
+        if (r < 0)
+                return r;
+
         if (S_ISREG(st.st_mode)) {
                 uint64_t partition_table_extra, largest_size;
 
@@ -3255,9 +3284,13 @@ int home_resize_luks(
                         new_partition_size = 0;
                         intention = INTENTION_SHRINK;
                 } else {
-                        uint64_t new_partition_size_rounded;
+                        uint64_t new_partition_size_rounded = DISK_SIZE_ROUND_DOWN(h->disk_size);
 
-                        new_partition_size_rounded = DISK_SIZE_ROUND_DOWN(h->disk_size);
+                        if (h->disk_size == UINT64_MAX && partition) {
+                                r = get_maximum_partition_size(image_fd, partition, &new_partition_size_rounded);
+                                if (r < 0)
+                                        return r;
+                        }
 
                         if (setup->partition_size >= new_partition_size_rounded &&
                             setup->partition_size <= h->disk_size) {
@@ -3350,16 +3383,6 @@ int home_resize_luks(
                  FORMAT_BYTES(old_fs_size),
                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
                  FORMAT_BYTES(new_fs_size));
-
-        r = prepare_resize_partition(
-                        image_fd,
-                        setup->partition_offset,
-                        setup->partition_size,
-                        &disk_uuid,
-                        &table,
-                        &partition);
-        if (r < 0)
-                return r;
 
         if (new_fs_size > old_fs_size) { /* → Grow */
 

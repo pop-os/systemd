@@ -21,6 +21,7 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "selinux-access.h"
+#include "service.h"
 #include "signal-util.h"
 #include "special.h"
 #include "string-table.h"
@@ -86,6 +87,12 @@ static int property_get_can_clean(
                         continue;
 
                 r = sd_bus_message_append(reply, "s", exec_resource_type_to_string(t));
+                if (r < 0)
+                        return r;
+        }
+
+        if (FLAGS_SET(mask, EXEC_CLEAN_FDSTORE)) {
+                r = sd_bus_message_append(reply, "s", "fdstore");
                 if (r < 0)
                         return r;
         }
@@ -229,9 +236,7 @@ static int property_get_unit_file_preset(
 
         r = unit_get_unit_file_preset(u);
 
-        return sd_bus_message_append(reply, "s",
-                                     r < 0 ? NULL:
-                                     r > 0 ? "enabled" : "disabled");
+        return sd_bus_message_append(reply, "s", preset_action_past_tense_to_string(r));
 }
 
 static int property_get_job(
@@ -513,10 +518,11 @@ int bus_unit_method_enqueue_job(sd_bus_message *message, void *userdata, sd_bus_
 
 int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Unit *u = ASSERT_PTR(userdata);
+        int32_t value = 0;
         const char *swho;
         int32_t signo;
         KillWho who;
-        int r;
+        int r, code;
 
         assert(message);
 
@@ -528,16 +534,29 @@ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *
         if (r < 0)
                 return r;
 
+        if (startswith(sd_bus_message_get_member(message), "QueueSignal")) {
+                r = sd_bus_message_read(message, "i", &value);
+                if (r < 0)
+                        return r;
+
+                code = SI_QUEUE;
+        } else
+                code = SI_USER;
+
         if (isempty(swho))
                 who = KILL_ALL;
         else {
                 who = kill_who_from_string(swho);
                 if (who < 0)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid who argument %s", swho);
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid who argument: %s", swho);
         }
 
         if (!SIGNAL_VALID(signo))
                 return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Signal number out of range.");
+
+        if (code == SI_QUEUE && !((signo >= SIGRTMIN) && (signo <= SIGRTMAX)))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
+                                         "Value parameter only accepted for realtime signals (SIGRTMIN…SIGRTMAX), refusing for signal SIG%s.", signal_to_string(signo));
 
         r = bus_verify_manage_units_async_full(
                         u,
@@ -552,7 +571,7 @@ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = unit_kill(u, who, signo, error);
+        r = unit_kill(u, who, signo, code, value, error);
         if (r < 0)
                 return r;
 
@@ -682,6 +701,7 @@ int bus_unit_method_clean(sd_bus_message *message, void *userdata, sd_bus_error 
                 return r;
 
         for (;;) {
+                ExecCleanMask m;
                 const char *i;
 
                 r = sd_bus_message_read(message, "s", &i);
@@ -690,17 +710,11 @@ int bus_unit_method_clean(sd_bus_message *message, void *userdata, sd_bus_error 
                 if (r == 0)
                         break;
 
-                if (streq(i, "all"))
-                        mask |= EXEC_CLEAN_ALL;
-                else {
-                        ExecDirectoryType t;
+                m = exec_clean_mask_from_string(i);
+                if (m < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid resource type: %s", i);
 
-                        t = exec_resource_type_from_string(i);
-                        if (t < 0)
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid resource type: %s", i);
-
-                        mask |= 1U << t;
-                }
+                mask |= m;
         }
 
         r = sd_bus_message_exit_container(message);
@@ -981,6 +995,11 @@ const sd_bus_vtable bus_unit_vtable[] = {
                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_ARGS("Kill",
                                 SD_BUS_ARGS("s", whom, "i", signal),
+                                SD_BUS_NO_RESULT,
+                                bus_unit_method_kill,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("QueueSignal",
+                                SD_BUS_ARGS("s", whom, "i", signal, "i", value),
                                 SD_BUS_NO_RESULT,
                                 bus_unit_method_kill,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
@@ -1629,6 +1648,9 @@ void bus_unit_send_change_signal(Unit *u) {
         if (u->in_dbus_queue) {
                 LIST_REMOVE(dbus_queue, u->manager->dbus_unit_queue, u);
                 u->in_dbus_queue = false;
+
+                /* The unit might be good to be GC once its pending signals have been sent */
+                unit_add_to_gc_queue(u);
         }
 
         if (!u->id)
@@ -1856,7 +1878,30 @@ int bus_unit_queue_job(
             (type == JOB_STOP && u->refuse_manual_stop) ||
             (IN_SET(type, JOB_RESTART, JOB_TRY_RESTART) && (u->refuse_manual_start || u->refuse_manual_stop)) ||
             (type == JOB_RELOAD_OR_START && job_type_collapse(type, u) == JOB_START && u->refuse_manual_start))
-                return sd_bus_error_setf(error, BUS_ERROR_ONLY_BY_DEPENDENCY, "Operation refused, unit %s may be requested by dependency only (it is configured to refuse manual start/stop).", u->id);
+                return sd_bus_error_setf(error,
+                                         BUS_ERROR_ONLY_BY_DEPENDENCY,
+                                         "Operation refused, unit %s may be requested by dependency only (it is configured to refuse manual start/stop).",
+                                         u->id);
+
+        /* dbus-broker issues StartUnit for activation requests, and Type=dbus services automatically
+         * gain dependency on dbus.socket. Therefore, if dbus has a pending stop job, the new start
+         * job that pulls in dbus again would cause job type conflict. Let's avoid that by rejecting
+         * job enqueuing early.
+         *
+         * Note that unlike signal_activation_request(), we can't use unit_inactive_or_pending()
+         * here. StartUnit is a more generic interface, and thus users are allowed to use e.g. systemctl
+         * to start Type=dbus services even when dbus is inactive. */
+        if (type == JOB_START && u->type == UNIT_SERVICE && SERVICE(u)->type == SERVICE_DBUS)
+                FOREACH_STRING(dbus_unit, SPECIAL_DBUS_SOCKET, SPECIAL_DBUS_SERVICE) {
+                        Unit *dbus;
+
+                        dbus = manager_get_unit(u->manager, dbus_unit);
+                        if (dbus && unit_stop_pending(dbus))
+                                return sd_bus_error_setf(error,
+                                                         BUS_ERROR_SHUTTING_DOWN,
+                                                         "Operation for unit %s refused, D-Bus is shutting down.",
+                                                         u->id);
+                }
 
         r = sd_bus_message_new_method_return(message, &reply);
         if (r < 0)
@@ -1974,7 +2019,6 @@ static int bus_set_transient_emergency_action(
         const char *s;
         EmergencyAction v;
         int r;
-        bool system;
 
         assert(p);
 
@@ -1982,8 +2026,7 @@ static int bus_set_transient_emergency_action(
         if (r < 0)
                 return r;
 
-        system = MANAGER_IS_SYSTEM(u->manager);
-        r = parse_emergency_action(s, system, &v);
+        r = parse_emergency_action(s, u->manager->runtime_scope, &v);
         if (r < 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
                                          r == -EOPNOTSUPP ? "%s setting invalid for manager type: %s"
@@ -2390,10 +2433,9 @@ int bus_unit_set_properties(
         assert(u);
         assert(message);
 
-        /* We iterate through the array twice. First run we just check
-         * if all passed data is valid, second run actually applies
-         * it. This is to implement transaction-like behaviour without
-         * actually providing full transactions. */
+        /* We iterate through the array twice. First run just checks if all passed data is valid, second run
+         * actually applies it. This implements transaction-like behaviour without actually providing full
+         * transactions. */
 
         r = sd_bus_message_enter_container(message, 'a', "(sv)");
         if (r < 0)

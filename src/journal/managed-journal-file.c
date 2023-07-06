@@ -222,10 +222,11 @@ static void managed_journal_file_set_offline_internal(ManagedJournalFile *f) {
 
                                 log_debug_errno(r, "Failed to re-enable copy-on-write for %s: %m, rewriting file", f->file->path);
 
-                                r = copy_file_atomic(FORMAT_PROC_FD_PATH(f->file->fd), f->file->path, f->file->mode,
-                                                     0,
-                                                     FS_NOCOW_FL,
-                                                     COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS);
+                                r = copy_file_atomic_full(FORMAT_PROC_FD_PATH(f->file->fd), f->file->path, f->file->mode,
+                                                          0,
+                                                          FS_NOCOW_FL,
+                                                          COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS,
+                                                          NULL, NULL);
                                 if (r < 0) {
                                         log_debug_errno(r, "Failed to rewrite %s: %m", f->file->path);
                                         continue;
@@ -536,14 +537,14 @@ int managed_journal_file_open_reliably(
                         ret);
         if (!IN_SET(r,
                     -EBADMSG,           /* Corrupted */
+                    -EADDRNOTAVAIL,     /* Referenced object offset out of bounds */
                     -ENODATA,           /* Truncated */
                     -EHOSTDOWN,         /* Other machine */
                     -EPROTONOSUPPORT,   /* Incompatible feature */
                     -EBUSY,             /* Unclean shutdown */
                     -ESHUTDOWN,         /* Already archived */
                     -EIO,               /* IO error, including SIGBUS on mmap */
-                    -EIDRM,             /* File has been deleted */
-                    -ETXTBSY))          /* File is from the future */
+                    -EIDRM))            /* File has been deleted */
                 return r;
 
         if ((open_flags & O_ACCMODE) == O_RDONLY)

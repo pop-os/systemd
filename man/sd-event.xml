@@ -34,8 +34,9 @@
   <refsect1>
     <title>Description</title>
 
-    <para><filename>sd-event.h</filename> provides a generic event
-    loop implementation, based on Linux <citerefentry
+    <para><filename>sd-event.h</filename> is part of
+    <citerefentry><refentrytitle>libsystemd</refentrytitle><manvolnum>3</manvolnum></citerefentry> and
+    provides a generic event loop implementation, based on Linux <citerefentry
     project='man-pages'><refentrytitle>epoll</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
     </para>
 
@@ -48,6 +49,7 @@
     <citerefentry><refentrytitle>sd_event_add_child</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
     <citerefentry><refentrytitle>sd_event_add_inotify</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
     <citerefentry><refentrytitle>sd_event_add_defer</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+    <citerefentry><refentrytitle>sd_event_add_memory_pressure</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
     <citerefentry><refentrytitle>sd_event_source_unref</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
     <citerefentry><refentrytitle>sd_event_source_set_priority</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
     <citerefentry><refentrytitle>sd_event_source_set_enabled</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
@@ -89,7 +91,7 @@
       project='man-pages'><refentrytitle>timerfd_create</refentrytitle><manvolnum>2</manvolnum></citerefentry>,
       supporting the <constant>CLOCK_MONOTONIC</constant>,
       <constant>CLOCK_REALTIME</constant>,
-      <constant>CLOCK_BOOTIME</constant> clocks, as well as the
+      <constant>CLOCK_BOOTTIME</constant> clocks, as well as the
       <constant>CLOCK_REALTIME_ALARM</constant> and
       <constant>CLOCK_BOOTTIME_ALARM</constant> clocks that can resume
       the system from suspend. When creating timer events a required
@@ -109,7 +111,7 @@
       other event sources or at event loop termination. See
       <citerefentry><refentrytitle>sd_event_add_defer</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
 
-      <listitem><para>Event sources may be assigned a 64bit priority
+      <listitem><para>Event sources may be assigned a 64-bit priority
       value, that controls the order in which event sources are
       dispatched if multiple are pending simultaneously. See
       <citerefentry><refentrytitle>sd_event_source_set_priority</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
@@ -140,6 +142,7 @@
       <citerefentry><refentrytitle>sd_event_add_child</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd_event_add_inotify</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd_event_add_defer</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>sd_event_add_memory_pressure</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd_event_source_unref</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd_event_source_set_priority</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>sd_event_source_set_enabled</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
