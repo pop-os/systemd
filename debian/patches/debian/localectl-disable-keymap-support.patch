@@ -10,7 +10,7 @@ solution is found.
  1 file changed, 6 insertions(+), 5 deletions(-)
 
 diff --git a/src/locale/localectl.c b/src/locale/localectl.c
-index fb83881..4f96b10 100644
+index d8db9d9..cd1d6cd 100644
 --- a/src/locale/localectl.c
 +++ b/src/locale/localectl.c
 @@ -386,6 +386,10 @@ static int list_x11_keymaps(int argc, char **argv, void *userdata) {

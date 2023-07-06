@@ -15,16 +15,16 @@ Fixes: #17575
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/src/systemctl/systemctl-compat-halt.c b/src/systemctl/systemctl-compat-halt.c
-index 8a0e4e6..7eeec9a 100644
+index 4f6e304..520e794 100644
 --- a/src/systemctl/systemctl-compat-halt.c
 +++ b/src/systemctl/systemctl-compat-halt.c
-@@ -148,9 +148,11 @@ int halt_main(void) {
+@@ -155,9 +155,11 @@ int halt_main(void) {
  
          if (arg_force == 0) {
                  /* always try logind first */
 -                if (arg_when > 0)
 +                if (arg_when > 0) {
-                         r = logind_schedule_shutdown();
+                         r = logind_schedule_shutdown(arg_action);
 -                else {
 +                        if (r < 0)
 +                                return r;
