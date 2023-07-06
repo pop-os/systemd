@@ -7,6 +7,7 @@ set -o pipefail
 
 export SYSTEMD_LOG_LEVEL=debug
 
+# shellcheck disable=SC2317
 cleanup() {(
     set +ex
 
@@ -42,7 +43,8 @@ systemd-dissect "${image}.raw" | grep -q -F "MARKER=1"
 systemd-dissect "${image}.raw" | grep -q -F -f <(sed 's/"//g' "$os_release")
 
 systemd-dissect --list "${image}.raw" | grep -q '^etc/os-release$'
-systemd-dissect --mtree "${image}.raw" | grep -q "./usr/bin/cat type=file mode=0755 uid=0 gid=0"
+systemd-dissect --mtree "${image}.raw" --mtree-hash yes | grep -qe "^./usr/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]* sha256sum=[a-z0-9]*$"
+systemd-dissect --mtree "${image}.raw" --mtree-hash no  | grep -qe "^./usr/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]*$"
 
 read -r SHA256SUM1 _ < <(systemd-dissect --copy-from "${image}.raw" etc/os-release | sha256sum)
 test "$SHA256SUM1" != ""
@@ -231,6 +233,33 @@ fi
 systemd-dissect --root-hash "${roothash}" "${image}.gpt" | grep -q -F "MARKER=1"
 systemd-dissect --root-hash "${roothash}" "${image}.gpt" | grep -q -F -f <(sed 's/"//g' "$os_release")
 
+# Test image policies
+systemd-dissect --validate "${image}.gpt"
+systemd-dissect --validate "${image}.gpt" --image-policy='*'
+(! systemd-dissect --validate "${image}.gpt" --image-policy='~')
+(! systemd-dissect --validate "${image}.gpt" --image-policy='-')
+(! systemd-dissect --validate "${image}.gpt" --image-policy=root=absent)
+(! systemd-dissect --validate "${image}.gpt" --image-policy=swap=unprotected+encrypted+verity)
+systemd-dissect --validate "${image}.gpt" --image-policy=root=unprotected
+systemd-dissect --validate "${image}.gpt" --image-policy=root=verity
+systemd-dissect --validate "${image}.gpt" --image-policy=root=verity:root-verity-sig=unused+absent
+systemd-dissect --validate "${image}.gpt" --image-policy=root=verity:swap=absent
+systemd-dissect --validate "${image}.gpt" --image-policy=root=verity:swap=absent+unprotected
+(! systemd-dissect --validate "${image}.gpt" --image-policy=root=verity:root-verity=unused+absent)
+systemd-dissect --validate "${image}.gpt" --image-policy=root=signed
+(! systemd-dissect --validate "${image}.gpt" --image-policy=root=signed:root-verity-sig=unused+absent)
+(! systemd-dissect --validate "${image}.gpt" --image-policy=root=signed:root-verity=unused+absent)
+
+# Test RootImagePolicy= unit file setting
+systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1"
+systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='*' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1"
+(! systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='~' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1")
+(! systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='-' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1")
+(! systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='root=absent' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1")
+systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='root=verity' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1"
+systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='root=signed' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1"
+(! systemd-run --wait -P -p RootImage="${image}.gpt" -p RootHash="${roothash}" -p RootImagePolicy='root=encrypted' -p MountAPIVFS=yes cat /usr/lib/os-release | grep -q -F "MARKER=1")
+
 systemd-dissect --root-hash "${roothash}" --mount "${image}.gpt" "${image_dir}/mount"
 grep -q -F -f "$os_release" "${image_dir}/mount/usr/lib/os-release"
 grep -q -F -f "$os_release" "${image_dir}/mount/etc/os-release"
@@ -413,6 +442,17 @@ systemd-sysext merge
 test ! -e /usr/lib/systemd/system/some_file
 systemd-sysext unmerge
 rmdir /etc/extensions/app-nodistro
+
+# Check that extensions cannot contain os-release
+mkdir -p /run/extensions/app-reject/usr/lib/{extension-release.d/,systemd/system}
+echo "ID=_any" >/run/extensions/app-reject/usr/lib/extension-release.d/extension-release.app-reject
+echo "ID=_any" >/run/extensions/app-reject/usr/lib/os-release
+touch /run/extensions/app-reject/usr/lib/systemd/system/other_file
+(! systemd-sysext merge)
+test ! -e /usr/lib/systemd/system/some_file
+test ! -e /usr/lib/systemd/system/other_file
+systemd-sysext unmerge
+rm -rf /run/extensions/app-reject
 rm /var/lib/extensions/app-nodistro.raw
 
 mkdir -p /run/machines /run/portables /run/extensions
@@ -423,6 +463,93 @@ grep -q -F '{"name":"a","type":"raw","class":"machine","ro":false,"path":"/run/m
 grep -q -F '{"name":"b","type":"raw","class":"portable","ro":false,"path":"/run/portables/b.raw"' /tmp/discover.json
 grep -q -F '{"name":"c","type":"raw","class":"extension","ro":false,"path":"/run/extensions/c.raw"' /tmp/discover.json
 rm /tmp/discover.json /run/machines/a.raw /run/portables/b.raw /run/extensions/c.raw
+
+# Check that the /sbin/mount.ddi helper works
+T="/tmp/mounthelper.$RANDOM"
+mount -t ddi "${image}.gpt" "$T" -o ro,X-mount.mkdir,discard
+umount -R "$T"
+rmdir "$T"
+
+LOOP="$(systemd-dissect --attach --loop-ref=waldo "${image}.raw")"
+
+# Wait until the symlinks we want to test are established
+udevadm trigger -w "$LOOP"
+
+# Check if the /dev/loop/* symlinks really reference the right device
+test /dev/loop/by-ref/waldo -ef "$LOOP"
+
+if [ "$(stat -c '%Hd:%Ld' "${image}.raw")" != '?d:?d' ] ; then
+   # Old stat didn't know the %Hd and %Ld specifiers and turned them into ?d
+   # instead. Let's simply skip the test on such old systems.
+   test "$(stat -c '/dev/loop/by-inode/%Hd:%Ld-%i' "${image}.raw")" -ef "$LOOP"
+fi
+
+# Detach by loopback device
+systemd-dissect --detach "$LOOP"
+
+# Test long reference name.
+# Note, sizeof_field(struct loop_info64, lo_file_name) == 64,
+# and --loop-ref accepts upto 63 characters, and udev creates symlink
+# based on the name when it has upto _62_ characters.
+name="$(for _ in {1..62}; do echo -n 'x'; done)"
+LOOP="$(systemd-dissect --attach --loop-ref="$name" "${image}.raw")"
+udevadm trigger -w "$LOOP"
+
+# Check if the /dev/loop/by-ref/$name symlink really references the right device
+test "/dev/loop/by-ref/$name" -ef "$LOOP"
+
+# Detach by the /dev/loop/by-ref symlink
+systemd-dissect --detach "/dev/loop/by-ref/$name"
+
+name="$(for _ in {1..63}; do echo -n 'x'; done)"
+LOOP="$(systemd-dissect --attach --loop-ref="$name" "${image}.raw")"
+udevadm trigger -w "$LOOP"
+
+# Check if the /dev/loop/by-ref/$name symlink does not exist
+test ! -e "/dev/loop/by-ref/$name"
+
+# Detach by backing inode
+systemd-dissect --detach "${image}.raw"
+(! systemd-dissect --detach "${image}.raw")
+
+# check for confext functionality
+mkdir -p /run/confexts/test/etc/extension-release.d
+echo "ID=_any" >/run/confexts/test/etc/extension-release.d/extension-release.test
+echo "ARCHITECTURE=_any" >>/run/confexts/test/etc/extension-release.d/extension-release.test
+echo "MARKER_CONFEXT_123" >/run/confexts/test/etc/testfile
+cat <<EOF >/run/confexts/test/etc/testscript
+#!/bin/bash
+echo "This should not happen"
+EOF
+chmod +x /run/confexts/test/etc/testscript
+systemd-confext merge
+grep -q -F "MARKER_CONFEXT_123" /etc/testfile
+(! /etc/testscript)
+systemd-confext status
+systemd-confext unmerge
+rm -rf /run/confexts/
+
+unsquashfs -no-xattrs -d /tmp/img "${image}.raw"
+systemd-run --unit=test-root-ephemeral \
+    -p RootDirectory=/tmp/img \
+    -p RootEphemeral=yes \
+    -p Type=exec \
+    bash -c "touch /abc && sleep infinity"
+test -n "$(ls -A /var/lib/systemd/ephemeral-trees)"
+systemctl stop test-root-ephemeral
+# shellcheck disable=SC2016
+timeout 10 bash -c 'while ! test -z "$(ls -A /var/lib/systemd/ephemeral-trees)"; do sleep .5; done'
+test ! -f /tmp/img/abc
+
+systemd-dissect --mtree /tmp/img
+systemd-dissect --list /tmp/img
+
+read -r SHA256SUM1 _ < <(systemd-dissect --copy-from /tmp/img etc/os-release | sha256sum)
+test "$SHA256SUM1" != ""
+
+echo abc > abc
+systemd-dissect --copy-to /tmp/img abc /abc
+test -f /tmp/img/abc
 
 echo OK >/testok
 

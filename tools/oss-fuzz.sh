@@ -35,17 +35,11 @@ else
     apt-get update
     apt-get install -y gperf m4 gettext python3-pip \
         libcap-dev libmount-dev \
-        pkg-config wget python3-jinja2 zipmerge
+        pkg-config wget python3-jinja2 zipmerge zstd
 
     if [[ "$ARCHITECTURE" == i386 ]]; then
         apt-get install -y pkg-config:i386 libcap-dev:i386 libmount-dev:i386
     fi
-
-    # gnu-efi is installed here to enable -Dgnu-efi behind which fuzz-bcd
-    # is hidden. It isn't linked against efi. It doesn't
-    # even include "efi.h" because "bcd.c" can work in "unit test" mode
-    # where it isn't necessary.
-    apt-get install -y gnu-efi zstd
 
     pip3 install -r .github/workflows/requirements.txt --require-hashes
 
@@ -73,7 +67,7 @@ else
     fi
 fi
 
-if ! meson "$build" "-D$fuzzflag" -Db_lundef=false; then
+if ! meson setup "$build" "-D$fuzzflag" -Db_lundef=false; then
     cat "$build/meson-logs/meson-log.txt"
     exit 1
 fi
@@ -115,12 +109,12 @@ install -Dt "$OUT/src/shared/" \
 # Most i386 libraries have to be brought to the runtime environment somehow. Ideally they
 # should be linked statically but since it isn't possible another way to keep them close
 # to the fuzz targets is used here. The dependencies are copied to "$OUT/src/shared" and
-# then `rpath` is tweaked to make it possible for the linker to find them there. "$OUT/src/shared"
+# then 'rpath' is tweaked to make it possible for the linker to find them there. "$OUT/src/shared"
 # is chosen because the runtime search path of all the fuzz targets already points to it
 # to load "libsystemd-shared" and "libsystemd-core". Stuff like that should be avoided on
 # x86_64 because it tends to break coverage reports, fuzz-introspector, CIFuzz and so on.
 if [[ "$ARCHITECTURE" == i386 ]]; then
-    for lib_path in $(ldd "$OUT"/src/shared/libsystemd-shared-*.so | perl -lne 'print $1 if m{=>\s+(/lib\S+)}'); do
+    for lib_path in $(ldd "$OUT"/src/shared/libsystemd-shared-*.so | awk '/=> \/lib/ { print $3 }'); do
         lib_name=$(basename "$lib_path")
         cp "$lib_path" "$OUT/src/shared"
         patchelf --set-rpath \$ORIGIN "$OUT/src/shared/$lib_name"

@@ -8,6 +8,8 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "chase.h"
+#include "creds-util.h"
 #include "fd-util.h"
 #include "id128-util.h"
 #include "io-util.h"
@@ -26,26 +28,43 @@
 #include "umask-util.h"
 #include "virt.h"
 
+static int acquire_machine_id_from_credential(sd_id128_t *ret) {
+        _cleanup_free_ char *buf = NULL;
+        int r;
+
+        r = read_credential_with_decryption("system.machine_id", (void**) &buf, /* ret_size= */ NULL);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to read system.machine_id credential, ignoring: %m");
+        if (r == 0) /* not found */
+                return -ENXIO;
+
+        r = sd_id128_from_string(buf, ret);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse system.machine_id credential, ignoring: %m");
+
+        log_info("Initializing machine ID from credential.");
+        return 0;
+}
+
 static int generate_machine_id(const char *root, sd_id128_t *ret) {
-        const char *dbus_machine_id;
         _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(ret);
 
         /* First, try reading the D-Bus machine id, unless it is a symlink */
-        dbus_machine_id = prefix_roota(root, "/var/lib/dbus/machine-id");
-        fd = open(dbus_machine_id, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
-        if (fd >= 0) {
-                if (id128_read_fd(fd, ID128_FORMAT_PLAIN, ret) >= 0) {
-                        log_info("Initializing machine ID from D-Bus machine ID.");
-                        return 0;
-                }
-
-                fd = safe_close(fd);
+        fd = chase_and_open("/var/lib/dbus/machine-id", root, CHASE_PREFIX_ROOT | CHASE_NOFOLLOW, O_RDONLY|O_CLOEXEC|O_NOCTTY, NULL);
+        if (fd >= 0 && id128_read_fd(fd, ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, ret) >= 0) {
+                log_info("Initializing machine ID from D-Bus machine ID.");
+                return 0;
         }
 
         if (isempty(root) && running_in_chroot() <= 0) {
+                /* Let's use a system credential for the machine ID if we can */
+                r = acquire_machine_id_from_credential(ret);
+                if (r >= 0)
+                        return r;
+
                 /* If that didn't work, see if we are running in a container,
                  * and a machine ID was passed in via $container_uuid the way
                  * libvirt/LXC does it */

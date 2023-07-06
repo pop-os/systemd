@@ -22,6 +22,7 @@
 #include "memory-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "random-util.h"
 #include "signal-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
@@ -336,8 +337,7 @@ static int bus_socket_auth_write(sd_bus *b, const char *t) {
         b->auth_iovec[0].iov_base = p;
         b->auth_iovec[0].iov_len += l;
 
-        free(b->auth_buffer);
-        b->auth_buffer = p;
+        free_and_replace(b->auth_buffer, p);
         b->auth_index = 0;
         return 0;
 }
@@ -604,7 +604,7 @@ static int bus_socket_read_auth(sd_bus *b) {
                                  * protocol? Somebody is playing games with
                                  * us. Close them all, and fail */
                                 j = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-                                close_many((int*) CMSG_DATA(cmsg), j);
+                                close_many(CMSG_TYPED_DATA(cmsg, int), j);
                                 return -EIO;
                         } else
                                 log_debug("Got unexpected auxiliary data with level=%d and type=%d",
@@ -651,6 +651,17 @@ static void bus_get_peercred(sd_bus *b) {
                 b->n_groups = (size_t) r;
         else if (!IN_SET(r, -EOPNOTSUPP, -ENOPROTOOPT))
                 log_debug_errno(r, "Failed to determine peer's group list: %m");
+
+        /* Let's query the peers socket address, it might carry information such as the peer's comm or
+         * description string */
+        zero(b->sockaddr_peer);
+        b->sockaddr_size_peer = 0;
+
+        socklen_t l = sizeof(b->sockaddr_peer) - 1; /* Leave space for a NUL */
+        if (getpeername(b->input_fd, &b->sockaddr_peer.sa, &l) < 0)
+                log_debug_errno(errno, "Failed to get peer's socket address, ignoring: %m");
+        else
+                b->sockaddr_size_peer = l;
 }
 
 static int bus_socket_start_auth_client(sd_bus *b) {
@@ -856,8 +867,7 @@ static int bus_socket_inotify_setup(sd_bus *b) {
                         goto fail;
                 }
 
-                free(absolute);
-                absolute = c;
+                free_and_replace(absolute, c);
 
                 max_follow--;
         }
@@ -889,6 +899,50 @@ fail:
         return r;
 }
 
+static int bind_description(sd_bus *b, int fd, int family) {
+        _cleanup_free_ char *bind_name = NULL, *comm = NULL;
+        union sockaddr_union bsa;
+        const char *d = NULL;
+        int r;
+
+        assert(b);
+        assert(fd >= 0);
+
+        /* If this is an AF_UNIX socket, let's set our client's socket address to carry the description
+         * string for this bus connection. This is useful for debugging things, as the connection name is
+         * visible in various socket-related tools, and can even be queried by the server side. */
+
+        if (family != AF_UNIX)
+                return 0;
+
+        (void) sd_bus_get_description(b, &d);
+
+        /* Generate a recognizable source address in the abstract namespace. We'll include:
+         * - a random 64-bit value (to avoid collisions)
+         * - our "comm" process name (suppressed if contains "/" to avoid parsing issues)
+         * - the description string of the bus connection. */
+        (void) get_process_comm(0, &comm);
+        if (comm && strchr(comm, '/'))
+                comm = mfree(comm);
+
+        if (!d && !comm) /* skip if we don't have either field, rely on kernel autobind instead */
+                return 0;
+
+        if (asprintf(&bind_name, "@%" PRIx64 "/bus/%s/%s", random_u64(), strempty(comm), strempty(d)) < 0)
+                return -ENOMEM;
+
+        strshorten(bind_name, sizeof_field(struct sockaddr_un, sun_path));
+
+        r = sockaddr_un_set_path(&bsa.un, bind_name);
+        if (r < 0)
+                return r;
+
+        if (bind(fd, &bsa.sa, r) < 0)
+                return -errno;
+
+        return 0;
+}
+
 int bus_socket_connect(sd_bus *b) {
         bool inotify_done = false;
         int r;
@@ -910,6 +964,10 @@ int bus_socket_connect(sd_bus *b) {
                 b->input_fd = socket(b->sockaddr.sa.sa_family, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
                 if (b->input_fd < 0)
                         return -errno;
+
+                r = bind_description(b, b->input_fd, b->sockaddr.sa.sa_family);
+                if (r < 0)
+                        return r;
 
                 b->input_fd = fd_move_above_stdio(b->input_fd);
 
@@ -994,18 +1052,16 @@ int bus_socket_exec(sd_bus *b) {
         if (r < 0)
                 return -errno;
 
-        r = safe_fork_full("(sd-busexec)", s+1, 1, FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE, &b->busexec_pid);
+        r = safe_fork_full("(sd-busexec)",
+                           (int[]) { s[1], s[1], STDERR_FILENO },
+                           NULL, 0,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_REARRANGE_STDIO|FORK_RLIMIT_NOFILE_SAFE, &b->busexec_pid);
         if (r < 0) {
                 safe_close_pair(s);
                 return r;
         }
         if (r == 0) {
                 /* Child */
-
-                r = rearrange_stdio(s[1], s[1], STDERR_FILENO);
-                TAKE_FD(s[1]);
-                if (r < 0)
-                        _exit(EXIT_FAILURE);
 
                 if (b->exec_argv)
                         execvp(b->exec_path, b->exec_argv);
@@ -1270,18 +1326,18 @@ int bus_socket_read_message(sd_bus *bus) {
                                          * isn't actually enabled? Close them,
                                          * and fail */
 
-                                        close_many((int*) CMSG_DATA(cmsg), n);
+                                        close_many(CMSG_TYPED_DATA(cmsg, int), n);
                                         return -EIO;
                                 }
 
                                 f = reallocarray(bus->fds, bus->n_fds + n, sizeof(int));
                                 if (!f) {
-                                        close_many((int*) CMSG_DATA(cmsg), n);
+                                        close_many(CMSG_TYPED_DATA(cmsg, int), n);
                                         return -ENOMEM;
                                 }
 
                                 for (i = 0; i < n; i++)
-                                        f[bus->n_fds++] = fd_move_above_stdio(((int*) CMSG_DATA(cmsg))[i]);
+                                        f[bus->n_fds++] = fd_move_above_stdio(CMSG_TYPED_DATA(cmsg, int)[i]);
                                 bus->fds = f;
                         } else
                                 log_debug("Got unexpected auxiliary data with level=%d and type=%d",

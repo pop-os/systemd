@@ -3,7 +3,7 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
-<refentry id="bootctl" conditional='HAVE_GNU_EFI'
+<refentry id="bootctl" conditional='ENABLE_BOOTLOADER'
     xmlns:xi="http://www.w3.org/2001/XInclude">
   <refentryinfo>
     <title>bootctl</title>
@@ -228,13 +228,14 @@
       <varlistentry>
         <term><option>random-seed</option></term>
 
-        <listitem><para>Generates a random seed and stores it in the EFI System Partition, for use by the
-        <command>systemd-boot</command> boot loader. Also, generates a random 'system token' and stores it
-        persistently as an EFI variable, if one has not been set before. If the boot loader finds the random
-        seed in the ESP and the system token in the EFI variable it will derive a random seed to pass to the
-        OS and a new seed to store in the ESP from the combination of both. The random seed passed to the OS
-        is credited to the kernel's entropy pool by the system manager during early boot, and permits
-        userspace to boot up with an entropy pool fully initialized very early on. Also see
+        <listitem><para>Generates a random seed and stores it in the EFI System Partition (ESP), for use by
+        the <command>systemd-boot</command> boot loader. If a random seed already exists in the ESP it is
+        refreshed. Also generates a random 'system token' and stores it persistently as an EFI variable, if
+        one has not been set before. If the boot loader finds the random seed in the ESP and the system token
+        in the EFI variable it will derive a random seed to pass to the OS and a new seed to store in the ESP
+        from the combination of both. The random seed passed to the OS is credited to the kernel's entropy
+        pool by the system manager during early boot, and permits userspace to boot up with an entropy pool
+        fully initialized very early on. Also see
         <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
 
         <para>See <ulink url="https://systemd.io/RANDOM_SEEDS">Random Seeds</ulink> for further
@@ -269,20 +270,8 @@
     <para>The following options are understood:</para>
 
     <variablelist>
-      <varlistentry>
-        <term><option>--esp-path=</option></term>
-        <listitem><para>Path to the EFI System Partition (ESP). If not specified, <filename>/efi/</filename>,
-        <filename>/boot/</filename>, and <filename>/boot/efi/</filename> are checked in turn.  It is
-        recommended to mount the ESP to <filename>/efi/</filename>, if possible.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><option>--boot-path=</option></term>
-        <listitem><para>Path to the Extended Boot Loader partition, as defined in the <ulink
-        url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink>. If not
-        specified, <filename>/boot/</filename> is checked.  It is recommended to mount the Extended Boot
-        Loader partition to <filename>/boot/</filename>, if possible.</para></listitem>
-      </varlistentry>
+      <xi:include href="standard-options.xml" xpointer="esp-path"/>
+      <xi:include href="standard-options.xml" xpointer="boot-path"/>
 
       <varlistentry>
         <term><option>--root=<replaceable>root</replaceable></option></term>
@@ -304,6 +293,8 @@
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         switch of the same name.</para></listitem>
       </varlistentry>
+
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
 
       <varlistentry>
         <term><option>--install-source=</option></term>
@@ -336,9 +327,25 @@
         Specification Type #2 entries should be placed in the directory <literal>$(bootctl
         -x)/EFI/Linux/</literal>.</para>
 
-        <para>Note that this option (similarly to the <option>--print-booth-path</option> option mentioned
+        <para>Note that this option (similarly to the <option>--print-boot-path</option> option mentioned
         above), is available independently from the boot loader used, i.e. also without
         <command>systemd-boot</command> being installed.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-R</option></term>
+        <term><option>--print-root-device</option></term>
+
+        <listitem><para>Print the path to the block device node backing the root file system of the local
+        OS. This prints a path such as <filename>/dev/nvme0n1p5</filename>. If the root file system is backed
+        by dm-crypt/LUKS or dm-verity the underlying block device is returned. If the root file system is
+        backed by multiple block devices (as supported by btrfs) the operation will fail. If the switch is
+        specified twice (i.e. <option>-RR</option>) and the discovered block device is a partition device the
+        "whole" block device it belongs to is determined and printed
+        (e.g. <filename>/dev/nvme0n1</filename>). If the root file system is <literal>tmpfs</literal> (or a
+        similar in-memory file system), the block device backing <filename>/usr/</filename> is returned if
+        applicable. If the root file system is a network file system (e.g. NFS, CIFS) the operation will
+        fail.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -462,7 +469,9 @@
 
   <refsect1>
     <title>Exit status</title>
-    <para>On success, 0 is returned, a non-zero failure code otherwise.</para>
+    <para>On success, 0 is returned, a non-zero failure code otherwise. <command>bootctl
+    --print-root-device</command> returns exit status 80 in case the root file system is not backed by single
+    block device, and other non-zero exit statuses on other errors.</para>
   </refsect1>
 
   <refsect1>

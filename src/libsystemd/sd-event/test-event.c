@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include "sd-event.h"
 
@@ -121,7 +122,7 @@ static int signal_handler(sd_event_source *s, const struct signalfd_siginfo *si,
         zero(plain_si);
         plain_si.si_signo = SIGUSR2;
         plain_si.si_code = SI_QUEUE;
-        plain_si.si_pid = getpid();
+        plain_si.si_pid = getpid_cached();
         plain_si.si_uid = getuid();
         plain_si.si_value.sival_int = 4711;
 
@@ -649,7 +650,7 @@ TEST(ratelimit) {
         for (unsigned i = 0; i < 10; i++) {
                 log_debug("slow loop iteration %u", i);
                 assert_se(sd_event_run(e, UINT64_MAX) >= 0);
-                assert_se(usleep(250 * USEC_PER_MSEC) >= 0);
+                assert_se(usleep_safe(250 * USEC_PER_MSEC) >= 0);
         }
 
         assert_se(sd_event_source_is_ratelimited(s) == 0);
@@ -663,7 +664,7 @@ TEST(ratelimit) {
         for (unsigned i = 0; i < 10; i++) {
                 log_debug("fast event loop iteration %u", i);
                 assert_se(sd_event_run(e, UINT64_MAX) >= 0);
-                assert_se(usleep(10) >= 0);
+                assert_se(usleep_safe(10) >= 0);
         }
         log_info("ratelimit_io_handler: called %u times, event source got ratelimited", count);
         assert_se(count < 10);
@@ -806,6 +807,96 @@ TEST(inotify_process_buffered_data) {
         assert_se(sd_event_dispatch(e) > 0);
         assert_se(sd_event_prepare(e) == 0);
         assert_se(sd_event_wait(e, 0) == 0);
+}
+
+TEST(fork) {
+        _cleanup_(sd_event_unrefp) sd_event *e = NULL;
+        int r;
+
+        assert_se(sd_event_default(&e) >= 0);
+        assert_se(sd_event_prepare(e) == 0);
+
+        /* Check that after a fork the cleanup functions return NULL */
+        r = safe_fork("(bus-fork-test)", FORK_WAIT|FORK_LOG, NULL);
+        if (r == 0) {
+                assert_se(e);
+                assert_se(sd_event_ref(e) == NULL);
+                assert_se(sd_event_unref(e) == NULL);
+                _exit(EXIT_SUCCESS);
+        }
+
+        assert_se(r >= 0);
+}
+
+static int hup_callback(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
+        unsigned *c = userdata;
+
+        assert_se(revents == EPOLLHUP);
+
+        (*c)++;
+        return 0;
+}
+
+TEST(leave_ratelimit) {
+        bool expect_ratelimit = false, manually_left_ratelimit = false;
+        _cleanup_(sd_event_source_unrefp) sd_event_source *s = NULL;
+        _cleanup_(sd_event_unrefp) sd_event *e = NULL;
+        _cleanup_close_pair_ int pfd[2] = PIPE_EBADF;
+        unsigned c = 0;
+        int r;
+
+        assert_se(sd_event_default(&e) >= 0);
+
+        /* Create an event source that will continuously fire by creating a pipe whose write side is closed,
+         * and which hence will only see EOF and constant EPOLLHUP */
+        assert_se(pipe2(pfd, O_CLOEXEC) >= 0);
+        assert_se(sd_event_add_io(e, &s, pfd[0], EPOLLIN, hup_callback, &c) >= 0);
+        assert_se(sd_event_source_set_io_fd_own(s, true) >= 0);
+        assert_se(sd_event_source_set_ratelimit(s, 5*USEC_PER_MINUTE, 5) >= 0);
+
+        pfd[0] = -EBADF;
+        pfd[1] = safe_close(pfd[1]); /* Trigger continuous EOF */
+
+        for (;;) {
+                r = sd_event_prepare(e);
+                assert_se(r >= 0);
+
+                if (r == 0) {
+                        r = sd_event_wait(e, UINT64_MAX);
+                        assert_se(r > 0);
+                }
+
+                r = sd_event_dispatch(e);
+                assert_se(r > 0);
+
+                r = sd_event_source_is_ratelimited(s);
+                assert_se(r >= 0);
+
+                if (c < 5)
+                        /* First four dispatches should just work */
+                        assert_se(!r);
+                else if (c == 5) {
+                        /* The fifth dispatch should still work, but we now expect the ratelimit to be hit subsequently */
+                        if (!expect_ratelimit) {
+                                assert_se(!r);
+                                assert_se(sd_event_source_leave_ratelimit(s) == 0); /* this should be a NOP, and return 0 hence */
+                                expect_ratelimit = true;
+                        } else {
+                                /* We expected the ratelimit, let's leave it manually, and verify it */
+                                assert_se(r);
+                                assert_se(sd_event_source_leave_ratelimit(s) > 0); /* we are ratelimited, hence should return > 0 */
+                                assert_se(sd_event_source_is_ratelimited(s) == 0);
+
+                                manually_left_ratelimit = true;
+                        }
+
+                } else if (c == 6)
+                        /* On the sixth iteration let's just exit */
+                        break;
+        }
+
+        /* Verify we definitely hit the ratelimit and left it manually again */
+        assert_se(manually_left_ratelimit);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

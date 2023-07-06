@@ -30,7 +30,7 @@ int bus_property_get_triggered_unit(
         return sd_bus_message_append(reply, "s", trigger ? trigger->id : NULL);
 }
 
-BUS_DEFINE_SET_TRANSIENT(mode_t, "u", uint32_t, mode_t, "%040o");
+BUS_DEFINE_SET_TRANSIENT(mode_t, "u", uint32_t, mode_t, "%04o");
 BUS_DEFINE_SET_TRANSIENT(unsigned, "u", uint32_t, unsigned, "%" PRIu32);
 
 static inline bool valid_user_group_name_or_id_relaxed(const char *u) {
@@ -73,6 +73,30 @@ int bus_set_transient_bool(
                 Unit *u,
                 const char *name,
                 bool *p,
+                sd_bus_message *message,
+                UnitWriteFlags flags,
+                sd_bus_error *error) {
+
+        int v, r;
+
+        assert(p);
+
+        r = sd_bus_message_read(message, "b", &v);
+        if (r < 0)
+                return r;
+
+        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                *p = v;
+                unit_write_settingf(u, flags, name, "%s=%s", name, yes_no(v));
+        }
+
+        return 1;
+}
+
+int bus_set_transient_tristate(
+                Unit *u,
+                const char *name,
+                int *p,
                 sd_bus_message *message,
                 UnitWriteFlags flags,
                 sd_bus_error *error) {

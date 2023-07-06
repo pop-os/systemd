@@ -15,6 +15,7 @@
 
 #include "alloc-util.h"
 #include "bus-polkit.h"
+#include "common-signal.h"
 #include "dns-domain.h"
 #include "event-util.h"
 #include "fd-util.h"
@@ -78,7 +79,7 @@ static double ts_to_d(const struct timespec *ts) {
 }
 
 static uint32_t graceful_add_offset_1900_1970(time_t t) {
-        /* Adds OFFSET_1900_1970 to t and returns it as 32bit value. This is handles overflows
+        /* Adds OFFSET_1900_1970 to t and returns it as 32-bit value. This is handles overflows
          * gracefully in a deterministic and well-defined way by cutting off the top bits. */
         uint64_t a = (uint64_t) t + OFFSET_1900_1970;
         return (uint32_t) (a & UINT64_C(0xFFFFFFFF));
@@ -410,7 +411,7 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
                 .msg_name = &server_addr,
                 .msg_namelen = sizeof(server_addr),
         };
-        struct timespec *recv_time = NULL;
+        struct timespec *recv_time;
         triple_timestamp dts;
         ssize_t len;
         double origin, receive, trans, dest, delay, offset, root_distance;
@@ -445,7 +446,7 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
                 return 0;
         }
 
-        recv_time = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_TIMESTAMPNS, struct timespec);
+        recv_time = CMSG_FIND_AND_COPY_DATA(&msghdr, SOL_SOCKET, SCM_TIMESTAMPNS, struct timespec);
         if (!recv_time)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Packet timestamp missing.");
 
@@ -621,7 +622,7 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
                            "MESSAGE_ID=" SD_MESSAGE_TIME_SYNC_STR,
                            "MONOTONIC_USEC=" USEC_FMT, dts.monotonic,
                            "REALTIME_USEC=" USEC_FMT, dts.realtime,
-                           "BOOTIME_USEC=" USEC_FMT, dts.boottime);
+                           "BOOTTIME_USEC=" USEC_FMT, dts.boottime);
         }
 
         r = manager_arm_timer(m, m->poll_interval_usec);
@@ -1129,6 +1130,11 @@ int manager_new(Manager **ret) {
 
         (void) sd_event_add_signal(m->event, NULL, SIGTERM, NULL,  NULL);
         (void) sd_event_add_signal(m->event, NULL, SIGINT, NULL, NULL);
+        (void) sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, NULL);
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
 
         (void) sd_event_set_watchdog(m->event, true);
 

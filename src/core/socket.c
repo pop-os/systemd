@@ -14,7 +14,7 @@
 #include "bpf-firewall.h"
 #include "bus-error.h"
 #include "bus-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "constants.h"
 #include "copy.h"
 #include "dbus-socket.h"
@@ -26,7 +26,7 @@
 #include "in-addr-util.h"
 #include "io-util.h"
 #include "ip-protocol-list.h"
-#include "label.h"
+#include "label-util.h"
 #include "log.h"
 #include "mkdir-label.h"
 #include "parse-util.h"
@@ -82,7 +82,7 @@ static void socket_init(Unit *u) {
         assert(u);
         assert(u->load_state == UNIT_STUB);
 
-        s->backlog = SOMAXCONN;
+        s->backlog = SOMAXCONN_DELUXE;
         s->timeout_usec = u->manager->default_timeout_start_usec;
         s->directory_mode = 0755;
         s->socket_mode = 0666;
@@ -120,6 +120,19 @@ static void socket_cleanup_fd_list(SocketPort *p) {
         p->n_auxiliary_fds = 0;
 }
 
+SocketPort *socket_port_free(SocketPort *p) {
+        if (!p)
+                return NULL;
+
+        sd_event_source_unref(p->event_source);
+
+        socket_cleanup_fd_list(p);
+        safe_close(p->fd);
+        free(p->path);
+
+        return mfree(p);
+}
+
 void socket_free_ports(Socket *s) {
         SocketPort *p;
 
@@ -127,13 +140,7 @@ void socket_free_ports(Socket *s) {
 
         while ((p = s->ports)) {
                 LIST_REMOVE(port, s->ports, p);
-
-                sd_event_source_unref(p->event_source);
-
-                socket_cleanup_fd_list(p);
-                safe_close(p->fd);
-                free(p->path);
-                free(p);
+                socket_port_free(p);
         }
 }
 
@@ -150,11 +157,9 @@ static void socket_done(Unit *u) {
 
         s->peers_by_address = set_free(s->peers_by_address);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, false);
+        s->exec_runtime = exec_runtime_free(s->exec_runtime);
         exec_command_free_array(s->exec_command, _SOCKET_EXEC_COMMAND_MAX);
         s->control_command = NULL;
-
-        dynamic_creds_unref(&s->dynamic_creds);
 
         socket_unwatch_control_pid(s);
 
@@ -278,7 +283,11 @@ static int socket_add_default_dependencies(Socket *s) {
                         return r;
         }
 
-        return unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        if (r < 0)
+                return r;
+
+        return exec_context_add_default_dependencies(UNIT(s), &s->exec_context);
 }
 
 _pure_ static bool socket_has_exec(Socket *s) {
@@ -714,7 +723,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
                         prefix, strna(s->user),
                         prefix, strna(s->group));
 
-        if (s->keep_alive_time > 0)
+        if (timestamp_is_set(s->keep_alive_time))
                 fprintf(f,
                         "%sKeepAliveTimeSec: %s\n",
                         prefix, FORMAT_TIMESPAN(s->keep_alive_time, USEC_PER_SEC));
@@ -971,7 +980,7 @@ static void socket_apply_socket_options(Socket *s, SocketPort *p, int fd) {
                         log_unit_warning_errno(UNIT(s), r, "SO_KEEPALIVE failed: %m");
         }
 
-        if (s->keep_alive_time > 0) {
+        if (timestamp_is_set(s->keep_alive_time)) {
                 r = setsockopt_int(fd, SOL_TCP, TCP_KEEPIDLE, s->keep_alive_time / USEC_PER_SEC);
                 if (r < 0)
                         log_unit_warning_errno(UNIT(s), r, "TCP_KEEPIDLE failed: %m");
@@ -1434,7 +1443,7 @@ static int socket_determine_selinux_label(Socket *s, char **ret) {
         if (!c)
                 goto no_label;
 
-        r = chase_symlinks(c->path, SERVICE(service)->exec_context.root_directory, CHASE_PREFIX_ROOT, &path, NULL);
+        r = chase(c->path, SERVICE(service)->exec_context.root_directory, CHASE_PREFIX_ROOT, &path, NULL);
         if (r < 0)
                 goto no_label;
 
@@ -1494,7 +1503,7 @@ static int fork_needed(const SocketAddress *address, const ExecContext *context)
                         return true;
         }
 
-        return context->private_network || context->network_namespace_path;
+        return exec_needs_network_namespace(context);
 }
 
 static int socket_address_listen_in_cgroup(
@@ -1532,16 +1541,18 @@ static int socket_address_listen_in_cgroup(
 
         if (s->exec_context.network_namespace_path &&
             s->exec_runtime &&
-            s->exec_runtime->netns_storage_socket[0] >= 0) {
-                r = open_shareable_ns_path(s->exec_runtime->netns_storage_socket, s->exec_context.network_namespace_path, CLONE_NEWNET);
+            s->exec_runtime->shared &&
+            s->exec_runtime->shared->netns_storage_socket[0] >= 0) {
+                r = open_shareable_ns_path(s->exec_runtime->shared->netns_storage_socket, s->exec_context.network_namespace_path, CLONE_NEWNET);
                 if (r < 0)
                         return log_unit_error_errno(UNIT(s), r, "Failed to open network namespace path %s: %m", s->exec_context.network_namespace_path);
         }
 
         if (s->exec_context.ipc_namespace_path &&
             s->exec_runtime &&
-            s->exec_runtime->ipcns_storage_socket[0] >= 0) {
-                r = open_shareable_ns_path(s->exec_runtime->ipcns_storage_socket, s->exec_context.ipc_namespace_path, CLONE_NEWIPC);
+            s->exec_runtime->shared &&
+            s->exec_runtime->shared->ipcns_storage_socket[0] >= 0) {
+                r = open_shareable_ns_path(s->exec_runtime->shared->ipcns_storage_socket, s->exec_context.ipc_namespace_path, CLONE_NEWIPC);
                 if (r < 0)
                         return log_unit_error_errno(UNIT(s), r, "Failed to open IPC namespace path %s: %m", s->exec_context.ipc_namespace_path);
         }
@@ -1557,12 +1568,13 @@ static int socket_address_listen_in_cgroup(
 
                 pair[0] = safe_close(pair[0]);
 
-                if ((s->exec_context.private_network || s->exec_context.network_namespace_path) &&
+                if (exec_needs_network_namespace(&s->exec_context) &&
                     s->exec_runtime &&
-                    s->exec_runtime->netns_storage_socket[0] >= 0) {
+                    s->exec_runtime->shared &&
+                    s->exec_runtime->shared->netns_storage_socket[0] >= 0) {
 
                         if (ns_type_supported(NAMESPACE_NET)) {
-                                r = setup_shareable_ns(s->exec_runtime->netns_storage_socket, CLONE_NEWNET);
+                                r = setup_shareable_ns(s->exec_runtime->shared->netns_storage_socket, CLONE_NEWNET);
                                 if (r < 0) {
                                         log_unit_error_errno(UNIT(s), r, "Failed to join network namespace: %m");
                                         _exit(EXIT_NETWORK);
@@ -1839,7 +1851,7 @@ static void socket_set_state(Socket *s, SocketState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(s), "Changed %s -> %s", socket_state_to_string(old_state), socket_state_to_string(state));
 
-        unit_notify(UNIT(s), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(s), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static int socket_coldplug(Unit *u) {
@@ -1905,10 +1917,8 @@ static int socket_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED, SOCKET_CLEANING)) {
-                (void) unit_setup_dynamic_creds(u);
+        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED, SOCKET_CLEANING))
                 (void) unit_setup_exec_runtime(u);
-        }
 
         socket_set_state(s, s->deserialized_state);
         return 0;
@@ -1947,7 +1957,7 @@ static int socket_spawn(Socket *s, ExecCommand *c, pid_t *_pid) {
                        &s->exec_context,
                        &exec_params,
                        s->exec_runtime,
-                       &s->dynamic_creds,
+                       &s->cgroup_context,
                        &pid);
         if (r < 0)
                 return r;
@@ -2048,13 +2058,11 @@ static void socket_enter_dead(Socket *s, SocketResult f) {
 
         socket_set_state(s, s->result != SOCKET_SUCCESS ? SOCKET_FAILED : SOCKET_DEAD);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
+        s->exec_runtime = exec_runtime_destroy(s->exec_runtime);
 
         unit_destroy_runtime_data(UNIT(s), &s->exec_context);
 
         unit_unref_uid_gid(UNIT(s), true);
-
-        dynamic_creds_destroy(&s->dynamic_creds);
 }
 
 static void socket_enter_signal(Socket *s, SocketState state, SocketResult f);
@@ -2396,7 +2404,7 @@ static void socket_enter_running(Socket *s, int cfd_in) {
                 if (r < 0) {
                         /* We failed to activate the new service, but it still exists. Let's make sure the
                          * service closes and forgets the connection fd again, immediately. */
-                        service_close_socket_fd(SERVICE(service));
+                        service_release_socket_fd(SERVICE(service));
                         goto fail;
                 }
 
@@ -2487,7 +2495,7 @@ static int socket_start(Unit *u) {
 
                 /* If the service is already active we cannot start the
                  * socket */
-                if (!IN_SET(service->state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_AUTO_RESTART))
+                if (!IN_SET(service->state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED_BEFORE_AUTO_RESTART, SERVICE_AUTO_RESTART))
                         return log_unit_error_errno(u, SYNTHETIC_ERRNO(EBUSY), "Socket service %s already active, refusing.", UNIT(service)->id);
         }
 
@@ -2600,6 +2608,7 @@ static int socket_serialize(Unit *u, FILE *f, FDSet *fds) {
 
 static int socket_deserialize_item(Unit *u, const char *key, const char *value, FDSet *fds) {
         Socket *s = SOCKET(u);
+        int r;
 
         assert(u);
         assert(key);
@@ -2654,123 +2663,182 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value, 
                         s->control_command = s->exec_command[id];
                 }
         } else if (streq(key, "fifo")) {
-                int fd, skip = 0;
+                _cleanup_free_ char *fdv = NULL;
+                bool found = false;
+                int fd;
 
-                if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
                         log_unit_debug(u, "Failed to parse fifo value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    p->type == SOCKET_FIFO &&
-                                    path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching fifo socket found: %s", value+skip);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid fifo value: %s", fdv);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            p->type == SOCKET_FIFO &&
+                            path_equal_or_inode_same(p->path, value, 0)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching fifo socket found: %s", value);
 
         } else if (streq(key, "special")) {
-                int fd, skip = 0;
+                _cleanup_free_ char *fdv = NULL;
+                bool found = false;
+                int fd;
 
-                if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
                         log_unit_debug(u, "Failed to parse special value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    p->type == SOCKET_SPECIAL &&
-                                    path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching special socket found: %s", value+skip);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid special value: %s", fdv);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            p->type == SOCKET_SPECIAL &&
+                            path_equal_or_inode_same(p->path, value, 0)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching special socket found: %s", value);
 
         } else if (streq(key, "mqueue")) {
-                int fd, skip = 0;
+                _cleanup_free_ char *fdv = NULL;
+                bool found = false;
+                int fd;
 
-                if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
                         log_unit_debug(u, "Failed to parse mqueue value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    p->type == SOCKET_MQUEUE &&
-                                    streq(p->path, value+skip)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching mqueue socket found: %s", value+skip);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid mqueue value: %s", fdv);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            p->type == SOCKET_MQUEUE &&
+                            streq(p->path, value)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching mqueue socket found: %s", value);
 
         } else if (streq(key, "socket")) {
-                int fd, type, skip = 0;
+                _cleanup_free_ char *fdv = NULL, *typev = NULL;
+                bool found = false;
+                int fd, type;
 
-                if (sscanf(value, "%i %i %n", &fd, &type, &skip) < 2 || fd < 0 || type < 0 || !fdset_contains(fds, fd))
-                        log_unit_debug(u, "Failed to parse socket value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    socket_address_is(&p->address, value+skip, type)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching %s socket found: %s",
-                                               socket_address_type_to_string(type), value+skip);
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
+                        log_unit_debug(u, "Failed to parse socket fd from value: %s", value);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid socket fd: %s", fdv);
+                        return 0;
+                }
+
+                r = extract_first_word(&value, &typev, NULL, 0);
+                if (r <= 0) {
+                        log_unit_debug(u, "Failed to parse socket type from value: %s", value);
+                        return 0;
+                }
+
+                if (safe_atoi(typev, &type) < 0 || type < 0) {
+                        log_unit_debug(u, "Invalid socket type: %s", typev);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            socket_address_is(&p->address, value, type)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching %s socket found: %s",
+                                       socket_address_type_to_string(type), value);
 
         } else if (streq(key, "netlink")) {
-                int fd, skip = 0;
+                _cleanup_free_ char *fdv = NULL;
+                bool found = false;
+                int fd;
 
-                if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
                         log_unit_debug(u, "Failed to parse socket value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    socket_address_is_netlink(&p->address, value+skip)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching netlink socket found: %s", value+skip);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid socket value: %s", fdv);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            socket_address_is_netlink(&p->address, value)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching netlink socket found: %s", value);
 
         } else if (streq(key, "ffs")) {
-                int fd, skip = 0;
+                _cleanup_free_ char *fdv = NULL;
+                bool found = false;
+                int fd;
 
-                if (sscanf(value, "%i %n", &fd, &skip) < 1 || fd < 0 || !fdset_contains(fds, fd))
+                r = extract_first_word(&value, &fdv, NULL, 0);
+                if (r <= 0) {
                         log_unit_debug(u, "Failed to parse ffs value: %s", value);
-                else {
-                        bool found = false;
-
-                        LIST_FOREACH(port, p, s->ports)
-                                if (p->fd < 0 &&
-                                    p->type == SOCKET_USB_FUNCTION &&
-                                    path_equal_or_files_same(p->path, value+skip, 0)) {
-                                        p->fd = fdset_remove(fds, fd);
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
-                                log_unit_debug(u, "No matching ffs socket found: %s", value+skip);
+                        return 0;
                 }
+
+                fd = parse_fd(fdv);
+                if (fd < 0 || !fdset_contains(fds, fd)) {
+                        log_unit_debug(u, "Invalid ffs value: %s", fdv);
+                        return 0;
+                }
+
+                LIST_FOREACH(port, p, s->ports)
+                        if (p->fd < 0 &&
+                            p->type == SOCKET_USB_FUNCTION &&
+                            path_equal_or_inode_same(p->path, value, 0)) {
+                                p->fd = fdset_remove(fds, fd);
+                                found = true;
+                                break;
+                        }
+                if (!found)
+                        log_unit_debug(u, "No matching ffs socket found: %s", value);
 
         } else
                 log_unit_debug(UNIT(s), "Unknown serialization key: %s", key);
@@ -3290,7 +3358,7 @@ static void socket_trigger_notify(Unit *u, Unit *other) {
                 return;
 
         if (IN_SET(SERVICE(other)->state,
-                   SERVICE_DEAD, SERVICE_FAILED,
+                   SERVICE_DEAD, SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED, SERVICE_FAILED_BEFORE_AUTO_RESTART,
                    SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL,
                    SERVICE_AUTO_RESTART))
                socket_enter_listening(s);
@@ -3299,8 +3367,8 @@ static void socket_trigger_notify(Unit *u, Unit *other) {
                 socket_set_state(s, SOCKET_RUNNING);
 }
 
-static int socket_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, -1, SOCKET(u)->control_pid, error);
+static int socket_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
+        return unit_kill_common(u, who, signo, code, value, -1, SOCKET(u)->control_pid, error);
 }
 
 static int socket_get_timeout(Unit *u, usec_t *timeout) {
@@ -3451,7 +3519,7 @@ SocketTimestamping socket_timestamping_from_string_harder(const char *p) {
          * too. */
         if (streq(p, "nsec"))
                 return SOCKET_TIMESTAMPING_NS;
-        if (STR_IN_SET(p, "usec", "µs"))
+        if (STR_IN_SET(p, "usec", "µs", "μs")) /* Accept both small greek letter mu + micro sign unicode codepoints */
                 return SOCKET_TIMESTAMPING_US;
 
         r = parse_boolean(p);
@@ -3467,7 +3535,6 @@ const UnitVTable socket_vtable = {
         .cgroup_context_offset = offsetof(Socket, cgroup_context),
         .kill_context_offset = offsetof(Socket, kill_context),
         .exec_runtime_offset = offsetof(Socket, exec_runtime),
-        .dynamic_creds_offset = offsetof(Socket, dynamic_creds),
 
         .sections =
                 "Unit\0"

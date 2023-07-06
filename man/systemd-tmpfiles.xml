@@ -131,7 +131,9 @@
         directories marked with <varname>D</varname> or
         <varname>R</varname>, and files or directories themselves
         marked with <varname>r</varname> or <varname>R</varname> are
-        removed.</para></listitem>
+        removed unless an exclusive or shared BSD lock is taken on them (see <citerefentry
+        project='man-pages'><refentrytitle>flock</refentrytitle><manvolnum>2</manvolnum></citerefentry>).
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -146,6 +148,12 @@
         on a running system may be marked in this way. <command>systemd-tmpfiles</command> is executed in
         early boot with <option>--boot</option> specified and will execute those lines. When invoked again
         later, it should be called without <option>--boot</option>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--graceful</option></term>
+        <listitem><para>Ignore configuration lines pertaining to unknown users or groups. This option is
+        intended to be used in early boot before all users or groups have been created.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -202,6 +210,8 @@
         <para>Implies <option>-E</option>.</para></listitem>
       </varlistentry>
 
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
+
       <varlistentry>
         <term><option>--replace=<replaceable>PATH</replaceable></option></term>
         <listitem><para>When this option is given, one or more positional arguments
@@ -236,13 +246,13 @@
     <title>Credentials</title>
 
     <para><command>systemd-tmpfiles</command> supports the service credentials logic as implemented by
-    <varname>LoadCredential=</varname>/<varname>SetCredential=</varname> (see
-    <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
+    <varname>ImportCredential=</varname>/<varname>LoadCredential=</varname>/<varname>SetCredential=</varname>
+    (see <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
     details). The following credentials are used when passed in:</para>
 
-    <variablelist>
+    <variablelist class='system-credentials'>
       <varlistentry>
-        <term><literal>tmpfiles.extra</literal></term>
+        <term><varname>tmpfiles.extra</varname></term>
 
         <listitem><para> The contents of this credential may contain additional lines to operate on. The
         credential contents should follow the same format as any other <filename>tmpfiles.d/</filename>

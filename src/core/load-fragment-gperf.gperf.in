@@ -6,12 +6,16 @@
 {{type}}.RootDirectory,                    config_parse_unit_path_printf,               true,                               offsetof({{type}}, exec_context.root_directory)
 {{type}}.RootImage,                        config_parse_unit_path_printf,               true,                               offsetof({{type}}, exec_context.root_image)
 {{type}}.RootImageOptions,                 config_parse_root_image_options,             0,                                  offsetof({{type}}, exec_context)
+{{type}}.RootImagePolicy,                  config_parse_image_policy,                   0,                                  offsetof({{type}}, exec_context.root_image_policy)
 {{type}}.RootHash,                         config_parse_exec_root_hash,                 0,                                  offsetof({{type}}, exec_context)
 {{type}}.RootHashSignature,                config_parse_exec_root_hash_sig,             0,                                  offsetof({{type}}, exec_context)
 {{type}}.RootVerity,                       config_parse_unit_path_printf,               true,                               offsetof({{type}}, exec_context.root_verity)
+{{type}}.RootEphemeral,                    config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.root_ephemeral)
 {{type}}.ExtensionDirectories,             config_parse_namespace_path_strv,            0,                                  offsetof({{type}}, exec_context.extension_directories)
 {{type}}.ExtensionImages,                  config_parse_extension_images,               0,                                  offsetof({{type}}, exec_context)
+{{type}}.ExtensionImagePolicy,             config_parse_image_policy,                   0,                                  offsetof({{type}}, exec_context.extension_image_policy)
 {{type}}.MountImages,                      config_parse_mount_images,                   0,                                  offsetof({{type}}, exec_context)
+{{type}}.MountImagePolicy,                 config_parse_image_policy,                   0,                                  offsetof({{type}}, exec_context.mount_image_policy)
 {{type}}.User,                             config_parse_user_group_compat,              0,                                  offsetof({{type}}, exec_context.user)
 {{type}}.Group,                            config_parse_user_group_compat,              0,                                  offsetof({{type}}, exec_context.group)
 {{type}}.SupplementaryGroups,              config_parse_user_group_strv_compat,         0,                                  offsetof({{type}}, exec_context.supplementary_groups)
@@ -126,14 +130,14 @@
 {{type}}.LogNamespace,                     config_parse_log_namespace,                  0,                                  offsetof({{type}}, exec_context)
 {{type}}.PrivateNetwork,                   config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.private_network)
 {{type}}.PrivateUsers,                     config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.private_users)
-{{type}}.PrivateMounts,                    config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.private_mounts)
+{{type}}.PrivateMounts,                    config_parse_tristate,                       0,                                  offsetof({{type}}, exec_context.private_mounts)
 {{type}}.PrivateIPC,                       config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.private_ipc)
 {{type}}.ProtectSystem,                    config_parse_protect_system,                 0,                                  offsetof({{type}}, exec_context.protect_system)
 {{type}}.ProtectHome,                      config_parse_protect_home,                   0,                                  offsetof({{type}}, exec_context.protect_home)
-{{type}}.MountFlags,                       config_parse_exec_mount_flags,               0,                                  offsetof({{type}}, exec_context.mount_flags)
+{{type}}.MountFlags,                       config_parse_exec_mount_propagation_flag,    0,                                  offsetof({{type}}, exec_context.mount_propagation_flag)
 {{type}}.MountAPIVFS,                      config_parse_exec_mount_apivfs,              0,                                  offsetof({{type}}, exec_context)
 {{type}}.Personality,                      config_parse_personality,                    0,                                  offsetof({{type}}, exec_context.personality)
-{{type}}.RuntimeDirectoryPreserve,         config_parse_runtime_preserve_mode,          0,                                  offsetof({{type}}, exec_context.runtime_directory_preserve_mode)
+{{type}}.RuntimeDirectoryPreserve,         config_parse_exec_preserve_mode,             0,                                  offsetof({{type}}, exec_context.runtime_directory_preserve_mode)
 {{type}}.RuntimeDirectoryMode,             config_parse_mode,                           0,                                  offsetof({{type}}, exec_context.directories[EXEC_DIRECTORY_RUNTIME].mode)
 {{type}}.RuntimeDirectory,                 config_parse_exec_directories,               0,                                  offsetof({{type}}, exec_context.directories[EXEC_DIRECTORY_RUNTIME])
 {{type}}.StateDirectoryMode,               config_parse_mode,                           0,                                  offsetof({{type}}, exec_context.directories[EXEC_DIRECTORY_STATE].mode)
@@ -148,6 +152,7 @@
 {{type}}.SetCredentialEncrypted,           config_parse_set_credential,                 1,                                  offsetof({{type}}, exec_context)
 {{type}}.LoadCredential,                   config_parse_load_credential,                0,                                  offsetof({{type}}, exec_context)
 {{type}}.LoadCredentialEncrypted,          config_parse_load_credential,                1,                                  offsetof({{type}}, exec_context)
+{{type}}.ImportCredential,                 config_parse_import_credential,              0,                                  offsetof({{type}}, exec_context.import_credentials)
 {{type}}.TimeoutCleanSec,                  config_parse_sec,                            0,                                  offsetof({{type}}, exec_context.timeout_clean_usec)
 {% if HAVE_PAM %}
 {{type}}.PAMName,                          config_parse_unit_string_printf,             0,                                  offsetof({{type}}, exec_context.pam_name)
@@ -173,6 +178,7 @@
 {{type}}.SmackProcessLabel,                config_parse_warn_compat,                    DISABLED_CONFIGURATION,             0
 {% endif %}
 {{type}}.ProtectHostname,                  config_parse_bool,                           0,                                  offsetof({{type}}, exec_context.protect_hostname)
+{{type}}.MemoryKSM,                        config_parse_tristate,                       0,                                  offsetof({{type}}, exec_context.memory_ksm)
 {%- endmacro -%}
 
 {%- macro KILL_CONTEXT_CONFIG_ITEMS(type) -%}
@@ -202,11 +208,17 @@
 {{type}}.MemoryMin,                        config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.DefaultMemoryMin,                 config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.DefaultMemoryLow,                 config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.DefaultStartupMemoryLow,          config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemoryLow,                        config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.StartupMemoryLow,                 config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemoryHigh,                       config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.StartupMemoryHigh,                config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemoryMax,                        config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.StartupMemoryMax,                 config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemorySwapMax,                    config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.StartupMemorySwapMax,             config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemoryZSwapMax,                   config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.StartupMemoryZSwapMax,            config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.MemoryLimit,                      config_parse_memory_limit,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.DeviceAllow,                      config_parse_device_allow,                   0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.DevicePolicy,                     config_parse_device_policy,                  0,                                  offsetof({{type}}, cgroup_context.device_policy)
@@ -228,6 +240,7 @@
 {{type}}.TasksAccounting,                  config_parse_bool,                           0,                                  offsetof({{type}}, cgroup_context.tasks_accounting)
 {{type}}.TasksMax,                         config_parse_tasks_max,                      0,                                  offsetof({{type}}, cgroup_context.tasks_max)
 {{type}}.Delegate,                         config_parse_delegate,                       0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.DelegateSubgroup,                 config_parse_delegate_subgroup ,             0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.DisableControllers,               config_parse_disable_controllers,            0,                                  offsetof({{type}}, cgroup_context)
 {{type}}.IPAccounting,                     config_parse_bool,                           0,                                  offsetof({{type}}, cgroup_context.ip_accounting)
 {{type}}.IPAddressAllow,                   config_parse_in_addr_prefixes,               AF_UNSPEC,                          offsetof({{type}}, cgroup_context.ip_address_allow)
@@ -243,6 +256,8 @@
 {{type}}.SocketBindAllow,                  config_parse_cgroup_socket_bind,             0,                                  offsetof({{type}}, cgroup_context.socket_bind_allow)
 {{type}}.SocketBindDeny,                   config_parse_cgroup_socket_bind,             0,                                  offsetof({{type}}, cgroup_context.socket_bind_deny)
 {{type}}.RestrictNetworkInterfaces,        config_parse_restrict_network_interfaces,    0,                                  offsetof({{type}}, cgroup_context)
+{{type}}.MemoryPressureThresholdSec,       config_parse_sec,                            0,                                  offsetof({{type}}, cgroup_context.memory_pressure_threshold_usec)
+{{type}}.MemoryPressureWatch,              config_parse_memory_pressure_watch,          0,                                  offsetof({{type}}, cgroup_context.memory_pressure_watch)
 {%- endmacro -%}
 
 %{
@@ -252,6 +267,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #include <stddef.h>
 #include "all-units.h"
 #include "conf-parser.h"
+#include "image-policy.h"
 #include "in-addr-prefix-util.h"
 #include "load-fragment.h"
 %}
@@ -391,6 +407,8 @@ Service.ExecReload,                      config_parse_exec,                     
 Service.ExecStop,                        config_parse_exec,                           SERVICE_EXEC_STOP,                  offsetof(Service, exec_command)
 Service.ExecStopPost,                    config_parse_exec,                           SERVICE_EXEC_STOP_POST,             offsetof(Service, exec_command)
 Service.RestartSec,                      config_parse_sec,                            0,                                  offsetof(Service, restart_usec)
+Service.RestartSteps,                    config_parse_unsigned,                       0,                                  offsetof(Service, restart_steps)
+Service.RestartMaxDelaySec,              config_parse_sec,                            0,                                  offsetof(Service, restart_max_delay_usec)
 Service.TimeoutSec,                      config_parse_service_timeout,                0,                                  0
 Service.TimeoutStartSec,                 config_parse_service_timeout,                0,                                  0
 Service.TimeoutStopSec,                  config_parse_sec_fix_0,                      0,                                  offsetof(Service, timeout_stop_usec)
@@ -409,6 +427,7 @@ Service.RebootArgument,                  config_parse_unit_string_printf,       
 Service.Type,                            config_parse_service_type,                   0,                                  offsetof(Service, type)
 Service.ExitType,                        config_parse_service_exit_type,              0,                                  offsetof(Service, exit_type)
 Service.Restart,                         config_parse_service_restart,                0,                                  offsetof(Service, restart)
+Service.RestartMode,                     config_parse_service_restart_mode,           0,                                  offsetof(Service, restart_mode)
 Service.PermissionsStartOnly,            config_parse_bool,                           0,                                  offsetof(Service, permissions_start_only)
 Service.RootDirectoryStartOnly,          config_parse_bool,                           0,                                  offsetof(Service, root_directory_start_only)
 Service.RemainAfterExit,                 config_parse_bool,                           0,                                  offsetof(Service, remain_after_exit)
@@ -420,6 +439,7 @@ Service.SysVStartPriority,               config_parse_warn_compat,              
 Service.NonBlocking,                     config_parse_bool,                           0,                                  offsetof(Service, exec_context.non_blocking)
 Service.BusName,                         config_parse_bus_name,                       0,                                  offsetof(Service, bus_name)
 Service.FileDescriptorStoreMax,          config_parse_unsigned,                       0,                                  offsetof(Service, n_fd_store_max)
+Service.FileDescriptorStorePreserve,     config_parse_exec_preserve_mode,             0,                                  offsetof(Service, fd_store_preserve_mode)
 Service.NotifyAccess,                    config_parse_notify_access,                  0,                                  offsetof(Service, notify_access)
 Service.Sockets,                         config_parse_service_sockets,                0,                                  0
 Service.BusPolicy,                       config_parse_warn_compat,                    DISABLED_LEGACY,                    0
@@ -564,5 +584,6 @@ Scope.OOMPolicy,                         config_parse_oom_policy,               
 Install.Alias,                           NULL,                                        0,                                  0
 Install.WantedBy,                        NULL,                                        0,                                  0
 Install.RequiredBy,                      NULL,                                        0,                                  0
+Install.UpheldBy,                        NULL,                                        0,                                  0
 Install.Also,                            NULL,                                        0,                                  0
 Install.DefaultInstance,                 NULL,                                        0,                                  0

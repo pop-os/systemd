@@ -44,6 +44,7 @@ typedef enum ManagerObjective {
         MANAGER_RELOAD,
         MANAGER_REEXECUTE,
         MANAGER_REBOOT,
+        MANAGER_SOFT_REBOOT,
         MANAGER_POWEROFF,
         MANAGER_HALT,
         MANAGER_KEXEC,
@@ -195,6 +196,9 @@ struct Manager {
         /* Units that have BindsTo= another unit, and might need to be shutdown because the bound unit is not active. */
         LIST_HEAD(Unit, stop_when_bound_queue);
 
+        /* Units that have resources open, and where it might be good to check if they can be released now */
+        LIST_HEAD(Unit, release_resources_queue);
+
         sd_event *event;
 
         /* This maps PIDs we care about to units that are interested in. We allow multiple units to be interested in
@@ -235,7 +239,8 @@ struct Manager {
         int user_lookup_fds[2];
         sd_event_source *user_lookup_event_source;
 
-        LookupScope unit_file_scope;
+        RuntimeScope runtime_scope;
+
         LookupPaths lookup_paths;
         Hashmap *unit_id_map;
         Hashmap *unit_name_map;
@@ -377,6 +382,9 @@ struct Manager {
         int default_oom_score_adjust;
         bool default_oom_score_adjust_set;
 
+        CGroupPressureWatch default_memory_pressure_watch;
+        usec_t default_memory_pressure_threshold_usec;
+
         int original_log_level;
         LogTarget original_log_target;
         bool log_level_overridden;
@@ -425,8 +433,8 @@ struct Manager {
         Hashmap *uid_refs;
         Hashmap *gid_refs;
 
-        /* ExecRuntime, indexed by their owner unit id */
-        Hashmap *exec_runtime_by_id;
+        /* ExecSharedRuntime, indexed by their owner unit id */
+        Hashmap *exec_shared_runtime_by_id;
 
         /* When the user hits C-A-D more than 7 times per 2s, do something immediately... */
         RateLimit ctrl_alt_del_ratelimit;
@@ -464,9 +472,10 @@ struct Manager {
 
         /* Allow users to configure a rate limit for Reload() operations */
         RateLimit reload_ratelimit;
-
         /* Dump*() are slow, so always rate limit them to 10 per 10 minutes */
         RateLimit dump_ratelimit;
+
+        sd_event_source *memory_pressure_event_source;
 };
 
 static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
@@ -474,8 +483,8 @@ static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
         return m->default_timeout_abort_set ? m->default_timeout_abort_usec : m->default_timeout_stop_usec;
 }
 
-#define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == LOOKUP_SCOPE_SYSTEM)
-#define MANAGER_IS_USER(m) ((m)->unit_file_scope != LOOKUP_SCOPE_SYSTEM)
+#define MANAGER_IS_SYSTEM(m) ((m)->runtime_scope == RUNTIME_SCOPE_SYSTEM)
+#define MANAGER_IS_USER(m) ((m)->runtime_scope == RUNTIME_SCOPE_USER)
 
 #define MANAGER_IS_RELOADING(m) ((m)->n_reloading > 0)
 
@@ -488,11 +497,11 @@ static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
 
 #define MANAGER_IS_TEST_RUN(m) ((m)->test_run_flags != 0)
 
-static inline usec_t manager_default_timeout(bool is_system) {
-        return is_system ? DEFAULT_TIMEOUT_USEC : DEFAULT_USER_TIMEOUT_USEC;
+static inline usec_t manager_default_timeout(RuntimeScope scope) {
+        return scope == RUNTIME_SCOPE_SYSTEM ? DEFAULT_TIMEOUT_USEC : DEFAULT_USER_TIMEOUT_USEC;
 }
 
-int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
+int manager_new(RuntimeScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
 Manager* manager_free(Manager *m);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
 
@@ -519,6 +528,8 @@ void manager_clear_jobs(Manager *m);
 void manager_unwatch_pid(Manager *m, pid_t pid);
 
 unsigned manager_dispatch_load_queue(Manager *m);
+
+int manager_setup_memory_pressure_event_source(Manager *m);
 
 int manager_default_environment(Manager *m);
 int manager_transient_environment_add(Manager *m, char **plus);

@@ -18,6 +18,7 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "clean-ipc.h"
+#include "common-signal.h"
 #include "conf-files.h"
 #include "device-util.h"
 #include "dirent-util.h"
@@ -222,6 +223,15 @@ int manager_new(Manager **ret) {
                 return r;
 
         r = sd_event_add_signal(m->event, NULL, SIGTERM, NULL, NULL);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || (r == -EHOSTDOWN) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to allocate memory pressure watch, ignoring: %m");
+
+        r = sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, NULL);
         if (r < 0)
                 return r;
 
@@ -1086,7 +1096,7 @@ static ssize_t read_datagram(
                     cmsg->cmsg_type == SCM_CREDENTIALS &&
                     cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred))) {
                         assert(!sender);
-                        sender = (struct ucred*) CMSG_DATA(cmsg);
+                        sender = CMSG_TYPED_DATA(cmsg, struct ucred);
                 }
 
                 if (cmsg->cmsg_level == SOL_SOCKET &&
@@ -1098,7 +1108,7 @@ static ssize_t read_datagram(
                         }
 
                         assert(passed_fd < 0);
-                        passed_fd = *(int*) CMSG_DATA(cmsg);
+                        passed_fd = *CMSG_TYPED_DATA(cmsg, int);
                 }
         }
 
@@ -1347,7 +1357,7 @@ static int manager_enumerate_devices(Manager *m) {
 }
 
 static int manager_load_key_pair(Manager *m) {
-        _cleanup_(fclosep) FILE *f = NULL;
+        _cleanup_fclose_ FILE *f = NULL;
         struct stat st;
         int r;
 
@@ -1446,9 +1456,10 @@ static int manager_generate_key_pair(Manager *m) {
                 return log_error_errno(errno, "Failed to move public key file into place: %m");
         temp_public = mfree(temp_public);
 
-        if (rename(temp_private, "/var/lib/systemd/home/local.private") < 0) {
-                (void) unlink_noerrno("/var/lib/systemd/home/local.public"); /* try to remove the file we already created */
-                return log_error_errno(errno, "Failed to move private key file into place: %m");
+        r = RET_NERRNO(rename(temp_private, "/var/lib/systemd/home/local.private"));
+        if (r < 0) {
+                (void) unlink("/var/lib/systemd/home/local.public"); /* try to remove the file we already created */
+                return log_error_errno(r, "Failed to move private key file into place: %m");
         }
         temp_private = mfree(temp_private);
 

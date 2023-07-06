@@ -25,6 +25,9 @@
     <cmdsynopsis>
       <command>systemd-notify <arg choice="opt" rep="repeat">OPTIONS</arg> <arg choice="opt" rep="repeat">VARIABLE=VALUE</arg></command>
     </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-notify --exec <arg choice="opt" rep="repeat">OPTIONS</arg> <arg choice="opt" rep="repeat">VARIABLE=VALUE</arg> ; <arg rep="repeat">CMDLINE</arg></command>
+    </cmdsynopsis>
   </refsynopsisdiv>
 
   <refsect1>
@@ -172,6 +175,43 @@
         the invoking process is directly spawned by the service manager and has enough privileges to allow
         <command>systemd-notify</command> to send the notification on its behalf. Sending notifications with
         this option set is prone to race conditions in all other cases.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--exec</option></term>
+
+        <listitem><para>If specified <command>systemd-notify</command> will execute another command line
+        after it completed its operation, replacing its own process. If used, the list of assignments to
+        include in the message sent must be followed by a <literal>;</literal> character (as separate
+        argument), followed by the command line to execute. This permits "chaining" of commands, i.e. issuing
+        one operation, followed immediately by another, without changing PIDs.</para>
+
+        <para>Note that many shells interpret <literal>;</literal> as their own separator for command lines,
+        hence when <command>systemd-notify</command> is invoked from a shell the semicolon must usually be
+        escaped as <literal>\;</literal>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--fd=</option></term>
+
+        <listitem><para>Send a file descriptor along with the notification message. This is useful when
+        invoked in services that have the <varname>FileDescriptorStoreMax=</varname> setting enabled, see
+        <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for details. The specified file descriptor must be passed to <command>systemd-notify</command> when
+        invoked. This option may be used multiple times to pass multiple file descriptors in a single
+        notification message.</para>
+
+        <para>To use this functionality from a <command>bash</command> shell, use an expression like the following:</para>
+        <programlisting>systemd-notify --fd=4 --fd=5 4&lt;/some/file 5&lt;/some/other/file</programlisting></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--fdname=</option></term>
+
+        <listitem><para>Set a name to assign to the file descriptors passed via <option>--fd=</option> (see
+        above). This controls the <literal>FDNAME=</literal> field. This setting may only be specified once,
+        and applies to all file descriptors passed. Invoke this tool multiple times in case multiple file
+        descriptors with different file descriptor names shall be submitted.</para></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="help" />

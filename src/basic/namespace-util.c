@@ -109,7 +109,7 @@ int namespace_enter(int pidns_fd, int mntns_fd, int netns_fd, int userns_fd, int
                 /* Can't setns to your own userns, since then you could escalate from non-root to root in
                  * your own namespace, so check if namespaces are equal before attempting to enter. */
 
-                r = files_same(FORMAT_PROC_FD_PATH(userns_fd), "/proc/self/ns/user", 0);
+                r = inode_same_at(userns_fd, "", AT_FDCWD, "/proc/self/ns/user", AT_EMPTY_PATH);
                 if (r < 0)
                         return r;
                 if (r)
@@ -190,13 +190,20 @@ int fd_is_ns(int fd, unsigned long nsflag) {
 }
 
 int detach_mount_namespace(void) {
-
-        /* Detaches the mount namespace, disabling propagation from our namespace to the host */
+        /* Detaches the mount namespace, disabling propagation from our namespace to the host. Sets
+         * propagation first to MS_SLAVE for all mounts (disabling propagation), and then back to MS_SHARED
+         * (so that we create a new peer group).  */
 
         if (unshare(CLONE_NEWNS) < 0)
-                return -errno;
+                return log_debug_errno(errno, "Failed to acquire mount namespace: %m");
 
-        return RET_NERRNO(mount(NULL, "/", NULL, MS_SLAVE | MS_REC, NULL));
+        if (mount(NULL, "/", NULL, MS_SLAVE | MS_REC, NULL) < 0)
+                return log_debug_errno(errno, "Failed to set mount propagation to MS_SLAVE for all mounts: %m");
+
+        if (mount(NULL, "/", NULL, MS_SHARED | MS_REC, NULL) < 0)
+                return log_debug_errno(errno, "Failed to set mount propagation back to MS_SHARED for all mounts: %m");
+
+        return 0;
 }
 
 int userns_acquire(const char *uid_map, const char *gid_map) {

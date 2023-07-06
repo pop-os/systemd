@@ -92,8 +92,8 @@
     disabled; see the <option>--no-pager</option> option and the "Environment" section below.</para>
 
     <para>When outputting to a tty, lines are colored according to priority: lines of level ERROR and higher
-    are colored red; lines of level NOTICE and higher are highlighted; lines of level DEBUG are colored
-    lighter grey; other lines are displayed normally.</para>
+    are colored red; lines of level WARNING are colored yellow; lines of level NOTICE are highlighted;
+    lines of level INFO are displayed normally; lines of level DEBUG are colored grey.</para>
 
     <para>To write entries <emphasis>to</emphasis> the journal, a few methods may be used. In general, output
     from systemd units is automatically connected to the journal, see
@@ -118,8 +118,12 @@
         <option>--user</option>).  If neither is specified, show all messages that the user can see.
         </para>
 
-        <para>The <option>--user</option> option affects how <option>--unit</option> arguments are
-        treated. See <option>--unit</option>.</para></listitem>
+        <para>The <option>--user</option> option affects how <option>--unit=</option> arguments are
+        treated. See <option>--unit=</option>.</para>
+
+        <para>Note that <option>--user</option> only works if persistent logging is enabled, via the
+        <varname>Storage=</varname> setting in
+        <citerefentry><refentrytitle>journald.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -181,6 +185,8 @@
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         switch of the same name.</para></listitem>
       </varlistentry>
+
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
 
       <varlistentry>
         <term><option>--namespace=<replaceable>NAMESPACE</replaceable></option></term>
@@ -293,8 +299,8 @@
         <citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         unit, all logs of children of the slice will be shown.</para>
 
-        <para>With <option>--user</option>, all <option>--unit</option> arguments will be converted to match
-        user messages as if specified with <option>--user-unit</option>.</para>
+        <para>With <option>--user</option>, all <option>--unit=</option> arguments will be converted to match
+        user messages as if specified with <option>--user-unit=</option>.</para>
 
         <para>This parameter can be specified multiple times.</para></listitem>
       </varlistentry>
@@ -421,6 +427,13 @@
             <term><option>short-iso-precise</option></term>
             <listitem><para>as for <option>short-iso</option> but includes full microsecond
             precision.</para></listitem>
+          </varlistentry>
+
+          <varlistentry>
+            <term><option>--truncate-newline</option></term>
+
+            <listitem><para>Truncate each log message at the first newline character on output, so that only the
+            first line of each message is displayed.</para></listitem>
           </varlistentry>
 
           <varlistentry>
@@ -736,22 +749,31 @@
         <term><option>--vacuum-time=</option></term>
         <term><option>--vacuum-files=</option></term>
 
-        <listitem><para>Removes the oldest archived journal files until the disk space they use falls below
-        the specified size (specified with the usual <literal>K</literal>, <literal>M</literal>,
-        <literal>G</literal> and <literal>T</literal> suffixes), or all archived journal files contain no
-        data older than the specified timespan (specified with the usual <literal>s</literal>,
-        <literal>m</literal>, <literal>h</literal>, <literal>days</literal>, <literal>months</literal>,
-        <literal>weeks</literal> and <literal>years</literal> suffixes), or no more than the specified
-        number of separate journal files remain. Note that running <option>--vacuum-size=</option> has only
-        an indirect effect on the output shown by <option>--disk-usage</option>, as the latter includes
-        active journal files, while the vacuuming operation only operates on archived journal
-        files. Similarly, <option>--vacuum-files=</option> might not actually reduce the number of journal
-        files to below the specified number, as it will not remove active journal files.</para>
+        <listitem><para><option>--vacuum-size=</option> removes the oldest archived journal files until the
+        disk space they use falls below the specified size. Accepts the usual <literal>K</literal>,
+        <literal>M</literal>, <literal>G</literal> and <literal>T</literal> suffixes (to the base of
+        1024).</para>
+
+        <para><option>--vacuum-time=</option> removes archived journal files older than the specified
+        timespan. Accepts the usual <literal>s</literal> (default), <literal>m</literal>,
+        <literal>h</literal>, <literal>days</literal>, <literal>months</literal>, <literal>weeks</literal>
+        and <literal>years</literal> suffixes, see
+        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details.</para>
+
+        <para><option>--vacuum-files=</option> leaves only the specified number of separate journal
+        files.</para>
+
+        <para>Note that running <option>--vacuum-size=</option> has only an indirect effect on the output
+        shown by <option>--disk-usage</option>, as the latter includes active journal files, while the
+        vacuuming operation only operates on archived journal files. Similarly,
+        <option>--vacuum-files=</option> might not actually reduce the number of journal files to below the
+        specified number, as it will not remove active journal files.</para>
 
         <para><option>--vacuum-size=</option>, <option>--vacuum-time=</option> and
-        <option>--vacuum-files=</option> may be combined in a single invocation to enforce any combination
-        of a size, a time and a number of files limit on the archived journal files. Specifying any of
-        these three parameters as zero is equivalent to not enforcing the specific limit, and is thus
+        <option>--vacuum-files=</option> may be combined in a single invocation to enforce any combination of
+        a size, a time and a number of files limit on the archived journal files. Specifying any of these
+        three parameters as zero is equivalent to not enforcing the specific limit, and is thus
         redundant.</para>
 
         <para>These three switches may also be combined with <option>--rotate</option> into one command. If

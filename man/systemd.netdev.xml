@@ -190,7 +190,7 @@
           <entry>The Intermediate Functional Block (ifb) pseudo network interface acts as a QoS concentrator for multiple different sources of traffic.</entry></row>
 
           <row><entry><varname>bareudp</varname></entry>
-          <entry>Bare UDP tunnels provide a generic L3 encapsulation support for tunnelling different L3 protocols like MPLS, IP etc. inside of an UDP tunnel.</entry></row>
+          <entry>Bare UDP tunnels provide a generic L3 encapsulation support for tunnelling different L3 protocols like MPLS, IP etc. inside of a UDP tunnel.</entry></row>
 
           <row><entry><varname>batadv</varname></entry>
           <entry><ulink url="https://www.open-mesh.org/projects/open-mesh/wiki">B.A.T.M.A.N. Advanced</ulink> is a routing protocol for multi-hop mobile ad-hoc networks which operates on layer 2.</entry></row>
@@ -826,6 +826,13 @@
           <para>Accepts the same key as in [VXLAN] section.</para>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>InheritInnerProtocol=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, inner Layer 3 protocol is set as Protocol Type in the GENEVE
+          header instead of Ethernet. Defaults to false.</para>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -1213,7 +1220,19 @@
         <term><varname>DiscoverPathMTU=</varname></term>
         <listitem>
           <para>Takes a boolean. When true, enables Path MTU Discovery on
-          the tunnel.</para>
+          the tunnel.
+          When <varname>IgnoreDontFragment=</varname> is enabled,
+          defaults to false. Otherwise, defaults to true.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>IgnoreDontFragment=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, enables IPv4 Don't Fragment (DF) suppression on
+          the tunnel. Defaults to false.
+          Note that if <varname>IgnoreDontFragment=</varname> is set to true,
+          <varname>DiscoverPathMTU=</varname> cannot be set to true.
+          Only applicable to GRE, GRETAP, and ERSPAN tunnels.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1693,9 +1712,10 @@
       <varlistentry>
         <term><varname>AllowedIPs=</varname></term>
         <listitem>
-          <para>Sets a comma-separated list of IP (v4 or v6) addresses with CIDR masks
-          from which this peer is allowed to send incoming traffic and to
-          which outgoing traffic for this peer is directed.</para>
+          <para>Sets a comma-separated list of IP (v4 or v6) addresses with CIDR masks from which this peer
+          is allowed to send incoming traffic and to which outgoing traffic for this peer is directed. This
+          setting can be specified multiple times. If an empty string is assigned, then the all previous
+          assignments are cleared.</para>
 
           <para>The catch-all 0.0.0.0/0 may be specified for matching all IPv4 addresses,
           and ::/0 may be specified for matching all IPv6 addresses.</para>

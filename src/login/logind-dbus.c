@@ -46,7 +46,7 @@
 #include "process-util.h"
 #include "reboot-util.h"
 #include "selinux-util.h"
-#include "sleep-config.h"
+#include "sleep-util.h"
 #include "special.h"
 #include "serialize.h"
 #include "stdio-util.h"
@@ -867,7 +867,7 @@ static int method_create_session(sd_bus_message *message, void *userdata, sd_bus
                 do {
                         id = mfree(id);
 
-                        if (asprintf(&id, "c%lu", ++m->session_counter) < 0)
+                        if (asprintf(&id, "c%" PRIu64, ++m->session_counter) < 0)
                                 return -ENOMEM;
 
                 } while (hashmap_contains(m->sessions, id));
@@ -1860,9 +1860,19 @@ static int method_do_shutdown_or_sleep(
                 if ((flags & ~SD_LOGIND_SHUTDOWN_AND_SLEEP_FLAGS_PUBLIC) != 0)
                         return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
                                                 "Invalid flags parameter");
-                if (a->handle != HANDLE_REBOOT && (flags & SD_LOGIND_REBOOT_VIA_KEXEC))
+
+                if (FLAGS_SET(flags, (SD_LOGIND_REBOOT_VIA_KEXEC|SD_LOGIND_SOFT_REBOOT)))
                         return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
-                                                "Reboot via kexec is only applicable with reboot operations");
+                                                "Both reboot via kexec and soft reboot selected, which is not supported");
+
+                if (a->handle != HANDLE_REBOOT) {
+                        if (flags & SD_LOGIND_REBOOT_VIA_KEXEC)
+                                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
+                                                        "Reboot via kexec option is only applicable with reboot operations");
+                        if (flags & SD_LOGIND_SOFT_REBOOT)
+                                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
+                                                        "Soft reboot option is only applicable with reboot operations");
+                }
         } else {
                 /* Old style method: no flags parameter, but interactive bool passed as boolean in
                  * payload. Let's convert this argument to the new-style flags parameter for our internal
@@ -1878,6 +1888,8 @@ static int method_do_shutdown_or_sleep(
 
         if ((flags & SD_LOGIND_REBOOT_VIA_KEXEC) && kexec_loaded())
                 a = handle_action_lookup(HANDLE_KEXEC);
+        else if ((flags & SD_LOGIND_SOFT_REBOOT))
+                a = handle_action_lookup(HANDLE_SOFT_REBOOT);
 
         /* Don't allow multiple jobs being executed at the same time */
         if (m->delayed_action)
@@ -2083,7 +2095,7 @@ void manager_load_scheduled_shutdown(Manager *m) {
 }
 
 static int update_schedule_file(Manager *m) {
-        _cleanup_free_ char *temp_path = NULL;
+        _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -2123,10 +2135,10 @@ static int update_schedule_file(Manager *m) {
                 goto fail;
         }
 
+        temp_path = mfree(temp_path);
         return 0;
 
 fail:
-        (void) unlink(temp_path);
         (void) unlink(SHUTDOWN_SCHEDULE_FILE);
 
         return log_error_errno(r, "Failed to write information about scheduled shutdowns: %m");
@@ -2221,7 +2233,7 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
         }
 
         handle = handle_action_from_string(type);
-        if (!IN_SET(handle, HANDLE_POWEROFF, HANDLE_REBOOT, HANDLE_HALT, HANDLE_KEXEC))
+        if (!IN_SET(handle, HANDLE_POWEROFF, HANDLE_REBOOT, HANDLE_SOFT_REBOOT, HANDLE_HALT, HANDLE_KEXEC))
                 return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Unsupported shutdown type");
 
         a = handle_action_lookup(handle);
@@ -2859,7 +2871,7 @@ static int method_set_reboot_to_boot_loader_menu(
                 } else {
                         char buf[DECIMAL_STR_MAX(uint64_t) + 1];
 
-                        xsprintf(buf, "%" PRIu64, x); /* µs granularity */
+                        xsprintf(buf, "%" PRIu64, x); /* μs granularity */
 
                         r = write_string_file_atomic_label("/run/systemd/reboot-to-boot-loader-menu", buf);
                         if (r < 0)
@@ -3274,7 +3286,7 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
         do {
                 id = mfree(id);
 
-                if (asprintf(&id, "%lu", ++m->inhibit_counter) < 0)
+                if (asprintf(&id, "%" PRIu64, ++m->inhibit_counter) < 0)
                         return -ENOMEM;
 
         } while (hashmap_get(m->inhibitors, id));

@@ -59,6 +59,7 @@
 #include "systemctl-sysv-compat.h"
 #include "systemctl-trivial-method.h"
 #include "systemctl-util.h"
+#include "systemctl-whoami.h"
 #include "systemctl.h"
 #include "terminal-util.h"
 #include "time-util.h"
@@ -71,7 +72,7 @@ char **arg_properties = NULL;
 bool arg_all = false;
 enum dependency arg_dependency = DEPENDENCY_FORWARD;
 const char *_arg_job_mode = NULL;
-LookupScope arg_scope = LOOKUP_SCOPE_SYSTEM;
+RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 bool arg_wait = false;
 bool arg_no_block = false;
 int arg_legend = -1; /* -1: true, unless --quiet is passed, 1: true */
@@ -97,6 +98,8 @@ UnitFilePresetMode arg_preset_mode = UNIT_FILE_PRESET_FULL;
 char **arg_wall = NULL;
 const char *arg_kill_whom = NULL;
 int arg_signal = SIGTERM;
+int arg_kill_value;
+bool arg_kill_value_set = false;
 char *arg_root = NULL;
 char *arg_image = NULL;
 usec_t arg_when = 0;
@@ -119,6 +122,7 @@ bool arg_read_only = false;
 bool arg_mkdir = false;
 bool arg_marked = false;
 const char *arg_drop_in = NULL;
+ImagePolicy *arg_image_policy = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_types, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_states, strv_freep);
@@ -133,6 +137,7 @@ STATIC_DESTRUCTOR_REGISTER(arg_host, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_boot_loader_entry, unsetp);
 STATIC_DESTRUCTOR_REGISTER(arg_clean_what, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_drop_in, unsetp);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 static int systemctl_help(void) {
         _cleanup_free_ char *link = NULL;
@@ -149,6 +154,8 @@ static int systemctl_help(void) {
                "\n%3$sUnit Commands:%4$s\n"
                "  list-units [PATTERN...]             List units currently in memory\n"
                "  list-automounts [PATTERN...]        List automount units currently in memory,\n"
+               "                                      ordered by path\n"
+               "  list-paths [PATTERN...]             List path units currently in memory,\n"
                "                                      ordered by path\n"
                "  list-sockets [PATTERN...]           List socket units currently in memory,\n"
                "                                      ordered by address\n"
@@ -187,7 +194,9 @@ static int systemctl_help(void) {
                "  service-log-level SERVICE [LEVEL]   Get/set logging threshold for service\n"
                "  service-log-target SERVICE [TARGET] Get/set logging target for service\n"
                "  reset-failed [PATTERN...]           Reset failed state for all, one, or more\n"
-               "                                      units"
+               "                                      units\n"
+               "  whoami [PID...]                     Return unit caller or specified PIDs are\n"
+               "                                      part of\n"
                "\n%3$sUnit File Commands:%4$s\n"
                "  list-unit-files [PATTERN...]        List installed unit files\n"
                "  enable [UNIT...|PATH...]            Enable one or more unit files\n"
@@ -236,8 +245,9 @@ static int systemctl_help(void) {
                "  poweroff                            Shut down and power-off the system\n"
                "  reboot                              Shut down and reboot the system\n"
                "  kexec                               Shut down and reboot the system with kexec\n"
+               "  soft-reboot                         Shut down and reboot userspace\n"
                "  exit [EXIT_CODE]                    Request user instance or container exit\n"
-               "  switch-root ROOT [INIT]             Change to a different root file system\n"
+               "  switch-root [ROOT [INIT]]           Change to a different root file system\n"
                "  suspend                             Suspend the system\n"
                "  hibernate                           Hibernate the system\n"
                "  hybrid-sleep                        Hibernate and suspend the system\n"
@@ -273,13 +283,15 @@ static int systemctl_help(void) {
                "                         sleeping, or hibernating\n"
                "  -i                     Shortcut for --check-inhibitors=no\n"
                "     --kill-whom=WHOM    Whom to send signal to\n"
+               "     --kill-value=INT    Signal value to enqueue\n"
                "  -s --signal=SIGNAL     Which signal to send\n"
                "     --what=RESOURCES    Which types of resources to remove\n"
                "     --now               Start or stop unit after enabling or disabling it\n"
                "     --dry-run           Only print what would be done\n"
                "                         Currently supported by verbs: halt, poweroff, reboot,\n"
-               "                             kexec, suspend, hibernate, suspend-then-hibernate,\n"
-               "                             hybrid-sleep, default, rescue, emergency, and exit.\n"
+               "                             kexec, soft-reboot, suspend, hibernate, \n"
+               "                             suspend-then-hibernate, hybrid-sleep, default,\n"
+               "                             rescue, emergency, and exit.\n"
                "  -q --quiet             Suppress output\n"
                "     --no-warn           Suppress several warnings shown by default\n"
                "     --wait              For (re)start, wait until service stopped again\n"
@@ -300,7 +312,9 @@ static int systemctl_help(void) {
                "     --root=PATH         Edit/enable/disable/mask unit files in the specified\n"
                "                         root directory\n"
                "     --image=PATH        Edit/enable/disable/mask unit files in the specified\n"
-               "                         image\n"
+               "                         disk image\n"
+               "     --image-policy=POLICY\n"
+               "                         Specify disk image dissection policy\n"
                "  -n --lines=INTEGER     Number of journal entries to show\n"
                "  -o --output=STRING     Change journal output mode (short, short-precise,\n"
                "                             short-iso, short-iso-precise, short-full,\n"
@@ -318,6 +332,8 @@ static int systemctl_help(void) {
                "     --mkdir             Create directory before mounting, if missing\n"
                "     --marked            Restart/reload previously marked units\n"
                "     --drop-in=NAME      Edit unit files using the specified drop-in file name\n"
+               "     --when=TIME         Schedule halt/power-off/reboot/kexec action after\n"
+               "                         a certain timestamp\n"
                "\nSee the %2$s for details.\n",
                program_invocation_short_name,
                link,
@@ -417,8 +433,10 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 ARG_NO_WALL,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_NO_RELOAD,
                 ARG_KILL_WHOM,
+                ARG_KILL_VALUE,
                 ARG_NO_ASK_PASSWORD,
                 ARG_FAILED,
                 ARG_RUNTIME,
@@ -441,6 +459,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 ARG_MARKED,
                 ARG_NO_WARN,
                 ARG_DROP_IN,
+                ARG_WHEN,
         };
 
         static const struct option options[] = {
@@ -476,9 +495,11 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "no-warn",             no_argument,       NULL, ARG_NO_WARN             },
                 { "root",                required_argument, NULL, ARG_ROOT                },
                 { "image",               required_argument, NULL, ARG_IMAGE               },
+                { "image-policy",        required_argument, NULL, ARG_IMAGE_POLICY        },
                 { "force",               no_argument,       NULL, 'f'                     },
                 { "no-reload",           no_argument,       NULL, ARG_NO_RELOAD           },
                 { "kill-whom",           required_argument, NULL, ARG_KILL_WHOM           },
+                { "kill-value",          required_argument, NULL, ARG_KILL_VALUE          },
                 { "signal",              required_argument, NULL, 's'                     },
                 { "no-ask-password",     no_argument,       NULL, ARG_NO_ASK_PASSWORD     },
                 { "host",                required_argument, NULL, 'H'                     },
@@ -504,6 +525,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "mkdir",               no_argument,       NULL, ARG_MKDIR               },
                 { "marked",              no_argument,       NULL, ARG_MARKED              },
                 { "drop-in",             required_argument, NULL, ARG_DROP_IN             },
+                { "when",                required_argument, NULL, ARG_WHEN                },
                 {}
         };
 
@@ -639,15 +661,15 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_USER:
-                        arg_scope = LOOKUP_SCOPE_USER;
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
                         break;
 
                 case ARG_SYSTEM:
-                        arg_scope = LOOKUP_SCOPE_SYSTEM;
+                        arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
                         break;
 
                 case ARG_GLOBAL:
-                        arg_scope = LOOKUP_SCOPE_GLOBAL;
+                        arg_runtime_scope = RUNTIME_SCOPE_GLOBAL;
                         break;
 
                 case ARG_WAIT:
@@ -689,6 +711,12 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
+
                 case 'l':
                         arg_full = true;
                         break;
@@ -722,6 +750,30 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 case ARG_KILL_WHOM:
                         arg_kill_whom = optarg;
                         break;
+
+                case ARG_KILL_VALUE: {
+                        unsigned u;
+
+                        if (isempty(optarg)) {
+                                arg_kill_value_set = false;
+                                return 0;
+                        }
+
+                        /* First, try to parse unsigned, so that we can support the prefixes 0x, 0o, 0b */
+                        r = safe_atou_full(optarg, 0, &u);
+                        if (r < 0)
+                                /* If this didn't work, try as signed integer, without those prefixes */
+                                r = safe_atoi(optarg, &arg_kill_value);
+                        else if (u > INT_MAX)
+                                r = -ERANGE;
+                        else
+                                arg_kill_value = (int) u;
+                        if (r < 0)
+                                return log_error_errno(r, "Unable to parse signal queue value: %s", optarg);
+
+                        arg_kill_value_set = true;
+                        break;
+                }
 
                 case 's':
                         r = parse_signal_argument(optarg, &arg_signal);
@@ -896,7 +948,8 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                                              "state\n"
                                              "cache\n"
                                              "logs\n"
-                                             "configuration");
+                                             "configuration\n"
+                                             "fdstore");
                                         return 0;
                                 }
 
@@ -944,6 +997,30 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                         arg_drop_in = optarg;
                         break;
 
+                case ARG_WHEN:
+                        if (streq(optarg, "show")) {
+                                r = logind_show_shutdown();
+                                if (r < 0 && r != -ENODATA)
+                                        return r;
+
+                                return 0;
+                        }
+
+                        if (STR_IN_SET(optarg, "", "cancel")) {
+                                arg_when = USEC_INFINITY;
+                                break;
+                        }
+
+                        r = parse_timestamp(optarg, &arg_when);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --when= argument '%s': %m", optarg);
+
+                        if (!timestamp_is_set(arg_when))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid timestamp '%s' specified for --when=.", optarg);
+
+                        break;
+
                 case '.':
                         /* Output an error mimicking getopt, and print a hint afterwards */
                         log_error("%s: invalid option -- '.'", program_invocation_name);
@@ -961,10 +1038,10 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
 
         /* If we are in --user mode, there's no point in talking to PolicyKit or the infra to query system
          * passwords */
-        if (arg_scope != LOOKUP_SCOPE_SYSTEM)
+        if (arg_runtime_scope != RUNTIME_SCOPE_SYSTEM)
                 arg_ask_password = false;
 
-        if (arg_transport == BUS_TRANSPORT_REMOTE && arg_scope != LOOKUP_SCOPE_SYSTEM)
+        if (arg_transport == BUS_TRANSPORT_REMOTE && arg_runtime_scope != RUNTIME_SCOPE_SYSTEM)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Cannot access user instance remotely.");
 
@@ -1062,6 +1139,7 @@ static int systemctl_main(int argc, char *argv[]) {
                 { "list-units",            VERB_ANY, VERB_ANY, VERB_DEFAULT|VERB_ONLINE_ONLY, verb_list_units },
                 { "list-unit-files",       VERB_ANY, VERB_ANY, 0,                verb_list_unit_files         },
                 { "list-automounts",       VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_automounts         },
+                { "list-paths",            VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_paths              },
                 { "list-sockets",          VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_sockets            },
                 { "list-timers",           VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_timers             },
                 { "list-jobs",             VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_jobs               },
@@ -1107,6 +1185,7 @@ static int systemctl_main(int argc, char *argv[]) {
                 { "poweroff",              VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "reboot",                VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "kexec",                 VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
+                { "soft-reboot",           VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "suspend",               VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "hibernate",             VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
                 { "hybrid-sleep",          VERB_ANY, 1,        VERB_ONLINE_ONLY, verb_start_system_special    },
@@ -1126,7 +1205,7 @@ static int systemctl_main(int argc, char *argv[]) {
                 { "unmask",                2,        VERB_ANY, 0,                verb_enable                  },
                 { "link",                  2,        VERB_ANY, 0,                verb_enable                  },
                 { "revert",                2,        VERB_ANY, 0,                verb_enable                  },
-                { "switch-root",           2,        VERB_ANY, VERB_ONLINE_ONLY, verb_switch_root             },
+                { "switch-root",           VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_switch_root             },
                 { "list-dependencies",     VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_list_dependencies       },
                 { "set-default",           2,        2,        0,                verb_set_default             },
                 { "get-default",           VERB_ANY, 1,        0,                verb_get_default             },
@@ -1137,6 +1216,7 @@ static int systemctl_main(int argc, char *argv[]) {
                 { "edit",                  2,        VERB_ANY, VERB_ONLINE_ONLY, verb_edit                    },
                 { "bind",                  3,        4,        VERB_ONLINE_ONLY, verb_bind                    },
                 { "mount-image",           4,        5,        VERB_ONLINE_ONLY, verb_mount_image             },
+                { "whoami",                VERB_ANY, VERB_ANY, VERB_ONLINE_ONLY, verb_whoami                  },
                 {}
         };
 
@@ -1151,7 +1231,7 @@ static int systemctl_main(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *mounted_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -1188,11 +1268,13 @@ static int run(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_REQUIRE_ROOT |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_VALIDATE_OS,
                                 &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;

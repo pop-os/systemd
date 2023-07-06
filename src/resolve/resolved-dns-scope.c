@@ -556,6 +556,9 @@ static DnsScopeMatch match_subnet_reverse_lookups(
         if (s->family != AF_UNSPEC && f != s->family)
                 return _DNS_SCOPE_MATCH_INVALID; /* Don't look for IPv4 addresses on LLMNR/mDNS over IPv6 and vice versa */
 
+        if (in_addr_is_null(f, &ia))
+                return DNS_SCOPE_NO;
+
         LIST_FOREACH(addresses, a, s->link->addresses) {
 
                 if (a->family != f)
@@ -568,6 +571,10 @@ static DnsScopeMatch match_subnet_reverse_lookups(
 
                 if (a->prefixlen == UCHAR_MAX) /* don't know subnet mask */
                         continue;
+
+                /* Don't send mDNS queries for the IPv4 broadcast address */
+                if (f == AF_INET && in_addr_equal(f, &a->in_addr_broadcast, &ia) > 0)
+                        return DNS_SCOPE_NO;
 
                 /* Check if the address is in the local subnet */
                 r = in_addr_prefix_covers(f, &a->in_addr, a->prefixlen, &ia);
@@ -1635,4 +1642,24 @@ bool dns_scope_is_default_route(DnsScope *scope) {
         /* Otherwise check if we have any route-only domains, as a sensible heuristic: if so, let's not
          * volunteer as default route. */
         return !dns_scope_has_route_only_domains(scope);
+}
+
+int dns_scope_dump_cache_to_json(DnsScope *scope, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *cache = NULL;
+        int r;
+
+        assert(scope);
+        assert(ret);
+
+        r = dns_cache_dump_to_json(&scope->cache, &cache);
+        if (r < 0)
+                return r;
+
+        return json_build(ret,
+                          JSON_BUILD_OBJECT(
+                                          JSON_BUILD_PAIR_STRING("protocol", dns_protocol_to_string(scope->protocol)),
+                                          JSON_BUILD_PAIR_CONDITION(scope->family != AF_UNSPEC, "family", JSON_BUILD_INTEGER(scope->family)),
+                                          JSON_BUILD_PAIR_CONDITION(scope->link, "ifindex", JSON_BUILD_INTEGER(scope->link ? scope->link->ifindex : 0)),
+                                          JSON_BUILD_PAIR_CONDITION(scope->link, "ifname", JSON_BUILD_STRING(scope->link ? scope->link->ifname : NULL)),
+                                          JSON_BUILD_PAIR_VARIANT("cache", cache)));
 }

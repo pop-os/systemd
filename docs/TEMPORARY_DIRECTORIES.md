@@ -84,7 +84,7 @@ By default, `systemd-tmpfiles` will apply a concept of ⚠️ "ageing" to all fi
 and directories stored in `/tmp/` and `/var/tmp/`. This means that files that
 have neither been changed nor read within a specific time frame are
 automatically removed in regular intervals. (This concept is not new to
-`systemd-tmpfiles` btw, it's inherited from previous subsystems such as
+`systemd-tmpfiles`, it's inherited from previous subsystems such as
 `tmpwatch`.) By default files in `/tmp/` are cleaned up after 10 days, and
 those in `/var/tmp` after 30 days.
 
@@ -111,14 +111,13 @@ strategies to avoid these issues:
    towards unexpected program termination as there are never files on disk that
    need to be explicitly deleted.
 
-3. 🥇 Operate below a sub-directory of `/tmp/` and `/var/tmp/` you created, and
-   take a BSD file lock ([`flock(dir_fd,
-   LOCK_SH)`](https://man7.org/linux/man-pages/man2/flock.2.html)) on that
-   sub-directory. This is particularly interesting when operating on more than
-   a single file, or on file nodes that are not plain regular files, for
-   example when extracting a tarball to a temporary directory. The ageing
-   algorithm will skip all directories (and everything below them) that are
-   locked through a BSD file lock. As BSD file locks are automatically released
+3. 🥇 Take an exclusive or shared BSD file lock ([`flock()`](
+   https://man7.org/linux/man-pages/man2/flock.2.html)) on files and directories
+   you don't want to be removed. This is particularly interesting when operating
+   on more than a single file, or on file nodes that are not plain regular files,
+   for example when extracting a tarball to a temporary directory. The ageing
+   algorithm will skip all directories (and everything below them) and files that
+   are locked through a BSD file lock. As BSD file locks are automatically released
    when the file descriptor they are taken on is closed, and all file
    descriptors opened by a process are implicitly closed when it exits, this is
    a robust mechanism that ensures all temporary files are subject to ageing
@@ -127,9 +126,7 @@ strategies to avoid these issues:
    modification/access times, as extracted files are otherwise immediately
    candidates for deletion by the ageing algorithm. The
    [`flock`](https://man7.org/linux/man-pages/man1/flock.1.html) tool of the
-   `util-linux` packages makes this concept available to shell scripts. Note
-   that `systemd-tmpfiles` only checks for BSD file locks on directories, locks
-   on other types of file nodes (including regular files) are not considered.
+   `util-linux` packages makes this concept available to shell scripts.
 
 4. Keep the access time of all temporary files created current. In regular
    intervals, use `utimensat()` or a related call to update the access time

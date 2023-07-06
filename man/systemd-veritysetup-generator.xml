@@ -64,8 +64,8 @@
         characters of the appropriate length (i.e. most likely 256 bit/64 characters, or longer). If not specified via
         <varname>systemd.verity_root_data=</varname> and <varname>systemd.verity_root_hash=</varname>, the hash and
         data devices to use are automatically derived from the specified hash value. Specifically, the data partition
-        device is looked for under a GPT partition UUID derived from the first 128bit of the root hash, the hash
-        partition device is looked for under a GPT partition UUID derived from the last 128bit of the root hash. Hence
+        device is looked for under a GPT partition UUID derived from the first 128-bit of the root hash, the hash
+        partition device is looked for under a GPT partition UUID derived from the last 128-bit of the root hash. Hence
         it is usually sufficient to specify the root hash to boot from a verity protected root file system, as
         device paths are automatically determined from it — as long as the partition table is properly set up.</para>
         </listitem>
@@ -85,8 +85,17 @@
         <term><varname>systemd.verity_root_options=</varname></term>
 
         <listitem><para>Takes a comma-separated list of dm-verity options. Expects the following options
+        <option>superblock=<replaceable>BOOLEAN</replaceable></option>,
+        <option>format=<replaceable>NUMBER</replaceable></option>,
+        <option>data-block-size=<replaceable>BYTES</replaceable></option>,
+        <option>hash-block-size=<replaceable>BYTES</replaceable></option>,
+        <option>data-blocks=<replaceable>BLOCKS</replaceable></option>,
+        <option>hash-offset=<replaceable>BYTES</replaceable></option>,
+        <option>salt=<replaceable>HEX</replaceable></option>, <option>uuid=<replaceable>UUID</replaceable></option>,
         <option>ignore-corruption</option>, <option>restart-on-corruption</option>, <option>ignore-zero-blocks</option>,
-        <option>check-at-most-once</option>, <option>panic-on-corruption</option> and
+        <option>check-at-most-once</option>, <option>panic-on-corruption</option>,
+        <option>hash=<replaceable>HASH</replaceable></option>, <option>fec-device=<replaceable>PATH</replaceable></option>,
+        <option>fec-offset=<replaceable>BYTES</replaceable></option>, <option>fec-roots=<replaceable>NUM</replaceable></option> and
         <option>root-hash-signature=<replaceable>PATH</replaceable>|base64:<replaceable>HEX</replaceable></option>. See
         <citerefentry project='die-net'><refentrytitle>veritysetup</refentrytitle><manvolnum>8</manvolnum></citerefentry> for more
         details.</para></listitem>

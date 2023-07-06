@@ -74,18 +74,15 @@ if conf.get('BPF_FRAMEWORK') == 1
         )
 endif
 
-subdir('bpf')
-
 subdir('bpf/socket_bind')
-if conf.get('BPF_FRAMEWORK') == 1
-        libcore_sources += [socket_bind_skel_h]
-        subdir('bpf/restrict_fs')
-        libcore_sources += [restrict_fs_skel_h]
-endif
-
+subdir('bpf/restrict_fs')
 subdir('bpf/restrict_ifaces')
+
 if conf.get('BPF_FRAMEWORK') == 1
-        libcore_sources += [restrict_ifaces_skel_h]
+        libcore_sources += [
+                socket_bind_skel_h,
+                restrict_fs_skel_h,
+                restrict_ifaces_skel_h]
 endif
 
 load_fragment_gperf_gperf = custom_target(
@@ -120,19 +117,21 @@ libcore = shared_library(
         link_args : ['-shared',
                      '-Wl,--version-script=' + libshared_sym_path],
         link_with : libshared,
-        dependencies : [versiondep,
-                        threads,
+        dependencies : [libacl,
+                        libapparmor,
+                        libaudit,
+                        libblkid,
                         libdl,
+                        libkmod,
+                        libm,
+                        libmount,
+                        libpam,
                         librt,
                         libseccomp,
-                        libpam,
-                        libaudit,
-                        libkmod,
-                        libapparmor,
                         libselinux,
-                        libmount,
-                        libblkid,
-                        libacl],
+                        threads,
+                        userspace,
+                        versiondep],
         install : true,
         install_dir : rootpkglibdir)
 
@@ -145,7 +144,6 @@ systemd_sources = files(
 
 in_files = [['system.conf',                     pkgsysconfdir],
             ['user.conf',                       pkgsysconfdir],
-            ['systemd.pc',                      pkgconfigdatadir],
             ['org.freedesktop.systemd1.policy', polkitpolicydir]]
 
 foreach item : in_files
@@ -160,6 +158,15 @@ foreach item : in_files
                 install : (dir == pkgsysconfdir) ? install_sysconfdir_samples : (dir != 'no'),
                 install_dir : dir)
 endforeach
+
+systemd_pc = custom_target(
+        'systemd.pc',
+        input : 'systemd.pc.in',
+        output : 'systemd.pc',
+        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
+        install : pkgconfigdatadir != 'no',
+        install_tag : 'devel',
+        install_dir : pkgconfigdatadir)
 
 install_data('org.freedesktop.systemd1.conf',
              install_dir : dbuspolicydir)
@@ -179,9 +186,25 @@ endif
 
 ############################################################
 
+test_core_base = {
+        'link_with' : [libcore, libshared],
+        'includes' : core_includes,
+}
+
 fuzzers += [
-        [files('fuzz-unit-file.c'),
-         [libcore,
-          libshared],
-         [libmount]],
+        {
+                'sources' : files('fuzz-unit-file.c'),
+                'link_with' : [
+                        libcore,
+                        libshared
+                ],
+                'dependencies' : libmount,
+        },
+        {
+                'sources' : files('fuzz-manager-serialize.c'),
+                'link_with' : [
+                        libcore,
+                        libshared
+                ],
+        },
 ]

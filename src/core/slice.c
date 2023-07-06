@@ -43,7 +43,7 @@ static void slice_set_state(Slice *t, SliceState state) {
                           slice_state_to_string(old_state),
                           slice_state_to_string(state));
 
-        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static int slice_add_parent_slice(Slice *s) {
@@ -247,8 +247,8 @@ static int slice_stop(Unit *u) {
         return 1;
 }
 
-static int slice_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, -1, -1, error);
+static int slice_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
+        return unit_kill_common(u, who, signo, code, value, -1, -1, error);
 }
 
 static int slice_serialize(Unit *u, FILE *f, FDSet *fds) {
@@ -349,17 +349,14 @@ static void slice_enumerate_perpetual(Manager *m) {
 
 static bool slice_freezer_action_supported_by_children(Unit *s) {
         Unit *member;
-        int r;
 
         assert(s);
 
         UNIT_FOREACH_DEPENDENCY(member, s, UNIT_ATOM_SLICE_OF) {
 
-                if (member->type == UNIT_SLICE) {
-                        r = slice_freezer_action_supported_by_children(member);
-                        if (!r)
-                                return r;
-                }
+                if (member->type == UNIT_SLICE &&
+                    !slice_freezer_action_supported_by_children(member))
+                        return false;
 
                 if (!UNIT_VTABLE(member)->freeze)
                         return false;

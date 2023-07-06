@@ -42,27 +42,24 @@ TEST(null_or_empty_path_with_root) {
         assert_se(null_or_empty_path_with_root("/foobar/barbar/dev/null", "/foobar/barbar/") == 1);
 }
 
-TEST(files_same) {
+TEST(inode_same) {
         _cleanup_close_ int fd = -EBADF;
-        char name[] = "/tmp/test-files_same.XXXXXX";
-        char name_alias[] = "/tmp/test-files_same.alias";
+        _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-files_same.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name_alias[] = "/tmp/test-files_same.alias";
 
         fd = mkostemp_safe(name);
         assert_se(fd >= 0);
         assert_se(symlink(name, name_alias) >= 0);
 
-        assert_se(files_same(name, name, 0));
-        assert_se(files_same(name, name, AT_SYMLINK_NOFOLLOW));
-        assert_se(files_same(name, name_alias, 0));
-        assert_se(!files_same(name, name_alias, AT_SYMLINK_NOFOLLOW));
-
-        unlink(name);
-        unlink(name_alias);
+        assert_se(inode_same(name, name, 0));
+        assert_se(inode_same(name, name, AT_SYMLINK_NOFOLLOW));
+        assert_se(inode_same(name, name_alias, 0));
+        assert_se(!inode_same(name, name_alias, AT_SYMLINK_NOFOLLOW));
 }
 
 TEST(is_symlink) {
-        char name[] = "/tmp/test-is_symlink.XXXXXX";
-        char name_link[] = "/tmp/test-is_symlink.link";
+        _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-is_symlink.XXXXXX";
+        _cleanup_(unlink_tempfilep) char name_link[] = "/tmp/test-is_symlink.link";
         _cleanup_close_ int fd = -EBADF;
 
         fd = mkostemp_safe(name);
@@ -72,9 +69,6 @@ TEST(is_symlink) {
         assert_se(is_symlink(name) == 0);
         assert_se(is_symlink(name_link) == 1);
         assert_se(is_symlink("/a/file/which/does/not/exist/i/guess") < 0);
-
-        unlink(name);
-        unlink(name_link);
 }
 
 TEST(path_is_fs_type) {

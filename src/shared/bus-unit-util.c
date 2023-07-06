@@ -460,7 +460,9 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                               "Slice",
                               "ManagedOOMSwap",
                               "ManagedOOMMemoryPressure",
-                              "ManagedOOMPreference"))
+                              "ManagedOOMPreference",
+                              "MemoryPressureWatch",
+                              "DelegateSubgroup"))
                 return bus_append_string(m, field, eq);
 
         if (STR_IN_SET(field, "ManagedOOMMemoryPressureLimit")) {
@@ -913,6 +915,9 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                 return 1;
         }
 
+        if (streq(field, "MemoryPressureThresholdSec"))
+                return bus_append_parse_sec_rename(m, field, eq);
+
         return 0;
 }
 
@@ -955,7 +960,10 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                               "ProcSubset",
                               "NetworkNamespacePath",
                               "IPCNamespacePath",
-                              "LogNamespace"))
+                              "LogNamespace",
+                              "RootImagePolicy",
+                              "MountImagePolicy",
+                              "ExtensionImagePolicy"))
                 return bus_append_string(m, field, eq);
 
         if (STR_IN_SET(field, "IgnoreSIGPIPE",
@@ -983,7 +991,9 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                               "CPUSchedulingResetOnFork",
                               "LockPersonality",
                               "ProtectHostname",
-                              "RestrictSUIDSGID"))
+                              "MemoryKSM",
+                              "RestrictSUIDSGID",
+                              "RootEphemeral"))
                 return bus_append_parse_boolean(m, field, eq);
 
         if (STR_IN_SET(field, "ReadWriteDirectories",
@@ -1194,6 +1204,17 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                         return bus_log_create_error(r);
 
                 r = sd_bus_message_close_container(m);
+                if (r < 0)
+                        return bus_log_create_error(r);
+
+                return 1;
+        }
+
+        if (streq(field, "ImportCredential")) {
+                if (isempty(eq))
+                        r = sd_bus_message_append(m, "(sv)", field, "as", 0);
+                else
+                        r = sd_bus_message_append(m, "(sv)", field, "as", 1, eq);
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -2185,13 +2206,15 @@ static int bus_append_service_property(sd_bus_message *m, const char *field, con
                               "Type",
                               "ExitType",
                               "Restart",
+                              "RestartMode",
                               "BusName",
                               "NotifyAccess",
                               "USBFunctionDescriptors",
                               "USBFunctionStrings",
                               "OOMPolicy",
                               "TimeoutStartFailureMode",
-                              "TimeoutStopFailureMode"))
+                              "TimeoutStopFailureMode",
+                              "FileDescriptorStorePreserve"))
                 return bus_append_string(m, field, eq);
 
         if (STR_IN_SET(field, "PermissionsStartOnly",
@@ -2201,6 +2224,7 @@ static int bus_append_service_property(sd_bus_message *m, const char *field, con
                 return bus_append_parse_boolean(m, field, eq);
 
         if (STR_IN_SET(field, "RestartSec",
+                              "RestartMaxDelaySec",
                               "TimeoutStartSec",
                               "TimeoutStopSec",
                               "TimeoutAbortSec",
@@ -2217,7 +2241,8 @@ static int bus_append_service_property(sd_bus_message *m, const char *field, con
                 return bus_append_parse_sec_rename(m, "TimeoutStopSec", eq);
         }
 
-        if (streq(field, "FileDescriptorStoreMax"))
+        if (STR_IN_SET(field, "FileDescriptorStoreMax",
+                              "RestartSteps"))
                 return bus_append_safe_atou(m, field, eq);
 
         if (STR_IN_SET(field, "ExecCondition",
@@ -2704,14 +2729,13 @@ int bus_append_unit_property_assignment_many(sd_bus_message *m, UnitType t, char
         return 0;
 }
 
-int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet, InstallChange **changes, size_t *n_changes) {
+int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet) {
         const char *type, *path, *source;
+        InstallChange *changes = NULL;
+        size_t n_changes = 0;
         int r;
 
-        /* changes is dereferenced when calling install_changes_dump() later,
-         * so we have to make sure this is not NULL. */
-        assert(changes);
-        assert(n_changes);
+        CLEANUP_ARRAY(changes, n_changes, install_changes_free);
 
         r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(sss)");
         if (r < 0)
@@ -2729,7 +2753,7 @@ int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet, In
                         continue;
                 }
 
-                r = install_changes_add(changes, n_changes, t, path, source);
+                r = install_changes_add(&changes, &n_changes, t, path, source);
                 if (r < 0)
                         return r;
         }
@@ -2740,7 +2764,8 @@ int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet, In
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        install_changes_dump(0, NULL, *changes, *n_changes, quiet);
+        install_changes_dump(0, NULL, changes, n_changes, quiet);
+
         return 0;
 }
 

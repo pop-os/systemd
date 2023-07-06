@@ -9,6 +9,7 @@
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "log-link.h"
 #include "mkdir.h"
 #include "netif-util.h"
@@ -725,7 +726,8 @@ DnsServer* link_set_dns_server(Link *l, DnsServer *s) {
         dns_server_unref(l->current_dns_server);
         l->current_dns_server = dns_server_ref(s);
 
-        if (l->unicast_scope)
+        /* Skip flushing the cache if server stale feature is enabled. */
+        if (l->unicast_scope && l->manager->stale_retention_usec == 0)
                 dns_cache_flush(&l->unicast_scope->cache);
 
         return s;
@@ -815,7 +817,11 @@ ResolveSupport link_get_mdns_support(Link *link) {
         return MIN(link->mdns_support, link->manager->mdns_support);
 }
 
-int link_address_new(Link *l, LinkAddress **ret, int family, const union in_addr_union *in_addr) {
+int link_address_new(Link *l,
+                LinkAddress **ret,
+                int family,
+                const union in_addr_union *in_addr,
+                const union in_addr_union *in_addr_broadcast) {
         LinkAddress *a;
 
         assert(l);
@@ -828,6 +834,7 @@ int link_address_new(Link *l, LinkAddress **ret, int family, const union in_addr
         *a = (LinkAddress) {
                 .family = family,
                 .in_addr = *in_addr,
+                .in_addr_broadcast = *in_addr_broadcast,
                 .link = l,
                 .prefixlen = UCHAR_MAX,
         };
@@ -1175,7 +1182,7 @@ static bool link_needs_save(Link *l) {
 }
 
 int link_save_user(Link *l) {
-        _cleanup_free_ char *temp_path = NULL;
+        _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         const char *v;
         int r;
@@ -1277,13 +1284,12 @@ int link_save_user(Link *l) {
                 goto fail;
         }
 
+        temp_path = mfree(temp_path);
+
         return 0;
 
 fail:
         (void) unlink(l->state_file);
-
-        if (temp_path)
-                (void) unlink(temp_path);
 
         return log_link_error_errno(l, r, "Failed to save link data %s: %m", l->state_file);
 }

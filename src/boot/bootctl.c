@@ -2,6 +2,7 @@
 
 #include <getopt.h>
 
+#include "blockdev-util.h"
 #include "bootctl.h"
 #include "bootctl-install.h"
 #include "bootctl-random-seed.h"
@@ -11,6 +12,7 @@
 #include "bootctl-systemd-efi-options.h"
 #include "bootctl-uki.h"
 #include "build.h"
+#include "devnum-util.h"
 #include "dissect-image.h"
 #include "escape.h"
 #include "find-esp.h"
@@ -33,6 +35,7 @@ char *arg_esp_path = NULL;
 char *arg_xbootldr_path = NULL;
 bool arg_print_esp_path = false;
 bool arg_print_dollar_boot_path = false;
+unsigned arg_print_root_device = 0;
 bool arg_touch_variables = true;
 PagerFlags arg_pager_flags = 0;
 bool arg_graceful = false;
@@ -40,7 +43,7 @@ bool arg_quiet = false;
 int arg_make_entry_directory = false; /* tri-state: < 0 for automatic logic */
 sd_id128_t arg_machine_id = SD_ID128_NULL;
 char *arg_install_layout = NULL;
-EntryTokenType arg_entry_token_type = ARG_ENTRY_TOKEN_AUTO;
+BootEntryTokenType arg_entry_token_type = BOOT_ENTRY_TOKEN_AUTO;
 char *arg_entry_token = NULL;
 JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
 bool arg_arch_all = false;
@@ -49,6 +52,7 @@ char *arg_image = NULL;
 InstallSource arg_install_source = ARG_INSTALL_SOURCE_AUTO;
 char *arg_efi_boot_option_description = NULL;
 bool arg_dry_run = false;
+ImagePolicy *arg_image_policy = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_esp_path, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_xbootldr_path, freep);
@@ -57,9 +61,10 @@ STATIC_DESTRUCTOR_REGISTER(arg_entry_token, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_efi_boot_option_description, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 int acquire_esp(
-                bool unprivileged_mode,
+                int unprivileged_mode,
                 bool graceful,
                 uint32_t *ret_part,
                 uint64_t *ret_pstart,
@@ -96,7 +101,7 @@ int acquire_esp(
 }
 
 int acquire_xbootldr(
-                bool unprivileged_mode,
+                int unprivileged_mode,
                 sd_id128_t *ret_uuid,
                 dev_t *ret_devid) {
 
@@ -154,7 +159,8 @@ static int help(int argc, char *argv[], void *userdata) {
                "  update               Update systemd-boot in the ESP and EFI variables\n"
                "  remove               Remove systemd-boot from the ESP and EFI variables\n"
                "  is-installed         Test whether systemd-boot is installed in the ESP\n"
-               "  random-seed          Initialize random seed in ESP and EFI variables\n"
+               "  random-seed          Initialize or refresh random seed in ESP and EFI\n"
+               "                       variables\n"
                "\n%3$sKernel Image Commands:%4$s\n"
                "  kernel-identify      Identify kernel image type\n"
                "  kernel-inspect       Prints details about the kernel image\n"
@@ -165,10 +171,17 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --boot-path=PATH  Path to the $BOOT partition\n"
                "     --root=PATH       Operate on an alternate filesystem root\n"
                "     --image=PATH      Operate on disk image as filesystem root\n"
+               "     --image-policy=POLICY\n"
+               "                       Specify disk image dissection policy\n"
                "     --install-source=auto|image|host\n"
                "                       Where to pick files when using --root=/--image=\n"
-               "  -p --print-esp-path  Print path to the EFI System Partition\n"
-               "  -x --print-boot-path Print path to the $BOOT partition\n"
+               "  -p --print-esp-path  Print path to the EFI System Partition mount point\n"
+               "  -x --print-boot-path Print path to the $BOOT partition mount point\n"
+               "  -R --print-root-device\n"
+               "                       Print path to the block device node backing the\n"
+               "                       root file system (returns e.g. /dev/nvme0n1p5)\n"
+               "  -RR                  Print path to the whole disk block device node\n"
+               "                       backing the root FS (returns e.g. /dev/nvme0n1)\n"
                "     --no-variables    Don't touch EFI variables\n"
                "     --no-pager        Do not pipe output into a pager\n"
                "     --graceful        Don't fail when the ESP cannot be found or EFI\n"
@@ -202,6 +215,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_BOOT_PATH,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_INSTALL_SOURCE,
                 ARG_VERSION,
                 ARG_NO_VARIABLES,
@@ -223,10 +237,12 @@ static int parse_argv(int argc, char *argv[]) {
                 { "boot-path",                   required_argument, NULL, ARG_BOOT_PATH                   },
                 { "root",                        required_argument, NULL, ARG_ROOT                        },
                 { "image",                       required_argument, NULL, ARG_IMAGE                       },
+                { "image-policy",                required_argument, NULL, ARG_IMAGE_POLICY                },
                 { "install-source",              required_argument, NULL, ARG_INSTALL_SOURCE              },
                 { "print-esp-path",              no_argument,       NULL, 'p'                             },
                 { "print-path",                  no_argument,       NULL, 'p'                             }, /* Compatibility alias */
                 { "print-boot-path",             no_argument,       NULL, 'x'                             },
+                { "print-root-device",           no_argument,       NULL, 'R'                             },
                 { "no-variables",                no_argument,       NULL, ARG_NO_VARIABLES                },
                 { "no-pager",                    no_argument,       NULL, ARG_NO_PAGER                    },
                 { "graceful",                    no_argument,       NULL, ARG_GRACEFUL                    },
@@ -242,12 +258,11 @@ static int parse_argv(int argc, char *argv[]) {
         };
 
         int c, r;
-        bool b;
 
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hpx", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hpxR", options, NULL)) >= 0)
                 switch (c) {
 
                 case 'h':
@@ -281,6 +296,12 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
+
                 case ARG_INSTALL_SOURCE:
                         if (streq(optarg, "auto"))
                                 arg_install_source = ARG_INSTALL_SOURCE_AUTO;
@@ -295,17 +316,15 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'p':
-                        if (arg_print_dollar_boot_path)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "--print-boot-path/-x cannot be combined with --print-esp-path/-p");
                         arg_print_esp_path = true;
                         break;
 
                 case 'x':
-                        if (arg_print_esp_path)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "--print-boot-path/-x cannot be combined with --print-esp-path/-p");
                         arg_print_dollar_boot_path = true;
+                        break;
+
+                case 'R':
+                        arg_print_root_device ++;
                         break;
 
                 case ARG_NO_VARIABLES:
@@ -324,40 +343,21 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_quiet = true;
                         break;
 
-                case ARG_ENTRY_TOKEN: {
-                        const char *e;
-
-                        if (streq(optarg, "machine-id")) {
-                                arg_entry_token_type = ARG_ENTRY_TOKEN_MACHINE_ID;
-                                arg_entry_token = mfree(arg_entry_token);
-                        } else if (streq(optarg, "os-image-id")) {
-                                arg_entry_token_type = ARG_ENTRY_TOKEN_OS_IMAGE_ID;
-                                arg_entry_token = mfree(arg_entry_token);
-                        } else if (streq(optarg, "os-id")) {
-                                arg_entry_token_type = ARG_ENTRY_TOKEN_OS_ID;
-                                arg_entry_token = mfree(arg_entry_token);
-                        } else if ((e = startswith(optarg, "literal:"))) {
-                                arg_entry_token_type = ARG_ENTRY_TOKEN_LITERAL;
-
-                                r = free_and_strdup_warn(&arg_entry_token, e);
-                                if (r < 0)
-                                        return r;
-                        } else
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Unexpected parameter for --entry-token=: %s", optarg);
-
+                case ARG_ENTRY_TOKEN:
+                        r = parse_boot_entry_token_type(optarg, &arg_entry_token_type, &arg_entry_token);
+                        if (r < 0)
+                                return r;
                         break;
-                }
 
                 case ARG_MAKE_ENTRY_DIRECTORY:
                         if (streq(optarg, "auto"))  /* retained for backwards compatibility */
                                 arg_make_entry_directory = -1; /* yes if machine-id is permanent */
                         else {
-                                r = parse_boolean_argument("--make-entry-directory=", optarg, &b);
+                                r = parse_boolean_argument("--make-entry-directory=", optarg, NULL);
                                 if (r < 0)
                                         return r;
 
-                                arg_make_entry_directory = b;
+                                arg_make_entry_directory = r;
                         }
                         break;
 
@@ -381,7 +381,8 @@ static int parse_argv(int argc, char *argv[]) {
                         }
                         if (strlen(optarg) > EFI_BOOT_OPTION_DESCRIPTION_MAX)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "--efi-boot-option-description= too long: %zu > %zu", strlen(optarg), EFI_BOOT_OPTION_DESCRIPTION_MAX);
+                                                       "--efi-boot-option-description= too long: %zu > %zu",
+                                                       strlen(optarg), EFI_BOOT_OPTION_DESCRIPTION_MAX);
                         r = free_and_strdup_warn(&arg_efi_boot_option_description, optarg);
                         if (r < 0)
                                 return r;
@@ -397,6 +398,10 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached();
                 }
+
+        if (!!arg_print_esp_path + !!arg_print_dollar_boot_path + (arg_print_root_device > 0) > 1)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "--print-esp-path/-p, --print-boot-path/-x, --print-root-device=/-R cannot be combined.");
 
         if ((arg_root || arg_image) && argv[optind] && !STR_IN_SET(argv[optind], "status", "list",
                         "install", "update", "remove", "is-installed", "random-seed", "unlink", "cleanup"))
@@ -444,11 +449,10 @@ static int bootctl_main(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
         int r;
 
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         /* If we run in a container, automatically turn off EFI file system access */
         if (detect_container() > 0)
@@ -458,20 +462,50 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
+        if (arg_print_root_device > 0) {
+                _cleanup_free_ char *path = NULL;
+                dev_t devno;
+
+                r = blockdev_get_root(LOG_ERR, &devno);
+                if (r < 0)
+                        return r;
+                if (r == 0) {
+                        log_error("Root file system not backed by a (single) whole block device.");
+                        return 80; /* some recognizable error code */
+                }
+
+                if (arg_print_root_device > 1) {
+                        r = block_get_whole_disk(devno, &devno);
+                        if (r < 0)
+                                log_debug_errno(r, "Unable to find whole block device for root block device, ignoring: %m");
+                }
+
+                r = device_path_make_canonical(S_IFBLK, devno, &path);
+                if (r < 0)
+                        return log_error_errno(r,
+                                               "Failed to format canonical device path for devno '" DEVNUM_FORMAT_STR "': %m",
+                                               DEVNUM_FORMAT_VAL(devno));
+
+                puts(path);
+                return 0;
+        }
+
         /* Open up and mount the image */
         if (arg_image) {
                 assert(!arg_root);
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK,
-                                &unlink_dir,
+                                &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;
 
-                arg_root = strdup(unlink_dir);
+                arg_root = strdup(mounted_dir);
                 if (!arg_root)
                         return log_oom();
         }

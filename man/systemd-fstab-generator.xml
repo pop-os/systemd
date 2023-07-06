@@ -81,11 +81,14 @@
 
         <listitem><para>Configures the operating system's root filesystem to mount when running in the
         initrd. This accepts a device node path (usually <filename>/dev/disk/by-uuid/…</filename> or
-        <filename>/dev/disk/by-label/…</filename> or similar), or the special values <literal>gpt-auto</literal>
-        and <literal>tmpfs</literal>.</para>
+        <filename>/dev/disk/by-label/…</filename> or similar), or the special values <literal>gpt-auto</literal>,
+        <literal>fstab</literal>, and <literal>tmpfs</literal>.</para>
 
         <para>Use <literal>gpt-auto</literal> to explicitly request automatic root file system discovery via
         <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+
+        <para>Use <literal>fstab</literal> to explicitly request automatic root file system discovery via
+        the initrd <filename>/etc/fstab</filename> rather than via kernel command line.</para>
 
         <para>Use <literal>tmpfs</literal> in order to mount a <citerefentry
         project='man-pages'><refentrytitle>tmpfs</refentrytitle><manvolnum>5</manvolnum></citerefentry> file
@@ -229,12 +232,54 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>systemd.swap</varname></term>
+        <term><varname>systemd.swap=</varname></term>
 
         <listitem><para>Takes a boolean argument or enables the option if specified
         without an argument. If disabled, causes the generator to ignore
         any swap devices configured in <filename>/etc/fstab</filename>.
         Defaults to enabled.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.mount-extra=<replaceable>WHAT</replaceable>:<replaceable>WHERE</replaceable>[:<replaceable>FSTYPE</replaceable>[:<replaceable>OPTIONS</replaceable>]]</varname></term>
+
+        <listitem>
+          <para>Specifies the mount unit. Takes at least two and at most four fields separated with a colon
+          (<literal>:</literal>). Each field is handled as the corresponding fstab field. This option can be
+          specified multiple times.</para>
+          <para>Example:
+          <programlisting>
+systemd.mount-extra=/dev/sda1:/mount-point:ext4:rw,noatime</programlisting>
+          </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.swap-extra=<replaceable>WHAT</replaceable>[:<replaceable>OPTIONS</replaceable>]</varname></term>
+
+        <listitem>
+          <para>Specifies the swap unit. Takes the block device to be used as a swap device, and optionally
+          takes mount options followed by a colon (<literal>:</literal>).</para>
+          <para>Example:
+          <programlisting>
+systemd.swap=/dev/sda2:x-systemd.makefs</programlisting>
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>System Credentials</title>
+
+    <variablelist class='system-credentials'>
+      <varlistentry>
+        <term><varname>fstab.extra</varname></term>
+
+        <listitem><para>This credential may contain addition mounts to establish, in the same format as
+        <citerefentry
+        project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>, with
+        one mount per line. It is read in addition to <filename>/etc/fstab</filename>.</para></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

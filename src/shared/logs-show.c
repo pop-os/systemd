@@ -93,14 +93,9 @@ static int url_from_catalog(sd_journal *j, char **ret) {
         if (r < 0)
                 return log_error_errno(r, "Failed to find catalog entry: %m");
 
-        weblink = startswith(t, "Documentation:");
-        if (!weblink) {
-                weblink = strstr(t + 1, "\nDocumentation:");
-                if (!weblink)
-                        goto notfound;
-
-                weblink += 15;
-        }
+        weblink = find_line_startswith(t, "Documentation:");
+        if (!weblink)
+                goto notfound;
 
         /* Skip whitespace to value */
         weblink += strspn(weblink, " \t");
@@ -514,7 +509,7 @@ static int output_short(
                 if (r < 0)
                         return r;
         }
-        if (r == -EBADMSG) {
+        if (IN_SET(r, -EBADMSG, -EADDRNOTAVAIL)) {
                 log_debug_errno(r, "Skipping message we can't read: %m");
                 return 0;
         }
@@ -528,6 +523,9 @@ static int output_short(
 
         if (!(flags & OUTPUT_SHOW_ALL))
                 strip_tab_ansi(&message, &message_len, highlight_shifted);
+
+        if (flags & OUTPUT_TRUNCATE_NEWLINE)
+                truncate_nl_full(message, &message_len);
 
         if (priority_len == 1 && *priority >= '0' && *priority <= '7')
                 p = *priority - '0';
@@ -791,11 +789,12 @@ static int output_export(
                 const dual_timestamp *previous_display_ts,
                 const sd_id128_t *previous_boot_id) {
 
+        sd_id128_t journal_boot_id, seqnum_id;
         _cleanup_free_ char *cursor = NULL;
-        const void *data;
-        size_t length;
         usec_t monotonic, realtime;
-        sd_id128_t journal_boot_id;
+        const void *data;
+        uint64_t seqnum;
+        size_t length;
         int r;
 
         assert(j);
@@ -818,14 +817,22 @@ static int output_export(
         if (r < 0)
                 return log_error_errno(r, "Failed to get monotonic timestamp: %m");
 
+        r = sd_journal_get_seqnum(j, &seqnum, &seqnum_id);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get seqnum: %m");
+
         fprintf(f,
                 "__CURSOR=%s\n"
-                "__REALTIME_TIMESTAMP="USEC_FMT"\n"
-                "__MONOTONIC_TIMESTAMP="USEC_FMT"\n"
+                "__REALTIME_TIMESTAMP=" USEC_FMT "\n"
+                "__MONOTONIC_TIMESTAMP=" USEC_FMT "\n"
+                "__SEQNUM=%" PRIu64 "\n"
+                "__SEQNUM_ID=%s\n"
                 "_BOOT_ID=%s\n",
                 cursor,
                 realtime,
                 monotonic,
+                seqnum,
+                SD_ID128_TO_STRING(seqnum_id),
                 SD_ID128_TO_STRING(journal_boot_id));
 
         JOURNAL_FOREACH_DATA_RETVAL(j, data, length, r) {
@@ -864,7 +871,7 @@ static int output_export(
 
                 fputc('\n', f);
         }
-        if (r == -EBADMSG) {
+        if (IN_SET(r, -EADDRNOTAVAIL, -EBADMSG)) {
                 log_debug_errno(r, "Skipping message we can't read: %m");
                 return 0;
         }
@@ -1040,15 +1047,16 @@ static int output_json(
                 const dual_timestamp *previous_display_ts,
                 const sd_id128_t *previous_boot_id) {
 
-        char usecbuf[DECIMAL_STR_MAX(usec_t)];
+        char usecbuf[CONST_MAX(DECIMAL_STR_MAX(usec_t), DECIMAL_STR_MAX(uint64_t))];
         _cleanup_(json_variant_unrefp) JsonVariant *object = NULL;
+        sd_id128_t journal_boot_id, seqnum_id;
         _cleanup_free_ char *cursor = NULL;
+        usec_t realtime, monotonic;
         JsonVariant **array = NULL;
         struct json_data *d;
         Hashmap *h = NULL;
+        uint64_t seqnum;
         size_t n = 0;
-        usec_t realtime, monotonic;
-        sd_id128_t journal_boot_id;
         int r;
 
         assert(j);
@@ -1070,6 +1078,10 @@ static int output_json(
         r = sd_journal_get_monotonic_usec(j, &monotonic, &journal_boot_id);
         if (r < 0)
                 return log_error_errno(r, "Failed to get monotonic timestamp: %m");
+
+        r = sd_journal_get_seqnum(j, &seqnum, &seqnum_id);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get seqnum: %m");
 
         h = hashmap_new(&string_hash_ops);
         if (!h)
@@ -1093,12 +1105,21 @@ static int output_json(
         if (r < 0)
                 goto finish;
 
+        xsprintf(usecbuf, USEC_FMT, seqnum);
+        r = update_json_data(h, flags, "__SEQNUM", usecbuf, SIZE_MAX);
+        if (r < 0)
+                goto finish;
+
+        r = update_json_data(h, flags, "__SEQNUM_ID", SD_ID128_TO_STRING(seqnum_id), SIZE_MAX);
+        if (r < 0)
+                goto finish;
+
         for (;;) {
                 const void *data;
                 size_t size;
 
                 r = sd_journal_enumerate_data(j, &data, &size);
-                if (r == -EBADMSG) {
+                if (IN_SET(r, -EBADMSG, -EADDRNOTAVAIL)) {
                         log_debug_errno(r, "Skipping message we can't read: %m");
                         r = 0;
                         goto finish;
@@ -1186,7 +1207,7 @@ static int output_cat_field(
                 get_log_colors(prio, &color_on, &color_off, &highlight_on);
 
         r = sd_journal_get_data(j, field, &data, &l);
-        if (r == -EBADMSG) {
+        if (IN_SET(r, -EBADMSG, -EADDRNOTAVAIL)) {
                 log_debug_errno(r, "Skipping message we can't read: %m");
                 return 0;
         }
@@ -1258,7 +1279,7 @@ static int output_cat(
                 /* Determine priority of this entry, so that we can color it nicely */
 
                 r = sd_journal_get_data(j, "PRIORITY", &data, &l);
-                if (r == -EBADMSG) {
+                if (IN_SET(r, -EBADMSG, -EADDRNOTAVAIL)) {
                         log_debug_errno(r, "Skipping message we can't read: %m");
                         return 0;
                 }
@@ -1402,7 +1423,7 @@ int show_journal_entry(
                 n_columns = columns();
 
         r = get_display_timestamp(j, &display_ts, &boot_id);
-        if (r == -EBADMSG) {
+        if (IN_SET(r, -EBADMSG, -EADDRNOTAVAIL)) {
                 log_debug_errno(r, "Skipping message we can't read: %m");
                 return 0;
         }
@@ -1733,8 +1754,17 @@ static int get_boot_id_for_machine(const char *machine, sd_id128_t *boot_id) {
         return 0;
 }
 
+int add_match_boot_id(sd_journal *j, sd_id128_t id) {
+        char match[STRLEN("_BOOT_ID=") + SD_ID128_STRING_MAX];
+
+        assert(j);
+        assert(!sd_id128_is_null(id));
+
+        sd_id128_to_string(id, stpcpy(match, "_BOOT_ID="));
+        return sd_journal_add_match(j, match, strlen(match));
+}
+
 int add_match_this_boot(sd_journal *j, const char *machine) {
-        char match[9+32+1] = "_BOOT_ID=";
         sd_id128_t boot_id;
         int r;
 
@@ -1750,8 +1780,7 @@ int add_match_this_boot(sd_journal *j, const char *machine) {
                         return log_error_errno(r, "Failed to get boot id: %m");
         }
 
-        sd_id128_to_string(boot_id, match + 9);
-        r = sd_journal_add_match(j, match, strlen(match));
+        r = add_match_boot_id(j, boot_id);
         if (r < 0)
                 return log_error_errno(r, "Failed to add match: %m");
 

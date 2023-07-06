@@ -128,6 +128,26 @@ binfmt_misc /proc/sys/fs/binfmt_misc yes     0            proc-sys-fs-binfmt_mis
         </varlistentry>
 
         <varlistentry>
+          <term><command>list-paths</command> <optional><replaceable>PATTERN</replaceable>…</optional></term>
+
+          <listitem>
+            <para>List path units currently in memory, ordered by path.  If one or more
+            <replaceable>PATTERN</replaceable>s are specified, only path units matching one of them are shown.
+            Produces output similar to
+            <programlisting>
+PATH                           CONDITION         UNIT                               ACTIVATES
+/run/systemd/ask-password      DirectoryNotEmpty systemd-ask-password-plymouth.path systemd-ask-password-plymouth.service
+/run/systemd/ask-password      DirectoryNotEmpty systemd-ask-password-wall.path     systemd-ask-password-wall.service
+/var/cache/cups/org.cups.cupsd PathExists        cups.path                          cups.service
+
+3 paths listed.</programlisting>
+            </para>
+
+            <para>Also see <option>--show-types</option>, <option>--all</option>, and <option>--state=</option>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><command>list-sockets</command> <optional><replaceable>PATTERN</replaceable>…</optional></term>
 
           <listitem>
@@ -347,10 +367,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <listitem>
             <para>Shows units required and wanted by the specified
             units. This recursively lists units following the
-            <varname>Requires=</varname>,
-            <varname>Requisite=</varname>,
-            <varname>ConsistsOf=</varname>,
-            <varname>Wants=</varname>, <varname>BindsTo=</varname>
+            <varname>Requires=</varname>, <varname>Requisite=</varname>,
+            <varname>Wants=</varname>, <varname>ConsistsOf=</varname>,
+            <varname>BindsTo=</varname>, and <varname>Upholds=</varname>
             dependencies. If no units are specified,
             <filename>default.target</filename> is implied.</para>
 
@@ -501,10 +520,11 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <term><command>kill <replaceable>PATTERN</replaceable>…</command></term>
 
           <listitem>
-            <para>Send a signal to one or more processes of the
-            unit. Use <option>--kill-whom=</option> to select which
-            process to kill. Use <option>--signal=</option> to select
-            the signal to send.</para>
+            <para>Send a UNIX process signal to one or more processes of the unit. Use
+            <option>--kill-whom=</option> to select which process to send the signal to. Use
+            <option>--signal=</option> to select the signal to send. Combine with
+            <option>--kill-value=</option> to enqueue a POSIX Realtime Signal with an associated
+            value.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -517,12 +537,16 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             <varname>StateDirectory=</varname>, <varname>CacheDirectory=</varname>,
             <varname>LogsDirectory=</varname> and <varname>RuntimeDirectory=</varname>, see
             <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-            for details. For timer units this may be used to clear out the persistent timestamp data if
+            for details. It may also be used to clear the file descriptor store as enabled via
+            <varname>FileDescriptorStoreMax=</varname>, see
+            <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+            for details.  For timer units this may be used to clear out the persistent timestamp data if
             <varname>Persistent=</varname> is used and <option>--what=state</option> is selected, see
             <citerefentry><refentrytitle>systemd.timer</refentrytitle><manvolnum>5</manvolnum></citerefentry>. This
             command only applies to units that use either of these settings. If <option>--what=</option> is
-            not specified, both the cache and runtime data are removed (as these two types of data are
-            generally redundant and reproducible on the next invocation of the unit).</para>
+            not specified, the cache and runtime data as well as the file descriptor store are removed (as
+            these three types of resources are generally redundant and reproducible on the next invocation of
+            the unit). Note that the specified units must be stopped to invoke this operation.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -716,6 +740,15 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             to be started again, use this command to make it startable again.</para>
           </listitem>
         </varlistentry>
+
+        <varlistentry>
+          <term><command>whoami [<replaceable>PID</replaceable>…]</command></term>
+
+          <listitem><para>Returns the units the processes referenced by the given PIDs belong to (one per
+          line). If no PID is specified returns the unit the <command>systemctl</command> command is invoked
+          in.</para></listitem>
+        </varlistentry>
+
       </variablelist>
     </refsect2>
 
@@ -820,6 +853,11 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             <para>This command will print information about the file system operations (symlink removals)
             executed. This output may be suppressed by passing <option>--quiet</option>.
             </para>
+
+            <para>When this command is used with <option>--user</option>, the units being operated on might
+            still be enabled in global scope, and thus get started automatically even after a successful
+            disablement in user scope. In this case, a warning about it is shown, which can be suppressed
+            using <option>--no-warn</option>.</para>
 
             <para>This command honors <option>--system</option>, <option>--user</option>, <option>--runtime</option>,
             <option>--global</option> and <option>--no-warn</option> in a similar way as <command>enable</command>.</para>
@@ -974,13 +1012,24 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <term><command>mask <replaceable>UNIT</replaceable>…</command></term>
 
           <listitem>
-            <para>Mask one or more units, as specified on the command line. This will link these unit files to
-            <filename>/dev/null</filename>, making it impossible to start them. This is a stronger version of
-            <command>disable</command>, since it prohibits all kinds of activation of the unit, including enablement
-            and manual activation. Use this option with care. This honors the <option>--runtime</option> option to only
-            mask temporarily until the next reboot of the system. The <option>--now</option> option may be used to
-            ensure that the units are also stopped. This command expects valid unit names only, it does not accept unit
-            file paths.</para>
+            <para>Mask one or more units, as specified on the command line. This will link these unit files
+            to <filename>/dev/null</filename>, making it impossible to start them. This is a stronger version
+            of <command>disable</command>, since it prohibits all kinds of activation of the unit, including
+            enablement and manual activation. Use this option with care. This honors the
+            <option>--runtime</option> option to only mask temporarily until the next reboot of the
+            system. The <option>--now</option> option may be used to ensure that the units are also
+            stopped. This command expects valid unit names only, it does not accept unit file paths.</para>
+
+            <para>Note that this will create a symlink under the unit's name in
+            <filename>/etc/systemd/system/</filename> (in case <option>--runtime</option> is not specified)
+            or <filename>/run/systemd/system/</filename> (in case <option>--runtime</option> is
+            specified). If a matching unit file already exists under these directories this operation will
+            hence fail. This means that the operation is primarily useful to mask units shipped by the vendor
+            (as those are shipped in <filename>/usr/lib/systemd/system/</filename> and not the aforementioned
+            two directories), but typically doesn't work for units created locally (as those are typically
+            placed precisely in the two aforementioned directories). Similar restrictions apply for
+            <option>--user</option> mode, in which case the directories are below the user's home directory
+            however.</para>
           </listitem>
         </varlistentry>
 
@@ -1460,6 +1509,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             <option>--force</option> is specified twice the halt operation is executed by <command>systemctl</command>
             itself, and the system manager is not contacted. This means the command should succeed even when the system
             manager has crashed.</para>
+
+            <para>If combined with <option>--when=</option>, shutdown will be scheduled after the given timestamp.
+            And <option>--when=cancel</option> will cancel the shutdown.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1471,13 +1523,8 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             users. This command is asynchronous; it will return after the power-off operation is enqueued, without
             waiting for it to complete.</para>
 
-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
-            powering off. If <option>--force</option> is specified twice, the operation is immediately executed without
-            terminating any processes or unmounting any file systems. This may result in data loss. Note that when
-            <option>--force</option> is specified twice the power-off operation is executed by
-            <command>systemctl</command> itself, and the system manager is not contacted. This means the command should
-            succeed even when the system manager has crashed.</para>
+            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
+            as <command>halt</command>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1491,14 +1538,6 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             users. This command is asynchronous; it will return after the reboot operation is enqueued,
             without waiting for it to complete.</para>
 
-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
-            reboot. If <option>--force</option> is specified twice, the operation is immediately executed without
-            terminating any processes or unmounting any file systems. This may result in data loss. Note that when
-            <option>--force</option> is specified twice the reboot operation is executed by
-            <command>systemctl</command> itself, and the system manager is not contacted. This means the command should
-            succeed even when the system manager has crashed.</para>
-
             <para>If the switch <option>--reboot-argument=</option> is given, it will be passed as the optional
             argument to the <citerefentry><refentrytitle>reboot</refentrytitle><manvolnum>2</manvolnum></citerefentry>
             system call.</para>
@@ -1506,6 +1545,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             <para>Options <option>--boot-loader-entry=</option>, <option>--boot-loader-menu=</option>, and
             <option>--firmware-setup</option> can be used to select what to do <emphasis>after</emphasis> the
             reboot. See the descriptions of those options for details.</para>
+
+            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
+            as <command>halt</command>.</para>
           </listitem>
         </varlistentry>
 
@@ -1513,14 +1555,45 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <term><command>kexec</command></term>
 
           <listitem>
-            <para>Shut down and reboot the system via <command>kexec</command>. This is equivalent to
-            <command>systemctl start kexec.target --job-mode=replace-irreversibly --no-block</command>. This command is
+            <para>Shut down and reboot the system via <command>kexec</command>. This command will load a
+            kexec kernel if one wasn't loaded yet or fail. A kernel may be loaded earlier by a separate step,
+            this is particularly useful if a custom initrd or additional kernel commandline options are
+            desired. The <option>--force</option> can be used to continue without a kexec kernel, i.e. to
+            perform a normal reboot. The final reboot step is equivalent to
+            <command>systemctl start kexec.target --job-mode=replace-irreversibly --no-block</command>.
+            </para>
+
+            <para>To load a kernel, an enumeration is performed following the
+            <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink>,
+            and the default boot entry is loaded. For this step to succeed, the system must be using UEFI
+            and the boot loader entries must be configured appropriately. <command>bootctl list</command>
+            may be used to list boot entries, see
+            <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
+            </para>
+
+            <para>This command is asynchronous; it will return after the reboot operation is enqueued,
+            without waiting for it to complete.</para>
+
+            <para>This command honors <option>--force</option> and <option>--when=</option> similarly
+            to <command>halt</command>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><command>soft-reboot</command></term>
+
+          <listitem>
+            <para>Shut down and reboot userspace. This is equivalent to <command>systemctl start
+            soft-reboot.target --job-mode=replace-irreversibly --no-block</command>. This command is
             asynchronous; it will return after the reboot operation is enqueued, without waiting for it to
             complete.</para>
 
-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
-            reboot.</para>
+            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
+            as <command>halt</command>.</para>
+
+            <para>This operation only reboots userspace, leaving the kernel running. See
+            <citerefentry><refentrytitle>systemd-soft-reboot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+            for details.</para>
           </listitem>
         </varlistentry>
 
@@ -1539,19 +1612,20 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         </varlistentry>
 
         <varlistentry>
-          <term><command>switch-root</command> <replaceable>ROOT</replaceable> <optional><replaceable>INIT</replaceable></optional></term>
+          <term><command>switch-root</command> <optional><replaceable>ROOT</replaceable> <optional><replaceable>INIT</replaceable></optional></optional></term>
 
           <listitem>
             <para>Switches to a different root directory and executes a new system manager process below it.
             This is intended for use in the initrd, and will transition from the initrd's system manager
-            process (a.k.a. "init" process) to the main system manager process which is loaded from the
-            actual host root files system. This call takes two arguments: the directory that is to become the
-            new root directory, and the path to the new system manager binary below it to execute as PID 1.
-            If the latter is omitted or the empty string, a systemd binary will automatically be searched for
-            and used as init. If the system manager path is omitted, equal to the empty string or identical
-            to the path to the systemd binary, the state of the initrd's system manager process is passed to
-            the main system manager, which allows later introspection of the state of the services involved
-            in the initrd boot phase.</para>
+            process (a.k.a. "init" process, PID 1) to the main system manager process which is loaded from
+            the actual host root files system. This call takes two arguments: the directory that is to become
+            the new root directory, and the path to the new system manager binary below it to execute as PID
+            1.  If both are omitted or the former is an empty string it defaults to
+            <filename>/sysroot/</filename>. If the latter is omitted or is an empty string, a systemd binary
+            will automatically be searched for and used as service manager. If the system manager path is
+            omitted, equal to the empty string or identical to the path to the systemd binary, the state of
+            the initrd's system manager process is passed to the main system manager, which allows later
+            introspection of the state of the services involved in the initrd boot phase.</para>
           </listitem>
         </varlistentry>
 
@@ -1768,7 +1842,7 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <para>Show reverse dependencies between units with
           <command>list-dependencies</command>, i.e. follow
           dependencies of type <varname>WantedBy=</varname>,
-          <varname>RequiredBy=</varname>,
+          <varname>RequiredBy=</varname>, <varname>UpheldBy=</varname>,
           <varname>PartOf=</varname>, <varname>BoundBy=</varname>,
           instead of <varname>Wants=</varname> and similar.
           </para>
@@ -1876,8 +1950,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <literal>isolate</literal>,
         <literal>ignore-dependencies</literal>,
         <literal>ignore-requirements</literal>,
-        <literal>flush</literal>, or
-        <literal>triggering</literal>. Defaults to
+        <literal>flush</literal>,
+        <literal>triggering</literal>, or
+        <literal>restart-dependencies</literal>. Defaults to
         <literal>replace</literal>, except when the
         <command>isolate</command> command is used which implies the
         <literal>isolate</literal> job mode.</para>
@@ -1920,7 +1995,6 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <literal>ignore-dependencies</literal>, but only causes the
         requirement dependencies to be ignored, the ordering
         dependencies will still be honored.</para>
-        </listitem>
 
         <para><literal>triggering</literal> may only be used with
         <command>systemctl stop</command>. In this mode, the specified
@@ -1929,6 +2003,11 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <varname>Triggers=</varname> in <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for more information about triggering units.</para>
 
+        <para><literal>restart-dependencies</literal> may only be used with
+        <command>systemctl start</command>. In this mode, dependencies of
+        the specified unit will receive restart propagation, as if a restart
+        job had been enqueued for the unit.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2024,7 +2103,11 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             </listitem>
             <listitem>
               <para>when using <command>enable</command> or <command>disable</command> on units without
-              install information (i.e. don't have or have an empty [Install] section).</para>
+              install information (i.e. don't have or have an empty [Install] section),</para>
+            </listitem>
+            <listitem>
+              <para>when using <command>disable</command> combined with <option>--user</option> on units
+              that are enabled in global scope.</para>
             </listitem>
           </itemizedlist>
           </para>
@@ -2124,38 +2207,44 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <term><option>--kill-whom=</option></term>
 
         <listitem>
-          <para>When used with <command>kill</command>, choose which
-          processes to send a signal to. Must be one of
-          <option>main</option>, <option>control</option> or
-          <option>all</option> to select whether to kill only the main
-          process, the control process or all processes of the
-          unit. The main process of the unit is the one that defines
-          the life-time of it. A control process of a unit is one that
-          is invoked by the manager to induce state changes of it. For
-          example, all processes started due to the
-          <varname>ExecStartPre=</varname>,
-          <varname>ExecStop=</varname> or
-          <varname>ExecReload=</varname> settings of service units are
-          control processes. Note that there is only one control
-          process per unit at a time, as only one state change is
-          executed at a time. For services of type
-          <varname>Type=forking</varname>, the initial process started
-          by the manager for <varname>ExecStart=</varname> is a
-          control process, while the process ultimately forked off by
-          that one is then considered the main process of the unit (if
-          it can be determined). This is different for service units
-          of other types, where the process forked off by the manager
-          for <varname>ExecStart=</varname> is always the main process
-          itself. A service unit consists of zero or one main process,
-          zero or one control process plus any number of additional
-          processes. Not all unit types manage processes of these
-          types however. For example, for mount units, control processes
-          are defined (which are the invocations of
-          <filename>&MOUNT_PATH;</filename> and
-          <filename>&UMOUNT_PATH;</filename>), but no main process
-          is defined. If omitted, defaults to
+          <para>When used with <command>kill</command>, choose which processes to send a UNIX process signal
+          to. Must be one of <option>main</option>, <option>control</option> or <option>all</option> to
+          select whether to kill only the main process, the control process or all processes of the unit. The
+          main process of the unit is the one that defines the life-time of it. A control process of a unit
+          is one that is invoked by the manager to induce state changes of it. For example, all processes
+          started due to the <varname>ExecStartPre=</varname>, <varname>ExecStop=</varname> or
+          <varname>ExecReload=</varname> settings of service units are control processes. Note that there is
+          only one control process per unit at a time, as only one state change is executed at a time. For
+          services of type <varname>Type=forking</varname>, the initial process started by the manager for
+          <varname>ExecStart=</varname> is a control process, while the process ultimately forked off by that
+          one is then considered the main process of the unit (if it can be determined). This is different
+          for service units of other types, where the process forked off by the manager for
+          <varname>ExecStart=</varname> is always the main process itself. A service unit consists of zero or
+          one main process, zero or one control process plus any number of additional processes. Not all unit
+          types manage processes of these types however. For example, for mount units, control processes are
+          defined (which are the invocations of <filename>&MOUNT_PATH;</filename> and
+          <filename>&UMOUNT_PATH;</filename>), but no main process is defined. If omitted, defaults to
           <option>all</option>.</para>
         </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--kill-value=</option><replaceable>INT</replaceable></term>
+
+        <listitem><para>If used with the <command>kill</command> command, enqueues a signal along with the
+        specified integer value parameter to the specified process(es). This operation is only available for
+        POSIX Realtime Signals (i.e. <option>--signal=SIGRTMIN+…</option> or
+        <option>--signal=SIGRTMAX-…</option>), and ensures the signals are generated via the <citerefentry
+        project='man-pages'><refentrytitle>sigqueue</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+        system call, rather than <citerefentry
+        project='man-pages'><refentrytitle>kill</refentrytitle><manvolnum>3</manvolnum></citerefentry>. The
+        specified value must be a 32-bit signed integer, and may be specified either in decimal, in
+        hexadecimal (if prefixed with <literal>0x</literal>), octal (if prefixed with <literal>0o</literal>)
+        or binary (if prefixed with <literal>0b</literal>)</para>
+
+        <para>If this option is used the signal will only be enqueued on the control or main process of the
+        unit, never on other processes belonging to the unit, i.e. <option>--kill-whom=all</option> will only
+        affect main and control processes but no other processes.</para></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="signal" />
@@ -2165,13 +2254,17 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
 
         <listitem>
           <para>Select what type of per-unit resources to remove when the <command>clean</command> command is
-          invoked, see below. Takes one of <constant>configuration</constant>, <constant>state</constant>,
-          <constant>cache</constant>, <constant>logs</constant>, <constant>runtime</constant> to select the
-          type of resource. This option may be specified more than once, in which case all specified resource
-          types are removed. Also accepts the special value <constant>all</constant> as a shortcut for
-          specifying all five resource types. If this option is not specified defaults to the combination of
-          <constant>cache</constant> and <constant>runtime</constant>, i.e. the two kinds of resources that
-          are generally considered to be redundant and can be reconstructed on next invocation.</para>
+          invoked, see above. Takes one of <constant>configuration</constant>, <constant>state</constant>,
+          <constant>cache</constant>, <constant>logs</constant>, <constant>runtime</constant>,
+          <constant>fdstore</constant> to select the type of resource. This option may be specified more than
+          once, in which case all specified resource types are removed. Also accepts the special value
+          <constant>all</constant> as a shortcut for specifying all six resource types. If this option is not
+          specified defaults to the combination of <constant>cache</constant>, <constant>runtime</constant>
+          and <constant>fdstore</constant>, i.e. the three kinds of resources that are generally considered
+          to be redundant and can be reconstructed on next invocation. Note that the explicit removal of the
+          <constant>fdstore</constant> resource type is only useful if the
+          <varname>FileDescriptorStorePreserve=</varname> option is enabled, since the file descriptor store
+          is otherwise cleaned automatically when the unit is stopped.</para>
         </listitem>
       </varlistentry>
 
@@ -2247,6 +2340,8 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         switch of the same name.</para></listitem>
       </varlistentry>
+
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
 
       <varlistentry>
         <term><option>--runtime</option></term>
@@ -2383,7 +2478,7 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <variablelist>
             <varlistentry>
               <term><option>us</option></term>
-              <term><option>µs</option></term>
+              <term><option>μs</option></term>
               <listitem><para><literal>Day YYYY-MM-DD HH:MM:SS.UUUUUU TZ</literal></para></listitem>
             </varlistentry>
           </variablelist>
@@ -2398,7 +2493,7 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <variablelist>
             <varlistentry>
               <term><option>us+utc</option></term>
-              <term><option>µs+utc</option></term>
+              <term><option>μs+utc</option></term>
               <listitem><para><literal>Day YYYY-MM-DD HH:MM:SS.UUUUUU UTC</literal></para></listitem>
             </varlistentry>
           </variablelist>
@@ -2438,6 +2533,19 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
         <listitem>
           <para>When used with <command>edit</command>, use the given drop-in file name instead of
           <filename>override.conf</filename>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--when=</option></term>
+
+        <listitem>
+          <para>When used with <command>halt</command>, <command>poweroff</command>, <command>reboot</command>
+          or <command>kexec</command>, schedule the action to be performed at the given timestamp,
+          which should adhere to the syntax documented in <citerefentry
+          project='man-pages'><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+          section "PARSING TIMESTAMPS". Specially, if <literal>show</literal> is given, the currently scheduled
+          action will be shown, which can be canceled by passing an empty string or <literal>cancel</literal>.</para>
         </listitem>
       </varlistentry>
 

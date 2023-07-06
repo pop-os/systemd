@@ -11,14 +11,14 @@
 Description=Create System Users
 Documentation=man:sysusers.d(5) man:systemd-sysusers.service(8)
 
+ConditionNeedsUpdate=|/etc
+ConditionCredential=|sysusers.extra
+
 DefaultDependencies=no
 After=systemd-remount-fs.service
 Before=sysinit.target systemd-update-done.service
 Conflicts=shutdown.target initrd-switch-root.target
 Before=shutdown.target initrd-switch-root.target
-
-ConditionNeedsUpdate=|/etc
-ConditionCredential=|sysusers.extra
 
 [Service]
 Type=oneshot
@@ -29,9 +29,9 @@ TimeoutSec=90s
 # Optionally, pick up a root password and shell for the root user from a
 # credential passed to the service manager. This is useful for importing this
 # data from nspawn's --set-credential= switch.
-LoadCredential=passwd.hashed-password.root
-LoadCredential=passwd.plaintext-password.root
-LoadCredential=passwd.shell.root
+ImportCredential=passwd.hashed-password.root
+ImportCredential=passwd.plaintext-password.root
+ImportCredential=passwd.shell.root
 
 # Also, allow configuring extra sysusers lines via a credential
-LoadCredential=sysusers.extra
+ImportCredential=sysusers.*

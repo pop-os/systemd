@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -12,10 +13,11 @@
 #include "bus-error.h"
 #include "bus-kernel.h"
 #include "bus-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "constants.h"
 #include "dbus-service.h"
 #include "dbus-unit.h"
+#include "devnum-util.h"
 #include "env-util.h"
 #include "escape.h"
 #include "exit-status.h"
@@ -26,6 +28,7 @@
 #include "load-fragment.h"
 #include "log.h"
 #include "manager.h"
+#include "missing_audit.h"
 #include "open-file.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -65,7 +68,11 @@ static const UnitActiveState state_translation_table[_SERVICE_STATE_MAX] = {
         [SERVICE_FINAL_SIGTERM] = UNIT_DEACTIVATING,
         [SERVICE_FINAL_SIGKILL] = UNIT_DEACTIVATING,
         [SERVICE_FAILED] = UNIT_FAILED,
+        [SERVICE_DEAD_BEFORE_AUTO_RESTART] = UNIT_INACTIVE,
+        [SERVICE_FAILED_BEFORE_AUTO_RESTART] = UNIT_FAILED,
+        [SERVICE_DEAD_RESOURCES_PINNED] = UNIT_INACTIVE,
         [SERVICE_AUTO_RESTART] = UNIT_ACTIVATING,
+        [SERVICE_AUTO_RESTART_QUEUED] = UNIT_ACTIVATING,
         [SERVICE_CLEANING] = UNIT_MAINTENANCE,
 };
 
@@ -91,7 +98,11 @@ static const UnitActiveState state_translation_table_idle[_SERVICE_STATE_MAX] = 
         [SERVICE_FINAL_SIGTERM] = UNIT_DEACTIVATING,
         [SERVICE_FINAL_SIGKILL] = UNIT_DEACTIVATING,
         [SERVICE_FAILED] = UNIT_FAILED,
+        [SERVICE_DEAD_BEFORE_AUTO_RESTART] = UNIT_INACTIVE,
+        [SERVICE_FAILED_BEFORE_AUTO_RESTART] = UNIT_FAILED,
+        [SERVICE_DEAD_RESOURCES_PINNED] = UNIT_INACTIVE,
         [SERVICE_AUTO_RESTART] = UNIT_ACTIVATING,
+        [SERVICE_AUTO_RESTART_QUEUED] = UNIT_ACTIVATING,
         [SERVICE_CLEANING] = UNIT_MAINTENANCE,
 };
 
@@ -114,6 +125,7 @@ static void service_init(Unit *u) {
         s->timeout_abort_usec = u->manager->default_timeout_abort_usec;
         s->timeout_abort_set = u->manager->default_timeout_abort_set;
         s->restart_usec = u->manager->default_restart_usec;
+        s->restart_max_delay_usec = USEC_INFINITY;
         s->runtime_max_usec = USEC_INFINITY;
         s->type = _SERVICE_TYPE_INVALID;
         s->socket_fd = -EBADF;
@@ -125,11 +137,15 @@ static void service_init(Unit *u) {
         s->exec_context.keyring_mode = MANAGER_IS_SYSTEM(u->manager) ?
                 EXEC_KEYRING_PRIVATE : EXEC_KEYRING_INHERIT;
 
+        s->notify_access_override = _NOTIFY_ACCESS_INVALID;
+
         s->watchdog_original_usec = USEC_INFINITY;
 
         s->oom_policy = _OOM_POLICY_INVALID;
         s->reload_begin_usec = USEC_INFINITY;
         s->reload_signal = SIGHUP;
+
+        s->fd_store_preserve_mode = EXEC_PRESERVE_RESTART;
 }
 
 static void service_unwatch_control_pid(Service *s) {
@@ -187,8 +203,13 @@ static int service_set_main_pid(Service *s, pid_t pid) {
         return 0;
 }
 
-void service_close_socket_fd(Service *s) {
+void service_release_socket_fd(Service *s) {
         assert(s);
+
+        if (s->socket_fd < 0 && !UNIT_ISSET(s->accept_socket) && !s->socket_peer)
+                return;
+
+        log_unit_debug(UNIT(s), "Closing connection socket.");
 
         /* Undo the effect of service_set_socket_fd(). */
 
@@ -200,6 +221,15 @@ void service_close_socket_fd(Service *s) {
         }
 
         s->socket_peer = socket_peer_unref(s->socket_peer);
+}
+
+static void service_override_notify_access(Service *s, NotifyAccess notify_access_override) {
+        assert(s);
+
+        s->notify_access_override = notify_access_override;
+
+        log_unit_debug(UNIT(s), "notify_access=%s", notify_access_to_string(s->notify_access));
+        log_unit_debug(UNIT(s), "notify_access_override=%s", notify_access_to_string(s->notify_access_override));
 }
 
 static void service_stop_watchdog(Service *s) {
@@ -249,6 +279,44 @@ static void service_start_watchdog(Service *s) {
         }
         if (r < 0)
                 log_unit_warning_errno(UNIT(s), r, "Failed to install watchdog timer: %m");
+}
+
+usec_t service_restart_usec_next(Service *s) {
+        unsigned n_restarts_next;
+        usec_t value;
+
+        assert(s);
+
+        /* When the service state is in SERVICE_*_BEFORE_AUTO_RESTART or SERVICE_AUTO_RESTART, we still need
+         * to add 1 to s->n_restarts manually, because s->n_restarts is not updated until a restart job is
+         * enqueued, i.e. state has transitioned to SERVICE_AUTO_RESTART_QUEUED. */
+        n_restarts_next = s->n_restarts + (s->state == SERVICE_AUTO_RESTART_QUEUED ? 0 : 1);
+
+        if (n_restarts_next <= 1 ||
+            s->restart_steps == 0 ||
+            s->restart_usec == 0 ||
+            s->restart_max_delay_usec == USEC_INFINITY ||
+            s->restart_usec >= s->restart_max_delay_usec)
+                value = s->restart_usec;
+        else if (n_restarts_next > s->restart_steps)
+                value = s->restart_max_delay_usec;
+        else {
+                /* Enforced in service_verify() and above */
+                assert(s->restart_max_delay_usec > s->restart_usec);
+
+                /* r_i / r_0 = (r_n / r_0) ^ (i / n)
+                 * where,
+                 *   r_0 : initial restart usec (s->restart_usec),
+                 *   r_i : i-th restart usec (value),
+                 *   r_n : maximum restart usec (s->restart_max_delay_usec),
+                 *   i : index of the next step (n_restarts_next - 1)
+                 *   n : num maximum steps (s->restart_steps) */
+                value = (usec_t) (s->restart_usec * powl((long double) s->restart_max_delay_usec / s->restart_usec,
+                                                         (long double) (n_restarts_next - 1) / s->restart_steps));
+        }
+
+        log_unit_debug(UNIT(s), "Next restart interval calculated as: %s", FORMAT_TIMESPAN(value, 0));
+        return value;
 }
 
 static void service_extend_event_source_timeout(Service *s, sd_event_source *source, usec_t extended) {
@@ -314,10 +382,9 @@ static void service_override_watchdog_timeout(Service *s, usec_t watchdog_overri
         log_unit_debug(UNIT(s), "watchdog_override_usec="USEC_FMT, s->watchdog_override_usec);
 }
 
-static void service_fd_store_unlink(ServiceFDStore *fs) {
-
+static ServiceFDStore* service_fd_store_unlink(ServiceFDStore *fs) {
         if (!fs)
-                return;
+                return NULL;
 
         if (fs->service) {
                 assert(fs->service->n_fd_store > 0);
@@ -328,40 +395,38 @@ static void service_fd_store_unlink(ServiceFDStore *fs) {
         sd_event_source_disable_unref(fs->event_source);
 
         free(fs->fdname);
-        safe_close(fs->fd);
-        free(fs);
+        asynchronous_close(fs->fd);
+        return mfree(fs);
 }
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(ServiceFDStore*, service_fd_store_unlink);
 
 static void service_release_fd_store(Service *s) {
         assert(s);
 
-        if (s->n_keep_fd_store > 0)
+        if (!s->fd_store)
                 return;
 
         log_unit_debug(UNIT(s), "Releasing all stored fds");
+
         while (s->fd_store)
                 service_fd_store_unlink(s->fd_store);
 
         assert(s->n_fd_store == 0);
 }
 
-static void service_release_resources(Unit *u) {
-        Service *s = SERVICE(u);
-
+static void service_release_stdio_fd(Service *s) {
         assert(s);
 
-        if (!s->fd_store && s->stdin_fd < 0 && s->stdout_fd < 0 && s->stderr_fd < 0)
+        if (s->stdin_fd < 0 && s->stdout_fd < 0 && s->stdout_fd < 0)
                 return;
 
-        log_unit_debug(u, "Releasing resources.");
+        log_unit_debug(UNIT(s), "Releasing stdin/stdout/stderr file descriptors.");
 
-        s->stdin_fd = safe_close(s->stdin_fd);
-        s->stdout_fd = safe_close(s->stdout_fd);
-        s->stderr_fd = safe_close(s->stderr_fd);
-
-        service_release_fd_store(s);
+        s->stdin_fd = asynchronous_close(s->stdin_fd);
+        s->stdout_fd = asynchronous_close(s->stdout_fd);
+        s->stderr_fd = asynchronous_close(s->stderr_fd);
 }
-
 static void service_done(Unit *u) {
         Service *s = SERVICE(u);
 
@@ -372,12 +437,10 @@ static void service_done(Unit *u) {
         s->pid_file = mfree(s->pid_file);
         s->status_text = mfree(s->status_text);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, false);
+        s->exec_runtime = exec_runtime_free(s->exec_runtime);
         exec_command_free_array(s->exec_command, _SERVICE_EXEC_COMMAND_MAX);
         s->control_command = NULL;
         s->main_command = NULL;
-
-        dynamic_creds_unref(&s->dynamic_creds);
 
         exit_status_set_free(&s->restart_prevent_status);
         exit_status_set_free(&s->restart_force_status);
@@ -399,10 +462,6 @@ static void service_done(Unit *u) {
         s->usb_function_descriptors = mfree(s->usb_function_descriptors);
         s->usb_function_strings = mfree(s->usb_function_strings);
 
-        service_close_socket_fd(s);
-
-        unit_ref_unset(&s->accept_socket);
-
         service_stop_watchdog(s);
 
         s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
@@ -410,7 +469,9 @@ static void service_done(Unit *u) {
 
         s->bus_name_pid_lookup_slot = sd_bus_slot_unref(s->bus_name_pid_lookup_slot);
 
-        service_release_resources(u);
+        service_release_socket_fd(s);
+        service_release_stdio_fd(s);
+        service_release_fd_store(s);
 }
 
 static int on_fd_store_io(sd_event_source *e, int fd, uint32_t revents, void *userdata) {
@@ -427,26 +488,32 @@ static int on_fd_store_io(sd_event_source *e, int fd, uint32_t revents, void *us
         return 0;
 }
 
-static int service_add_fd_store(Service *s, int fd, const char *name, bool do_poll) {
-        ServiceFDStore *fs;
+static int service_add_fd_store(Service *s, int fd_in, const char *name, bool do_poll) {
+        _cleanup_(service_fd_store_unlinkp) ServiceFDStore *fs = NULL;
+        _cleanup_(asynchronous_closep) int fd = ASSERT_FD(fd_in);
+        struct stat st;
         int r;
 
-        /* fd is always consumed if we return >= 0 */
+        /* fd is always consumed even if the function fails. */
 
         assert(s);
-        assert(fd >= 0);
+
+        if (fstat(fd, &st) < 0)
+                return -errno;
+
+        log_unit_debug(UNIT(s), "Trying to stash fd for dev=" DEVNUM_FORMAT_STR "/inode=%" PRIu64, DEVNUM_FORMAT_VAL(st.st_dev), (uint64_t) st.st_ino);
 
         if (s->n_fd_store >= s->n_fd_store_max)
-                return -EXFULL; /* Our store is full.
-                                 * Use this errno rather than E[NM]FILE to distinguish from
-                                 * the case where systemd itself hits the file limit. */
+                /* Our store is full.  Use this errno rather than E[NM]FILE to distinguish from the case
+                 * where systemd itself hits the file limit. */
+                return log_unit_debug_errno(UNIT(s), SYNTHETIC_ERRNO(EXFULL), "Hit fd store limit.");
 
         LIST_FOREACH(fd_store, i, s->fd_store) {
                 r = same_fd(i->fd, fd);
                 if (r < 0)
                         return r;
                 if (r > 0) {
-                        safe_close(fd);
+                        log_unit_debug(UNIT(s), "Suppressing duplicate fd %i in fd store.", fd);
                         return 0; /* fd already included */
                 }
         }
@@ -456,30 +523,29 @@ static int service_add_fd_store(Service *s, int fd, const char *name, bool do_po
                 return -ENOMEM;
 
         *fs = (ServiceFDStore) {
-                .fd = fd,
-                .service = s,
+                .fd = TAKE_FD(fd),
                 .do_poll = do_poll,
                 .fdname = strdup(name ?: "stored"),
         };
 
-        if (!fs->fdname) {
-                free(fs);
+        if (!fs->fdname)
                 return -ENOMEM;
-        }
 
         if (do_poll) {
-                r = sd_event_add_io(UNIT(s)->manager->event, &fs->event_source, fd, 0, on_fd_store_io, fs);
-                if (r < 0 && r != -EPERM) { /* EPERM indicates fds that aren't pollable, which is OK */
-                        free(fs->fdname);
-                        free(fs);
+                r = sd_event_add_io(UNIT(s)->manager->event, &fs->event_source, fs->fd, 0, on_fd_store_io, fs);
+                if (r < 0 && r != -EPERM) /* EPERM indicates fds that aren't pollable, which is OK */
                         return r;
-                } else if (r >= 0)
+                else if (r >= 0)
                         (void) sd_event_source_set_description(fs->event_source, "service-fd-store");
         }
 
+        fs->service = s;
         LIST_PREPEND(fd_store, s->fd_store, fs);
         s->n_fd_store++;
 
+        log_unit_debug(UNIT(s), "Added fd %i (%s) to fd store.", fs->fd, fs->fdname);
+
+        TAKE_PTR(fs);
         return 1; /* fd newly stored */
 }
 
@@ -488,8 +554,8 @@ static int service_add_fd_store_set(Service *s, FDSet *fds, const char *name, bo
 
         assert(s);
 
-        while (fdset_size(fds) > 0) {
-                _cleanup_close_ int fd = -EBADF;
+        for (;;) {
+                int fd;
 
                 fd = fdset_steal_first(fds);
                 if (fd < 0)
@@ -502,9 +568,6 @@ static int service_add_fd_store_set(Service *s, FDSet *fds, const char *name, bo
                                                       s->n_fd_store_max);
                 if (r < 0)
                         return log_unit_error_errno(UNIT(s), r, "Failed to add fd to store: %m");
-                if (r > 0)
-                        log_unit_debug(UNIT(s), "Added fd %i (%s) to fd store.", fd, strna(name));
-                fd = -EBADF;
         }
 
         return 0;
@@ -633,6 +696,17 @@ static int service_verify(Service *s) {
         if (s->exit_type == SERVICE_EXIT_CGROUP && cg_unified() < CGROUP_UNIFIED_SYSTEMD)
                 log_unit_warning(UNIT(s), "Service has ExitType=cgroup set, but we are running with legacy cgroups v1, which might not work correctly. Continuing.");
 
+        if (s->restart_max_delay_usec == USEC_INFINITY && s->restart_steps > 0)
+                log_unit_warning(UNIT(s), "Service has RestartSteps= but no RestartMaxDelaySec= setting. Ignoring.");
+
+        if (s->restart_max_delay_usec != USEC_INFINITY && s->restart_steps == 0)
+                log_unit_warning(UNIT(s), "Service has RestartMaxDelaySec= but no RestartSteps= setting. Ignoring.");
+
+        if (s->restart_max_delay_usec < s->restart_usec) {
+                log_unit_warning(UNIT(s), "RestartMaxDelaySec= has a value smaller than RestartSec=, resetting RestartSec= to RestartMaxDelaySec=.");
+                s->restart_usec = s->restart_max_delay_usec;
+        }
+
         return 0;
 }
 
@@ -673,7 +747,12 @@ static int service_add_default_dependencies(Service *s) {
                 return r;
 
         /* Third, add us in for normal shutdown. */
-        return unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_two_dependencies_by_name(UNIT(s), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+        if (r < 0)
+                return r;
+
+        /* Fourth, add generic dependencies */
+        return exec_context_add_default_dependencies(UNIT(s), &s->exec_context);
 }
 
 static void service_fix_stdio(Service *s) {
@@ -815,8 +894,43 @@ static int service_load(Unit *u) {
         return service_verify(s);
 }
 
+static void service_dump_fdstore(Service *s, FILE *f, const char *prefix) {
+        assert(s);
+        assert(f);
+        assert(prefix);
+
+        LIST_FOREACH(fd_store, i, s->fd_store) {
+                _cleanup_free_ char *path = NULL;
+                struct stat st;
+                int flags;
+
+                if (fstat(i->fd, &st) < 0) {
+                        log_debug_errno(errno, "Failed to stat fdstore entry: %m");
+                        continue;
+                }
+
+                flags = fcntl(i->fd, F_GETFL);
+                if (flags < 0) {
+                        log_debug_errno(errno, "Failed to get fdstore entry flags: %m");
+                        continue;
+                }
+
+                (void) fd_get_path(i->fd, &path);
+
+                fprintf(f,
+                        "%s%s '%s' (type=%s; dev=" DEVNUM_FORMAT_STR "; inode=%" PRIu64 "; rdev=" DEVNUM_FORMAT_STR "; path=%s; access=%s)\n",
+                        prefix, i == s->fd_store ? "File Descriptor Store Entry:" : "                            ",
+                        i->fdname,
+                        inode_type_to_string(st.st_mode),
+                        DEVNUM_FORMAT_VAL(st.st_dev),
+                        (uint64_t) st.st_ino,
+                        DEVNUM_FORMAT_VAL(st.st_rdev),
+                        strna(path),
+                        accmode_to_string(flags));
+        }
+}
+
 static void service_dump(Unit *u, FILE *f, const char *prefix) {
-        ServiceExecCommand c;
         Service *s = SERVICE(u);
         const char *prefix2;
 
@@ -850,7 +964,7 @@ static void service_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, yes_no(s->guess_main_pid),
                 prefix, service_type_to_string(s->type),
                 prefix, service_restart_to_string(s->restart),
-                prefix, notify_access_to_string(s->notify_access),
+                prefix, notify_access_to_string(service_get_notify_access(s)),
                 prefix, notify_state_to_string(s->notify_state),
                 prefix, oom_policy_to_string(s->oom_policy),
                 prefix, signal_to_string(s->reload_signal));
@@ -888,11 +1002,15 @@ static void service_dump(Unit *u, FILE *f, const char *prefix) {
 
         fprintf(f,
                 "%sRestartSec: %s\n"
+                "%sRestartSteps: %u\n"
+                "%sRestartMaxDelaySec: %s\n"
                 "%sTimeoutStartSec: %s\n"
                 "%sTimeoutStopSec: %s\n"
                 "%sTimeoutStartFailureMode: %s\n"
                 "%sTimeoutStopFailureMode: %s\n",
                 prefix, FORMAT_TIMESPAN(s->restart_usec, USEC_PER_SEC),
+                prefix, s->restart_steps,
+                prefix, FORMAT_TIMESPAN(s->restart_max_delay_usec, USEC_PER_SEC),
                 prefix, FORMAT_TIMESPAN(s->timeout_start_usec, USEC_PER_SEC),
                 prefix, FORMAT_TIMESPAN(s->timeout_stop_usec, USEC_PER_SEC),
                 prefix, service_timeout_failure_mode_to_string(s->timeout_start_failure_mode),
@@ -914,8 +1032,7 @@ static void service_dump(Unit *u, FILE *f, const char *prefix) {
         kill_context_dump(&s->kill_context, f, prefix);
         exec_context_dump(&s->exec_context, f, prefix);
 
-        for (c = 0; c < _SERVICE_EXEC_COMMAND_MAX; c++) {
-
+        for (ServiceExecCommand c = 0; c < _SERVICE_EXEC_COMMAND_MAX; c++) {
                 if (!s->exec_command[c])
                         continue;
 
@@ -932,9 +1049,13 @@ static void service_dump(Unit *u, FILE *f, const char *prefix) {
         if (s->n_fd_store_max > 0)
                 fprintf(f,
                         "%sFile Descriptor Store Max: %u\n"
+                        "%sFile Descriptor Store Pin: %s\n"
                         "%sFile Descriptor Store Current: %zu\n",
                         prefix, s->n_fd_store_max,
+                        prefix, exec_preserve_mode_to_string(s->fd_store_preserve_mode),
                         prefix, s->n_fd_store);
+
+        service_dump_fdstore(s, f, prefix);
 
         if (s->open_files)
                 LIST_FOREACH(open_files, of, s->open_files) {
@@ -996,21 +1117,21 @@ static int service_load_pid_file(Service *s, bool may_warn) {
 
         prio = may_warn ? LOG_INFO : LOG_DEBUG;
 
-        r = chase_symlinks(s->pid_file, NULL, CHASE_SAFE, NULL, &fd);
+        r = chase(s->pid_file, NULL, CHASE_SAFE, NULL, &fd);
         if (r == -ENOLINK) {
                 log_unit_debug_errno(UNIT(s), r,
                                      "Potentially unsafe symlink chain, will now retry with relaxed checks: %s", s->pid_file);
 
                 questionable_pid_file = true;
 
-                r = chase_symlinks(s->pid_file, NULL, 0, NULL, &fd);
+                r = chase(s->pid_file, NULL, 0, NULL, &fd);
         }
         if (r < 0)
                 return log_unit_full_errno(UNIT(s), prio, r,
                                            "Can't open PID file %s (yet?) after %s: %m", s->pid_file, service_state_to_string(s->state));
 
         /* Let's read the PID file now that we chased it down. But we need to convert the O_PATH fd
-         * chase_symlinks() returned us into a proper fd first. */
+         * chase() returned us into a proper fd first. */
         r = read_one_line_file(FORMAT_PROC_FD_PATH(fd), &k);
         if (r < 0)
                 return log_unit_error_errno(UNIT(s), r,
@@ -1141,19 +1262,13 @@ static void service_set_state(Service *s, ServiceState state) {
                 s->control_command_id = _SERVICE_EXEC_COMMAND_INVALID;
         }
 
-        if (IN_SET(state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_AUTO_RESTART)) {
+        if (IN_SET(state,
+                   SERVICE_DEAD, SERVICE_FAILED,
+                   SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED_BEFORE_AUTO_RESTART, SERVICE_AUTO_RESTART, SERVICE_AUTO_RESTART_QUEUED,
+                   SERVICE_DEAD_RESOURCES_PINNED)) {
                 unit_unwatch_all_pids(UNIT(s));
                 unit_dequeue_rewatch_pids(UNIT(s));
         }
-
-        if (!IN_SET(state,
-                    SERVICE_CONDITION, SERVICE_START_PRE, SERVICE_START, SERVICE_START_POST,
-                    SERVICE_RUNNING,
-                    SERVICE_RELOAD, SERVICE_RELOAD_SIGNAL, SERVICE_RELOAD_NOTIFY,
-                    SERVICE_STOP, SERVICE_STOP_WATCHDOG, SERVICE_STOP_SIGTERM, SERVICE_STOP_SIGKILL, SERVICE_STOP_POST,
-                    SERVICE_FINAL_WATCHDOG, SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL) &&
-            !(state == SERVICE_DEAD && UNIT(s)->job))
-                service_close_socket_fd(s);
 
         if (state != SERVICE_START)
                 s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
@@ -1169,9 +1284,7 @@ static void service_set_state(Service *s, ServiceState state) {
         if (old_state != state)
                 log_unit_debug(UNIT(s), "Changed %s -> %s", service_state_to_string(old_state), service_state_to_string(state));
 
-        unit_notify(UNIT(s), table[old_state], table[state],
-                    (s->reload_result == SERVICE_SUCCESS ? 0 : UNIT_NOTIFY_RELOAD_FAILURE) |
-                    (s->will_auto_restart ? UNIT_NOTIFY_WILL_AUTO_RESTART : 0));
+        unit_notify(UNIT(s), table[old_state], table[state], s->reload_result == SERVICE_SUCCESS);
 }
 
 static usec_t service_coldplug_timeout(Service *s) {
@@ -1204,7 +1317,7 @@ static usec_t service_coldplug_timeout(Service *s) {
                 return usec_add(UNIT(s)->state_change_timestamp.monotonic, service_timeout_abort_usec(s));
 
         case SERVICE_AUTO_RESTART:
-                return usec_add(UNIT(s)->inactive_enter_timestamp.monotonic, s->restart_usec);
+                return usec_add(UNIT(s)->inactive_enter_timestamp.monotonic, service_restart_usec_next(s));
 
         case SERVICE_CLEANING:
                 return usec_add(UNIT(s)->state_change_timestamp.monotonic, s->exec_context.timeout_clean_usec);
@@ -1254,9 +1367,12 @@ static int service_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(s->deserialized_state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_AUTO_RESTART, SERVICE_CLEANING)) {
+        if (!IN_SET(s->deserialized_state,
+                    SERVICE_DEAD, SERVICE_FAILED,
+                    SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED_BEFORE_AUTO_RESTART, SERVICE_AUTO_RESTART, SERVICE_AUTO_RESTART_QUEUED,
+                    SERVICE_CLEANING,
+                    SERVICE_DEAD_RESOURCES_PINNED)) {
                 (void) unit_enqueue_rewatch_pids(u);
-                (void) unit_setup_dynamic_creds(u);
                 (void) unit_setup_exec_runtime(u);
         }
 
@@ -1303,10 +1419,9 @@ static int service_collect_fds(
 
                 /* Pass the per-connection socket */
 
-                rfds = new(int, 1);
+                rfds = newdup(int, &s->socket_fd, 1);
                 if (!rfds)
                         return -ENOMEM;
-                rfds[0] = s->socket_fd;
 
                 rfd_names = strv_new("connection");
                 if (!rfd_names)
@@ -1465,11 +1580,11 @@ static bool service_exec_needs_notify_socket(Service *s, ExecFlags flags) {
 
         if (flags & EXEC_IS_CONTROL)
                 /* A control process */
-                return IN_SET(s->notify_access, NOTIFY_EXEC, NOTIFY_ALL);
+                return IN_SET(service_get_notify_access(s), NOTIFY_EXEC, NOTIFY_ALL);
 
         /* We only spawn main processes and control processes, so any
          * process that is not a control process is a main process */
-        return s->notify_access != NOTIFY_NONE;
+        return service_get_notify_access(s) != NOTIFY_NONE;
 }
 
 static Service *service_get_triggering_service(Service *s) {
@@ -1574,7 +1689,7 @@ static int service_spawn_internal(
         if (r < 0)
                 return r;
 
-        our_env = new0(char*, 12);
+        our_env = new0(char*, 13);
         if (!our_env)
                 return -ENOMEM;
 
@@ -1583,6 +1698,10 @@ static int service_spawn_internal(
                         return -ENOMEM;
 
                 exec_params.notify_socket = UNIT(s)->manager->notify_socket;
+
+                if (s->n_fd_store_max > 0)
+                        if (asprintf(our_env + n_env++, "FDSTORE=%u", s->n_fd_store_max) < 0)
+                                return -ENOMEM;
         }
 
         if (s->main_pid > 0)
@@ -1708,7 +1827,7 @@ static int service_spawn_internal(
                        &s->exec_context,
                        &exec_params,
                        s->exec_runtime,
-                       &s->dynamic_creds,
+                       &s->cgroup_context,
                        &pid);
         if (r < 0)
                 return r;
@@ -1832,16 +1951,20 @@ static bool service_will_restart(Unit *u) {
 
         assert(s);
 
-        if (s->will_auto_restart)
-                return true;
-        if (s->state == SERVICE_AUTO_RESTART)
+        if (IN_SET(s->state, SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED_BEFORE_AUTO_RESTART, SERVICE_AUTO_RESTART, SERVICE_AUTO_RESTART_QUEUED))
                 return true;
 
         return unit_will_restart_default(u);
 }
 
+static ServiceState service_determine_dead_state(Service *s) {
+        assert(s);
+
+        return s->fd_store && s->fd_store_preserve_mode == EXEC_PRESERVE_YES ? SERVICE_DEAD_RESOURCES_PINNED : SERVICE_DEAD;
+}
+
 static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) {
-        ServiceState end_state;
+        ServiceState end_state, restart_state;
         int r;
 
         assert(s);
@@ -1856,13 +1979,16 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
 
         if (s->result == SERVICE_SUCCESS) {
                 unit_log_success(UNIT(s));
-                end_state = SERVICE_DEAD;
+                end_state = service_determine_dead_state(s);
+                restart_state = SERVICE_DEAD_BEFORE_AUTO_RESTART;
         } else if (s->result == SERVICE_SKIP_CONDITION) {
                 unit_log_skip(UNIT(s), service_result_to_string(s->result));
-                end_state = SERVICE_DEAD;
+                end_state = service_determine_dead_state(s);
+                restart_state = SERVICE_DEAD_BEFORE_AUTO_RESTART;
         } else {
                 unit_log_failure(UNIT(s), service_result_to_string(s->result));
                 end_state = SERVICE_FAILED;
+                restart_state = SERVICE_FAILED_BEFORE_AUTO_RESTART;
         }
         unit_warn_leftover_processes(UNIT(s), unit_log_leftover_process_stop);
 
@@ -1870,56 +1996,59 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
                 log_unit_debug(UNIT(s), "Service restart not allowed.");
         else {
                 const char *reason;
-                bool shall_restart;
 
-                shall_restart = service_shall_restart(s, &reason);
+                allow_restart = service_shall_restart(s, &reason);
                 log_unit_debug(UNIT(s), "Service will %srestart (%s)",
-                                        shall_restart ? "" : "not ",
+                                        allow_restart ? "" : "not ",
                                         reason);
-                if (shall_restart)
-                        s->will_auto_restart = true;
         }
 
-        /* Make sure service_release_resources() doesn't destroy our FD store, while we are changing through
-         * SERVICE_FAILED/SERVICE_DEAD before entering into SERVICE_AUTO_RESTART. */
-        s->n_keep_fd_store ++;
+        if (allow_restart) {
+                /* We make two state changes here: one that maps to the high-level UNIT_INACTIVE/UNIT_FAILED
+                 * state (i.e. a state indicating deactivation), and then one that that maps to the
+                 * high-level UNIT_STARTING state (i.e. a state indicating activation). We do this so that
+                 * external software can watch the state changes and see all service failures, even if they
+                 * are only transitionary and followed by an automatic restart. We have fine-grained
+                 * low-level states for this though so that software can distinguish the permanent UNIT_INACTIVE
+                 * state from this transitionary UNIT_INACTIVE state by looking at the low-level states. */
+                if (s->restart_mode != SERVICE_RESTART_MODE_DIRECT)
+                        service_set_state(s, restart_state);
 
-        service_set_state(s, end_state);
-
-        if (s->will_auto_restart) {
-                s->will_auto_restart = false;
-
-                r = service_arm_timer(s, /* relative= */ true, s->restart_usec);
-                if (r < 0) {
-                        s->n_keep_fd_store--;
+                r = service_arm_timer(s, /* relative= */ true, service_restart_usec_next(s));
+                if (r < 0)
                         goto fail;
-                }
 
                 service_set_state(s, SERVICE_AUTO_RESTART);
-        } else
+        } else {
+                service_set_state(s, end_state);
+
                 /* If we shan't restart, then flush out the restart counter. But don't do that immediately, so that the
                  * user can still introspect the counter. Do so on the next start. */
                 s->flush_n_restarts = true;
+        }
 
         /* The new state is in effect, let's decrease the fd store ref counter again. Let's also re-add us to the GC
          * queue, so that the fd store is possibly gc'ed again */
-        s->n_keep_fd_store--;
         unit_add_to_gc_queue(UNIT(s));
 
         /* The next restart might not be a manual stop, hence reset the flag indicating manual stops */
         s->forbid_restart = false;
 
-        /* We want fresh tmpdirs in case service is started again immediately */
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
+        /* Reset NotifyAccess override */
+        s->notify_access_override = _NOTIFY_ACCESS_INVALID;
+
+        /* We want fresh tmpdirs and ephemeral snapshots in case the service is started again immediately. */
+        s->exec_runtime = exec_runtime_destroy(s->exec_runtime);
 
         /* Also, remove the runtime directory */
         unit_destroy_runtime_data(UNIT(s), &s->exec_context);
 
+        /* Also get rid of the fd store, if that's configured. */
+        if (s->fd_store_preserve_mode == EXEC_PRESERVE_NO)
+                service_release_fd_store(s);
+
         /* Get rid of the IPC bits of the user */
         unit_unref_uid_gid(UNIT(s), true);
-
-        /* Release the user, and destroy it if we are the only remaining owner */
-        dynamic_creds_destroy(&s->dynamic_creds);
 
         /* Try to delete the pid file. At this point it will be
          * out-of-date, and some software might be confused by it, so
@@ -2389,19 +2518,19 @@ static void service_enter_restart(Service *s) {
                 return;
         }
 
-        /* Any units that are bound to this service must also be
-         * restarted. We use JOB_RESTART (instead of the more obvious
-         * JOB_START) here so that those dependency jobs will be added
-         * as well. */
-        r = manager_add_job(UNIT(s)->manager, JOB_RESTART, UNIT(s), JOB_REPLACE, NULL, &error, NULL);
+        /* Any units that are bound to this service must also be restarted. We use JOB_START for ourselves
+         * but then set JOB_RESTART_DEPENDENCIES which will enqueue JOB_RESTART for those dependency jobs. */
+        r = manager_add_job(UNIT(s)->manager, JOB_START, UNIT(s), JOB_RESTART_DEPENDENCIES, NULL, &error, NULL);
         if (r < 0)
                 goto fail;
 
-        /* Count the jobs we enqueue for restarting. This counter is maintained as long as the unit isn't fully
-         * stopped, i.e. as long as it remains up or remains in auto-start states. The user can reset the counter
-         * explicitly however via the usual "systemctl reset-failure" logic. */
+        /* Count the jobs we enqueue for restarting. This counter is maintained as long as the unit isn't
+         * fully stopped, i.e. as long as it remains up or remains in auto-start states. The user can reset
+         * the counter explicitly however via the usual "systemctl reset-failure" logic. */
         s->n_restarts ++;
         s->flush_n_restarts = false;
+
+        s->notify_access_override = _NOTIFY_ACCESS_INVALID;
 
         log_unit_struct(UNIT(s), LOG_INFO,
                         "MESSAGE_ID=" SD_MESSAGE_UNIT_RESTART_SCHEDULED_STR,
@@ -2410,13 +2539,10 @@ static void service_enter_restart(Service *s) {
                                          "Scheduled restart job, restart counter is at %u.", s->n_restarts),
                         "N_RESTARTS=%u", s->n_restarts);
 
+        service_set_state(s, SERVICE_AUTO_RESTART_QUEUED);
+
         /* Notify clients about changed restart counter */
         unit_add_to_dbus_queue(UNIT(s));
-
-        /* Note that we stay in the SERVICE_AUTO_RESTART state here,
-         * it will be canceled as part of the service_stop() call that
-         * is executed as part of JOB_RESTART. */
-
         return;
 
 fail:
@@ -2588,17 +2714,14 @@ static int service_start(Unit *u) {
         if (IN_SET(s->state, SERVICE_CONDITION, SERVICE_START_PRE, SERVICE_START, SERVICE_START_POST))
                 return 0;
 
-        /* A service that will be restarted must be stopped first to
-         * trigger BindsTo and/or OnFailure dependencies. If a user
-         * does not want to wait for the holdoff time to elapse, the
-         * service should be manually restarted, not started. We
-         * simply return EAGAIN here, so that any start jobs stay
-         * queued, and assume that the auto restart timer will
-         * eventually trigger the restart. */
-        if (s->state == SERVICE_AUTO_RESTART)
+        /* A service that will be restarted must be stopped first to trigger BindsTo and/or OnFailure
+         * dependencies. If a user does not want to wait for the holdoff time to elapse, the service should
+         * be manually restarted, not started. We simply return EAGAIN here, so that any start jobs stay
+         * queued, and assume that the auto restart timer will eventually trigger the restart. */
+        if (IN_SET(s->state, SERVICE_AUTO_RESTART, SERVICE_DEAD_BEFORE_AUTO_RESTART, SERVICE_FAILED_BEFORE_AUTO_RESTART))
                 return -EAGAIN;
 
-        assert(IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED));
+        assert(IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_DEAD_RESOURCES_PINNED, SERVICE_AUTO_RESTART_QUEUED));
 
         r = unit_acquire_invocation_id(u);
         if (r < 0)
@@ -2613,6 +2736,7 @@ static int service_start(Unit *u) {
         s->status_text = mfree(s->status_text);
         s->status_errno = 0;
 
+        s->notify_access_override = _NOTIFY_ACCESS_INVALID;
         s->notify_state = NOTIFY_UNKNOWN;
 
         s->watchdog_original_usec = s->watchdog_usec;
@@ -2642,34 +2766,55 @@ static int service_stop(Unit *u) {
         /* Don't create restart jobs from manual stops. */
         s->forbid_restart = true;
 
-        /* Already on it */
-        if (IN_SET(s->state,
-                   SERVICE_STOP, SERVICE_STOP_SIGTERM, SERVICE_STOP_SIGKILL, SERVICE_STOP_POST,
-                   SERVICE_FINAL_WATCHDOG, SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL))
+        switch (s->state) {
+
+        case SERVICE_STOP:
+        case SERVICE_STOP_SIGTERM:
+        case SERVICE_STOP_SIGKILL:
+        case SERVICE_STOP_POST:
+        case SERVICE_FINAL_WATCHDOG:
+        case SERVICE_FINAL_SIGTERM:
+        case SERVICE_FINAL_SIGKILL:
+                /* Already on it */
                 return 0;
 
-        /* A restart will be scheduled or is in progress. */
-        if (s->state == SERVICE_AUTO_RESTART) {
-                service_set_state(s, SERVICE_DEAD);
+        case SERVICE_AUTO_RESTART:
+        case SERVICE_AUTO_RESTART_QUEUED:
+                /* Give up on the auto restart */
+                service_set_state(s, service_determine_dead_state(s));
                 return 0;
-        }
 
-        /* If there's already something running we go directly into kill mode. */
-        if (IN_SET(s->state, SERVICE_CONDITION, SERVICE_START_PRE, SERVICE_START, SERVICE_START_POST, SERVICE_RELOAD, SERVICE_RELOAD_SIGNAL, SERVICE_RELOAD_NOTIFY, SERVICE_STOP_WATCHDOG)) {
+        case SERVICE_CONDITION:
+        case SERVICE_START_PRE:
+        case SERVICE_START:
+        case SERVICE_START_POST:
+        case SERVICE_RELOAD:
+        case SERVICE_RELOAD_SIGNAL:
+        case SERVICE_RELOAD_NOTIFY:
+        case SERVICE_STOP_WATCHDOG:
+                /* If there's already something running we go directly into kill mode. */
                 service_enter_signal(s, SERVICE_STOP_SIGTERM, SERVICE_SUCCESS);
                 return 0;
-        }
 
-        /* If we are currently cleaning, then abort it, brutally. */
-        if (s->state == SERVICE_CLEANING) {
+        case SERVICE_CLEANING:
+                /* If we are currently cleaning, then abort it, brutally. */
                 service_enter_signal(s, SERVICE_FINAL_SIGKILL, SERVICE_SUCCESS);
                 return 0;
+
+        case SERVICE_RUNNING:
+        case SERVICE_EXITED:
+                service_enter_stop(s, SERVICE_SUCCESS);
+                return 1;
+
+        case SERVICE_DEAD_BEFORE_AUTO_RESTART:
+        case SERVICE_FAILED_BEFORE_AUTO_RESTART:
+        case SERVICE_DEAD:
+        case SERVICE_FAILED:
+        case SERVICE_DEAD_RESOURCES_PINNED:
+        default:
+                /* Unknown state, or unit_stop() should already have handled these */
+                assert_not_reached();
         }
-
-        assert(IN_SET(s->state, SERVICE_RUNNING, SERVICE_EXITED));
-
-        service_enter_stop(s, SERVICE_SUCCESS);
-        return 1;
 }
 
 static int service_reload(Unit *u) {
@@ -2863,6 +3008,9 @@ static int service_serialize(Unit *u, FILE *f, FDSet *fds) {
                         (void) serialize_item_format(f, "main-exec-status-status", "%i", s->main_exec_status.status);
                 }
         }
+
+        if (s->notify_access_override >= 0)
+                (void) serialize_item(f, "notify-access-override", notify_access_to_string(s->notify_access_override));
 
         (void) serialize_dual_timestamp(f, "watchdog-timestamp", &s->watchdog_timestamp);
         (void) serialize_bool(f, "forbid-restart", s->forbid_restart);
@@ -3087,7 +3235,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
         } else if (streq(key, "socket-fd")) {
                 int fd;
 
-                if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                if ((fd = parse_fd(value)) < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse socket-fd value: %s", value);
                 else {
                         asynchronous_close(s->socket_fd);
@@ -3095,11 +3243,10 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                 }
         } else if (streq(key, "fd-store-fd")) {
                 _cleanup_free_ char *fdv = NULL, *fdn = NULL, *fdp = NULL;
-                int fd;
-                int do_poll;
+                int fd, do_poll;
 
                 r = extract_first_word(&value, &fdv, NULL, 0);
-                if (r <= 0 || safe_atoi(fdv, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd)) {
+                if (r <= 0 || (fd = parse_fd(fdv)) < 0 || !fdset_contains(fds, fd)) {
                         log_unit_debug(u, "Failed to parse fd-store-fd value: %s", value);
                         return 0;
                 }
@@ -3119,11 +3266,18 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                         return 0;
                 }
 
+                r = fdset_remove(fds, fd);
+                if (r < 0) {
+                        log_unit_error_errno(u, r, "Could not find deserialized fd %i in fdset: %m", fd);
+                        return 0;
+                }
+                assert(r == fd);
+
                 r = service_add_fd_store(s, fd, fdn, do_poll);
-                if (r < 0)
-                        log_unit_error_errno(u, r, "Failed to add fd to store: %m");
-                else
-                        fdset_remove(fds, fd);
+                if (r < 0) {
+                        log_unit_error_errno(u, r, "Failed to store deserialized fd %i: %m", fd);
+                        return 0;
+                }
         } else if (streq(key, "main-exec-status-pid")) {
                 pid_t pid;
 
@@ -3149,7 +3303,15 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                 deserialize_dual_timestamp(value, &s->main_exec_status.start_timestamp);
         else if (streq(key, "main-exec-status-exit"))
                 deserialize_dual_timestamp(value, &s->main_exec_status.exit_timestamp);
-        else if (streq(key, "watchdog-timestamp"))
+        else if (streq(key, "notify-access-override")) {
+                NotifyAccess notify_access;
+
+                notify_access = notify_access_from_string(value);
+                if (notify_access < 0)
+                        log_unit_debug(u, "Failed to parse notify-access-override value: %s", value);
+                else
+                        s->notify_access_override = notify_access;
+        } else if (streq(key, "watchdog-timestamp"))
                 deserialize_dual_timestamp(value, &s->watchdog_timestamp);
         else if (streq(key, "forbid-restart")) {
                 int b;
@@ -3162,7 +3324,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
         } else if (streq(key, "stdin-fd")) {
                 int fd;
 
-                if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                if ((fd = parse_fd(value)) < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse stdin-fd value: %s", value);
                 else {
                         asynchronous_close(s->stdin_fd);
@@ -3172,7 +3334,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
         } else if (streq(key, "stdout-fd")) {
                 int fd;
 
-                if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                if ((fd = parse_fd(value)) < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse stdout-fd value: %s", value);
                 else {
                         asynchronous_close(s->stdout_fd);
@@ -3182,7 +3344,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
         } else if (streq(key, "stderr-fd")) {
                 int fd;
 
-                if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                if ((fd = parse_fd(value)) < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse stderr-fd value: %s", value);
                 else {
                         asynchronous_close(s->stderr_fd);
@@ -3192,7 +3354,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
         } else if (streq(key, "exec-fd")) {
                 int fd;
 
-                if (safe_atoi(value, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                if ((fd = parse_fd(value)) < 0 || !fdset_contains(fds, fd))
                         log_unit_debug(u, "Failed to parse exec-fd value: %s", value);
                 else {
                         s->exec_fd_event_source = sd_event_source_disable_unref(s->exec_fd_event_source);
@@ -3266,6 +3428,11 @@ static bool service_may_gc(Unit *u) {
             control_pid_good(s) > 0)
                 return false;
 
+        /* Only allow collection of actually dead services, i.e. not those that are in the transitionary
+         * SERVICE_DEAD_BEFORE_AUTO_RESTART/SERVICE_FAILED_BEFORE_AUTO_RESTART states. */
+        if (!IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_DEAD_RESOURCES_PINNED))
+                return false;
+
         return true;
 }
 
@@ -3306,30 +3473,30 @@ fail:
 }
 
 static int service_demand_pid_file(Service *s) {
-        PathSpec *ps;
+        _cleanup_free_ PathSpec *ps = NULL;
 
         assert(s->pid_file);
         assert(!s->pid_file_pathspec);
 
-        ps = new0(PathSpec, 1);
+        ps = new(PathSpec, 1);
         if (!ps)
                 return -ENOMEM;
 
-        ps->unit = UNIT(s);
-        ps->path = strdup(s->pid_file);
-        if (!ps->path) {
-                free(ps);
+        *ps = (PathSpec) {
+                .unit = UNIT(s),
+                .path = strdup(s->pid_file),
+                /* PATH_CHANGED would not be enough. There are daemons (sendmail) that keep their PID file
+                 * open all the time. */
+                .type = PATH_MODIFIED,
+                .inotify_fd = -EBADF,
+        };
+
+        if (!ps->path)
                 return -ENOMEM;
-        }
 
         path_simplify(ps->path);
 
-        /* PATH_CHANGED would not be enough. There are daemons (sendmail) that
-         * keep their PID file open all the time. */
-        ps->type = PATH_MODIFIED;
-        ps->inotify_fd = -EBADF;
-
-        s->pid_file_pathspec = ps;
+        s->pid_file_pathspec = TAKE_PTR(ps);
 
         return service_watch_pid_file(s);
 }
@@ -3427,11 +3594,9 @@ static void service_notify_cgroup_empty_event(Unit *u) {
 
         switch (s->state) {
 
-                /* Waiting for SIGCHLD is usually more interesting,
-                 * because it includes return codes/signals. Which is
-                 * why we ignore the cgroup events for most cases,
-                 * except when we don't know pid which to expect the
-                 * SIGCHLD for. */
+                /* Waiting for SIGCHLD is usually more interesting, because it includes return
+                 * codes/signals. Which is why we ignore the cgroup events for most cases, except when we
+                 * don't know pid which to expect the SIGCHLD for. */
 
         case SERVICE_START:
                 if (IN_SET(s->type, SERVICE_NOTIFY, SERVICE_NOTIFY_RELOAD) &&
@@ -3487,8 +3652,8 @@ static void service_notify_cgroup_empty_event(Unit *u) {
 
         /* If the cgroup empty notification comes when the unit is not active, we must have failed to clean
          * up the cgroup earlier and should do it now. */
-        case SERVICE_DEAD:
-        case SERVICE_FAILED:
+        case SERVICE_AUTO_RESTART:
+        case SERVICE_AUTO_RESTART_QUEUED:
                 unit_prune_cgroup(u);
                 break;
 
@@ -3592,7 +3757,6 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                         return;
 
                 s->main_pid = 0;
-                s->main_pid_known = false;
                 exec_status_exit(&s->main_exec_status, &s->exec_context, pid, code, status);
 
                 if (s->main_command) {
@@ -3676,7 +3840,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                                  * has been received */
                                                 if (f != SERVICE_SUCCESS)
                                                         service_enter_signal(s, SERVICE_STOP_SIGTERM, f);
-                                                else if (!s->remain_after_exit || s->notify_access == NOTIFY_MAIN)
+                                                else if (!s->remain_after_exit || service_get_notify_access(s) == NOTIFY_MAIN)
                                                         /* The service has never been and will never be active */
                                                         service_enter_signal(s, SERVICE_STOP_SIGTERM, SERVICE_FAILURE_PROTOCOL);
                                                 break;
@@ -4094,8 +4258,8 @@ static int service_dispatch_timer(sd_event_source *source, usec_t usec, void *us
         case SERVICE_AUTO_RESTART:
                 if (s->restart_usec > 0)
                         log_unit_debug(UNIT(s),
-                                       "Service RestartSec=%s expired, scheduling restart.",
-                                       FORMAT_TIMESPAN(s->restart_usec, USEC_PER_SEC));
+                                       "Service restart interval %s expired, scheduling restart.",
+                                       FORMAT_TIMESPAN(service_restart_usec_next(s), USEC_PER_SEC));
                 else
                         log_unit_debug(UNIT(s),
                                        "Service has no hold-off time (RestartSec=0), scheduling restart.");
@@ -4143,12 +4307,14 @@ static int service_dispatch_watchdog(sd_event_source *source, usec_t usec, void 
 static bool service_notify_message_authorized(Service *s, pid_t pid, FDSet *fds) {
         assert(s);
 
-        if (s->notify_access == NOTIFY_NONE) {
+        NotifyAccess notify_access = service_get_notify_access(s);
+
+        if (notify_access == NOTIFY_NONE) {
                 log_unit_warning(UNIT(s), "Got notification message from PID "PID_FMT", but reception is disabled.", pid);
                 return false;
         }
 
-        if (s->notify_access == NOTIFY_MAIN && pid != s->main_pid) {
+        if (notify_access == NOTIFY_MAIN && pid != s->main_pid) {
                 if (s->main_pid != 0)
                         log_unit_warning(UNIT(s), "Got notification message from PID "PID_FMT", but reception only permitted for main PID "PID_FMT, pid, s->main_pid);
                 else
@@ -4157,7 +4323,7 @@ static bool service_notify_message_authorized(Service *s, pid_t pid, FDSet *fds)
                 return false;
         }
 
-        if (s->notify_access == NOTIFY_EXEC && pid != s->main_pid && pid != s->control_pid) {
+        if (notify_access == NOTIFY_EXEC && pid != s->main_pid && pid != s->control_pid) {
                 if (s->main_pid != 0 && s->control_pid != 0)
                         log_unit_warning(UNIT(s), "Got notification message from PID "PID_FMT", but reception only permitted for main PID "PID_FMT" and control PID "PID_FMT,
                                          pid, s->main_pid, s->control_pid);
@@ -4179,7 +4345,7 @@ static void service_force_watchdog(Service *s) {
                 return;
 
         log_unit_error(UNIT(s), "Watchdog request (last status: %s)!",
-                       s->status_text ? s->status_text : "<unset>");
+                       s->status_text ?: "<unset>");
 
         service_enter_signal(s, SERVICE_STOP_WATCHDOG, SERVICE_FAILURE_WATCHDOG);
 }
@@ -4199,7 +4365,7 @@ static void service_notify_message(
         assert(u);
         assert(ucred);
 
-        if (!service_notify_message_authorized(SERVICE(u), ucred->pid, fds))
+        if (!service_notify_message_authorized(s, ucred->pid, fds))
                 return;
 
         if (DEBUG_LOGGING) {
@@ -4334,6 +4500,25 @@ static void service_notify_message(
                 }
         }
 
+        /* Interpret NOTIFYACCESS= */
+        e = strv_find_startswith(tags, "NOTIFYACCESS=");
+        if (e) {
+                NotifyAccess notify_access;
+
+                notify_access = notify_access_from_string(e);
+                if (notify_access < 0)
+                        log_unit_warning_errno(u, notify_access,
+                                               "Failed to parse NOTIFYACCESS= field value '%s' in notification message, ignoring: %m", e);
+
+                /* We don't need to check whether the new access mode is more strict than what is
+                 * already in use, since only the privileged process is allowed to change it
+                 * in the first place. */
+                if (service_get_notify_access(s) != notify_access) {
+                        service_override_notify_access(s, notify_access);
+                        notify_dbus = true;
+                }
+        }
+
         /* Interpret ERRNO= */
         e = strv_find_startswith(tags, "ERRNO=");
         if (e) {
@@ -4424,6 +4609,11 @@ static int service_get_timeout(Unit *u, usec_t *timeout) {
 
         *timeout = t;
         return 1;
+}
+
+static usec_t service_get_timeout_start_usec(Unit *u) {
+        Service *s = SERVICE(ASSERT_PTR(u));
+        return s->timeout_start_usec;
 }
 
 static bool pick_up_pid_from_bus_name(Service *s) {
@@ -4557,7 +4747,7 @@ int service_set_socket_fd(
 
         assert(!s->socket_peer);
 
-        if (s->state != SERVICE_DEAD)
+        if (!IN_SET(s->state, SERVICE_DEAD, SERVICE_DEAD_RESOURCES_PINNED))
                 return -EAGAIN;
 
         if (getpeername_pretty(fd, true, &peer_text) >= 0) {
@@ -4594,7 +4784,7 @@ static void service_reset_failed(Unit *u) {
         assert(s);
 
         if (s->state == SERVICE_FAILED)
-                service_set_state(s, SERVICE_DEAD);
+                service_set_state(s, service_determine_dead_state(s));
 
         s->result = SERVICE_SUCCESS;
         s->reload_result = SERVICE_SUCCESS;
@@ -4603,12 +4793,12 @@ static void service_reset_failed(Unit *u) {
         s->flush_n_restarts = false;
 }
 
-static int service_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
+static int service_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
         Service *s = SERVICE(u);
 
         assert(s);
 
-        return unit_kill_common(u, who, signo, s->main_pid, s->control_pid, error);
+        return unit_kill_common(u, who, signo, code, value, s->main_pid, s->control_pid, error);
 }
 
 static int service_main_pid(Unit *u) {
@@ -4682,22 +4872,39 @@ static const char* service_status_text(Unit *u) {
 
 static int service_clean(Unit *u, ExecCleanMask mask) {
         _cleanup_strv_free_ char **l = NULL;
+        bool may_clean_fdstore = false;
         Service *s = SERVICE(u);
         int r;
 
         assert(s);
         assert(mask != 0);
 
-        if (s->state != SERVICE_DEAD)
+        if (!IN_SET(s->state, SERVICE_DEAD, SERVICE_DEAD_RESOURCES_PINNED))
                 return -EBUSY;
 
+        /* Determine if there's anything we could potentially clean */
         r = exec_context_get_clean_directories(&s->exec_context, u->manager->prefix, mask, &l);
         if (r < 0)
                 return r;
 
-        if (strv_isempty(l))
-                return -EUNATCH;
+        if (mask & EXEC_CLEAN_FDSTORE)
+                may_clean_fdstore = s->n_fd_store > 0 || s->n_fd_store_max > 0;
 
+        if (strv_isempty(l) && !may_clean_fdstore)
+                return -EUNATCH; /* Nothing to potentially clean */
+
+        /* Let's clean the stuff we can clean quickly */
+        if (may_clean_fdstore)
+                service_release_fd_store(s);
+
+        /* If we are done, leave quickly */
+        if (strv_isempty(l)) {
+                if (s->state == SERVICE_DEAD_RESOURCES_PINNED && !s->fd_store)
+                        service_set_state(s, SERVICE_DEAD);
+                return 0;
+        }
+
+        /* We need to clean disk stuff. This is slow, hence do it out of process, and change state */
         service_unwatch_control_pid(s);
         s->clean_result = SERVICE_SUCCESS;
         s->control_command = NULL;
@@ -4724,10 +4931,21 @@ fail:
 
 static int service_can_clean(Unit *u, ExecCleanMask *ret) {
         Service *s = SERVICE(u);
+        ExecCleanMask mask = 0;
+        int r;
 
         assert(s);
+        assert(ret);
 
-        return exec_context_get_clean_mask(&s->exec_context, ret);
+        r = exec_context_get_clean_mask(&s->exec_context, &mask);
+        if (r < 0)
+                return r;
+
+        if (s->n_fd_store_max > 0)
+                mask |= EXEC_CLEAN_FDSTORE;
+
+        *ret = mask;
+        return 0;
 }
 
 static const char *service_finished_job(Unit *u, JobType t, JobResult result) {
@@ -4756,6 +4974,30 @@ static int service_can_start(Unit *u) {
         return 1;
 }
 
+static void service_release_resources(Unit *u) {
+        Service *s = SERVICE(ASSERT_PTR(u));
+
+        /* Invoked by the unit state engine, whenever it realizes that unit is dead and there's no job
+         * anymore for it, and it hence is a good idea to release resources */
+
+        /* Don't release resources if this is a transitionary failed/dead state
+         * (i.e. SERVICE_DEAD_BEFORE_AUTO_RESTART/SERVICE_FAILED_BEFORE_AUTO_RESTART), insist on a permanent
+         * failure state. */
+        if (!IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_DEAD_RESOURCES_PINNED))
+                return;
+
+        log_unit_debug(u, "Releasing resources...");
+
+        service_release_socket_fd(s);
+        service_release_stdio_fd(s);
+
+        if (s->fd_store_preserve_mode != EXEC_PRESERVE_YES)
+                service_release_fd_store(s);
+
+        if (s->state == SERVICE_DEAD_RESOURCES_PINNED && !s->fd_store)
+                service_set_state(s, SERVICE_DEAD);
+}
+
 static const char* const service_restart_table[_SERVICE_RESTART_MAX] = {
         [SERVICE_RESTART_NO]          = "no",
         [SERVICE_RESTART_ON_SUCCESS]  = "on-success",
@@ -4767,6 +5009,13 @@ static const char* const service_restart_table[_SERVICE_RESTART_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(service_restart, ServiceRestart);
+
+static const char* const service_restart_mode_table[_SERVICE_RESTART_MODE_MAX] = {
+        [SERVICE_RESTART_MODE_NORMAL] = "normal",
+        [SERVICE_RESTART_MODE_DIRECT]  = "direct",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(service_restart_mode, ServiceRestartMode);
 
 static const char* const service_type_table[_SERVICE_TYPE_MAX] = {
         [SERVICE_SIMPLE]        = "simple",
@@ -4851,7 +5100,6 @@ const UnitVTable service_vtable = {
         .cgroup_context_offset = offsetof(Service, cgroup_context),
         .kill_context_offset = offsetof(Service, kill_context),
         .exec_runtime_offset = offsetof(Service, exec_runtime),
-        .dynamic_creds_offset = offsetof(Service, dynamic_creds),
 
         .sections =
                 "Unit\0"
@@ -4913,6 +5161,7 @@ const UnitVTable service_vtable = {
         .bus_commit_properties = bus_service_commit_properties,
 
         .get_timeout = service_get_timeout,
+        .get_timeout_start_usec = service_get_timeout_start_usec,
         .needs_console = service_needs_console,
         .exit_status = service_exit_status,
         .status_text = service_status_text,
@@ -4929,4 +5178,9 @@ const UnitVTable service_vtable = {
         },
 
         .can_start = service_can_start,
+
+        .notify_plymouth = true,
+
+        .audit_start_message_type = AUDIT_SERVICE_START,
+        .audit_stop_message_type = AUDIT_SERVICE_STOP,
 };

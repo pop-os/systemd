@@ -17,6 +17,7 @@
 #include "macro.h"
 #include "missing_prctl.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "string-util.h"
 #include "tests.h"
 
@@ -228,7 +229,7 @@ static void test_apply_ambient_caps(void) {
         assert_se(prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_IS_SET, CAP_CHOWN, 0, 0) == 0);
 }
 
-static void test_ensure_cap_64bit(void) {
+static void test_ensure_cap_64_bit(void) {
         _cleanup_free_ char *content = NULL;
         unsigned long p = 0;
         int r;
@@ -240,19 +241,69 @@ static void test_ensure_cap_64bit(void) {
 
         assert_se(safe_atolu(content, &p) >= 0);
 
-        /* If caps don't fit into 64bit anymore, we have a problem, fail the test. */
+        /* If caps don't fit into 64-bit anymore, we have a problem, fail the test. */
         assert_se(p <= 63);
 
         /* Also check for the header definition */
         assert_cc(CAP_LAST_CAP <= 63);
 }
 
+static void test_capability_get_ambient(void) {
+        uint64_t c;
+        int r;
+
+        assert_se(capability_get_ambient(&c) >= 0);
+
+        r = safe_fork("(getambient)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_WAIT|FORK_LOG, NULL);
+        assert_se(r >= 0);
+
+        if (r == 0) {
+                int x, y;
+                /* child */
+                assert_se(capability_get_ambient(&c) >= 0);
+
+                x = capability_ambient_set_apply(
+                                (UINT64_C(1) << CAP_MKNOD)|
+                                (UINT64_C(1) << CAP_LINUX_IMMUTABLE),
+                                /* also_inherit= */ true);
+                assert_se(x >= 0 || ERRNO_IS_PRIVILEGE(x));
+
+                assert_se(capability_get_ambient(&c) >= 0);
+                assert_se(x < 0 || FLAGS_SET(c, UINT64_C(1) << CAP_MKNOD));
+                assert_se(x < 0 || FLAGS_SET(c, UINT64_C(1) << CAP_LINUX_IMMUTABLE));
+                assert_se(x < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_SETPCAP));
+
+                y = capability_bounding_set_drop(
+                                ((UINT64_C(1) << CAP_LINUX_IMMUTABLE)|
+                                 (UINT64_C(1) << CAP_SETPCAP)),
+                                /* right_now= */ true);
+                assert_se(y >= 0 || ERRNO_IS_PRIVILEGE(y));
+
+                assert_se(capability_get_ambient(&c) >= 0);
+                assert_se(x < 0 || y < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_MKNOD));
+                assert_se(x < 0 || y < 0 || FLAGS_SET(c, UINT64_C(1) << CAP_LINUX_IMMUTABLE));
+                assert_se(x < 0 || y < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_SETPCAP));
+
+                y = capability_bounding_set_drop(
+                                (UINT64_C(1) << CAP_SETPCAP),
+                                /* right_now= */ true);
+                assert_se(y >= 0 || ERRNO_IS_PRIVILEGE(y));
+
+                assert_se(capability_get_ambient(&c) >= 0);
+                assert_se(x < 0 || y < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_MKNOD));
+                assert_se(x < 0 || y < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_LINUX_IMMUTABLE));
+                assert_se(x < 0 || y < 0 || !FLAGS_SET(c, UINT64_C(1) << CAP_SETPCAP));
+
+                _exit(EXIT_SUCCESS);
+        }
+}
+
 int main(int argc, char *argv[]) {
         bool run_ambient;
 
-        test_setup_logging(LOG_INFO);
+        test_setup_logging(LOG_DEBUG);
 
-        test_ensure_cap_64bit();
+        test_ensure_cap_64_bit();
 
         test_last_cap_file();
         test_last_cap_probe();
@@ -274,6 +325,8 @@ int main(int argc, char *argv[]) {
 
         if (run_ambient)
                 fork_test(test_apply_ambient_caps);
+
+        test_capability_get_ambient();
 
         return 0;
 }

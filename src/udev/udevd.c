@@ -31,6 +31,7 @@
 #include "blockdev-util.h"
 #include "cgroup-setup.h"
 #include "cgroup-util.h"
+#include "common-signal.h"
 #include "cpu-set-util.h"
 #include "daemon-util.h"
 #include "dev-setup.h"
@@ -111,6 +112,9 @@ typedef struct Manager {
         sd_event_source *inotify_event;
 
         sd_event_source *kill_workers_event;
+
+        sd_event_source *memory_pressure_event_source;
+        sd_event_source *sigrtmin18_event_source;
 
         usec_t last_usec;
 
@@ -263,6 +267,9 @@ static Manager* manager_free(Manager *manager) {
 
         safe_close(manager->inotify_fd);
         safe_close_pair(manager->worker_watch);
+
+        sd_event_source_unref(manager->memory_pressure_event_source);
+        sd_event_source_unref(manager->sigrtmin18_event_source);
 
         free(manager->cgroup);
         return mfree(manager);
@@ -699,8 +706,6 @@ static int worker_main(Manager *_manager, sd_device_monitor *monitor, sd_device 
         assert(monitor);
         assert(dev);
 
-        assert_se(unsetenv("NOTIFY_SOCKET") == 0);
-
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, -1) >= 0);
 
         /* Reset OOM score, we only protect the main daemon. */
@@ -813,7 +818,7 @@ static int worker_spawn(Manager *manager, Event *event) {
                 return log_error_errno(r, "Failed to fork() worker: %m");
         }
         if (r == 0) {
-                DEVICE_TRACE_POINT(worker_spawned, event->dev, getpid());
+                DEVICE_TRACE_POINT(worker_spawned, event->dev, getpid_cached());
 
                 /* Worker process */
                 r = worker_main(manager, worker_monitor, sd_device_ref(event->dev));
@@ -1794,62 +1799,12 @@ static int parse_argv(int argc, char *argv[]) {
         return 1;
 }
 
-static int create_subcgroup(char **ret) {
-        _cleanup_free_ char *cgroup = NULL, *subcgroup = NULL;
-        int r;
-
-        if (getppid() != 1)
-                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Not invoked by PID1.");
-
-        r = sd_booted();
-        if (r < 0)
-                return log_debug_errno(r, "Failed to check if systemd is running: %m");
-        if (r == 0)
-                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "systemd is not running.");
-
-        /* Get our own cgroup, we regularly kill everything udev has left behind.
-         * We only do this on systemd systems, and only if we are directly spawned
-         * by PID1. Otherwise we are not guaranteed to have a dedicated cgroup. */
-
-        r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
-        if (r < 0) {
-                if (IN_SET(r, -ENOENT, -ENOMEDIUM))
-                        return log_debug_errno(r, "Dedicated cgroup not found: %m");
-                return log_debug_errno(r, "Failed to get cgroup: %m");
-        }
-
-        r = cg_get_xattr_bool(SYSTEMD_CGROUP_CONTROLLER, cgroup, "trusted.delegate");
-        if (r == 0 || (r < 0 && ERRNO_IS_XATTR_ABSENT(r)))
-                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "The cgroup %s is not delegated to us.", cgroup);
-        if (r < 0)
-                return log_debug_errno(r, "Failed to read trusted.delegate attribute: %m");
-
-        /* We are invoked with our own delegated cgroup tree, let's move us one level down, so that we
-         * don't collide with the "no processes in inner nodes" rule of cgroups, when the service
-         * manager invokes the ExecReload= job in the .control/ subcgroup. */
-
-        subcgroup = path_join(cgroup, "/udev");
-        if (!subcgroup)
-                return log_oom_debug();
-
-        r = cg_create_and_attach(SYSTEMD_CGROUP_CONTROLLER, subcgroup, 0);
-        if (r < 0)
-                return log_debug_errno(r, "Failed to create %s subcgroup: %m", subcgroup);
-
-        log_debug("Created %s subcgroup.", subcgroup);
-        if (ret)
-                *ret = TAKE_PTR(subcgroup);
-        return 0;
-}
-
 static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent) {
         _cleanup_(manager_freep) Manager *manager = NULL;
         _cleanup_free_ char *cgroup = NULL;
         int r;
 
         assert(ret);
-
-        (void) create_subcgroup(&cgroup);
 
         manager = new(Manager, 1);
         if (!manager)
@@ -1858,7 +1813,6 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent) {
         *manager = (Manager) {
                 .inotify_fd = -EBADF,
                 .worker_watch = PIPE_EBADF,
-                .cgroup = TAKE_PTR(cgroup),
         };
 
         r = udev_ctrl_new_from_fd(&manager->ctrl, fd_ctrl);
@@ -1890,6 +1844,14 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent) {
 
         manager->log_level = log_get_max_level();
 
+        r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
+        if (r < 0)
+                log_warning_errno(r, "Failed to get cgroup, ignoring: %m");
+        else if (endswith(cgroup, "/udev")) { /* If we are in a subcgroup /udev/ we assume it was delegated to us */
+                log_debug("Running in delegated subcgroup '%s'.", cgroup);
+                manager->cgroup = TAKE_PTR(cgroup);
+        }
+
         *ret = TAKE_PTR(manager);
 
         return 0;
@@ -1918,7 +1880,7 @@ static int main_loop(Manager *manager) {
         udev_watch_restore(manager->inotify_fd);
 
         /* block and listen to all signals on signalfd */
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGHUP, SIGCHLD, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGHUP, SIGCHLD, SIGRTMIN+18, -1) >= 0);
 
         r = sd_event_default(&manager->event);
         if (r < 0)
@@ -1975,6 +1937,16 @@ static int main_loop(Manager *manager) {
         r = sd_event_add_post(manager->event, NULL, on_post, manager);
         if (r < 0)
                 return log_error_errno(r, "Failed to create post event source: %m");
+
+        /* Eventually, we probably want to do more here on memory pressure, for example, kill idle workers immediately */
+        r = sd_event_add_memory_pressure(manager->event, &manager->memory_pressure_event_source, NULL, NULL);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || (r == -EHOSTDOWN) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to allocate memory pressure watch, ignoring: %m");
+
+        r = sd_event_add_signal(manager->event, &manager->memory_pressure_event_source, SIGRTMIN+18, sigrtmin18_handler, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate SIGRTMIN+18 event source, ignoring: %m");
 
         manager->last_usec = now(CLOCK_MONOTONIC);
 
@@ -2047,7 +2019,7 @@ int run_udevd(int argc, char *argv[]) {
         /* set umask before creating any file/directory */
         umask(022);
 
-        r = mac_selinux_init();
+        r = mac_init();
         if (r < 0)
                 return r;
 

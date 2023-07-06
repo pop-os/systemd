@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <linux/oom.h>
+#include <pthread.h>
 #include <sys/mount.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
@@ -24,6 +25,7 @@
 #include "macro.h"
 #include "missing_sched.h"
 #include "missing_syscall.h"
+#include "namespace-util.h"
 #include "parse-util.h"
 #include "process-util.h"
 #include "procfs-util.h"
@@ -110,7 +112,8 @@ TEST(get_process_comm) {
 }
 
 static void test_get_process_cmdline_one(pid_t pid) {
-        _cleanup_free_ char *c = NULL, *d = NULL, *e = NULL, *f = NULL, *g = NULL, *h = NULL;
+        _cleanup_free_ char *c = NULL, *d = NULL, *e = NULL, *f = NULL, *g = NULL, *h = NULL, *joined = NULL;
+        _cleanup_strv_free_ char **strv_a = NULL, **strv_b = NULL;
         int r;
 
         r = get_process_cmdline(pid, SIZE_MAX, 0, &c);
@@ -130,6 +133,18 @@ static void test_get_process_cmdline_one(pid_t pid) {
 
         r = get_process_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE_POSIX | PROCESS_CMDLINE_COMM_FALLBACK, &h);
         log_info("      %s", r >= 0 ? h : errno_to_name(r));
+
+        r = get_process_cmdline_strv(pid, 0, &strv_a);
+        if (r >= 0)
+                assert_se(joined = strv_join(strv_a, "\", \""));
+        log_info("      \"%s\"", r >= 0 ? joined : errno_to_name(r));
+
+        joined = mfree(joined);
+
+        r = get_process_cmdline_strv(pid, PROCESS_CMDLINE_COMM_FALLBACK, &strv_b);
+        if (r >= 0)
+                assert_se(joined = strv_join(strv_b, "\", \""));
+        log_info("      \"%s\"", r >= 0 ? joined : errno_to_name(r));
 }
 
 TEST(get_process_cmdline) {
@@ -242,7 +257,9 @@ TEST(get_process_cmdline_harder) {
         char path[] = "/tmp/test-cmdlineXXXXXX";
         _cleanup_close_ int fd = -EBADF;
         _cleanup_free_ char *line = NULL;
+        _cleanup_strv_free_ char **args = NULL;
         pid_t pid;
+        int r;
 
         if (geteuid() != 0) {
                 log_info("Skipping %s: not root", __func__);
@@ -277,11 +294,11 @@ TEST(get_process_cmdline_harder) {
         }
 
         assert_se(pid == 0);
-        assert_se(unshare(CLONE_NEWNS) >= 0);
 
-        if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL) < 0) {
-                log_warning_errno(errno, "mount(..., \"/\", MS_SLAVE|MS_REC, ...) failed: %m");
-                assert_se(IN_SET(errno, EPERM, EACCES));
+        r = detach_mount_namespace();
+        if (r < 0) {
+                log_warning_errno(r, "detach mount namespace failed: %m");
+                assert_se(ERRNO_IS_PRIVILEGE(r));
                 return;
         }
 
@@ -355,6 +372,10 @@ TEST(get_process_cmdline_harder) {
         assert_se(streq(line, "[testa]"));
         line = mfree(line);
 
+        assert_se(get_process_cmdline_strv(0, PROCESS_CMDLINE_COMM_FALLBACK, &args) >= 0);
+        assert_se(strv_equal(args, STRV_MAKE("[testa]")));
+        args = strv_free(args);
+
         /* Test with multiple arguments that don't require quoting */
 
         assert_se(write(fd, "foo\0bar", 8) == 8);
@@ -367,6 +388,10 @@ TEST(get_process_cmdline_harder) {
         assert_se(get_process_cmdline(0, SIZE_MAX, PROCESS_CMDLINE_COMM_FALLBACK, &line) >= 0);
         assert_se(streq(line, "foo bar"));
         line = mfree(line);
+
+        assert_se(get_process_cmdline_strv(0, PROCESS_CMDLINE_COMM_FALLBACK, &args) >= 0);
+        assert_se(strv_equal(args, STRV_MAKE("foo", "bar")));
+        args = strv_free(args);
 
         assert_se(write(fd, "quux", 4) == 4);
         assert_se(get_process_cmdline(0, SIZE_MAX, 0, &line) >= 0);
@@ -454,6 +479,10 @@ TEST(get_process_cmdline_harder) {
         assert_se(streq(line, "foo bar quux"));
         line = mfree(line);
 
+        assert_se(get_process_cmdline_strv(0, PROCESS_CMDLINE_COMM_FALLBACK, &args) >= 0);
+        assert_se(strv_equal(args, STRV_MAKE("foo", "bar", "quux")));
+        args = strv_free(args);
+
         assert_se(ftruncate(fd, 0) >= 0);
         assert_se(prctl(PR_SET_NAME, "aaaa bbbb cccc") >= 0);
 
@@ -479,11 +508,17 @@ TEST(get_process_cmdline_harder) {
         assert_se(streq(line, "[aaaa bbbb …"));
         line = mfree(line);
 
+        assert_se(get_process_cmdline_strv(0, PROCESS_CMDLINE_COMM_FALLBACK, &args) >= 0);
+        assert_se(strv_equal(args, STRV_MAKE("[aaaa bbbb cccc]")));
+        args = strv_free(args);
+
         /* Test with multiple arguments that do require quoting */
 
 #define CMDLINE1 "foo\0'bar'\0\"bar$\"\0x y z\0!``\0"
 #define EXPECT1  "foo \"'bar'\" \"\\\"bar\\$\\\"\" \"x y z\" \"!\\`\\`\""
-#define EXPECT1p  "foo $'\\'bar\\'' $'\"bar$\"' $'x y z' $'!``'"
+#define EXPECT1p "foo $'\\'bar\\'' $'\"bar$\"' $'x y z' $'!``'"
+#define EXPECT1v STRV_MAKE("foo", "'bar'", "\"bar$\"", "x y z", "!``")
+
         assert_se(lseek(fd, SEEK_SET, 0) == 0);
         assert_se(write(fd, CMDLINE1, sizeof CMDLINE1) == sizeof CMDLINE1);
         assert_se(ftruncate(fd, sizeof CMDLINE1) == 0);
@@ -500,9 +535,15 @@ TEST(get_process_cmdline_harder) {
         assert_se(streq(line, EXPECT1p));
         line = mfree(line);
 
+        assert_se(get_process_cmdline_strv(0, 0, &args) >= 0);
+        assert_se(strv_equal(args, EXPECT1v));
+        args = strv_free(args);
+
 #define CMDLINE2 "foo\0\1\2\3\0\0"
 #define EXPECT2  "foo \"\\001\\002\\003\""
-#define EXPECT2p  "foo $'\\001\\002\\003'"
+#define EXPECT2p "foo $'\\001\\002\\003'"
+#define EXPECT2v STRV_MAKE("foo", "\1\2\3")
+
         assert_se(lseek(fd, SEEK_SET, 0) == 0);
         assert_se(write(fd, CMDLINE2, sizeof CMDLINE2) == sizeof CMDLINE2);
         assert_se(ftruncate(fd, sizeof CMDLINE2) == 0);
@@ -518,6 +559,10 @@ TEST(get_process_cmdline_harder) {
         log_debug("exp: ==%s==", EXPECT2p);
         assert_se(streq(line, EXPECT2p));
         line = mfree(line);
+
+        assert_se(get_process_cmdline_strv(0, 0, &args) >= 0);
+        assert_se(strv_equal(args, EXPECT2v));
+        args = strv_free(args);
 
         safe_close(fd);
         _exit(EXIT_SUCCESS);
@@ -569,7 +614,7 @@ TEST(getpid_measure) {
                 (void) getpid();
         q = now(CLOCK_MONOTONIC) - t;
 
-        log_info(" glibc getpid(): %lf µs each\n", (double) q / iterations);
+        log_info(" glibc getpid(): %lf μs each\n", (double) q / iterations);
 
         iterations *= 50; /* _cached() is about 50 times faster, so we need more iterations */
 
@@ -578,7 +623,7 @@ TEST(getpid_measure) {
                 (void) getpid_cached();
         q = now(CLOCK_MONOTONIC) - t;
 
-        log_info("getpid_cached(): %lf µs each\n", (double) q / iterations);
+        log_info("getpid_cached(): %lf μs each\n", (double) q / iterations);
 }
 
 TEST(safe_fork) {
@@ -588,12 +633,12 @@ TEST(safe_fork) {
 
         BLOCK_SIGNALS(SIGCHLD);
 
-        r = safe_fork("(test-child)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_NULL_STDIO|FORK_REOPEN_LOG, &pid);
+        r = safe_fork("(test-child)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_REARRANGE_STDIO|FORK_REOPEN_LOG, &pid);
         assert_se(r >= 0);
 
         if (r == 0) {
                 /* child */
-                usleep(100 * USEC_PER_MSEC);
+                usleep_safe(100 * USEC_PER_MSEC);
 
                 _exit(88);
         }
@@ -791,6 +836,106 @@ TEST(set_oom_score_adjust) {
         assert_se(set_oom_score_adjust(a) >= 0);
         assert_se(get_oom_score_adjust(&b) >= 0);
         assert_se(b == a);
+}
+
+static void* dummy_thread(void *p) {
+        int fd = PTR_TO_FD(p);
+        char x;
+
+        /* let main thread know we are ready */
+        assert_se(write(fd, &(const char) { 'x' }, 1) == 1);
+
+        /* wait for the main thread to tell us to shut down */
+        assert_se(read(fd, &x, 1) == 1);
+        return NULL;
+}
+
+TEST(get_process_threads) {
+        int r;
+
+        /* Run this test in a child, so that we can guarantee there's exactly one thread around in the child */
+        r = safe_fork("(nthreads)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_REOPEN_LOG|FORK_WAIT|FORK_LOG, NULL);
+        assert_se(r >= 0);
+
+        if (r == 0) {
+                _cleanup_close_pair_ int pfd[2] = PIPE_EBADF, ppfd[2] = PIPE_EBADF;
+                pthread_t t, tt;
+                char x;
+
+                assert_se(socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0, pfd) >= 0);
+                assert_se(socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0, ppfd) >= 0);
+
+                assert_se(get_process_threads(0) == 1);
+                assert_se(pthread_create(&t, NULL, &dummy_thread, FD_TO_PTR(pfd[0])) == 0);
+                assert_se(read(pfd[1], &x, 1) == 1);
+                assert_se(get_process_threads(0) == 2);
+                assert_se(pthread_create(&tt, NULL, &dummy_thread, FD_TO_PTR(ppfd[0])) == 0);
+                assert_se(read(ppfd[1], &x, 1) == 1);
+                assert_se(get_process_threads(0) == 3);
+
+                assert_se(write(pfd[1], &(const char) { 'x' }, 1) == 1);
+                assert_se(pthread_join(t, NULL) == 0);
+
+                /* the value reported via /proc/ is decreased asynchronously, and there appears to be no nice
+                 * way to sync on it. Hence we do the weak >= 2 check, even though == 2 is what we'd actually
+                 * like to check here */
+                assert_se(get_process_threads(0) >= 2);
+
+                assert_se(write(ppfd[1], &(const char) { 'x' }, 1) == 1);
+                assert_se(pthread_join(tt, NULL) == 0);
+
+                /* similar here */
+                assert_se(get_process_threads(0) >= 1);
+
+                _exit(EXIT_SUCCESS);
+        }
+}
+
+TEST(is_reaper_process) {
+        int r;
+
+        r = safe_fork("(regular)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_WAIT, NULL);
+        assert_se(r >= 0);
+        if (r == 0) {
+                /* child */
+
+                assert_se(is_reaper_process() == 0);
+                _exit(EXIT_SUCCESS);
+        }
+
+        r = safe_fork("(newpid)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_WAIT, NULL);
+        assert_se(r >= 0);
+        if (r == 0) {
+                /* child */
+
+                if (unshare(CLONE_NEWPID) < 0) {
+                        if (ERRNO_IS_PRIVILEGE(errno) || ERRNO_IS_NOT_SUPPORTED(errno)) {
+                                log_notice("Skipping CLONE_NEWPID reaper check, lacking privileges/support");
+                                _exit(EXIT_SUCCESS);
+                        }
+                }
+
+                r = safe_fork("(newpid1)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_WAIT, NULL);
+                assert_se(r >= 0);
+                if (r == 0) {
+                        /* grandchild, which is PID1 in a pidns */
+                        assert_se(getpid_cached() == 1);
+                        assert_se(is_reaper_process() > 0);
+                        _exit(EXIT_SUCCESS);
+                }
+
+                _exit(EXIT_SUCCESS);
+        }
+
+        r = safe_fork("(subreaper)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_WAIT, NULL);
+        assert_se(r >= 0);
+        if (r == 0) {
+                /* child */
+                assert_se(make_reaper_process(true) >= 0);
+
+                assert_se(is_reaper_process() > 0);
+                _exit(EXIT_SUCCESS);
+        }
 }
 
 static int intro(void) {

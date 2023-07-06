@@ -5,7 +5,7 @@
 
 #include "alloc-util.h"
 #include "build.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "conf-files.h"
 #include "constants.h"
 #include "copy.h"
@@ -99,6 +99,7 @@ static const char *arg_replace = NULL;
 static bool arg_dry_run = false;
 static bool arg_inline = false;
 static PagerFlags arg_pager_flags = 0;
+static ImagePolicy *arg_image_policy = NULL;
 
 static OrderedHashmap *users = NULL, *groups = NULL;
 static OrderedHashmap *todo_uids = NULL, *todo_gids = NULL;
@@ -128,6 +129,7 @@ STATIC_DESTRUCTOR_REGISTER(database_groups, set_free_freep);
 STATIC_DESTRUCTOR_REGISTER(uid_range, uid_range_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 static int errno_is_not_exists(int code) {
         /* See getpwnam(3) and getgrnam(3): those codes and others can be returned if the user or group are
@@ -616,7 +618,6 @@ static int write_temporary_shadow(const char *shadow_path, FILE **ret_tmpfile, c
 
                 struct spwd n = {
                         .sp_namp = i->name,
-                        .sp_pwdp = (char*) PASSWORD_LOCKED_AND_INVALID,
                         .sp_lstchg = lstchg,
                         .sp_min = -1,
                         .sp_max = -1,
@@ -639,6 +640,11 @@ static int write_temporary_shadow(const char *shadow_path, FILE **ret_tmpfile, c
 
                 if (creds_password)
                         n.sp_pwdp = creds_password;
+                else if (streq(i->name, "root"))
+                        /* Let firstboot set the password later */
+                        n.sp_pwdp = (char*) PASSWORD_UNPROVISIONED;
+                else
+                        n.sp_pwdp = (char*) PASSWORD_LOCKED_AND_INVALID;
 
                 r = putspent_sane(&n, shadow);
                 if (r < 0)
@@ -1571,7 +1577,7 @@ static int item_equivalent(Item *a, Item *b) {
             !(is_nologin_shell(a_shell) && is_nologin_shell(b_shell))) {
                 _cleanup_free_ char *pa = NULL, *pb = NULL;
 
-                r = chase_symlinks(a_shell, arg_root, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &pa, NULL);
+                r = chase(a_shell, arg_root, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &pa, NULL);
                 if (r < 0) {
                         log_full_errno(ERRNO_IS_RESOURCE(r) ? LOG_ERR : LOG_DEBUG,
                                        r, "Failed to look up path '%s%s%s': %m",
@@ -1579,7 +1585,7 @@ static int item_equivalent(Item *a, Item *b) {
                         return ERRNO_IS_RESOURCE(r) ? r : false;
                 }
 
-                r = chase_symlinks(b_shell, arg_root, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &pb, NULL);
+                r = chase(b_shell, arg_root, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &pb, NULL);
                 if (r < 0) {
                         log_full_errno(ERRNO_IS_RESOURCE(r) ? LOG_ERR : LOG_DEBUG,
                                        r, "Failed to look up path '%s%s%s': %m",
@@ -1964,6 +1970,7 @@ static int help(void) {
                "     --cat-config           Show configuration files\n"
                "     --root=PATH            Operate on an alternate filesystem root\n"
                "     --image=PATH           Operate on disk image as filesystem root\n"
+               "     --image-policy=POLICY  Specify disk image dissection policy\n"
                "     --replace=PATH         Treat arguments as replacement for PATH\n"
                "     --dry-run              Just print what would be done\n"
                "     --inline               Treat arguments as configuration lines\n"
@@ -1982,6 +1989,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_CAT_CONFIG,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_REPLACE,
                 ARG_DRY_RUN,
                 ARG_INLINE,
@@ -1989,15 +1997,16 @@ static int parse_argv(int argc, char *argv[]) {
         };
 
         static const struct option options[] = {
-                { "help",       no_argument,       NULL, 'h'            },
-                { "version",    no_argument,       NULL, ARG_VERSION    },
-                { "cat-config", no_argument,       NULL, ARG_CAT_CONFIG },
-                { "root",       required_argument, NULL, ARG_ROOT       },
-                { "image",      required_argument, NULL, ARG_IMAGE      },
-                { "replace",    required_argument, NULL, ARG_REPLACE    },
-                { "dry-run",    no_argument,       NULL, ARG_DRY_RUN    },
-                { "inline",     no_argument,       NULL, ARG_INLINE     },
-                { "no-pager",   no_argument,       NULL, ARG_NO_PAGER   },
+                { "help",         no_argument,       NULL, 'h'              },
+                { "version",      no_argument,       NULL, ARG_VERSION      },
+                { "cat-config",   no_argument,       NULL, ARG_CAT_CONFIG   },
+                { "root",         required_argument, NULL, ARG_ROOT         },
+                { "image",        required_argument, NULL, ARG_IMAGE        },
+                { "image-policy", required_argument, NULL, ARG_IMAGE_POLICY },
+                { "replace",      required_argument, NULL, ARG_REPLACE      },
+                { "dry-run",      no_argument,       NULL, ARG_DRY_RUN      },
+                { "inline",       no_argument,       NULL, ARG_INLINE       },
+                { "no-pager",     no_argument,       NULL, ARG_NO_PAGER     },
                 {}
         };
 
@@ -2036,6 +2045,12 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 #endif
+
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
 
                 case ARG_REPLACE:
                         if (!path_is_absolute(optarg) ||
@@ -2146,7 +2161,7 @@ static int read_credential_lines(void) {
 static int run(int argc, char *argv[]) {
 #ifndef STANDALONE
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
 #endif
         _cleanup_close_ int lock = -EBADF;
         Item *i;
@@ -2163,7 +2178,7 @@ static int run(int argc, char *argv[]) {
 
         umask(0022);
 
-        r = mac_selinux_init();
+        r = mac_init();
         if (r < 0)
                 return r;
 
@@ -2173,18 +2188,20 @@ static int run(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_REQUIRE_ROOT |
                                 DISSECT_IMAGE_VALIDATE_OS |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_FSCK |
                                 DISSECT_IMAGE_GROWFS,
-                                &unlink_dir,
+                                &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;
 
-                arg_root = strdup(unlink_dir);
+                arg_root = strdup(mounted_dir);
                 if (!arg_root)
                         return log_oom();
         }

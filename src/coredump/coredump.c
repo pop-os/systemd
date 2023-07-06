@@ -36,6 +36,7 @@
 #include "macro.h"
 #include "main-func.h"
 #include "memory-util.h"
+#include "memstream-util.h"
 #include "mkdir-label.h"
 #include "parse-util.h"
 #include "process-util.h"
@@ -49,10 +50,9 @@
 #include "sync-util.h"
 #include "tmpfile-util.h"
 #include "uid-alloc-range.h"
-#include "unaligned.h"
 #include "user-util.h"
 
-/* The maximum size up to which we process coredumps. We use 1G on 32bit systems, and 32G on 64bit systems */
+/* The maximum size up to which we process coredumps. We use 1G on 32-bit systems, and 32G on 64-bit systems */
 #if __SIZEOF_POINTER__ == 4
 #define PROCESS_SIZE_MAX ((uint64_t) (1LLU*1024LLU*1024LLU*1024LLU))
 #elif __SIZEOF_POINTER__ == 8
@@ -91,7 +91,7 @@ enum {
         META_ARGV_UID,          /* %u: as seen in the initial user namespace */
         META_ARGV_GID,          /* %g: as seen in the initial user namespace */
         META_ARGV_SIGNAL,       /* %s: number of signal causing dump */
-        META_ARGV_TIMESTAMP,    /* %t: time of dump, expressed as seconds since the Epoch (we expand this to µs granularity) */
+        META_ARGV_TIMESTAMP,    /* %t: time of dump, expressed as seconds since the Epoch (we expand this to μs granularity) */
         META_ARGV_RLIMIT,       /* %c: core file size soft resource limit */
         META_ARGV_HOSTNAME,     /* %h: hostname */
         _META_ARGV_MAX,
@@ -172,14 +172,27 @@ static int parse_config(void) {
                 {}
         };
 
-        return config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/coredump.conf",
-                        CONF_PATHS_NULSTR("systemd/coredump.conf.d"),
+        int r;
+
+        r = config_parse_config_file(
+                        "coredump.conf",
                         "Coredump\0",
-                        config_item_table_lookup, items,
+                        config_item_table_lookup,
+                        items,
                         CONFIG_PARSE_WARN,
-                        NULL,
-                        NULL);
+                        /* userdata= */ NULL);
+        if (r < 0)
+                return r;
+
+        /* Let's make sure we fix up the maximum size we send to the journal here on the client side, for
+         * efficiency reasons. journald wouldn't accept anything larger anyway. */
+        if (arg_journal_size_max > JOURNAL_SIZE_MAX) {
+                log_warning("JournalSizeMax= set to larger value (%s) than journald would accept (%s), lowering automatically.",
+                            FORMAT_BYTES(arg_journal_size_max), FORMAT_BYTES(JOURNAL_SIZE_MAX));
+                arg_journal_size_max = JOURNAL_SIZE_MAX;
+        }
+
+        return 0;
 }
 
 static uint64_t storage_size_max(void) {
@@ -252,7 +265,7 @@ static int fix_xattr(int fd, const Context *context) {
 #define filename_escape(s) xescape((s), "./ ")
 
 static const char *coredump_tmpfile_name(const char *s) {
-        return s ? s : "(unnamed temporary file)";
+        return s ?: "(unnamed temporary file)";
 }
 
 static int fix_permissions(
@@ -274,11 +287,7 @@ static int fix_permissions(
         (void) fix_acl(fd, uid, allow_user);
         (void) fix_xattr(fd, context);
 
-        r = fsync_full(fd);
-        if (r < 0)
-                return log_error_errno(r, "Failed to sync coredump %s: %m", coredump_tmpfile_name(filename));
-
-        r = link_tmpfile(fd, filename, target);
+        r = link_tmpfile(fd, filename, target, LINK_TMPFILE_SYNC);
         if (r < 0)
                 return log_error_errno(r, "Failed to move coredump %s into place: %m", target);
 
@@ -341,66 +350,6 @@ static int make_filename(const Context *context, char **ret) {
         return 0;
 }
 
-#define _DEFINE_PARSE_AUXV(size, type, unaligned_read)                  \
-        static int parse_auxv##size(                                    \
-                        const void *auxv,                               \
-                        size_t size_bytes,                              \
-                        int *at_secure,                                 \
-                        uid_t *uid,                                     \
-                        uid_t *euid,                                    \
-                        gid_t *gid,                                     \
-                        gid_t *egid) {                                  \
-                                                                        \
-                assert(auxv || size_bytes == 0);                        \
-                                                                        \
-                if (size_bytes % (2 * sizeof(type)) != 0)               \
-                        return log_warning_errno(SYNTHETIC_ERRNO(EIO),  \
-                                                 "Incomplete auxv structure (%zu bytes).", \
-                                                 size_bytes);           \
-                                                                        \
-                size_t words = size_bytes / sizeof(type);               \
-                                                                        \
-                /* Note that we set output variables even on error. */  \
-                                                                        \
-                for (size_t i = 0; i + 1 < words; i += 2) {             \
-                        type key, val;                                  \
-                                                                        \
-                        key = unaligned_read((uint8_t*) auxv + i * sizeof(type)); \
-                        val = unaligned_read((uint8_t*) auxv + (i + 1) * sizeof(type)); \
-                                                                        \
-                        switch (key) {                                  \
-                        case AT_SECURE:                                 \
-                                *at_secure = val != 0;                  \
-                                break;                                  \
-                        case AT_UID:                                    \
-                                *uid = val;                             \
-                                break;                                  \
-                        case AT_EUID:                                   \
-                                *euid = val;                            \
-                                break;                                  \
-                        case AT_GID:                                    \
-                                *gid = val;                             \
-                                break;                                  \
-                        case AT_EGID:                                   \
-                                *egid = val;                            \
-                                break;                                  \
-                        case AT_NULL:                                   \
-                                if (val != 0)                           \
-                                        goto error;                     \
-                                return 0;                               \
-                        }                                               \
-                }                                                       \
-        error:                                                          \
-                return log_warning_errno(SYNTHETIC_ERRNO(ENODATA),      \
-                                         "AT_NULL terminator not found, cannot parse auxv structure."); \
-        }
-
-#define DEFINE_PARSE_AUXV(size)\
-        _DEFINE_PARSE_AUXV(size, uint##size##_t, unaligned_read_ne##size)
-
-DEFINE_PARSE_AUXV(32);
-DEFINE_PARSE_AUXV(64);
-
 static int grant_user_access(int core_fd, const Context *context) {
         int at_secure = -1;
         uid_t uid = UID_INVALID, euid = UID_INVALID;
@@ -435,14 +384,11 @@ static int grant_user_access(int core_fd, const Context *context) {
                 return log_info_errno(SYNTHETIC_ERRNO(EUCLEAN),
                                       "Core file has non-native endianness, not adjusting permissions.");
 
-        if (elf[EI_CLASS] == ELFCLASS64)
-                r = parse_auxv64(context->meta[META_PROC_AUXV],
-                                 context->meta_size[META_PROC_AUXV],
-                                 &at_secure, &uid, &euid, &gid, &egid);
-        else
-                r = parse_auxv32(context->meta[META_PROC_AUXV],
-                                 context->meta_size[META_PROC_AUXV],
-                                 &at_secure, &uid, &euid, &gid, &egid);
+        r = parse_auxv(LOG_WARNING,
+                       /* elf_class= */ elf[EI_CLASS],
+                       context->meta[META_PROC_AUXV],
+                       context->meta_size[META_PROC_AUXV],
+                       &at_secure, &uid, &euid, &gid, &egid);
         if (r < 0)
                 return r;
 
@@ -676,14 +622,15 @@ static int allocate_journal_field(int fd, size_t size, char **ret, size_t *ret_s
                 return log_warning_errno(errno, "Failed to seek: %m");
 
         field = malloc(9 + size);
-        if (!field) {
-                log_warning("Failed to allocate memory for coredump, coredump will not be stored.");
-                return -ENOMEM;
-        }
+        if (!field)
+                return log_warning_errno(SYNTHETIC_ERRNO(ENOMEM),
+                                         "Failed to allocate memory for coredump, coredump will not be stored.");
 
         memcpy(field, "COREDUMP=", 9);
 
-        n = read(fd, field + 9, size);
+        /* NB: simple read() would fail for overly large coredumps, since read() on Linux can only deal with
+         * 0x7ffff000 bytes max. Hence call things in a loop. */
+        n = loop_read(fd, field + 9, size, /* do_poll= */ false);
         if (n < 0)
                 return log_error_errno((int) n, "Failed to read core data: %m");
         if ((size_t) n < size)
@@ -710,17 +657,16 @@ static int allocate_journal_field(int fd, size_t size, char **ret, size_t *ret_s
  * flags:  0100002
  * EOF
  */
-static int compose_open_fds(pid_t pid, char **open_fds) {
+static int compose_open_fds(pid_t pid, char **ret) {
+        _cleanup_(memstream_done) MemStream m = {};
         _cleanup_closedir_ DIR *proc_fd_dir = NULL;
         _cleanup_close_ int proc_fdinfo_fd = -EBADF;
-        _cleanup_free_ char *buffer = NULL;
-        _cleanup_fclose_ FILE *stream = NULL;
         const char *fddelim = "", *path;
-        size_t size = 0;
+        FILE *stream;
         int r;
 
         assert(pid >= 0);
-        assert(open_fds != NULL);
+        assert(ret);
 
         path = procfs_file_alloca(pid, "fd");
         proc_fd_dir = opendir(path);
@@ -731,7 +677,7 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
         if (proc_fdinfo_fd < 0)
                 return -errno;
 
-        stream = open_memstream_unlocked(&buffer, &size);
+        stream = memstream_init(&m);
         if (!stream)
                 return -ENOMEM;
 
@@ -770,15 +716,7 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
                 }
         }
 
-        errno = 0;
-        stream = safe_fclose(stream);
-
-        if (errno > 0)
-                return -errno;
-
-        *open_fds = TAKE_PTR(buffer);
-
-        return 0;
+        return memstream_finalize(&m, ret, NULL);
 }
 
 static int get_process_ns(pid_t pid, const char *namespace, ino_t *ns) {
@@ -1163,7 +1101,7 @@ static int process_socket(int fd) {
                         }
 
                         assert(input_fd < 0);
-                        input_fd = *(int*) CMSG_DATA(found);
+                        input_fd = *CMSG_TYPED_DATA(found, int);
                         break;
                 } else
                         cmsg_close_all(&mh);
@@ -1286,7 +1224,7 @@ static int gather_pid_metadata_from_argv(
                 case META_ARGV_TIMESTAMP:
                         /* The journal fields contain the timestamp padded with six
                          * zeroes, so that the kernel-supplied 1s granularity timestamps
-                         * becomes 1µs granularity, i.e. the granularity systemd usually
+                         * becomes 1μs granularity, i.e. the granularity systemd usually
                          * operates in. */
                         t = free_timestamp = strjoin(argv[i], "000000");
                         if (!t)
@@ -1457,11 +1395,9 @@ static int process_kernel(int argc, char* argv[]) {
         if (r < 0)
                 goto finish;
 
-        if (!context.is_journald) {
+        if (!context.is_journald)
                 /* OK, now we know it's not the journal, hence we can make use of it now. */
-                log_set_target(LOG_TARGET_JOURNAL_OR_KMSG);
-                log_open();
-        }
+                log_set_target_and_open(LOG_TARGET_JOURNAL_OR_KMSG);
 
         /* If this is PID 1 disable coredump collection, we'll unlikely be able to process
          * it later on.
@@ -1560,8 +1496,7 @@ static int run(int argc, char *argv[]) {
         /* First, log to a safe place, since we don't know what crashed and it might
          * be journald which we'd rather not log to then. */
 
-        log_set_target(LOG_TARGET_KMSG);
-        log_open();
+        log_set_target_and_open(LOG_TARGET_KMSG);
 
         /* Make sure we never enter a loop */
         (void) prctl(PR_SET_DUMPABLE, 0);

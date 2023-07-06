@@ -184,7 +184,7 @@ static int append_identity_range(char **text, uid_t start, uid_t next_start, uid
                           exclude + 1, exclude + 1, next_start - exclude - 1);
 }
 
-static int make_userns(uid_t stored_uid, uid_t exposed_uid) {
+static int make_home_userns(uid_t stored_uid, uid_t exposed_uid) {
         _cleanup_free_ char *text = NULL;
         _cleanup_close_ int userns_fd = -EBADF;
         int r;
@@ -226,7 +226,7 @@ static int make_userns(uid_t stored_uid, uid_t exposed_uid) {
                 return log_oom();
 
         /* Leave everything else unmapped, starting from UID_NOBODY itself. Specifically, this means the
-         * whole space outside of 16bit remains unmapped */
+         * whole space outside of 16-bit remains unmapped */
 
         log_debug("Creating userns with mapping:\n%s", text);
 
@@ -269,7 +269,7 @@ int home_shift_uid(int dir_fd, const char *target, uid_t stored_uid, uid_t expos
                 return log_error_errno(errno, "Failed to open tree of home directory: %m");
         }
 
-        userns_fd = make_userns(stored_uid, exposed_uid);
+        userns_fd = make_home_userns(stored_uid, exposed_uid);
         if (userns_fd < 0)
                 return userns_fd;
 

@@ -151,7 +151,7 @@
         <term><varname>DOCUMENTATION=</varname></term>
         <listitem>
           <para>A documentation URL with further information about the topic of the log message. Tools such
-          as <command>journalctl</command> will include a hyperlink to an URL specified this way in their
+          as <command>journalctl</command> will include a hyperlink to a URL specified this way in their
           output. Should be an <literal>http://</literal>, <literal>https://</literal>,
           <literal>file:/</literal>, <literal>man:</literal> or <literal>info:</literal> URL.</para>
         </listitem>
@@ -376,7 +376,7 @@
       <varlistentry>
         <term><varname>_STREAM_ID=</varname></term>
         <listitem>
-          <para>Only applies to <literal>_TRANSPORT=stdout</literal> records: specifies a randomized 128bit ID assigned
+          <para>Only applies to <literal>_TRANSPORT=stdout</literal> records: specifies a randomized 128-bit ID assigned
           to the stream connection when it was first created. This ID is useful to reconstruct individual log streams
           from the log records: all log records carrying the same stream ID originate from the same stream.</para>
         </listitem>
@@ -595,6 +595,16 @@
           <literal>_BOOT_ID=</literal>.
           </para>
         </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>__SEQNUM=</varname></term>
+        <term><varname>__SEQNUM_ID=</varname></term>
+
+        <listitem><para>The sequence number (and associated sequence number ID) of this journal entry in the
+        journal file it originates from. See
+        <citerefentry><refentrytitle>sd_journal_get_seqnum</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+        for details.</para></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

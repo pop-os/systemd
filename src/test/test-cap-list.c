@@ -7,13 +7,22 @@
 #include "cap-list.h"
 #include "capability-util.h"
 #include "parse-util.h"
+#include "random-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "tests.h"
 
 /* verify the capability parser */
 TEST(cap_list) {
         assert_se(!capability_to_name(-1));
         assert_se(!capability_to_name(capability_list_length()));
+        assert_se(!capability_to_name(63));
+        assert_se(!capability_to_name(64));
+
+        assert_se(!CAPABILITY_TO_STRING(-1));
+        if (capability_list_length() <= 62)
+                assert_se(streq(CAPABILITY_TO_STRING(62), "0x3e"));
+        assert_se(!CAPABILITY_TO_STRING(64));
 
         for (int i = 0; i < capability_list_length(); i++) {
                 const char *n;
@@ -21,6 +30,8 @@ TEST(cap_list) {
                 assert_se(n = capability_to_name(i));
                 assert_se(capability_from_name(n) == i);
                 printf("%s = %i\n", n, i);
+
+                assert_se(streq(CAPABILITY_TO_STRING(i), n));
         }
 
         assert_se(capability_from_name("asdfbsd") == -EINVAL);
@@ -29,7 +40,8 @@ TEST(cap_list) {
         assert_se(capability_from_name("cAp_aUdIt_rEAd") == CAP_AUDIT_READ);
         assert_se(capability_from_name("0") == 0);
         assert_se(capability_from_name("15") == 15);
-        assert_se(capability_from_name("63") == 63);
+        assert_se(capability_from_name("62") == 62);
+        assert_se(capability_from_name("63") == -EINVAL);
         assert_se(capability_from_name("64") == -EINVAL);
         assert_se(capability_from_name("-1") == -EINVAL);
 
@@ -57,10 +69,10 @@ static void test_capability_set_one(uint64_t c, const char *t) {
         _cleanup_free_ char *t1 = NULL;
         uint64_t c1, c_masked = c & all_capabilities();
 
-        assert_se(capability_set_to_string_alloc(c, &t1) == 0);
+        assert_se(capability_set_to_string(c, &t1) == 0);
         assert_se(streq(t1, t));
 
-        assert_se(capability_set_from_string(t1, &c1) == 0);
+        assert_se(capability_set_from_string(t1, &c1) > 0);
         assert_se(c1 == c_masked);
 
         free(t1);
@@ -73,20 +85,37 @@ static void test_capability_set_one(uint64_t c, const char *t) {
 TEST(capability_set_from_string) {
         uint64_t c;
 
-        assert_se(capability_set_from_string(NULL, &c) == 0);
+        assert_se(capability_set_from_string(NULL, &c) > 0);
         assert_se(c == 0);
 
-        assert_se(capability_set_from_string("", &c) == 0);
+        assert_se(capability_set_from_string("", &c) > 0);
         assert_se(c == 0);
 
-        assert_se(capability_set_from_string("0", &c) == 0);
+        assert_se(capability_set_from_string("0", &c) > 0);
         assert_se(c == UINT64_C(1));
 
-        assert_se(capability_set_from_string("1", &c) == 0);
+        assert_se(capability_set_from_string("1", &c) > 0);
         assert_se(c == UINT64_C(1) << 1);
 
-        assert_se(capability_set_from_string("0 1 2 3", &c) == 0);
+        assert_se(capability_set_from_string("0 1 2 3", &c) > 0);
         assert_se(c == (UINT64_C(1) << 4) - 1);
+}
+
+static void test_capability_set_to_strv_one(uint64_t m, char **l) {
+        _cleanup_strv_free_ char **b = NULL;
+
+        assert_se(capability_set_to_strv(m, &b) >= 0);
+        assert_se(strv_equal(l, b));
+}
+
+TEST(capability_set_to_strv) {
+        test_capability_set_to_strv_one(0, STRV_MAKE(NULL));
+        test_capability_set_to_strv_one(UINT64_C(1) << CAP_MKNOD, STRV_MAKE("cap_mknod"));
+        test_capability_set_to_strv_one((UINT64_C(1) << CAP_MKNOD) |
+                                        (UINT64_C(1) << CAP_NET_BIND_SERVICE), STRV_MAKE("cap_net_bind_service", "cap_mknod"));
+        test_capability_set_to_strv_one((UINT64_C(1) << CAP_MKNOD) |
+                                        (UINT64_C(1) << CAP_NET_BIND_SERVICE) |
+                                        (UINT64_C(1) << CAP_IPC_OWNER), STRV_MAKE("cap_net_bind_service", "cap_ipc_owner", "cap_mknod"));
 }
 
 static void test_capability_set_to_string_invalid(uint64_t invalid_cap_set) {
@@ -117,10 +146,32 @@ static void test_capability_set_to_string_invalid(uint64_t invalid_cap_set) {
 TEST(capability_set_to_string) {
         test_capability_set_to_string_invalid(0);
 
-        /* once the kernel supports 63 caps, there are no 'invalid' numbers
+        /* once the kernel supports 62 caps, there are no 'invalid' numbers
          * for us to test with */
-        if (cap_last_cap() < 63)
+        if (cap_last_cap() < 62)
                 test_capability_set_to_string_invalid(all_capabilities() + 1);
+}
+
+TEST(capability_set_to_string_negative) {
+
+        for (unsigned i = 0; i < 150; i++) {
+                _cleanup_free_ char *a = NULL, *b = NULL;
+
+                uint64_t m =
+                        random_u64() % (UINT64_C(1) << (cap_last_cap() + 1));
+
+                assert_se(capability_set_to_string(m, &a) >= 0);
+                assert_se(capability_set_to_string_negative(m, &b) >= 0);
+
+                printf("%s (%zu) → ", a, strlen(a));
+
+                if (streq(a, b))
+                        printf("same\n");
+                else
+                        printf("%s (%zu)\n", b, strlen(b));
+
+                assert_se(strlen(b) <= strlen(a));
+        }
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

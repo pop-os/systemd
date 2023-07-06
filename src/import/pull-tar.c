@@ -237,9 +237,9 @@ static int tar_pull_make_local_copy(TarPull *i) {
                 return log_error_errno(r, "Failed to generate temporary filename for %s: %m", p);
 
         if (i->flags & PULL_BTRFS_SUBVOL)
-                r = btrfs_subvol_snapshot(
-                                i->final_path,
-                                t,
+                r = btrfs_subvol_snapshot_at(
+                                AT_FDCWD, i->final_path,
+                                AT_FDCWD, t,
                                 (i->flags & PULL_BTRFS_QUOTA ? BTRFS_SNAPSHOT_QUOTA : 0)|
                                 BTRFS_SNAPSHOT_FALLBACK_COPY|
                                 BTRFS_SNAPSHOT_FALLBACK_DIRECTORY|
@@ -275,7 +275,6 @@ static int tar_pull_make_local_copy(TarPull *i) {
                                 i->settings_path,
                                 local_settings,
                                 0664,
-                                0, 0,
                                 COPY_REFLINK |
                                 (FLAGS_SET(i->flags, PULL_FORCE) ? COPY_REPLACE : 0) |
                                 (FLAGS_SET(i->flags, PULL_SYNC) ? COPY_FSYNC_FULL : 0));

@@ -160,8 +160,8 @@ static int signal_activation_request(sd_bus_message *message, void *userdata, sd
                 return 0;
         }
 
-        if (manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SERVICE) ||
-            manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SOCKET)) {
+        if (manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SOCKET) ||
+            manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SERVICE)) {
                 r = sd_bus_error_set(&error, BUS_ERROR_SHUTTING_DOWN, "Refusing activation, D-Bus is shutting down.");
                 goto failed;
         }
@@ -684,7 +684,7 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
                 return 0;
         }
 
-        nfd = -EBADF;
+        TAKE_FD(nfd);
 
         r = bus_check_peercred(bus);
         if (r < 0) {
@@ -703,7 +703,8 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
         r = sd_bus_negotiate_creds(bus, 1,
                                    SD_BUS_CREDS_PID|SD_BUS_CREDS_UID|
                                    SD_BUS_CREDS_EUID|SD_BUS_CREDS_EFFECTIVE_CAPS|
-                                   SD_BUS_CREDS_SELINUX_CONTEXT);
+                                   SD_BUS_CREDS_SELINUX_CONTEXT|
+                                   SD_BUS_CREDS_COMM|SD_BUS_CREDS_DESCRIPTION);
         if (r < 0) {
                 log_warning_errno(r, "Failed to enable credentials for new connection: %m");
                 return 0;
@@ -721,6 +722,23 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
                 return 0;
         }
 
+        if (DEBUG_LOGGING) {
+                _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *c = NULL;
+                const char *comm = NULL, *description = NULL;
+                pid_t pid = 0;
+
+                r = sd_bus_get_owner_creds(bus, SD_BUS_CREDS_PID|SD_BUS_CREDS_COMM|SD_BUS_CREDS_DESCRIPTION, &c);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to get peer creds, ignoring: %m");
+                else {
+                        (void) sd_bus_creds_get_pid(c, &pid);
+                        (void) sd_bus_creds_get_comm(c, &comm);
+                        (void) sd_bus_creds_get_description(c, &description);
+                }
+
+                log_debug("Accepting direct incoming connection from " PID_FMT " (%s) [%s]", pid, strna(comm), strna(description));
+        }
+
         r = sd_bus_attach_event(bus, m->event, SD_EVENT_PRIORITY_NORMAL);
         if (r < 0) {
                 log_warning_errno(r, "Failed to attach new connection bus to event loop: %m");
@@ -736,6 +754,10 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
                 log_warning_errno(r, "Failed to set up API vtables on new connection bus: %m");
                 return 0;
         }
+
+        r = bus_register_malloc_status(bus, "org.freedesktop.systemd1");
+        if (r < 0)
+                log_warning_errno(r, "Failed to register MemoryAllocation1, ignoring: %m");
 
         r = set_ensure_put(&m->private_buses, NULL, bus);
         if (r == -ENOMEM) {
@@ -797,6 +819,10 @@ static int bus_setup_api(Manager *m, sd_bus *bus) {
         r = sd_bus_request_name_async(bus, NULL, "org.freedesktop.systemd1", SD_BUS_NAME_REPLACE_EXISTING|SD_BUS_NAME_ALLOW_REPLACEMENT, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request name: %m");
+
+        r = bus_register_malloc_status(bus, "org.freedesktop.systemd1");
+        if (r < 0)
+                log_warning_errno(r, "Failed to register MemoryAllocation1, ignoring: %m");
 
         log_debug("Successfully connected to API bus.");
 
@@ -946,7 +972,7 @@ int bus_init_private(Manager *m) {
         if (r < 0)
                 return log_error_errno(errno, "Failed to bind private socket: %m");
 
-        r = listen(fd, SOMAXCONN);
+        r = listen(fd, SOMAXCONN_DELUXE);
         if (r < 0)
                 return log_error_errno(errno, "Failed to make private socket listening: %m");
 

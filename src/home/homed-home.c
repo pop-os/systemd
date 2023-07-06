@@ -11,6 +11,7 @@
 #include "blockdev-util.h"
 #include "btrfs-util.h"
 #include "bus-common-errors.h"
+#include "bus-locator.h"
 #include "data-fd-util.h"
 #include "env-util.h"
 #include "errno-list.h"
@@ -23,12 +24,13 @@
 #include "home-util.h"
 #include "homed-home-bus.h"
 #include "homed-home.h"
+#include "memfd-util.h"
 #include "missing_magic.h"
+#include "missing_mman.h"
 #include "missing_syscall.h"
 #include "mkdir.h"
 #include "path-util.h"
 #include "process-util.h"
-#include "pwquality-util.h"
 #include "quota-util.h"
 #include "resize-fs.h"
 #include "set.h"
@@ -37,7 +39,7 @@
 #include "string-table.h"
 #include "strv.h"
 #include "uid-alloc-range.h"
-#include "user-record-pwquality.h"
+#include "user-record-password-quality.h"
 #include "user-record-sign.h"
 #include "user-record-util.h"
 #include "user-record.h"
@@ -1175,13 +1177,14 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
 
         log_debug("Sending to worker: %s", formatted);
 
-        stdout_fd = memfd_create("homework-stdout", MFD_CLOEXEC);
+        stdout_fd = memfd_create_wrapper("homework-stdout", MFD_CLOEXEC | MFD_NOEXEC_SEAL);
         if (stdout_fd < 0)
-                return -errno;
+                return stdout_fd;
 
         r = safe_fork_full("(sd-homework)",
-                           (int[]) { stdin_fd, stdout_fd }, 2,
-                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_REOPEN_LOG, &pid);
+                           (int[]) { stdin_fd, stdout_fd, STDERR_FILENO },
+                           NULL, 0,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_REARRANGE_STDIO|FORK_LOG|FORK_REOPEN_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -1225,13 +1228,6 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
                 r = setenv_systemd_exec_pid(true);
                 if (r < 0)
                         log_warning_errno(r, "Failed to update $SYSTEMD_EXEC_PID, ignoring: %m");
-
-                r = rearrange_stdio(TAKE_FD(stdin_fd), TAKE_FD(stdout_fd), STDERR_FILENO); /* fds are invalidated by rearrange_stdio() even on failure */
-                if (r < 0) {
-                        log_error_errno(r, "Failed to rearrange stdin/stdout/stderr: %m");
-                        _exit(EXIT_FAILURE);
-                }
-
 
                 /* Allow overriding the homework path via an environment variable, to make debugging
                  * easier. */
@@ -1516,7 +1512,7 @@ int home_create(Home *h, UserRecord *secret, sd_bus_error *error) {
         if (h->record->enforce_password_policy == false)
                 log_debug("Password quality check turned off for account, skipping.");
         else {
-                r = user_record_quality_check_password(h->record, secret, error);
+                r = user_record_check_password_quality(h->record, secret, error);
                 if (r < 0)
                         return r;
         }
@@ -1891,7 +1887,7 @@ int home_passwd(Home *h,
         if (c->enforce_password_policy == false)
                 log_debug("Password quality check turned off for account, skipping.");
         else {
-                r = user_record_quality_check_password(c, merged_secret, error);
+                r = user_record_check_password_quality(c, merged_secret, error);
                 if (r < 0)
                         return r;
         }
@@ -2121,15 +2117,7 @@ int home_killall(Home *h) {
         if (asprintf(&unit, "user-" UID_FMT ".slice", h->uid) < 0)
                 return log_oom();
 
-        r = sd_bus_call_method(
-                        h->manager->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "KillUnit",
-                        &error,
-                        NULL,
-                        "ssi", unit, "all", SIGKILL);
+        r = bus_call_method(h->manager->bus, bus_systemd_mgr, "KillUnit", &error, NULL, "ssi", unit, "all", SIGKILL);
         if (r < 0)
                 log_full_errno(sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT) ? LOG_DEBUG : LOG_WARNING,
                                r, "Failed to kill login processes of user, ignoring: %s", bus_error_message(&error, r));

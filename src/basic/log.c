@@ -42,7 +42,7 @@
 #include "utf8.h"
 
 #define SNDBUF_SIZE (8*1024*1024)
-#define IOVEC_MAX 128U
+#define IOVEC_MAX 256U
 
 static log_syntax_callback_t log_syntax_callback = NULL;
 static void *log_syntax_callback_userdata = NULL;
@@ -50,6 +50,7 @@ static void *log_syntax_callback_userdata = NULL;
 static LogTarget log_target = LOG_TARGET_CONSOLE;
 static int log_max_level = LOG_INFO;
 static int log_facility = LOG_DAEMON;
+static bool ratelimit_kmsg = true;
 
 static int console_fd = STDERR_FILENO;
 static int syslog_fd = -EBADF;
@@ -73,15 +74,22 @@ static bool prohibit_ipc = false;
 static char *log_abort_msg = NULL;
 
 typedef struct LogContext {
+        unsigned n_ref;
         /* Depending on which destructor is used (log_context_free() or log_context_detach()) the memory
          * referenced by this is freed or not */
         char **fields;
+        struct iovec *input_iovec;
+        size_t n_input_iovec;
+        char *key;
+        char *value;
         bool owned;
         LIST_FIELDS(struct LogContext, ll);
 } LogContext;
 
 static thread_local LIST_HEAD(LogContext, _log_context) = NULL;
 static thread_local size_t _log_context_num_fields = 0;
+
+static thread_local const char *log_prefix = NULL;
 
 #if LOG_MESSAGE_VERIFICATION || defined(__COVERITY__)
 bool _log_message_dummy = false; /* Always false */
@@ -98,7 +106,8 @@ bool _log_message_dummy = false; /* Always false */
         } while (false)
 
 static void log_close_console(void) {
-        console_fd = safe_close_above_stdio(console_fd);
+        /* See comment in log_close_journal() */
+        (void) safe_close_above_stdio(TAKE_FD(console_fd));
 }
 
 static int log_open_console(void) {
@@ -122,7 +131,8 @@ static int log_open_console(void) {
 }
 
 static void log_close_kmsg(void) {
-        kmsg_fd = safe_close(kmsg_fd);
+        /* See comment in log_close_journal() */
+        (void) safe_close(TAKE_FD(kmsg_fd));
 }
 
 static int log_open_kmsg(void) {
@@ -139,7 +149,8 @@ static int log_open_kmsg(void) {
 }
 
 static void log_close_syslog(void) {
-        syslog_fd = safe_close(syslog_fd);
+        /* See comment in log_close_journal() */
+        (void) safe_close(TAKE_FD(syslog_fd));
 }
 
 static int create_log_socket(int type) {
@@ -204,7 +215,11 @@ fail:
 }
 
 static void log_close_journal(void) {
-        journal_fd = safe_close(journal_fd);
+        /* If the journal FD is bad, safe_close will fail, and will try to log, which will fail, so we'll
+         * try to close the journal FD, which is bad, so safe_close will fail... Whether we can close it
+         * or not, invalidate it immediately so that we don't get in a recursive loop until we run out of
+         * stack. */
+        (void) safe_close(TAKE_FD(journal_fd));
 }
 
 static int log_open_journal(void) {
@@ -348,6 +363,11 @@ void log_set_target(LogTarget target) {
         log_target = target;
 }
 
+void log_set_target_and_open(LogTarget target) {
+        log_set_target(target);
+        log_open();
+}
+
 void log_close(void) {
         /* Do not call from library code. */
 
@@ -367,6 +387,17 @@ void log_set_max_level(int level) {
         assert(level == LOG_NULL || (level & LOG_PRIMASK) == level);
 
         log_max_level = level;
+
+        /* Also propagate max log level to libc's syslog(), just in case some other component loaded into our
+         * process logs directly via syslog(). You might wonder why we maintain our own log level variable if
+         * libc has the same functionality. This has multiple reasons, first and foremost that we want to
+         * apply this to all our log targets, not just syslog and console. Moreover, we cannot query the
+         * current log mask from glibc without changing it, but that's useful for testing the current log
+         * level before even entering the log functions like we do in our macros. */
+        setlogmask(LOG_UPTO(level));
+
+        /* Ensure that our own LOG_NULL define maps sanely to the log mask */
+        assert_cc(LOG_UPTO(LOG_NULL) == 0);
 }
 
 void log_set_facility(int facility) {
@@ -385,7 +416,7 @@ static int write_to_console(
              header_time[FORMAT_TIMESTAMP_MAX],
              prefix[1 + DECIMAL_STR_MAX(int) + 2],
              tid_string[3 + DECIMAL_STR_MAX(pid_t) + 1];
-        struct iovec iovec[9];
+        struct iovec iovec[11];
         const char *on = NULL, *off = NULL;
         size_t n = 0;
 
@@ -424,6 +455,10 @@ static int write_to_console(
 
         if (on)
                 iovec[n++] = IOVEC_MAKE_STRING(on);
+        if (log_prefix) {
+                iovec[n++] = IOVEC_MAKE_STRING(log_prefix);
+                iovec[n++] = IOVEC_MAKE_STRING(": ");
+        }
         iovec[n++] = IOVEC_MAKE_STRING(buffer);
         if (off)
                 iovec[n++] = IOVEC_MAKE_STRING(off);
@@ -483,6 +518,8 @@ static int write_to_syslog(
                 IOVEC_MAKE_STRING(header_time),
                 IOVEC_MAKE_STRING(program_invocation_short_name),
                 IOVEC_MAKE_STRING(header_pid),
+                IOVEC_MAKE_STRING(strempty(log_prefix)),
+                IOVEC_MAKE_STRING(log_prefix ? ": " : ""),
                 IOVEC_MAKE_STRING(buffer),
         };
         const struct msghdr msghdr = {
@@ -534,8 +571,12 @@ static int write_to_kmsg(
         if (kmsg_fd < 0)
                 return 0;
 
-        if (!ratelimit_below(&ratelimit))
-                return 0;
+        if (ratelimit_kmsg && !ratelimit_below(&ratelimit)) {
+                if (ratelimit_num_dropped(&ratelimit) > 1)
+                        return 0;
+
+                buffer = "Too many messages being logged to kmsg, ignoring";
+        }
 
         xsprintf(header_priority, "<%i>", level);
         xsprintf(header_pid, "["PID_FMT"]: ", getpid_cached());
@@ -544,6 +585,8 @@ static int write_to_kmsg(
                 IOVEC_MAKE_STRING(header_priority),
                 IOVEC_MAKE_STRING(program_invocation_short_name),
                 IOVEC_MAKE_STRING(header_pid),
+                IOVEC_MAKE_STRING(strempty(log_prefix)),
+                IOVEC_MAKE_STRING(log_prefix ? ": " : ""),
                 IOVEC_MAKE_STRING(buffer),
                 IOVEC_MAKE_STRING("\n"),
         };
@@ -608,7 +651,7 @@ static void log_do_context(struct iovec *iovec, size_t iovec_len, size_t *n) {
         assert(iovec);
         assert(n);
 
-        LIST_FOREACH(ll, c, _log_context)
+        LIST_FOREACH(ll, c, _log_context) {
                 STRV_FOREACH(s, c->fields) {
                         if (*n + 2 >= iovec_len)
                                 return;
@@ -616,6 +659,24 @@ static void log_do_context(struct iovec *iovec, size_t iovec_len, size_t *n) {
                         iovec[(*n)++] = IOVEC_MAKE_STRING(*s);
                         iovec[(*n)++] = IOVEC_MAKE_STRING("\n");
                 }
+
+                for (size_t i = 0; i < c->n_input_iovec; i++) {
+                        if (*n + 2 >= iovec_len)
+                                return;
+
+                        iovec[(*n)++] = c->input_iovec[i];
+                        iovec[(*n)++] = IOVEC_MAKE_STRING("\n");
+                }
+
+                if (c->key && c->value) {
+                        if (*n + 3 >= iovec_len)
+                                return;
+
+                        iovec[(*n)++] = IOVEC_MAKE_STRING(c->key);
+                        iovec[(*n)++] = IOVEC_MAKE_STRING(c->value);
+                        iovec[(*n)++] = IOVEC_MAKE_STRING("\n");
+                }
+        }
 }
 
 static int write_to_journal(
@@ -637,13 +698,17 @@ static int write_to_journal(
         if (journal_fd < 0)
                 return 0;
 
-        iovec_len = MIN(4 + _log_context_num_fields * 2, IOVEC_MAX);
+        iovec_len = MIN(6 + _log_context_num_fields * 2, IOVEC_MAX);
         iovec = newa(struct iovec, iovec_len);
 
         log_do_header(header, sizeof(header), level, error, file, line, func, object_field, object, extra_field, extra);
 
         iovec[n++] = IOVEC_MAKE_STRING(header);
         iovec[n++] = IOVEC_MAKE_STRING("MESSAGE=");
+        if (log_prefix) {
+                iovec[n++] = IOVEC_MAKE_STRING(log_prefix);
+                iovec[n++] = IOVEC_MAKE_STRING(": ");
+        }
         iovec[n++] = IOVEC_MAKE_STRING(buffer);
         iovec[n++] = IOVEC_MAKE_STRING("\n");
 
@@ -819,16 +884,9 @@ int log_object_internalv(
         /* Make sure that %m maps to the specified error (or "Success"). */
         LOCAL_ERRNO(ERRNO_VALUE(error));
 
-        /* Prepend the object name before the message */
-        if (object) {
-                size_t n;
+        LOG_SET_PREFIX(object);
 
-                n = strlen(object);
-                buffer = newa(char, n + 2 + LINE_MAX);
-                b = stpcpy(stpcpy(buffer, object), ": ");
-        } else
-                b = buffer = newa(char, LINE_MAX);
-
+        b = buffer = newa(char, LINE_MAX);
         (void) vsnprintf(b, LINE_MAX, format, ap);
 
         return log_dispatch_internal(level, error, file, line, func,
@@ -1143,6 +1201,17 @@ int log_set_max_level_from_string(const char *e) {
         return 0;
 }
 
+static int log_set_ratelimit_kmsg_from_string(const char *e) {
+        int r;
+
+        r = parse_boolean(e);
+        if (r < 0)
+                return r;
+
+        ratelimit_kmsg = r;
+        return 0;
+}
+
 static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
 
         /*
@@ -1193,6 +1262,10 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (log_show_time_from_string(value ?: "1") < 0)
                         log_warning("Failed to parse log time setting '%s'. Ignoring.", value);
 
+        } else if (proc_cmdline_key_streq(key, "systemd.log_ratelimit_kmsg")) {
+
+                if (log_set_ratelimit_kmsg_from_string(value ?: "1") < 0)
+                        log_warning("Failed to parse log ratelimit kmsg boolean '%s'. Ignoring.", value);
         }
 
         return 0;
@@ -1233,6 +1306,10 @@ void log_parse_environment_variables(void) {
         e = getenv("SYSTEMD_LOG_TID");
         if (e && log_show_tid_from_string(e) < 0)
                 log_warning("Failed to parse log tid '%s'. Ignoring.", e);
+
+        e = getenv("SYSTEMD_LOG_RATELIMIT_KMSG");
+        if (e && log_set_ratelimit_kmsg_from_string(e) < 0)
+                log_warning("Failed to parse log ratelimit kmsg boolean '%s'. Ignoring.", e);
 }
 
 void log_parse_environment(void) {
@@ -1544,6 +1621,15 @@ void log_setup(void) {
                 log_show_color(true);
 }
 
+const char *_log_set_prefix(const char *prefix, bool force) {
+        const char *old = log_prefix;
+
+        if (prefix || force)
+                log_prefix = prefix;
+
+        return old;
+}
+
 static int saved_log_context_enabled = -1;
 
 bool log_context_enabled(void) {
@@ -1564,31 +1650,67 @@ bool log_context_enabled(void) {
         return saved_log_context_enabled;
 }
 
-LogContext* log_context_attach(LogContext *c) {
+static LogContext* log_context_attach(LogContext *c) {
         assert(c);
 
         _log_context_num_fields += strv_length(c->fields);
+        _log_context_num_fields += c->n_input_iovec;
+        _log_context_num_fields += !!c->key;
 
         return LIST_PREPEND(ll, _log_context, c);
 }
 
-LogContext* log_context_detach(LogContext *c) {
+static LogContext* log_context_detach(LogContext *c) {
         if (!c)
                 return NULL;
 
-        assert(_log_context_num_fields >= strv_length(c->fields));
+        assert(_log_context_num_fields >= strv_length(c->fields) + c->n_input_iovec +!!c->key);
         _log_context_num_fields -= strv_length(c->fields);
+        _log_context_num_fields -= c->n_input_iovec;
+        _log_context_num_fields -= !!c->key;
 
         LIST_REMOVE(ll, _log_context, c);
         return NULL;
 }
 
-LogContext* log_context_new(char **fields, bool owned) {
+LogContext* log_context_new(const char *key, const char *value) {
+        assert(key);
+        assert(endswith(key, "="));
+        assert(value);
+
+        LIST_FOREACH(ll, i, _log_context)
+                if (i->key == key && i->value == value)
+                        return log_context_ref(i);
+
         LogContext *c = new(LogContext, 1);
         if (!c)
                 return NULL;
 
         *c = (LogContext) {
+                .n_ref = 1,
+                .key = (char *) key,
+                .value = (char *) value,
+        };
+
+        return log_context_attach(c);
+}
+
+LogContext* log_context_new_strv(char **fields, bool owned) {
+        if (!fields)
+                return NULL;
+
+        LIST_FOREACH(ll, i, _log_context)
+                if (i->fields == fields) {
+                        assert(!owned);
+                        return log_context_ref(i);
+                }
+
+        LogContext *c = new(LogContext, 1);
+        if (!c)
+                return NULL;
+
+        *c = (LogContext) {
+                .n_ref = 1,
                 .fields = fields,
                 .owned = owned,
         };
@@ -1596,22 +1718,60 @@ LogContext* log_context_new(char **fields, bool owned) {
         return log_context_attach(c);
 }
 
-LogContext* log_context_free(LogContext *c) {
+LogContext* log_context_new_iov(struct iovec *input_iovec, size_t n_input_iovec, bool owned) {
+        if (!input_iovec || n_input_iovec == 0)
+                return NULL;
+
+        LIST_FOREACH(ll, i, _log_context)
+                if (i->input_iovec == input_iovec && i->n_input_iovec == n_input_iovec) {
+                        assert(!owned);
+                        return log_context_ref(i);
+                }
+
+        LogContext *c = new(LogContext, 1);
+        if (!c)
+                return NULL;
+
+        *c = (LogContext) {
+                .n_ref = 1,
+                .input_iovec = input_iovec,
+                .n_input_iovec = n_input_iovec,
+                .owned = owned,
+        };
+
+        return log_context_attach(c);
+}
+
+static LogContext* log_context_free(LogContext *c) {
         if (!c)
                 return NULL;
 
         log_context_detach(c);
 
-        if (c->owned)
+        if (c->owned) {
                 strv_free(c->fields);
+                iovec_array_free(c->input_iovec, c->n_input_iovec);
+                free(c->key);
+                free(c->value);
+        }
 
         return mfree(c);
 }
 
-LogContext* log_context_new_consume(char **fields) {
-        LogContext *c = log_context_new(fields, /*owned=*/ true);
+DEFINE_TRIVIAL_REF_UNREF_FUNC(LogContext, log_context, log_context_free);
+
+LogContext* log_context_new_strv_consume(char **fields) {
+        LogContext *c = log_context_new_strv(fields, /*owned=*/ true);
         if (!c)
                 strv_free(fields);
+
+        return c;
+}
+
+LogContext* log_context_new_iov_consume(struct iovec *input_iovec, size_t n_input_iovec) {
+        LogContext *c = log_context_new_iov(input_iovec, n_input_iovec, /*owned=*/ true);
+        if (!c)
+                iovec_array_free(input_iovec, n_input_iovec);
 
         return c;
 }

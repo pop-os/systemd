@@ -29,6 +29,7 @@ libtimesyncd_core = static_library(
         'timesyncd-core',
         sources,
         include_directories : includes,
+        dependencies : userspace,
         link_with : timesyncd_link_with,
         build_by_default : false)
 
@@ -54,8 +55,12 @@ endif
 ############################################################
 
 tests += [
-        [files('test-timesync.c'),
-         [libtimesyncd_core,
-          libshared],
-         [libm]],
+        {
+                'sources' : files('test-timesync.c'),
+                'link_with' : [
+                        libshared,
+                        libtimesyncd_core,
+                ],
+                'dependencies' : libm,
+        },
 ]

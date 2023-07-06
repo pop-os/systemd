@@ -75,7 +75,7 @@ Janitorial Clean-ups:
 * rework mount.c and swap.c to follow proper state enumeration/deserialization
   semantics, like we do for device.c now
 
-* get rid of prefix_roota() and similar, only use chase_symlinks() and related
+* get rid of prefix_roota() and similar, only use chase() and related
   calls instead.
 
 * get rid of basename() and replace by path_extract_filename()
@@ -127,7 +127,203 @@ Deprecations and removals:
 * Once baseline is 4.13, remove support for INTERFACE_OLD= checks in "udevadm
   trigger"'s waiting logic, since we can then rely on uuid-tagged uevents
 
+* remove remaining tpm1.2 support from sd-stub
+
 Features:
+
+* new "systemd-pcrlock" component for dealing with PCR4. Design idea:
+  1. define /{etc,usr,var/lib}/pcrlock.d/<component>/<version>.pcrlock
+  2. these files contain list of hashes that will be measured when component is
+     run, per PCR
+  3. each component involved in the boot that is deterministically measured can
+     place one or more of these files in those dirs (shim, sd-boot,
+     sd-stub/UKI, cryptsetup, pcrphase, pcrfs, …)
+  4. since each component has its own dir, with multiple files in them, package
+     such as kernels (of which there can be multiple installed at the same
+     time) can be grouped together: only one of them is measured at a time.
+  5. whenever a new component is added or an old one removed, or the PCR lock
+     shall be relaxed or tightened the systemd-pcrlock tool is invoked.
+  6. tool iterates through all these files, orders them alphabetically by
+     component, then matches them up with current measurements (as per uefi
+     event log), identifying by hash, accepting that the "beginning" of the
+     measurements might not be recognizable.
+  7. Then calculates expected PCR values starting with the "unrecognized
+     head" from the event log, then continuing with all of components
+     defined via the .pcrlock files (but dropping out the "recognized tail"
+     from the uefi event log). (This might mean combinatorial explosion, if
+     there are multiple shims, multiple sd-boot, and so on.)
+  8. Generates a public/private key pair on the TPM
+  9. Generates a counter object in the TPM, with a policy that allows only
+     one-by-one increase with signature policy by the public/private key pair.
+  10. now signs policies of all expected PCR values with the generated keypair,
+      using all combinations of components defined in the .pcrlock files
+      restricting it to the counter + 1.
+  11. locks down the keypair with a signed policy with its own public key
+  12. generates JSON file of all these policies with their signatures, drops
+      them as singleton in ESP
+  13. increases the counter by one.
+  14. after boot sd-stub picks JSON up from ESP, passes it to userspace via
+      .extra
+  15. JSON contained policies can now be used to unlock disk as well as the
+      public/key itself for signing further policies, as well as increment for
+      the counter
+  16. whenever any of the components above is added/removed new JSON file with
+      signatures for counter + 1 is generated, dropped in ESP, then counter
+      increased. (i.e. this means the "recognized tail" of the event log is
+      deterministically swapped out)
+  17. when firmware update is expected, relaxed signed policy is generated for
+      next boot only valid if counter is increased (this means the
+      "unrecognized head" for the event log can change without losing access)
+  18. on every boot checks if releaxed policy is in effect, if so, new strict
+      policy is generated and counter increased.
+  Net result: Removes downgrade attack surface + Locks OS to firmware + Allows
+              downgrades within bounds
+
+* add another PE section ".fname" or so that encodes the intended filename for
+  PE file, and validate that when loading add-ons and similar before using
+  it. This is particularly relevant when we load multiple add-ons and want to
+  sort them to apply them in a define order. The order should not be under
+  control of the attacker.
+
+* also include packaging metadata (á la
+  https://systemd.io/ELF_PACKAGE_METADATA/) in our UEFI PE binaries, using the
+  same JSON format.
+
+* make "bootctl install" + "bootctl update" useful for installing shim too. For
+  that introduce new dir /usr/lib/systemd/efi/extra/ which we copy mostly 1:1
+  into the ESP at install time. Then make the logic smart enough so that we
+  don't overwrite bootx64.efi with our own if the extra tree already contains
+  one. Also, follow symlinks when copying, so that shim rpm can symlink their
+  stuff into our dir (which is safe since the target ESP is generally VFAT and
+  thus does not have symlinks anyway). Later, teach the update logic to look at
+  the ELF package metadata (which we also should include in all PE files, see
+  above) for version info in all *.EFI files, and use it to only update if
+  newer.
+
+* in sd-stub: optionally add support for a new PE section .keyring or so that
+  contains additional certificates to include in the Mok keyring, extending
+  what shim might have placed there. why? let's say I use "ukify" to build +
+  sign my own fedora-based UKIs, and only enroll my personal lennart key via
+  shim.  Then, I want to include the fedora keyring in it, so that kmods work.
+  But I might not want to enroll the fedora key in shim, because this would
+  also mean that the key would be in effect whenever I boot an archlinux UKI
+  built the same way, signed with the same lennart key.
+
+* resolved: take possession of some IPv6 ULA address (let's say
+  fd00:5353:5353:5353:5353:5353:5353:5353), and listen on port 53 on it for the
+  local stubs, so that we can make the stub available via ipv6 too.
+
+* introduce a .microcode PE section for sd-stub which we'll pass as first initrd
+  to the kernel which will then upload it to the CPU. This should be distinct
+  from .initrd to guarantee right ordering. also, and maybe more importantly
+  support .microcode in PE add-ons, so that a microcode update can be shipped
+  independently of any kernel.
+
+* Maybe add SwitchRootEx() as new bus call that takes env vars to set for new
+  PID 1 as argument. When adding SwitchRootEx() we should maybe also add a
+  flags param that allows disabling and enabling whether serialization is
+  requested during switch root.
+
+* introduce a .acpitable section for early ACPI table override
+
+* add proper .osrel matching for PE addons. i.e. refuse applying an addon
+  intended for a different OS. Take inspiration from how confext/sysext are
+  matched against OS.
+
+* use different sbat for sd-boot and sd-stub (so that people can revoke one
+  without the other)
+
+* in ukify merge sbat info from kernel (if it has any, upstream kernels so far
+  dont), of sd-stub and data supplied by user. Then measure sbat too in
+  sd-stub, explicitly.
+
+* figure out what to do about credentials sealed to PCRs in kexec + soft-reboot
+  scenarios. Maybe insist sealing is done additionally against some keypair in
+  the TPM to which access is updated on each boot, for the next, or so?
+
+* logind: when logging in, always take an fd to the home dir, to keep the dir
+  busy, so that autofs release can never happen. (this is generally a good
+  idea, and specifically works around the fact the autofs ignores busy by mount
+  namespaces)
+
+* refuse using the switch-root operation without /etc/initrd-release. Now
+  that we have a concept of userspace reboot, we can clearly say: switch-root
+  is for transitioning from initrd to host (or initrd to next initrd), while
+  userspace reboot is for switching host to next version of the host.
+
+* mount most file systems with a restrictive uidmap. e.g. mount /usr/ with a
+  uidmap that blocks out anything outside 0…1000 (i.e. system users) and similar.
+
+* mount the root fs with MS_NOSUID by default, and then mount /usr/ without
+  both so that suid executables can only be placed there. Do this already in
+  the initrd. If /usr/ is not split out create a bind mount automatically.
+
+* rework journalctl -M to be based on a machined method that generates a mount
+  fd of the relevant journal dirs in the container with uidmapping applied to
+  allow the host to read it, while making everything read-only.
+
+* fix our various hwdb lookup keys to end with ":" again. The original idea was
+  that hwdb patterns can match arbitrary fields with expressions like
+  "*:foobar:*", to wildcard match both the start and the end of the string.
+  This only works safely for later extensions of the string if the strings
+  always end in a colon. This requires updating our udev rules, as well as
+  checking if the various hwdb files are fine with that.
+
+* mount /tmp/ and /var/tmp with a uidmap applied that blocks out "nobody" user
+  among other things such as dynamic uid ranges for containers and so on. That
+  way no one can create files there with these uids and we enforce they are only
+  used transiently, never persistently.
+
+* rework loopback support in fstab: when "loop" option is used, then
+  instantiate a new systemd-loop@.service for the source path, set the
+  lo_file_name field for it to something recognizable derived from the fstab
+  line, and then generate a mount unit for it using a udev generated symlink
+  based on lo_file_name.
+
+* remove tomoyo support, it's obsolete and unmaintained apparently
+
+* journald: add varlink service that allows subscribing to certain log events,
+  for example matching by message ID, or log level returns a list of journal
+  cursors as they happen.
+
+* In .socket units, add ConnectStream=, ConnectDatagram=,
+  ConnectSequentialPacket= that create a socket, and then *connect to* rather than
+  listen on some socket. Then, add a new setting WriteData= that takes some
+  base64 data that systemd will write into the socket early on. This can then
+  be used to create connections to arbitrary services and issue requests into
+  them, as long as the data is static. This can then be combined with the
+  aforementioned journald subscription varlink service, to enable
+  activation-by-message id and similar.
+
+* landlock: lock down RuntimeDirectory= via landlock, so that services lose
+  ability to write anywehere else below /run/. Similar for
+  StateDirectory=. Benefit would be clear delegation via unit files: services
+  get the directories they get, and nothing else even if they wanted to.
+
+* landlock: for unprivileged systemd (i.e. systemd --user), use landlock to
+  implement ProtectSystem=, ProtectHome= and so on. Landlock does not require
+  privs, and we can implement pretty similar behaviour. Also, maybe add a mode
+  where ProtectSystem= combined with an explicit PrivateMounts=no could request
+  similar behaviour for system services, too.
+
+* Add systemd-mount@.service which is instantiated for a block device and
+  invokes systemd-mount and exits. This is then useful to use in
+  ENV{SYSTEMD_WANTS} in udev rules, and a bit prettier than using RUN+=
+
+* udevd: extend memory pressure logic: also kill any idle worker processes
+
+* SIGRTMIN+18 and memory pressure handling should still be added to: hostnamed,
+  localed, oomd, timedated.
+
+* journald: also collect CLOCK_BOOTTIME timestamps per log entry. Then, derive
+  "corrected" CLOCK_REALTIME information on display from that and the timestamp
+  info of the newest entry of the specific boot (as identified by the boot
+  ID). This way, if a system comes up without a valid clock but acquires a
+  better clock later, we can "fix" older entry timestamps on display, by
+  calculating backwards. We cannot use CLOCK_MONOTONIC for this, since it does
+  not account for suspend phases. This would then also enable us to correct the
+  kmsg timestamping we consume (where we erroneously assume the clock was in
+  CLOCK_MONOTONIC, but it actually is CLOCK_BOOTTIME as per kernel).
 
 * sd-journal puts a limit on parallel journal files to view at once. journald
   should probably honour that same limit (JOURNAL_FILES_MAX) when vacuuming to
@@ -226,12 +422,6 @@ Features:
   userspace to allow ordering boots (for example in journalctl). The counter
   would be monotonically increased on every boot.
 
-* systemd-sysext: for sysext DDIs picked up via EFI stub, set much stricter
-  image policy by default
-
-* systemd-dissect: maybe add "--attach" and "--detach" verbs which
-  synchronously attach a DDI to a loopback device but not actually mount them.
-
 * pam_systemd_home: add module parameter to control whether to only accept
   only password or only pcks11/fido2 auth, and then use this to hook nicely
   into two of the three PAM stacks gdm provides.
@@ -241,12 +431,6 @@ Features:
   lines. Then, do the uefi http dance to download kernels and boot them. This
   is then useful for network boot, by embdedding a cpio with type #1 snippets
   in sd-boot, which reference remote kernels.
-
-* fix systemd-gpt-auto-generator in case a UKI is spawned from XBOOTLDR without
-  sd-boot. In that case LoaderDevicePartUUID will point to the XBOOTLDR, and we
-  should then derive the root disk from that, and then the ESP/XBOOTLDR from
-  that. Right now we will only mount ESP if it matches LoaderDEvicePartUUID
-  which isn't quite the same.
 
 * maybe prohibit setuid() to the nobody user, to lock things down, via seccomp.
   the nobody is not a user any code should run under, ever, as that user would
@@ -266,8 +450,6 @@ Features:
   URL, then downloads the file from it using UEFI HTTP APIs, and executes it.
   Usecase: provide a minimal ESP with sd-boot and a couple of these sd-fetch
   binaries in place of UKIs, and download them on-the-fly.
-
-* bootctl: warn if ESP is mounted world-readable (and in particular the seed).
 
 * maybe: systemd-loop-generator that sets up loopback devices if requested via kernel
   cmdline. usecase: include encrypted/verity root fs in UKI.
@@ -383,12 +565,6 @@ Features:
   parametrization, if needed. This matches our usual rule that admin config
   should win over vendor defaults.
 
-* sd-stub: optionally allow users to configure manual kernel command line even
-  in SecureBoot by authenticating it via shim's APIs, integrating with MOK and
-  similar: instead of authenticating just PE code shim should be capable of
-  authenticating any kind of data for us, including files containing kernel
-  command lines.
-
 * write a "search path" spec, that documents the prefixes to search in
   (i.e. the usual /etc/, /run/, /usr/lib/ dance, potentially /usr/etc/), how to
   sort found entries, how masking works and overriding.
@@ -457,13 +633,13 @@ Features:
 * add support for asymmetric LUKS2 TPM based encryption. i.e. allow preparing
   an encrypted image on some host given a public key belonging to a specific
   other host, so that only hosts possessing the private key in the TPM2 chip
-  can decrypt the volume key and activate the volume. Usecase: systemd-syscfg
-  for a central orchestrator to generate syscfg images securely that can only
+  can decrypt the volume key and activate the volume. Usecase: systemd-confext
+  for a central orchestrator to generate confext images securely that can only
   be activated on one specific host (which can be used for installing a bunch
   of creds in /etc/credstore/ for example). Extending on this: allow binding
   LUKS2 TPM based encryption also to the TPM2 internal clock. Net result:
-  prepare a syscfg image that can only be activated on a specific host that
-  runs a specific software in a specific time window. syscfg would be
+  prepare a confext image that can only be activated on a specific host that
+  runs a specific software in a specific time window. confext would be
   automatically invalidated outside of it.
 
 * maybe add a "systemd-report" tool, that generates a TPM2-backed "report" of
@@ -474,17 +650,17 @@ Features:
   this: have the report tool upload these reports every 3min somewhere. Then
   have the orchestrator collect these reports centrally over a 3min time
   window, and use them to determine what which node should now start/stop what,
-  and generate a small syscfg for each node, that uses Uphold= to pin services
-  on each node.  The syscfg would be encrypted using the asymmetric encryption
+  and generate a small confext for each node, that uses Uphold= to pin services
+  on each node.  The confext would be encrypted using the asymmetric encryption
   proposed above, so that it can only be activated on the specific host, if the
   software is in a good state, and within a specific time frame. Then run a
   loop on each node that sends report to orchestrator and then sysupdate to
-  update syscfg.  Orchestrator would be stateless, i.e. operate on desired
+  update confext.  Orchestrator would be stateless, i.e. operate on desired
   config and collected reports in the last 3min time window only, and thus can
   be trivially scaled up since all instances of the orchestrator should come to
   the same conclusions given the same inputs of reports/desired workload info.
   Could also be used to deliver Wireguard secrets and thus to clients, thus
-  permitting zero-trust networking: secrets are rolled over via syscfg updates,
+  permitting zero-trust networking: secrets are rolled over via confext updates,
   and via the time window TPM logic invalidated if node doesn't keep itself
   updated, or becomes corrupted in some way.
 
@@ -518,10 +694,6 @@ Features:
   would just use the same public key specified with --public-key= (or the one
   automatically derived from --private-key=).
 
-* tmpfiles: add new line type for setting btrfs subvolume attributes (i.e. rw/ro)
-
-* tmpfiles: add new line type for setting fcaps
-
 * push people to use ".sysext.raw" as suffix for sysext DDIs (DDI =
   discoverable disk images, i.e. the new name for gpt disk images following the
   discoverable disk spec). [Also: just ".sysext/" for directory-based sysext]
@@ -537,12 +709,9 @@ Features:
   keyring, so that the kernel does this validation for us for verity and kernel
   modules
 
-* for systemd-syscfg: add a tool that can generate suitable DDIs with verity +
+* for systemd-confext: add a tool that can generate suitable DDIs with verity +
   sig using squashfs-tools-ng's library. Maybe just systemd-repart called under
   a new name with a built-in config?
-
-* gpt-auto: generate mount units that reference partitions via
-  /dev/disk/by-diskseq/… so that they can't be swapped out behind our back.
 
 * lock down acceptable encrypted credentials at boot, via simple allowlist,
   maybe on kernel command line:
@@ -552,14 +721,11 @@ Features:
 * Add support for extra verity configuration options to systemd-repart (FEC,
   hash type, etc)
 
-* chase_symlinks(): take inspiration from path_extract_filename() and return
+* chase(): take inspiration from path_extract_filename() and return
   O_DIRECTORY if input path contains trailing slash.
 
-* chase_symlinks(): refuse resolution if trailing slash is specified on input,
+* chase(): refuse resolution if trailing slash is specified on input,
   but final node is not a directory
-
-* chase_symlinks(): add new flag that simply refuses all symlink use in a path,
-  then use that for accessing XBOOTLDR/ESP
 
 * document in boot loader spec that symlinks in XBOOTLDR/ESP are not OK even if
   non-VFAT fs is used.
@@ -570,6 +736,8 @@ Features:
   systemd-gpt-auto-generator/systemd-repart and in systemd-cryptsetup?)
 
 * pick up creds from EFI vars
+
+* Add and pickup tpm2 metadata for creds structure.
 
 * sd-boot: we probably should include all BootXY EFI variable defined boot
   entries in our menu, and then suppress ourselves. Benefit: instant
@@ -593,7 +761,13 @@ Features:
   an sd_device, then always work based on that.
 
 * add small wrapper around qemu that implements sd_notify/AF_VSOCK + machined and
-  maybe some other stuff and boots it
+  maybe some other stuff and boots it. Should implement command line roughly
+  equivalent to nspawn's. Maybe be called "systemd-vmspawn". Should imply good
+  settings, i.e. RNG + HyperV enlightenments. Should also result in swtpm
+  instance, plus virtiofsd instances. Translate credentials into smbios type
+  11 strings. Correctly translate SIGTERM into ACPI shutdown events.
+  Listen to logind suspend events and turn these into suspend key pressed +
+  ACPI resume events.
 
 * maybe add new flags to gpt partition tables for rootfs and usrfs indicating
   purpose, i.e. whether something is supposed to be bootable in a VM, on
@@ -633,10 +807,9 @@ Features:
 * Process credentials in:
   • networkd/udevd: add a way to define additional .link, .network, .netdev files
     via the credentials logic.
-  • fstab-generator: allow defining additional fstab-like mounts via
-    credentials (similar: crypttab-generator, verity-generator,
-    integrity-generator)
-  • getty-generator: allow defining additional getty instances via a credential
+  • crypttab-generator: allow defining additional crypttab-like volumes via
+    credentials (similar: verity-generator, integrity-generator). Use
+    fstab-generator logic as inspiration.
   • run-generator: allow defining additional commands to run via a credential
   • resolved: allow defining additional /etc/hosts entries via a credential (it
     might make sense to then synthesize a new combined /etc/hosts file in /run
@@ -651,9 +824,6 @@ Features:
     systemd.homed.register or so with JSON user records to automatically
     register if not registered yet.  Usecase: deploy a system, and add an
     account one can directly log into.
-  • initialize machine ID from systemd credential picked up from the ESP via
-    sd-stub, so that machine ID is stable even on systems where unified kernels
-    are used, and hence kernel cmdline cannot be modified locally
   • in gpt-auto-generator: check partition uuids against such uuids supplied via
     sd-stub credentials. That way, we can support parallel OS installations with
     pre-built kernels.
@@ -689,9 +859,6 @@ Features:
   3. mount.x-initrd mount option in fstab should be implied for /var
 
 * implement varlink introspection
-
-* we should probably drop all use of prefix_roota() and friends, and use
-  chase_symlinks() instead
 
 * make persistent restarts easier by adding a new setting OpenPersistentFile=
   or so, which allows opening one or more files that is "persistent" across
@@ -733,7 +900,7 @@ Features:
   not unprivileged code.
 
 * given that /etc/ssh/ssh_config.d/ is a thing now, ship a drop-in for that
-  that hooks up userbdctl ssh-key stuff.
+  that hooks up userdbctl ssh-key stuff.
 
 * maybe add support for binding and connecting AF_UNIX sockets in the file
   system outside of the 108ch limit. When connecting, open O_PATH fd to socket
@@ -765,11 +932,6 @@ Features:
   https://0pointer.net/blog/testing-my-system-code-in-usr-without-modifying-usr.html
   https://0pointer.net/blog/running-an-container-off-the-host-usr.html
 
-* add a clear concept how the initrd can make up credentials on their own to
-  pass to the system when transitioning into the host OS. usecase: things like
-  cloud-init/ignitation and similar can parameterize the host with data they
-  acquire.
-
 * sd-event: compat wd reuse in inotify code: keep a set of removed watch
   descriptors, and clear this set piecemeal when we see the IN_IGNORED event
   for it, or when read() returns EAGAIN or on IN_Q_OVERFLOW. Then, whenever we
@@ -778,24 +940,14 @@ Features:
   case the same wd is reused multiple times before we start processing
   IN_IGNORED again)
 
-* systemd-fstab-generator: support addition mount specifications via kernel
-  cmdline. Usecase: invoke a VM, and mount a host homedir into it via
-  virtio-fs.
-
 * for vendor-built signed initrds:
-  - make sysext run in the initrd
-  - sysext should pick up sysext images from /.extra/ in the initrd, and insist
-    on verification if in secureboot mode
-  - kernel-install should be able to install pre-built unified kernel images in
-    type #2 drop-in dir in the ESP.
-  - kernel-install should be able install encrypted creds automatically for
+  - kernel-install should be able to install encrypted creds automatically for
     machine id, root pw, rootfs uuid, resume partition uuid, and place next to
     EFI kernel, for sd-stub to pick them up. These creds should be locked to
     the TPM, and bind to the right PCR the kernel is measured to.
   - kernel-install should be able to pick up initrd sysexts automatically and
     place them next to EFI kernel, for sd-stub to pick them up.
   - systemd-fstab-generator should look for rootfs device to mount in creds
-  - pid 1 should look for machine ID in creds
   - systemd-resume-generator should look for resume partition uuid in creds
   - sd-stub: automatically pick up microcode from ESP (/loader/microcode/*)
     and synthesize initrd from it, and measure it. Signing is not necessary, as
@@ -805,20 +957,12 @@ Features:
   signal for setting service log level, that carries the level via the
   sigqueue() data parameter. Enable this via unit file setting.
 
-* firstboot: maybe just default to C.UTF-8 locale if nothing is set, so that we
-  don't query this unnecessarily in entirely uninitialized
-  containers. (i.e. containers with empty /etc).
-
 * sd_notify/vsock: maybe support binding to AF_VSOCK in Type=notify services,
   then passing $NOTIFY_SOCKET and $NOTIFY_GUESTCID with PID1's cid (typically
   fixed to "2", i.e. the official host cid) and the expected guest cid, for the
   two sides of the channel. The latter env var could then be used in an
   appropriate qemu cmdline. That way qemu payloads could talk sd_notify()
   directly to host service manager.
-
-* maybe write a tool that binds an AF_VFSOCK socket, then invokes qemu,
-  extending the command line to enable vsock on the VM, and using fw_cfg to
-  configure socket address.
 
 * sd-boot: add menu item for shutdown? or hotkey?
 
@@ -849,7 +993,7 @@ Features:
 
 * sd-boot: maybe add support for embedding the various auxiliary resources we
   look for right in the sd-boot binary. i.e. take inspiration from sd-stub
-  logic: allow combining sd-boot via objcopy with kernels to enumerate, .conf
+  logic: allow combining sd-boot via ukify with kernels to enumerate, .conf
   files, drivers, keys to enroll and so on. Then, add whatever we find that way
   to the menu. Usecase: allow building a single PE image you can boot into via
   UEFI HTTP boot.
@@ -857,7 +1001,7 @@ Features:
 * maybe add a new UEFI stub binary "sd-http". It works similar to sd-stub, but
   all it does is download a file from a http server, and execute it, after
   optionally checking its hash sum. idea would be: combine this "sd-http" stub
-  binary with some minimal info about an URL + hash sum, plus .osrel data, and
+  binary with some minimal info about a URL + hash sum, plus .osrel data, and
   drop it into the unified kernel dir in the ESP. And bam you have something
   that is tiny, feels a lot like a unified kernel, but all it does is chainload
   the real kernel. benefit: downloading these stubs would be tiny and quick,
@@ -865,19 +1009,13 @@ Features:
 
 * sysext: measure all activated sysext into a TPM PCR
 
-* maybe add a "syscfg" concept, that is almost entirely identical to "sysext",
-  but operates on /etc/ instead of /usr/ and /opt/. Use case would be: trusted,
-  authenticated, atomic, additive configuration management primitive: drop in a
-  configuration bundle, and activate it, so that it is instantly visible,
-  comprehensively.
-
 * systemd-dissect: show available versions inside of a disk image, i.e. if
   multiple versions are around of the same resource, show which ones. (in other
   words: show partition labels).
 
 * maybe add a generator that reads /proc/cmdline, looks for
   systemd.pull-raw-portable=, systemd-pull-raw-sysext= and similar switches
-  that take an URL as parameter. It then generates service units for
+  that take a URL as parameter. It then generates service units for
   systemd-pull calls that download these URLs if not installed yet. usecase:
   invoke a VM or nspawn container in a way it automatically deploys/runs these
   images as OS payloads. i.e. have a generic OS image you can point to any
@@ -913,8 +1051,6 @@ Features:
 
 * kernel-install:
   - add --all switch for rerunning kernel-install for all installed kernels
-  - maybe add env var that shortcuts kernel-install for installers that want to
-    call it at the end only
 
 * doc: prep a document explaining resolved's internal objects, i.e. Query
   vs. Question vs. Transaction vs. Stream and so on.
@@ -999,9 +1135,6 @@ Features:
   CapabilityQuintet we already have. (This likely allows us to drop libcap
   dep in the base OS image)
 
-* sysext: automatically activate sysext images dropped in via new sd-stub
-  sysext pickup logic. (must insist on verity + signature on those though)
-
 * add concept for "exitrd" as inverse of "initrd", that we can transition to at
   shutdown, and has similar security semantics. This should then take the place
   of dracut's shutdown logic. Should probably support sysexts too. Care needs
@@ -1031,22 +1164,6 @@ Features:
   keys of /etc/crypttab. That way people can store/provide the roothash
   externally and provide to us on demand only.
 
-* add high-level lockdown level for GPT dissection logic: e.g. an enum that can
-  be ANY (to mount anything), TRUSTED (to require that /usr is on signed
-  verity, but rest doesn't matter), LOCKEDDOWN (to require that everything is
-  on signed verity, except for ESP), SUPERLOCKDOWN (like LOCKEDDOWN but ESP not
-  allowed). And then maybe some flavours of that that declare what is expected
-  from home/srv/var… Then, add a new cmdline flag to all tools that parse such
-  images, to configure this. Also, add a kernel cmdline option for this, to be
-  honoured by the gpt auto generator.
-
-  Alternative idea: add "systemd.gpt_auto_policy=rhvs" to allow gpt-auto to
-  only mount root dir, /home/ dir, /var/ and /srv/, but nothing else. And then
-  minor extension to this, insisting on encryption, for example
-  "systemd.gpt_auto_policy=r+v+h" to require encryption for root and var but not
-  for /home/, and similar. Similar add --image-dissect-policy= to tools that
-  take --image= that take the same short string.
-
 * we probably should extend the root verity hash of the root fs into some PCR
   on boot. (i.e. maybe add a veritytab option tpm2-measure=12 or so to measure
   it into PCR 12); Similar: we probably should extend the LUKS volume key of
@@ -1058,10 +1175,6 @@ Features:
   key). That way, we nicely distinguish resources supplied by the OS vendor
   (i.e. sysext, root verity) from those inherently local (i.e. encryption key),
   which is useful if they shall be signed separately.
-
-* add a "policy" to the dissection logic. i.e. a bit mask what is OK to mount,
-  what must be read-only, what requires encryption, and what requires
-  authentication.
 
 * in uefi stub: query firmware regarding which PCR banks are being used, store
   that in EFI var. then use this when enrolling TPM2 in cryptsetup to verify
@@ -1165,7 +1278,7 @@ Features:
 
 * introduce a new group to own TPM devices
 
-* cyptsetup: add option for automatically removing empty password slot on boot
+* cryptsetup: add option for automatically removing empty password slot on boot
 
 * cryptsetup: optionally, when run during boot-up and password is never
   entered, and we are on battery power (or so), power off machine again
@@ -1185,34 +1298,15 @@ Features:
   - cryptsetup-generator: allow specification of passwords in crypttab itself
   - support rd.luks.allow-discards= kernel cmdline params in cryptsetup generator
 
-* when configuring loopback netif, and it fails due to EPERM, eat up error if
-  it happens to be set up alright already.
-
-* at boot: check if battery above some threshold, if not power off again after explanation
-
-* userdb: add field for ambient caps, so that a user can have CAP_WAKE_ALARM
-  for example. And add code that resets ambient caps for all services by
-  default.
-
-* sd-bus: when connecting to some dbus server socker, set originating AF_UNIX
-  socket name in abstract namespace to include "description" string, and pick
-  it up from there in sd_bus_creds logic. i.e. we can use the socket peer
-  address as conduit for some minimal connection metainfo, and use it to
-  restore the "description" logic that kdbus used to have.
-
 * systemd-analyze netif that explains predictable interface (or networkctl)
 
 * Add service setting to run a service within the specified VRF. i.e. do the
   equivalent of "ip vrf exec".
 
-* change SwitchRoot() implementation in PID 1 to use pivot_root(".", "."), as
-  documented in the pivot_root(2) man page, so that we can drop the /oldroot
-  temporary dir.
-
-* special case some calls of chase_symlinks() to use openat2() internally, so
+* special case some calls of chase() to use openat2() internally, so
   that the kernel does what we otherwise do.
 
-* add a new flag to chase_symlinks() that stops chasing once the first missing
+* add a new flag to chase() that stops chasing once the first missing
   component is found and then allows the caller to create the rest.
 
 * make use of new glibc 2.32 APIs sigabbrev_np() and strerrorname_np().
@@ -1250,10 +1344,6 @@ Features:
 
 * busctl: maybe expose a verb "ping" for pinging a dbus service to see if it
   exists and responds.
-
-* Maybe add a separate GPT partition type to the discoverable partition spec
-  for "hibernate" partitions, that are exactly like swap partitions but only
-  activated right before hibernation and thus never used for regular swapping.
 
 * socket units: allow creating a udev monitor socket with ListenDevices= or so,
   with matches, then activate app through that passing socket over
@@ -1303,9 +1393,6 @@ Features:
   https://bugs.freedesktop.org/show_bug.cgi?id=69447
 
 * teach parse_timestamp() timezones like the calendar spec already knows it
-
-* beef up hibernation to optionally do swapon/swapoff immediately before/after
-  the hibernation
 
 * beef up s2h to implement a battery watch loop: instead of entering
   hibernation unconditionally after coming back from resume make a decision
@@ -1402,13 +1489,7 @@ Features:
 * When reloading configuration PID 1 should reset all its properties to the
   original defaults before calling parse_config()
 
-* hibernate/s2h: make this robust and safe to enable in Fedora by default.
-  Specifically:
-
-  1. add resume_offset support to the resume code (i.e. support swap files
-     properly)
-  2. check if swap is on weird storage and refuse if so
-  3. add auto-detection of hibernation images
+* hibernate/s2h: if swap is on weird storage and refuse if so
 
 * cgroups: use inotify to get notified when somebody else modifies cgroups
   owned by us, then log a friendly warning.
@@ -1440,15 +1521,6 @@ Features:
 
 * add --vacuum-xyz options to coredumpctl, matching those journalctl already has.
 
-* introduce Ephemeral= unit file switch, that creates an ephemeral copy of all
-  files and directories that are left writable for a unit, and which are
-  removed after the unit goes down again. A bit like --ephemeral for
-  systemd-nspawn but for system services. If used together with RootImage= this
-  should reflink the image file itself.
-
-  Related: add Ephemeral=<path1> <path2> … which would allow marking
-  specific paths only like this.
-
 * add CopyFile= or so as unit file setting that may be used to copy files or
   directory trees from the host to the services RootImage= and RootDirectory=
   environment. Which we can use for /etc/machine-id and in particular
@@ -1474,8 +1546,6 @@ Features:
 * maybe rework get_user_creds() to query the user database if $SHELL is used
   for root, but only then.
 
-* be stricter with fds we receive for the fdstore: close them asynchronously
-
 * calenderspec: add support for week numbers and day numbers within a
   year. This would allow us to define "bi-weekly" triggers safely.
 
@@ -1495,10 +1565,6 @@ Features:
   doing disk usage calculations and so on.
 
 * deprecate RootDirectoryStartOnly= in favour of a new ExecStart= prefix char
-
-* add a new RuntimeDirectoryPreserve= mode that defines a similar lifecycle for
-  the runtime dir as we maintain for the fdstore: i.e. keep it around as long
-  as the unit is running or has a job queued.
 
 * support projid-based quota in machinectl for containers
 
@@ -1665,8 +1731,6 @@ Features:
 * exponential backoff in timesyncd when we cannot reach a server
 
 * timesyncd: add ugly bus calls to set NTP servers per-interface, for usage by NM
-
-* merge ~/.local/share and ~/.local/lib into one similar /usr/lib and /usr/share....
 
 * add systemd.abort_on_kill or some other such flag to send SIGABRT instead of SIGKILL
   (throughout the codebase, not only PID1)
@@ -1893,16 +1957,13 @@ Features:
 * dbus: when a unit failed to load (i.e. is in UNIT_ERROR state), we
   should be able to safely try another attempt when the bus call LoadUnit() is invoked.
 
+* document org.freedesktop.MemoryAllocation1
+
 * maybe do not install getty@tty1.service symlink in /etc but in /usr?
 
 * print a nicer explanation if people use variable/specifier expansion in ExecStart= for the first word
 
 * mount: turn dependency information from /proc/self/mountinfo into dependency information between systemd units.
-
-* systemd-firstboot: make sure to always use chase_symlinks() before
-  reading/writing files
-
-* firstboot: make it useful to be run immediately after yum --installroot to set up a machine. (most specifically, make --copy-root-password work even if /etc/passwd already exists
 
 * EFI:
   - honor language efi variables for default language selection (if there are any?)
@@ -1917,9 +1978,6 @@ Features:
   - show whether UEFI audit mode is available
   - teach it to prepare an ESP wholesale, i.e. with mkfs.vfat invocation
   - teach it to copy in unified kernel images and maybe type #1 boot loader spec entries from host
-
-* kernel-install:
-  - optionally, support generating type #2 entries instead of type #1, including signing them
 
 * logind:
   - logind: optionally, ignore idle-hint logic for autosuspend, block suspend as long as a session is around
@@ -1973,7 +2031,7 @@ Features:
   - check if we can make journalctl by default use --follow mode inside of less if called without args?
   - maybe add API to send pairs of iovecs via sd_journal_send
   - journal: add a setgid "systemd-journal" utility to invoke from libsystemd-journal, which passes fds via STDOUT and does PK access
-  - journactl: support negative filtering, i.e. FOOBAR!="waldo",
+  - journalctl: support negative filtering, i.e. FOOBAR!="waldo",
     and !FOOBAR for events without FOOBAR.
   - journal: store timestamp of journal_file_set_offline() in the header,
     so it is possible to display when the file was last synced.
@@ -2202,11 +2260,6 @@ Features:
   properties as JSON, similar to busctl's new JSON output. In contrast to that
   it should skip the variant type string though.
 
-* add an explicit "vertical" mode to format-table, so that "systemctl
-  status"-like outputs (i.e. with a series of field names left and values
-  right) become genuine first class citizens, and we gain automatic, sane JSON
-  output for them.
-
 * Add a "systemctl list-units --by-slice" mode or so, which rearranges the
   output of "systemctl list-units" slightly by showing the tree structure of
   the slices, and the units attached to them.
@@ -2324,6 +2377,7 @@ Features:
 
 * tmpfiles:
   - apply "x" on "D" too (see patch from William Douglas)
+  - allow time-based cleanup in r and R too
   - instead of ignoring unknown fields, reject them.
   - creating new directories/subvolumes/fifos/device nodes
     should not follow symlinks. None of the other adjustment or creation
@@ -2332,6 +2386,8 @@ Features:
   - teach tmpfiles.d q/Q logic something sensible in the context of XFS/ext4
     project quota
   - teach tmpfiles.d m/M to move / atomic move + symlink old -> new
+  - add new line type for setting btrfs subvolume attributes (i.e. rw/ro)
+  - tmpfiles: add new line type for setting fcaps
 
 * udev-link-config:
    - Make sure ID_PATH is always exported and complete for

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 project('systemd', 'c',
-        version : '253',
+        version : '254',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu11',
@@ -10,15 +10,15 @@ project('systemd', 'c',
                 'localstatedir=/var',
                 'warning_level=2',
         ],
-        meson_version : '>= 0.53.2',
+        meson_version : '>= 0.60.0',
        )
 
-libsystemd_version = '0.36.0'
-libudev_version = '1.7.6'
+libsystemd_version = '0.37.0'
+libudev_version = '1.7.7'
 
 conf = configuration_data()
 conf.set_quoted('PROJECT_URL', 'https://systemd.io/')
-conf.set('PROJECT_VERSION',    meson.project_version(),
+conf.set('PROJECT_VERSION', meson.project_version(),
          description : 'Numerical project version (used where a simple number is expected)')
 
 # This is to be used instead of meson.source_root(), as the latter will return
@@ -201,11 +201,14 @@ kernelinstalldir = kerneldir / 'install.d'
 factorydir = datadir / 'factory'
 bootlibdir = prefixdir / 'lib/systemd/boot/efi'
 testsdir = prefixdir / 'lib/systemd/tests'
+unittestsdir = testsdir / 'unit-tests'
+testdata_dir = testsdir / 'testdata'
 systemdstatedir = localstatedir / 'lib/systemd'
 catalogstatedir = systemdstatedir / 'catalog'
 randomseeddir = localstatedir / 'lib/systemd'
 profiledir = rootlibexecdir / 'portable' / 'profile'
 ntpservicelistdir = rootprefixdir / 'lib/systemd/ntp-units.d'
+credstoredir = prefixdir / 'lib/credstore'
 
 docdir = get_option('docdir')
 if docdir == ''
@@ -274,7 +277,7 @@ conf.set_quoted('SYSTEMD_LANGUAGE_FALLBACK_MAP',              pkgdatadir / 'lang
 conf.set_quoted('SYSTEMD_MAKEFS_PATH',                        rootlibexecdir / 'systemd-makefs')
 conf.set_quoted('SYSTEMD_PULL_PATH',                          rootlibexecdir / 'systemd-pull')
 conf.set_quoted('SYSTEMD_SHUTDOWN_BINARY_PATH',               rootlibexecdir / 'systemd-shutdown')
-conf.set_quoted('SYSTEMD_TEST_DATA',                          testsdir / 'testdata')
+conf.set_quoted('SYSTEMD_TEST_DATA',                          testdata_dir)
 conf.set_quoted('SYSTEMD_TTY_ASK_PASSWORD_AGENT_BINARY_PATH', rootbindir / 'systemd-tty-ask-password-agent')
 conf.set_quoted('SYSTEMD_UPDATE_HELPER_PATH',                 rootlibexecdir / 'systemd-update-helper')
 conf.set_quoted('SYSTEMD_USERWORK_PATH',                      rootlibexecdir / 'systemd-userwork')
@@ -318,6 +321,8 @@ conf.set10('FIRST_BOOT_FULL_PRESET',                          get_option('first-
 #####################################################################
 
 cc = meson.get_compiler('c')
+userspace_c_args = []
+userspace_c_ld_args = []
 meson_build_sh = find_program('tools/meson-build.sh')
 
 want_tests = get_option('tests')
@@ -325,7 +330,7 @@ slow_tests = want_tests != 'false' and get_option('slow-tests')
 fuzz_tests = want_tests != 'false' and get_option('fuzz-tests')
 install_tests = get_option('install-tests')
 
-if add_languages('cpp', required : fuzzer_build)
+if add_languages('cpp', native : false, required : fuzzer_build)
         #  Used only for tests
         cxx = meson.get_compiler('cpp')
         cxx_cmd = ' '.join(cxx.cmd_array())
@@ -336,9 +341,9 @@ endif
 if want_libfuzzer
         fuzzing_engine = meson.get_compiler('cpp').find_library('Fuzzer', required : false)
         if fuzzing_engine.found()
-                add_project_arguments('-fsanitize-coverage=trace-pc-guard,trace-cmp', language : 'c')
+                userspace_c_args += '-fsanitize-coverage=trace-pc-guard,trace-cmp'
         elif cc.has_argument('-fsanitize=fuzzer-no-link')
-                add_project_arguments('-fsanitize=fuzzer-no-link', language : 'c')
+                userspace_c_args += '-fsanitize=fuzzer-no-link'
         else
                 error('Looks like neither libFuzzer nor -fsanitize=fuzzer-no-link is supported')
         endif
@@ -364,11 +369,14 @@ possible_common_cc_flags = [
         '-Werror=implicit-int',
         '-Werror=incompatible-pointer-types',
         '-Werror=int-conversion',
+        '-Werror=missing-declarations',
+        '-Werror=missing-prototypes',
         '-Werror=overflow',
         '-Werror=override-init',
         '-Werror=return-type',
         '-Werror=shift-count-overflow',
         '-Werror=shift-overflow=2',
+        '-Werror=strict-flex-arrays',
         '-Werror=undef',
         '-Wfloat-equal',
         # gperf prevents us from enabling this because it does not emit fallthrough
@@ -395,7 +403,16 @@ possible_common_cc_flags = [
         '-Wno-error=#warnings',  # clang
         '-Wno-string-plus-int',  # clang
 
+        '-fdiagnostics-show-option',
+        '-fno-common',
+        '-fstack-protector',
+        '-fstack-protector-strong',
         '-fstrict-flex-arrays',
+        '--param=ssp-buffer-size=4',
+]
+
+possible_common_link_flags = [
+        '-fstack-protector',
 ]
 
 c_args = get_option('c_args')
@@ -430,7 +447,6 @@ possible_link_flags = [
         '-Wl,--fatal-warnings',
         '-Wl,-z,now',
         '-Wl,-z,relro',
-        '-fstack-protector',
 ]
 
 if get_option('b_sanitize') == 'none'
@@ -451,17 +467,10 @@ if get_option('mode') == 'release'
         possible_common_cc_flags += '-ftrivial-auto-var-init=zero'
 endif
 
-possible_cc_flags = possible_common_cc_flags + [
-        '-Werror=missing-declarations',
-        '-Werror=missing-prototypes',
-        '-fdiagnostics-show-option',
-        '-fno-common',
+possible_cc_flags = [
         '-fno-strict-aliasing',
-        '-fstack-protector',
-        '-fstack-protector-strong',
         '-fstrict-flex-arrays=1',
         '-fvisibility=hidden',
-        '--param=ssp-buffer-size=4',
 ]
 
 if get_option('buildtype') != 'debug'
@@ -477,9 +486,19 @@ if get_option('mode') == 'developer'
         possible_cc_flags += '-fno-omit-frame-pointer'
 endif
 
-add_project_arguments(cc.get_supported_arguments(basic_disabled_warnings), language : 'c')
-add_project_arguments(cc.get_supported_arguments(possible_cc_flags), language : 'c')
-add_project_link_arguments(cc.get_supported_link_arguments(possible_link_flags), language : 'c')
+add_project_arguments(
+        cc.get_supported_arguments(
+                basic_disabled_warnings,
+                possible_common_cc_flags
+        ),
+        language : 'c')
+
+add_project_link_arguments(
+        cc.get_supported_link_arguments(possible_common_link_flags),
+        language : 'c')
+
+userspace_c_args += cc.get_supported_arguments(possible_cc_flags)
+userspace_c_ld_args += cc.get_supported_link_arguments(possible_link_flags)
 
 have = cc.has_argument('-Wzero-length-bounds')
 conf.set10('HAVE_ZERO_LENGTH_BOUNDS', have)
@@ -508,14 +527,14 @@ has_wstringop_truncation = cc.has_argument('-Wstringop-truncation')
 #####################################################################
 # compilation result tests
 
-conf.set('_GNU_SOURCE', true)
+conf.set('_GNU_SOURCE', 1)
 conf.set('__SANE_USERSPACE_TYPES__', true)
 conf.set10('HAVE_WSTRINGOP_TRUNCATION', has_wstringop_truncation)
 
 conf.set('SIZEOF_DEV_T', cc.sizeof('dev_t', prefix : '#include <sys/types.h>'))
 conf.set('SIZEOF_INO_T', cc.sizeof('ino_t', prefix : '#include <sys/types.h>'))
-conf.set('SIZEOF_TIME_T', cc.sizeof('time_t', prefix : '#include <sys/time.h>'))
 conf.set('SIZEOF_RLIM_T', cc.sizeof('rlim_t', prefix : '#include <sys/resource.h>'))
+conf.set('SIZEOF_TIME_T', cc.sizeof('time_t', prefix : '#include <sys/time.h>'))
 conf.set('SIZEOF_TIMEX_MEMBER', cc.sizeof('typeof(((struct timex *)0)->freq)', prefix : '#include <sys/timex.h>'))
 
 long_max = cc.compute_int(
@@ -631,6 +650,7 @@ foreach ident : [
         ['open_tree',         '''#include <sys/mount.h>'''],
         ['fsopen',            '''#include <sys/mount.h>'''],
         ['fsconfig',          '''#include <sys/mount.h>'''],
+        ['fsmount',           '''#include <sys/mount.h>'''],
         ['getdents64',        '''#include <dirent.h>'''],
 ]
 
@@ -668,7 +688,9 @@ else
                 command: vcs_tagger)
 endif
 
-versiondep = declare_dependency(sources: version_h)
+versiondep = declare_dependency(
+        sources: version_h,
+        include_directories : include_directories('.'))
 
 shared_lib_tag = get_option('shared-lib-tag')
 if shared_lib_tag == ''
@@ -683,11 +705,13 @@ stat = find_program('stat')
 ln = find_program('ln')
 git = find_program('git', required : false)
 env = find_program('env')
-perl = find_program('perl', required : false)
 rsync = find_program('rsync', required : false)
+diff = find_program('diff')
+find = find_program('find')
 meson_make_symlink = project_source_root + '/tools/meson-make-symlink.sh'
 
 mkdir_p = 'mkdir -p $DESTDIR/@0@'
+mkdir_p_mode = 'mkdir -p $DESTDIR/@0@ -m @1@'
 
 # If -Dxxx-path option is found, use that. Otherwise, check in $PATH,
 # /usr/sbin, /sbin, and fall back to the default from middle column.
@@ -711,7 +735,7 @@ foreach prog : progs
                                    '/usr/sbin/' + prog[0],
                                    '/sbin/' + prog[0],
                                    required: false)
-                path = exe.found() ? exe.path() : prog[1]
+                path = exe.found() ? exe.full_path() : prog[1]
         endif
         name = prog.length() > 2 ? prog[2] : prog[0].to_upper()
         conf.set_quoted(name, path)
@@ -818,7 +842,7 @@ endif
 time_epoch = get_option('time-epoch')
 if time_epoch <= 0
         time_epoch = run_command(sh, '-c', 'echo "$SOURCE_DATE_EPOCH"', check : true).stdout().strip()
-        if time_epoch == '' and git.found() and fs.exists('.git')
+        if time_epoch == '' and git.found() and fs.is_dir('.git')
                 # If we're in a git repository, use the creation time of the latest git tag.
                 latest_tag = run_command(git, 'describe', '--abbrev=0', '--tags',
                                          check : false)
@@ -988,6 +1012,9 @@ conf.set_quoted('SYSTEMD_DEFAULT_LOCALE', default_locale)
 nspawn_locale = get_option('nspawn-locale')
 conf.set_quoted('SYSTEMD_NSPAWN_LOCALE', nspawn_locale)
 
+default_keymap = get_option('default-keymap')
+conf.set_quoted('SYSTEMD_DEFAULT_KEYMAP', default_keymap)
+
 localegen_path = get_option('localegen-path')
 if localegen_path != ''
         conf.set_quoted('LOCALEGEN_PATH', localegen_path)
@@ -1020,8 +1047,6 @@ endforeach
 conf.set10('ENABLE_DEBUG_HASHMAP', enable_debug_hashmap)
 conf.set10('ENABLE_DEBUG_MMAP_CACHE', enable_debug_mmap_cache)
 conf.set10('ENABLE_DEBUG_SIPHASH', enable_debug_siphash)
-
-conf.set10('VALGRIND', get_option('valgrind'))
 conf.set10('LOG_TRACE', get_option('log-trace'))
 
 default_user_path = get_option('user-path')
@@ -1029,14 +1054,14 @@ if default_user_path != ''
         conf.set_quoted('DEFAULT_USER_PATH', default_user_path)
 endif
 
-
 #####################################################################
 
 threads = dependency('threads')
 librt = cc.find_library('rt')
 libm = cc.find_library('m')
 libdl = cc.find_library('dl')
-libcrypt = cc.find_library('crypt')
+libcrypt = dependency('libcrypt')
+libcap = dependency('libcap')
 
 # On some architectures, libatomic is required. But on some installations,
 # it is found, but actual linking fails. So let's try to use it opportunistically.
@@ -1059,12 +1084,6 @@ foreach ident : [
                                dependencies : libcrypt)
         conf.set10('HAVE_' + ident[0].to_upper(), have)
 endforeach
-
-libcap = dependency('libcap', required : false)
-if not libcap.found()
-        # Compat with Ubuntu 14.04 which ships libcap w/o .pc file
-        libcap = cc.find_library('cap')
-endif
 
 want_bpf_framework = get_option('bpf-framework')
 bpf_compiler = get_option('bpf-compiler')
@@ -1098,7 +1117,7 @@ else
                         r = find_program('clang', required : bpf_framework_required, version : '>= 10.0.0')
                         clang_found = r.found()
                         if clang_found
-                                clang = r.path()
+                                clang = r.full_path()
                         endif
                 else
                         clang_found = true
@@ -1110,10 +1129,10 @@ else
                         clang_supports_bpf = run_command(clang, '-target', 'bpf', '--print-supported-cpus', check : false).returncode() == 0
                 endif
         elif bpf_compiler == 'gcc'
-                warning('GCC BPF Compiler support is experimental and not recommended.')
                 bpf_gcc = find_program('bpf-gcc',
+                                       'bpf-none-gcc',
                                        required : true,
-                                       version : '>= 12.1.0')
+                                       version : '>= 13.1.0')
                 bpf_gcc_found = bpf_gcc.found()
         endif
 
@@ -1170,15 +1189,32 @@ else
 endif
 conf.set10('HAVE_LIBFDISK', have)
 
+want_passwdqc = get_option('passwdqc')
 want_pwquality = get_option('pwquality')
-if want_pwquality != 'false' and not skip_deps
-        libpwquality = dependency('pwquality', required : want_pwquality == 'true')
+if want_passwdqc == 'true' and want_pwquality == 'true'
+        error('passwdqc and pwquality cannot be requested simultaneously')
+endif
+
+if want_pwquality != 'false' and want_passwdqc != 'true' and not skip_deps
+        libpwquality = dependency('pwquality',
+                                  version : '>= 1.4.1',
+                                  required : want_pwquality == 'true')
         have = libpwquality.found()
 else
         have = false
         libpwquality = []
 endif
 conf.set10('HAVE_PWQUALITY', have)
+
+if not have and want_passwdqc != 'false' and not skip_deps
+        libpasswdqc = dependency('passwdqc',
+                                 required : want_passwdqc == 'true')
+        have = libpasswdqc.found()
+else
+        have = false
+        libpasswdqc = []
+endif
+conf.set10('HAVE_PASSWDQC', have)
 
 want_seccomp = get_option('seccomp')
 if want_seccomp != 'false' and not skip_deps
@@ -1244,7 +1280,7 @@ conf.set10('ENABLE_POLKIT', install_polkit)
 
 want_acl = get_option('acl')
 if want_acl != 'false' and not skip_deps
-        libacl = cc.find_library('acl', required : want_acl == 'true')
+        libacl = dependency('libacl', required : want_acl == 'true')
         have = libacl.found()
 else
         have = false
@@ -1301,8 +1337,15 @@ conf.set10('HAVE_XENCTRL', have)
 
 want_pam = get_option('pam')
 if want_pam != 'false' and not skip_deps
-        libpam = cc.find_library('pam', required : want_pam == 'true')
-        libpam_misc = cc.find_library('pam_misc', required : want_pam == 'true')
+        libpam = dependency('pam', required : false)
+        if not libpam.found()
+                # Debian older than bookworm and Ubuntu older than 22.10 do not provide the .pc file.
+                libpam = cc.find_library('pam', required : want_pam == 'true')
+        endif
+        libpam_misc = dependency('pam_misc', required : false)
+        if not libpam_misc.found()
+                libpam_misc = cc.find_library('pam_misc', required : want_pam == 'true')
+        endif
         have = libpam.found() and libpam_misc.found()
 else
         have = false
@@ -1431,8 +1474,12 @@ conf.set10('HAVE_QRENCODE', have)
 
 want_gcrypt = get_option('gcrypt')
 if want_gcrypt != 'false' and not skip_deps
-        libgcrypt = cc.find_library('gcrypt', required : want_gcrypt == 'true')
-        libgpg_error = cc.find_library('gpg-error', required : want_gcrypt == 'true')
+        libgcrypt = dependency('libgcrypt', required : want_gcrypt == 'true')
+        libgpg_error = dependency('gpg-error', required : false)
+        if not libgpg_error.found()
+                # CentOS 8 does not provide the .pc file.
+                libgpg_error = cc.find_library('gpg-error', required : want_gcrypt == 'true')
+        endif
         have = libgcrypt.found() and libgpg_error.found()
 else
         have = false
@@ -1502,7 +1549,7 @@ conf.set10('HAVE_LIBFIDO2', have)
 
 want_tpm2 = get_option('tpm2')
 if want_tpm2 != 'false' and not skip_deps
-        tpm2 = dependency('tss2-esys tss2-rc tss2-mu',
+        tpm2 = dependency('tss2-esys tss2-rc tss2-mu tss2-tcti-device',
                           required : want_tpm2 == 'true')
         have = tpm2.found()
         have_esys3 = tpm2.version().version_compare('>= 3.0.0')
@@ -1542,8 +1589,11 @@ conf.set10('HAVE_ZLIB', have)
 
 want_bzip2 = get_option('bzip2')
 if want_bzip2 != 'false' and not skip_deps
-        libbzip2 = cc.find_library('bz2',
-                                   required : want_bzip2 == 'true')
+        libbzip2 = dependency('bzip2', required : false)
+        if not libbzip2.found()
+                # Debian and Ubuntu do not provide the .pc file.
+                libbzip2 = cc.find_library('bz2', required : want_bzip2 == 'true')
+        endif
         have = libbzip2.found()
 else
         have = false
@@ -1817,9 +1867,6 @@ else
 endif
 conf.set10('ENABLE_IMPORTD', have)
 
-want_kernel_install = get_option('kernel-install')
-conf.set10('ENABLE_KERNEL_INSTALL', want_kernel_install)
-
 want_homed = get_option('homed')
 if want_homed != 'false'
         have = (conf.get('HAVE_OPENSSL') == 1 and
@@ -1835,9 +1882,6 @@ conf.set10('ENABLE_HOMED', have)
 
 have = have and conf.get('HAVE_PAM') == 1
 conf.set10('ENABLE_PAM_HOME', have)
-
-have = get_option('oomd')
-conf.set10('ENABLE_OOMD', have)
 
 want_remote = get_option('remote')
 if want_remote != 'false'
@@ -1859,6 +1903,7 @@ conf.set10('ENABLE_REMOTE', have)
 foreach term : ['analyze',
                 'backlight',
                 'binfmt',
+                'compat-mutable-uid-boundaries',
                 'coredump',
                 'efi',
                 'environment-d',
@@ -1870,23 +1915,24 @@ foreach term : ['analyze',
                 'idn',
                 'ima',
                 'initrd',
-                'compat-mutable-uid-boundaries',
-                'nscd',
+                'kernel-install',
                 'ldconfig',
                 'localed',
                 'logind',
                 'machined',
                 'networkd',
+                'nscd',
                 'nss-myhostname',
                 'nss-systemd',
+                'oomd',
                 'portabled',
-                'sysext',
                 'pstore',
                 'quotacheck',
                 'randomseed',
                 'resolve',
                 'rfkill',
                 'smack',
+                'sysext',
                 'sysusers',
                 'timedated',
                 'timesyncd',
@@ -1936,14 +1982,10 @@ conf.set10('SYSTEMD_SLOW_TESTS_DEFAULT', slow_tests)
 ############################################################
 
 tests = []
+simple_tests = []
 fuzzers = []
+simple_fuzzers = []
 catalogs = []
-
-############################################################
-
-# Include these now as they provide gnu-efi detection.
-subdir('src/fundamental')
-subdir('src/boot/efi')
 
 ############################################################
 
@@ -1951,34 +1993,190 @@ pymod = import('python')
 python = pymod.find_installation('python3', required : true, modules : ['jinja2'])
 python_39 = python.language_version().version_compare('>=3.9')
 
+############################################################
+
+if conf.get('BPF_FRAMEWORK') == 1
+        bpf_clang_flags = [
+                '-std=gnu11',
+                '-Wno-compare-distinct-pointer-types',
+                '-fno-stack-protector',
+                '-O2',
+                '-target',
+                'bpf',
+                '-g',
+                '-c',
+        ]
+
+        bpf_gcc_flags = [
+                '-std=gnu11',
+                '-fno-stack-protector',
+                '-O2',
+                '-mkernel=5.2',
+                '-mcpu=v3',
+                '-mco-re',
+                '-gbtf',
+                '-c',
+        ]
+
+        # Generate defines that are appropriate to tell the compiler what architecture
+        # we're compiling for. By default we just map meson's cpu_family to __<cpu_family>__.
+        # This dictionary contains the exceptions where this doesn't work.
+        #
+        # C.f. https://mesonbuild.com/Reference-tables.html#cpu-families
+        # and src/basic/missing_syscall_def.h.
+        cpu_arch_defines = {
+                'ppc'     : ['-D__powerpc__'],
+                'ppc64'   : ['-D__powerpc64__', '-D_CALL_ELF=2'],
+                'riscv32' : ['-D__riscv', '-D__riscv_xlen=32'],
+                'riscv64' : ['-D__riscv', '-D__riscv_xlen=64'],
+                'x86'     : ['-D__i386__'],
+
+                # For arm, assume hardware fp is available.
+                'arm'     : ['-D__arm__', '-D__ARM_PCS_VFP'],
+        }
+
+        bpf_arch_flags = cpu_arch_defines.get(host_machine.cpu_family(),
+                                              ['-D__@0@__'.format(host_machine.cpu_family())])
+        if bpf_compiler == 'gcc'
+                bpf_arch_flags += ['-m' + host_machine.endian() + '-endian']
+        endif
+
+        libbpf_include_dir = libbpf.get_variable(pkgconfig : 'includedir')
+
+        bpf_o_unstripped_cmd = []
+        if bpf_compiler == 'clang'
+                bpf_o_unstripped_cmd += [
+                        clang,
+                        bpf_clang_flags,
+                        bpf_arch_flags,
+                ]
+        elif bpf_compiler == 'gcc'
+                bpf_o_unstripped_cmd += [
+                        bpf_gcc,
+                        bpf_gcc_flags,
+                        bpf_arch_flags,
+                ]
+        endif
+
+        bpf_o_unstripped_cmd += ['-I.']
+
+        if not meson.is_cross_build() and bpf_compiler == 'clang'
+                target_triplet_cmd = run_command('gcc', '-dumpmachine', check: false)
+                if target_triplet_cmd.returncode() == 0
+                        target_triplet = target_triplet_cmd.stdout().strip()
+                        bpf_o_unstripped_cmd += [
+                                '-isystem',
+                                '/usr/include/@0@'.format(target_triplet)
+                        ]
+                endif
+        endif
+
+        bpf_o_unstripped_cmd += [
+                '-idirafter',
+                libbpf_include_dir,
+                '@INPUT@',
+                '-o',
+                '@OUTPUT@'
+        ]
+
+        if bpftool_strip
+                bpf_o_cmd = [
+                        bpftool,
+                        'gen',
+                        'object',
+                        '@OUTPUT@',
+                        '@INPUT@'
+                ]
+        elif bpf_compiler == 'clang'
+                bpf_o_cmd = [
+                        llvm_strip,
+                        '-g',
+                        '@INPUT@',
+                        '-o',
+                        '@OUTPUT@'
+                ]
+        endif
+
+        skel_h_cmd = [
+                bpftool,
+                'gen',
+                'skeleton',
+                '@INPUT@'
+        ]
+endif
+
+#####################################################################
+
+efi_arch = {
+        'aarch64'     : 'aa64',
+        'arm'         : 'arm',
+        'loongarch32' : 'loongarch32',
+        'loongarch64' : 'loongarch64',
+        'riscv32'     : 'riscv32',
+        'riscv64'     : 'riscv64',
+        'x86_64'      : 'x64',
+        'x86'         : 'ia32',
+}.get(host_machine.cpu_family(), '')
+
+if get_option('bootloader') != 'false' and efi_arch != ''
+        conf.set_quoted('EFI_MACHINE_TYPE_NAME', efi_arch)
+elif get_option('bootloader') == 'true' and efi_arch == ''
+        error('EFI not supported for this arch.')
+endif
+
+efi_arch_alt = ''
+if efi_arch == 'x64' and cc.links('''
+                #include <limits.h>
+                int main(int argc, char *argv[]) {
+                        return __builtin_popcount(argc - CHAR_MAX);
+                }''', args : ['-m32', '-march=i686'], name : '32bit build possible')
+        efi_arch_alt = 'ia32'
+endif
+
+have_pyelftools = pymod.find_installation('python3', required : false, modules : ['elftools']).found()
+if get_option('bootloader') == 'true' and (not python_39 or not have_pyelftools)
+        error('EFI bootloader support requires Python >= 3.9 and pyelftools.')
+endif
+
+conf.set10(
+        'ENABLE_BOOTLOADER',
+        get_option('efi') and
+        get_option('bootloader') in ['auto', 'true'] and
+        efi_arch != '' and
+        python_39 and
+        have_pyelftools,
+)
+
 if get_option('ukify') == 'auto'
-    want_ukify = python_39  and conf.get('HAVE_GNU_EFI') == 1
-elif get_option('ukify') == 'true' and (not python_39 or conf.get('HAVE_GNU_EFI') != 1)
-    error('ukify requires Python >= 3.9 and GNU EFI')
+    want_ukify = python_39  and conf.get('ENABLE_BOOTLOADER') == 1
+elif get_option('ukify') == 'true' and (not python_39 or conf.get('ENABLE_BOOTLOADER') != 1)
+    error('ukify requires Python >= 3.9 and -Dbootloader=true')
 else
     want_ukify = get_option('ukify') == 'true'
 endif
 conf.set10('ENABLE_UKIFY', want_ukify)
 
 ############################################################
-#
+
+elf2efi_lds = project_source_root / 'tools/elf2efi.lds'
+elf2efi_py = find_program('tools/elf2efi.py')
+export_dbus_interfaces_py = find_program('tools/dbus_exporter.py')
 generate_gperfs = find_program('tools/generate-gperfs.py')
 make_autosuspend_rules_py = find_program('tools/make-autosuspend-rules.py')
 make_directive_index_py = find_program('tools/make-directive-index.py')
 make_man_index_py = find_program('tools/make-man-index.py')
 meson_render_jinja2 = find_program('tools/meson-render-jinja2.py')
 update_dbus_docs_py = find_program('tools/update-dbus-docs.py')
-update_man_rules_py = find_program('tools/update-man-rules.py')
-update_hwdb_sh = find_program('tools/update-hwdb.sh')
 update_hwdb_autosuspend_sh = find_program('tools/update-hwdb-autosuspend.sh')
+update_hwdb_sh = find_program('tools/update-hwdb.sh')
+update_man_rules_py = find_program('tools/update-man-rules.py')
 update_syscall_tables_sh = find_program('tools/update-syscall-tables.sh')
 xml_helper_py = find_program('tools/xml_helper.py')
-export_dbus_interfaces_py = find_program('tools/dbus_exporter.py')
 
 ############################################################
 
 if get_option('b_coverage')
-        add_project_arguments('-include', 'src/basic/coverage.h', language : 'c')
+        userspace_c_args += ['-include', 'src/basic/coverage.h']
 endif
 
 ############################################################
@@ -1987,9 +2185,16 @@ config_h = configure_file(
         output : 'config.h',
         configuration : conf)
 
-add_project_arguments('-include', 'config.h', language : 'c')
+userspace_c_args += ['-include', 'config.h']
 
 jinja2_cmdline = [meson_render_jinja2, config_h, version_h]
+
+userspace = declare_dependency(
+        compile_args : userspace_c_args,
+        link_args : userspace_c_ld_args,
+)
+
+man_page_depends = []
 
 ############################################################
 
@@ -1999,6 +2204,9 @@ public_programs = []
 
 # D-Bus introspection XML export
 dbus_programs = []
+
+# A list of boot stubs. Required for testing of ukify.
+boot_stubs = []
 
 basic_includes = include_directories(
         'src/basic',
@@ -2021,14 +2229,13 @@ includes = [libsystemd_includes, include_directories('src/shared')]
 
 subdir('po')
 subdir('catalog')
+subdir('src/fundamental')
 subdir('src/basic')
 subdir('src/libsystemd')
 subdir('src/shared')
 subdir('src/udev')
 subdir('src/libudev')
 subdir('src/cryptsetup/cryptsetup-tokens')
-
-alias_target('devel', libsystemd_pc, libudev_pc)
 
 libsystemd = shared_library(
         'systemd',
@@ -2040,8 +2247,9 @@ libsystemd = shared_library(
                      libbasic_gcrypt,
                      libbasic_compress],
         link_whole : [libsystemd_static],
-        dependencies : [threads,
-                        librt],
+        dependencies : [librt,
+                        threads,
+                        userspace],
         link_depends : libsystemd_sym,
         install : true,
         install_tag: 'libsystemd',
@@ -2062,17 +2270,18 @@ install_libsystemd_static = static_library(
         install_tag: 'libsystemd',
         install_dir : rootlibdir,
         pic : static_libsystemd_pic,
-        dependencies : [threads,
+        dependencies : [libblkid,
+                        libcap,
+                        libdl,
+                        libgcrypt,
+                        liblz4,
+                        libmount,
+                        libopenssl,
                         librt,
                         libxz,
                         libzstd,
-                        liblz4,
-                        libdl,
-                        libcap,
-                        libblkid,
-                        libmount,
-                        libgcrypt,
-                        libopenssl,
+                        threads,
+                        userspace,
                         versiondep],
         c_args : libsystemd_c_args + (static_libsystemd_pic ? [] : ['-fno-PIC']))
 
@@ -2084,7 +2293,8 @@ libudev = shared_library(
                      '-Wl,--version-script=' + libudev_sym_path],
         link_with : [libsystemd_static, libshared_static],
         link_whole : libudev_basic,
-        dependencies : [threads],
+        dependencies : [threads,
+                        userspace],
         link_depends : libudev_sym,
         install : true,
         install_tag: 'libudev',
@@ -2105,8 +2315,9 @@ install_libudev_static = static_library(
         install_tag: 'libudev',
         install_dir : rootlibdir,
         link_depends : libudev_sym,
-        dependencies : [libshared_deps,
-                        libmount,
+        dependencies : [libmount,
+                        libshared_deps,
+                        userspace,
                         versiondep],
         c_args : static_libudev_pic ? [] : ['-fno-PIC'],
         pic : static_libudev_pic)
@@ -2123,6 +2334,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                      libshared],
                         dependencies : [libcryptsetup,
                                         tpm2,
+                                        userspace,
                                         versiondep],
                         link_depends : cryptsetup_token_sym,
                         install_rpath : rootpkglibdir,
@@ -2141,6 +2353,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                      libshared],
                         dependencies : [libcryptsetup,
                                         libfido2,
+                                        userspace,
                                         versiondep],
                         link_depends : cryptsetup_token_sym,
                         install_rpath : rootpkglibdir,
@@ -2159,6 +2372,7 @@ if conf.get('HAVE_LIBCRYPTSETUP_PLUGINS') == 1
                                      libshared],
                         dependencies : [libcryptsetup,
                                         libp11kit,
+                                        userspace,
                                         versiondep],
                         link_depends : cryptsetup_token_sym,
                         install_rpath : rootpkglibdir,
@@ -2178,6 +2392,7 @@ subdir('src/libsystemd-network')
 
 subdir('src/analyze')
 subdir('src/boot')
+subdir('src/boot/efi')
 subdir('src/busctl')
 subdir('src/coredump')
 subdir('src/cryptenroll')
@@ -2216,6 +2431,8 @@ subdir('rules.d')
 subdir('test')
 subdir('src/ukify/test')  # needs to be last for test_env variable
 
+alias_target('devel', libsystemd_pc, libudev_pc, systemd_pc, udev_pc)
+
 ############################################################
 
 # only static linking apart from libdl, to make sure that the
@@ -2225,7 +2442,8 @@ test_dlopen = executable(
         test_dlopen_c,
         include_directories : includes,
         link_with : [libbasic],
-        dependencies : [libdl],
+        dependencies : [libdl,
+                        userspace],
         build_by_default : want_tests != 'false')
 
 foreach tuple : [['myhostname', 'ENABLE_NSS_MYHOSTNAME'],
@@ -2261,8 +2479,9 @@ foreach tuple : [['myhostname', 'ENABLE_NSS_MYHOSTNAME'],
                         link_with : [libsystemd_static,
                                      libshared_static,
                                      libbasic],
-                        dependencies : [threads,
-                                        librt],
+                        dependencies : [librt,
+                                        threads,
+                                        userspace],
                         link_depends : sym,
                         install : true,
                         install_tag : 'nss',
@@ -2295,6 +2514,7 @@ exe = executable(
         link_with : [libcore,
                      libshared],
         dependencies : [libseccomp,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -2313,10 +2533,13 @@ exe = executable(
         link_with : [libcore,
                      libshared],
         dependencies : [libseccomp,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : conf.get('ENABLE_ANALYZE') == 1)
-public_programs += exe
+if conf.get('ENABLE_ANALYZE') == 1
+        public_programs += exe
+endif
 
 if want_tests != 'false'
         test('test-compare-versions',
@@ -2330,11 +2553,12 @@ executable(
         include_directories : includes,
         link_with : [libjournal_core,
                      libshared],
-        dependencies : [threads,
-                        libxz,
-                        liblz4,
+        dependencies : [liblz4,
                         libselinux,
+                        libxz,
                         libzstd,
+                        threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -2347,6 +2571,7 @@ public_programs += executable(
         link_with : [libjournal_core,
                      libshared],
         dependencies : [threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true)
@@ -2364,12 +2589,12 @@ public_programs += executable(
         journalctl_sources,
         include_directories : includes,
         link_with : [journalctl_link_with],
-        dependencies : [threads,
-                        libdl,
-                        libxz,
+        dependencies : [libdl,
                         liblz4,
+                        libxz,
                         libzstd,
-                        libdl,
+                        threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -2380,6 +2605,7 @@ executable(
         'src/getty-generator/getty-generator.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : systemgeneratordir)
@@ -2389,6 +2615,7 @@ executable(
         'src/debug-generator/debug-generator.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : systemgeneratordir)
@@ -2398,6 +2625,7 @@ executable(
         'src/run-generator/run-generator.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : systemgeneratordir)
@@ -2407,6 +2635,7 @@ exe = executable(
         'src/fstab-generator/fstab-generator.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : systemgeneratordir)
@@ -2429,6 +2658,7 @@ if conf.get('ENABLE_ENVIRONMENT_D') == 1
                 'src/environment-d-generator/environment-d-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : userenvgeneratordir)
@@ -2444,6 +2674,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
                 'src/hibernate-resume/hibernate-resume-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2453,6 +2684,7 @@ if conf.get('ENABLE_HIBERNATE') == 1
                 'src/hibernate-resume/hibernate-resume.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2464,7 +2696,8 @@ if conf.get('HAVE_BLKID') == 1
                 'src/gpt-auto-generator/gpt-auto-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : libblkid,
+                dependencies : [libblkid,
+                                userspace],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2474,9 +2707,14 @@ if conf.get('HAVE_BLKID') == 1
                 'src/dissect/dissect.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
+
+        meson.add_install_script(meson_make_symlink,
+                                 bindir / 'systemd-dissect',
+                                 rootsbindir / 'mount.ddi')
 endif
 
 if conf.get('ENABLE_RESOLVE') == 1
@@ -2487,7 +2725,8 @@ if conf.get('ENABLE_RESOLVE') == 1
                 link_with : [libshared,
                              libbasic_gcrypt,
                              libsystemd_resolve_core],
-                dependencies : systemd_resolved_dependencies,
+                dependencies : [systemd_resolved_dependencies,
+                                userspace],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2499,10 +2738,11 @@ if conf.get('ENABLE_RESOLVE') == 1
                 link_with : [libshared,
                              libbasic_gcrypt,
                              libsystemd_resolve_core],
-                dependencies : [threads,
-                                lib_openssl_or_gcrypt,
-                                libm,
+                dependencies : [lib_openssl_or_gcrypt,
                                 libidn,
+                                libm,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -2523,8 +2763,9 @@ if conf.get('ENABLE_LOGIND') == 1
                 include_directories : includes,
                 link_with : [liblogind_core,
                              libshared],
-                dependencies : [threads,
-                                libacl,
+                dependencies : [libacl,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2535,10 +2776,11 @@ if conf.get('ENABLE_LOGIND') == 1
                 loginctl_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                liblz4,
+                dependencies : [liblz4,
                                 libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2549,7 +2791,8 @@ if conf.get('ENABLE_LOGIND') == 1
                 'src/login/inhibit.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootbindir)
@@ -2565,9 +2808,10 @@ if conf.get('ENABLE_LOGIND') == 1
                                      '-Wl,--version-script=' + version_script_arg],
                         link_with : [libsystemd_static,
                                      libshared_static],
-                        dependencies : [threads,
+                        dependencies : [libpam_misc,
                                         libpam,
-                                        libpam_misc,
+                                        threads,
+                                        userspace,
                                         versiondep],
                         link_depends : pam_systemd_sym,
                         install : true,
@@ -2588,6 +2832,7 @@ if conf.get('ENABLE_LOGIND') == 1
                 user_runtime_dir_sources,
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2599,12 +2844,13 @@ if conf.get('HAVE_PAM') == 1
                 'src/user-sessions/user-sessions.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
 endif
 
-if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
+if conf.get('HAVE_BLKID') == 1 and conf.get('ENABLE_BOOTLOADER') == 1
         if get_option('link-boot-shared')
                 boot_link_with = [libshared]
         else
@@ -2617,6 +2863,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                 include_directories : includes,
                 link_with : [boot_link_with],
                 dependencies : [libblkid,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -2635,6 +2882,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                 include_directories : includes,
                 link_with : [boot_link_with],
                 dependencies : [libblkid,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2645,6 +2893,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                 'src/boot/bless-boot-generator.c',
                 include_directories : includes,
                 link_with : [boot_link_with],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2656,6 +2905,7 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                         include_directories : includes,
                         link_with : [libshared],
                         dependencies : [libopenssl,
+                                        userspace,
                                         versiondep],
                         install_rpath : rootpkglibdir,
                         install : true,
@@ -2665,9 +2915,10 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
                         'src/boot/pcrphase.c',
                         include_directories : includes,
                         link_with : [libshared],
-                        dependencies : [libopenssl,
+                        dependencies : [libblkid,
+                                        libopenssl,
                                         tpm2,
-                                        libblkid,
+                                        userspace,
                                         versiondep],
                         install_rpath : rootpkglibdir,
                         install : true,
@@ -2681,6 +2932,7 @@ executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies : [libblkid,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -2688,10 +2940,11 @@ executable(
 
 public_programs += executable(
         'systemd-socket-activate',
-        'src/activate/activate.c',
+        'src/socket-activate/socket-activate.c',
         include_directories : includes,
         link_with : [libshared],
         dependencies : [threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true)
@@ -2701,12 +2954,13 @@ systemctl = executable(
         systemctl_sources,
         include_directories : includes,
         link_with : systemctl_link_with,
-        dependencies : [threads,
-                        libcap,
+        dependencies : [libcap,
+                        liblz4,
                         libselinux,
                         libxz,
-                        liblz4,
                         libzstd,
+                        threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -2714,13 +2968,21 @@ systemctl = executable(
 public_programs += systemctl
 
 if conf.get('ENABLE_PORTABLED') == 1
+        if get_option('link-portabled-shared')
+                portabled_link_with = [libshared]
+        else
+                portabled_link_with = [libsystemd_static,
+                                       libshared_static]
+        endif
+
         dbus_programs += executable(
                 'systemd-portabled',
                 systemd_portabled_sources,
                 include_directories : includes,
-                link_with : [libshared],
-                dependencies : [threads,
-                                libselinux,
+                link_with : [portabled_link_with],
+                dependencies : [libselinux,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2730,8 +2992,9 @@ if conf.get('ENABLE_PORTABLED') == 1
                 'portablectl',
                 'src/portable/portablectl.c',
                 include_directories : includes,
-                link_with : [libshared],
+                link_with : [portabled_link_with],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2744,7 +3007,8 @@ if conf.get('ENABLE_SYSEXT') == 1
                 systemd_sysext_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootbindir)
@@ -2757,6 +3021,7 @@ if conf.get('ENABLE_USERDB') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2768,6 +3033,7 @@ if conf.get('ENABLE_USERDB') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2779,6 +3045,7 @@ if conf.get('ENABLE_USERDB') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -2791,12 +3058,13 @@ if conf.get('ENABLE_HOMED') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              libshared_fdisk],
-                dependencies : [threads,
-                                libblkid,
+                dependencies : [libblkid,
                                 libcrypt,
-                                libopenssl,
                                 libfdisk,
+                                libopenssl,
                                 libp11kit,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2807,10 +3075,11 @@ if conf.get('ENABLE_HOMED') == 1
                 systemd_homed_sources,
                 include_directories : home_includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                libcrypt,
-                                libopenssl,
+                dependencies : [libcrypt,
                                 libm,
+                                libopenssl,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2821,11 +3090,12 @@ if conf.get('ENABLE_HOMED') == 1
                 homectl_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                libcrypt,
+                dependencies : [libcrypt,
+                                libdl,
                                 libopenssl,
                                 libp11kit,
-                                libdl,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -2841,10 +3111,11 @@ if conf.get('ENABLE_HOMED') == 1
                                      '-Wl,--version-script=' + version_script_arg],
                         link_with : [libsystemd_static,
                                      libshared_static],
-                        dependencies : [threads,
-                                        libpam,
+                        dependencies : [libcrypt,
                                         libpam_misc,
-                                        libcrypt,
+                                        libpam,
+                                        threads,
+                                        userspace,
                                         versiondep],
                         link_depends : pam_systemd_home_sym,
                         install : true,
@@ -2878,6 +3149,7 @@ if conf.get('ENABLE_BACKLIGHT') == 1
                 'src/backlight/backlight.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2889,6 +3161,7 @@ if conf.get('ENABLE_RFKILL') == 1
                 'src/rfkill/rfkill.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2899,6 +3172,7 @@ executable(
         'src/system-update-generator/system-update-generator.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : systemgeneratordir)
@@ -2910,9 +3184,10 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libcryptsetup,
+                                libopenssl,
                                 libp11kit,
-                                versiondep,
-                                libopenssl],
+                                userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2922,6 +3197,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 'src/cryptsetup/cryptsetup-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2932,6 +3208,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libcryptsetup,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2942,7 +3219,8 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 'src/veritysetup/veritysetup-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2956,6 +3234,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                                 libdl,
                                 libopenssl,
                                 libp11kit,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -2966,6 +3245,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libcryptsetup,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -2976,6 +3256,7 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 ['src/integritysetup/integritysetup-generator.c', 'src/integritysetup/integrity-util.c'],
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2987,6 +3268,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
                 'src/sysv-generator/sysv-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -3003,6 +3285,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
                 'src/rc-local-generator/rc-local-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -3014,6 +3297,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
                 systemd_xdg_autostart_generator_sources,
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : usergeneratordir)
@@ -3023,6 +3307,7 @@ if conf.get('ENABLE_XDG_AUTOSTART') == 1
                 'src/xdg-autostart-generator/xdg-autostart-condition.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3034,6 +3319,7 @@ if conf.get('ENABLE_HOSTNAMED') == 1
                 'src/hostname/hostnamed.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3043,28 +3329,21 @@ if conf.get('ENABLE_HOSTNAMED') == 1
                 'src/hostname/hostnamectl.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
 endif
 
 if conf.get('ENABLE_LOCALED') == 1
-        if conf.get('HAVE_XKBCOMMON') == 1
-                # logind will load libxkbcommon.so dynamically on its own, but we still
-                # need to specify where the headers are
-                deps = [libdl,
-                        libxkbcommon.partial_dependency(compile_args: true),
-                        versiondep]
-        else
-                deps = [versiondep]
-        endif
-
         dbus_programs += executable(
                 'systemd-localed',
                 systemd_localed_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : deps,
+                dependencies : libxkbcommon_deps +
+                               [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3074,7 +3353,8 @@ if conf.get('ENABLE_LOCALED') == 1
                 localectl_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
 endif
@@ -3085,6 +3365,7 @@ if conf.get('ENABLE_TIMEDATED') == 1
                 'src/timedate/timedated.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3098,6 +3379,7 @@ if conf.get('ENABLE_TIMEDATECTL') == 1
                 install_rpath : rootpkglibdir,
                 link_with : [libshared],
                 dependencies : [libm,
+                                userspace,
                                 versiondep],
                 install : true)
 endif
@@ -3108,8 +3390,9 @@ if conf.get('ENABLE_TIMESYNCD') == 1
                 systemd_timesyncd_sources,
                 include_directories : includes,
                 link_with : [libtimesyncd_core],
-                dependencies : [threads,
-                                libm,
+                dependencies : [libm,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3120,6 +3403,7 @@ if conf.get('ENABLE_TIMESYNCD') == 1
                 'src/timesync/wait-sync.c',
                 include_directories : includes,
                 link_with : [libtimesyncd_core],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3132,6 +3416,7 @@ if conf.get('ENABLE_MACHINED') == 1
                 include_directories : includes,
                 link_with : [libmachine_core,
                              libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3141,10 +3426,11 @@ if conf.get('ENABLE_MACHINED') == 1
                 'src/machine/machinectl.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [threads,
+                dependencies : [liblz4,
                                 libxz,
-                                liblz4,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3158,6 +3444,7 @@ if conf.get('ENABLE_IMPORTD') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3169,11 +3456,12 @@ if conf.get('ENABLE_IMPORTD') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              lib_import_common],
-                dependencies : [libcurl,
-                                lib_openssl_or_gcrypt,
-                                libz,
+                dependencies : [lib_openssl_or_gcrypt,
                                 libbzip2,
+                                libcurl,
                                 libxz,
+                                libz,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3185,10 +3473,11 @@ if conf.get('ENABLE_IMPORTD') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              lib_import_common],
-                dependencies : [libcurl,
-                                libz,
-                                libbzip2,
+                dependencies : [libbzip2,
+                                libcurl,
                                 libxz,
+                                libz,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3200,7 +3489,8 @@ if conf.get('ENABLE_IMPORTD') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              lib_import_common],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3211,10 +3501,11 @@ if conf.get('ENABLE_IMPORTD') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              lib_import_common],
-                dependencies : [libcurl,
-                                libz,
-                                libbzip2,
+                dependencies : [libbzip2,
+                                libcurl,
                                 libxz,
+                                libz,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3229,12 +3520,13 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_LIBCURL') == 1
                 systemd_journal_upload_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                libcurl,
+                dependencies : [libcurl,
                                 libgnutls,
-                                libxz,
                                 liblz4,
+                                libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3248,12 +3540,13 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                 include_directories : journal_includes,
                 link_with : [libshared,
                              libsystemd_journal_remote],
-                dependencies : [threads,
-                                libmicrohttpd,
-                                libgnutls,
-                                libxz,
+                dependencies : [libgnutls,
                                 liblz4,
+                                libmicrohttpd,
+                                libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3264,12 +3557,13 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                 systemd_journal_gatewayd_sources,
                 include_directories : journal_includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                libmicrohttpd,
-                                libgnutls,
-                                libxz,
+                dependencies : [libgnutls,
                                 liblz4,
+                                libmicrohttpd,
+                                libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3283,11 +3577,12 @@ if conf.get('ENABLE_COREDUMP') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              libbasic_compress],
-                dependencies : [threads,
-                                libacl,
-                                libxz,
+                dependencies : [libacl,
                                 liblz4,
+                                libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3299,10 +3594,11 @@ if conf.get('ENABLE_COREDUMP') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              libbasic_compress],
-                dependencies : [threads,
+                dependencies : [liblz4,
                                 libxz,
-                                liblz4,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
@@ -3314,11 +3610,12 @@ if conf.get('ENABLE_PSTORE') == 1
                 systemd_pstore_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [threads,
-                                libacl,
-                                libxz,
+                dependencies : [libacl,
                                 liblz4,
+                                libxz,
                                 libzstd,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3331,6 +3628,7 @@ if conf.get('ENABLE_OOMD') == 1
                    include_directories : includes,
                    link_with : [libshared],
                    dependencies : [libatomic,
+                                   userspace,
                                    versiondep],
                    install_rpath : rootpkglibdir,
                    install : true,
@@ -3341,7 +3639,8 @@ if conf.get('ENABLE_OOMD') == 1
                 oomctl_sources,
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true)
 endif
@@ -3352,7 +3651,8 @@ if conf.get('ENABLE_BINFMT') == 1
                 'src/binfmt/binfmt.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3372,10 +3672,11 @@ if conf.get('ENABLE_SYSUPDATE') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              libshared_fdisk],
-                dependencies : [threads,
-                                libblkid,
+                dependencies : [libblkid,
                                 libfdisk,
                                 libopenssl,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3389,6 +3690,7 @@ if conf.get('ENABLE_VCONSOLE') == 1
                 'src/vconsole/vconsole-setup.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3400,7 +3702,8 @@ if conf.get('ENABLE_RANDOMSEED') == 1
                 'src/random-seed/random-seed.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3413,6 +3716,7 @@ if conf.get('ENABLE_FIRSTBOOT') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libcrypt,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3424,7 +3728,8 @@ executable(
         'src/remount-fs/remount-fs.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3434,7 +3739,8 @@ executable(
         'src/machine-id-setup/machine-id-setup-main.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
@@ -3444,7 +3750,8 @@ executable(
         'src/fsck/fsck.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3454,7 +3761,8 @@ executable(
         'src/partition/growfs.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3464,7 +3772,8 @@ executable(
         'src/partition/makefs.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3474,7 +3783,8 @@ executable(
         'src/sleep/sleep.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3489,7 +3799,8 @@ public_programs += executable(
         'src/sysctl/sysctl.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3499,7 +3810,8 @@ public_programs += executable(
         'src/ac-power/ac-power.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3508,7 +3820,8 @@ public_programs += executable(
         'src/detect-virt/detect-virt.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3517,7 +3830,8 @@ public_programs += executable(
         'src/delta/delta.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3526,7 +3840,8 @@ public_programs += executable(
         'src/escape/escape.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
@@ -3536,7 +3851,8 @@ public_programs += executable(
         'src/notify/notify.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
@@ -3548,16 +3864,38 @@ public_programs += executable(
         link_with : [libshared],
         dependencies : [threads,
                         libopenssl,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
+
+public_programs += executable(
+        'systemd-battery-check',
+        'src/battery-check/battery-check.c',
+        include_directories : includes,
+        link_with : [libshared],
+        dependencies : [userspace, versiondep],
+        install_rpath : rootpkglibdir,
+        install_dir : rootlibexecdir,
+        install : true)
+
+# Protecting files from the distro in /usr doesn't make sense since they can be trivially accessed otherwise,
+# so don't restrict the access mode in /usr. That doesn't apply to /etc, so we do restrict the access mode
+# there.
+meson.add_install_script('sh', '-c', mkdir_p.format(credstoredir))
+if install_sysconfdir
+        # Keep in sync with tmpfiles.d/credstore.conf
+        meson.add_install_script('sh', '-c', mkdir_p_mode.format(sysconfdir / 'credstore', '0700'))
+        meson.add_install_script('sh', '-c', mkdir_p_mode.format(sysconfdir / 'credstore.encrypted', '0700'))
+endif
 
 executable(
         'systemd-volatile-root',
         'src/volatile-root/volatile-root.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : conf.get('ENABLE_INITRD') == 1,
         install_dir : rootlibexecdir)
@@ -3567,6 +3905,7 @@ executable(
         'src/cgroups-agent/cgroups-agent.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3576,7 +3915,8 @@ systemd_id128 = executable(
         'src/id128/id128.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 public_programs += systemd_id128
@@ -3594,7 +3934,8 @@ public_programs += executable(
         'src/path/path.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3603,7 +3944,8 @@ public_programs += executable(
         'src/ask-password/ask-password.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
@@ -3613,6 +3955,7 @@ executable(
         'src/reply-password/reply-password.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3622,7 +3965,8 @@ public_programs += executable(
         'src/tty-ask-password-agent/tty-ask-password-agent.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootbindir)
@@ -3632,7 +3976,8 @@ public_programs += executable(
         'src/cgls/cgls.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3641,7 +3986,8 @@ public_programs += executable(
         'src/cgtop/cgtop.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3650,6 +3996,7 @@ executable(
         'src/initctl/initctl.c',
         include_directories : includes,
         link_with : [libshared],
+        dependencies : userspace,
         install_rpath : rootpkglibdir,
         install : (conf.get('HAVE_SYSV_COMPAT') == 1),
         install_dir : rootlibexecdir)
@@ -3660,6 +4007,7 @@ public_programs += executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies: [libmount,
+                       userspace,
                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
@@ -3672,7 +4020,8 @@ public_programs += executable(
         'src/run/run.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3681,7 +4030,7 @@ public_programs += executable(
         'src/stdio-bridge/stdio-bridge.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep,
+        dependencies : [userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true)
@@ -3691,7 +4040,8 @@ public_programs += executable(
         busctl_sources,
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true)
 
@@ -3701,7 +4051,8 @@ if enable_sysusers
                 'src/sysusers/sysusers.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootbindir)
@@ -3714,19 +4065,21 @@ if enable_sysusers
                      args : exe.full_path())
         endif
 
+        exe = executable(
+                'systemd-sysusers.standalone',
+                'src/sysusers/sysusers.c',
+                include_directories : includes,
+                c_args : '-DSTANDALONE',
+                link_with : [libshared_static,
+                             libbasic,
+                             libbasic_gcrypt,
+                             libsystemd_static],
+                dependencies : [userspace,
+                                versiondep],
+                build_by_default: have_standalone_binaries,
+                install : have_standalone_binaries,
+                install_dir : rootbindir)
         if have_standalone_binaries
-                exe = executable(
-                        'systemd-sysusers.standalone',
-                        'src/sysusers/sysusers.c',
-                        include_directories : includes,
-                        c_args : '-DSTANDALONE',
-                        link_with : [libshared_static,
-                                     libbasic,
-                                     libbasic_gcrypt,
-                                     libsystemd_static],
-                        dependencies : [versiondep],
-                        install : true,
-                        install_dir : rootbindir)
                 public_programs += exe
 
                 if want_tests != 'false'
@@ -3745,6 +4098,7 @@ if conf.get('ENABLE_TMPFILES') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libacl,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3758,20 +4112,22 @@ if conf.get('ENABLE_TMPFILES') == 1
                      args : exe.full_path())
         endif
 
+        exe = executable(
+                'systemd-tmpfiles.standalone',
+                systemd_tmpfiles_sources,
+                include_directories : includes,
+                c_args : '-DSTANDALONE',
+                link_with : [libshared_static,
+                             libbasic,
+                             libbasic_gcrypt,
+                             libsystemd_static],
+                dependencies : [libacl,
+                                userspace,
+                                versiondep],
+                build_by_default: have_standalone_binaries,
+                install : have_standalone_binaries,
+                install_dir : rootbindir)
         if have_standalone_binaries
-                exe = executable(
-                        'systemd-tmpfiles.standalone',
-                        systemd_tmpfiles_sources,
-                        include_directories : includes,
-                        c_args : '-DSTANDALONE',
-                        link_with : [libshared_static,
-                                     libbasic,
-                                     libbasic_gcrypt,
-                                     libsystemd_static],
-                        dependencies : [libacl,
-                                        versiondep],
-                        install : true,
-                        install_dir : rootbindir)
                 public_programs += exe
 
                 if want_tests != 'false'
@@ -3789,7 +4145,8 @@ if conf.get('ENABLE_HWDB') == 1
                 'src/hwdb/hwdb.c',
                 include_directories : includes,
                 link_with : udev_link_with,
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : udev_rpath,
                 install : true,
                 install_dir : rootbindir)
@@ -3798,7 +4155,7 @@ if conf.get('ENABLE_HWDB') == 1
         if want_tests != 'false'
                 test('hwdb-test',
                      hwdb_test_sh,
-                     suite : 'dist-check',
+                     suite : 'dist',
                      args : [systemd_hwdb.full_path()],
                      timeout : 90)
         endif
@@ -3810,6 +4167,7 @@ if conf.get('ENABLE_QUOTACHECK') == 1
                 'src/quotacheck/quotacheck.c',
                 include_directories : includes,
                 link_with : [libshared],
+                dependencies : userspace,
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3821,6 +4179,7 @@ public_programs += executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies : [threads,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
@@ -3831,16 +4190,24 @@ udevadm = executable(
         udevadm_sources,
         include_directories : includes,
         link_with : [libudevd_core],
-        dependencies : [threads,
-                        libkmod,
-                        libidn,
-                        libacl,
+        dependencies : [libacl,
                         libblkid,
+                        libidn,
+                        libkmod,
+                        threads,
+                        userspace,
                         versiondep],
         install_rpath : udev_rpath,
         install : true,
         install_dir : rootbindir)
 public_programs += udevadm
+
+if want_tests != 'false'
+        test('udev-rules-check',
+             udevadm,
+             suite : 'dist',
+             args : ['verify', '--resolve-names=never', all_rules])
+endif
 
 if conf.get('ENABLE_REPART') == 1
         exe = executable(
@@ -3849,35 +4216,38 @@ if conf.get('ENABLE_REPART') == 1
                 include_directories : includes,
                 link_with : [libshared,
                              libshared_fdisk],
-                dependencies : [threads,
-                                libblkid,
+                dependencies : [libblkid,
                                 libfdisk,
                                 libopenssl,
+                                threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootbindir)
         public_programs += exe
 
+        exe = executable(
+                'systemd-repart.standalone',
+                systemd_repart_sources,
+                include_directories : includes,
+                c_args : '-DSTANDALONE',
+                link_with : [libshared_static,
+                             libbasic,
+                             libbasic_gcrypt,
+                             libsystemd_static,
+                             libshared_fdisk],
+                dependencies : [libblkid,
+                                libfdisk,
+                                libopenssl,
+                                threads,
+                                userspace,
+                                versiondep],
+                build_by_default: have_standalone_binaries,
+                install_rpath : rootpkglibdir,
+                install : have_standalone_binaries,
+                install_dir : rootbindir)
         if have_standalone_binaries
-                exe = executable(
-                        'systemd-repart.standalone',
-                        systemd_repart_sources,
-                        include_directories : includes,
-                        c_args : '-DSTANDALONE',
-                        link_with : [libshared_static,
-                                     libbasic,
-                                     libbasic_gcrypt,
-                                     libsystemd_static,
-                                     libshared_fdisk],
-                        dependencies : [threads,
-                                        libblkid,
-                                        libfdisk,
-                                        libopenssl,
-                                        versiondep],
-                        install_rpath : rootpkglibdir,
-                        install : true,
-                        install_dir : rootbindir)
                 public_programs += exe
         endif
 endif
@@ -3888,33 +4258,35 @@ executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies : [libmount,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
 
-if have_standalone_binaries
-        executable(
-                'systemd-shutdown.standalone',
-                systemd_shutdown_sources,
-                include_directories : includes,
-                c_args : '-DSTANDALONE',
-                link_with : [libshared_static,
-                             libbasic,
-                             libsystemd_static],
-                dependencies : [libmount,
-                                versiondep],
-                install_rpath : rootpkglibdir,
-                install : true,
-                install_dir : rootlibexecdir)
-endif
+executable(
+        'systemd-shutdown.standalone',
+        systemd_shutdown_sources,
+        include_directories : includes,
+        c_args : '-DSTANDALONE',
+        link_with : [libshared_static,
+                     libbasic,
+                     libsystemd_static],
+        dependencies : [libmount,
+                        userspace,
+                        versiondep],
+        build_by_default: have_standalone_binaries,
+        install_rpath : rootpkglibdir,
+        install : have_standalone_binaries,
+        install_dir : rootlibexecdir)
 
 executable(
         'systemd-update-done',
         'src/update-done/update-done.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -3925,6 +4297,7 @@ executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies : [libaudit,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : (conf.get('ENABLE_UTMP') == 1),
@@ -3937,6 +4310,7 @@ if conf.get('HAVE_KMOD') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [libkmod,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3958,6 +4332,7 @@ public_programs += executable(
                      libshared],
         dependencies : [libblkid,
                         libseccomp,
+                        userspace,
                         versiondep],
         install_rpath : rootpkglibdir,
         install : true)
@@ -3971,6 +4346,7 @@ if conf.get('ENABLE_NETWORKD') == 1
                              libsystemd_network,
                              networkd_link_with],
                 dependencies : [threads,
+                                userspace,
                                 versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
@@ -3981,7 +4357,8 @@ if conf.get('ENABLE_NETWORKD') == 1
                 systemd_networkd_wait_online_sources,
                 include_directories : includes,
                 link_with : [networkd_link_with],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -3992,7 +4369,8 @@ if conf.get('ENABLE_NETWORKD') == 1
                 include_directories : libsystemd_network_includes,
                 link_with : [libsystemd_network,
                              networkd_link_with],
-                dependencies : [versiondep],
+                dependencies : [userspace,
+                                versiondep],
                 install_rpath : rootpkglibdir,
                 install : true,
                 install_dir : rootbindir)
@@ -4003,7 +4381,8 @@ exe = executable(
         network_generator_sources,
         include_directories : includes,
         link_with : [networkd_link_with],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
@@ -4021,38 +4400,49 @@ executable(
         'src/sulogin-shell/sulogin-shell.c',
         include_directories : includes,
         link_with : [libshared],
-        dependencies : [versiondep],
+        dependencies : [userspace,
+                        versiondep],
         install_rpath : rootpkglibdir,
         install : true,
         install_dir : rootlibexecdir)
 
-exe = custom_target(
+kernel_install = executable(
         'kernel-install',
-        input : kernel_install_in,
-        output : 'kernel-install',
-        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
+        'src/kernel-install/kernel-install.c',
+        include_directories : includes,
+        link_with : [libshared],
+        dependencies : [userspace,
+                        versiondep],
+        install_rpath : rootpkglibdir,
         install : want_kernel_install,
-        install_mode : 'rwxr-xr-x',
         install_dir : bindir)
-public_programs += exe
+public_programs += kernel_install
 
-if want_tests != 'false' and want_kernel_install
-        test('test-kernel-install',
-             test_kernel_install_sh,
-             env : test_env,
-             args : [exe.full_path(), loaderentry_install])
-endif
-
-if want_ukify
-   exe = custom_target(
+ukify = custom_target(
         'ukify',
         input : 'src/ukify/ukify.py',
         output : 'ukify',
         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
-        install : true,
+        install : want_ukify,
         install_mode : 'rwxr-xr-x',
         install_dir : rootlibexecdir)
-   public_programs += exe
+if want_ukify
+        public_programs += ukify
+endif
+
+if want_tests != 'false' and want_kernel_install
+        args = [kernel_install.full_path(), loaderentry_install.full_path(), uki_copy_install]
+        deps = [kernel_install, loaderentry_install]
+        if want_ukify and boot_stubs.length() > 0
+                args += [ukify.full_path(), ukify_install.full_path(), boot_stubs[0]]
+                deps += [ukify, ukify_install, boot_stubs[0]]
+        endif
+
+        test('test-kernel-install',
+             test_kernel_install_sh,
+             env : test_env,
+             args : args,
+             depends: deps)
 endif
 
 ############################################################
@@ -4076,58 +4466,61 @@ if '-O2' in c_args and '-flto=auto' in c_args
         test_cflags += cc.first_supported_argument('-Wno-maybe-uninitialized')
 endif
 
-foreach tuple : tests
-        sources = tuple[0]
-        link_with = tuple.length() > 1 and tuple[1].length() > 0 ? tuple[1] : [libshared]
-        dependencies = tuple.length() > 2 ? tuple[2] : []
-        incs = tuple.length() > 3 and tuple[3].length() > 0 ? tuple[3] : includes
-        condition = tuple.length() > 4 ? tuple[4] : ''
-        type = tuple.length() > 5 ? tuple[5] : ''
-        defs = tuple.length() > 6 ? tuple[6] : []
-        defs += test_cflags
-        parallel = tuple.length() > 7 ? tuple[7] : true
-        timeout = 30
+foreach test : simple_tests
+        tests += { 'sources' : [test] }
+endforeach
 
-        # FIXME: Use fs.stem() with meson >= 0.54.0
-        name = '@0@'.format(sources[0]).split('/')[-1].split('.')[0]
-        if type.startswith('timeout=')
-                timeout = type.split('=')[1].to_int()
-                type = ''
+TESTS = {}
+foreach test : tests
+        sources = test.get('sources')
+        condition = test.get('condition', '')
+        type = test.get('type', '')
+        base = test.get('base', {})
+        deps = [
+                base.get('dependencies', []),
+                test.get('dependencies', []),
+                versiondep,
+        ]
+
+        name = fs.name(sources[0])
+        if not name.endswith('.cc')
+                deps += [userspace]
         endif
+        name = fs.stem(name)
 
-        suite = fs.name(fs.parent('@0@'.format(sources[0])))
-        # FIXME: Use str.replace() with meson >= 0.58.0
-        suite = suite.split('sd-')[-1]
+        suite = fs.name(fs.parent(sources[0])).replace('sd-', '')
 
-        if condition == '' or conf.get(condition) == 1
-                exe = executable(
-                        name,
-                        sources,
-                        include_directories : incs,
-                        link_with : link_with,
-                        dependencies : [versiondep,
-                                        dependencies],
-                        c_args : defs,
-                        build_by_default : want_tests != 'false',
-                        install_rpath : rootpkglibdir,
-                        install : install_tests,
-                        install_dir : testsdir / type,
-                        link_depends : runtest_env)
-
-                if type == 'manual'
-                        message('@0@ is a manual test'.format(name))
-                elif type == 'unsafe' and want_tests != 'unsafe'
-                        message('@0@ is an unsafe test'.format(name))
-                elif want_tests != 'false'
-                        test(name, exe,
-                             env : test_env,
-                             timeout : timeout,
-                             suite : suite,
-                             is_parallel : parallel)
-                endif
-        else
+        if condition != '' and conf.get(condition) == 0
                 message('Not compiling @0@ because @1@ is not true'.format(name, condition))
+                continue
         endif
+
+        exe = executable(
+                name,
+                sources,
+                include_directories : [base.get('includes', []), test.get('includes', includes)],
+                link_with : [base.get('link_with', []), test.get('link_with', libshared)],
+                dependencies : deps,
+                c_args : [test_cflags, test.get('c_args', [])],
+                build_by_default : want_tests != 'false',
+                install_rpath : rootpkglibdir,
+                install : install_tests,
+                install_dir : unittestsdir / type,
+                link_depends : runtest_env)
+
+        if type == 'manual'
+                message('@0@ is a manual test'.format(name))
+        elif type == 'unsafe' and want_tests != 'unsafe'
+                message('@0@ is an unsafe test'.format(name))
+        elif want_tests != 'false'
+                test(name, exe,
+                     env : test_env,
+                     timeout : test.get('timeout', 30),
+                     suite : suite,
+                     is_parallel : test.get('parallel', true))
+        endif
+
+        TESTS += { name : exe }
 endforeach
 
 exe = executable(
@@ -4135,9 +4528,10 @@ exe = executable(
         test_libsystemd_sym_c,
         include_directories : includes,
         link_with : [libsystemd],
+        dependencies : userspace,
         build_by_default : want_tests != 'false',
         install : install_tests,
-        install_dir : testsdir)
+        install_dir : unittestsdir)
 if want_tests != 'false'
         test('test-libsystemd-sym', exe)
 endif
@@ -4147,12 +4541,16 @@ exe = executable(
         test_libsystemd_sym_c,
         include_directories : includes,
         link_with : [install_libsystemd_static],
-        dependencies : [threads], # threads is already included in dependencies on the library,
-                                  # but does not seem to get propagated. Add here as a work-around.
-        build_by_default : want_tests != 'false' and static_libsystemd_pic,
-        install : install_tests and static_libsystemd_pic,
-        install_dir : testsdir)
-if want_tests != 'false' and static_libsystemd_pic
+        dependencies : [
+                # threads is already included in dependencies on the library,
+                # but does not seem to get propagated. Add here as a work-around.
+                threads,
+                userspace,
+        ],
+        build_by_default : want_tests != 'false' and static_libsystemd != 'false',
+        install : install_tests and static_libsystemd != 'false',
+        install_dir : unittestsdir)
+if want_tests != 'false' and static_libsystemd != 'false'
         test('test-libsystemd-static-sym', exe)
 endif
 
@@ -4162,9 +4560,10 @@ exe = executable(
         include_directories : libudev_includes,
         c_args : ['-Wno-deprecated-declarations'] + test_cflags,
         link_with : [libudev],
+        dependencies : userspace,
         build_by_default : want_tests != 'false',
         install : install_tests,
-        install_dir : testsdir)
+        install_dir : unittestsdir)
 if want_tests != 'false'
         test('test-libudev-sym', exe)
 endif
@@ -4175,23 +4574,36 @@ exe = executable(
         include_directories : libudev_includes,
         c_args : ['-Wno-deprecated-declarations'] + test_cflags,
         link_with : [install_libudev_static],
-        build_by_default : want_tests != 'false' and static_libudev_pic,
-        install : install_tests and static_libudev_pic,
-        install_dir : testsdir)
-if want_tests != 'false' and static_libudev_pic
+        dependencies : userspace,
+        build_by_default : want_tests != 'false' and static_libudev != 'false',
+        install : install_tests and static_libudev != 'false',
+        install_dir : unittestsdir)
+if want_tests != 'false' and static_libudev != 'false'
         test('test-libudev-static-sym', exe)
+endif
+
+if want_tests != 'false'
+        exe = TESTS.get('udev-rule-runner')
+        test('test-udev',
+             test_udev_py,
+             args : ['-v'],
+             env : ['UDEV_RULE_RUNNER=' + exe.full_path()],
+             depends : exe,
+             timeout : 180)
 endif
 
 ############################################################
 
+foreach fuzzer : simple_fuzzers
+        fuzzers += { 'sources' : [fuzzer] }
+endforeach
+
 fuzzer_exes = []
 
-foreach tuple : fuzzers
-        sources = tuple[0]
-        link_with = tuple.length() > 1 and tuple[1].length() > 0 ? tuple[1] : [libshared]
-        dependencies = tuple.length() > 2 ? tuple[2] : []
-        incs = tuple.length() > 3 and tuple[3].length() > 0 ? tuple[3] : includes
-        defs = tuple.length() > 4 ? tuple[4] : []
+foreach fuzzer : fuzzers
+        sources = fuzzer.get('sources')
+        base = fuzzer.get('base', {})
+        dependencies = [base.get('dependencies', []), fuzzer.get('dependencies', [])]
         link_args = []
 
         if want_ossfuzz
@@ -4203,21 +4615,27 @@ foreach tuple : fuzzers
                         link_args += ['-fsanitize=fuzzer']
                 endif
         else
-                sources += 'src/fuzz/fuzz-main.c'
+                sources += files('src/fuzz/fuzz-main.c')
         endif
         sources += fuzz_generated_directives
 
-        # FIXME: Use fs.stem() with meson >= 0.54.0
-        name = '@0@'.format(sources[0]).split('/')[-1].split('.')[0]
+        name = fs.stem(sources[0])
 
         exe = executable(
                 name,
                 sources,
-                include_directories : [incs, include_directories('src/fuzz')],
-                link_with : link_with,
-                dependencies : [dependencies,
-                                versiondep],
-                c_args : defs + test_cflags,
+                include_directories : [
+                        base.get('includes', []),
+                        fuzzer.get('includes', includes),
+                        include_directories('src/fuzz'),
+                ],
+                link_with : [base.get('link_with', []), fuzzer.get('link_with', libshared)],
+                dependencies : [
+                        dependencies,
+                        userspace,
+                        versiondep,
+                ],
+                c_args : [test_cflags, fuzzer.get('c_args', [])],
                 link_args: link_args,
                 install : false,
                 build_by_default : fuzzer_build)
@@ -4231,7 +4649,7 @@ foreach tuple : fuzzers
                         fuzz_in = tuple[1]
                         test('@0@_@1@'.format(name, fuzz_in),
                              exe,
-                             suite : 'fuzzers',
+                             suite : 'fuzz',
                              args : [fuzz_dir != '' ? project_source_root / fuzz_dir / name / fuzz_in
                                                     : fuzz_generated_in_dir / '@0@_@1@'.format(name, fuzz_in)])
                 endforeach
@@ -4293,7 +4711,7 @@ jekyll = find_program('jekyll', required : false)
 if get_option('mode') == 'developer' and want_tests != 'false' and jekyll.found()
         test('github-pages',
              jekyll,
-             suite : 'dist-check',
+             suite : 'dist',
              args : ['build',
                      '--source', project_source_root / 'docs',
                      '--destination', project_build_root / '_site'])
@@ -4305,17 +4723,17 @@ check_help = find_program('tools/check-help.sh')
 check_version = find_program('tools/check-version.sh')
 
 foreach exec : public_programs
-        name = exec.full_path().split('/')[-1]
+        name = fs.name(exec.full_path())
         if want_tests != 'false'
                 test('check-help-' + name,
                      check_help,
-                     suite : 'dist-check',
+                     suite : 'dist',
                      args : exec.full_path(),
                      depends: exec)
 
                 test('check-version-' + name,
                      check_version,
-                     suite : 'dist-check',
+                     suite : 'dist',
                      args : [exec.full_path(),
                              meson.project_version()],
                      depends: exec)
@@ -4364,14 +4782,13 @@ foreach tuple : fuzz_sanitizers
         endif
 endforeach
 
-
 ############################################################
 
 if git.found()
         all_files = run_command(
                 env, '-u', 'GIT_WORK_TREE',
                 git, '--git-dir=@0@/.git'.format(project_source_root),
-                     'ls-files', ':/*.[ch]',
+                     'ls-files', ':/*.[ch]', ':/*.cc',
                 check : false)
         if all_files.returncode() == 0
                 all_files = files(all_files.stdout().split())
@@ -4383,17 +4800,26 @@ if git.found()
                 run_target(
                         'ctags',
                         command : [env, 'ctags', '--tag-relative=never', '-o', '@0@/tags'.format(project_source_root)] + all_files)
-        endif
-endif
 
-if git.found()
+                ############################################
+
+                if want_tests != 'false' and conf.get('BUILD_MODE_DEVELOPER') == 1
+                        test('check-includes',
+                             files('tools/check-includes.py'),
+                             args: all_files,
+                             env : ['PROJECT_SOURCE_ROOT=@0@'.format(project_source_root)])
+                endif
+        endif
+
+        ####################################################
+
         git_contrib_sh = find_program('tools/git-contrib.sh')
         run_target(
                 'git-contrib',
                 command : [git_contrib_sh])
-endif
 
-if git.found()
+        ####################################################
+
         git_head = run_command(
                 git, '--git-dir=@0@/.git'.format(project_source_root),
                      'rev-parse', 'HEAD',
@@ -4529,6 +4955,7 @@ foreach tuple : [
         ['microhttpd'],
         ['openssl'],
         ['p11kit'],
+        ['passwdqc'],
         ['pcre2'],
         ['pwquality'],
         ['qrencode'],
@@ -4545,11 +4972,11 @@ foreach tuple : [
         # components
         ['backlight'],
         ['binfmt'],
+        ['bootloader'],
         ['bpf-framework',          conf.get('BPF_FRAMEWORK') == 1],
         ['coredump'],
-        ['environment.d'],
         ['efi'],
-        ['gnu-efi'],
+        ['environment.d'],
         ['firstboot'],
         ['hibernate'],
         ['homed'],
@@ -4608,8 +5035,9 @@ foreach tuple : [
         ['debug hashmap'],
         ['debug mmap cache'],
         ['debug siphash'],
-        ['valgrind',               conf.get('VALGRIND') == 1],
         ['trace logging',          conf.get('LOG_TRACE') == 1],
+        ['slow tests',             slow_tests],
+        ['fuzz tests',             fuzz_tests],
         ['install tests',          install_tests],
         ['link-udev-shared',       get_option('link-udev-shared')],
         ['link-systemctl-shared',  get_option('link-systemctl-shared')],
@@ -4617,6 +5045,7 @@ foreach tuple : [
         ['link-timesyncd-shared',  get_option('link-timesyncd-shared')],
         ['link-journalctl-shared', get_option('link-journalctl-shared')],
         ['link-boot-shared',       get_option('link-boot-shared')],
+        ['link-portabled-shared',  get_option('link-portabled-shared')],
         ['first-boot-full-preset'],
         ['fexecve'],
         ['standalone-binaries',    get_option('standalone-binaries')],

@@ -161,6 +161,29 @@ bool address_is_ready(const Address *a) {
         return true;
 }
 
+bool link_check_addresses_ready(Link *link, NetworkConfigSource source) {
+        Address *a;
+        bool has = false;
+
+        assert(link);
+
+        /* Check if all addresses on the interface are ready. If there is no address, this will return false. */
+
+        SET_FOREACH(a, link->addresses) {
+                if (source >= 0 && a->source != source)
+                        continue;
+                if (address_is_marked(a))
+                        continue;
+                if (!address_exists(a))
+                        continue;
+                if (!address_is_ready(a))
+                        return false;
+                has = true;
+        }
+
+        return has;
+}
+
 void link_mark_addresses(Link *link, NetworkConfigSource source) {
         Address *a;
 
@@ -1133,6 +1156,9 @@ static bool address_is_ready_to_configure(Link *link, const Address *address) {
         assert(address);
 
         if (!link_is_ready_to_configure(link, false))
+                return false;
+
+        if (address_is_removing(address))
                 return false;
 
         if (!ipv4acd_bound(address))

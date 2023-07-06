@@ -24,6 +24,7 @@
 #include "string-util.h"
 #include "strv.h"
 #include "tmpfile-util.h"
+#include "xkbcommon-util.h"
 
 static bool startswith_comma(const char *s, const char *prefix) {
         assert(s);
@@ -70,8 +71,7 @@ void x11_context_replace(X11Context *dest, X11Context *src) {
         assert(src);
 
         x11_context_clear(dest);
-        *dest = *src;
-        *src = (X11Context) {};
+        *dest = TAKE_STRUCT(*src);
 }
 
 bool x11_context_isempty(const X11Context *xc) {
@@ -154,6 +154,35 @@ int x11_context_copy(X11Context *dest, const X11Context *src) {
         return modified;
 }
 
+int x11_context_verify_and_warn(const X11Context *xc, int log_level, sd_bus_error *error) {
+        int r;
+
+        assert(xc);
+
+        if (!x11_context_is_safe(xc)) {
+                if (error)
+                        sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid X11 keyboard layout.");
+                return log_full_errno(log_level, SYNTHETIC_ERRNO(EINVAL), "Invalid X11 keyboard layout.");
+        }
+
+        r = verify_xkb_rmlvo(xc->model, xc->layout, xc->variant, xc->options);
+        if (r == -EOPNOTSUPP) {
+                log_full_errno(MAX(log_level, LOG_NOTICE), r,
+                               "Cannot verify if new keymap is correct, libxkbcommon.so unavailable.");
+                return 0;
+        }
+        if (r < 0) {
+                if (error)
+                        sd_bus_error_set_errnof(error, r, "Specified keymap cannot be compiled, refusing as invalid.");
+                return log_full_errno(log_level, r,
+                                      "Cannot compile XKB keymap for x11 keyboard layout "
+                                      "(model='%s' / layout='%s' / variant='%s' / options='%s'): %m",
+                                      strempty(xc->model), strempty(xc->layout), strempty(xc->variant), strempty(xc->options));
+        }
+
+        return 0;
+}
+
 void vc_context_clear(VCContext *vc) {
         assert(vc);
 
@@ -166,8 +195,7 @@ void vc_context_replace(VCContext *dest, VCContext *src) {
         assert(src);
 
         vc_context_clear(dest);
-        *dest = *src;
-        *src = (VCContext) {};
+        *dest = TAKE_STRUCT(*src);
 }
 
 bool vc_context_isempty(const VCContext *vc) {
@@ -224,6 +252,46 @@ int vc_context_copy(VCContext *dest, const VCContext *src) {
         return modified;
 }
 
+static int verify_keymap(const char *keymap, int log_level, sd_bus_error *error) {
+        int r;
+
+        assert(keymap);
+
+        r = keymap_exists(keymap); /* This also verifies that the keymap name is kosher. */
+        if (r < 0) {
+                if (error)
+                        sd_bus_error_set_errnof(error, r, "Failed to check keymap %s: %m", keymap);
+                return log_full_errno(log_level, r, "Failed to check keymap %s: %m", keymap);
+        }
+        if (r == 0) {
+                if (error)
+                        sd_bus_error_setf(error, SD_BUS_ERROR_FAILED, "Keymap %s is not installed.", keymap);
+                return log_full_errno(log_level, SYNTHETIC_ERRNO(ENOENT), "Keymap %s is not installed.", keymap);
+        }
+
+        return 0;
+}
+
+int vc_context_verify_and_warn(const VCContext *vc, int log_level, sd_bus_error *error) {
+        int r;
+
+        assert(vc);
+
+        if (vc->keymap) {
+                r = verify_keymap(vc->keymap, log_level, error);
+                if (r < 0)
+                        return r;
+        }
+
+        if (vc->toggle) {
+                r = verify_keymap(vc->toggle, log_level, error);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
 void context_clear(Context *c) {
         assert(c);
 
@@ -269,6 +337,7 @@ int locale_read_data(Context *c, sd_bus_message *m) {
 int vconsole_read_data(Context *c, sd_bus_message *m) {
         _cleanup_close_ int fd = -EBADF;
         struct stat st;
+        int r;
 
         assert(c);
 
@@ -302,17 +371,28 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
         vc_context_clear(&c->vc);
         x11_context_clear(&c->x11_from_vc);
 
-        return parse_env_file_fd(fd, "/etc/vconsole.conf",
-                                 "KEYMAP",        &c->vc.keymap,
-                                 "KEYMAP_TOGGLE", &c->vc.toggle,
-                                 "XKBLAYOUT",     &c->x11_from_vc.layout,
-                                 "XKBMODEL",      &c->x11_from_vc.model,
-                                 "XKBVARIANT",    &c->x11_from_vc.variant,
-                                 "XKBOPTIONS",    &c->x11_from_vc.options);
+        r = parse_env_file_fd(
+                        fd, "/etc/vconsole.conf",
+                        "KEYMAP",        &c->vc.keymap,
+                        "KEYMAP_TOGGLE", &c->vc.toggle,
+                        "XKBLAYOUT",     &c->x11_from_vc.layout,
+                        "XKBMODEL",      &c->x11_from_vc.model,
+                        "XKBVARIANT",    &c->x11_from_vc.variant,
+                        "XKBOPTIONS",    &c->x11_from_vc.options);
+        if (r < 0)
+                return r;
+
+        if (vc_context_verify(&c->vc) < 0)
+                vc_context_clear(&c->vc);
+
+        if (x11_context_verify(&c->x11_from_vc) < 0)
+                x11_context_clear(&c->x11_from_vc);
+
+        return 0;
 }
 
 int x11_read_data(Context *c, sd_bus_message *m) {
-        _cleanup_close_ int fd = -EBADF, fd_ro = -EBADF;
+        _cleanup_close_ int fd = -EBADF;
         _cleanup_fclose_ FILE *f = NULL;
         bool in_section = false;
         struct stat st;
@@ -348,15 +428,9 @@ int x11_read_data(Context *c, sd_bus_message *m) {
         c->x11_stat = st;
         x11_context_clear(&c->x11_from_xorg);
 
-        fd_ro = fd_reopen(fd, O_CLOEXEC | O_RDONLY);
-        if (fd_ro < 0)
-                return fd_ro;
-
-        f = fdopen(fd_ro, "re");
-        if (!f)
-                return -errno;
-
-        TAKE_FD(fd_ro);
+        r = fdopen_independent(fd, "re", &f);
+        if (r < 0)
+                return r;
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
@@ -408,6 +482,9 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                 } else if (in_section && first_word(l, "EndSection"))
                         in_section = false;
         }
+
+        if (x11_context_verify(&c->x11_from_xorg) < 0)
+                x11_context_clear(&c->x11_from_xorg);
 
         return 0;
 }
@@ -578,6 +655,7 @@ static int read_next_mapping(
 int vconsole_convert_to_x11(const VCContext *vc, X11Context *ret) {
         _cleanup_fclose_ FILE *f = NULL;
         const char *map;
+        X11Context xc;
         int r;
 
         assert(vc);
@@ -599,22 +677,65 @@ int vconsole_convert_to_x11(const VCContext *vc, X11Context *ret) {
                 r = read_next_mapping(map, 5, UINT_MAX, f, &n, &a);
                 if (r < 0)
                         return r;
-                if (r == 0) {
-                        *ret = (X11Context) {};
-                        return 0;
-                }
+                if (r == 0)
+                        break;
 
                 if (!streq(vc->keymap, a[0]))
                         continue;
 
-                return x11_context_copy(ret,
-                                     &(X11Context) {
-                                             .layout  = empty_or_dash_to_null(a[1]),
-                                             .model   = empty_or_dash_to_null(a[2]),
-                                             .variant = empty_or_dash_to_null(a[3]),
-                                             .options = empty_or_dash_to_null(a[4]),
-                                     });
+                xc = (X11Context) {
+                        .layout  = empty_or_dash_to_null(a[1]),
+                        .model   = empty_or_dash_to_null(a[2]),
+                        .variant = empty_or_dash_to_null(a[3]),
+                        .options = empty_or_dash_to_null(a[4]),
+                };
+
+                if (x11_context_verify(&xc) < 0)
+                        continue;
+
+                return x11_context_copy(ret, &xc);
         }
+
+        /* No custom mapping has been found, see if the keymap is a converted one. In such case deducing the
+         * corresponding x11 layout is easy. */
+        _cleanup_free_ char *xlayout = NULL, *converted = NULL;
+        char *xvariant;
+
+        xlayout = strdup(vc->keymap);
+        if (!xlayout)
+                return -ENOMEM;
+        xvariant = strchr(xlayout, '-');
+        if (xvariant) {
+                xvariant[0] = '\0';
+                xvariant++;
+        }
+
+        /* Note: by default we use keyboard model "microsoftpro" which should be equivalent to "pc105" but
+         * with the internet/media key mapping added. */
+        xc = (X11Context) {
+                .layout  = xlayout,
+                .model   = (char*) "microsoftpro",
+                .variant = xvariant,
+                .options = (char*) "terminate:ctrl_alt_bksp",
+        };
+
+        /* This sanity check seems redundant with the verification of the X11 layout done on the next
+         * step. However xkbcommon is an optional dependency hence the verification might be a NOP.  */
+        r = find_converted_keymap(&xc, &converted);
+        if (r == 0 && xc.variant) {
+                /* If we still haven't find a match, try with no variant, it's still better than nothing.  */
+                xc.variant = NULL;
+                r = find_converted_keymap(&xc, &converted);
+        }
+        if (r < 0)
+                return r;
+
+        if (r == 0 || x11_context_verify(&xc) < 0) {
+                *ret = (X11Context) {};
+                return 0;
+        }
+
+        return x11_context_copy(ret, &xc);
 }
 
 int find_converted_keymap(const X11Context *xc, char **ret) {
@@ -735,12 +856,12 @@ int find_legacy_keymap(const X11Context *xc, char **ret) {
                  * matches just the first layout.
                  */
 
-                l = strndup(xc->layout, strcspn(xc->layout, ","));
+                l = strdupcspn(xc->layout, ",");
                 if (!l)
                         return -ENOMEM;
 
                 if (!isempty(xc->variant)) {
-                        v = strndup(xc->variant, strcspn(xc->variant, ","));
+                        v = strdupcspn(xc->variant, ",");
                         if (!v)
                                 return -ENOMEM;
                 }
@@ -759,6 +880,39 @@ int find_legacy_keymap(const X11Context *xc, char **ret) {
 
         *ret = TAKE_PTR(new_keymap);
         return !!*ret;
+}
+
+int x11_convert_to_vconsole(const X11Context *xc, VCContext *ret) {
+        _cleanup_free_ char *keymap = NULL;
+        int r;
+
+        assert(xc);
+        assert(ret);
+
+        if (isempty(xc->layout)) {
+                *ret = (VCContext) {};
+                return 0;
+        }
+
+        r = find_converted_keymap(xc, &keymap);
+        if (r == 0) {
+                r = find_legacy_keymap(xc, &keymap);
+                if (r == 0 && xc->variant)
+                        /* If we still haven't find a match, try with no variant, it's still better than
+                         * nothing.  */
+                        r = find_converted_keymap(
+                                        &(X11Context) {
+                                                .layout = xc->layout,
+                                        },
+                                        &keymap);
+        }
+        if (r < 0)
+                return r;
+
+        *ret = (VCContext) {
+                .keymap = TAKE_PTR(keymap),
+        };
+        return 0;
 }
 
 int find_language_fallback(const char *lang, char **ret) {
@@ -788,30 +942,6 @@ int find_language_fallback(const char *lang, char **ret) {
                         return 1;
                 }
         }
-}
-
-int x11_convert_to_vconsole(const X11Context *xc, VCContext *ret) {
-        _cleanup_free_ char *keymap = NULL;
-        int r;
-
-        assert(xc);
-        assert(ret);
-
-        if (isempty(xc->layout)) {
-                *ret = (VCContext) {};
-                return 0;
-        }
-
-        r = find_converted_keymap(xc, &keymap);
-        if (r == 0)
-                r = find_legacy_keymap(xc, &keymap);
-        if (r < 0)
-                return r;
-
-        *ret = (VCContext) {
-                .keymap = TAKE_PTR(keymap),
-        };
-        return 0;
 }
 
 bool locale_gen_check_available(void) {
@@ -922,7 +1052,7 @@ int locale_gen_enable_locale(const char *locale) {
                 r = copy_access(fileno(fr), fileno(fw));
                 if (r < 0)
                         return r;
-                r = copy_xattr(fileno(fr), fileno(fw), COPY_ALL_XATTRS);
+                r = copy_xattr(fileno(fr), NULL, fileno(fw), NULL, COPY_ALL_XATTRS);
                 if (r < 0)
                         log_debug_errno(r, "Failed to copy all xattrs from old to new /etc/locale.gen file, ignoring: %m");
         }

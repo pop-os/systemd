@@ -5,7 +5,9 @@
 
 #include "fs-util.h"
 #include "generator.h"
+#include "initrd-util.h"
 #include "log.h"
+#include "path-util.h"
 #include "proc-cmdline.h"
 #include "special.h"
 #include "string-util.h"
@@ -18,21 +20,25 @@
 static const char *arg_dest = NULL;
 
 static int generate_symlink(void) {
-        const char *p = NULL;
+        FOREACH_STRING(p, "/system-update", "/etc/system-update") {
+                if (laccess(p, F_OK) >= 0) {
+                        _cleanup_free_ char *j = NULL;
 
-        if (laccess("/system-update", F_OK) < 0) {
-                if (errno == ENOENT)
-                        return 0;
+                        j = path_join(arg_dest, SPECIAL_DEFAULT_TARGET);
+                        if (!j)
+                                return log_oom();
 
-                log_error_errno(errno, "Failed to check for system update: %m");
-                return -EINVAL;
+                        if (symlink(SYSTEM_DATA_UNIT_DIR "/system-update.target", j) < 0)
+                                return log_error_errno(errno, "Failed to create symlink %s: %m", j);
+
+                        return 1;
+                }
+
+                if (errno != ENOENT)
+                        log_warning_errno(errno, "Failed to check if %s symlink exists, ignoring: %m", p);
         }
 
-        p = strjoina(arg_dest, "/" SPECIAL_DEFAULT_TARGET);
-        if (symlink(SYSTEM_DATA_UNIT_DIR "/system-update.target", p) < 0)
-                return log_error_errno(errno, "Failed to create symlink %s: %m", p);
-
-        return 1;
+        return 0;
 }
 
 static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
@@ -55,6 +61,11 @@ static int run(const char *dest, const char *dest_early, const char *dest_late) 
         int r;
 
         assert_se(arg_dest = dest_early);
+
+        if (in_initrd()) {
+                log_debug("Skipping generator, running in the initrd.");
+                return EXIT_SUCCESS;
+        }
 
         r = generate_symlink();
         if (r <= 0)

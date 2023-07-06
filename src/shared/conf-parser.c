@@ -533,48 +533,52 @@ static int config_parse_many_files(
         return 0;
 }
 
-/* Parse each config file in the directories specified as nulstr. */
-int config_parse_many_nulstr(
+/* Parse one main config file located in /etc/systemd and its drop-ins, which is what all systemd daemons
+ * do. */
+int config_parse_config_file(
                 const char *conf_file,
-                const char *conf_file_dirs,
                 const char *sections,
                 ConfigItemLookup lookup,
                 const void *table,
                 ConfigParseFlags flags,
-                void *userdata,
-                Hashmap **ret_stats_by_path) {
+                void *userdata) {
 
-        _cleanup_strv_free_ char **files = NULL;
+        _cleanup_strv_free_ char **dropins = NULL, **dropin_dirs = NULL;
+        char **conf_paths = CONF_PATHS_STRV("");
         int r;
 
-        r = conf_files_list_nulstr(&files, ".conf", NULL, 0, conf_file_dirs);
+        assert(conf_file);
+
+        /* build the dropin dir list */
+        dropin_dirs = new0(char*, strv_length(conf_paths) + 1);
+        if (!dropin_dirs) {
+                if (flags & CONFIG_PARSE_WARN)
+                        return log_oom();
+                return -ENOMEM;
+        }
+
+        size_t i = 0;
+        STRV_FOREACH(p, conf_paths) {
+                char *d;
+
+                d = strjoin(*p, "systemd/", conf_file, ".d");
+                if (!d) {
+                        if (flags & CONFIG_PARSE_WARN)
+                                return log_oom();
+                        return -ENOMEM;
+                }
+
+                dropin_dirs[i++] = d;
+        }
+
+        r = conf_files_list_strv(&dropins, ".conf", NULL, 0, (const char**) dropin_dirs);
         if (r < 0)
                 return r;
 
-        return config_parse_many_files(STRV_MAKE_CONST(conf_file),
-                                       files, sections, lookup, table, flags, userdata,
-                                       ret_stats_by_path);
-}
+        const char *sysconf_file = strjoina(PKGSYSCONFDIR, "/", conf_file);
 
-static int config_get_dropin_files(
-                const char* const* conf_file_dirs,
-                const char *dropin_dirname,
-                char ***ret) {
-
-        _cleanup_strv_free_ char **dropin_dirs = NULL;
-        const char *suffix;
-        int r;
-
-        assert(conf_file_dirs);
-        assert(dropin_dirname);
-        assert(ret);
-
-        suffix = strjoina("/", dropin_dirname);
-        r = strv_extend_strv_concat(&dropin_dirs, (char**) conf_file_dirs, suffix);
-        if (r < 0)
-                return r;
-
-        return conf_files_list_strv(ret, ".conf", NULL, 0, (const char* const*) dropin_dirs);
+        return config_parse_many_files(STRV_MAKE_CONST(sysconf_file), dropins,
+                                       sections, lookup, table, flags, userdata, NULL);
 }
 
 /* Parse each config file in the directories specified as strv. */
@@ -582,6 +586,7 @@ int config_parse_many(
                 const char* const* conf_files,
                 const char* const* conf_file_dirs,
                 const char *dropin_dirname,
+                const char *root,
                 const char *sections,
                 ConfigItemLookup lookup,
                 const void *table,
@@ -598,7 +603,7 @@ int config_parse_many(
         assert(sections);
         assert(table);
 
-        r = config_get_dropin_files(conf_file_dirs, dropin_dirname, &files);
+        r = conf_files_list_dropins(&files, dropin_dirname, root, conf_file_dirs);
         if (r < 0)
                 return r;
 
@@ -634,7 +639,7 @@ static int dropins_get_stats_by_path(
         if (!strextend(&dropin_dirname, ".d"))
                 return -ENOMEM;
 
-        r = config_get_dropin_files(conf_file_dirs, dropin_dirname, &files);
+        r = conf_files_list_dropins(&files, dropin_dirname, /* root = */ NULL, conf_file_dirs);
         if (r < 0)
                 return r;
 
@@ -948,12 +953,12 @@ int config_parse_id128(
 
         r = sd_id128_from_string(rvalue, &t);
         if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse 128bit ID/UUID, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse 128-bit ID/UUID, ignoring: %s", rvalue);
                 return 0;
         }
 
         if (sd_id128_is_null(t)) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0, "128bit ID/UUID is all 0, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "128-bit ID/UUID is all 0, ignoring: %s", rvalue);
                 return 0;
         }
 

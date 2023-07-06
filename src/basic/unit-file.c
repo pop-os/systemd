@@ -2,7 +2,7 @@
 
 #include "sd-id128.h"
 
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
@@ -71,10 +71,11 @@ int unit_symlink_name_compatible(const char *symlink, const char *target, bool i
 }
 
 int unit_validate_alias_symlink_or_warn(int log_level, const char *filename, const char *target) {
-        const char *src, *dst;
+        _cleanup_free_ char *src = NULL, *dst = NULL;
         _cleanup_free_ char *src_instance = NULL, *dst_instance = NULL;
         UnitType src_unit_type, dst_unit_type;
         UnitNameFlags src_name_type, dst_name_type;
+        int r;
 
         /* Check if the *alias* symlink is valid. This applies to symlinks like
          * /etc/systemd/system/dbus.service → dbus-broker.service, but not to .wants or .requires symlinks
@@ -87,8 +88,13 @@ int unit_validate_alias_symlink_or_warn(int log_level, const char *filename, con
          * -ELOOP for an alias to self.
          */
 
-        src = basename(filename);
-        dst = basename(target);
+        r = path_extract_filename(filename, &src);
+        if (r < 0)
+                return r;
+
+        r = path_extract_filename(target, &dst);
+        if (r < 0)
+                return r;
 
         /* src checks */
 
@@ -244,9 +250,10 @@ bool lookup_paths_timestamp_hash_same(const LookupPaths *lp, uint64_t timestamp_
 
 static int directory_name_is_valid(const char *name) {
 
-        /* Accept a directory whose name is a valid unit file name ending in .wants/, .requires/ or .d/ */
+        /* Accept a directory whose name is a valid unit file name ending in .wants/, .requires/,
+         * .upholds/ or .d/ */
 
-        FOREACH_STRING(suffix, ".wants", ".requires", ".d") {
+        FOREACH_STRING(suffix, ".wants", ".requires", ".upholds", ".d") {
                 _cleanup_free_ char *chopped = NULL;
                 const char *e;
 
@@ -322,7 +329,7 @@ int unit_file_resolve_symlink(
         }
 
         /* Get rid of "." and ".." components in target path */
-        r = chase_symlinks(target, root_dir, CHASE_NOFOLLOW | CHASE_NONEXISTENT, &simplified, NULL);
+        r = chase(target, root_dir, CHASE_NOFOLLOW | CHASE_NONEXISTENT, &simplified, NULL);
         if (r < 0)
                 return log_warning_errno(r, "Failed to resolve symlink %s/%s pointing to %s: %m",
                                          dir, filename, target);
@@ -432,7 +439,7 @@ int unit_file_build_name_map(
                 if (r < 0)
                         return log_oom();
 
-                r = chase_symlinks(*dir, NULL, 0, &resolved_dir, NULL);
+                r = chase(*dir, NULL, 0, &resolved_dir, NULL);
                 if (r < 0) {
                         if (r != -ENOENT)
                                 log_warning_errno(r, "Failed to resolve symlink %s, ignoring: %m", *dir);
@@ -762,7 +769,10 @@ int unit_file_find_fragment(
         }
 
         if (fragment && ret_names) {
-                const char *fragment_basename = basename(fragment);
+                _cleanup_free_ char *fragment_basename = NULL;
+                r = path_extract_filename(fragment, &fragment_basename);
+                if (r < 0)
+                        return r;
 
                 if (!streq(fragment_basename, unit_name)) {
                         /* Add names based on the fragment name to the set of names */

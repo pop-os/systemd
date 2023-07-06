@@ -1,13 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <wchar.h>
-
 #include "efi-string.h"
 
 #if SD_BOOT
-#  include "missing_efi.h"
+#  include "proto/simple-text-io.h"
 #  include "util.h"
 #else
 #  include <stdlib.h>
@@ -116,7 +112,7 @@ DEFINE_STRCPY(char16_t, strcpy16);
                         s++;                       \
                 }                                  \
                                                    \
-                return NULL;                       \
+                return c ? NULL : (type *) s;      \
         }
 
 DEFINE_STRCHR(char, strchr8);
@@ -214,6 +210,21 @@ char16_t *xstrn8_to_16(const char *str8, size_t n) {
 
         str16[i] = '\0';
         return str16;
+}
+
+char *startswith8(const char *s, const char *prefix) {
+        size_t l;
+
+        assert(prefix);
+
+        if (!s)
+                return NULL;
+
+        l = strlen8(prefix);
+        if (!strneq8(s, prefix, l))
+                return NULL;
+
+        return (char*) s + l;
 }
 
 static bool efi_fnmatch_prefix(const char16_t *p, const char16_t *h, const char16_t **ret_p, const char16_t **ret_h) {
@@ -380,9 +391,25 @@ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack) {
 DEFINE_PARSE_NUMBER(char, parse_number8);
 DEFINE_PARSE_NUMBER(char16_t, parse_number16);
 
+char16_t *hexdump(const void *data, size_t size) {
+        static const char hex[16] = "0123456789abcdef";
+        const uint8_t *d = data;
+
+        assert(data || size == 0);
+
+        char16_t *buf = xnew(char16_t, size * 2 + 1);
+
+        for (size_t i = 0; i < size; i++) {
+                buf[i * 2] = hex[d[i] >> 4];
+                buf[i * 2 + 1] = hex[d[i] & 0x0F];
+        }
+
+        buf[size * 2] = 0;
+        return buf;
+}
+
 static const char * const warn_table[] = {
         [EFI_SUCCESS]               = "Success",
-#if SD_BOOT
         [EFI_WARN_UNKNOWN_GLYPH]    = "Unknown glyph",
         [EFI_WARN_DELETE_FAILURE]   = "Delete failure",
         [EFI_WARN_WRITE_FAILURE]    = "Write failure",
@@ -390,7 +417,6 @@ static const char * const warn_table[] = {
         [EFI_WARN_STALE_DATA]       = "Stale data",
         [EFI_WARN_FILE_SYSTEM]      = "File system",
         [EFI_WARN_RESET_REQUIRED]   = "Reset required",
-#endif
 };
 
 /* Errors have MSB set, remove it to keep the table compact. */
@@ -399,7 +425,6 @@ static const char * const warn_table[] = {
 static const char * const err_table[] = {
         [NOERR(EFI_ERROR_MASK)]           = "Error",
         [NOERR(EFI_LOAD_ERROR)]           = "Load error",
-#if SD_BOOT
         [NOERR(EFI_INVALID_PARAMETER)]    = "Invalid parameter",
         [NOERR(EFI_UNSUPPORTED)]          = "Unsupported",
         [NOERR(EFI_BAD_BUFFER_SIZE)]      = "Bad buffer size",
@@ -427,14 +452,13 @@ static const char * const err_table[] = {
         [NOERR(EFI_SECURITY_VIOLATION)]   = "Security violation",
         [NOERR(EFI_CRC_ERROR)]            = "CRC error",
         [NOERR(EFI_END_OF_MEDIA)]         = "End of media",
-        [29]                              = "Reserved (29)",
-        [30]                              = "Reserved (30)",
+        [NOERR(EFI_ERROR_RESERVED_29)]    = "Reserved (29)",
+        [NOERR(EFI_ERROR_RESERVED_30)]    = "Reserved (30)",
         [NOERR(EFI_END_OF_FILE)]          = "End of file",
         [NOERR(EFI_INVALID_LANGUAGE)]     = "Invalid language",
         [NOERR(EFI_COMPROMISED_DATA)]     = "Compromised data",
         [NOERR(EFI_IP_ADDRESS_CONFLICT)]  = "IP address conflict",
         [NOERR(EFI_HTTP_ERROR)]           = "HTTP error",
-#endif
 };
 
 static const char *status_to_string(EFI_STATUS status) {
@@ -605,7 +629,7 @@ static bool handle_format_specifier(FormatContext *ctx, SpecifierContext *sp) {
         /* Parses one item from the format specifier in ctx and put the info into sp. If we are done with
          * this specifier returns true, otherwise this function should be called again. */
 
-        /* This implementation assumes 32bit ints. Also note that all types smaller than int are promoted to
+        /* This implementation assumes 32-bit ints. Also note that all types smaller than int are promoted to
          * int in vararg functions, which is why we fetch only ints for any such types. The compiler would
          * otherwise warn about fetching smaller types. */
         assert_cc(sizeof(int) == 4);
@@ -871,17 +895,35 @@ char16_t *xvasprintf_status(EFI_STATUS status, const char *format, va_list ap) {
 
 #if SD_BOOT
 /* To provide the actual implementation for these we need to remove the redirection to the builtins. */
+#  undef memchr
 #  undef memcmp
 #  undef memcpy
 #  undef memset
+_used_ void *memchr(const void *p, int c, size_t n);
+_used_ int memcmp(const void *p1, const void *p2, size_t n);
+_used_ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
+_used_ void *memset(void *p, int c, size_t n);
 #else
 /* And for userspace unit testing we need to give them an efi_ prefix. */
+#  define memchr efi_memchr
 #  define memcmp efi_memcmp
 #  define memcpy efi_memcpy
 #  define memset efi_memset
 #endif
 
-_used_ int memcmp(const void *p1, const void *p2, size_t n) {
+void *memchr(const void *p, int c, size_t n) {
+        if (!p || n == 0)
+                return NULL;
+
+        const uint8_t *q = p;
+        for (size_t i = 0; i < n; i++)
+                if (q[i] == (unsigned char) c)
+                        return (void *) (q + i);
+
+        return NULL;
+}
+
+int memcmp(const void *p1, const void *p2, size_t n) {
         const uint8_t *up1 = p1, *up2 = p2;
         int r;
 
@@ -901,7 +943,7 @@ _used_ int memcmp(const void *p1, const void *p2, size_t n) {
         return 0;
 }
 
-_used_ void *memcpy(void * restrict dest, const void * restrict src, size_t n) {
+void *memcpy(void * restrict dest, const void * restrict src, size_t n) {
         if (!dest || !src || n == 0)
                 return dest;
 
@@ -928,7 +970,7 @@ _used_ void *memcpy(void * restrict dest, const void * restrict src, size_t n) {
         return dest;
 }
 
-_used_ void *memset(void *p, int c, size_t n) {
+void *memset(void *p, int c, size_t n) {
         if (!p || n == 0)
                 return p;
 

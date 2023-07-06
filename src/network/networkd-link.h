@@ -154,6 +154,7 @@ typedef struct Link {
         sd_event_source *ndisc_expire;
         Set *ndisc_rdnss;
         Set *ndisc_dnssl;
+        Set *ndisc_captive_portals;
         unsigned ndisc_messages;
         bool ndisc_configured:1;
 

@@ -4,6 +4,7 @@
 
 #include "sd-daemon.h"
 
+#include "common-signal.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "mkdir.h"
@@ -19,49 +20,27 @@
 
 static int start_workers(Manager *m, bool explicit_request);
 
-static int on_sigchld(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+static int on_worker_exit(sd_event_source *s, const siginfo_t *si, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
 
         assert(s);
 
-        for (;;) {
-                siginfo_t siginfo = {};
-                bool removed = false;
+        assert_se(!set_remove(m->workers_dynamic, s) != !set_remove(m->workers_fixed, s));
+        sd_event_source_disable_unref(s);
 
-                if (waitid(P_ALL, 0, &siginfo, WNOHANG|WEXITED) < 0) {
-                        if (errno == ECHILD)
-                                break;
-
-                        log_warning_errno(errno, "Failed to invoke waitid(): %m");
-                        break;
-                }
-                if (siginfo.si_pid == 0)
-                        break;
-
-                if (set_remove(m->workers_dynamic, PID_TO_PTR(siginfo.si_pid)))
-                        removed = true;
-                if (set_remove(m->workers_fixed, PID_TO_PTR(siginfo.si_pid)))
-                        removed = true;
-
-                if (!removed) {
-                        log_warning("Weird, got SIGCHLD for unknown child " PID_FMT ", ignoring.", siginfo.si_pid);
-                        continue;
-                }
-
-                if (siginfo.si_code == CLD_EXITED) {
-                        if (siginfo.si_status == EXIT_SUCCESS)
-                                log_debug("Worker " PID_FMT " exited successfully.", siginfo.si_pid);
-                        else
-                                log_warning("Worker " PID_FMT " died with a failure exit status %i, ignoring.", siginfo.si_pid, siginfo.si_status);
-                } else if (siginfo.si_code == CLD_KILLED)
-                        log_warning("Worker " PID_FMT " was killed by signal %s, ignoring.", siginfo.si_pid, signal_to_string(siginfo.si_status));
-                else if (siginfo.si_code == CLD_DUMPED)
-                        log_warning("Worker " PID_FMT " dumped core by signal %s, ignoring.", siginfo.si_pid, signal_to_string(siginfo.si_status));
+        if (si->si_code == CLD_EXITED) {
+                if (si->si_status == EXIT_SUCCESS)
+                        log_debug("Worker " PID_FMT " exited successfully.", si->si_pid);
                 else
-                        log_warning("Can't handle SIGCHLD of this type");
-        }
+                        log_warning("Worker " PID_FMT " died with a failure exit status %i, ignoring.", si->si_pid, si->si_status);
+        } else if (si->si_code == CLD_KILLED)
+                log_warning("Worker " PID_FMT " was killed by signal %s, ignoring.", si->si_pid, signal_to_string(si->si_status));
+        else if (si->si_code == CLD_DUMPED)
+                log_warning("Worker " PID_FMT " dumped core by signal %s, ignoring.", si->si_pid, signal_to_string(si->si_status));
+        else
+                log_warning("Can't handle SIGCHLD of this type");
 
-        (void) start_workers(m, false); /* Fill up workers again if we fell below the low watermark */
+        (void) start_workers(m, /* explicit_request= */ false); /* Fill up workers again if we fell below the low watermark */
         return 0;
 }
 
@@ -70,9 +49,27 @@ static int on_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si, voi
 
         assert(s);
 
-        (void) start_workers(m, true); /* Workers told us there's more work, let's add one more worker as long as we are below the high watermark */
+        (void) start_workers(m, /* explicit_request=*/ true); /* Workers told us there's more work, let's add one more worker as long as we are below the high watermark */
         return 0;
 }
+
+static int on_deferred_start_worker(sd_event_source *s, uint64_t usec, void *userdata) {
+        Manager *m = ASSERT_PTR(userdata);
+
+        assert(s);
+
+        m->deferred_start_worker_event_source = sd_event_source_unref(m->deferred_start_worker_event_source);
+
+        (void) start_workers(m, /* explicit_request=*/ false);
+        return 0;
+}
+
+DEFINE_HASH_OPS_WITH_KEY_DESTRUCTOR(
+                event_source_hash_ops,
+                sd_event_source,
+                (void (*)(const sd_event_source*, struct siphash*)) trivial_hash_func,
+                (int (*)(const sd_event_source*, const sd_event_source*)) trivial_compare_func,
+                sd_event_source_disable_unref);
 
 int manager_new(Manager **ret) {
         _cleanup_(manager_freep) Manager *m = NULL;
@@ -85,8 +82,8 @@ int manager_new(Manager **ret) {
         *m = (Manager) {
                 .listen_fd = -EBADF,
                 .worker_ratelimit = {
-                        .interval = 5 * USEC_PER_SEC,
-                        .burst = 50,
+                        .interval = 2 * USEC_PER_SEC,
+                        .burst = 2500,
                 },
         };
 
@@ -94,27 +91,23 @@ int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
-        r = sd_event_add_signal(m->event, NULL, SIGINT, NULL, NULL);
+        r = sd_event_set_signal_exit(m->event, true);
         if (r < 0)
                 return r;
 
-        r = sd_event_add_signal(m->event, NULL, SIGTERM, NULL, NULL);
+        r = sd_event_add_signal(m->event, NULL, (SIGRTMIN+18)|SD_EVENT_SIGNAL_PROCMASK, sigrtmin18_handler, NULL);
         if (r < 0)
                 return r;
 
-        (void) sd_event_set_watchdog(m->event, true);
-
-        m->workers_fixed = set_new(NULL);
-        m->workers_dynamic = set_new(NULL);
-
-        if (!m->workers_fixed || !m->workers_dynamic)
-                return -ENOMEM;
-
-        r = sd_event_add_signal(m->event, &m->sigusr2_event_source, SIGUSR2, on_sigusr2, m);
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
         if (r < 0)
-                return r;
+                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
 
-        r = sd_event_add_signal(m->event, &m->sigchld_event_source, SIGCHLD, on_sigchld, m);
+        r = sd_event_set_watchdog(m->event, true);
+        if (r < 0)
+                log_debug_errno(r, "Failed to enable watchdog handling, ignoring: %m");
+
+        r = sd_event_add_signal(m->event, NULL, SIGUSR2|SD_EVENT_SIGNAL_PROCMASK, on_sigusr2, m);
         if (r < 0)
                 return r;
 
@@ -129,8 +122,7 @@ Manager* manager_free(Manager *m) {
         set_free(m->workers_fixed);
         set_free(m->workers_dynamic);
 
-        sd_event_source_disable_unref(m->sigusr2_event_source);
-        sd_event_source_disable_unref(m->sigchld_event_source);
+        m->deferred_start_worker_event_source = sd_event_source_unref(m->deferred_start_worker_event_source);
 
         sd_event_unref(m->event);
 
@@ -144,6 +136,7 @@ static size_t manager_current_workers(Manager *m) {
 }
 
 static int start_one_worker(Manager *m) {
+        _cleanup_(sd_event_source_disable_unrefp) sd_event_source *source = NULL;
         bool fixed;
         pid_t pid;
         int r;
@@ -152,22 +145,17 @@ static int start_one_worker(Manager *m) {
 
         fixed = set_size(m->workers_fixed) < USERDB_WORKERS_MIN;
 
-        r = safe_fork("(sd-worker)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        r = safe_fork_full(
+                        "(sd-worker)",
+                        /* stdio_fds= */ NULL,
+                        &m->listen_fd, 1,
+                        FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_REOPEN_LOG|FORK_LOG|FORK_CLOSE_ALL_FDS,
+                        &pid);
         if (r < 0)
                 return log_error_errno(r, "Failed to fork new worker child: %m");
         if (r == 0) {
                 char pids[DECIMAL_STR_MAX(pid_t)];
                 /* Child */
-
-                log_close();
-
-                r = close_all_fds(&m->listen_fd, 1);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to close fds in child: %m");
-                        _exit(EXIT_FAILURE);
-                }
-
-                log_open();
 
                 if (m->listen_fd == 3) {
                         r = fd_cloexec(3, false);
@@ -209,12 +197,18 @@ static int start_one_worker(Manager *m) {
                 _exit(EXIT_FAILURE);
         }
 
-        if (fixed)
-                r = set_put(m->workers_fixed, PID_TO_PTR(pid));
-        else
-                r = set_put(m->workers_dynamic, PID_TO_PTR(pid));
+        r = sd_event_add_child(m->event, &source, pid, WEXITED, on_worker_exit, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to watch child " PID_FMT ": %m", pid);
+
+        r = set_ensure_put(
+                        fixed ? &m->workers_fixed : &m->workers_dynamic,
+                        &event_source_hash_ops,
+                        source);
         if (r < 0)
                 return log_error_errno(r, "Failed to add child process to set: %m");
+
+        TAKE_PTR(source);
 
         return 0;
 }
@@ -232,10 +226,31 @@ static int start_workers(Manager *m, bool explicit_request) {
                         break;
 
                 if (!ratelimit_below(&m->worker_ratelimit)) {
-                        /* If we keep starting workers too often, let's fail the whole daemon, something is wrong */
-                        sd_event_exit(m->event, EXIT_FAILURE);
 
-                        return log_error_errno(SYNTHETIC_ERRNO(EUCLEAN), "Worker threads requested too frequently, something is wrong.");
+                        /* If we keep starting workers too often but none sticks, let's fail the whole
+                         * daemon, something is wrong */
+                        if (n == 0) {
+                                sd_event_exit(m->event, EXIT_FAILURE);
+                                return log_error_errno(SYNTHETIC_ERRNO(EUCLEAN), "Worker threads requested too frequently, but worker count is zero, something is wrong.");
+                        }
+
+                        /* Otherwise, let's stop spawning more for a while. */
+                        log_warning("Worker threads requested too frequently, not starting new ones for a while.");
+
+                        if (!m->deferred_start_worker_event_source) {
+                                r = sd_event_add_time(
+                                                m->event,
+                                                &m->deferred_start_worker_event_source,
+                                                CLOCK_MONOTONIC,
+                                                ratelimit_end(&m->worker_ratelimit),
+                                                /* accuracy_usec= */ 0,
+                                                on_deferred_start_worker,
+                                                m);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to allocate deferred start worker event source: %m");
+                        }
+
+                        break;
                 }
 
                 r = start_one_worker(m);
@@ -262,7 +277,7 @@ int manager_startup(Manager *m) {
         if (n == 1)
                 m->listen_fd = SD_LISTEN_FDS_START;
         else {
-                union sockaddr_union sockaddr = {
+                static const union sockaddr_union sockaddr = {
                         .un.sun_family = AF_UNIX,
                         .un.sun_path = "/run/systemd/userdb/io.systemd.Multiplexer",
                 };
@@ -291,7 +306,7 @@ int manager_startup(Manager *m) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to bind io.systemd.Multiplexer: %m");
 
-                if (listen(m->listen_fd, SOMAXCONN) < 0)
+                if (listen(m->listen_fd, SOMAXCONN_DELUXE) < 0)
                         return log_error_errno(errno, "Failed to listen on socket: %m");
         }
 
@@ -300,5 +315,5 @@ int manager_startup(Manager *m) {
         if (setsockopt(m->listen_fd, SOL_SOCKET, SO_RCVTIMEO, TIMEVAL_STORE(LISTEN_TIMEOUT_USEC), sizeof(struct timeval)) < 0)
                 return log_error_errno(errno, "Failed to se SO_RCVTIMEO: %m");
 
-        return start_workers(m, false);
+        return start_workers(m, /* explicit_request= */ false);
 }

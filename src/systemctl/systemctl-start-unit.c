@@ -175,8 +175,8 @@ fail:
                                            BUS_ERROR_UNIT_MASKED,
                                            BUS_ERROR_JOB_TYPE_NOT_APPLICABLE))
                 log_error("See %s logs and 'systemctl%s status%s %s' for details.",
-                          arg_scope == LOOKUP_SCOPE_SYSTEM ? "system" : "user",
-                          arg_scope == LOOKUP_SCOPE_SYSTEM ? "" : " --user",
+                          runtime_scope_to_string(arg_runtime_scope),
+                          arg_runtime_scope == RUNTIME_SCOPE_SYSTEM ? "" : " --user",
                           name[0] == '-' ? " --" : "",
                           name);
 
@@ -222,6 +222,7 @@ const struct action_metadata action_table[_ACTION_MAX] = {
         [ACTION_POWEROFF]               = { SPECIAL_POWEROFF_TARGET,               "poweroff",               "replace-irreversibly" },
         [ACTION_REBOOT]                 = { SPECIAL_REBOOT_TARGET,                 "reboot",                 "replace-irreversibly" },
         [ACTION_KEXEC]                  = { SPECIAL_KEXEC_TARGET,                  "kexec",                  "replace-irreversibly" },
+        [ACTION_SOFT_REBOOT]            = { SPECIAL_SOFT_REBOOT_TARGET,            "soft-reboot",            "replace-irreversibly" },
         [ACTION_RUNLEVEL2]              = { SPECIAL_MULTI_USER_TARGET,             NULL,                     "isolate"              },
         [ACTION_RUNLEVEL3]              = { SPECIAL_MULTI_USER_TARGET,             NULL,                     "isolate"              },
         [ACTION_RUNLEVEL4]              = { SPECIAL_MULTI_USER_TARGET,             NULL,                     "isolate"              },
@@ -249,7 +250,7 @@ static const char** make_extra_args(const char *extra_args[static 4]) {
 
         assert(extra_args);
 
-        if (arg_scope != LOOKUP_SCOPE_SYSTEM)
+        if (arg_runtime_scope != RUNTIME_SCOPE_SYSTEM)
                 extra_args[n++] = "--user";
 
         if (arg_transport == BUS_TRANSPORT_REMOTE) {

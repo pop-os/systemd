@@ -6,6 +6,7 @@
 #include "cgroup-util.h"
 #include "compress.h"
 #include "condition.h"
+#include "confidential-virt.h"
 #include "device-private.h"
 #include "device.h"
 #include "discover-image.h"
@@ -49,6 +50,7 @@ int main(int argc, char **argv) {
         test_table(collect_mode, COLLECT_MODE);
         test_table(condition_result, CONDITION_RESULT);
         test_table(condition_type, CONDITION_TYPE);
+        test_table(confidential_virtualization, CONFIDENTIAL_VIRTUALIZATION);
         test_table(device_action, SD_DEVICE_ACTION);
         test_table(device_state, DEVICE_STATE);
         test_table(dns_over_tls_mode, DNS_OVER_TLS_MODE);
@@ -95,6 +97,7 @@ int main(int argc, char **argv) {
         test_table(scope_state, SCOPE_STATE);
         test_table(service_exec_command, SERVICE_EXEC_COMMAND);
         test_table(service_restart, SERVICE_RESTART);
+        test_table(service_restart_mode, SERVICE_RESTART_MODE);
         test_table(service_result, SERVICE_RESULT);
         test_table(service_state, SERVICE_STATE);
         test_table(service_type, SERVICE_TYPE);

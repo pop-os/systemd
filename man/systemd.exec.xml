@@ -70,8 +70,12 @@
 
       <listitem><para>Units whose standard output or error output is connected to <option>journal</option> or
       <option>kmsg</option> (or their combinations with console output, see below) automatically acquire
-      dependencies of type <varname>After=</varname> on
-      <filename>systemd-journald.socket</filename>.</para></listitem>
+      dependencies of type <varname>After=</varname> on <filename>systemd-journald.socket</filename>.
+      </para></listitem>
+
+      <listitem><para>Units using the terminal (standard input, output, or error are connected to a terminal
+      or <varname>TTYPath=</varname> is used) automatically acquire an <varname>After=</varname> dependency
+      on <filename>systemd-vconsole-setup.service</filename>.</para></listitem>
 
       <listitem><para>Units using <varname>LogNamespace=</varname> will automatically gain ordering and
       requirement dependencies on the two socket units associated with
@@ -197,6 +201,26 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>RootEphemeral=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If enabled, executed processes will run in an ephemeral
+        copy of the root directory or root image. The ephemeral copy is placed in
+        <filename>/var/lib/systemd/ephemeral-trees/</filename> while the service is active and is cleaned up
+        when the service is stopped or restarted. If <varname>RootDirectory=</varname> is used and the root
+        directory is a subvolume, the ephemeral copy will be created by making a snapshot of the subvolume.
+        </para>
+
+        <para>To make sure making ephemeral copies can be made efficiently, the root directory or root image
+        should be located on the same filesystem as <filename>/var/lib/systemd/ephemeral-trees/</filename>.
+        When using <varname>RootEphemeral=</varname> with root directories, btrfs should be used as the
+        filesystem and the root directory should ideally be a subvolume which <command>systemd</command> can
+        snapshot to make the ephemeral copy. For root images, a filesystem with support for reflinks should
+        be used to ensure an efficient ephemeral copy.</para>
+
+        <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>RootHash=</varname></term>
 
         <listitem><para>Takes a data integrity (dm-verity) root hash specified in hexadecimal, or the path to a file
@@ -258,6 +282,30 @@
         url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable Partitions Specification</ulink>.</para>
 
         <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RootImagePolicy=</varname></term>
+        <term><varname>MountImagePolicy=</varname></term>
+        <term><varname>ExtensionImagePolicy=</varname></term>
+
+        <listitem><para>Takes an image policy string as per
+        <citerefentry><refentrytitle>systemd.image-policy</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        to use when mounting the disk images (DDI) specified in <varname>RootImage=</varname>,
+        <varname>MountImage=</varname>, <varname>ExtensionImage=</varname>, respectively. If not specified
+        the following policy string is the default for <varname>RootImagePolicy=</varname> and <varname>MountImagePolicy</varname>:</para>
+
+        <programlisting>root=verity+signed+encrypted+unprotected+absent: \
+        usr=verity+signed+encrypted+unprotected+absent: \
+        home=encrypted+unprotected+absent: \
+        srv=encrypted+unprotected+absent: \
+        tmp=encrypted+unprotected+absent: \
+        var=encrypted+unprotected+absent</programlisting>
+
+        <para>The default policy for <varname>ExtensionImagePolicy=</varname> is:</para>
+
+        <programlisting>root=verity+signed+encrypted+unprotected+absent: \
+        usr=verity+signed+encrypted+unprotected+absent</programlisting></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1095,13 +1143,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <constant>ppc</constant>, <constant>ppc-le</constant>, <constant>ppc64</constant>,
         <constant>ppc64-le</constant>, <constant>s390</constant> or <constant>s390x</constant>. Which
         personality architectures are supported depends on the kernel's native architecture. Usually the
-        64bit versions of the various system architectures support their immediate 32bit personality
+        64-bit versions of the various system architectures support their immediate 32-bit personality
         architecture counterpart, but no others. For example, <constant>x86-64</constant> systems support the
         <constant>x86-64</constant> and <constant>x86</constant> personalities but no others. The personality
         feature is useful when running 32-bit services on a 64-bit host system. If not specified, the
         personality is left unmodified and thus reflects the personality of the host system's kernel. This
         option is not useful on architectures for which only one native word width was ever available, such
-        as <constant>m68k</constant> (32bit only) or <constant>alpha</constant> (64bit only).</para></listitem>
+        as <constant>m68k</constant> (32-bit only) or <constant>alpha</constant> (64-bit only).</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1330,7 +1378,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
               <row>
                 <entry><varname>StateDirectory=</varname></entry>
                 <entry><filename>/var/lib/</filename></entry>
-                <entry><varname>$XDG_CONFIG_HOME</varname></entry>
+                <entry><varname>$XDG_STATE_HOME</varname></entry>
                 <entry><varname>$STATE_DIRECTORY</varname></entry>
               </row>
               <row>
@@ -1342,7 +1390,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
               <row>
                 <entry><varname>LogsDirectory=</varname></entry>
                 <entry><filename>/var/log/</filename></entry>
-                <entry><varname>$XDG_CONFIG_HOME</varname><filename>/log/</filename></entry>
+                <entry><varname>$XDG_STATE_HOME</varname><filename>/log/</filename></entry>
                 <entry><varname>$LOGS_DIRECTORY</varname></entry>
               </row>
               <row>
@@ -1399,7 +1447,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         The second parameter will be interpreted as a destination path that will be created as a symlink to the directory.
         The symlinks will be created after any <varname>BindPaths=</varname> or <varname>TemporaryFileSystem=</varname>
         options have been set up, to make ephemeral symlinking possible. The same source can have multiple symlinks, by
-        using the same first parameter, but a different second parameter.</para></listitem>
+        using the same first parameter, but a different second parameter.</para>
 
         <para>The directories defined by these options are always created under the standard paths used by systemd
         (<filename>/var/</filename>, <filename>/run/</filename>, <filename>/etc/</filename>, …). If the service needs
@@ -1435,7 +1483,7 @@ StateDirectory=aaa/bbb ccc</programlisting>
         <programlisting>RuntimeDirectory=foo:bar foo:baz</programlisting>
         the service manager creates <filename index='false'>/run/foo</filename> (if it does not exist), and
         <filename index='false'>/run/bar</filename> plus <filename index='false'>/run/baz</filename> as symlinks to
-        <filename index='false'>/run/foo</filename>.</para>
+        <filename index='false'>/run/foo</filename>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1663,6 +1711,10 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         not available), and the unit should be written in a way that does not solely rely on this setting for
         security.</para>
 
+        <para>When this option is enabled, <varname>PrivateMounts=</varname> is implied unless it is
+        explicitly disabled, and <filename>/sys</filename> will be remounted to associate it with the new
+        network namespace.</para>
+
         <para>When this option is used on a socket unit any sockets bound on behalf of this unit will be
         bound within a private network namespace. This may be combined with
         <varname>JoinsNamespaceOf=</varname> to listen on sockets inside of network namespaces of other
@@ -1683,6 +1735,10 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         the listed units that have <varname>PrivateNetwork=</varname> or
         <varname>NetworkNamespacePath=</varname> configured, as otherwise the network namespace of those
         units is reused.</para>
+
+        <para>When this option is enabled, <varname>PrivateMounts=</varname> is implied unless it is
+        explicitly disabled, and <filename>/sys</filename> will be remounted to associate it with the new
+        network namespace.</para>
 
         <para>When this option is used on a socket unit any sockets bound on behalf of this unit will be
         bound within the specified network namespace.</para>
@@ -1735,6 +1791,22 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         units is reused.</para>
 
         <xi:include href="system-or-user-ns.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryKSM=</varname></term>
+
+        <listitem><para>Takes a boolean argument. When set, it enables KSM (kernel samepage merging) for
+        the processes. KSM is a memory-saving de-duplication feature. Anonymous memory pages with identical
+        content can be replaced by a single write-protected page. This feature should only be enabled for
+        jobs that share the same security domain. For details, see
+        <ulink url="https://docs.kernel.org/admin-guide/mm/ksm.html">Kernel Samepage Merging</ulink> in the
+        kernel documentation.</para>
+
+        <para>Note that this functionality might not be available, for example if KSM is disabled in the
+        kernel, or the kernel doesn't support controlling KSM at the process level through
+        <function>prctl()</function>.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2077,9 +2149,11 @@ RestrictNamespaces=~cgroup net</programlisting>
 
         <listitem><para>Takes a boolean argument. If set, attempts to create memory mappings that are writable and
         executable at the same time, or to change existing memory mappings to become executable, or mapping shared
-        memory segments as executable, are prohibited. Specifically, a system call filter is added that rejects
-        <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with both
-        <constant>PROT_EXEC</constant> and <constant>PROT_WRITE</constant> set,
+        memory segments as executable, are prohibited. Specifically, a system call filter is added (or
+        preferably, an equivalent kernel check is enabled with
+        <citerefentry><refentrytitle>prctl</refentrytitle><manvolnum>2</manvolnum></citerefentry>) that
+        rejects <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        system calls with both <constant>PROT_EXEC</constant> and <constant>PROT_WRITE</constant> set,
         <citerefentry><refentrytitle>mprotect</refentrytitle><manvolnum>2</manvolnum></citerefentry> or
         <citerefentry><refentrytitle>pkey_mprotect</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls
         with <constant>PROT_EXEC</constant> set and
@@ -2346,6 +2420,10 @@ RestrictNamespaces=~cgroup net</programlisting>
                 <entry>Unusual, obsolete or unimplemented (<citerefentry project='man-pages'><refentrytitle>create_module</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>gtty</refentrytitle><manvolnum>2</manvolnum></citerefentry>, …)</entry>
               </row>
               <row>
+                <entry>@pkey</entry>
+                <entry>System calls that deal with memory protection keys (<citerefentry project='man-pages'><refentrytitle>pkeys</refentrytitle><manvolnum>7</manvolnum></citerefentry>)</entry>
+              </row>
+              <row>
                 <entry>@privileged</entry>
                 <entry>All system calls which need super-user capabilities (<citerefentry project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry>)</entry>
               </row>
@@ -2364,6 +2442,10 @@ RestrictNamespaces=~cgroup net</programlisting>
               <row>
                 <entry>@resources</entry>
                 <entry>System calls for changing resource limits, memory and scheduling parameters (<citerefentry project='man-pages'><refentrytitle>setrlimit</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>setpriority</refentrytitle><manvolnum>2</manvolnum></citerefentry>, …)</entry>
+              </row>
+              <row>
+                <entry>@sandbox</entry>
+                <entry>System calls for sandboxing programs (<citerefentry project='man-pages'><refentrytitle>seccomp</refentrytitle><manvolnum>2</manvolnum></citerefentry>, Landlock system calls, …)</entry>
               </row>
               <row>
                 <entry>@setuid</entry>
@@ -2904,8 +2986,8 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         <term><varname>LogExtraFields=</varname></term>
 
         <listitem><para>Configures additional log metadata fields to include in all log records generated by
-        processes associated with this unit. This setting takes one or more journal field assignments in the
-        format <literal>FIELD=VALUE</literal> separated by whitespace. See
+        processes associated with this unit, including systemd. This setting takes one or more journal field
+        assignments in the format <literal>FIELD=VALUE</literal> separated by whitespace. See
         <citerefentry><refentrytitle>systemd.journal-fields</refentrytitle><manvolnum>7</manvolnum></citerefentry>
         for details on the journal field concept. Even though the underlying journal implementation permits
         binary field values, this setting accepts only valid UTF-8 values. To include space characters in a
@@ -3192,18 +3274,21 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         11) with a prefix of <literal>io.systemd.credential:</literal> or
         <literal>io.systemd.credential.binary:</literal>. In both cases a key/value pair separated by
         <literal>=</literal> is expected, in the latter case the right-hand side is Base64 decoded when
-        parsed (thus permitting binary data to be passed in). Example
-        <ulink url="https://www.qemu.org/docs/master/system/index.html">qemu</ulink>
-        switch: <literal>-smbios
+        parsed (thus permitting binary data to be passed in). Example <ulink
+        url="https://www.qemu.org/docs/master/system/index.html">qemu</ulink> switch: <literal>-smbios
         type=11,value=io.systemd.credential:xx=yy</literal>, or <literal>-smbios
         type=11,value=io.systemd.credential.binary:rick=TmV2ZXIgR29ubmEgR2l2ZSBZb3UgVXA=</literal>. Alternatively,
         use the <command>qemu</command> <literal>fw_cfg</literal> node
-        <literal>opt/io.systemd.credentials/</literal>. Example <command>qemu</command> switch: <literal>-fw_cfg
-        name=opt/io.systemd.credentials/mycred,string=supersecret</literal>. They may also be specified on
-        the kernel command line using the <literal>systemd.set_credential=</literal> switch (see
-        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>) and from
-        the UEFI firmware environment via
-        <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>.</para>
+        <literal>opt/io.systemd.credentials/</literal>. Example <command>qemu</command> switch:
+        <literal>-fw_cfg name=opt/io.systemd.credentials/mycred,string=supersecret</literal>. They may also
+        be passed from the UEFI firmware environment via
+        <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+        from the initrd (see
+        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>), or be
+        specified on the kernel command line using the <literal>systemd.set_credential=</literal> and
+        <literal>systemd.set_credential_binary=</literal> switches (see
+        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry> – this is
+        not recommended since unprivileged userspace can read the kernel command line). </para>
 
         <para>If referencing an <constant>AF_UNIX</constant> stream socket to connect to, the connection will
         originate from an abstract namespace socket, that includes information about the unit and the
@@ -3222,6 +3307,31 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
 
         <para>For further information see <ulink url="https://systemd.io/CREDENTIALS">System and Service
         Credentials</ulink> documentation.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ImportCredential=</varname><replaceable>GLOB</replaceable></term>
+
+        <listitem><para>Pass one or more credentials to the unit. Takes a credential name for which we'll
+        attempt to find a credential that the service manager itself received under the specified name —
+        which may be used to propagate credentials from an invoking environment (e.g. a container manager
+        that invoked the service manager) into a service. If the credential name is a glob, all credentials
+        matching the glob are passed to the unit. Matching credentials are searched for in the system
+        credentials, the encrypted system credentials, and under <filename>/etc/credstore/</filename>,
+        <filename>/run/credstore/</filename>, <filename>/usr/lib/credstore/</filename>,
+        <filename>/run/credstore.encrypted/</filename>, <filename>/etc/credstore.encrypted/</filename>, and
+        <filename>/usr/lib/credstore.encrypted/</filename> in that order. When multiple credentials of the
+        same name are found, the first one found is used.</para>
+
+        <para>The globbing expression implements a restrictive subset of <citerefentry
+        project='man-pages'><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>: only
+        a single trailing <literal>*</literal> wildcard may be specified. Both <literal>?</literal> and
+        <literal>[]</literal> wildcards are not permitted, nor are <literal>*</literal> wildcards anywhere
+        except at the end of the glob expression.</para>
+
+        <para>When multiple credentials of the same name are found, credentials found by
+        <varname>LoadCredential=</varname> and <varname>LoadCredentialEncrypted=</varname> take priority over
+        credentials found by <varname>ImportCredential=</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -3245,10 +3355,13 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         directly from plaintext credentials. For further details see
         <varname>LoadCredentialEncrypted=</varname> above.</para>
 
-        <para>If a credential of the same ID is listed in both <varname>LoadCredential=</varname> and
-        <varname>SetCredential=</varname>, the latter will act as default if the former cannot be
-        retrieved. In this case not being able to retrieve the credential from the path specified in
-        <varname>LoadCredential=</varname> is not considered fatal.</para></listitem>
+        <para>When multiple credentials of the same name are found, credentials found by
+        <varname>LoadCredential=</varname>, <varname>LoadCredentialEncrypted=</varname> and
+        <varname>ImportCredential=</varname> take priority over credentials found by
+        <varname>SetCredential=</varname>. As such, <varname>SetCredential=</varname> will act as default if
+        no credentials are found by any of the former. In this case not being able to retrieve the credential
+        from the path specified in <varname>LoadCredential=</varname> or
+        <varname>LoadCredentialEncrypted=</varname> is not considered fatal.</para></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -3395,7 +3508,7 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         <varlistentry>
           <term><varname>$INVOCATION_ID</varname></term>
 
-          <listitem><para>Contains a randomized, unique 128bit ID identifying each runtime cycle of the unit, formatted
+          <listitem><para>Contains a randomized, unique 128-bit ID identifying each runtime cycle of the unit, formatted
           as 32 character hexadecimal string. A new ID is assigned each time the unit changes from an inactive state into
           an activating or active state, and may be used to identify this specific runtime cycle, in particular in data
           stored offline, such as the journal. The same ID is passed to all processes run as part of the
@@ -3430,10 +3543,10 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
           <term><varname>$CREDENTIALS_DIRECTORY</varname></term>
 
           <listitem><para>An absolute path to the per-unit directory with credentials configured via
-          <varname>LoadCredential=</varname>/<varname>SetCredential=</varname>. The directory is marked
-          read-only and is placed in unswappable memory (if supported and permitted), and is only accessible to
-          the UID associated with the unit via <varname>User=</varname> or <varname>DynamicUser=</varname> (and
-          the superuser).</para></listitem>
+          <varname>ImportCredential=</varname>/<varname>LoadCredential=</varname>/<varname>SetCredential=</varname>.
+          The directory is marked read-only and is placed in unswappable memory (if supported and permitted),
+          and is only accessible to the UID associated with the unit via <varname>User=</varname> or
+          <varname>DynamicUser=</varname> (and the superuser).</para></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -3465,8 +3578,7 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         <varlistentry>
           <term><varname>$NOTIFY_SOCKET</varname></term>
 
-          <listitem><para>The socket
-          <function>sd_notify()</function> talks to. See
+          <listitem><para>The socket <function>sd_notify()</function> talks to. See
           <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
           </para></listitem>
         </varlistentry>
@@ -3755,6 +3867,15 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
         </varlistentry>
 
         <varlistentry>
+          <term><varname>$REMOTE_ADDR</varname></term>
+          <term><varname>$REMOTE_PORT</varname></term>
+
+          <listitem><para>If this is a unit started via per-connection socket activation (i.e. via a socket
+          unit with <varname>Accept=yes</varname>), these environment variables contain the IP address and
+          port number of the remote peer of the socket connection.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><varname>$TRIGGER_UNIT</varname></term>
           <term><varname>$TRIGGER_PATH</varname></term>
           <term><varname>$TRIGGER_TIMER_REALTIME_USEC</varname></term>
@@ -3767,6 +3888,29 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
           Because of this, in most cases this variable will be primarily informational, i.e. useful for debugging
           purposes, is lossy, and should not be relied upon to propagate a comprehensive reason for activation.
           </para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>$MEMORY_PRESSURE_WATCH</varname></term>
+          <term><varname>$MEMORY_PRESSURE_WRITE</varname></term>
+
+          <listitem><para>If memory pressure monitoring is enabled for this service unit, the path to watch
+          and the data to write into it. See <ulink url="https://systemd.io/MEMORY_PRESSURE">Memory Pressure
+          Handling</ulink> for details about these variables and the service protocol data they
+          convey.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>$FDSTORE</varname></term>
+
+          <listitem><para>If the file descriptor store is enabled for a service
+          (i.e. <varname>FileDescriptorStoreMax=</varname> is set to a non-zero value, see
+          <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+          for details), this environment variable will be set to the maximum number of permitted entries, as
+          per the setting. Applications may check this environment variable before sending file descriptors
+          to the service manager via <function>sd_pid_notify_with_fds()</function> (see
+          <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry> for
+          details).</para></listitem>
         </varlistentry>
 
       </variablelist>
@@ -4091,7 +4235,7 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
           <row>
             <entry>243</entry>
             <entry><constant>EXIT_CREDENTIALS</constant></entry>
-            <entry>Failed to set up unit's credentials. See <varname>LoadCredential=</varname> and <varname>SetCredential=</varname> above.</entry>
+            <entry>Failed to set up unit's credentials. See <varname>ImportCredential=</varname>, <varname>LoadCredential=</varname> and <varname>SetCredential=</varname> above.</entry>
           </row>
           <row>
             <entry>245</entry>

@@ -15,6 +15,7 @@
 
 #include "alloc-util.h"
 #include "build.h"
+#include "bus-locator.h"
 #include "bus-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -30,6 +31,7 @@
 #include "parse-util.h"
 #include "pretty-print.h"
 #include "sigbus.h"
+#include "signal-util.h"
 #include "tmpfile-util.h"
 
 #define JOURNAL_WAIT_TIMEOUT (10*USEC_PER_SEC)
@@ -329,7 +331,7 @@ static int request_parse_range(
                                 return r;
                 }
 
-                p = (colon2 ? colon2 : colon) + 1;
+                p = (colon2 ?: colon) + 1;
                 if (*p) {
                         r = safe_atou64(p, &m->n_entries);
                         if (r < 0)
@@ -704,14 +706,7 @@ static int get_virtualization(char **v) {
         if (r < 0)
                 return r;
 
-        r = sd_bus_get_property_string(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "Virtualization",
-                        NULL,
-                        &b);
+        r = bus_get_property_string(bus, bus_systemd_mgr, "Virtualization", NULL, &b);
         if (r < 0)
                 return r;
 
@@ -1010,11 +1005,15 @@ static int parse_argv(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(MHD_stop_daemonp) struct MHD_Daemon *d = NULL;
+        static const struct sigaction sigterm = {
+                .sa_handler = nop_signal_handler,
+                .sa_flags = SA_RESTART,
+        };
         struct MHD_OptionItem opts[] = {
-                { MHD_OPTION_NOTIFY_COMPLETED,
-                  (intptr_t) request_meta_free, NULL },
                 { MHD_OPTION_EXTERNAL_LOGGER,
                   (intptr_t) microhttpd_logger, NULL },
+                { MHD_OPTION_NOTIFY_COMPLETED,
+                  (intptr_t) request_meta_free, NULL },
                 { MHD_OPTION_END, 0, NULL },
                 { MHD_OPTION_END, 0, NULL },
                 { MHD_OPTION_END, 0, NULL },
@@ -1046,6 +1045,7 @@ static int run(int argc, char *argv[]) {
                 return r;
 
         sigbus_install();
+        assert_se(sigaction(SIGTERM, &sigterm, NULL) >= 0);
 
         r = setup_gnutls_logger(NULL);
         if (r < 0)

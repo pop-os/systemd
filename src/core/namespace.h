@@ -55,13 +55,13 @@ typedef enum ProcSubset {
 struct NamespaceInfo {
         bool ignore_protect_paths;
         bool private_dev;
-        bool private_mounts;
         bool protect_control_groups;
         bool protect_kernel_tunables;
         bool protect_kernel_modules;
         bool protect_kernel_logs;
         bool mount_apivfs;
         bool protect_hostname;
+        bool private_network;
         bool private_ipc;
         bool mount_nosuid;
         ProtectHome protect_home;
@@ -103,6 +103,7 @@ int setup_namespace(
                 const char *root_directory,
                 const char *root_image,
                 const MountOptions *root_image_options,
+                const ImagePolicy *root_image_policy,
                 const NamespaceInfo *ns_info,
                 char **read_write_paths,
                 char **read_only_paths,
@@ -117,20 +118,16 @@ int setup_namespace(
                 size_t n_temporary_filesystems,
                 const MountImage *mount_images,
                 size_t n_mount_images,
+                const ImagePolicy *mount_image_policy,
                 const char *tmp_dir,
                 const char *var_tmp_dir,
                 const char *creds_path,
                 const char *log_namespace,
-                unsigned long mount_flags,
-                const void *root_hash,
-                size_t root_hash_size,
-                const char *root_hash_path,
-                const void *root_hash_sig,
-                size_t root_hash_sig_size,
-                const char *root_hash_sig_path,
-                const char *root_verity,
+                unsigned long mount_propagation_flag,
+                VeritySettings *verity,
                 const MountImage *extension_images,
                 size_t n_extension_images,
+                const ImagePolicy *extension_image_policy,
                 char **extension_directories,
                 const char *propagate_dir,
                 const char *incoming_dir,
@@ -153,8 +150,8 @@ int setup_tmp_dirs(
                 char **tmp_dir,
                 char **var_tmp_dir);
 
-int setup_shareable_ns(const int ns_storage_socket[static 2], unsigned long nsflag);
-int open_shareable_ns_path(const int netns_storage_socket[static 2], const char *path, unsigned long nsflag);
+int setup_shareable_ns(int ns_storage_socket[static 2], unsigned long nsflag);
+int open_shareable_ns_path(int netns_storage_socket[static 2], const char *path, unsigned long nsflag);
 
 const char* protect_home_to_string(ProtectHome p) _const_;
 ProtectHome protect_home_from_string(const char *s) _pure_;

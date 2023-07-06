@@ -28,7 +28,6 @@ foreach section : ['Automount', 'Mount', 'Path', 'Scope', 'Service', 'Slice', 'S
                 capture: true)
 endforeach
 
-
 ############################################################
 
 sanitize_address_undefined = custom_target(
@@ -50,7 +49,7 @@ sanitize_address_undefined = custom_target(
 fuzz_sanitizers = [['address,undefined', sanitize_address_undefined]]
 fuzz_testsdir = 'test/fuzz'
 
-if git.found() and fs.exists(project_source_root / '.git')
+if git.found() and fs.is_dir(project_source_root / '.git')
         out = run_command(env, '-u', 'GIT_WORK_TREE',
                           git, '--git-dir=@0@/.git'.format(project_source_root),
                           'ls-files', ':/@0@/*/*'.format(fuzz_testsdir),
@@ -83,8 +82,8 @@ foreach p : out.stdout().split()
         if p.contains('\\')
                 continue
         endif
-        fuzzer = p.split('/')[-2]
-        fuzz_in = p.split('/')[-1]
+        fuzzer = fs.name(fs.parent(p))
+        fuzz_in = fs.name(p)
         if fuzzer not in fuzz_regression_tests
                 fuzz_regression_tests += {fuzzer: []}
         endif

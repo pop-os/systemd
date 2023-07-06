@@ -236,7 +236,7 @@
             <literal>MONOTONIC_USEC=</literal> set to the current monotonic time
             (i.e. <constant>CLOCK_MONOTONIC</constant> in
             <citerefentry><refentrytitle>clock_gettime</refentrytitle><manvolnum>2</manvolnum></citerefentry>)
-            in µs, formatted as decimal string. Once reloading is complete another notification message must
+            in μs, formatted as decimal string. Once reloading is complete another notification message must
             be sent, containing <literal>READY=1</literal>. Using this service type and implementing this
             reload protocol is an efficient alternative to providing an <varname>ExecReload=</varname>
             command for reloading of the service's configuration.</para></listitem>
@@ -356,11 +356,8 @@
 
       <varlistentry>
         <term><varname>ExecStart=</varname></term>
-        <listitem><para>Commands with their arguments that are
-        executed when this service is started. The value is split into
-        zero or more command lines according to the rules described
-        below (see section "Command Lines" below).
-        </para>
+        <listitem><para>Commands that are executed when this service is started. The value is split into zero
+        or more command lines according to the rules described in the section "Command Lines" below.</para>
 
         <para>Unless <varname>Type=</varname> is <option>oneshot</option>, exactly one command must be given. When
         <varname>Type=oneshot</varname> is used, zero or more commands may be specified. Commands may be specified by
@@ -370,66 +367,6 @@
         specified, then the service must have <varname>RemainAfterExit=yes</varname> and at least one
         <varname>ExecStop=</varname> line set. (Services lacking both <varname>ExecStart=</varname> and
         <varname>ExecStop=</varname> are not valid.)</para>
-
-        <para>For each of the specified commands, the first argument must be either an absolute path to an executable
-        or a simple file name without any slashes. Optionally, this filename may be prefixed with a number of special
-        characters:</para>
-
-        <table>
-          <title>Special executable prefixes</title>
-
-          <tgroup cols='2'>
-            <colspec colname='prefix'/>
-            <colspec colname='meaning'/>
-
-            <thead>
-              <row>
-                <entry>Prefix</entry>
-                <entry>Effect</entry>
-              </row>
-            </thead>
-            <tbody>
-              <row>
-                <entry><literal>@</literal></entry>
-                <entry>If the executable path is prefixed with <literal>@</literal>, the second specified token will be passed as <literal>argv[0]</literal> to the executed process (instead of the actual filename), followed by the further arguments specified.</entry>
-              </row>
-
-              <row>
-                <entry><literal>-</literal></entry>
-                <entry>If the executable path is prefixed with <literal>-</literal>, an exit code of the command normally considered a failure (i.e. non-zero exit status or abnormal exit due to signal) is recorded, but has no further effect and is considered equivalent to success.</entry>
-              </row>
-
-              <row>
-                <entry><literal>:</literal></entry>
-                <entry>If the executable path is prefixed with <literal>:</literal>, environment variable substitution (as described by the "Command Lines" section below) is not applied.</entry>
-              </row>
-
-              <row>
-                <entry><literal>+</literal></entry>
-                <entry>If the executable path is prefixed with <literal>+</literal> then the process is executed with full privileges. In this mode privilege restrictions configured with <varname>User=</varname>, <varname>Group=</varname>, <varname>CapabilityBoundingSet=</varname> or the various file system namespacing options (such as <varname>PrivateDevices=</varname>, <varname>PrivateTmp=</varname>) are not applied to the invoked command line (but still affect any other <varname>ExecStart=</varname>, <varname>ExecStop=</varname>, … lines). However, note that this will not bypass options that apply to the whole control group, such as <varname>DevicePolicy=</varname>, see <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry> for the full list.</entry>
-              </row>
-
-              <row>
-                <entry><literal>!</literal></entry>
-
-                <entry>Similar to the <literal>+</literal> character discussed above this permits invoking command lines with elevated privileges. However, unlike <literal>+</literal> the <literal>!</literal> character exclusively alters the effect of <varname>User=</varname>, <varname>Group=</varname> and <varname>SupplementaryGroups=</varname>, i.e. only the stanzas that affect user and group credentials. Note that this setting may be combined with <varname>DynamicUser=</varname>, in which case a dynamic user/group pair is allocated before the command is invoked, but credential changing is left to the executed process itself.</entry>
-              </row>
-
-              <row>
-                <entry><literal>!!</literal></entry>
-
-                <entry>This prefix is very similar to <literal>!</literal>, however it only has an effect on systems lacking support for ambient process capabilities, i.e. without support for <varname>AmbientCapabilities=</varname>. It's intended to be used for unit files that take benefit of ambient capabilities to run processes with minimal privileges wherever possible while remaining compatible with systems that lack ambient capabilities support. Note that when <literal>!!</literal> is used, and a system lacking ambient capability support is detected any configured <varname>SystemCallFilter=</varname> and <varname>CapabilityBoundingSet=</varname> stanzas are implicitly modified, in order to permit spawned processes to drop credentials and capabilities themselves, even if this is configured to not be allowed. Moreover, if this prefix is used and a system lacking ambient capability support is detected <varname>AmbientCapabilities=</varname> will be skipped and not be applied. On systems supporting ambient capabilities, <literal>!!</literal> has no effect and is redundant.</entry>
-              </row>
-            </tbody>
-          </tgroup>
-        </table>
-
-        <para><literal>@</literal>, <literal>-</literal>, <literal>:</literal>, and one of
-        <literal>+</literal>/<literal>!</literal>/<literal>!!</literal> may be used together and they can appear in any
-        order. However, only one of <literal>+</literal>, <literal>!</literal>, <literal>!!</literal> may be used at a
-        time. Note that these prefixes are also supported for the other command line settings,
-        i.e. <varname>ExecStartPre=</varname>, <varname>ExecStartPost=</varname>, <varname>ExecReload=</varname>,
-        <varname>ExecStop=</varname> and <varname>ExecStopPost=</varname>.</para>
 
         <para>If more than one command is specified, the commands are
         invoked sequentially in the order they appear in the unit
@@ -608,6 +545,25 @@
         a service (as configured with <varname>Restart=</varname>).
         Takes a unit-less value in seconds, or a time span value such
         as "5min 20s". Defaults to 100ms.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RestartSteps=</varname></term>
+        <listitem><para>Configures the number of steps to take to increase the interval
+        of auto-restarts from <varname>RestartSec=</varname> to <varname>RestartMaxDelaySec=</varname>.
+        Takes a positive integer or 0 to disable it. Defaults to 0.</para>
+
+        <para>This setting is effective only if <varname>RestartMaxDelaySec=</varname> is also set.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RestartMaxDelaySec=</varname></term>
+        <listitem><para>Configures the longest time to sleep before restarting a service
+        as the interval goes up with <varname>RestartSteps=</varname>. Takes a value
+        in the same format as <varname>RestartSec=</varname>, or <literal>infinity</literal>
+        to disable the setting. Defaults to <literal>infinity</literal>.</para>
+
+        <para>This setting is effective only if <varname>RestartSteps=</varname> is also set.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -942,6 +898,28 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>RestartMode=</varname></term>
+
+        <listitem>
+          <para>Takes a string value that specifies how a service should restart:
+            <itemizedlist>
+              <listitem><para>If set to <option>normal</option> (the default), the service restarts by
+              going through a failed/inactive state.</para></listitem>
+
+              <listitem><para>If set to <option>direct</option>, the service transitions to the activating
+              state directly during auto-restart, skipping failed/inactive state.
+              <varname>ExecStopPost=</varname> is invoked.
+              <varname>OnSuccess=</varname> and <varname>OnFailure=</varname> are skipped.</para></listitem>
+            </itemizedlist>
+          </para>
+
+          <para>This option is useful in cases where a dependency can fail temporarily
+          but we don't want these temporary failures to make the dependent units fail.
+          When this option is set to <option>direct</option>, dependent units are not notified of these temporary failures.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>SuccessExitStatus=</varname></term>
 
         <listitem><para>Takes a list of exit status definitions that, when returned by the main service
@@ -1109,7 +1087,7 @@
         <literal>FDSTORE=1</literal> messages. This is useful for implementing services that can restart
         after an explicit request or a crash without losing state. Any open sockets and other file
         descriptors which should not be closed during the restart may be stored this way. Application state
-        can either be serialized to a file in <filename>/run/</filename>, or better, stored in a
+        can either be serialized to a file in <varname>RuntimeDirectory=</varname>, or stored in a
         <citerefentry><refentrytitle>memfd_create</refentrytitle><manvolnum>2</manvolnum></citerefentry>
         memory file descriptor. Defaults to 0, i.e. no file descriptors may be stored in the service
         manager. All file descriptors passed to the service manager from a specific service are passed back
@@ -1118,10 +1096,43 @@
         details about the precise protocol used and the order in which the file descriptors are passed). Any
         file descriptors passed to the service manager are automatically closed when
         <constant>POLLHUP</constant> or <constant>POLLERR</constant> is seen on them, or when the service is
-        fully stopped and no job is queued or being executed for it. If this option is used,
+        fully stopped and no job is queued or being executed for it (the latter can be tweaked with
+        <varname>FileDescriptorStorePreserve=</varname>, see below). If this option is used,
         <varname>NotifyAccess=</varname> (see above) should be set to open access to the notification socket
         provided by systemd. If <varname>NotifyAccess=</varname> is not set, it will be implicitly set to
-        <option>main</option>.</para></listitem>
+        <option>main</option>.</para>
+
+        <para>The <command>fdstore</command> command of
+        <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        may be used to list the current contents of a service's file descriptor store.</para>
+
+        <para>Note that the service manager will only pass file descriptors contained in the file descriptor
+        store to the service's own processes, never to other clients via IPC or similar. However, it does
+        allow unprivileged clients to query the list of currently open file descriptors of a
+        service. Sensitive data may hence be safely placed inside the referenced files, but should not be
+        attached to the metadata (e.g. included in filenames) of the stored file
+        descriptors.</para>
+
+        <para>If this option is set to a non-zero value the <varname>$FDSTORE</varname> environment variable
+        will be set for processes invoked for this service. See
+        <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+        details.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>FileDescriptorStorePreserve=</varname></term>
+        <listitem><para>Takes one of <constant>no</constant>, <constant>yes</constant>,
+        <constant>restart</constant> and controls when to release the service's file descriptor store
+        (i.e. when to close the contained file descriptors, if any). If set to <constant>no</constant> the
+        file descriptor store is automatically released when the service is stopped; if
+        <constant>restart</constant> (the default) it is kept around as long as the unit is neither inactive
+        nor failed, or a job is queued for the service, or the service is expected to be restarted. If
+        <constant>yes</constant> the file descriptor store is kept around until the unit is removed from
+        memory (i.e. is not referenced anymore and inactive). The latter is useful to keep entries in the
+        file descriptor store pinned until the service manage exits.</para>
+
+        <para>Use <command>systemctl clean --what=fdstore …</command> to release the file descriptor store
+        explicitly.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1264,6 +1275,73 @@
 
     <para>The command to execute may contain spaces, but control characters are not allowed.</para>
 
+    <para>Each command may be prefixed with a number of special characters:</para>
+
+    <table>
+      <title>Special executable prefixes</title>
+
+      <tgroup cols='2'>
+        <colspec colname='prefix'/>
+        <colspec colname='meaning'/>
+
+        <thead>
+          <row>
+            <entry>Prefix</entry>
+            <entry>Effect</entry>
+          </row>
+        </thead>
+        <tbody>
+          <row>
+            <entry><literal>@</literal></entry>
+            <entry>If the executable path is prefixed with <literal>@</literal>, the second specified token will be passed as <constant>argv[0]</constant> to the executed process (instead of the actual filename), followed by the further arguments specified.</entry>
+          </row>
+
+          <row>
+            <entry><literal>-</literal></entry>
+            <entry>If the executable path is prefixed with <literal>-</literal>, an exit code of the command normally considered a failure (i.e. non-zero exit status or abnormal exit due to signal) is recorded, but has no further effect and is considered equivalent to success.</entry>
+          </row>
+
+          <row>
+            <entry><literal>:</literal></entry>
+            <entry>If the executable path is prefixed with <literal>:</literal>, environment variable substitution (as described by the "Command Lines" section below) is not applied.</entry>
+          </row>
+
+          <row>
+            <entry><literal>+</literal></entry>
+            <entry>If the executable path is prefixed with <literal>+</literal> then the process is executed with full privileges. In this mode privilege restrictions configured with <varname>User=</varname>, <varname>Group=</varname>, <varname>CapabilityBoundingSet=</varname> or the various file system namespacing options (such as <varname>PrivateDevices=</varname>, <varname>PrivateTmp=</varname>) are not applied to the invoked command line (but still affect any other <varname>ExecStart=</varname>, <varname>ExecStop=</varname>, … lines). However, note that this will not bypass options that apply to the whole control group, such as <varname>DevicePolicy=</varname>, see <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry> for the full list.</entry>
+          </row>
+
+          <row>
+            <entry><literal>!</literal></entry>
+
+            <entry>Similar to the <literal>+</literal> character discussed above this permits invoking command lines with elevated privileges. However, unlike <literal>+</literal> the <literal>!</literal> character exclusively alters the effect of <varname>User=</varname>, <varname>Group=</varname> and <varname>SupplementaryGroups=</varname>, i.e. only the stanzas that affect user and group credentials. Note that this setting may be combined with <varname>DynamicUser=</varname>, in which case a dynamic user/group pair is allocated before the command is invoked, but credential changing is left to the executed process itself.</entry>
+          </row>
+
+          <row>
+            <entry><literal>!!</literal></entry>
+
+            <entry>This prefix is very similar to <literal>!</literal>, however it only has an effect on systems lacking support for ambient process capabilities, i.e. without support for <varname>AmbientCapabilities=</varname>. It's intended to be used for unit files that take benefit of ambient capabilities to run processes with minimal privileges wherever possible while remaining compatible with systems that lack ambient capabilities support. Note that when <literal>!!</literal> is used, and a system lacking ambient capability support is detected any configured <varname>SystemCallFilter=</varname> and <varname>CapabilityBoundingSet=</varname> stanzas are implicitly modified, in order to permit spawned processes to drop credentials and capabilities themselves, even if this is configured to not be allowed. Moreover, if this prefix is used and a system lacking ambient capability support is detected <varname>AmbientCapabilities=</varname> will be skipped and not be applied. On systems supporting ambient capabilities, <literal>!!</literal> has no effect and is redundant.</entry>
+          </row>
+        </tbody>
+      </tgroup>
+    </table>
+
+    <para><literal>@</literal>, <literal>-</literal>, <literal>:</literal>, and one of
+    <literal>+</literal>/<literal>!</literal>/<literal>!!</literal> may be used together and they can appear in any
+    order. However, only one of <literal>+</literal>, <literal>!</literal>, <literal>!!</literal> may be used at a
+    time.</para>
+
+    <para>For each command, the first argument must be either an absolute path to an executable or a simple
+    file name without any slashes. If the command is not a full (absolute) path, it will be resolved to a
+    full path using a fixed search path determined at compilation time. Searched directories include
+    <filename>/usr/local/bin/</filename>, <filename>/usr/bin/</filename>, <filename>/bin/</filename> on
+    systems using split <filename>/usr/bin/</filename> and <filename>/bin/</filename> directories, and their
+    <filename>sbin/</filename> counterparts on systems using split <filename>bin/</filename> and
+    <filename>sbin/</filename>. It is thus safe to use just the executable name in case of executables
+    located in any of the "standard" directories, and an absolute path must be used in other cases. Using an
+    absolute path is recommended to avoid ambiguity. Hint: this search path may be queried using
+    <command>systemd-path search-binaries-default</command>.</para>
+
     <para>The command line accepts <literal>%</literal> specifiers as described in
     <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
 
@@ -1277,17 +1355,6 @@
     variable split at whitespace, resulting in zero or more arguments.
     For this type of expansion, quotes are respected when splitting
     into words, and afterwards removed.</para>
-
-    <para>If the command is not a full (absolute) path, it will be resolved to a full path using a
-    fixed search path determined at compilation time. Searched directories include
-    <filename>/usr/local/bin/</filename>, <filename>/usr/bin/</filename>, <filename>/bin/</filename>
-    on systems using split <filename>/usr/bin/</filename> and <filename>/bin/</filename>
-    directories, and their <filename>sbin/</filename> counterparts on systems using split
-    <filename>bin/</filename> and <filename>sbin/</filename>. It is thus safe to use just the
-    executable name in case of executables located in any of the "standard" directories, and an
-    absolute path must be used in other cases. Using an absolute path is recommended to avoid
-    ambiguity. Hint: this search path may be queried using
-    <command>systemd-path search-binaries-default</command>.</para>
 
     <para>Example:</para>
 
@@ -1338,6 +1405,17 @@ ExecStart=/bin/echo $ONE $TWO $THREE</programlisting>
     each time with one argument: <literal>one</literal> and
     <literal>two two</literal>, respectively. Because two commands are
     specified, <varname>Type=oneshot</varname> must be used.</para>
+
+    <para>Example:</para>
+
+    <programlisting>Type=oneshot
+ExecStart=:echo $USER ; -false ; +:@true $TEST</programlisting>
+
+    <para>This will execute <command>/usr/bin/echo</command> with the literal argument
+    <literal>$USER</literal> (<literal>:</literal> suppresses variable expansion), and then
+    <command>/usr/bin/false</command> (the return value will be ignored because <literal>-</literal>
+    suppresses checking of the return value), and <command>/usr/bin/true</command> (with elevated privileges,
+    with <literal>$TEST</literal> as <constant>argv[0]</constant>).</para>
 
     <para>Example:</para>
 

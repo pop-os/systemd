@@ -12,6 +12,7 @@
 #include "hashmap.h"
 #include "list.h"
 #include "prioq.h"
+#include "runtime-scope.h"
 #include "socket-util.h"
 #include "time-util.h"
 
@@ -201,8 +202,6 @@ struct sd_bus {
         bool nodes_modified:1;
         bool trusted:1;
         bool manual_peer_interface:1;
-        bool is_system:1;
-        bool is_user:1;
         bool allow_interactive_authorization:1;
         bool exit_on_disconnect:1;
         bool exited:1;
@@ -214,6 +213,8 @@ struct sd_bus {
         bool attach_timestamp:1;
         bool connected_signal:1;
         bool close_on_exit:1;
+
+        RuntimeScope runtime_scope;
 
         signed int use_memfd:2;
 
@@ -266,6 +267,8 @@ struct sd_bus {
         char *label;
         gid_t *groups;
         size_t n_groups;
+        union sockaddr_union sockaddr_peer;
+        socklen_t sockaddr_size_peer;
 
         uint64_t creds_mask;
 
@@ -285,7 +288,7 @@ struct sd_bus {
         struct memfd_cache memfd_cache[MEMFD_CACHE_MAX];
         unsigned n_memfd_cache;
 
-        pid_t original_pid;
+        uint64_t origin_id;
         pid_t busexec_pid;
 
         unsigned iteration_counter;
@@ -376,7 +379,7 @@ int bus_seal_synthetic_message(sd_bus *b, sd_bus_message *m);
 
 int bus_rqueue_make_room(sd_bus *bus);
 
-bool bus_pid_changed(sd_bus *bus);
+bool bus_origin_changed(sd_bus *bus);
 
 char *bus_address_escape(const char *v);
 
@@ -385,6 +388,16 @@ int bus_attach_inotify_event(sd_bus *b);
 
 void bus_close_inotify_fd(sd_bus *b);
 void bus_close_io_fds(sd_bus *b);
+
+int bus_add_match_full(
+                sd_bus *bus,
+                sd_bus_slot **slot,
+                bool asynchronous,
+                const char *match,
+                sd_bus_message_handler_t callback,
+                sd_bus_message_handler_t install_callback,
+                void *userdata,
+                uint64_t timeout_usec);
 
 #define OBJECT_PATH_FOREACH_PREFIX(prefix, path)                        \
         for (char *_slash = ({ strcpy((prefix), (path)); streq((prefix), "/") ? NULL : strrchr((prefix), '/'); }) ; \
@@ -399,7 +412,7 @@ void bus_close_io_fds(sd_bus *b);
 int bus_set_address_system(sd_bus *bus);
 int bus_set_address_user(sd_bus *bus);
 int bus_set_address_system_remote(sd_bus *b, const char *host);
-int bus_set_address_machine(sd_bus *b, bool user, const char *machine);
+int bus_set_address_machine(sd_bus *b, RuntimeScope runtime_scope, const char *machine);
 
 int bus_maybe_reply_error(sd_bus_message *m, int r, sd_bus_error *error);
 

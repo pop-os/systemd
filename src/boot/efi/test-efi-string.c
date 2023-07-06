@@ -229,6 +229,8 @@ TEST(strchr8) {
         assert_se(strchr8(str, 'a') == &str[0]);
         assert_se(strchr8(str, 'c') == &str[2]);
         assert_se(strchr8(str, 'B') == &str[4]);
+
+        assert_se(strchr8(str, 0) == str + strlen8(str));
 }
 
 TEST(strchr16) {
@@ -240,6 +242,8 @@ TEST(strchr16) {
         assert_se(strchr16(str, 'a') == &str[0]);
         assert_se(strchr16(str, 'c') == &str[2]);
         assert_se(strchr16(str, 'B') == &str[4]);
+
+        assert_se(strchr16(str, 0) == str + strlen16(str));
 }
 
 TEST(xstrndup8) {
@@ -349,6 +353,18 @@ TEST(xstrn8_to_16) {
         assert_se(s = xstrn8_to_16("¶¶", 3));
         assert_se(streq16(s, u"¶"));
         free(s);
+}
+
+TEST(startswith8) {
+        assert_se(streq8(startswith8("", ""), ""));
+        assert_se(streq8(startswith8("x", ""), "x"));
+        assert_se(!startswith8("", "x"));
+        assert_se(!startswith8("", "xxxxxxxx"));
+        assert_se(streq8(startswith8("xxx", "x"), "xx"));
+        assert_se(streq8(startswith8("xxx", "xx"), "x"));
+        assert_se(streq8(startswith8("xxx", "xxx"), ""));
+        assert_se(!startswith8("xxx", "xxxx"));
+        assert_se(!startswith8(NULL, ""));
 }
 
 #define TEST_FNMATCH_ONE(pattern, haystack, expect)                                     \
@@ -466,6 +482,26 @@ TEST(parse_number16) {
         assert_se(parse_number16(u"54321rest", &u, &tail));
         assert_se(u == 54321);
         assert_se(streq16(tail, u"rest"));
+}
+
+TEST(test_hexdump) {
+        char16_t *hex;
+
+        hex = hexdump(NULL, 0);
+        assert(streq16(hex, u""));
+        free(hex);
+
+        hex = hexdump("1", 2);
+        assert(streq16(hex, u"3100"));
+        free(hex);
+
+        hex = hexdump("abc", 4);
+        assert(streq16(hex, u"61626300"));
+        free(hex);
+
+        hex = hexdump((uint8_t[]){ 0x0, 0x42, 0xFF, 0xF1, 0x1F }, 5);
+        assert(streq16(hex, u"0042fff11f"));
+        free(hex);
 }
 
 _printf_(1, 2) static void test_printf_one(const char *format, ...) {
@@ -608,6 +644,19 @@ TEST(xvasprintf_status) {
         assert_se(s = xasprintf_status(0x42, "%m"));
         assert_se(streq16(s, u"0x42"));
         s = mfree(s);
+}
+
+TEST(efi_memchr) {
+        assert_se(streq8(efi_memchr("abcde", 'c', 5), "cde"));
+        assert_se(streq8(efi_memchr("abcde", 'c', 3), "cde"));
+        assert_se(streq8(efi_memchr("abcde", 'c', 2), NULL));
+        assert_se(streq8(efi_memchr("abcde", 'c', 7), "cde"));
+        assert_se(streq8(efi_memchr("abcde", 'q', 5), NULL));
+        assert_se(streq8(efi_memchr("abcde", 'q', 0), NULL));
+        /* Test that the character is interpreted as unsigned char. */
+        assert_se(streq8(efi_memchr("abcde", 'a', 6), efi_memchr("abcde", 'a' + 0x100, 6)));
+        assert_se(streq8(efi_memchr("abcde", 0, 6), ""));
+        assert_se(efi_memchr(NULL, 0, 0) == NULL);
 }
 
 TEST(efi_memcmp) {

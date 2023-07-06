@@ -234,7 +234,7 @@ static int raw_import_finish(RawImport *i) {
 
                 if (S_ISREG(i->input_stat.st_mode)) {
                         (void) copy_times(i->input_fd, i->output_fd, COPY_CRTIME);
-                        (void) copy_xattr(i->input_fd, i->output_fd, 0);
+                        (void) copy_xattr(i->input_fd, NULL, i->output_fd, NULL, 0);
                 }
         }
 
@@ -335,7 +335,7 @@ static int raw_import_try_reflink(RawImport *i) {
         if ((uint64_t) p != (uint64_t) i->buffer_size)
                 return 0;
 
-        r = btrfs_reflink(i->input_fd, i->output_fd);
+        r = reflink(i->input_fd, i->output_fd);
         if (r >= 0)
                 return 1;
 

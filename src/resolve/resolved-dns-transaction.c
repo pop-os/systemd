@@ -69,7 +69,7 @@ static void dns_transaction_close_connection(
 
         t->dns_udp_event_source = sd_event_source_disable_unref(t->dns_udp_event_source);
 
-        /* If we have an UDP socket where we sent a packet, but never received one, then add it to the socket
+        /* If we have a UDP socket where we sent a packet, but never received one, then add it to the socket
          * graveyard, instead of closing it right away. That way it will stick around for a moment longer,
          * and the reply we might still get from the server will be eaten up instead of resulting in an ICMP
          * port unreachable error message. */
@@ -282,7 +282,6 @@ int dns_transaction_new(
                 .bypass = dns_packet_ref(bypass),
                 .current_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID,
                 .clamp_feature_level_servfail = _DNS_SERVER_FEATURE_LEVEL_INVALID,
-                .clamp_feature_level_nxdomain = _DNS_SERVER_FEATURE_LEVEL_INVALID,
                 .id = pick_new_id(s->manager),
         };
 
@@ -472,10 +471,8 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
 
         /* If we changed the server invalidate the feature level clamping, as the new server might have completely
          * different properties. */
-        if (server != t->server) {
+        if (server != t->server)
                 t->clamp_feature_level_servfail = _DNS_SERVER_FEATURE_LEVEL_INVALID;
-                t->clamp_feature_level_nxdomain = _DNS_SERVER_FEATURE_LEVEL_INVALID;
-        }
 
         t->current_feature_level = dns_server_possible_feature_level(server);
 
@@ -483,9 +480,6 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
         if (t->clamp_feature_level_servfail != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
             t->current_feature_level > t->clamp_feature_level_servfail)
                 t->current_feature_level = t->clamp_feature_level_servfail;
-        if (t->clamp_feature_level_nxdomain != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
-            t->current_feature_level > t->clamp_feature_level_nxdomain)
-                t->current_feature_level = t->clamp_feature_level_nxdomain;
 
         log_debug("Using feature level %s for transaction %u.", dns_server_feature_level_to_string(t->current_feature_level), t->id);
 
@@ -829,7 +823,8 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
                       t->answer_dnssec_result,
                       t->answer_nsec_ttl,
                       t->received->family,
-                      &t->received->sender);
+                      &t->received->sender,
+                      t->scope->manager->stale_retention_usec);
 }
 
 static bool dns_transaction_dnssec_is_live(DnsTransaction *t) {
@@ -1277,45 +1272,6 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p, bool encrypt
                 return;
         }
 
-        if (t->scope->protocol == DNS_PROTOCOL_DNS &&
-            !t->bypass &&
-            DNS_PACKET_RCODE(p) == DNS_RCODE_NXDOMAIN &&
-            p->opt && !DNS_PACKET_DO(p) &&
-            DNS_SERVER_FEATURE_LEVEL_IS_EDNS0(t->current_feature_level) &&
-            DNS_SERVER_FEATURE_LEVEL_IS_UDP(t->current_feature_level) &&
-            t->scope->dnssec_mode != DNSSEC_YES) {
-
-                /* Some captive portals are special in that the Aruba/Datavalet hardware will miss
-                 * replacing the packets with the local server IP to point to the authenticated side
-                 * of the network if EDNS0 is enabled. Instead they return NXDOMAIN, with DO bit set
-                 * to zero... nothing to see here, yet respond with the captive portal IP, when using
-                 * the more simple UDP level.
-                 *
-                 * Common portal names that fail like so are:
-                 *     secure.datavalet.io
-                 *     securelogin.arubanetworks.com
-                 *     securelogin.networks.mycompany.com
-                 *
-                 * Thus retry NXDOMAIN RCODES with a lower feature level.
-                 *
-                 * Do not lower the server's tracked feature level, as the captive portal should not
-                 * be lying for the wider internet (e.g. _other_ queries were observed fine with
-                 * EDNS0 on these networks, post auth), i.e. let's just lower the level transaction's
-                 * feature level.
-                 *
-                 * This is reported as https://github.com/dns-violations/dns-violations/blob/master/2018/DVE-2018-0001.md
-                 */
-
-                t->clamp_feature_level_nxdomain = DNS_SERVER_FEATURE_LEVEL_UDP;
-
-                log_debug("Server returned error %s in EDNS0 mode, retrying transaction with reduced feature level %s (DVE-2018-0001 mitigation)",
-                          FORMAT_DNS_RCODE(DNS_PACKET_RCODE(p)),
-                          dns_server_feature_level_to_string(t->clamp_feature_level_nxdomain));
-
-                dns_transaction_retry(t, false /* use the same server */);
-                return;
-        }
-
         if (t->server) {
                 /* Report that we successfully received a valid packet with a good rcode after we initially got a bad
                  * rcode and subsequently downgraded the protocol */
@@ -1742,10 +1698,18 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
                 /* Let's then prune all outdated entries */
                 dns_cache_prune(&t->scope->cache);
 
+                /* For the initial attempt or when no stale data is requested, disable serve stale
+                 * and answer the question from the cache (honors ttl property).
+                 * On the second attempt, if StaleRetentionSec is greater than zero,
+                 * try to answer the question using stale date (honors until property) */
+                uint64_t query_flags = t->query_flags;
+                if (t->n_attempts == 1 || t->scope->manager->stale_retention_usec == 0)
+                        query_flags |= SD_RESOLVED_NO_STALE;
+
                 r = dns_cache_lookup(
                                 &t->scope->cache,
                                 dns_transaction_key(t),
-                                t->query_flags,
+                                query_flags,
                                 &t->answer_rcode,
                                 &t->answer,
                                 &t->received,
@@ -1761,6 +1725,13 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
                                  * packet. */
                                 dns_transaction_reset_answer(t);
                         else {
+                                if (t->n_attempts > 1 && !FLAGS_SET(query_flags, SD_RESOLVED_NO_STALE)) {
+                                        char key_str[DNS_RESOURCE_KEY_STRING_MAX];
+                                        log_debug("Serve Stale response rcode=%s for %s",
+                                                FORMAT_DNS_RCODE(t->answer_rcode),
+                                                dns_resource_key_to_string(dns_transaction_key(t), key_str, sizeof key_str));
+                                }
+
                                 t->answer_source = DNS_TRANSACTION_CACHE;
                                 if (t->answer_rcode == DNS_RCODE_SUCCESS)
                                         dns_transaction_complete(t, DNS_TRANSACTION_SUCCESS);

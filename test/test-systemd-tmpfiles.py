@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import pwd
 import grp
+from pathlib import Path
 
 try:
     from systemd import id128
@@ -28,6 +29,7 @@ except AttributeError:
     sys.exit(EXIT_TEST_SKIP)
 
 exe_with_args = sys.argv[1:]
+temp_dir = tempfile.TemporaryDirectory(prefix='test-systemd-tmpfiles.')
 
 def test_line(line, *, user, returncode=EX_DATAERR, extra={}):
     args = ['--user'] if user else []
@@ -75,7 +77,7 @@ def test_uninitialized_t():
               user=True, returncode=0, extra={'env':{'HOME': os.getenv('HOME')}})
 
 def test_content(line, expected, *, user, extra={}, subpath='/arg', path_cb=None):
-    d = tempfile.TemporaryDirectory(prefix='test-systemd-tmpfiles.')
+    d = tempfile.TemporaryDirectory(prefix='test-content.', dir=temp_dir.name)
     if path_cb is not None:
         path_cb(d.name, subpath)
     arg = d.name + subpath
@@ -199,12 +201,28 @@ def test_hard_cleanup(*, user):
     test_content('f= {} - - - - ' + label, label, user=user, subpath='/deep/1/2', path_cb=valid_symlink)
 
 def test_base64():
-    test_line('f~ /tmp/base64-test - - - - UGlmZgpQYWZmClB1ZmYgCg==', user=False, returncode=0)
+    test_content('f~ {} - - - - UGlmZgpQYWZmClB1ZmYgCg==', "Piff\nPaff\nPuff \n", user=False)
 
-    with open("/tmp/base64-test", mode='r') as f:
-        d = f.read()
+def test_conditionalized_execute_bit():
+    c = subprocess.run(exe_with_args + ['--version', '|', 'grep', '-F', '+ACL'], shell=True, stdout=subprocess.DEVNULL)
+    if c.returncode != 0:
+        return 0
 
-    assert d == "Piff\nPaff\nPuff \n"
+    d = tempfile.TemporaryDirectory(prefix='test-acl.', dir=temp_dir.name)
+    temp = Path(d.name) / "cond_exec"
+    temp.touch()
+    temp.chmod(0o644)
+
+    test_line(f"a {temp} - - - - u:root:Xwr", user=False, returncode=0)
+    c = subprocess.run(["getfacl", "-Ec", temp],
+                       stdout=subprocess.PIPE, check=True, text=True)
+    assert "user:root:rw-" in c.stdout
+
+    temp.chmod(0o755)
+    test_line(f"a+ {temp} - - - - u:root:Xwr,g:root:rX", user=False, returncode=0)
+    c = subprocess.run(["getfacl", "-Ec", temp],
+                       stdout=subprocess.PIPE, check=True, text=True)
+    assert "user:root:rwx" in c.stdout and "group:root:r-x" in c.stdout
 
 if __name__ == '__main__':
     test_invalids(user=False)
@@ -218,3 +236,5 @@ if __name__ == '__main__':
     test_hard_cleanup(user=True)
 
     test_base64()
+
+    test_conditionalized_execute_bit()

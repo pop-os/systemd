@@ -2,10 +2,12 @@
 
 #include <linux/nexthop.h>
 
+#include "dhcp-server-internal.h"
 #include "dns-domain.h"
 #include "ip-protocol-list.h"
 #include "netif-util.h"
 #include "networkd-address.h"
+#include "networkd-dhcp-common.h"
 #include "networkd-json.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -50,8 +52,10 @@ static int address_build_json(Address *address, JsonVariant **ret) {
                                 JSON_BUILD_PAIR_UNSIGNED("Flags", address->flags),
                                 JSON_BUILD_PAIR_STRING("FlagsString", flags),
                                 JSON_BUILD_PAIR_STRING_NON_EMPTY("Label", address->label),
-                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUsec", address->lifetime_preferred_usec),
-                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUsec", address->lifetime_valid_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUSec", address->lifetime_preferred_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUsec", address->lifetime_preferred_usec), /* for backward compat */
+                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUSec", address->lifetime_valid_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUsec", address->lifetime_valid_usec), /* for backward compat */
                                 JSON_BUILD_PAIR_STRING("ConfigSource", network_config_source_to_string(address->source)),
                                 JSON_BUILD_PAIR_STRING("ConfigState", state),
                                 JSON_BUILD_PAIR_IN_ADDR_NON_NULL("ConfigProvider", &address->provider, address->family)));
@@ -872,6 +876,25 @@ finalize:
         return r;
 }
 
+static int captive_portal_build_json(Link *link, JsonVariant **ret) {
+        const char *captive_portal;
+        int r;
+
+        assert(link);
+        assert(ret);
+
+        r = link_get_captive_portal(link, &captive_portal);
+        if (r < 0)
+                return r;
+
+        if (!captive_portal) {
+                *ret = NULL;
+                return 0;
+        }
+
+        return json_build(ret, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_STRING("CaptivePortal", captive_portal)));
+}
+
 static int domain_build_json(int family, const char *domain, NetworkConfigSource s, const union in_addr_union *p, JsonVariant **ret) {
         assert(IN_SET(family, AF_UNSPEC, AF_INET, AF_INET6));
         assert(domain);
@@ -1161,6 +1184,129 @@ finalize:
         return r;
 }
 
+static int dhcp_server_offered_leases_build_json(Link *link, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *elements = NULL;
+        int r;
+        DHCPLease *lease;
+
+        assert(link);
+        assert(ret);
+
+        if (!link->dhcp_server) {
+                *ret = NULL;
+                return 0;
+        }
+
+        if (hashmap_isempty(link->dhcp_server->bound_leases_by_client_id)) {
+                *ret = NULL;
+                return 0;
+        }
+
+        HASHMAP_FOREACH(lease, link->dhcp_server->bound_leases_by_client_id) {
+                _cleanup_(json_variant_unrefp) JsonVariant *e = NULL;
+                struct in_addr address = { .s_addr = lease->address };
+
+                r = json_build(&e,
+                               JSON_BUILD_OBJECT(
+                                               JSON_BUILD_PAIR_BYTE_ARRAY(
+                                                               "ClientId",
+                                                               lease->client_id.data,
+                                                               lease->client_id.length),
+                                               JSON_BUILD_PAIR_IN4_ADDR_NON_NULL("Address", &address),
+                                               JSON_BUILD_PAIR_STRING_NON_EMPTY("Hostname", lease->hostname),
+                                               JSON_BUILD_PAIR_FINITE_USEC(
+                                                               "ExpirationUSec", lease->expiration)));
+                if (r < 0)
+                        return r;
+
+                r = json_variant_append_array(&elements, e);
+                if (r < 0)
+                        return r;
+        }
+
+        return json_build(ret, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_VARIANT("Leases", elements)));
+}
+
+static int dhcp_server_static_leases_build_json(Link *link, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *elements = NULL;
+        int r;
+        DHCPLease *lease;
+
+        assert(link);
+        assert(ret);
+
+        if (!link->dhcp_server) {
+                *ret = NULL;
+                return 0;
+        }
+
+        if (hashmap_isempty(link->dhcp_server->static_leases_by_client_id)) {
+                *ret = NULL;
+                return 0;
+        }
+
+        HASHMAP_FOREACH(lease, link->dhcp_server->static_leases_by_client_id) {
+                _cleanup_(json_variant_unrefp) JsonVariant *e = NULL;
+                struct in_addr address = { .s_addr = lease->address };
+
+                r = json_build(&e,
+                               JSON_BUILD_OBJECT(
+                                               JSON_BUILD_PAIR_BYTE_ARRAY(
+                                                               "ClientId",
+                                                               lease->client_id.data,
+                                                               lease->client_id.length),
+                                               JSON_BUILD_PAIR_IN4_ADDR_NON_NULL("Address", &address)));
+                if (r < 0)
+                        return r;
+
+                r = json_variant_append_array(&elements, e);
+                if (r < 0)
+                        return r;
+        }
+
+        return json_build(ret, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_VARIANT("StaticLeases", elements)));
+}
+
+static int dhcp_server_build_json(Link *link, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *w = NULL;
+        int r;
+
+        assert(link);
+        assert(ret);
+
+        if (!link->dhcp_server) {
+                *ret = NULL;
+                return 0;
+        }
+
+        r = json_build(&v,
+                       JSON_BUILD_OBJECT(
+                                       JSON_BUILD_PAIR_UNSIGNED("PoolOffset", link->dhcp_server->pool_offset),
+                                       JSON_BUILD_PAIR_UNSIGNED("PoolSize", link->dhcp_server->pool_size)));
+        if (r < 0)
+                return r;
+
+        r = dhcp_server_offered_leases_build_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = json_variant_merge(&v, w);
+        if (r < 0)
+                return r;
+
+        w = json_variant_unref(w);
+
+        r = dhcp_server_static_leases_build_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = json_variant_merge(&v, w);
+        if (r < 0)
+                return r;
+
+        return json_build(ret, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_VARIANT("DHCPServer", v)));
+}
+
 int link_build_json(Link *link, JsonVariant **ret) {
         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *w = NULL;
         _cleanup_free_ char *type = NULL, *flags = NULL;
@@ -1266,6 +1412,16 @@ int link_build_json(Link *link, JsonVariant **ret) {
 
         w = json_variant_unref(w);
 
+        r = captive_portal_build_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = json_variant_merge(&v, w);
+        if (r < 0)
+                return r;
+
+        w = json_variant_unref(w);
+
         r = domains_build_json(link, /* is_route = */ false, &w);
         if (r < 0)
                 return r;
@@ -1337,6 +1493,16 @@ int link_build_json(Link *link, JsonVariant **ret) {
         w = json_variant_unref(w);
 
         r = routes_build_json(link->routes, &w);
+        if (r < 0)
+                return r;
+
+        r = json_variant_merge(&v, w);
+        if (r < 0)
+                return r;
+
+        w = json_variant_unref(w);
+
+        r = dhcp_server_build_json(link, &w);
         if (r < 0)
                 return r;
 
