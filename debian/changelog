@@ -1,3 +1,24 @@
+systemd (254~rc1-1) experimental; urgency=medium
+
+  [ Luca Boccassi ]
+  * d/watch: watch main repository
+  * New upstream version 254~rc1
+  * Refresh patches for v254-rc1
+  * Drop build dependency on gnu-efi and add python3-pyelftools. Move to
+    !stage1 given it's external python modules
+  * Install new libsystemd.3 manpage
+  * Install new mount.ddi alias for sd-dissect
+  * Update symbols file for 254
+  * Update Lintian overrides for systemd-tests
+  * autopkgtest: find test-udev in new location.
+
+  [ Zbigniew Jędrzejewski-Szmek ]
+  * autopkgtest: drop 'udev' test
+    https://github.com/systemd/systemd/pull/27534 makes it into a normal
+    unit test, so it will be invoked as part of 'upstream'.
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 07 Jul 2023 11:05:37 +0100
+
 systemd (253.5-1) unstable; urgency=medium
 
   * New upstream version 253.5 (Closes: #1040035)
