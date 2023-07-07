@@ -102,8 +102,6 @@ CONFFLAGS = \
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
-	-Defi=true \
-	-Dbootloader=true \
 	-Daudit=true \
 	-Dlibcryptsetup=true \
 	-Dlibcryptsetup-plugins=true \
@@ -127,8 +125,6 @@ CONFFLAGS += \
 	-Dpcre2=true
 else
 CONFFLAGS += \
-	-Defi=false \
-	-Dbootloader=false \
 	-Daudit=false \
 	-Dlibcryptsetup=false \
 	-Dlibcryptsetup-plugins=false \
