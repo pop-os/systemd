@@ -97,12 +97,12 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
-	-Dukify=false \
 	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),false,auto) \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
+	-Dukify=true \
 	-Daudit=true \
 	-Dlibcryptsetup=true \
 	-Dlibcryptsetup-plugins=true \
@@ -126,6 +126,7 @@ CONFFLAGS += \
 	-Dpcre2=true
 else
 CONFFLAGS += \
+	-Dukify=false \
 	-Daudit=false \
 	-Dlibcryptsetup=false \
 	-Dlibcryptsetup-plugins=false \
