@@ -1,3 +1,10 @@
+systemd (254~rc1-2) experimental; urgency=medium
+
+  * Backport patch to fix fuzz test without cgroup access. Fix build on
+    buildds https://github.com/systemd/systemd/pull/28303
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 07 Jul 2023 22:55:16 +0100
+
 systemd (254~rc1-1) experimental; urgency=medium
 
   [ Luca Boccassi ]
