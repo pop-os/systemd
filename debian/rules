@@ -89,7 +89,6 @@ CONFFLAGS = \
 	-Dhwdb=true \
 	-Dsysusers=true \
 	-Dinstall-tests=$(if $(filter noinsttest,$(DEB_BUILD_PROFILES)),false,true) \
-	-Defi=true \
 	-Dman=$(if $(filter nodoc,$(DEB_BUILD_PROFILES)),false,true) \
 	-Dtranslations=true \
 	-Dnss-myhostname=true \
@@ -103,6 +102,8 @@ CONFFLAGS = \
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
+	-Defi=true \
+	-Dbootloader=true \
 	-Daudit=true \
 	-Dlibcryptsetup=true \
 	-Dlibcryptsetup-plugins=true \
@@ -126,6 +127,8 @@ CONFFLAGS += \
 	-Dpcre2=true
 else
 CONFFLAGS += \
+	-Defi=false \
+	-Dbootloader=false \
 	-Daudit=false \
 	-Dlibcryptsetup=false \
 	-Dlibcryptsetup-plugins=false \
