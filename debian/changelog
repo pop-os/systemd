@@ -1,3 +1,10 @@
+systemd (254~rc1-3) experimental; urgency=medium
+
+  * Restrict pyelftools to UEFI-enabled architectures and drop explicit
+    meson settings.
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 08 Jul 2023 00:40:33 +0100
+
 systemd (254~rc1-2) experimental; urgency=medium
 
   * Backport patch to fix fuzz test without cgroup access. Fix build on
