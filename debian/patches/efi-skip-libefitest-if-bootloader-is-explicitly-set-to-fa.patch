@@ -1,0 +1,26 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Sun, 9 Jul 2023 14:39:05 +0100
+Subject: efi: skip libefitest if 'bootloader' is explicitly set to false
+
+On x32 efi_arch will be set as the kernel architecture is just x86_64,
+but there's no userland support to build the EFI ABI. When -Dbootloader=false
+is set, skip libefitest too.
+---
+ src/boot/efi/meson.build | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index a963ce1..b3b6dca 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -3,6 +3,10 @@
+ efi_config_h_dir = meson.current_build_dir()
+ efi_addon = ''
+ 
++if conf.get('EFI_MACHINE_TYPE_NAME', '') == ''
++        subdir_done()
++endif
++
+ if efi_arch != ''
+         libefitest = static_library(
+                 'efitest',

@@ -1,11 +1,18 @@
-Author: Luca Boccassi <bluca@debian.org>
+From: Luca Boccassi <bluca@debian.org>
+Date: Sun, 9 Jul 2023 13:22:35 +0100
+Subject: switch fuzz-manager-serialize to MANAGER_TEST_RUN_MINIMAL
+
 Forwarded: https://github.com/systemd/systemd/pull/28303
-Description: switch fuzz-manager-serialize to MANAGER_TEST_RUN_MINIMAL
- When there is no access to cgroups MANAGER_TEST_RUN_BASIC will fail
- to set up and assert. This happens on a build system like Debian's.
- Switch to _MINIMAL which skips cgroup and other machine-wide setups.
+
+When there is no access to cgroups MANAGER_TEST_RUN_BASIC will fail
+to set up and assert. This happens on a build system like Debian's.
+Switch to _MINIMAL which skips cgroup and other machine-wide setups.
+---
+ src/core/fuzz-manager-serialize.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
 diff --git a/src/core/fuzz-manager-serialize.c b/src/core/fuzz-manager-serialize.c
-index 04560341da..2f0c0c3029 100644
+index 0456034..2f0c0c3 100644
 --- a/src/core/fuzz-manager-serialize.c
 +++ b/src/core/fuzz-manager-serialize.c
 @@ -21,7 +21,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
