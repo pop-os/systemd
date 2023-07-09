@@ -1,3 +1,13 @@
+systemd (254~rc1-4) experimental; urgency=medium
+
+  * Backport patches to fix FTBFS on mipsel, ia64, x32
+  * d/rules: explicitly disable EFI on x32. On x32 the cpu architecture is
+    just x86_64 so EFI will be enabled, and it will fail to build as
+    userland doesn't support building the EFI ABI. Disable it explicitly,
+    and leave it on 'auto' elsewhere.
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 09 Jul 2023 15:13:53 +0100
+
 systemd (254~rc1-3) experimental; urgency=medium
 
   * Restrict pyelftools to UEFI-enabled architectures and drop explicit
