@@ -42,10 +42,10 @@ Last-Update: 2020-07-23
  1 file changed, 3 insertions(+)
 
 diff --git a/rules.d/60-persistent-storage.rules b/rules.d/60-persistent-storage.rules
-index 86e0165..397d190 100644
+index ad5cca0..aa70e04 100644
 --- a/rules.d/60-persistent-storage.rules
 +++ b/rules.d/60-persistent-storage.rules
-@@ -122,8 +122,11 @@ KERNEL!="sr*|mmcblk[0-9]boot[0-9]", IMPORT{builtin}="blkid"
+@@ -130,8 +130,11 @@ KERNEL!="sr*|mmcblk[0-9]boot[0-9]", IMPORT{builtin}="blkid"
  LABEL="persistent_storage_blkid_probe_end"
  
  # by-label/by-uuid links (filesystem metadata)

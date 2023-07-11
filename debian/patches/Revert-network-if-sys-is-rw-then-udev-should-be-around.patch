@@ -12,7 +12,7 @@ LP: #1857123
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 019bef0..693e4ad 100644
+index f2839ec..6aa385a 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -68,6 +68,7 @@

@@ -212,7 +212,7 @@ index 6d4821d..f68dc22 100755
 +
  do_test "$@"
 diff --git a/test/TEST-58-REPART/test.sh b/test/TEST-58-REPART/test.sh
-index 5f04d20..a3acf83 100755
+index 7549de5..5367a8a 100755
 --- a/test/TEST-58-REPART/test.sh
 +++ b/test/TEST-58-REPART/test.sh
 @@ -25,4 +25,6 @@ test_append_files() {

@@ -79,10 +79,10 @@ index 0000000..2ef881f
 + * /etc/writable; if it is, update that instead */
 +const char *writable_filename(const char *path);
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index b700f36..36e82b9 100644
+index 0bea149..0ad187a 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -21,6 +21,7 @@
+@@ -22,6 +22,7 @@
  #include "parse-util.h"
  #include "path-util.h"
  #include "process-util.h"
@@ -90,7 +90,7 @@ index b700f36..36e82b9 100644
  #include "stat-util.h"
  #include "string-table.h"
  #include "string-util.h"
-@@ -1478,7 +1479,7 @@ int get_timezone(char **ret) {
+@@ -1479,7 +1480,7 @@ int get_timezone(char **ret) {
          char *z;
          int r;
  
@@ -100,7 +100,7 @@ index b700f36..36e82b9 100644
                  /* If the symlink does not exist, assume "UTC", like glibc does */
                  z = strdup("UTC");
 diff --git a/src/core/manager.c b/src/core/manager.c
-index 7b39479..539dd7b 100644
+index 1853526..8dd87e1 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
 @@ -72,6 +72,7 @@
