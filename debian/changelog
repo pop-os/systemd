@@ -1,4 +1,4 @@
-systemd (253.5-1ubuntu1) UNRELEASED; urgency=medium
+systemd (253.5-1ubuntu1) mantic; urgency=medium
 
   * Merge 253.5-1 from Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -142,7 +142,7 @@ systemd (253.5-1ubuntu1) UNRELEASED; urgency=medium
       skip tests for unsupported localectl features
     - debian/tests/boot-and-services: drop test_no_failed
 
- -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 10 Jul 2023 13:31:01 -0400
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Tue, 11 Jul 2023 14:11:33 -0400
 
 systemd (253.5-1) unstable; urgency=medium
 
