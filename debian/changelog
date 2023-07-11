@@ -1,3 +1,149 @@
+systemd (253.5-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge 253.5-1 from Debian unstable. Remaining changes:
+    - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/storage: skip tests if scsi_debug module is not available
+    - debian/tests/boot-and-services:
+      + skip test_syslog on s390x
+      + skip coredump tests on s390x
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+    - debian/systemd.postinst: skip daemon-reexec and try-restarts during shutdown
+    - debian/systemd.postinst,debian/rules:
+      Disable dh_installinit generation of tmpfiles for systemd package, and
+      manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Set default user path
+      + Disable LLMNR by default
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf:
+      Set ManagedOOMSwap=auto, disabling swap kill by default
+    - debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin
+      to the kernel (we previously only set it in modprobe.d)
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Provide upgrade path (Replaces:) for Jammy's systemd-repart
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+    - d/p/debian/Ubuntu-UseDomains-by-default.patch:
+      Enable UseDomains by default on Ubuntu.
+    - d/p/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch:
+      Set AssumedAppArmorLabel=unconfined in timedate1 dbus service file
+    - d/p/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch:
+      Launch QEMU with -vga none in test-functions
+    - d/p/debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch:
+      Set Nice=-1 in journald.service to dodge watchdog on soft lockups
+    - d/p/debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch:
+      Revert "namespace: be more careful when handling namespacing failures gracefully"
+      upstream commit
+    - d/p/debian/UBUNTU-resolved-default-no-negative-caching.patch:
+      Default to Cache=no-negative in systemd-resolved
+    - d/p/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch:
+      Revert "network: if /sys is rw, then udev should be around" upstream
+      commit
+    - d/p/debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch:
+      Skip some of test-execute when running in LXD
+    - d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
+      skip disk/by-uuid for bcache devices
+    - d/p/deny-list-TEST-55-OOMD-on-ppc64el.patch:
+      Deny-list TEST-55-OOMD om ppc64el
+    - d/p/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch:
+      Don't override Ubuntu's default sysctl values
+    - d/p/test-increase-QEMU_MEM-for-some-tests.patch:
+      Increase QEMU_MEM for some tests to improve success rate
+    - d/p/test-denylist-TEST-29-PORTABLE-again.patch:
+      Deny-list TEST-29-PORTABLE
+  * Dropped changes, fixed upstream:
+    - lp1999275-binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/5aaa79ce96
+    - lp1999275-stat-util-introduce-fd_is_read_only_fs.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/dc1752ea72
+    - lp1999275-binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/94ba5b1532
+    - lp2002445-sd-netlink-do-not-swap-old-name-and-alternative-name.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/080afbb57c
+    - lp2002445-udev-net-allow-new-link-name-as-an-altname-before-renamin.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/d0b31efc1a
+    - lp2004478-network-dhcp4-accept-local-subnet-routes-from-DHCP.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/1d84a3c779
+    - lp1999275-binfmt-util-split-out-binfmt_mounted.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/a51a9684c9
+    - lp2002445-sd-netlink-restore-altname-on-error-in-rtnl_set_link_name.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/4d600667f8
+    - lp2002445-test-network-add-a-test-for-renaming-device-to-current-al.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/f68f644a16
+    - lp2002445/sd-device-make-device_set_syspath-clear-sysname-and-sysnu.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/9a26098e90
+    - lp2002445/core-device-ignore-failed-uevents.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/e9336d6ac3
+    - lp2002445/udev-restore-syspath-and-properties-on-failure.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/210033847c
+    - lp2002445/sd-device-introduce-device_get_property_int.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/eedfef0f0d
+    - lp2002445-udev-attempt-device-rename-even-if-interface-is-up.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/53584e7b61
+    - lp1999275-unit-check-more-specific-path-to-be-written-by-systemd-bi.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/f74a7cb45c
+    - lp2002445-sd-netlink-add-a-test-for-rtnl_set_link_name.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/b338a8bb40
+    - test-skip-some-tests-when-machine-id-is-not-initialized.patch:
+      Applied upstream: https://github.com/systemd/systemd/pull/25732
+    - sd-netlink-skip-test_rtnl_set_link_name-when-altnames-are.patch:
+      Applied upstream: https://github.com/systemd/systemd/commit/5ccbe7fb197
+    - debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch (LP: #1982218):
+      This has been implemented upstream in a different way, but with the same
+      outcome: https://github.com/systemd/systemd/commit/ab3aed4a034.
+    - debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch:
+      This is obsoleted by an upstream change to fix the underlying issue:
+      https://github.com/systemd/systemd/commit/362235bf59.
+  * Dropped changes, no longer needed:
+    - Deny-list-TEST-74-AUX-UTILS-on-s390x.patch:
+      This test passes on s390x now.
+    - debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch:
+      This test passes without this patch now.
+    - debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch:
+      Testing libvirt against systemd without this patch passses now.
+    - debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch:
+      This test passes without this patch now.
+    - debian/UBUNTU-src-test-testmount-util.c-Skip-parts-of-test-mount-util-in-LXC.patch:
+      This test passes in LXD without this patch now.
+    - debian/systemd.prerm: remove unnecessary whitespace
+    - debian/systemd.maintscript:
+      Our delta pertains to versions older than 249, which is in Jammy and is
+      therefore the oldest version direct upgrades will be supported from.
+    - test: drop /etc/default/locale handling from TEST-74-AUX-UTILS
+  * New changes:
+    - debian/patches: consolidate Ubuntu core hacks into one patch,
+      debian/UBUNTU-read-only-etc-hacks.patch:
+      + debian/UBUNTU-Fix-timezone-setting-on-read-only-etc.patch
+      + debian/UBUNTU-Support-system-image-read-only-etc.patch
+      + debian/timedatectl-lp1650688.patch
+      + lp1981042-core-firstboot-workaround-timezone-issues-caused-by-Ubunt.patch
+      + debian/UBUNTU-read-only-etc-hacks.patch
+    - debian/systemd.postinst: remove duplicate if block
+    - debian/gbp.conf: update debian-branch to ubuntu-mantic
+    - debian/tests: add ability to override SELECTED_TESTS in upstream tests
+    - debian/systemd.postinst: fix /etc/locale.conf migration
+    - debian/tests/tests-in-lxd: use --reuse flag in lxc publish (LP: #2023229)
+    - debian/rules: set MulticastDNS=resolve by default
+    - test-skip-tests-for-unsupported-localectl-features.patch:
+      skip tests for unsupported localectl features
+    - debian/tests/boot-and-services: drop test_no_failed
+
+ -- Nick Rosbrook <nick.rosbrook@canonical.com>  Mon, 10 Jul 2023 13:31:01 -0400
+
 systemd (253.5-1) unstable; urgency=medium
 
   * New upstream version 253.5 (Closes: #1040035)
