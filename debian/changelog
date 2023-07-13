@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.9pop0) jammy; urgency=medium
+
+  * Pop!_OS backport
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 13 Jul 2023 09:40:01 -0600
+
 systemd (249.11-0ubuntu3.9) jammy; urgency=medium
 
   * udev: gracefully handle rename failures (LP: #2002445)
