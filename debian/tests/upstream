@@ -24,4 +24,6 @@ export TEST_SHOW_JOURNAL=warning
 export TEST_REQUIRE_INSTALL_TESTS=0
 export TEST_PREFER_NSPAWN=1
 export NO_BUILD=1
+export QEMU_TIMEOUT=2400
+export NSPAWN_TIMEOUT=2400
 test/run-integration-tests.sh
