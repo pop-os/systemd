@@ -188,6 +188,7 @@ Depends: systemd-tests,
   locales,
   locales-all,
   stress,
+  curl,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
