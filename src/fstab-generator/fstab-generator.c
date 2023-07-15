@@ -7,6 +7,7 @@
 #include "alloc-util.h"
 #include "bus-error.h"
 #include "bus-locator.h"
+#include "bus-unit-util.h"
 #include "chase.h"
 #include "creds-util.h"
 #include "efi-loader.h"
@@ -607,6 +608,12 @@ static int add_mount(
         if (r < 0)
                 return r;
 
+        if (in_initrd() && path_equal(where, "/sysroot") && is_device_path(what)) {
+                r = generator_write_initrd_root_device_deps(dest, what);
+                if (r < 0)
+                        return r;
+        }
+
         r = write_mount_timeout(f, where, opts);
         if (r < 0)
                 return r;
@@ -706,7 +713,6 @@ static int add_mount(
 
 static int do_daemon_reload(void) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r, k;
 
@@ -716,13 +722,9 @@ static int do_daemon_reload(void) {
         if (r < 0)
                 return log_error_errno(r, "Failed to get D-Bus connection: %m");
 
-        r = bus_message_new_method_call(bus, &m, bus_systemd_mgr, "Reload");
+        r = bus_service_manager_reload(bus);
         if (r < 0)
-                return bus_log_create_error(r);
-
-        r = sd_bus_call(bus, m, DAEMON_RELOAD_TIMEOUT_SEC, &error, NULL);
-        if (r < 0)
-                return log_error_errno(r, "Failed to reload daemon: %s", bus_error_message(&error, r));
+                return r;
 
         /* We need to requeue the two targets so that any new units which previously were not part of the
          * targets, and which we now added, will be started. */
@@ -799,6 +801,40 @@ static MountPointFlags fstab_options_to_flags(const char *options, bool is_swap)
         return flags;
 }
 
+static int canonicalize_mount_path(const char *path, const char *type, bool initrd, char **ret) {
+        _cleanup_free_ char *p = NULL;
+        bool changed;
+        int r;
+
+        assert(path);
+        assert(type);
+        assert(STR_IN_SET(type, "where", "what"));
+        assert(ret);
+
+        // FIXME: when chase() learns to chase non-existent paths, use this here and drop the prefixing with
+        // /sysroot on error below.
+        r = chase(path, initrd ? "/sysroot" : NULL, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &p, NULL);
+        if (r < 0) {
+                log_debug_errno(r, "Failed to chase '%s', using as-is: %m", path);
+
+                if (initrd)
+                        p = path_join("/sysroot", path);
+                else
+                        p = strdup(path);
+                if (!p)
+                        return log_oom();
+
+                path_simplify(p);
+        }
+
+        changed = !streq(path, p);
+        if (changed)
+                log_debug("Canonicalized %s=%s to %s", type, path, p);
+
+        *ret = TAKE_PTR(p);
+        return changed;
+}
+
 static int parse_fstab_one(
                 const char *source,
                 const char *what_original,
@@ -811,7 +847,7 @@ static int parse_fstab_one(
 
         _cleanup_free_ char *what = NULL, *where = NULL;
         MountPointFlags flags;
-        bool is_swap;
+        bool is_swap, where_changed;
         int r;
 
         assert(what_original);
@@ -846,7 +882,7 @@ static int parse_fstab_one(
         assert(where_original); /* 'where' is not necessary for swap entry. */
 
         if (!is_path(where_original)) {
-                log_warning("Mount point %s is not a valid path, ignoring.", where);
+                log_warning("Mount point %s is not a valid path, ignoring.", where_original);
                 return 0;
         }
 
@@ -854,41 +890,33 @@ static int parse_fstab_one(
          * mount units, but causes problems since it historically worked to have symlinks in e.g.
          * /etc/fstab. So we canonicalize here. Note that we use CHASE_NONEXISTENT to handle the case
          * where a symlink refers to another mount target; this works assuming the sub-mountpoint
-         * target is the final directory.
-         *
-         * FIXME: when chase() learns to chase non-existent paths, use this here and
-         *        drop the prefixing with /sysroot on error below.
-         */
-        r = chase(where_original, initrd ? "/sysroot" : NULL, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &where, NULL);
-        if (r < 0) {
-                /* If we can't canonicalize, continue as if it wasn't a symlink */
-                log_debug_errno(r, "Failed to read symlink target for %s, using as-is: %m", where_original);
+         * target is the final directory. */
+        r = canonicalize_mount_path(where_original, "where", initrd, &where);
+        if (r < 0)
+                return r;
+        where_changed = r > 0;
 
-                if (initrd)
-                        where = path_join("/sysroot", where_original);
-                else
-                        where = strdup(where_original);
-                if (!where)
-                        return log_oom();
+        if (initrd && fstab_is_bind(options, fstype)) {
+                /* When in initrd, the source of bind mount needs to be prepended with /sysroot as well. */
+                _cleanup_free_ char *p = NULL;
 
-                path_simplify(where);
+                r = canonicalize_mount_path(what, "what", initrd, &p);
+                if (r < 0)
+                        return r;
+
+                free_and_replace(what, p);
         }
-
-        if (streq(where, where_original)) /* If it was fully canonicalized, suppress the change */
-                where = mfree(where);
-        else
-                log_debug("Canonicalized what=%s where=%s to %s", what, where_original, where);
 
         log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s pcrfs=%s noauto=%s nofail=%s",
                   what, where, strna(fstype),
                   yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS), yes_no(flags & MOUNT_PCRFS),
                   yes_no(flags & MOUNT_NOAUTO), yes_no(flags & MOUNT_NOFAIL));
 
-        bool is_sysroot = in_initrd() && path_equal(where ?: where_original, "/sysroot");
+        bool is_sysroot = in_initrd() && path_equal(where, "/sysroot");
         /* See comment from add_sysroot_usr_mount() about the need for extra indirection in case /usr needs
          * to be mounted in order for the root fs to be synthesized based on configuration included in /usr/,
          * e.g. systemd-repart. */
-        bool is_sysroot_usr = in_initrd() && path_equal(where ?: where_original, "/sysroot/usr");
+        bool is_sysroot_usr = in_initrd() && path_equal(where, "/sysroot/usr");
 
         const char *target_unit =
                         initrd ?                            SPECIAL_INITRD_FS_TARGET :
@@ -897,17 +925,11 @@ static int parse_fstab_one(
                         mount_is_network(fstype, options) ? SPECIAL_REMOTE_FS_TARGET :
                                                             SPECIAL_LOCAL_FS_TARGET;
 
-        if (is_sysroot && is_device_path(what)) {
-                r = generator_write_initrd_root_device_deps(arg_dest, what);
-                if (r < 0)
-                        return r;
-        }
-
         r = add_mount(source,
                       arg_dest,
                       what,
-                      is_sysroot_usr ? "/sysusr/usr" : where ?: where_original,
-                      !is_sysroot_usr && where ? where_original : NULL,
+                      is_sysroot_usr ? "/sysusr/usr" : where,
+                      !is_sysroot_usr && where_changed ? where_original : NULL,
                       fstype,
                       options,
                       passno,
@@ -1089,12 +1111,6 @@ static int add_sysroot_mount(void) {
                 opts = arg_root_options;
 
         log_debug("Found entry what=%s where=/sysroot type=%s opts=%s", what, strna(arg_root_fstype), strempty(opts));
-
-        if (is_device_path(what)) {
-                r = generator_write_initrd_root_device_deps(arg_dest, what);
-                if (r < 0)
-                        return r;
-        }
 
         makefs = fstab_test_option(opts, "x-systemd.makefs\0");
         flags = makefs * MOUNT_MAKEFS;

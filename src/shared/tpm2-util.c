@@ -210,7 +210,7 @@ static int tpm2_cache_capabilities(Tpm2Context *c) {
          * by the SetAlgorithmSet() command. Unfortunately, the spec doesn't require a TPM reinitialization
          * after changing the algorithm set (unless the PCR algorithms are changed). However, the spec also
          * indicates the TPM behavior after SetAlgorithmSet() is "vendor-dependent", giving the example of
-         * flushing sessions and objects, erasing policies, etc. So, if the algorithm set is programatically
+         * flushing sessions and objects, erasing policies, etc. So, if the algorithm set is programmatically
          * changed while we are performing some operation, it's reasonable to assume it will break us even if
          * we don't cache the algorithms, thus they should be "safe" to cache. */
         TPM2_ALG_ID current_alg = TPM2_ALG_FIRST;
@@ -245,7 +245,7 @@ static int tpm2_cache_capabilities(Tpm2Context *c) {
         }
 
         /* Cache the command capabilities. The spec isn't actually clear if commands can be added/removed
-         * while running, but that would be crazy, so let's hope it is not possbile. */
+         * while running, but that would be crazy, so let's hope it is not possible. */
         TPM2_CC current_cc = TPM2_CC_FIRST;
         for (;;) {
                 r = tpm2_get_capability(
@@ -3431,6 +3431,14 @@ int tpm2_unseal(const char *device,
         if (r < 0)
                 return r;
 
+        /* Older code did not save the pcr_bank, and unsealing needed to detect the best pcr bank to use,
+         * so we need to handle that legacy situation. */
+        if (pcr_bank == UINT16_MAX) {
+                r = tpm2_get_best_pcr_bank(c, hash_pcr_mask|pubkey_pcr_mask, &pcr_bank);
+                if (r < 0)
+                        return r;
+        }
+
         _cleanup_(tpm2_handle_freep) Tpm2Handle *primary_handle = NULL;
         if (srk_buf) {
                 r = tpm2_handle_new(c, &primary_handle);
@@ -3838,32 +3846,30 @@ int tpm2_pcr_mask_from_string(const char *arg, uint32_t *ret_mask) {
 
 int tpm2_make_pcr_json_array(uint32_t pcr_mask, JsonVariant **ret) {
         _cleanup_(json_variant_unrefp) JsonVariant *a = NULL;
-        JsonVariant* pcr_array[TPM2_PCRS_MAX];
-        unsigned n_pcrs = 0;
         int r;
 
-        for (size_t i = 0; i < ELEMENTSOF(pcr_array); i++) {
+        assert(ret);
+
+        for (size_t i = 0; i < TPM2_PCRS_MAX; i++) {
+                _cleanup_(json_variant_unrefp) JsonVariant *e = NULL;
+
                 if ((pcr_mask & (UINT32_C(1) << i)) == 0)
                         continue;
 
-                r = json_variant_new_integer(pcr_array + n_pcrs, i);
+                r = json_variant_new_integer(&e, i);
                 if (r < 0)
-                        goto finish;
+                        return r;
 
-                n_pcrs++;
+                r = json_variant_append_array(&a, e);
+                if (r < 0)
+                        return r;
         }
 
-        r = json_variant_new_array(&a, pcr_array, n_pcrs);
-        if (r < 0)
-                goto finish;
+        if (!a)
+                return json_variant_new_array(ret, NULL, 0);
 
-        if (ret)
-                *ret = TAKE_PTR(a);
-        r = 0;
-
-finish:
-        json_variant_unref_many(pcr_array, n_pcrs);
-        return r;
+        *ret = TAKE_PTR(a);
+        return 0;
 }
 
 int tpm2_parse_pcr_json_array(JsonVariant *v, uint32_t *ret) {
@@ -4195,6 +4201,10 @@ Tpm2Support tpm2_support(void) {
 
 #if HAVE_TPM2
         support |= TPM2_SUPPORT_SYSTEM;
+
+        r = dlopen_tpm2();
+        if (r >= 0)
+                support |= TPM2_SUPPORT_LIBRARIES;
 #endif
 
         return support;
