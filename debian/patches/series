@@ -1,8 +1,3 @@
-fuzz-switch-fuzz-manager-serialize-to-MANAGER_TEST_RUN_MINIMAL.patch
-Print-ssize_t-as-zd.patch
-Print-st_dev-as-PRIu64.patch
-process-util-use-clone2-on-ia64.patch
-sleep-fix-unused-variable-warning.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/Only-start-logind-if-dbus-is-installed.patch
@@ -14,4 +9,3 @@ debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
-efi-skip-libefitest-if-bootloader-is-explicitly-set-to-fa.patch
