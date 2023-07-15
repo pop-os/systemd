@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index afda4c0..c0b5037 100644
+index 395eca1..4573304 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -3778,6 +3778,17 @@ executable(
+@@ -3787,6 +3787,17 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -261,10 +261,10 @@ index afda4c0..c0b5037 100644
          'systemd-sleep',
          'src/sleep/sleep.c',
 diff --git a/po/POTFILES.in b/po/POTFILES.in
-index e045852..131e4bc 100644
+index 16899fd..6bba341 100644
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -12,3 +12,4 @@ src/portable/org.freedesktop.portable1.policy
+@@ -13,3 +13,4 @@ src/portable/org.freedesktop.portable1.policy
  src/resolve/org.freedesktop.resolve1.policy
  src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
