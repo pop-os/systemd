@@ -1,3 +1,5 @@
+gpt-it-s-__mips64-not-__mips64__.patch
+sd-gpt-__mips__-is-also-defined-when-building-__mips64.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/Only-start-logind-if-dbus-is-installed.patch
