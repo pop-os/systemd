@@ -1,3 +1,25 @@
+systemd (254~rc2-1) experimental; urgency=medium
+
+  [ Luca Boccassi ]
+  * Bump dependency on Meson to 0.60
+  * upstream-ci: install libdw and libelf for boot-and-services too.
+  * upstream-ci: add libssl-dev to autopkgtest upstream suite.
+  * upstream-ci: add nftables.
+  * upstream-ci: add 'stress' to the upstream testsuite dependency list.
+  * tests/upstream: install curl.
+  * tests/upstream: bump timeout by 10 minutes.
+  * New upstream version 254~rc2
+  * Drop patches merged upstream
+  * Refresh patches for v254-rc2
+
+  [ Yu Watanabe ]
+  * autopkgtest: create directory to make accounts-daemon.service not
+    fail. The service requires /usr/share/accountsservice/interfaces, but
+    the directory is not packaged (at least in 22.08.8-6). This adds a
+    workaround for the failure.
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 15 Jul 2023 01:29:39 +0100
+
 systemd (254~rc1-4) experimental; urgency=medium
 
   * Backport patches to fix FTBFS on mipsel, ia64, x32
