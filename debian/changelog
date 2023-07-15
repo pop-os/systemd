@@ -1,3 +1,9 @@
+systemd (254~rc2-2) experimental; urgency=medium
+
+  * Backport two more mips64 fixes from upstream
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 15 Jul 2023 15:07:20 +0100
+
 systemd (254~rc2-1) experimental; urgency=medium
 
   [ Luca Boccassi ]
