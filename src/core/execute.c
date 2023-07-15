@@ -208,10 +208,8 @@ static const char *exec_context_tty_path(const ExecContext *context) {
 }
 
 static int exec_context_tty_size(const ExecContext *context, unsigned *ret_rows, unsigned *ret_cols) {
-        _cleanup_free_ char *rowskey = NULL, *rowsvalue = NULL, *colskey = NULL, *colsvalue = NULL;
         unsigned rows, cols;
         const char *tty;
-        int r;
 
         assert(context);
         assert(ret_rows);
@@ -221,45 +219,8 @@ static int exec_context_tty_size(const ExecContext *context, unsigned *ret_rows,
         cols = context->tty_cols;
 
         tty = exec_context_tty_path(context);
-        if (!tty || (rows != UINT_MAX && cols != UINT_MAX)) {
-                *ret_rows = rows;
-                *ret_cols = cols;
-                return 0;
-        }
-
-        tty = skip_dev_prefix(tty);
-        if (!in_charset(tty, ALPHANUMERICAL)) {
-                log_debug("%s contains non-alphanumeric characters, ignoring", tty);
-                *ret_rows = rows;
-                *ret_cols = cols;
-                return 0;
-        }
-
-        rowskey = strjoin("systemd.tty.rows.", tty);
-        if (!rowskey)
-                return -ENOMEM;
-
-        colskey = strjoin("systemd.tty.columns.", tty);
-        if (!colskey)
-                return -ENOMEM;
-
-        r = proc_cmdline_get_key_many(/* flags = */ 0,
-                                      rowskey, &rowsvalue,
-                                      colskey, &colsvalue);
-        if (r < 0)
-                log_debug_errno(r, "Failed to read TTY size of %s from kernel cmdline, ignoring: %m", tty);
-
-        if (rows == UINT_MAX && rowsvalue) {
-                r = safe_atou(rowsvalue, &rows);
-                if (r < 0)
-                        log_debug_errno(r, "Failed to parse %s=%s, ignoring: %m", rowskey, rowsvalue);
-        }
-
-        if (cols == UINT_MAX && colsvalue) {
-                r = safe_atou(colsvalue, &cols);
-                if (r < 0)
-                        log_debug_errno(r, "Failed to parse %s=%s, ignoring: %m", colskey, colsvalue);
-        }
+        if (tty)
+                (void) proc_cmdline_tty_size(tty, rows == UINT_MAX ? &rows : NULL, cols == UINT_MAX ? &cols : NULL);
 
         *ret_rows = rows;
         *ret_cols = cols;
@@ -268,25 +229,34 @@ static int exec_context_tty_size(const ExecContext *context, unsigned *ret_rows,
 }
 
 static void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p) {
-        const char *path;
+        _cleanup_close_ int fd = -EBADF;
+        const char *path = exec_context_tty_path(ASSERT_PTR(context));
 
-        assert(context);
+        /* Take a lock around the device for the duration of the setup that we do here.
+         * systemd-vconsole-setup.service also takes the lock to avoid being interrupted.
+         * We open a new fd that will be closed automatically, and operate on it for convenience.
+         */
 
-        path = exec_context_tty_path(context);
+        if (p && p->stdin_fd >= 0) {
+                fd = xopenat_lock(p->stdin_fd, NULL,
+                                  O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY, 0, 0, LOCK_BSD, LOCK_EX);
+                if (fd < 0)
+                        return;
+        } else if (path) {
+                fd = open_terminal(path, O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
+                if (fd < 0)
+                        return;
 
-        if (context->tty_vhangup) {
-                if (p && p->stdin_fd >= 0)
-                        (void) terminal_vhangup_fd(p->stdin_fd);
-                else if (path)
-                        (void) terminal_vhangup(path);
-        }
+                if (lock_generic(fd, LOCK_BSD, LOCK_EX) < 0)
+                        return;
+        } else
+                return;   /* nothing to do */
 
-        if (context->tty_reset) {
-                if (p && p->stdin_fd >= 0)
-                        (void) reset_terminal_fd(p->stdin_fd, true);
-                else if (path)
-                        (void) reset_terminal(path);
-        }
+        if (context->tty_vhangup)
+                (void) terminal_vhangup_fd(fd);
+
+        if (context->tty_reset)
+                (void) reset_terminal_fd(fd, true);
 
         if (p && p->stdin_fd >= 0) {
                 unsigned rows = context->tty_rows, cols = context->tty_cols;
@@ -2519,7 +2489,7 @@ static int setup_exec_directory(
                          * didn't know the more recent addition to the xdg-basedir spec: the $XDG_STATE_HOME
                          * directory. In older systemd versions EXEC_DIRECTORY_STATE was aliased to
                          * EXEC_DIRECTORY_CONFIGURATION, with the advent of $XDG_STATE_HOME is is now
-                         * seperated. If a service has both dirs configured but only the configuration dir
+                         * separated. If a service has both dirs configured but only the configuration dir
                          * exists and the state dir does not, we assume we are looking at an update
                          * situation. Hence, create a compatibility symlink, so that all expectations are
                          * met.
@@ -7217,16 +7187,6 @@ bool exec_context_has_encrypted_credentials(ExecContext *c) {
                         return true;
 
         return false;
-}
-
-int exec_context_add_default_dependencies(Unit *u, const ExecContext *c) {
-        assert(u);
-        assert(u->default_dependencies);
-
-        if (c && exec_context_needs_term(c))
-                return unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_VCONSOLE_SETUP_SERVICE,
-                                                   /* add_reference= */ true, UNIT_DEPENDENCY_DEFAULT);
-        return 0;
 }
 
 void exec_status_start(ExecStatus *s, pid_t pid) {

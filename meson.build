@@ -1060,7 +1060,11 @@ threads = dependency('threads')
 librt = cc.find_library('rt')
 libm = cc.find_library('m')
 libdl = cc.find_library('dl')
-libcrypt = dependency('libcrypt')
+libcrypt = dependency('libcrypt', 'libxcrypt', required : false)
+if not libcrypt.found()
+        # fallback to use find_library() if libcrypt is provided by glibc, e.g. for LibreELEC.
+        libcrypt = cc.find_library('crypt')
+endif
 libcap = dependency('libcap')
 
 # On some architectures, libatomic is required. But on some installations,
@@ -2120,22 +2124,27 @@ efi_arch = {
 
 if get_option('bootloader') != 'false' and efi_arch != ''
         conf.set_quoted('EFI_MACHINE_TYPE_NAME', efi_arch)
+elif get_option('bootloader') == 'false' and efi_arch != ''
+        # Ensure that if the option is explicitly set to false, then no EFI code is built, including tests
+        efi_arch = ''
 elif get_option('bootloader') == 'true' and efi_arch == ''
         error('EFI not supported for this arch.')
 endif
 
 efi_arch_alt = ''
+efi_cpu_family_alt = ''
 if efi_arch == 'x64' and cc.links('''
                 #include <limits.h>
                 int main(int argc, char *argv[]) {
                         return __builtin_popcount(argc - CHAR_MAX);
                 }''', args : ['-m32', '-march=i686'], name : '32bit build possible')
         efi_arch_alt = 'ia32'
+        efi_cpu_family_alt = 'x86'
 endif
 
 have_pyelftools = pymod.find_installation('python3', required : false, modules : ['elftools']).found()
-if get_option('bootloader') == 'true' and (not python_39 or not have_pyelftools)
-        error('EFI bootloader support requires Python >= 3.9 and pyelftools.')
+if get_option('bootloader') == 'true' and not have_pyelftools
+        error('EFI bootloader support requires pyelftools.')
 endif
 
 conf.set10(
@@ -2143,7 +2152,6 @@ conf.set10(
         get_option('efi') and
         get_option('bootloader') in ['auto', 'true'] and
         efi_arch != '' and
-        python_39 and
         have_pyelftools,
 )
 
@@ -2649,6 +2657,7 @@ if want_tests != 'false'
              test_fstab_generator_sh,
              # https://github.com/mesonbuild/meson/issues/2681
              args : exe.full_path(),
+             env : test_env,
              depends : exe)
 endif
 
