@@ -2244,6 +2244,58 @@ int tpm2_digest_many_digests(
         return tpm2_digest_many(alg, digest, iovecs, n_data, extend);
 }
 
+/* This hashes the provided pin into a digest value, but also verifies that the final byte is not 0, because
+ * the TPM specification Part 1 ("Architecture") section Authorization Values (subsection "Authorization Size
+ * Convention") states "Trailing octets of zero are to be removed from any string before it is used as an
+ * authValue". Since the TPM doesn't know if the auth value is a "string" or just a hash digest, any hash
+ * digest that randomly happens to end in 0 must have the final 0(s) trimmed.
+ *
+ * This is required at 2 points. First, when setting the authValue during creation of new sealed objects, in
+ * tpm2_seal(). This only applies to newly created objects, of course.  Second, when using a previously
+ * created sealed object that has an authValue set, we use the sealed objects as the session bind key. This
+ * requires calling SetAuth so tpm2-tss can correctly calculate the HMAC to use for the encryption session.
+ *
+ * TPM implementations will perform the trimming for any authValue for existing sealed objects, so the
+ * tpm2-tss library must also perform the trimming before HMAC calculation, but it does not yet; this bug is
+ * open to add the trimming: https://github.com/tpm2-software/tpm2-tss/issues/2664
+ *
+ * Until our minimum tpm2-tss version contains a fix for that bug, we must perform the trimming
+ * ourselves. Note that since we are trimming, which is exactly what a TPM implementation would do, this will
+ * work for both existing objects with a authValue ending in 0(s) as well as new sealed objects we create,
+ * which we will trim the 0(s) from before sending to the TPM.
+ */
+static void tpm2_trim_auth_value(TPM2B_AUTH *auth) {
+        bool trimmed = false;
+
+        assert(auth);
+
+        while (auth->size > 0 && auth->buffer[auth->size - 1] == 0) {
+                trimmed = true;
+                auth->size--;
+        }
+
+        if (trimmed)
+                log_debug("authValue ends in 0, trimming as required by the TPM2 specification Part 1 section 'HMAC Computation' authValue Note 2.");
+}
+
+static int tpm2_get_pin_auth(TPMI_ALG_HASH hash, const char *pin, TPM2B_AUTH *ret_auth) {
+        TPM2B_AUTH auth = {};
+        int r;
+
+        assert(pin);
+        assert(ret_auth);
+
+        r = tpm2_digest_buffer(hash, &auth, pin, strlen(pin), /* extend= */ false);
+        if (r < 0)
+                return r;
+
+        tpm2_trim_auth_value(&auth);
+
+        *ret_auth = TAKE_STRUCT(auth);
+
+        return 0;
+}
+
 static int tpm2_set_auth(Tpm2Context *c, const Tpm2Handle *handle, const char *pin) {
         TPM2B_AUTH auth = {};
         TSS2_RC rc;
@@ -2257,7 +2309,7 @@ static int tpm2_set_auth(Tpm2Context *c, const Tpm2Handle *handle, const char *p
 
         CLEANUP_ERASE(auth);
 
-        r = tpm2_digest_buffer(TPM2_ALG_SHA256, &auth, pin, strlen(pin), /* extend= */ false);
+        r = tpm2_get_pin_auth(TPM2_ALG_SHA256, pin, &auth);
         if (r < 0)
                 return r;
 
@@ -3228,7 +3280,7 @@ int tpm2_seal(const char *device,
         CLEANUP_ERASE(hmac_sensitive);
 
         if (pin) {
-                r = tpm2_digest_buffer(TPM2_ALG_SHA256, &hmac_sensitive.userAuth, pin, strlen(pin), /* extend= */ false);
+                r = tpm2_get_pin_auth(TPM2_ALG_SHA256, pin, &hmac_sensitive.userAuth);
                 if (r < 0)
                         return r;
         }
