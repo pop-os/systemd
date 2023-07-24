@@ -1,3 +1,9 @@
+systemd (254~rc3-2) unstable; urgency=medium
+
+  * ukify: enable only on UEFI architectures.
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 24 Jul 2023 16:55:57 +0100
+
 systemd (254~rc3-1) unstable; urgency=low
 
   * Drop Suggests on transitional policykit-1 package
