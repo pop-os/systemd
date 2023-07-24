@@ -30,7 +30,13 @@ else
     GENSYMBOLS_LEVEL = 1
 endif
 
+# Workaround for https://bugs.debian.org/1041499
+ifeq ($(DEB_HOST_ARCH),mips64el)
+CROSS_WRAPPER = --native-file=$(CURDIR)/debian/extra/no-exe-wrapper.ini
+endif
+
 CONFFLAGS = \
+	$(CROSS_WRAPPER) \
 	-Db_lto=true \
 	-Db_pie=true \
 	-Dmode=release \
