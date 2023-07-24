@@ -1,3 +1,14 @@
+systemd (254~rc3-1) unstable; urgency=low
+
+  * Drop Suggests on transitional policykit-1 package
+  * Drop autopkgtest dependency on transitional policykit-1 package
+  * Ship ukify in systemd package (Closes: #1041399)
+  * New upstream version 254~rc3 (Closes: #1041648, #1041540)
+  * Drop patches merged upstream
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 24 Jul 2023 12:59:37 +0100
+
 systemd (254~rc2-3) unstable; urgency=low
 
   * Upload to unstable
