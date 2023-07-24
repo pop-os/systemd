@@ -1,3 +1,10 @@
+systemd (254~rc3-3) unstable; urgency=low
+
+  * Backport patch to fix FTBFS on armhf
+  * Add workaround for Meson regression to fix FTBFS on mips64el
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 24 Jul 2023 20:50:48 +0100
+
 systemd (254~rc3-2) unstable; urgency=medium
 
   * ukify: enable only on UEFI architectures.
