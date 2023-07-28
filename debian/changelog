@@ -1,3 +1,12 @@
+systemd (254-1) unstable; urgency=medium
+
+  * New upstream version 254
+  * Drop patches merged upstream
+  * d/watch: switch back to stable repository
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 28 Jul 2023 10:01:15 +0100
+
 systemd (254~rc3-3) unstable; urgency=low
 
   * Backport patch to fix FTBFS on armhf
