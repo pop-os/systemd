@@ -1,0 +1,57 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 29 Jun 2023 13:31:19 +0200
+Subject: core: reorder systemd arguments on reexec
+
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/884ab38057dca70b8779c85884f4646057e80921
+Bug-Ubuntu: https://launchpad.net/bugs/2013543
+
+When reexecuting system let's put our arguments carrying deserialization
+info first followed by any existing arguments to make sure they get
+parsed in case we get weird stuff from the kernel cmdline (like --).
+
+See: https://github.com/systemd/systemd/issues/28184
+(cherry picked from commit 06afda6b38d5d730fca3c65449096425933272bc)
+---
+ src/core/main.c            | 6 +++++-
+ test/TEST-01-BASIC/test.sh | 5 +++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/main.c b/src/core/main.c
+index ecfc57c..6766763 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -1841,13 +1841,17 @@ static int do_reexecute(
+                 xsprintf(sfd, "--deserialize=%i", fileno(arg_serialization));
+
+                 i = 1;         /* Leave args[0] empty for now. */
+-                filter_args(args, &i, argv, argc);
+
++                /* Put our stuff first to make sure it always gets parsed in case
++                 * we get weird stuff from the kernel cmdline (like --) */
+                 if (switch_root_dir)
+                         args[i++] = "--switched-root";
+
+                 args[i++] = arg_system ? "--system" : "--user";
+                 args[i++] = sfd;
++
++                filter_args(args, &i, argv, argc);
++
+                 args[i++] = NULL;
+
+                 assert(i <= args_size);
+diff --git a/test/TEST-01-BASIC/test.sh b/test/TEST-01-BASIC/test.sh
+index cc6d065..d0e714a 100755
+--- a/test/TEST-01-BASIC/test.sh
++++ b/test/TEST-01-BASIC/test.sh
+@@ -8,6 +8,11 @@ RUN_IN_UNPRIVILEGED_CONTAINER=${RUN_IN_UNPRIVILEGED_CONTAINER:-yes}
+ TEST_REQUIRE_INSTALL_TESTS=0
+ TEST_SUPPORTING_SERVICES_SHOULD_BE_MASKED=0
+
++# Check if we can correctly deserialize if the kernel cmdline contains "weird" stuff
++# like an invalid argument, "end of arguments" separator, or a sysvinit argument (-z)
++# See: https://github.com/systemd/systemd/issues/28184
++KERNEL_APPEND="foo -- -z bar --- baz $KERNEL_APPEND"
++
+ # shellcheck source=test/test-functions
+ . "${TEST_BASE_DIR:?}/test-functions"
+
