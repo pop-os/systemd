@@ -1,0 +1,67 @@
+From: Mariusz Tkaczyk <mariusz.tkaczyk@linux.intel.com>
+Date: Tue, 29 Mar 2022 12:49:54 +0200
+Subject: shutdown: get only active md arrays.
+
+Origin: upstream, https://github.com/systemd/systemd/commit/3a3b022d2cc112803ea7b9beea98bbcad110368a
+Bug-Ubuntu: https://launchpad.net/bugs/2025563
+
+Current md_list_get() implementation filters all block devices, started from
+"md*". This is ambiguous because list could contain:
+- partitions created upon md device (mdXpY)
+- external metadata container- specific type of md array.
+
+For partitions there is no issue, because they aren't handle STOP_ARRAY
+ioctl sent later. It generates misleading errors only.
+
+Second case is more problematic because containers are not locked in kernel.
+They are stopped even if container member array is active. For that reason
+reboot or shutdown flow could be blocked because metadata manager cannot be
+restarted after switch root on shutdown.
+
+Add filters to remove partitions and containers from md_list. Partitions
+can be excluded by DEVTYPE. Containers are determined by MD_LEVEL
+property, we are excluding all with "container" value.
+
+Signed-off-by: Mariusz Tkaczyk <mariusz.tkaczyk@linux.intel.com>
+---
+ src/shutdown/umount.c | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/src/shutdown/umount.c b/src/shutdown/umount.c
+index 1f945b7..9325870 100644
+--- a/src/shutdown/umount.c
++++ b/src/shutdown/umount.c
+@@ -352,9 +352,14 @@ static int md_list_get(MountPoint **head) {
+         if (r < 0)
+                 return r;
+
++        /* Filter out partitions. */
++        r = sd_device_enumerator_add_match_property(e, "DEVTYPE", "disk");
++        if (r < 0)
++                return r;
++
+         FOREACH_DEVICE(e, d) {
+                 _cleanup_free_ char *p = NULL;
+-                const char *dn;
++                const char *dn, *md_level;
+                 MountPoint *m;
+                 dev_t devnum;
+
+@@ -362,6 +367,17 @@ static int md_list_get(MountPoint **head) {
+                     sd_device_get_devname(d, &dn) < 0)
+                         continue;
+
++                r = sd_device_get_property_value(d, "MD_LEVEL", &md_level);
++                if (r < 0) {
++                        log_warning_errno(r, "Failed to get MD_LEVEL property for %s, ignoring: %m", dn);
++                        continue;
++                }
++
++                /* MD "containers" are a special type of MD devices, used for external metadata.
++                 * Since it doesn't provide RAID functionality in itself we don't need to stop it. */
++                if (streq(md_level, "container"))
++                        continue;
++
+                 p = strdup(dn);
+                 if (!p)
+                         return -ENOMEM;
