@@ -114,3 +114,4 @@ lp2002445/udev-restore-syspath-and-properties-on-failure.patch
 lp2002445/sd-device-introduce-device_get_property_int.patch
 lp2002445/core-device-ignore-failed-uevents.patch
 lp2025563-shutdown-get-only-active-md-arrays.patch
+lp2028180-udev-rules-fix-nvme-symlink-creation-on-namespace-changes.patch

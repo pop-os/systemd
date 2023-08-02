@@ -1,0 +1,47 @@
+From: Thomas Blume <Thomas.Blume@suse.com>
+Date: Thu, 2 Mar 2023 12:06:13 +0100
+Subject: udev-rules: fix nvme symlink creation on namespace changes
+
+Origin: upstream, https://github.com/systemd/systemd/commit/c5ba7a2a4dd19a2d31b8a9d52d3c4bdde78387f0
+Bug-Ubuntu: https://launchpad.net/bugs/2028180
+
+The nvme by-id symlink changes to the latest namespace when a new namespace gets
+added, for example by connecting multiple NVMe/TCP host controllers via nvme
+connect-all.
+That is incorrect for persistent device links.
+The persistent symbolic device link should continue to point to the same NVMe
+namespace throughout the lifetime of the current boot.
+Therefore the namespace id needs to be added to the link name.
+
+(modified to apply to v249.11)
+---
+ rules.d/60-persistent-storage.rules | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/rules.d/60-persistent-storage.rules b/rules.d/60-persistent-storage.rules
+index a2417cd..1e78f04 100644
+--- a/rules.d/60-persistent-storage.rules
++++ b/rules.d/60-persistent-storage.rules
+@@ -37,14 +37,22 @@ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{serial}=="?*", ENV{ID_S
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{wwid}=="?*", ENV{ID_WWN}="$attr{wwid}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
++KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
++KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", ENV{ID_NSID}=="?*",\
++  OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}_$env{ID_NSID}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
+
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{serial}=="?*", ENV{ID_SERIAL_SHORT}="$attr{serial}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
++KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"
++KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*",  ENV{ID_NSID}=="?*",\
++  OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}_$env{ID_NSID}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"
+
+ # virtio-blk
+ KERNEL=="vd*[!0-9]", ATTRS{serial}=="?*", ENV{ID_SERIAL}="$attr{serial}", SYMLINK+="disk/by-id/virtio-$env{ID_SERIAL}"
