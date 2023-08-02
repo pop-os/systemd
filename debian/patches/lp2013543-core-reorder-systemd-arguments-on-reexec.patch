@@ -1,0 +1,58 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 29 Jun 2023 13:31:19 +0200
+Subject: core: reorder systemd arguments on reexec
+
+Origin: upstream, https://github.com/systemd/systemd/commit/163be31d380fbdcb56ec06c09e81774840df90dc
+Bug-Ubuntu: https://launchpad.net/bugs/2013543
+
+When reexecuting system let's put our arguments carrying deserialization
+info first followed by any existing arguments to make sure they get
+parsed in case we get weird stuff from the kernel cmdline (like --).
+
+See: https://github.com/systemd/systemd/issues/28184
+(cherry picked from commit 06afda6b38d5d730fca3c65449096425933272bc)
+(cherry picked from commit 884ab38057dca70b8779c85884f4646057e80921)
+---
+ src/core/main.c            | 6 +++++-
+ test/TEST-01-BASIC/test.sh | 5 +++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/main.c b/src/core/main.c
+index 66897c2..1bb3b6b 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -1797,13 +1797,17 @@ static void do_reexecute(
+                 xsprintf(sfd, "%i", fileno(arg_serialization));
+
+                 i = 1;         /* Leave args[0] empty for now. */
+-                filter_args(args, &i, argv, argc);
+
++                /* Put our stuff first to make sure it always gets parsed in case
++                 * we get weird stuff from the kernel cmdline (like --) */
+                 if (switch_root_dir)
+                         args[i++] = "--switched-root";
+                 args[i++] = arg_system ? "--system" : "--user";
+                 args[i++] = "--deserialize";
+                 args[i++] = sfd;
++
++                filter_args(args, &i, argv, argc);
++
+                 args[i++] = NULL;
+
+                 assert(i <= args_size);
+diff --git a/test/TEST-01-BASIC/test.sh b/test/TEST-01-BASIC/test.sh
+index d42c0df..dbca6ac 100755
+--- a/test/TEST-01-BASIC/test.sh
++++ b/test/TEST-01-BASIC/test.sh
+@@ -6,6 +6,11 @@ IMAGE_NAME="basic"
+ RUN_IN_UNPRIVILEGED_CONTAINER=${RUN_IN_UNPRIVILEGED_CONTAINER:-yes}
+ TEST_REQUIRE_INSTALL_TESTS=0
+
++# Check if we can correctly deserialize if the kernel cmdline contains "weird" stuff
++# like an invalid argument, "end of arguments" separator, or a sysvinit argument (-z)
++# See: https://github.com/systemd/systemd/issues/28184
++KERNEL_APPEND="foo -- -z bar --- baz $KERNEL_APPEND"
++
+ # shellcheck source=test/test-functions
+ . "${TEST_BASE_DIR:?}/test-functions"
+
