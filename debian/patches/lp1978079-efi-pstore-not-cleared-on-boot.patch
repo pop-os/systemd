@@ -6,9 +6,10 @@ Subject: [PATCH] pstore: Run after modules are loaded
 Origin: upstream, https://github.com/systemd/systemd/commit/70e74a5997ae2ce7ba72a74ac949c3b2dad1a1d6
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1978079
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1981622
-Last-Updated: 2022-07-22
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2023462
+Last-Updated: 2023-08-02
 
-The original commit has been modified to not load mtdpstore.
+The original commit has been modified to only load efi_pstore, as that is all that was really needed.
 
 ---
 The systemd-pstore service takes pstore files on boot and transfers them
@@ -42,8 +43,8 @@ index 848e311e9642..86de30ad4a72 100644
  DefaultDependencies=no
  Conflicts=shutdown.target
  Before=sysinit.target shutdown.target
-+After=modprobe@efi_pstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
-+Wants=modprobe@efi_pstore.service modprobe@chromeos_pstore.service modprobe@ramoops.service modprobe@pstore_zone.service modprobe@pstore_blk.service
++After=modprobe@efi_pstore.service
++Wants=modprobe@efi_pstore.service
  
  [Service]
  Type=oneshot
