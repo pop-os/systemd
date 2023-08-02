@@ -1,0 +1,59 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 7 Jul 2023 06:31:04 +0900
+Subject: network/dhcp4: do not ignore the gateway even if the destination is
+ in the same network
+
+Origin: upstream, https://github.com/systemd/systemd/commit/77451f654a89d822cd288883edfac315949d1cb6
+Bug-Ubuntu: https://launchpad.net/bugs/2009743
+
+Fixes #28280.
+
+(modified to apply to v249.11)
+---
+ src/network/networkd-dhcp4.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
+index 9b06edc..8dc85a4 100644
+--- a/src/network/networkd-dhcp4.c
++++ b/src/network/networkd-dhcp4.c
+@@ -290,7 +290,8 @@ static int dhcp4_request_route_to_gateway(Link *link, const struct in_addr *gw)
+ static int dhcp4_request_route_auto(
+                 Route *in,
+                 Link *link,
+-                const struct in_addr *gw) {
++                const struct in_addr *gw,
++                bool force_use_gw) {
+
+         _cleanup_(route_freep) Route *route = in;
+         struct in_addr address, netmask, prefix;
+@@ -335,7 +336,8 @@ static int dhcp4_request_route_auto(
+                 route->gw = IN_ADDR_NULL;
+                 route->prefsrc.in = address;
+
+-        } else if (route->dst_prefixlen >= prefixlen &&
++        } else if (!force_use_gw &&
++                   route->dst_prefixlen >= prefixlen &&
+                    (route->dst.in.s_addr & netmask.s_addr) == prefix.s_addr) {
+                 if (in4_addr_is_set(gw))
+                         log_link_debug(link, "DHCP: requested route destination "IPV4_ADDRESS_FMT_STR"/%u is in the assigned network "
+@@ -450,7 +452,9 @@ static int dhcp4_request_static_routes(Link *link, struct in_addr *ret_default_g
+                     in4_addr_is_null(&default_gw))
+                         default_gw = gw;
+
+-                r = dhcp4_request_route_auto(TAKE_PTR(route), link, &gw);
++                /* Do not ignore the gateway given by the classless route option even if the destination is
++                 * in the same network. See issue #28280. */
++                r = dhcp4_request_route_auto(TAKE_PTR(route), link, &gw, /* force_use_gw = */ classless_route);
+                 if (r < 0)
+                         return r;
+         }
+@@ -575,7 +579,7 @@ static int dhcp4_request_routes_to_servers(
+                 route->table = link_get_dhcp_route_table(link);
+                 route->mtu = link->network->dhcp_route_mtu;
+
+-                r = dhcp4_request_route_auto(TAKE_PTR(route), link, gw);
++                r = dhcp4_request_route_auto(TAKE_PTR(route), link, gw, /* force_use_gw = */ false);
+                 if (r < 0)
+                         return r;
+         }
