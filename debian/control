@@ -442,6 +442,7 @@ Build-Profiles: <!stage1>
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         libnss-systemd (= ${binary:Version}),
          systemd (= ${binary:Version}),
 Description: dynamic user/group manager
  systemd-userdbd is a system service that multiplexes user/group lookups to all
