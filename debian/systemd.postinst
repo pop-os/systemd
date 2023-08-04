@@ -87,7 +87,22 @@ fi
 
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
-    _systemctl daemon-reexec || true
+    # LP: #2013543 - the systemd cmdline can get mangled depending on the
+    # contents of /proc/cmdline, which causes systemd to fail to deserialize
+    # it's previous state on daemon-reexec. This means that for upgrades from
+    # affected versions, we need a reboot and cannot re-exec here, else the
+    # bug could be triggered.
+    if dpkg --compare-versions "$2" lt "249.11-0ubuntu3.10~"; then
+        if ! grep -Fqsx systemd /run/reboot-required.pkgs; then
+            echo systemd >> /run/reboot-required.pkgs || true
+        fi
+
+        # Reload to avoid warnings when restarting services below
+        _systemctl daemon-reload || true
+    else
+        _systemctl daemon-reexec || true
+    fi
+
     # don't restart logind; this can be done again once this gets implemented:
     # https://github.com/systemd/systemd/issues/1163
     if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
