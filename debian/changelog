@@ -1,3 +1,12 @@
+systemd (254.1-1) UNRELEASED; urgency=medium
+
+  * systemd-userdbd: depend on libnss-systemd. This library provides nss
+    integration for userdbd/homed and is needed for homed logins
+  * New upstream version 254.1
+  * Refresh patches for v254.1
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 09 Aug 2023 15:58:06 +0100
+
 systemd (254-1) unstable; urgency=medium
 
   * New upstream version 254
