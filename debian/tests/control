@@ -109,6 +109,7 @@ Depends: systemd-tests,
   libfido2-dev,
   libdw-dev,
   libqrencode-dev,
+  tzdata-legacy | tzdata,
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: upstream
@@ -189,6 +190,7 @@ Depends: systemd-tests,
   locales-all,
   stress,
   curl,
+  tzdata-legacy | tzdata,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
