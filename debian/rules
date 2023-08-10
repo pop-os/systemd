@@ -4,6 +4,7 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 export LC_ALL = C.UTF-8
+export DEB_CFLAGS_MAINT_APPEND = -ffat-lto-objects
 
 include /usr/share/dpkg/default.mk
 include /usr/share/debhelper/dh_package_notes/package-notes.mk
