@@ -1,11 +1,24 @@
-systemd (254.1-1) UNRELEASED; urgency=medium
+systemd (254.1-1) unstable; urgency=medium
 
+  [ Luca Boccassi ]
   * systemd-userdbd: depend on libnss-systemd. This library provides nss
     integration for userdbd/homed and is needed for homed logins
   * New upstream version 254.1
   * Refresh patches for v254.1
+  * systemd: do not ship empty .wants/ directories. These will conflict
+    with finalizing usrmerge as they are in /lib, so remove them for now.
+    systemctl enable creates them anyway when needed.
 
- -- Luca Boccassi <bluca@debian.org>  Wed, 09 Aug 2023 15:58:06 +0100
+  [ Helmut Grohne ]
+  * duplicate udev trigger interest for /usr-merge. As packages move their
+    files from / to /usr, dpkg will cease activating udev's trigger
+    interest for hwdb.d files. In DEP17, this is documented as P2. Since
+    there are only two packages in Debian affected by this issue, we opt
+    for an individual mitigation and explicitly duplicate the trigger
+    interest to both locations (M12). This is safe regardless of the other
+    chosen mitigations as trigger activations are accumulated.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 10 Aug 2023 21:41:13 +0100
 
 systemd (254-1) unstable; urgency=medium
 
