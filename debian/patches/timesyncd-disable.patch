@@ -8,7 +8,7 @@ Index: systemd/debian/control
           util-linux (>= 2.27.1),
           mount (>= 2.26),
           adduser,
-+         chrony,
++         chrony [!i386],
  Conflicts: consolekit,
             libpam-ck-connector,
             systemd-shim,
