@@ -199,3 +199,10 @@ Depends: systemd-sysv,
   gdm3 [!s390x],
   xserver-xorg-video-dummy,
 Restrictions: needs-root, isolation-container, allow-stderr, breaks-testbed
+
+Tests: build-with-static-libsystemd
+Depends: systemd,
+  pkg-config,
+  build-essential,
+  libsystemd-dev,
+  libcap-dev,
