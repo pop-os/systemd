@@ -33,6 +33,7 @@ endif
 CONFFLAGS = \
 	-Db_lto=true \
 	-Db_pie=true \
+	-Dstatic-libsystemd=true \
 	-Dmode=release \
 	-Drootlibdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
 	-Dsplit-usr=true \
