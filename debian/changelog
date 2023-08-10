@@ -1,3 +1,11 @@
+systemd (254.1-2) unstable; urgency=medium
+
+  * Build-depend on tzdata-legacy | tzdata. Some timezones were split out,
+    but some unit tests need them, so pull in the new tzdata-legacy
+    package if it exists.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 10 Aug 2023 23:31:48 +0100
+
 systemd (254.1-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
