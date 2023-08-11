@@ -228,6 +228,8 @@ execute_after_dh_install-arch:
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
 	rm debian/systemd/lib/systemd/system/local-fs.target.wants/tmp.mount
+	# Unused empty directory interacts badly with /usr-merge
+	rmdir --ignore-fail-on-non-empty debian/systemd/lib/systemd/system/local-fs.target.wants
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
