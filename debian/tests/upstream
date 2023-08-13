@@ -10,6 +10,9 @@ DPKGARCH=$(dpkg --print-architecture)
 case "${DEB_BUILD_PROFILES:-}" in
     *pkg.systemd.upstream*)
         denylist="deny-list-ubuntu-ci"
+        if [ "$DPKGARCH" = ppc64el ]; then
+            export TEST_NO_QEMU=1
+        fi
         ;;
     *)
         denylist="deny-list-upstream-ci"
