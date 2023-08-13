@@ -1,0 +1,66 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Sat, 12 Aug 2023 15:15:55 +0100
+Subject: test: skip test-path on Salsa CI
+
+Salsa is the Debian git forge. In the package build environment test-path
+always fails as we cannot set up cgroups and so the path unit fails to
+start. Skip the test in that environment.
+
+Unfortunately meson doesn't allow one to skip individual tests by name.
+
+Origin: upstream, https://github.com/systemd/systemd/commit/a0b0b670ab6caa119eef37bda0d70b7273a70568
+---
+ src/shared/tests.c   |  2 ++
+ src/test/test-path.c | 23 +++++++++++++++--------
+ 2 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index ce72be1..60e2542 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -339,6 +339,8 @@ const char *ci_environment(void) {
+                 return (ans = "github-actions");
+         if (getenv("AUTOPKGTEST_ARTIFACTS") || getenv("AUTOPKGTEST_TMP"))
+                 return (ans = "autopkgtest");
++        if (getenv("SALSA_CI_IMAGES"))
++                return (ans = "salsa-ci");
+ 
+         FOREACH_STRING(var, "CI", "CONTINOUS_INTEGRATION") {
+                 /* Those vars are booleans according to Semaphore and Travis docs:
+diff --git a/src/test/test-path.c b/src/test/test-path.c
+index 92b6b65..22ed88f 100644
+--- a/src/test/test-path.c
++++ b/src/test/test-path.c
+@@ -100,17 +100,24 @@ static int _check_states(unsigned line,
+                          service_state_to_string(service->state),
+                          service_result_to_string(service->result));
+ 
+-                if (service->state == SERVICE_FAILED &&
+-                    service->main_exec_status.status == EXIT_CGROUP &&
+-                    !ci_environment())
++                if (service->state == SERVICE_FAILED && service->main_exec_status.status == EXIT_CGROUP) {
++                        const char *ci = ci_environment();
++
+                         /* On a general purpose system we may fail to start the service for reasons which are
+                          * not under our control: permission limits, resource exhaustion, etc. Let's skip the
+                          * test in those cases. On developer machines we require proper setup. */
+-                        return log_notice_errno(SYNTHETIC_ERRNO(ECANCELED),
+-                                                "Failed to start service %s, aborting test: %s/%s",
+-                                                UNIT(service)->id,
+-                                                service_state_to_string(service->state),
+-                                                service_result_to_string(service->result));
++                        if (!ci)
++                                return log_notice_errno(SYNTHETIC_ERRNO(ECANCELED),
++                                                        "Failed to start service %s, aborting test: %s/%s",
++                                                        UNIT(service)->id,
++                                                        service_state_to_string(service->state),
++                                                        service_result_to_string(service->result));
++
++                        /* On Salsa we can't setup cgroups so the unit always fails. The test checks if it
++                         * can but continues if it cannot at the beginning, but on Salsa it fails here. */
++                        if (streq(ci, "salsa-ci"))
++                                exit(EXIT_TEST_SKIP);
++                }
+ 
+                 if (n >= end) {
+                         log_error("Test timeout when testing %s", UNIT(path)->id);
