@@ -1,4 +1,4 @@
-systemd (253.5-1ubuntu2) UNRELEASED; urgency=medium
+systemd (253.5-1ubuntu2) mantic; urgency=medium
 
   * core: reorder systemd arguments on reexec (LP: #2013543)
     File: debian/patches/lp2013543-core-reorder-systemd-arguments-on-reexec.patch
@@ -26,7 +26,7 @@ systemd (253.5-1ubuntu2) UNRELEASED; urgency=medium
     - debian/tests/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9d90da82d6b4adcf59b9a6b6188af3a49381fea8
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 14 Aug 2023 11:28:08 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 14 Aug 2023 11:28:09 -0400
 
 systemd (253.5-1ubuntu1) mantic; urgency=medium
 
