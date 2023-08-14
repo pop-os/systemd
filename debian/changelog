@@ -1,3 +1,33 @@
+systemd (253.5-1ubuntu2) UNRELEASED; urgency=medium
+
+  * core: reorder systemd arguments on reexec (LP: #2013543)
+    File: debian/patches/lp2013543-core-reorder-systemd-arguments-on-reexec.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c93e797cdd4f3678cdcc7449f8a6f6820e98b7f0
+  * network/dhcp4: do not ignore the gateway even if the destination is in same network (LP: #2009743)
+    Files:
+    - debian/patches/lp2009743/network-dhcp4-do-not-ignore-the-gateway-even-if-the-desti.patch
+    - debian/patches/lp2009743/test-network-add-one-more-testcase-for-DHCPv4-classless-r.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c09bc22fca4259301c88195f34ae3b24956afb22
+  * debian/systemd.postint: do not daemon re-exec if we could hit LP: #2013543
+    File: debian/systemd.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=19447af92c6d30e331ff97420e7ddcf3e5d723e1
+  * meson.build: disable -Wformat-overflow on gcc with -O3
+    File: debian/patches/meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8c8595bf0f12e56d4b3a063c93a3ba69c798add2
+  * debian: ship libsystemd.a in libsystemd-dev (LP: #2012437)
+    Thanks to Serge Hallyn
+    Files:
+    - debian/libsystemd-dev.install
+    - debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5997dd2a25a7c65d7c8a826346c0120532a0e083
+  * autopkgtest: add build test for static libsystemd
+    Files:
+    - debian/tests/build-with-static-libsystemd
+    - debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9d90da82d6b4adcf59b9a6b6188af3a49381fea8
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 14 Aug 2023 11:28:08 -0400
+
 systemd (253.5-1ubuntu1) mantic; urgency=medium
 
   * Merge 253.5-1 from Debian unstable. Remaining changes:
