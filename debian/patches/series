@@ -119,3 +119,7 @@ lp2009743/network-dhcp4-do-not-ignore-the-gateway-even-if-the-desti.patch
 lp2009743/test-network-add-one-more-testcase-for-DHCPv4-classless-r.patch
 lp1977630-fix_machinectl_pull_tar.patch
 lp1991829-add-CAP_LINUX_IMMUTABLE-to-systemd-machined-so-it-ca.patch
+lp1999275/binfmt-util-split-out-binfmt_mounted.patch
+lp1999275/binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
+lp1999275/binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
+lp1999275/unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
