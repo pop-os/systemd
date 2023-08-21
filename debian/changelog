@@ -1,3 +1,52 @@
+systemd (249.11-0ubuntu3.10) UNRELEASED; urgency=medium
+
+  [ Nick Rosbrook ]
+  * debian/tests/tests-in-lxd: use --reuse flag in lxc publish (LP: #2023229)
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=85b2ceddff1a6cc1ddbca8a1b7e5381d146e6313
+  * pstore: only try to load efi_pstore module (LP: #2023462)
+    File: debian/patches/lp1978079-efi-pstore-not-cleared-on-boot.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7600bbfb1e8a399e5aeb1010a20deda3e5a06c89
+  * shutdown: get only active md arrays. (LP: #2025563)
+    File: debian/patches/lp2025563-shutdown-get-only-active-md-arrays.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=416a9245c8f0efbedcc4395cada23cb09c685ec3
+  * udev-rules: fix nvme symlink creation on namespace changes (LP: #2028180)
+    File: debian/patches/lp2028180-udev-rules-fix-nvme-symlink-creation-on-namespace-changes.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=26e85b944da9098e66fc0c39f64ee40254c0c278
+  * core: reorder systemd arguments on reexec (LP: #2013543)
+    File: debian/patches/lp2013543-core-reorder-systemd-arguments-on-reexec.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=19ba0f20d311642596dc65fa5d6eb96a2d4be280
+  * network/dhcp4: do not ignore the gateway even if the destination is in same network (LP: #2009743)
+    Files:
+    - debian/patches/lp2009743/network-dhcp4-do-not-ignore-the-gateway-even-if-the-desti.patch
+    - debian/patches/lp2009743/test-network-add-one-more-testcase-for-DHCPv4-classless-r.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=73e774a2fb99c82df6d0edd770bb84ab735ec2f0
+  * Drop debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch (LP: #1982218)
+    File: debian/patches/debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cf82f08feea456e1c65895b34bffa8c33d421588
+  * debian/systemd.postint: do not daemon re-exec if we could hit LP: #2013543
+    File: debian/systemd.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=be484dab06d590b1792a8f016f4292373d0174b7
+  * binfmt: fix systemd-binfmt in LXD containers (LP: #1999275)
+    Files:
+    - debian/patches/lp1999275/binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
+    - debian/patches/lp1999275/binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
+    - debian/patches/lp1999275/binfmt-util-split-out-binfmt_mounted.patch
+    - debian/patches/lp1999275/unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0b9eadf05ee6db0e009dacbc71521480095880b3
+
+  [ Dan Streetman ]
+  * Fix machinectl pull-tar and import-tar (LP: #1977630)
+    Author: Dan Streetman
+    File: debian/patches/lp1977630-fix_machinectl_pull_tar.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1e7d3febe1600c6eb03bd71a17be6a6af52988c7
+  * make machinectl read-only work (LP: #1991829)
+    Author: Dan Streetman
+    File: debian/patches/lp1991829-add-CAP_LINUX_IMMUTABLE-to-systemd-machined-so-it-ca.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7a7c47569e0a2d175915eb0b79c60f2611848731
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 21 Aug 2023 17:11:39 -0400
+
 systemd (249.11-0ubuntu3.9) jammy; urgency=medium
 
   * udev: gracefully handle rename failures (LP: #2002445)
