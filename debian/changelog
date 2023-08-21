@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.10) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.10) jammy; urgency=medium
 
   [ Nick Rosbrook ]
   * debian/tests/tests-in-lxd: use --reuse flag in lxc publish (LP: #2023229)
@@ -45,7 +45,7 @@ systemd (249.11-0ubuntu3.10) UNRELEASED; urgency=medium
     File: debian/patches/lp1991829-add-CAP_LINUX_IMMUTABLE-to-systemd-machined-so-it-ca.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7a7c47569e0a2d175915eb0b79c60f2611848731
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 21 Aug 2023 17:11:39 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 21 Aug 2023 17:11:40 -0400
 
 systemd (249.11-0ubuntu3.9) jammy; urgency=medium
 
