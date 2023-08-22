@@ -1,4 +1,17 @@
-#!/bin/sh
+#!/bin/bash
+
+cat <<EOF
+
+Providing additional information can help diagnose problems with udev.
+Specifically, this would include a udev database.
+The data is generated via "udevadm info --export-db".
+If this information is not relevant for your bug report or you have privacy
+concerns, please choose no.
+
+EOF
+
+yesno "Do you want to provide additional information [Y|n]? " yep
+[ "$REPLY" = yep ] || exit 0
 
 # We don’t clean up this directory because there is no way to know when
 # reportbug finished running, and reportbug needs the files around.
