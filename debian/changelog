@@ -1,3 +1,18 @@
+systemd (253.5-1ubuntu3) UNRELEASED; urgency=medium
+
+  [ Nick Rosbrook ]
+  * debian/rules: build with -ffat-lto-objects (LP: #2031416)
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c78b7a6a2578d2b3f70638db918858f9b78107a4
+
+  [ Utkarsh Gupta ]
+  * Drop Provides: time-daemon for bin:systemd-timesyncd
+    Author: Utkarsh Gupta
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9b78ef26d64a40c21cac1e48534c6bf33661e6d7
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 25 Aug 2023 15:31:16 -0400
+
 systemd (253.5-1ubuntu2) mantic; urgency=medium
 
   * core: reorder systemd arguments on reexec (LP: #2013543)
