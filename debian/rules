@@ -201,9 +201,6 @@ execute_before_dh_install:
 	rm -f debian/tmp/usr/lib/sysctl.d/50-default.conf
 	rm -f debian/tmp/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
 	rmdir -p --ignore-fail-on-non-empty debian/tmp/etc/X11/xinit/xinitrc.d/
-	# Remove these for now, as they'll mess with finalizing usrmerge, when
-	# needed they are created anyway by 'systemctl enable'
-	find debian/tmp/lib/systemd/system -type d -name "*.wants" -empty -delete
 	# remove files related to factory-reset feature
 	find debian/tmp/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \
@@ -230,8 +227,6 @@ execute_after_dh_install-arch:
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
 	rm debian/systemd/lib/systemd/system/local-fs.target.wants/tmp.mount
-	# Unused empty directory interacts badly with /usr-merge
-	rmdir --ignore-fail-on-non-empty debian/systemd/lib/systemd/system/local-fs.target.wants
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -261,6 +256,10 @@ execute_after_dh_installman-arch:
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
 		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
+	# Remove empty directories from (/usr)/lib.
+	# Those are not strictly needed and can trigger piuparts errors due to
+	# accidential directory removal by dpkg on merged-/usr systems.
+	find debian/systemd/usr/lib debian/systemd/lib/ -type d -empty -print -delete
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)
