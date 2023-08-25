@@ -1,3 +1,38 @@
+systemd (254.1-3) unstable; urgency=medium
+
+  [ Nick Rosbrook ]
+  * debian: ship libsystemd.a in libsystemd-dev.
+    Thanks to Serge Hallyn
+  * autopkgtest: add build test for static libsystemd
+  * debian/rules: build with -ffat-lto-objects.
+    Building with -flto=auto, but without -ffat-lto-objects, causes static
+    archives to end up without any code sections. This is needed to ship a
+    usable libsystemd.a in libsystemd-dev.
+    See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=977596.
+
+  [ Luca Boccassi ]
+  * Backport patch to fix test-path failure on Salsa CI
+
+  [ Michael Biebl ]
+  * Ask before attaching the udev db information to the bug report
+    (Closes: #1041652)
+  * Install D-Bus interface files in systemd-dev.
+    Now that we have a dedicated -dev package, use that to install
+    /usr/share/dbus-1/interfaces.
+  * Clean up a couple more __pycache__ directories
+  * Remove workarounds for dh_installman.
+    No longer needed as stable ships a fixed debhelper.
+  * Remove all empty directories from (/usr)/lib.
+    This mitigates the accidental empty directory removal by dpkg on
+    merged-/usr systems. (Closes: #1036920)
+  * Remove no longer needed maintainer scripts migration code for versions
+    older then oldstable
+  * Revert "Add workaround for Meson regression to fix FTBFS on mips64el"
+    This reverts commit 97ebdcea6d0ce52973dd5a9cfeede1573a628bd0.
+    No longer needed as a fixed meson package is available now.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 25 Aug 2023 12:04:10 +0200
+
 systemd (254.1-2) unstable; urgency=medium
 
   * Build-depend on tzdata-legacy | tzdata. Some timezones were split out,
