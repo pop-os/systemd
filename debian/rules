@@ -202,8 +202,6 @@ execute_before_dh_install:
 	# Remove these for now, as they'll mess with finalizing usrmerge, when
 	# needed they are created anyway by 'systemctl enable'
 	find debian/tmp/lib/systemd/system -type d -name "*.wants" -empty -delete
-	# those files should probably be shipped in a -dev package, remove for now
-	rm -rf debian/tmp/usr/share/dbus-1/interfaces/
 	# remove files related to factory-reset feature
 	find debian/tmp/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \

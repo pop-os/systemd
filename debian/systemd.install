@@ -21,7 +21,9 @@ usr/lib/kernel
 <!stage1> usr/lib/*/cryptsetup/
 usr/share/bash-completion/
 usr/share/zsh/vendor-completions/
-usr/share/dbus-1/
+usr/share/dbus-1/services/
+usr/share/dbus-1/system-services/
+usr/share/dbus-1/system.d/
 usr/share/doc/
 usr/share/polkit-1/
 usr/share/systemd/kbd-model-map
