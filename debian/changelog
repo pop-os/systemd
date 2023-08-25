@@ -1,4 +1,4 @@
-systemd (253.5-1ubuntu3) UNRELEASED; urgency=medium
+systemd (253.5-1ubuntu3) mantic; urgency=medium
 
   [ Nick Rosbrook ]
   * debian/rules: build with -ffat-lto-objects (LP: #2031416)
@@ -11,7 +11,7 @@ systemd (253.5-1ubuntu3) UNRELEASED; urgency=medium
     File: debian/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9b78ef26d64a40c21cac1e48534c6bf33661e6d7
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 25 Aug 2023 15:31:16 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 25 Aug 2023 15:31:17 -0400
 
 systemd (253.5-1ubuntu2) mantic; urgency=medium
 
