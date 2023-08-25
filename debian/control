@@ -198,6 +198,7 @@ Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon
 Replaces: time-daemon,
           systemd (<< 245.4-2~),
+Provides: time-daemon
 Description: minimalistic service to synchronize local time with NTP servers
  The package contains the systemd-timesyncd system service that may be used to
  synchronize the local system clock with a remote Network Time Protocol server.
