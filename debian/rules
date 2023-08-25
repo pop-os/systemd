@@ -184,6 +184,8 @@ endif
 execute_after_dh_auto_clean:
 	rm -f debian/shlibs.local
 	# remove Python byte code files
+	rm -rf src/ukify/test/__pycache__/
+	rm -rf src/ukify/__pycache__/
 	rm -rf tools/__pycache__/
 	rm -rf tools/chromiumos/__pycache__/
 	rm -f po/systemd.pot
