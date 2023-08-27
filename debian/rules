@@ -65,7 +65,6 @@ CONFFLAGS = \
 	-Drpmmacrosdir=no \
 	-Dvconsole=false \
 	-Dfirstboot=true \
-	-Dsysupdate=false \
 	-Dxkbcommon=false \
 	-Dwheel-group=false \
 	-Dpwquality=false \
@@ -124,7 +123,8 @@ CONFFLAGS += \
 	-Dqrencode=true \
 	-Dhomed=true \
 	-Duserdb=true \
-	-Dpcre2=true
+	-Dpcre2=true \
+	-Dsysupdate=true
 else
 CONFFLAGS += \
 	-Daudit=false \
