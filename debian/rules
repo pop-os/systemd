@@ -266,6 +266,7 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
 	dh_installsystemd -psystemd-resolved
+	dh_installsystemd -pudev systemd-udevd.service
 
 override_dh_installsystemduser:
 
