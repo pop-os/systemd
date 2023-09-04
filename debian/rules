@@ -258,9 +258,6 @@ execute_after_dh_installman-arch:
 override_dh_missing:
 	dh_missing $(DH_MISSING)
 
-override_dh_installinit:
-	dh_installinit --no-start
-
 override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
 	dh_installsystemd -psystemd-oomd systemd-oomd.service
