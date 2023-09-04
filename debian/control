@@ -128,6 +128,8 @@ Priority: important
 Conflicts: sysvinit-core,
            file-rc,
            systemd-shim,
+           initscripts,
+           orphan-sysvinit-scripts,
 Replaces: sysvinit-core,
 Pre-Depends: systemd
 Depends: ${misc:Depends},
