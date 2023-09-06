@@ -210,6 +210,9 @@ execute_before_dh_install:
 	debian/extra/make-sysusers-basic > debian/tmp/usr/lib/sysusers.d/basic.conf
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
+	# Do not ship systemd-gpt-auto-genrator on Ubuntu
+	rm -f debian/tmp/lib/systemd/system-generators/systemd-gpt-auto-generator
+	rm -f debian/tmp/usr/share/man/man8/systemd-gpt-auto-generator.8
 
 execute_after_dh_install-arch:
 	# install standalone binaries
