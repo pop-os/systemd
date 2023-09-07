@@ -1,3 +1,25 @@
+systemd (254.2-1) UNRELEASED; urgency=medium
+
+  [ Daniel Andersson ]
+  * Add systemd-sysupdate.
+
+  [ Luca Boccassi ]
+  * autopkgtest: add workaround for lxc+apparmor regression.
+  * New upstream version 254.2
+  * Refresh patches for 254.2
+
+  [ Michael Biebl ]
+  * Remove obsolete SysV init script. Keep the udev alias for one more
+    release cycle.
+  * Use dh_installsystemd to handle systemd-udevd.service. This allows us
+    to drop a lot of custom maintscript code. Fix the formatting of the
+    udev maintscript code while at it.
+  * Add Conflicts against initscripts and orphan-sysvinit-scripts. Those
+    packages have undesirable side effects if systemd is the active init
+    system so ensure they can't be installed.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 07 Sep 2023 10:14:36 +0100
+
 systemd (254.1-3) unstable; urgency=medium
 
   [ Nick Rosbrook ]
