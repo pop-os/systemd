@@ -1,3 +1,17 @@
+systemd (253.5-1ubuntu5) UNRELEASED; urgency=medium
+
+  * Revert "core/service: when resetting PID also reset known flag" (LP: #2033325)
+    Thanks to Sergio Durigan Junior
+    File: debian/patches/lp2033325-Revert-core-service-when-resetting-PID-also-reset-known-f.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=021b6fafca7ae9bddaa479500614a4a4be40ce59
+  * debian/rules: do not ship systemd-gpt-auto-generator.
+    We do not want the functionality provided by this generator, so do not
+    ship it.
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a366279a84730e92ed734710560ea833709f359d
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 07 Sep 2023 11:57:33 -0400
+
 systemd (253.5-1ubuntu4) mantic; urgency=medium
 
   * Revert "Drop Provides: time-daemon for bin:systemd-timesyncd"
