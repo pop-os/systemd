@@ -1,10 +1,9 @@
-systemd (254.3-1) UNRELEASED; urgency=medium
+systemd (254.3-1) unstable; urgency=medium
 
   [ Daniel Andersson ]
   * Add systemd-sysupdate.
 
   [ Luca Boccassi ]
-  * autopkgtest: add workaround for lxc+apparmor regression.
   * New upstream version 254.2
   * Refresh patches for 254.2
   * New upstream version 254.3
@@ -19,7 +18,7 @@ systemd (254.3-1) UNRELEASED; urgency=medium
     packages have undesirable side effects if systemd is the active init
     system so ensure they can't be installed.
 
- -- Luca Boccassi <bluca@debian.org>  Sat, 09 Sep 2023 00:23:44 +0100
+ -- Luca Boccassi <bluca@debian.org>  Mon, 11 Sep 2023 09:11:51 +0100
 
 systemd (254.1-3) unstable; urgency=medium
 
