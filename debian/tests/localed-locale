@@ -3,14 +3,6 @@ set -e
 
 . `dirname $0`/assert.sh
 
-# Workaround for https://bugs.debian.org/1050256
-mkdir -p /run/systemd/system/service.d
-cat <<EOF>/run/systemd/system/service.d/disable-private-network.conf
-[Service]
-PrivateNetwork=no
-EOF
-systemctl daemon-reload
-
 if [ -f /etc/locale.conf ]; then
     cp /etc/locale.conf /etc/locale.conf.orig
 fi
