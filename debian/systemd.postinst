@@ -32,22 +32,18 @@ if [ "$1" = "triggered" ]; then
     exit 0
 fi
 
-# Enable getty and remote-fs.target by default on new installs
+# Enable getty, remote-fs.target and systemd-pstore by default on new installs
 if [ -z "$2" ]; then
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable getty@tty1.service || true
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable remote-fs.target || true
-fi
-
-# Enable systemd-pstore by default on new installs and upgrades, see #952767
-if dpkg --compare-versions "$2" lt "245.4-4~"; then
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable systemd-pstore.service || true
 fi
 
 # Create /etc/machine-id
 systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 
-# Enable persistent journal, in auto-mode, by default on new installs and upgrades
-if dpkg --compare-versions "$2" lt "244.1-2~"; then
+# Enable persistent journal, in auto-mode, by default on new installs
+if [ -z "$2" ]; then
     mkdir -p "$DPKG_ROOT/var/log/journal"
 fi
 

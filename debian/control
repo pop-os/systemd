@@ -105,9 +105,7 @@ Depends: ${shlibs:Depends},
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
-Breaks: resolvconf (<< 1.83~),
-        udev (<< 247~),
-        less (<< 563),
+Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
@@ -193,10 +191,8 @@ Priority: standard
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd
-Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon
-Replaces: time-daemon,
-          systemd (<< 245.4-2~),
+Replaces: time-daemon
 Provides: time-daemon
 Description: minimalistic service to synchronize local time with NTP servers
  The package contains the systemd-timesyncd system service that may be used to
