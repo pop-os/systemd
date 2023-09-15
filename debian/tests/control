@@ -208,6 +208,7 @@ Depends: systemd-tests,
   xkb-data,
   locales,
   locales-all,
+  tzdata-legacy,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
