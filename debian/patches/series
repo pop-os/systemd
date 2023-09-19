@@ -123,3 +123,4 @@ lp1999275/binfmt-util-split-out-binfmt_mounted.patch
 lp1999275/binfmt-util-also-check-if-binfmt-is-mounted-in-read-write.patch
 lp1999275/binfmt-check-if-binfmt-is-mounted-before-applying-rules.patch
 lp1999275/unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
+lp2036358-wait-online-exit-early-if-all-links-are-ignored.patch

@@ -1,0 +1,48 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Tue, 19 Sep 2023 10:18:15 -0400
+Subject: wait-online: exit early if all links are ignored
+
+Forwarded: no
+Bug-Ubuntu: https://launchpad.net/bugs/2036358
+
+If we are not given an explicit list of links to check, and all other
+links are ignored because they are not required for online, then exit
+early. Otherwise we will just timeout.
+
+This fixes a regression caused by cf82f08fee
+("Drop debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch").
+---
+ src/network/wait-online/manager.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
+index 17b7475..84db80d 100644
+--- a/src/network/wait-online/manager.c
++++ b/src/network/wait-online/manager.c
+@@ -117,7 +117,7 @@ static int manager_link_is_online(Manager *m, Link *l, LinkOperationalStateRange
+ }
+
+ bool manager_configured(Manager *m) {
+-        bool one_ready = false;
++        bool one_ready = false, all_ignored = true;
+         const char *ifname;
+         Link *l;
+         int r;
+@@ -163,6 +163,8 @@ bool manager_configured(Manager *m) {
+                         continue;
+                 }
+
++                all_ignored = false;
++
+                 r = manager_link_is_online(m, l,
+                                            (LinkOperationalStateRange) { _LINK_OPERSTATE_INVALID,
+                                                                          _LINK_OPERSTATE_INVALID });
+@@ -174,7 +176,7 @@ bool manager_configured(Manager *m) {
+                         one_ready = true;
+         }
+
+-        return one_ready;
++        return one_ready || all_ignored;
+ }
+
+ static int manager_process_link(sd_netlink *rtnl, sd_netlink_message *mm, void *userdata) {
