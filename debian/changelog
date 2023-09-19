@@ -1,10 +1,10 @@
-systemd (253.5-1ubuntu6) UNRELEASED; urgency=medium
+systemd (253.5-1ubuntu6) mantic; urgency=medium
 
   * debian/tests: Depends: tzdata-legacy for upstream-{1,2} (LP: #2035778)
     File: debian/tests/control
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=28d9f59c6abb6e460dd34baa4237ef04aa06aced
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 19 Sep 2023 11:54:34 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 19 Sep 2023 11:54:35 -0400
 
 systemd (253.5-1ubuntu5) mantic; urgency=medium
 
