@@ -1,3 +1,11 @@
+systemd (249.11-0ubuntu3.11) UNRELEASED; urgency=medium
+
+  * wait-online: exit early if all links are ignored (LP: #2036358)
+    File: debian/patches/lp2036358-wait-online-exit-early-if-all-links-are-ignored.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fcf9af1efaa904b9e587a3bfa76814d2601d05f3
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 19 Sep 2023 12:56:59 -0400
+
 systemd (249.11-0ubuntu3.10) jammy; urgency=medium
 
   [ Nick Rosbrook ]
