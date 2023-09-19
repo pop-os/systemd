@@ -22,7 +22,7 @@ case "$1" in
         addgroup --quiet --system render
 
         if dpkg --compare-versions "$2" lt-nl "254.1-4~"; then
-            update-rc.d -f udev remove || true
+            update-rc.d udev remove || true
         fi
     ;;
 
