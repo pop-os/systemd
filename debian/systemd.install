@@ -54,11 +54,12 @@ usr/bin/systemd-tmpfiles
 usr/bin/systemd-tty-ask-password-agent
 usr/bin/systemd-umount
 usr/bin/timedatectl
-usr/bin/ukify
 usr/bin/varlinkctl
 usr/lib/environment.d/99-environment.conf
 usr/lib/kernel/install.conf
-usr/lib/kernel/install.d/
+usr/lib/kernel/install.d/50-depmod.install
+usr/lib/kernel/install.d/90-loaderentry.install
+usr/lib/kernel/install.d/90-uki-copy.install
 usr/lib/modprobe.d/systemd.conf
 <!stage1> usr/lib/pcrlock.d/
 [alpha amd64 arm64 ia64 loong64 mips64el ppc64 ppc64el riscv64 s390x sparc64] usr/lib/sysctl.d/50-pid-max.conf
@@ -403,7 +404,6 @@ usr/lib/systemd/system/user.slice
 usr/lib/systemd/system/user-.slice.d/10-defaults.conf
 usr/lib/systemd/system/veritysetup-pre.target
 usr/lib/systemd/system/veritysetup.target
-usr/lib/systemd/ukify
 usr/lib/systemd/user/app.slice
 usr/lib/systemd/user/background.slice
 usr/lib/systemd/user/basic.target
