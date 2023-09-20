@@ -1,3 +1,23 @@
+systemd (254.4-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * Fix installation of tzdata-legacy. Apply a version constraint to the
+    tzdata alternative. Specifically (<< 2023c-8), which is the version
+    tzdata was split. Otherwise tzdata-legacy is not considered, as tzdata
+    is installed by default. (Closes: #1051760)
+  * Drop obsolete Breaks/Replaces and migration code for versions older
+    than oldstable
+  * Drop -f from update-rc.d udev remove
+
+  [ Luca Boccassi ]
+  * upstream-ci: run unit tests from installed location. (Closes: #1051756)
+  * New upstream version 254.4. Fixes minor security issue in arm64
+    and riscv64 systemd-boot (EFI) with device tree blobs loading:
+    https://github.com/systemd/systemd/security/advisories/GHSA-6m6p-rjcq-334c
+  * Refresh patches
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 20 Sep 2023 15:43:01 +0100
+
 systemd (254.3-1) unstable; urgency=medium
 
   [ Daniel Andersson ]
