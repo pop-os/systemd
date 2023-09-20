@@ -51,7 +51,7 @@ index 30f82d5..2e0e90d 100644
                                                 "%s Automatically generating a unit file for compatibility. Please update package to include a native systemd unit file, in order to make it safe, robust and future-proof. "
                                                 "%s This compatibility logic is deprecated, expect removal soon. %s",
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index 1f25f88..ece0f32 100644
+index 2a34d2e..5249021 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
 @@ -3158,6 +3158,7 @@ static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *
