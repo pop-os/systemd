@@ -1,4 +1,4 @@
-systemd (254.4-1) UNRELEASED; urgency=medium
+systemd (254.4-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * Fix installation of tzdata-legacy. Apply a version constraint to the
@@ -15,8 +15,16 @@ systemd (254.4-1) UNRELEASED; urgency=medium
     and riscv64 systemd-boot (EFI) with device tree blobs loading:
     https://github.com/systemd/systemd/security/advisories/GHSA-6m6p-rjcq-334c
   * Refresh patches
+  * Install factory-reset related units
 
- -- Luca Boccassi <bluca@debian.org>  Wed, 20 Sep 2023 15:43:01 +0100
+  [ Gioele Barabucci ]
+  * debian/udev.debian-udev.sysusers: Add Debian-specific sysusers for
+    udev
+  * d/udev.postinst: Do not use addgroup to add udev-related groups
+  * d/control: Remove adduser, it is no longer needed now that all
+    udev-related groups are generated via `sd-sysusers`.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 21 Sep 2023 11:13:06 +0100
 
 systemd (254.3-1) unstable; urgency=medium
 
