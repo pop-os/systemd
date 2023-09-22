@@ -191,6 +191,13 @@ execute_before_dh_install:
 	debian/extra/make-sysusers-basic > debian/tmp/usr/lib/sysusers.d/basic.conf
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
+	# we don't want repart and shutdown standalone binaries for now
+	rm -f debian/tmp/usr/bin/systemd-repart.standalone
+	rm -f debian/tmp/usr/lib/systemd/systemd-shutdown.standalone
+	# files shipped by cryptsetup
+ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
+	rm -f debian/tmp/usr/share/man/man5/crypttab.5
+endif
 
 execute_after_dh_install-arch:
 	# install standalone binaries
@@ -198,19 +205,11 @@ execute_after_dh_install-arch:
 		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
 		mv debian/tmp/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
 	done
-	# We don't want repart and shutdown standalone binaries for now
-	rm -f debian/tmp/usr/bin/systemd-repart.standalone
-	rm -f debian/tmp/usr/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/tmp/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
 	rm debian/tmp/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
-
-	# files shipped by cryptsetup
-ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
-	rm -f debian/tmp/usr/share/man/man5/crypttab.5
-endif
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
