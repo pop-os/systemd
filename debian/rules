@@ -198,6 +198,8 @@ execute_before_dh_install:
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 	rm -f debian/tmp/usr/share/man/man5/crypttab.5
 endif
+	# print empty directories, makes it easier to keep *.install files up-to-date
+	find debian/tmp -type d -empty -print
 
 execute_after_dh_install-arch:
 	# we don't want /tmp to be a tmpfs by default
