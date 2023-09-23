@@ -200,12 +200,6 @@ ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 endif
 
 execute_after_dh_install-arch:
-	# install standalone binaries
-	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
-		mv debian/tmp/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
-	done
-
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/tmp/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
