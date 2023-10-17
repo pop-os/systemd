@@ -1,10 +1,10 @@
-systemd (253.5-1ubuntu7) UNRELEASED; urgency=medium
+systemd (253.5-1ubuntu7) mantic; urgency=medium
 
   * Revert "debian/rules: set MulticastDNS=resolve by default" (LP: #2038894)
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3d753238699f54e8c2892d8107136d49f09e44b6
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 17 Oct 2023 10:20:11 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 17 Oct 2023 10:20:13 -0400
 
 systemd (253.5-1ubuntu6) mantic; urgency=medium
 
