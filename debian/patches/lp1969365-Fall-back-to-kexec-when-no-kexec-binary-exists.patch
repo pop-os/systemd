@@ -1,0 +1,28 @@
+From: Arusekk <arek_koz@o2.pl>
+Date: Sun, 22 Mar 2020 10:41:18 +0100
+Subject: Fall back to kexec when no kexec binary exists
+
+Origin: upstream, https://github.com/systemd/systemd/commit/71180f8e57f8fbb55978b00a13990c79093ff7b3
+Bug-Ubuntu: https://launchpad.net/bugs/1969365
+
+This may be not a popular setup, but in case kexec resides somewhere different
+than the default location for KEXEC (`/usr/sbin/kexec`), don't just reboot and
+try doing `reboot(RB_KEXEC)` instead, just like what `kexec -e` normally does.
+---
+ src/shutdown/shutdown.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/shutdown/shutdown.c b/src/shutdown/shutdown.c
+index 271751a..5e2c963 100644
+--- a/src/shutdown/shutdown.c
++++ b/src/shutdown/shutdown.c
+@@ -549,6 +549,9 @@ int main(int argc, char *argv[]) {
+                                 /* Child */
+
+                                 execv(args[0], (char * const *) args);
++
++                                /* execv failed (kexec binary missing?), so try simply reboot(RB_KEXEC) */
++                                (void) reboot(cmd);
+                                 _exit(EXIT_FAILURE);
+                         }
+
