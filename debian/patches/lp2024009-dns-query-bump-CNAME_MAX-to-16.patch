@@ -1,0 +1,24 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Tue, 24 Oct 2023 16:32:30 -0400
+Subject: dns-query: bump CNAME_MAX to 16
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/focal/+source/systemd/+bug/2024009
+Origin: upstream (partial), https://github.com/systemd/systemd/commit/e0ae456a55
+
+---
+ src/resolve/resolved-dns-query.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-query.c b/src/resolve/resolved-dns-query.c
+index 4a41921..dfb2f50 100644
+--- a/src/resolve/resolved-dns-query.c
++++ b/src/resolve/resolved-dns-query.c
+@@ -10,7 +10,7 @@
+ #include "resolved-etc-hosts.h"
+ #include "string-util.h"
+
+-#define CNAME_MAX 8
++#define CNAME_MAX 16
+ #define QUERIES_MAX 2048
+ #define AUXILIARY_QUERIES_MAX 64
+
