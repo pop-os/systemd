@@ -17,7 +17,6 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 deny-list-TEST-55-OOMD-on-ppc64el.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 test-increase-QEMU_MEM-for-some-tests.patch
-test-denylist-TEST-29-PORTABLE-again.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
 debian/pkgconfig-keep-unmerged-paths-for-udevdir.patch
