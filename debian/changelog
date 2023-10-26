@@ -1,3 +1,14 @@
+systemd (253.5-1ubuntu7) noble; urgency=medium
+
+  * Revert "debian/rules: set MulticastDNS=resolve by default" (LP: #2038894)
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3d753238699f54e8c2892d8107136d49f09e44b6
+  * debian/gbp.conf: update for noble
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a65decb3a73592af8b952b159cfb453e9c0babd5
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 26 Oct 2023 09:51:33 -0400
+
 systemd (253.5-1ubuntu6) mantic; urgency=medium
 
   * debian/tests: Depends: tzdata-legacy for upstream-{1,2} (LP: #2035778)
