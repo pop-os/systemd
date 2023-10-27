@@ -162,14 +162,6 @@ execute_after_dh_auto_build:
 	# generate POT file for translators
 	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
-execute_after_dh_auto_install:
-	# fix paths in manpages; manually check the remaining /usr occurrences
-	# occasionally, with filtering out paths which are known to be in /usr:
-	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
-	if test -d debian/tmp/usr/share/man; then \
-		find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'; \
-	fi
-
 execute_before_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
