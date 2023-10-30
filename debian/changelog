@@ -1,3 +1,27 @@
+systemd (245.4-4ubuntu3.23) UNRELEASED; urgency=medium
+
+  [ Nick Rosbrook ]
+  * core/device: ignore DEVICE_FOUND_UDEV bit on switching root (LP: #2037281)
+    File: debian/patches/lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7793563bb38a84a3dc6bc0da1c08546c3b915ab8
+  * dns-query: bump CNAME_MAX to 16 (LP: #2024009)
+    File: debian/patches/lp2024009-dns-query-bump-CNAME_MAX-to-16.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=193899d103d44c642d362e9916b14df844ec702f
+  * Fall back to kexec when no kexec binary exists (LP: #1969365)
+    File: debian/patches/lp1969365-Fall-back-to-kexec-when-no-kexec-binary-exists.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3934f3794427dee4e72824998dd4c6e6d5875289
+  * test: ignore LXC filesystem when checking for writable locations (LP: #2029352)
+    File: debian/patches/lp2029352-test-ignore-LXC-filesystem-when-checking-for-writable-loc.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=70facbfbf54c4ffb31ba392dbe3fec3084fdf3bc
+
+  [ Heitor Alves de Siqueira ]
+  * core/mount: adjust deserialized state based on /proc/self/mountinfo (LP: #1837227)
+    Author: Heitor Alves de Siqueira
+    File: debian/patches/lp1837227-core-mount-adjust-deserialized-state-based-on-proc-self-m.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a0a749953d309f48bc45140102adf205d1071c4d
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 30 Oct 2023 15:24:20 -0400
+
 systemd (245.4-4ubuntu3.22) focal; urgency=medium
 
   * resolve: fix potential memleak and use-after-free (LP: #2012943)
