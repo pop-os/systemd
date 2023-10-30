@@ -1,0 +1,29 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 11 May 2022 12:24:10 +0100
+Subject: test: ignore LXC filesystem when checking for writable locations
+
+Origin: upstream, https://github.com/systemd/systemd/commit/646cba5c4208c28c56dbe52d676ab1a176c69b7f
+Bug-Ubuntu: https://launchpad.net/bugs/2029352
+
+test-execute checks that only /var/lib/private/waldo is writable, but there are
+some filesystems that are always writable and excluded. Add /sys/devices/system/cpu
+which is created by lxcfs.
+
+Fixes https://github.com/systemd/systemd/issues/23263
+---
+ test/test-execute/exec-dynamicuser-statedir.service | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/test-execute/exec-dynamicuser-statedir.service b/test/test-execute/exec-dynamicuser-statedir.service
+index ca40934..4ec6c53 100644
+--- a/test/test-execute/exec-dynamicuser-statedir.service
++++ b/test/test-execute/exec-dynamicuser-statedir.service
+@@ -13,7 +13,7 @@ ExecStart=test -f /var/lib/private/quux/pief/yayyay
+ ExecStart=/bin/sh -x -c 'test "$$STATE_DIRECTORY" = "%S/waldo:%S/quux/pief"'
+
+ # Make sure that /var/lib/private/waldo is really the only writable directory besides the obvious candidates
+-ExecStart=sh -x -c 'test $$(find / \( -path /var/tmp -o -path /tmp -o -path /proc -o -path /dev/mqueue -o -path /dev/shm -o -path /sys/fs/bpf -o -path /dev/.lxc \) -prune -o -type d -writable -print 2>/dev/null | sort -u | tr -d '\\\\n') = /var/lib/private/quux/pief/var/lib/private/waldo'
++ExecStart=sh -x -c 'test $$(find / \\( -path /var/tmp -o -path /tmp -o -path /proc -o -path /dev/mqueue -o -path /dev/shm -o -path /sys/fs/bpf -o -path /dev/.lxc -o -path /sys/devices/system/cpu \\) -prune -o -type d -writable -print 2>/dev/null | sort -u | tr -d "\\\\n") = /var/lib/private/quux/pief/var/lib/private/waldo'
+
+ Type=oneshot
+ DynamicUser=yes

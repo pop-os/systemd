@@ -198,3 +198,4 @@ lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
 lp1837227-core-mount-adjust-deserialized-state-based-on-proc-self-m.patch
 lp2024009-dns-query-bump-CNAME_MAX-to-16.patch
 lp1969365-Fall-back-to-kexec-when-no-kexec-binary-exists.patch
+lp2029352-test-ignore-LXC-filesystem-when-checking-for-writable-loc.patch
