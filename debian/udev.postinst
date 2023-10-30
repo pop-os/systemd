@@ -11,7 +11,7 @@ case "$1" in
         # update/create hwdb before we (re)start udev
         update_hwdb
 
-        if dpkg --compare-versions "$2" lt-nl "254.1-4~"; then
+        if dpkg --compare-versions "$2" lt-nl "254.3-1~"; then
             update-rc.d udev remove || true
         fi
     ;;
