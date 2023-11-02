@@ -1,3 +1,19 @@
+systemd (249.11-0ubuntu3.12) UNRELEASED; urgency=medium
+
+  * core/device: ignore DEVICE_FOUND_UDEV bit on switching root (LP: #2037281)
+    File: debian/patches/lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=00f86f0b20f794f30aabe7181912d2ec2207e292
+  * use read-only /etc hack in more places (LP: #2035122)
+    File: debian/patches/debian/UBUNTU-Support-system-image-read-only-etc.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c57406e850396a5d446aefe5e70a3aeaad080d72
+  * autopkgtest: do not allow qemu to be used on ppc64el.
+    Almost every run on ppc64el takes 12 to 24 hours, so do this as a last
+    resort to relieve pressure on autopkgtest infrastructure.
+    File: debian/tests/upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d125a1ed3f01e59dba2f370c13801bfb76c16f5d
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 02 Nov 2023 09:52:13 -0400
+
 systemd (249.11-0ubuntu3.11) jammy; urgency=medium
 
   * wait-online: exit early if all links are ignored (LP: #2036358)
