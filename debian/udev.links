@@ -1,2 +1,2 @@
 # drop the compat symlink in forky
-/lib/systemd/system/systemd-udevd.service /lib/systemd/system/udev.service
+/usr/lib/systemd/system/systemd-udevd.service /usr/lib/systemd/system/udev.service

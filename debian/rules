@@ -36,8 +36,6 @@ CONFFLAGS = \
 	-Db_pie=true \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
-	-Drootlibdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
-	-Dsplit-usr=true \
 	-Dversion-tag="$(DEB_VERSION)" \
 	-Dquotaon-path=/sbin/quotaon \
 	-Dquotacheck-path=/sbin/quotacheck \
@@ -61,7 +59,7 @@ CONFFLAGS = \
 	-Ddefault-hierarchy=unified \
 	-Ddefault-dnssec=no \
 	-Dpamconfdir=no \
-	-Dpamlibdir=/lib/$(DEB_HOST_MULTIARCH)/security \
+	-Dpamlibdir=/usr/lib/$(DEB_HOST_MULTIARCH)/security \
 	-Drpmmacrosdir=no \
 	-Dvconsole=false \
 	-Dfirstboot=true \
@@ -181,8 +179,8 @@ execute_before_dh_install:
 	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
 	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
 	rm -f debian/tmp/etc/init.d/README
-	rm -f debian/tmp/lib/*.d/README
-	rm -f debian/tmp/lib/udev/*.d/README
+	rm -f debian/tmp/usr/lib/*.d/README
+	rm -f debian/tmp/usr/lib/udev/*.d/README
 	rm -f debian/tmp/usr/lib/*.d/README
 	rm -f debian/tmp/usr/lib/sysctl.d/50-default.conf
 	rm -f debian/tmp/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
@@ -198,17 +196,17 @@ execute_before_dh_install:
 execute_after_dh_install-arch:
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/bin; \
-		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
+		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
+		mv debian/systemd/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
 	done
 	# We don't want repart and shutdown standalone binaries for now
 	rm -f debian/systemd/bin/systemd-repart.standalone
 	rm -f debian/systemd/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
-	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
+	mv debian/systemd/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
-	rm debian/systemd/lib/systemd/system/local-fs.target.wants/tmp.mount
+	rm debian/systemd/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -216,17 +214,17 @@ ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 endif
 
 	# files shipped by systemd
-	rm debian/udev/lib/udev/rules.d/70-uaccess.rules
-	rm debian/udev/lib/udev/rules.d/73-seat-late.rules
-	rm debian/udev/lib/udev/rules.d/71-seat.rules
-	rm debian/udev/lib/udev/rules.d/99-systemd.rules
+	rm debian/udev/usr/lib/udev/rules.d/70-uaccess.rules
+	rm debian/udev/usr/lib/udev/rules.d/73-seat-late.rules
+	rm debian/udev/usr/lib/udev/rules.d/71-seat.rules
+	rm debian/udev/usr/lib/udev/rules.d/99-systemd.rules
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py
 	install -D --mode=644 debian/extra/systemd.py debian/systemd/usr/share/apport/package-hooks/systemd.py
-	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
-	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
+	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/usr/lib/udev/rules.d/
+	cp -a debian/extra/units-ubuntu/* debian/systemd/usr/lib/systemd/system/
 endif
 
 execute_after_dh_installman-arch:
@@ -238,10 +236,10 @@ execute_after_dh_installman-arch:
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
 		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
-	# Remove empty directories from (/usr)/lib.
+	# Remove empty directories from /usr/lib.
 	# Those are not strictly needed and can trigger piuparts errors due to
 	# accidential directory removal by dpkg on merged-/usr systems.
-	find debian/systemd/usr/lib debian/systemd/lib/ -type d -empty -print -delete
+	find debian/systemd/usr/lib -type d -empty -print -delete
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)
@@ -268,7 +266,7 @@ PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(D
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
 	dh_shlibdeps -psystemd -Llibsystemd-shared -- \
-		-dPre-Depends -edebian/systemd/bin/systemctl \
+		-dPre-Depends -edebian/systemd/usr/bin/systemctl \
 		-dDepends
 	dh_shlibdeps -plibsystemd-shared -lusr/lib/$(DEB_HOST_MULTIARCH)/systemd
 	dh_shlibdeps --remaining-packages -Llibsystemd-shared

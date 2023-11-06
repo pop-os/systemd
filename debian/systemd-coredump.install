@@ -1,7 +1,7 @@
 etc/systemd/coredump.conf
-lib/systemd/systemd-coredump
-lib/systemd/system/systemd-coredump*
-lib/systemd/system/*/systemd-coredump*
+usr/lib/systemd/systemd-coredump
+usr/lib/systemd/system/systemd-coredump*
+usr/lib/systemd/system/*/systemd-coredump*
 usr/bin/coredumpctl
 usr/lib/sysctl.d/50-coredump.conf
 usr/lib/sysusers.d/systemd-coredump.conf

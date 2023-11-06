@@ -5,4 +5,4 @@ systemd: systemd-service-file-missing-install-key
 systemd: spare-manual-page
 systemd: package-supports-alternative-init-but-no-init.d-script
 # netlink keyword
-systemd: spelling-error-in-binary iif if [lib/systemd/systemd-networkd]
+systemd: spelling-error-in-binary iif if [usr/lib/systemd/systemd-networkd]
