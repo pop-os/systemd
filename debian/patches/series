@@ -1,4 +1,3 @@
-test-skip-test-path-on-Salsa-CI.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
