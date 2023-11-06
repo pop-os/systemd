@@ -61,7 +61,7 @@ jobs:
           - distro: ubuntu
             release: jammy
           - distro: fedora
-            release: "38"
+            release: "39"
           - distro: fedora
             release: rawhide
           - distro: opensuse
@@ -75,8 +75,8 @@ jobs:
       SYSTEMD_LOG_LEVEL: debug
 
     steps:
-    - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9
-    - uses: systemd/mkosi@5866c0ff3b36d350c943016e5a3b115f7a95d37f
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+    - uses: systemd/mkosi@16e63baaeadf7a5b100c5b5bf780c61c29878cfc
 
     - name: Configure
       run: |
@@ -84,48 +84,40 @@ jobs:
         [Distribution]
         Distribution=${{ matrix.distro }}
         Release=${{ matrix.release }}
+        EOF
 
+        tee mkosi.conf.d/99-ci.conf <<- EOF
         [Content]
         Environment=CI_BUILD=1
                     SLOW_TESTS=true
 
-        [Output]
+        [Host]
         KernelCommandLineExtra=systemd.unit=mkosi-check-and-shutdown.service
                                systemd.journald.max_level_console=debug
                                # udev's debug log output is very verbose, so up it to info in CI.
                                udev.log_level=info
                                # Root device can take a long time to appear, so let's bump the timeout.
                                systemd.default_device_timeout_sec=180
-
-        [Host]
-        ExtraSearchPaths=!*
         QemuVsock=yes
+        # Sometimes we run on a host with /dev/kvm, but it is broken, so explicitly disable it
+        QemuKvm=no
         Ephemeral=yes
-        EOF
-
-        # TODO: Remove once archlinux-keyring is updated in ppa:michel-slm/kernel-utils.
-        tee mkosi.conf.d/11-arch-keyring.conf <<- EOF
-        [Match]
-        Distribution=arch
-
-        [Distribution]
-        RepositoryKeyCheck=no
         EOF
 
         # For erofs, we have to install linux-modules-extra-azure, but that doesn't match the running kernel
         # version, so we can't load the erofs module. squashfs is a builtin module so we use that instead.
 
-        mkdir -p mkosi.presets/20-final/mkosi.repart/10-usr.conf.d
-        tee mkosi.presets/20-final/mkosi.repart/10-usr.conf.d/squashfs.conf <<- EOF
+        mkdir -p mkosi.presets/system/mkosi.repart/10-usr.conf.d
+        tee mkosi.presets/system/mkosi.repart/10-usr.conf.d/squashfs.conf <<- EOF
         [Partition]
         Format=squashfs
         EOF
 
         # The emergency shell is not useful in the CI, as it just blocks for a long time before the job
         # eventually times out. Override it to just shutdown immediately.
-        mkdir -p mkosi.presets/10-initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/
-        mkdir -p mkosi.presets/20-final/mkosi.extra/usr/lib/systemd/system/emergency.service.d/
-        tee mkosi.presets/10-initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf <<- EOF
+        mkdir -p mkosi.presets/initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/
+        mkdir -p mkosi.presets/system/mkosi.extra/usr/lib/systemd/system/emergency.service.d/
+        tee mkosi.presets/initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf <<- EOF
         [Unit]
         FailureAction=exit
         [Service]
@@ -133,19 +125,19 @@ jobs:
         ExecStart=
         ExecStart=false
         EOF
-        cp mkosi.presets/10-initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf mkosi.presets/20-final/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf
+        cp mkosi.presets/initrd/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf mkosi.presets/system/mkosi.extra/usr/lib/systemd/system/emergency.service.d/poweroff.conf
 
     - name: Generate secure boot key
       run: mkosi --debug genkey
 
-    - name: Show ${{ matrix.distro }} image summary
+    - name: Show image summary
       run: mkosi summary
 
-    - name: Build ${{ matrix.distro }}
+    - name: Build
       run: mkosi --debug
 
-    - name: Boot ${{ matrix.distro }} systemd-nspawn
+    - name: Boot systemd-nspawn
       run: test "$(sudo mkosi --debug boot 1>&2; echo $?)" -eq 123
 
-    - name: Boot ${{ matrix.distro }} QEMU
+    - name: Boot QEMU
       run: timeout -k 30 10m test "$(mkosi --debug qemu 1>&2; echo $?)" -eq 123

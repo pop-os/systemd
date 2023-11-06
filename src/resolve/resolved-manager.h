@@ -128,6 +128,11 @@ struct Manager {
         sd_event_source *sigrtmin1_event_source;
 
         unsigned n_transactions_total;
+        unsigned n_timeouts_total;
+        unsigned n_timeouts_served_stale_total;
+        unsigned n_failure_responses_total;
+        unsigned n_failure_responses_served_stale_total;
+
         unsigned n_dnssec_verdict[_DNSSEC_VERDICT_MAX];
 
         /* Data from /etc/hosts */
@@ -171,7 +176,7 @@ int manager_start(Manager *m);
 
 uint32_t manager_find_mtu(Manager *m);
 
-int manager_monitor_send(Manager *m, int state, int rcode, int error, DnsQuestion *question_idna, DnsQuestion *question_utf8, DnsQuestion *collected_questions, DnsAnswer *answer);
+int manager_monitor_send(Manager *m, int state, int rcode, int error, DnsQuestion *question_idna, DnsQuestion *question_utf8, DnsPacket *question_bypass, DnsQuestion *collected_questions, DnsAnswer *answer);
 
 int manager_write(Manager *m, int fd, DnsPacket *p);
 int manager_send(Manager *m, int fd, int ifindex, int family, const union in_addr_union *destination, uint16_t port, const union in_addr_union *source, DnsPacket *p);
@@ -219,3 +224,7 @@ bool manager_next_dnssd_names(Manager *m);
 bool manager_server_is_stub(Manager *m, DnsServer *s);
 
 int socket_disable_pmtud(int fd, int af);
+
+int dns_manager_dump_statistics_json(Manager *m, JsonVariant **ret);
+
+void dns_manager_reset_statistics(Manager *m);

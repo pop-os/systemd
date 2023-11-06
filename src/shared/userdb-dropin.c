@@ -57,14 +57,14 @@ static int load_user(
                 }
 
                 r = json_parse_file(NULL, j, JSON_PARSE_SENSITIVE, &privileged_v, NULL, NULL);
-                if (ERRNO_IS_PRIVILEGE(r))
+                if (ERRNO_IS_NEG_PRIVILEGE(r))
                         have_privileged = false;
                 else if (r == -ENOENT)
                         have_privileged = true; /* if the privileged file doesn't exist, we are complete */
                 else if (r < 0)
                         return r;
                 else {
-                        r = json_variant_merge(&v, privileged_v);
+                        r = json_variant_merge_object(&v, privileged_v);
                         if (r < 0)
                                 return r;
 
@@ -201,14 +201,14 @@ static int load_group(
                 }
 
                 r = json_parse_file(NULL, j, JSON_PARSE_SENSITIVE, &privileged_v, NULL, NULL);
-                if (ERRNO_IS_PRIVILEGE(r))
+                if (ERRNO_IS_NEG_PRIVILEGE(r))
                         have_privileged = false;
                 else if (r == -ENOENT)
                         have_privileged = true; /* if the privileged file doesn't exist, we are complete */
                 else if (r < 0)
                         return r;
                 else {
-                        r = json_variant_merge(&v, privileged_v);
+                        r = json_variant_merge_object(&v, privileged_v);
                         if (r < 0)
                                 return r;
 

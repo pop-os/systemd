@@ -380,7 +380,7 @@ static int verify_gpg(
                 const void *payload, size_t payload_size,
                 const void *signature, size_t signature_size) {
 
-        _cleanup_close_pair_ int gpg_pipe[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int gpg_pipe[2] = EBADF_PAIR;
         char sig_file_path[] = "/tmp/sigXXXXXX", gpg_home[] = "/tmp/gpghomeXXXXXX";
         _cleanup_(sigkill_waitp) pid_t pid = 0;
         bool gpg_home_created = false;
@@ -400,7 +400,7 @@ static int verify_gpg(
                 if (sig_file < 0)
                         return log_error_errno(errno, "Failed to create temporary file: %m");
 
-                r = loop_write(sig_file, signature, signature_size, false);
+                r = loop_write(sig_file, signature, signature_size);
                 if (r < 0) {
                         log_error_errno(r, "Failed to write to temporary file: %m");
                         goto finish;
@@ -417,7 +417,7 @@ static int verify_gpg(
         r = safe_fork_full("(gpg)",
                            (int[]) { gpg_pipe[0], -EBADF, STDERR_FILENO },
                            NULL, 0,
-                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_REARRANGE_STDIO|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REARRANGE_STDIO|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE,
                            &pid);
         if (r < 0)
                 return r;
@@ -465,7 +465,7 @@ static int verify_gpg(
 
         gpg_pipe[0] = safe_close(gpg_pipe[0]);
 
-        r = loop_write(gpg_pipe[1], payload, payload_size, false);
+        r = loop_write(gpg_pipe[1], payload, payload_size);
         if (r < 0) {
                 log_error_errno(r, "Failed to write to pipe: %m");
                 goto finish;

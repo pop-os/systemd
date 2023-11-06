@@ -143,6 +143,8 @@ const GptPartitionType gpt_partition_type_table[] = {
         _GPT_ARCH_SEXTET(ARM64,       "aarch64"), /* Alias: must be listed after arm64 */
         _GPT_ARCH_SEXTET(IA64,        "ia64"),
         _GPT_ARCH_SEXTET(LOONGARCH64, "loongarch64"),
+        _GPT_ARCH_SEXTET(MIPS,        "mips"),
+        _GPT_ARCH_SEXTET(MIPS64,      "mips64"),
         _GPT_ARCH_SEXTET(MIPS_LE,     "mips-le"),
         _GPT_ARCH_SEXTET(MIPS64_LE,   "mips64-le"),
         _GPT_ARCH_SEXTET(PARISC,      "parisc"),
@@ -273,7 +275,7 @@ Architecture gpt_partition_type_uuid_to_arch(sd_id128_t id) {
 int gpt_partition_label_valid(const char *s) {
         _cleanup_free_ char16_t *recoded = NULL;
 
-        recoded = utf8_to_utf16(s, strlen(s));
+        recoded = utf8_to_utf16(s, SIZE_MAX);
         if (!recoded)
                 return -ENOMEM;
 
@@ -335,4 +337,25 @@ bool gpt_partition_type_knows_no_auto(GptPartitionType type) {
                       PARTITION_TMP,
                       PARTITION_XBOOTLDR,
                       PARTITION_SWAP);
+}
+
+bool gpt_header_has_signature(const GptHeader *p) {
+        assert(p);
+
+        if (memcmp(p->signature, (const char[8]) { 'E', 'F', 'I', ' ', 'P', 'A', 'R', 'T' }, 8) != 0)
+                return false;
+
+        if (le32toh(p->revision) != UINT32_C(0x00010000)) /* the only known revision of the spec: 1.0 */
+                return false;
+
+        if (le32toh(p->header_size) < sizeof(GptHeader))
+                return false;
+
+        if (le32toh(p->header_size) > 4096) /* larger than a sector? something is off… */
+                return false;
+
+        if (le64toh(p->my_lba) != 1) /* this sector must claim to be at sector offset 1 */
+                return false;
+
+        return true;
 }

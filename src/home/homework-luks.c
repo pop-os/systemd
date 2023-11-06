@@ -228,7 +228,7 @@ static int run_fsck(const char *node, const char *fstype) {
         }
 
         r = safe_fork("(fsck)",
-                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
                       &fsck_pid);
         if (r < 0)
                 return r;
@@ -498,7 +498,7 @@ static int acquire_open_luks_device(
                 return r;
 
         r = sym_crypt_init_by_name(&cd, setup->dm_name);
-        if ((ERRNO_IS_DEVICE_ABSENT(r) || r == -EINVAL) && graceful)
+        if ((ERRNO_IS_NEG_DEVICE_ABSENT(r) || r == -EINVAL) && graceful)
                 return 0;
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", setup->dm_name);
@@ -1638,7 +1638,7 @@ int home_deactivate_luks(UserRecord *h, HomeSetup *setup) {
                 cryptsetup_enable_logging(setup->crypt_device);
 
                 r = sym_crypt_deactivate_by_name(setup->crypt_device, setup->dm_name, 0);
-                if (ERRNO_IS_DEVICE_ABSENT(r) || r == -EINVAL)
+                if (ERRNO_IS_NEG_DEVICE_ABSENT(r) || r == -EINVAL)
                         log_debug_errno(r, "LUKS device %s is already detached.", setup->dm_node);
                 else if (r < 0)
                         return log_info_errno(r, "LUKS device %s couldn't be deactivated: %m", setup->dm_node);
@@ -1868,7 +1868,7 @@ static int make_partition_table(
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize partition type: %m");
 
-        r = fdisk_new_context_fd(fd, /* read_only= */ false, sector_size, &c);
+        r = fdisk_new_context_at(fd, /* path= */ NULL, /* read_only= */ false, sector_size, &c);
         if (r < 0)
                 return log_error_errno(r, "Failed to open device: %m");
 
@@ -2024,11 +2024,10 @@ static int wait_for_devlink(const char *path) {
                         return log_error_errno(SYNTHETIC_ERRNO(ETIMEDOUT), "Device link %s still hasn't shown up, giving up.", path);
 
                 r = fd_wait_for_event(inotify_fd, POLLIN, until - w);
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r))
-                                continue;
+                if (ERRNO_IS_NEG_TRANSIENT(r))
+                        continue;
+                if (r < 0)
                         return log_error_errno(r, "Failed to watch inotify: %m");
-                }
 
                 (void) flush_fd(inotify_fd);
         }
@@ -2381,7 +2380,7 @@ int home_create_luks(
                 return log_oom();
 
         /* Prefer using a btrfs subvolume if we can, fall back to directory otherwise */
-        r = btrfs_subvol_make_fallback(subdir, 0700);
+        r = btrfs_subvol_make_fallback(AT_FDCWD, subdir, 0700);
         if (r < 0)
                 return log_error_errno(r, "Failed to create user directory in mounted image file: %m");
 
@@ -2597,7 +2596,7 @@ static int ext4_offline_resize_fs(
 
         /* resize2fs requires that the file system is force checked first, do so. */
         r = safe_fork("(e2fsck)",
-                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
                       &fsck_pid);
         if (r < 0)
                 return r;
@@ -2629,7 +2628,7 @@ static int ext4_offline_resize_fs(
 
         /* Resize the thing */
         r = safe_fork("(e2resize)",
-                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
                       &resize_pid);
         if (r < 0)
                 return r;
@@ -2696,7 +2695,7 @@ static int prepare_resize_partition(
                 return 0;
         }
 
-        r = fdisk_new_context_fd(fd, /* read_only= */ false, UINT32_MAX, &c);
+        r = fdisk_new_context_at(fd, /* path= */ NULL, /* read_only= */ false, UINT32_MAX, &c);
         if (r < 0)
                 return log_error_errno(r, "Failed to open device: %m");
 
@@ -2762,13 +2761,9 @@ static int get_maximum_partition_size(
         assert(p);
         assert(ret_maximum_partition_size);
 
-        c = fdisk_new_context();
-        if (!c)
-                return log_oom();
-
-        r = fdisk_assign_device(c, FORMAT_PROC_FD_PATH(fd), 0);
+        r = fdisk_new_context_at(fd, /* path= */ NULL, /* read_only= */ true, /* sector_size= */ UINT32_MAX, &c);
         if (r < 0)
-                return log_error_errno(r, "Failed to open device: %m");
+                return log_error_errno(r, "Failed to create fdisk context: %m");
 
         start_lba = fdisk_partition_get_start(p);
         assert(start_lba <= UINT64_MAX/512);
@@ -2853,7 +2848,7 @@ static int apply_resize_partition(
         if ((size_t) n != ssz * 2)
                 return log_error_errno(SYNTHETIC_ERRNO(EIO), "Short write while wiping partition table.");
 
-        r = fdisk_new_context_fd(fd, /* read_only= */ false, ssz, &c);
+        r = fdisk_new_context_at(fd, /* path= */ NULL, /* read_only= */ false, ssz, &c);
         if (r < 0)
                 return log_error_errno(r, "Failed to open device: %m");
 
@@ -3202,7 +3197,7 @@ int home_resize_luks(
 
                 old_image_size = st.st_size;
 
-                /* Note an asymetry here: when we operate on loopback files the specified disk size we get we
+                /* Note an asymmetry here: when we operate on loopback files the specified disk size we get we
                  * apply onto the loopback file as a whole. When we operate on block devices we instead apply
                  * to the partition itself only. */
 

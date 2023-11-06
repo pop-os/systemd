@@ -16,6 +16,7 @@ rules = [
                '60-input-id.rules',
                '60-persistent-alsa.rules',
                '60-persistent-input.rules',
+               '60-persistent-storage-mtd.rules',
                '60-persistent-storage-tape.rules',
                '60-persistent-v4l.rules',
                '60-sensor.rules',
@@ -36,7 +37,7 @@ rules = [
          conf.get('HAVE_KMOD') == 1],
 
         [files('70-memory.rules'),
-         dmi_arches.contains(host_machine.cpu_family())],
+         conf.get('HAVE_DMI') == 1],
 
         [files('70-power-switch.rules'),
          enable_logind],

@@ -80,6 +80,30 @@ node /org/freedesktop/login1 {
                     out u vtnr,
                     out b existing);
       @org.freedesktop.systemd1.Privileged("true")
+      CreateSessionWithPIDFD(in  u uid,
+                             in  h pidfd,
+                             in  s service,
+                             in  s type,
+                             in  s class,
+                             in  s desktop,
+                             in  s seat_id,
+                             in  u vtnr,
+                             in  s tty,
+                             in  s display,
+                             in  b remote,
+                             in  s remote_user,
+                             in  s remote_host,
+                             in  t flags,
+                             in  a(sv) properties,
+                             out s session_id,
+                             out o object_path,
+                             out s runtime_path,
+                             out h fifo_fd,
+                             out u uid,
+                             out s seat_id,
+                             out u vtnr,
+                             out b existing);
+      @org.freedesktop.systemd1.Privileged("true")
       ReleaseSession(in  s session_id);
       ActivateSession(in  s session_id);
       ActivateSessionOnSeat(in  s session_id,
@@ -156,6 +180,8 @@ node /org/freedesktop/login1 {
       SeatRemoved(s seat_id,
                   o object_path);
       PrepareForShutdown(b start);
+      PrepareForShutdownWithMetadata(b start,
+                                     a{sv} metadata);
       PrepareForSleep(b start);
     properties:
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
@@ -292,6 +318,8 @@ node /org/freedesktop/login1 {
 
     <variablelist class="dbus-method" generated="True" extra-ref="CreateSession()"/>
 
+    <variablelist class="dbus-method" generated="True" extra-ref="CreateSessionWithPIDFD()"/>
+
     <variablelist class="dbus-method" generated="True" extra-ref="ReleaseSession()"/>
 
     <variablelist class="dbus-method" generated="True" extra-ref="ActivateSession()"/>
@@ -401,6 +429,8 @@ node /org/freedesktop/login1 {
     <variablelist class="dbus-signal" generated="True" extra-ref="SeatRemoved"/>
 
     <variablelist class="dbus-signal" generated="True" extra-ref="PrepareForShutdown"/>
+
+    <variablelist class="dbus-signal" generated="True" extra-ref="PrepareForShutdownWithMetadata"/>
 
     <variablelist class="dbus-signal" generated="True" extra-ref="PrepareForSleep"/>
 
@@ -521,10 +551,10 @@ node /org/freedesktop/login1 {
       structures consisting of <varname>what</varname>, <varname>who</varname>, <varname>why</varname>,
       <varname>mode</varname>, <varname>uid</varname> (user ID), and <varname>pid</varname> (process ID).</para>
 
-      <para><function>CreateSession()</function> and <function>ReleaseSession()</function> may be used to
-      open or close login sessions. These calls should <emphasis>never</emphasis> be invoked directly by
-      clients. Creating/closing sessions is exclusively the job of PAM and its
-      <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+      <para><function>CreateSession()</function>, <function>CreateSessionWithPIDFD()</function>, and
+      <function>ReleaseSession()</function> may be used to open or close login sessions. These calls should
+      <emphasis>never</emphasis> be invoked directly by clients. Creating/closing sessions is exclusively the job
+      of PAM and its <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry>
       module.</para>
 
       <para><function>ActivateSession()</function> brings the session with the specified ID into the
@@ -591,16 +621,20 @@ node /org/freedesktop/login1 {
       <function>SuspendThenHibernateWithFlags()</function> add <varname>flags</varname> to allow for
       extendability, defined as follows:</para>
       <programlisting>
-#define SD_LOGIND_ROOT_CHECK_INHIBITORS  (UINT64_C(1) &lt;&lt; 0)
-#define SD_LOGIND_KEXEC_REBOOT           (UINT64_C(1) &lt;&lt; 1)
-#define SD_LOGIND_SOFT_REBOOT            (UINT64_C(1) &lt;&lt; 2)
+#define SD_LOGIND_ROOT_CHECK_INHIBITORS          (UINT64_C(1) &lt;&lt; 0)
+#define SD_LOGIND_KEXEC_REBOOT                   (UINT64_C(1) &lt;&lt; 1)
+#define SD_LOGIND_SOFT_REBOOT                    (UINT64_C(1) &lt;&lt; 2)
+#define SD_LOGIND_SOFT_REBOOT_IF_NEXTROOT_SET_UP (UINT64_C(1) &lt;&lt; 3)
       </programlisting>
       <para>When the <varname>flags</varname> is 0 then these methods behave just like the versions without
       flags. When <constant>SD_LOGIND_ROOT_CHECK_INHIBITORS</constant> (0x01) is set, active inhibitors are
-      honoured for privileged users too. When <constant>SD_LOGIND_KEXEC_REBOOT</constant> (0x02) is set, then
-      <function>RebootWithFlags()</function> performs a kexec reboot if kexec kernel is loaded. When
-      <constant>SD_LOGIND_SOFT_REBOOT</constant> (0x04) is set, then <function>RebootWithFlags()</function>
-      performs a userspace reboot only.</para>
+      honoured for privileged users too. When <constant>SD_LOGIND_KEXEC_REBOOT</constant> (0x02) is set,
+      then <function>RebootWithFlags()</function> performs a kexec reboot if kexec kernel is loaded. When
+      <constant>SD_LOGIND_SOFT_REBOOT</constant> (0x04) is set, or
+      <constant>SD_LOGIND_SOFT_REBOOT_IF_NEXTROOT_SET_UP</constant> (0x08) is set and a new root file system
+      has been set up on <literal>/run/nextroot/</literal>, then <function>RebootWithFlags()</function>
+      performs a userspace reboot only. <constant>SD_LOGIND_SOFT_REBOOT_IF_NEXTROOT_SET_UP</constant> and
+      <constant>SD_LOGIND_KEXEC_REBOOT</constant> can be combined, with soft-reboot having precedence.</para>
 
       <para><function>SetRebootParameter()</function> sets a parameter for a subsequent reboot operation.
       See the description of <command>reboot</command> in
@@ -674,15 +708,20 @@ node /org/freedesktop/login1 {
       logs in or out, or a seat is added or removed. They each contain the ID of the object plus the object
       path.</para>
 
-      <para>The <function>PrepareForShutdown()</function> and <function>PrepareForSleep()</function> signals
-      are sent right before (with the argument <literal>true</literal>) or after (with the argument
+      <para>The <function>PrepareForShutdown</function>,
+      <function>PrepareForShutdownWithMetadata</function>, and <function>PrepareForSleep</function>
+      signals are sent right before (with the argument <literal>true</literal>) or after (with the argument
       <literal>false</literal>) the system goes down for reboot/poweroff and suspend/hibernate,
       respectively. This may be used by applications to save data on disk, release memory, or do other jobs
       that should be done shortly before shutdown/sleep, in conjunction with delay inhibitor locks. After
       completion of this work they should release their inhibition locks in order to not delay the operation
       any further. For more information see
-      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/inhibit">Inhibitor Locks</ulink>.
-      </para>
+      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/inhibit">Inhibitor Locks</ulink>. The
+      <function>PrepareForShutdownWithMetadata()</function> signal additionally sends a list of key/value
+      pair metadata fields. Currently it sends a <varname>type</varname> string which defines the type of
+      shutdown. The type can be one of <literal>power-off</literal>, <literal>reboot</literal>,
+      <literal>halt</literal>, <literal>kexec</literal> or <literal>soft-reboot</literal>. This signal is
+      sent first, followed by <function>PrepareForShutdown</function> (for backward compatibility).</para>
     </refsect2>
 
     <refsect2>
@@ -1496,4 +1535,24 @@ node /org/freedesktop/login1/session/1 {
   </refsect1>
 
   <xi:include href="org.freedesktop.locale1.xml" xpointer="versioning"/>
+
+  <refsect1>
+    <title>History</title>
+    <refsect2>
+      <title>The Manager Object</title>
+      <para><varname>HandlePowerKeyLongPress</varname>,
+      <varname>HandleRebootKey</varname>,
+      <varname>HandleRebootKeyLongPress</varname>,
+      <varname>HandleSuspendKeyLongPress</varname>, and
+      <varname>HandleHibernateKeyLongPress</varname> were added in version 251.</para>
+      <para><varname>StopIdleSessionUSec</varname> was added in version 252.</para>
+      <para><function>PrepareForShutdownWithMetadata</function> and
+      <function>CreateSessionWithPIDFD()</function> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Session Objects</title>
+      <para><function>SetDisplay()</function> was added in version 252.</para>
+      <para><function>SetTTY()</function> was added in version 254.</para>
+    </refsect2>
+  </refsect1>
 </refentry>

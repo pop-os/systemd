@@ -81,11 +81,11 @@ systemd-analyze cat-config systemd/journal-upload.conf
 
 systemctl restart systemd-journal-remote.socket
 systemctl restart systemd-journal-upload
-timeout 15 bash -xec 'while ! systemctl -q is-active systemd-journal-remote.service; do sleep 1; done'
+timeout 15 bash -xec 'until systemctl -q is-active systemd-journal-remote.service; do sleep 1; done'
 systemctl status systemd-journal-{remote,upload}
 
 # It may take a bit until the whole journal is transferred
-timeout 30 bash -xec "while ! journalctl --directory=/var/log/journal/remote --identifier='$TEST_TAG' --grep='$TEST_MESSAGE'; do sleep 1; done"
+timeout 30 bash -xec "until journalctl --directory=/var/log/journal/remote --identifier='$TEST_TAG' --grep='$TEST_MESSAGE'; do sleep 1; done"
 
 systemctl stop systemd-journal-upload
 systemctl stop systemd-journal-remote.{socket,service}
@@ -184,11 +184,11 @@ systemd-analyze cat-config systemd/journal-upload.conf
 
 systemctl restart systemd-journal-remote.socket
 systemctl restart systemd-journal-upload
-timeout 15 bash -xec 'while ! systemctl -q is-active systemd-journal-remote.service; do sleep 1; done'
+timeout 15 bash -xec 'until systemctl -q is-active systemd-journal-remote.service; do sleep 1; done'
 systemctl status systemd-journal-{remote,upload}
 
 # It may take a bit until the whole journal is transferred
-timeout 30 bash -xec "while ! journalctl --directory=/var/log/journal/remote --identifier='$TEST_TAG' --grep='$TEST_MESSAGE'; do sleep 1; done"
+timeout 30 bash -xec "until journalctl --directory=/var/log/journal/remote --identifier='$TEST_TAG' --grep='$TEST_MESSAGE'; do sleep 1; done"
 
 systemctl stop systemd-journal-upload
 systemctl stop systemd-journal-remote.{socket,service}
@@ -209,6 +209,12 @@ ServerCertificateFile=/run/systemd/journal-remote-tls/cert.pem
 TrustedCertificateFile=/run/systemd/remote-pki/ca.crt
 EOF
 systemd-analyze cat-config systemd/journal-upload.conf
+mkdir -p /run/systemd/system/systemd-journal-upload.service.d
+cat >/run/systemd/system/systemd-journal-upload.service.d/99-test.conf <<EOF
+[Service]
+Restart=no
+EOF
+systemctl daemon-reload
 setfacl -R -m "u:systemd-journal-upload:rwX" /run/systemd/journal-remote-tls
 
 systemctl restart systemd-journal-upload

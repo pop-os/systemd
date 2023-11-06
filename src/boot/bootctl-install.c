@@ -27,12 +27,10 @@ static int load_etc_machine_id(void) {
         int r;
 
         r = sd_id128_get_machine(&arg_machine_id);
-        if (r < 0) {
-                if (ERRNO_IS_MACHINE_ID_UNSET(r)) /* Not set or empty */
-                        return 0;
-
+        if (ERRNO_IS_NEG_MACHINE_ID_UNSET(r)) /* Not set or empty */
+                return 0;
+        if (r < 0)
                 return log_error_errno(r, "Failed to get machine-id: %m");
-        }
 
         log_debug("Loaded machine ID %s from /etc/machine-id.", SD_ID128_TO_STRING(arg_machine_id));
         return 0;
@@ -235,7 +233,7 @@ static int copy_file_with_version_check(const char *from, const char *to, bool f
                         if (r < 0)
                                 return r;
 
-                        if (lseek(fd_from, 0, SEEK_SET) == (off_t) -1)
+                        if (lseek(fd_from, 0, SEEK_SET) < 0)
                                 return log_error_errno(errno, "Failed to seek in \"%s\": %m", from);
 
                         fd_to = safe_close(fd_to);
@@ -421,8 +419,7 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
                  * newer version, or other boot loader in place. */
                 if (arg_graceful && IN_SET(k, -ESTALE, -ESRCH))
                         continue;
-                if (k < 0 && r == 0)
-                        r = k;
+                RET_GATHER(r, k);
         }
 
         return r;
@@ -975,9 +972,11 @@ static int remove_loader_variables(void) {
         /* Remove all persistent loader variables we define */
 
         FOREACH_STRING(var,
+                       EFI_LOADER_VARIABLE(LoaderConfigConsoleMode),
                        EFI_LOADER_VARIABLE(LoaderConfigTimeout),
                        EFI_LOADER_VARIABLE(LoaderConfigTimeoutOneShot),
                        EFI_LOADER_VARIABLE(LoaderEntryDefault),
+                       EFI_LOADER_VARIABLE(LoaderEntryLastBooted),
                        EFI_LOADER_VARIABLE(LoaderEntryOneShot),
                        EFI_LOADER_VARIABLE(LoaderSystemToken)){
 

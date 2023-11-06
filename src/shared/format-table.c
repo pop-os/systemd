@@ -318,6 +318,7 @@ static size_t table_data_size(TableDataType type, const void *data) {
 
         case TABLE_INT32:
         case TABLE_UINT32:
+        case TABLE_UINT32_HEX:
                 return sizeof(uint32_t);
 
         case TABLE_INT16:
@@ -981,6 +982,7 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                 }
 
                 case TABLE_UINT32:
+                case TABLE_UINT32_HEX:
                         buffer.uint32 = va_arg(ap, uint32_t);
                         data = &buffer.uint32;
                         break;
@@ -1365,6 +1367,7 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                         return CMP(a->uint16, b->uint16);
 
                 case TABLE_UINT32:
+                case TABLE_UINT32_HEX:
                         return CMP(a->uint32, b->uint32);
 
                 case TABLE_UINT64:
@@ -1586,9 +1589,7 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 else if (d->type == TABLE_TIMESTAMP_DATE)
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_DATE);
                 else if (d->type == TABLE_TIMESTAMP_RELATIVE_MONOTONIC)
-                        ret = format_timestamp_relative_full(p, FORMAT_TIMESTAMP_RELATIVE_MAX,
-                                                             d->timestamp, CLOCK_MONOTONIC,
-                                                             /* implicit_left = */ false);
+                        ret = format_timestamp_relative_monotonic(p, FORMAT_TIMESTAMP_RELATIVE_MAX, d->timestamp);
                 else
                         ret = format_timestamp_relative_full(p, FORMAT_TIMESTAMP_RELATIVE_MAX,
                                                              d->timestamp, CLOCK_REALTIME,
@@ -1754,6 +1755,18 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                         return NULL;
 
                 sprintf(p, "%" PRIu32, d->uint32);
+                d->formatted = TAKE_PTR(p);
+                break;
+        }
+
+        case TABLE_UINT32_HEX: {
+                _cleanup_free_ char *p = NULL;
+
+                p = new(char, 8 + 1);
+                if (!p)
+                        return NULL;
+
+                sprintf(p, "%" PRIx32, d->uint32);
                 d->formatted = TAKE_PTR(p);
                 break;
         }
@@ -2564,6 +2577,14 @@ size_t table_get_columns(Table *t) {
         return t->n_columns;
 }
 
+size_t table_get_current_column(Table *t) {
+        if (!t)
+                return 0;
+
+        assert(t->n_columns > 0);
+        return t->n_cells % t->n_columns;
+}
+
 int table_set_reverse(Table *t, size_t column, bool b) {
         assert(t);
         assert(column < t->n_columns);
@@ -2691,6 +2712,7 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
                 return json_variant_new_unsigned(ret, d->uint16);
 
         case TABLE_UINT32:
+        case TABLE_UINT32_HEX:
                 return json_variant_new_unsigned(ret, d->uint32);
 
         case TABLE_UINT64:

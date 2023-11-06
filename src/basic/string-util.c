@@ -627,14 +627,23 @@ char* strshorten(char *s, size_t l) {
 }
 
 int strgrowpad0(char **s, size_t l) {
+        size_t sz;
+
         assert(s);
+
+        if (*s) {
+                sz = strlen(*s) + 1;
+                if (sz >= l) /* never shrink */
+                        return 0;
+        } else
+                sz = 0;
 
         char *q = realloc(*s, l);
         if (!q)
                 return -ENOMEM;
+
         *s = q;
 
-        size_t sz = strlen(*s);
         memzero(*s + sz, l - sz);
         return 0;
 }
@@ -1445,4 +1454,68 @@ bool version_is_valid_versionspec(const char *s) {
                 return false;
 
         return true;
+}
+
+ssize_t strlevenshtein(const char *x, const char *y) {
+        _cleanup_free_ size_t *t0 = NULL, *t1 = NULL, *t2 = NULL;
+        size_t xl, yl;
+
+        /* This is inspired from the Linux kernel's Levenshtein implementation */
+
+        if (streq_ptr(x, y))
+                return 0;
+
+        xl = strlen_ptr(x);
+        if (xl > SSIZE_MAX)
+                return -E2BIG;
+
+        yl = strlen_ptr(y);
+        if (yl > SSIZE_MAX)
+                return -E2BIG;
+
+        if (isempty(x))
+                return yl;
+        if (isempty(y))
+                return xl;
+
+        t0 = new0(size_t, yl + 1);
+        if (!t0)
+                return -ENOMEM;
+        t1 = new0(size_t, yl + 1);
+        if (!t1)
+                return -ENOMEM;
+        t2 = new0(size_t, yl + 1);
+        if (!t2)
+                return -ENOMEM;
+
+        for (size_t i = 0; i <= yl; i++)
+                t1[i] = i;
+
+        for (size_t i = 0; i < xl; i++) {
+                t2[0] = i + 1;
+
+                for (size_t j = 0; j < yl; j++) {
+                        /* Substitution */
+                        t2[j+1] = t1[j] + (x[i] != y[j]);
+
+                        /* Swap */
+                        if (i > 0 && j > 0 && x[i-1] == y[j] && x[i] == y[j-1] && t2[j+1] > t0[j-1] + 1)
+                                t2[j+1] = t0[j-1] + 1;
+
+                        /* Deletion */
+                        if (t2[j+1] > t1[j+1] + 1)
+                                t2[j+1] = t1[j+1] + 1;
+
+                        /* Insertion */
+                        if (t2[j+1] > t2[j] + 1)
+                                t2[j+1] = t2[j] + 1;
+                }
+
+                size_t *dummy = t0;
+                t0 = t1;
+                t1 = t2;
+                t2 = dummy;
+        }
+
+        return t1[yl];
 }

@@ -204,18 +204,25 @@ int json_variant_dump(JsonVariant *v, JsonFormatFlags flags, FILE *f, const char
 int json_variant_filter(JsonVariant **v, char **to_remove);
 
 int json_variant_set_field(JsonVariant **v, const char *field, JsonVariant *value);
+int json_variant_set_fieldb(JsonVariant **v, const char *field, ...);
 int json_variant_set_field_string(JsonVariant **v, const char *field, const char *value);
 int json_variant_set_field_integer(JsonVariant **v, const char *field, int64_t value);
 int json_variant_set_field_unsigned(JsonVariant **v, const char *field, uint64_t value);
 int json_variant_set_field_boolean(JsonVariant **v, const char *field, bool b);
 int json_variant_set_field_strv(JsonVariant **v, const char *field, char **l);
 
+static inline int json_variant_set_field_non_null(JsonVariant **v, const char *field, JsonVariant *value) {
+        return value && !json_variant_is_null(value) ? json_variant_set_field(v, field, value) : 0;
+}
+
 JsonVariant *json_variant_find(JsonVariant *haystack, JsonVariant *needle);
 
 int json_variant_append_array(JsonVariant **v, JsonVariant *element);
+int json_variant_append_arrayb(JsonVariant **v, ...);
 int json_variant_append_array_nodup(JsonVariant **v, JsonVariant *element);
 
-int json_variant_merge(JsonVariant **v, JsonVariant *m);
+int json_variant_merge_object(JsonVariant **v, JsonVariant *m);
+int json_variant_merge_objectb(JsonVariant **v, ...);
 
 int json_variant_strv(JsonVariant *v, char ***ret);
 
@@ -259,7 +266,9 @@ enum {
         _JSON_BUILD_VARIANT_ARRAY,
         _JSON_BUILD_LITERAL,
         _JSON_BUILD_STRV,
+        _JSON_BUILD_STRV_ENV_PAIR,
         _JSON_BUILD_BASE64,
+        _JSON_BUILD_IOVEC_BASE64,
         _JSON_BUILD_BASE32HEX,
         _JSON_BUILD_HEX,
         _JSON_BUILD_OCTESCAPE,
@@ -267,6 +276,8 @@ enum {
         _JSON_BUILD_UUID,
         _JSON_BUILD_BYTE_ARRAY,
         _JSON_BUILD_HW_ADDR,
+        _JSON_BUILD_STRING_SET,
+        _JSON_BUILD_CALLBACK,
         _JSON_BUILD_PAIR_UNSIGNED_NON_ZERO,
         _JSON_BUILD_PAIR_FINITE_USEC,
         _JSON_BUILD_PAIR_STRING_NON_EMPTY,
@@ -280,6 +291,8 @@ enum {
         _JSON_BUILD_PAIR_HW_ADDR_NON_NULL,
         _JSON_BUILD_MAX,
 };
+
+typedef int (*JsonBuildCallback)(JsonVariant **ret, const char *name, void *userdata);
 
 #define JSON_BUILD_STRING(s) _JSON_BUILD_STRING, (const char*) { s }
 #define JSON_BUILD_INTEGER(i) _JSON_BUILD_INTEGER, (int64_t) { i }
@@ -297,7 +310,9 @@ enum {
 #define JSON_BUILD_VARIANT_ARRAY(v, n) _JSON_BUILD_VARIANT_ARRAY, (JsonVariant **) { v }, (size_t) { n }
 #define JSON_BUILD_LITERAL(l) _JSON_BUILD_LITERAL, (const char*) { l }
 #define JSON_BUILD_STRV(l) _JSON_BUILD_STRV, (char**) { l }
+#define JSON_BUILD_STRV_ENV_PAIR(l) _JSON_BUILD_STRV_ENV_PAIR, (char**) { l }
 #define JSON_BUILD_BASE64(p, n) _JSON_BUILD_BASE64, (const void*) { p }, (size_t) { n }
+#define JSON_BUILD_IOVEC_BASE64(iov) _JSON_BUILD_IOVEC_BASE64, (const struct iovec*) { iov }
 #define JSON_BUILD_BASE32HEX(p, n) _JSON_BUILD_BASE32HEX, (const void*) { p }, (size_t) { n }
 #define JSON_BUILD_HEX(p, n) _JSON_BUILD_HEX, (const void*) { p }, (size_t) { n }
 #define JSON_BUILD_OCTESCAPE(p, n) _JSON_BUILD_OCTESCAPE, (const void*) { p }, (size_t) { n }
@@ -310,6 +325,8 @@ enum {
 #define JSON_BUILD_IN_ADDR(v, f) JSON_BUILD_BYTE_ARRAY(((const union in_addr_union*) { v })->bytes, FAMILY_ADDRESS_SIZE_SAFE(f))
 #define JSON_BUILD_ETHER_ADDR(v) JSON_BUILD_BYTE_ARRAY(((const struct ether_addr*) { v })->ether_addr_octet, sizeof(struct ether_addr))
 #define JSON_BUILD_HW_ADDR(v) _JSON_BUILD_HW_ADDR, (const struct hw_addr_data*) { v }
+#define JSON_BUILD_STRING_SET(s) _JSON_BUILD_STRING_SET, (Set *) { s }
+#define JSON_BUILD_CALLBACK(c, u) _JSON_BUILD_CALLBACK, (JsonBuildCallback) { c }, (void*) { u }
 
 #define JSON_BUILD_PAIR_STRING(name, s) JSON_BUILD_PAIR(name, JSON_BUILD_STRING(s))
 #define JSON_BUILD_PAIR_INTEGER(name, i) JSON_BUILD_PAIR(name, JSON_BUILD_INTEGER(i))
@@ -326,6 +343,7 @@ enum {
 #define JSON_BUILD_PAIR_LITERAL(name, l) JSON_BUILD_PAIR(name, JSON_BUILD_LITERAL(l))
 #define JSON_BUILD_PAIR_STRV(name, l) JSON_BUILD_PAIR(name, JSON_BUILD_STRV(l))
 #define JSON_BUILD_PAIR_BASE64(name, p, n) JSON_BUILD_PAIR(name, JSON_BUILD_BASE64(p, n))
+#define JSON_BUILD_PAIR_IOVEC_BASE64(name, iov) JSON_BUILD_PAIR(name, JSON_BUILD_IOVEC_BASE64(iov))
 #define JSON_BUILD_PAIR_HEX(name, p, n) JSON_BUILD_PAIR(name, JSON_BUILD_HEX(p, n))
 #define JSON_BUILD_PAIR_ID128(name, id) JSON_BUILD_PAIR(name, JSON_BUILD_ID128(id))
 #define JSON_BUILD_PAIR_UUID(name, id) JSON_BUILD_PAIR(name, JSON_BUILD_UUID(id))
@@ -335,6 +353,8 @@ enum {
 #define JSON_BUILD_PAIR_IN_ADDR(name, v, f) JSON_BUILD_PAIR(name, JSON_BUILD_IN_ADDR(v, f))
 #define JSON_BUILD_PAIR_ETHER_ADDR(name, v) JSON_BUILD_PAIR(name, JSON_BUILD_ETHER_ADDR(v))
 #define JSON_BUILD_PAIR_HW_ADDR(name, v) JSON_BUILD_PAIR(name, JSON_BUILD_HW_ADDR(v))
+#define JSON_BUILD_PAIR_STRING_SET(name, s) JSON_BUILD_PAIR(name, JSON_BUILD_STRING_SET(s))
+#define JSON_BUILD_PAIR_CALLBACK(name, c, u) JSON_BUILD_PAIR(name, JSON_BUILD_CALLBACK(c, u))
 
 #define JSON_BUILD_PAIR_UNSIGNED_NON_ZERO(name, u) _JSON_BUILD_PAIR_UNSIGNED_NON_ZERO, (const char*) { name }, (uint64_t) { u }
 #define JSON_BUILD_PAIR_FINITE_USEC(name, u) _JSON_BUILD_PAIR_FINITE_USEC, (const char*) { name }, (usec_t) { u }
@@ -349,9 +369,6 @@ enum {
 
 int json_build(JsonVariant **ret, ...);
 int json_buildv(JsonVariant **ret, va_list ap);
- /* These two functions below are equivalent to json_build() (or json_buildv()) and json_variant_merge(). */
-int json_append(JsonVariant **v, ...);
-int json_appendv(JsonVariant **v, va_list ap);
 
 /* A bitmask of flags used by the dispatch logic. Note that this is a combined bit mask, that is generated from the bit
  * mask originally passed into json_dispatch(), the individual bitmask associated with the static JsonDispatch callout
@@ -379,7 +396,11 @@ typedef struct JsonDispatch {
         JsonDispatchFlags flags;
 } JsonDispatch;
 
-int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallback bad, JsonDispatchFlags flags, void *userdata);
+int json_dispatch_full(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallback bad, JsonDispatchFlags flags, void *userdata, const char **reterr_bad_field);
+
+static inline int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchFlags flags, void *userdata) {
+        return json_dispatch_full(v, table, NULL, flags, userdata, NULL);
+}
 
 int json_dispatch_string(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 int json_dispatch_const_string(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
@@ -398,6 +419,7 @@ int json_dispatch_uid_gid(const char *name, JsonVariant *variant, JsonDispatchFl
 int json_dispatch_user_group_name(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 int json_dispatch_id128(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 int json_dispatch_unsupported(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+int json_dispatch_unbase64_iovec(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 
 assert_cc(sizeof(uint32_t) == sizeof(unsigned));
 #define json_dispatch_uint json_dispatch_uint32

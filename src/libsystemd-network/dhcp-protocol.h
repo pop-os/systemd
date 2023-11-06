@@ -9,8 +9,15 @@
 #include <netinet/udp.h>
 #include <stdint.h>
 
+#include "sd-dhcp-protocol.h"
+
 #include "macro.h"
 #include "sparse-endian.h"
+#include "time-util.h"
+
+/* RFC 8925 - IPv6-Only Preferred Option for DHCPv4 3.4.
+ * MIN_V6ONLY_WAIT: The lower boundary for V6ONLY_WAIT. Value: 300 seconds */
+#define MIN_V6ONLY_WAIT_USEC (300U * USEC_PER_SEC)
 
 struct DHCPMessage {
         uint8_t op;
@@ -53,20 +60,6 @@ enum {
         DHCP_PORT_SERVER                        = 67,
         DHCP_PORT_CLIENT                        = 68,
 };
-
-enum DHCPState {
-        DHCP_STATE_INIT                         = 0,
-        DHCP_STATE_SELECTING                    = 1,
-        DHCP_STATE_INIT_REBOOT                  = 2,
-        DHCP_STATE_REBOOTING                    = 3,
-        DHCP_STATE_REQUESTING                   = 4,
-        DHCP_STATE_BOUND                        = 5,
-        DHCP_STATE_RENEWING                     = 6,
-        DHCP_STATE_REBINDING                    = 7,
-        DHCP_STATE_STOPPED                      = 8,
-};
-
-typedef enum DHCPState DHCPState;
 
 enum {
         BOOTREQUEST                             = 1,

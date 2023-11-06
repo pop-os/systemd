@@ -19,11 +19,6 @@ if systemd-detect-virt -q --container; then
     test ! -e /run/systemd/container
     cp -afv /tmp/container /run/systemd/container
 else
-    # We should've created a mount under /run in initrd (see the other half of the test)
-    # that should've survived the transition from initrd to the real system
-    test -d /run/initrd-mount-target
-    mountpoint /run/initrd-mount-target
-
     # We bring the loopback netdev up only during a full setup, so it should
     # not get brought back up during reexec if we disable it beforehand
     [[ "$(ip -o link show lo)" =~ LOOPBACK,UP ]]
@@ -49,5 +44,18 @@ systemctl daemon-reload
 # e.g. SecurityStartTimestamp, are re-initialized, and causes an ABRT
 # of systemd-analyze blame. See issue #27187.
 systemd-analyze blame
+
+# Test for 'systemd-update-utmp runlevel' vs 'systemctl daemon-reexec'.
+# See issue #27163.
+# shellcheck disable=SC2034
+for _ in {0..10}; do
+    systemctl daemon-reexec &
+    pid_reexec=$!
+    # shellcheck disable=SC2034
+    for _ in {0..10}; do
+        SYSTEMD_LOG_LEVEL=debug /usr/lib/systemd/systemd-update-utmp runlevel
+    done
+    wait "$pid_reexec"
+done
 
 touch /testok

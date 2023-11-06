@@ -6,8 +6,8 @@
 #include "proto/file-io.h"
 #include "string-util-fundamental.h"
 
-/* This is provided by linker script. */
-extern uint8_t __ImageBase;
+/* This is provided by the linker. */
+extern uint8_t __executable_start[];
 
 static inline void free(void *p) {
         if (!p)
@@ -52,6 +52,11 @@ static inline void *xrealloc(void *p, size_t old_size, size_t new_size) {
         return t;
 }
 
+_malloc_ _alloc_(2) _returns_nonnull_ _warn_unused_result_
+static inline void* xmemdup(const void *p, size_t l) {
+        return memcpy(xmalloc(l), p, l);
+}
+
 #define xnew(type, n) ((type *) xmalloc_multiply(sizeof(type), (n)))
 
 typedef struct {
@@ -80,14 +85,14 @@ static inline Pages xmalloc_pages(
         };
 }
 
-EFI_STATUS parse_boolean(const char *v, bool *b);
-
 EFI_STATUS efivar_set(const EFI_GUID *vendor, const char16_t *name, const char16_t *value, uint32_t flags);
 EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, size_t size, uint32_t flags);
 EFI_STATUS efivar_set_uint_string(const EFI_GUID *vendor, const char16_t *name, size_t i, uint32_t flags);
 EFI_STATUS efivar_set_uint32_le(const EFI_GUID *vendor, const char16_t *NAME, uint32_t value, uint32_t flags);
 EFI_STATUS efivar_set_uint64_le(const EFI_GUID *vendor, const char16_t *name, uint64_t value, uint32_t flags);
 void efivar_set_time_usec(const EFI_GUID *vendor, const char16_t *name, uint64_t usec);
+
+EFI_STATUS efivar_unset(const EFI_GUID *vendor, const char16_t *name, uint32_t flags);
 
 EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **ret);
 EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, size_t *ret_size);
@@ -98,7 +103,7 @@ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, b
 
 void convert_efi_path(char16_t *path);
 char16_t *xstr8_to_path(const char *stra);
-void mangle_stub_cmdline(char16_t *cmdline);
+char16_t *mangle_stub_cmdline(char16_t *cmdline);
 
 EFI_STATUS chunked_read(EFI_FILE *file, size_t *size, void *buf);
 EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t size, char **content, size_t *content_size);

@@ -1071,60 +1071,97 @@ static int verb_tlsa(int argc, char **argv, void *userdata) {
 }
 
 static int show_statistics(int argc, char **argv, void *userdata) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(table_unrefp) Table *table = NULL;
-        sd_bus *bus = ASSERT_PTR(userdata);
-        uint64_t n_current_transactions, n_total_transactions,
-                cache_size, n_cache_hit, n_cache_miss,
-                n_dnssec_secure, n_dnssec_insecure, n_dnssec_bogus, n_dnssec_indeterminate;
-        int r, dnssec_supported;
+        JsonVariant *reply = NULL;
+        _cleanup_(varlink_unrefp) Varlink *vl = NULL;
+        int r;
 
-        r = bus_get_property_trivial(bus, bus_resolve_mgr, "DNSSECSupported", &error, 'b', &dnssec_supported);
+        r = varlink_connect_address(&vl, "/run/systemd/resolve/io.systemd.Resolve.Monitor");
         if (r < 0)
-                return log_error_errno(r, "Failed to get DNSSEC supported state: %s", bus_error_message(&error, r));
+                return log_error_errno(r, "Failed to connect to query monitoring service /run/systemd/resolve/io.systemd.Resolve.Monitor: %m");
 
-        printf("DNSSEC supported by current servers: %s%s%s\n\n",
-               ansi_highlight(),
-               yes_no(dnssec_supported),
-               ansi_normal());
-
-        r = bus_get_property(bus, bus_resolve_mgr, "TransactionStatistics", &error, &reply, "(tt)");
+        r = varlink_call(vl, "io.systemd.Resolve.Monitor.DumpStatistics", NULL, &reply, NULL, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to get transaction statistics: %s", bus_error_message(&error, r));
+                return log_error_errno(r, "Failed to issue DumpStatistics() varlink call: %m");
 
-        r = sd_bus_message_read(reply, "(tt)",
-                                &n_current_transactions,
-                                &n_total_transactions);
+        if (!FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF))
+                return json_variant_dump(reply, arg_json_format_flags, NULL, NULL);
+
+        struct statistics {
+                JsonVariant *transactions;
+                JsonVariant *cache;
+                JsonVariant *dnssec;
+        } statistics;
+
+        static const JsonDispatch statistics_dispatch_table[] = {
+                { "transactions",       JSON_VARIANT_OBJECT,    json_dispatch_variant_noref,    offsetof(struct statistics, transactions),      JSON_MANDATORY },
+                { "cache",              JSON_VARIANT_OBJECT,    json_dispatch_variant_noref,    offsetof(struct statistics, cache),             JSON_MANDATORY },
+                { "dnssec",             JSON_VARIANT_OBJECT,    json_dispatch_variant_noref,    offsetof(struct statistics, dnssec),            JSON_MANDATORY },
+                {},
+        };
+
+        r = json_dispatch(reply, statistics_dispatch_table, JSON_LOG, &statistics);
         if (r < 0)
-                return bus_log_parse_error(r);
+                return r;
 
-        reply = sd_bus_message_unref(reply);
+        struct transactions {
+                uint64_t n_current_transactions;
+                uint64_t n_transactions_total;
+                uint64_t n_timeouts_total;
+                uint64_t n_timeouts_served_stale_total;
+                uint64_t n_failure_responses_total;
+                uint64_t n_failure_responses_served_stale_total;
+        } transactions;
 
-        r = bus_get_property(bus, bus_resolve_mgr, "CacheStatistics", &error, &reply, "(ttt)");
+        static const JsonDispatch transactions_dispatch_table[] = {
+                { "currentTransactions",                JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_current_transactions),                  JSON_MANDATORY },
+                { "totalTransactions",                  JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_transactions_total),                    JSON_MANDATORY },
+                { "totalTimeouts",                      JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_timeouts_total),                        JSON_MANDATORY },
+                { "totalTimeoutsServedStale",           JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_timeouts_served_stale_total),           JSON_MANDATORY },
+                { "totalFailedResponses",               JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_failure_responses_total),               JSON_MANDATORY },
+                { "totalFailedResponsesServedStale",    JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct transactions, n_failure_responses_served_stale_total),  JSON_MANDATORY },
+                {},
+        };
+
+        r = json_dispatch(statistics.transactions, transactions_dispatch_table, JSON_LOG, &transactions);
         if (r < 0)
-                return log_error_errno(r, "Failed to get cache statistics: %s", bus_error_message(&error, r));
+                return r;
 
-        r = sd_bus_message_read(reply, "(ttt)",
-                                &cache_size,
-                                &n_cache_hit,
-                                &n_cache_miss);
+        struct cache {
+                uint64_t cache_size;
+                uint64_t n_cache_hit;
+                uint64_t n_cache_miss;
+        } cache;
+
+        static const JsonDispatch cache_dispatch_table[] = {
+                { "size",       JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct cache, cache_size),     JSON_MANDATORY },
+                { "hits",       JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct cache, n_cache_hit),    JSON_MANDATORY },
+                { "misses",     JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct cache, n_cache_miss),   JSON_MANDATORY },
+                {},
+        };
+
+        r = json_dispatch(statistics.cache, cache_dispatch_table, JSON_LOG, &cache);
         if (r < 0)
-                return bus_log_parse_error(r);
+                return r;
 
-        reply = sd_bus_message_unref(reply);
+        struct dnsssec {
+                uint64_t n_dnssec_secure;
+                uint64_t n_dnssec_insecure;
+                uint64_t n_dnssec_bogus;
+                uint64_t n_dnssec_indeterminate;
+        } dnsssec;
 
-        r = bus_get_property(bus, bus_resolve_mgr, "DNSSECStatistics", &error, &reply, "(tttt)");
+        static const JsonDispatch dnssec_dispatch_table[] = {
+                { "secure",             JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct dnsssec, n_dnssec_secure),              JSON_MANDATORY },
+                { "insecure",           JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct dnsssec, n_dnssec_insecure),            JSON_MANDATORY },
+                { "bogus",              JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct dnsssec, n_dnssec_bogus),               JSON_MANDATORY },
+                { "indeterminate",      JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,   offsetof(struct dnsssec, n_dnssec_indeterminate),       JSON_MANDATORY },
+                {},
+        };
+
+        r = json_dispatch(statistics.dnssec, dnssec_dispatch_table, JSON_LOG, &dnsssec);
         if (r < 0)
-                return log_error_errno(r, "Failed to get DNSSEC statistics: %s", bus_error_message(&error, r));
-
-        r = sd_bus_message_read(reply, "(tttt)",
-                                &n_dnssec_secure,
-                                &n_dnssec_insecure,
-                                &n_dnssec_bogus,
-                                &n_dnssec_indeterminate);
-        if (r < 0)
-                return bus_log_parse_error(r);
+                return r;
 
         table = table_new_vertical();
         if (!table)
@@ -1137,10 +1174,10 @@ static int show_statistics(int argc, char **argv, void *userdata) {
                            TABLE_EMPTY,
                            TABLE_FIELD, "Current Transactions",
                            TABLE_SET_ALIGN_PERCENT, 100,
-                           TABLE_UINT64, n_current_transactions,
+                           TABLE_UINT64, transactions.n_current_transactions,
                            TABLE_SET_ALIGN_PERCENT, 100,
                            TABLE_FIELD, "Total Transactions",
-                           TABLE_UINT64, n_total_transactions,
+                           TABLE_UINT64, transactions.n_transactions_total,
                            TABLE_EMPTY, TABLE_EMPTY,
                            TABLE_STRING, "Cache",
                            TABLE_SET_COLOR, ansi_highlight(),
@@ -1148,11 +1185,25 @@ static int show_statistics(int argc, char **argv, void *userdata) {
                            TABLE_EMPTY,
                            TABLE_FIELD, "Current Cache Size",
                            TABLE_SET_ALIGN_PERCENT, 100,
-                           TABLE_UINT64, cache_size,
+                           TABLE_UINT64, cache.cache_size,
                            TABLE_FIELD, "Cache Hits",
-                           TABLE_UINT64, n_cache_hit,
+                           TABLE_UINT64, cache.n_cache_hit,
                            TABLE_FIELD, "Cache Misses",
-                           TABLE_UINT64, n_cache_miss,
+                           TABLE_UINT64, cache.n_cache_miss,
+                           TABLE_EMPTY, TABLE_EMPTY,
+                           TABLE_STRING, "Failure Transactions",
+                           TABLE_SET_COLOR, ansi_highlight(),
+                           TABLE_SET_ALIGN_PERCENT, 0,
+                           TABLE_EMPTY,
+                           TABLE_FIELD, "Total Timeouts",
+                           TABLE_SET_ALIGN_PERCENT, 100,
+                           TABLE_UINT64, transactions.n_timeouts_total,
+                           TABLE_FIELD, "Total Timeouts (Stale Data Served)",
+                           TABLE_UINT64, transactions.n_timeouts_served_stale_total,
+                           TABLE_FIELD, "Total Failure Responses",
+                           TABLE_UINT64, transactions.n_failure_responses_total,
+                           TABLE_FIELD, "Total Failure Responses (Stale Data Served)",
+                           TABLE_UINT64, transactions.n_failure_responses_served_stale_total,
                            TABLE_EMPTY, TABLE_EMPTY,
                            TABLE_STRING, "DNSSEC Verdicts",
                            TABLE_SET_COLOR, ansi_highlight(),
@@ -1160,13 +1211,14 @@ static int show_statistics(int argc, char **argv, void *userdata) {
                            TABLE_EMPTY,
                            TABLE_FIELD, "Secure",
                            TABLE_SET_ALIGN_PERCENT, 100,
-                           TABLE_UINT64, n_dnssec_secure,
+                           TABLE_UINT64, dnsssec.n_dnssec_secure,
                            TABLE_FIELD, "Insecure",
-                           TABLE_UINT64, n_dnssec_insecure,
+                           TABLE_UINT64, dnsssec.n_dnssec_insecure,
                            TABLE_FIELD, "Bogus",
-                           TABLE_UINT64, n_dnssec_bogus,
+                           TABLE_UINT64, dnsssec.n_dnssec_bogus,
                            TABLE_FIELD, "Indeterminate",
-                           TABLE_UINT64, n_dnssec_indeterminate);
+                           TABLE_UINT64, dnsssec.n_dnssec_indeterminate
+                          );
         if (r < 0)
                 return table_log_add_error(r);
 
@@ -1178,13 +1230,20 @@ static int show_statistics(int argc, char **argv, void *userdata) {
 }
 
 static int reset_statistics(int argc, char **argv, void *userdata) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        sd_bus *bus = userdata;
+        JsonVariant *reply = NULL;
+        _cleanup_(varlink_unrefp) Varlink *vl = NULL;
         int r;
 
-        r = bus_call_method(bus, bus_resolve_mgr, "ResetStatistics", &error, NULL, NULL);
+        r = varlink_connect_address(&vl, "/run/systemd/resolve/io.systemd.Resolve.Monitor");
         if (r < 0)
-                return log_error_errno(r, "Failed to reset statistics: %s", bus_error_message(&error, r));
+                return log_error_errno(r, "Failed to connect to query monitoring service /run/systemd/resolve/io.systemd.Resolve.Monitor: %m");
+
+        r = varlink_call(vl, "io.systemd.Resolve.Monitor.ResetStatistics", NULL, &reply, NULL, 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to issue ResetStatistics() varlink call: %m");
+
+        if (!FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF))
+                return json_variant_dump(reply, arg_json_format_flags, NULL, NULL);
 
         return 0;
 }
@@ -2673,7 +2732,7 @@ static void monitor_query_dump(JsonVariant *v) {
                 {}
         };
 
-        r = json_dispatch(v, dispatch_table, NULL, 0, NULL);
+        r = json_dispatch(v, dispatch_table, 0, NULL);
         if (r < 0)
                 return (void) log_warning("Received malformed monitor message, ignoring.");
 
@@ -2799,7 +2858,7 @@ static int dump_cache_item(JsonVariant *item) {
         _cleanup_(dns_resource_key_unrefp) DnsResourceKey *k = NULL;
         int r, c = 0;
 
-        r = json_dispatch(item, dispatch_table, NULL, JSON_LOG, &item_info);
+        r = json_dispatch(item, dispatch_table, JSON_LOG, &item_info);
         if (r < 0)
                 return r;
 
@@ -2861,7 +2920,7 @@ static int dump_cache_scope(JsonVariant *scope) {
                 {},
         };
 
-        r = json_dispatch(scope, dispatch_table, NULL, JSON_LOG, &scope_info);
+        r = json_dispatch(scope, dispatch_table, JSON_LOG, &scope_info);
         if (r < 0)
                 return r;
 
@@ -2920,6 +2979,180 @@ static int verb_show_cache(int argc, char *argv[], void *userdata) {
 
                 JSON_VARIANT_ARRAY_FOREACH(i, d) {
                         r = dump_cache_scope(i);
+                        if (r < 0)
+                                return r;
+                }
+
+                return 0;
+        }
+
+        return json_variant_dump(d, arg_json_format_flags, NULL, NULL);
+}
+
+static int dump_server_state(JsonVariant *server) {
+        _cleanup_(table_unrefp) Table *table = NULL;
+        TableCell *cell;
+
+        struct server_state {
+                const char *server_name;
+                const char *type;
+                const char *ifname;
+                int ifindex;
+                const char *verified_feature_level;
+                const char *possible_feature_level;
+                const char *dnssec_mode;
+                bool dnssec_supported;
+                size_t received_udp_fragment_max;
+                uint64_t n_failed_udp;
+                uint64_t n_failed_tcp;
+                bool packet_truncated;
+                bool packet_bad_opt;
+                bool packet_rrsig_missing;
+                bool packet_invalid;
+                bool packet_do_off;
+        } server_state = {
+                .ifindex = -1,
+        };
+
+        int r;
+
+        static const JsonDispatch dispatch_table[] = {
+                { "Server",                     JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, server_name),                JSON_MANDATORY },
+                { "Type",                       JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, type),                       JSON_MANDATORY },
+                { "Interface",                  JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, ifname),                     0              },
+                { "InterfaceIndex",             JSON_VARIANT_INTEGER,   json_dispatch_int,           offsetof(struct server_state, ifindex),                    0              },
+                { "VerifiedFeatureLevel",       JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, verified_feature_level),     0              },
+                { "PossibleFeatureLevel",       JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, possible_feature_level),     0              },
+                { "DNSSECMode",                 JSON_VARIANT_STRING,    json_dispatch_const_string,  offsetof(struct server_state, dnssec_mode),                JSON_MANDATORY },
+                { "DNSSECSupported",            JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, dnssec_supported),           JSON_MANDATORY },
+                { "ReceivedUDPFragmentMax",     JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,        offsetof(struct server_state, received_udp_fragment_max),  JSON_MANDATORY },
+                { "FailedUDPAttempts",          JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,        offsetof(struct server_state, n_failed_udp),               JSON_MANDATORY },
+                { "FailedTCPAttempts",          JSON_VARIANT_UNSIGNED,  json_dispatch_uint64,        offsetof(struct server_state, n_failed_tcp),               JSON_MANDATORY },
+                { "PacketTruncated",            JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, packet_truncated),           JSON_MANDATORY },
+                { "PacketBadOpt",               JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, packet_bad_opt),             JSON_MANDATORY },
+                { "PacketRRSIGMissing",         JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, packet_rrsig_missing),       JSON_MANDATORY },
+                { "PacketInvalid",              JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, packet_invalid),             JSON_MANDATORY },
+                { "PacketDoOff",                JSON_VARIANT_BOOLEAN,   json_dispatch_boolean,       offsetof(struct server_state, packet_do_off),              JSON_MANDATORY },
+                {},
+        };
+
+        r = json_dispatch(server, dispatch_table, JSON_LOG|JSON_PERMISSIVE, &server_state);
+        if (r < 0)
+                return r;
+
+        table = table_new_vertical();
+        if (!table)
+                return log_oom();
+
+        assert_se(cell = table_get_cell(table, 0, 0));
+        (void) table_set_ellipsize_percent(table, cell, 100);
+        (void) table_set_align_percent(table, cell, 0);
+
+        r = table_add_cell_stringf(table, NULL, "Server: %s", server_state.server_name);
+        if (r < 0)
+                return table_log_add_error(r);
+
+        r = table_add_many(table,
+                           TABLE_EMPTY,
+                           TABLE_FIELD, "Type",
+                           TABLE_SET_ALIGN_PERCENT, 100,
+                           TABLE_STRING, server_state.type);
+        if (r < 0)
+                return table_log_add_error(r);
+
+        if (server_state.ifname) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Interface",
+                                   TABLE_STRING, server_state.ifname);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        if (server_state.ifindex >= 0) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Interface Index",
+                                   TABLE_INT, server_state.ifindex);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        if (server_state.verified_feature_level) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Verified feature level",
+                                   TABLE_STRING, server_state.verified_feature_level);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        if (server_state.possible_feature_level) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Possible feature level",
+                                   TABLE_STRING, server_state.possible_feature_level);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        r = table_add_many(table,
+                           TABLE_FIELD, "DNSSEC Mode",
+                           TABLE_STRING, server_state.dnssec_mode,
+                           TABLE_FIELD, "DNSSEC Supported",
+                           TABLE_STRING, yes_no(server_state.dnssec_supported),
+                           TABLE_FIELD, "Maximum UDP fragment size received",
+                           TABLE_UINT64, server_state.received_udp_fragment_max,
+                           TABLE_FIELD, "Failed UDP attempts",
+                           TABLE_UINT64, server_state.n_failed_udp,
+                           TABLE_FIELD, "Failed TCP attempts",
+                           TABLE_UINT64, server_state.n_failed_tcp,
+                           TABLE_FIELD, "Seen truncated packet",
+                           TABLE_STRING, yes_no(server_state.packet_truncated),
+                           TABLE_FIELD, "Seen OPT RR getting lost",
+                           TABLE_STRING, yes_no(server_state.packet_bad_opt),
+                           TABLE_FIELD, "Seen RRSIG RR missing",
+                           TABLE_STRING, yes_no(server_state.packet_rrsig_missing),
+                           TABLE_FIELD, "Seen invalid packet",
+                           TABLE_STRING, yes_no(server_state.packet_invalid),
+                           TABLE_FIELD, "Server dropped DO flag",
+                           TABLE_STRING, yes_no(server_state.packet_do_off),
+                           TABLE_SET_ALIGN_PERCENT, 0,
+                           TABLE_EMPTY, TABLE_EMPTY);
+
+        if (r < 0)
+                return table_log_add_error(r);
+
+        r = table_print(table, NULL);
+        if (r < 0)
+                return table_log_print_error(r);
+
+        return 0;
+}
+
+static int verb_show_server_state(int argc, char *argv[], void *userdata) {
+        JsonVariant *reply = NULL, *d = NULL;
+        _cleanup_(varlink_unrefp) Varlink *vl = NULL;
+        int r;
+
+        r = varlink_connect_address(&vl, "/run/systemd/resolve/io.systemd.Resolve.Monitor");
+        if (r < 0)
+                return log_error_errno(r, "Failed to connect to query monitoring service /run/systemd/resolve/io.systemd.Resolve.Monitor: %m");
+
+        r = varlink_call(vl, "io.systemd.Resolve.Monitor.DumpServerState", NULL, &reply, NULL, 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to issue DumpServerState() varlink call: %m");
+
+        d = json_variant_by_key(reply, "dump");
+        if (!d)
+                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                       "DumpCache() response is missing 'dump' key.");
+
+        if (!json_variant_is_array(d))
+                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                       "DumpCache() response 'dump' field not an array");
+
+        if (FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF)) {
+                JsonVariant *i;
+
+                JSON_VARIANT_ARRAY_FOREACH(i, d) {
+                        r = dump_server_state(i);
                         if (r < 0)
                                 return r;
                 }
@@ -3037,6 +3270,7 @@ static int native_help(void) {
                "  reset-server-features        Forget learnt DNS server feature levels\n"
                "  monitor                      Monitor DNS queries\n"
                "  show-cache                   Show cache contents\n"
+               "  show-server-state            Show servers state\n"
                "  dns [LINK [SERVER...]]       Get/set per-interface DNS server address\n"
                "  domain [LINK [DOMAIN...]]    Get/set per-interface search domain\n"
                "  default-route [LINK [BOOL]]  Get/set per-interface default route flag\n"
@@ -3694,6 +3928,7 @@ static int native_main(int argc, char *argv[], sd_bus *bus) {
                 { "log-level",             VERB_ANY, 2,        0,            verb_log_level        },
                 { "monitor",               VERB_ANY, 1,        0,            verb_monitor          },
                 { "show-cache",            VERB_ANY, 1,        0,            verb_show_cache       },
+                { "show-server-state",     VERB_ANY, 1,        0,            verb_show_server_state},
                 {}
         };
 

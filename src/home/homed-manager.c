@@ -37,6 +37,7 @@
 #include "homed-varlink.h"
 #include "io-util.h"
 #include "mkdir.h"
+#include "openssl-util.h"
 #include "process-util.h"
 #include "quota-util.h"
 #include "random-util.h"
@@ -52,6 +53,7 @@
 #include "user-record-util.h"
 #include "user-record.h"
 #include "user-util.h"
+#include "varlink-io.systemd.UserDatabase.h"
 
 /* Where to look for private/public keys that are used to sign the user records. We are not using
  * CONF_PATHS_NULSTR() here since we want to insert /var/lib/systemd/home/ in the middle. And we insert that
@@ -1002,6 +1004,10 @@ static int manager_bind_varlink(Manager *m) {
 
         varlink_server_set_userdata(m->varlink_server, m);
 
+        r = varlink_server_add_interface(m->varlink_server, &vl_interface_io_systemd_UserDatabase);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add UserDatabase interface to varlink server: %m");
+
         r = varlink_server_bind_method_many(
                         m->varlink_server,
                         "io.systemd.UserDatabase.GetUserRecord",  vl_method_get_user_record,
@@ -1392,8 +1398,6 @@ static int manager_load_key_pair(Manager *m) {
         return 1;
 }
 
-DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_PKEY_CTX*, EVP_PKEY_CTX_free, NULL);
-
 static int manager_generate_key_pair(Manager *m) {
         _cleanup_(EVP_PKEY_CTX_freep) EVP_PKEY_CTX *ctx = NULL;
         _cleanup_(unlink_and_freep) char *temp_public = NULL, *temp_private = NULL;
@@ -1504,7 +1508,6 @@ int manager_sign_user_record(Manager *m, UserRecord *u, UserRecord **ret, sd_bus
 }
 
 DEFINE_PRIVATE_HASH_OPS_FULL(public_key_hash_ops, char, string_hash_func, string_compare_func, free, EVP_PKEY, EVP_PKEY_free);
-DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_PKEY*, EVP_PKEY_free, NULL);
 
 static int manager_load_public_key_one(Manager *m, const char *path) {
         _cleanup_(EVP_PKEY_freep) EVP_PKEY *pkey = NULL;

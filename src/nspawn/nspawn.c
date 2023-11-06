@@ -24,6 +24,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "ether-addr-util.h"
 #include "barrier.h"
 #include "base-filesystem.h"
 #include "blkid-util.h"
@@ -59,6 +60,7 @@
 #include "log.h"
 #include "loop-util.h"
 #include "loopback-setup.h"
+#include "machine-credential.h"
 #include "macro.h"
 #include "main-func.h"
 #include "missing_sched.h"
@@ -69,7 +71,6 @@
 #include "netlink-util.h"
 #include "nspawn-bind-user.h"
 #include "nspawn-cgroup.h"
-#include "nspawn-creds.h"
 #include "nspawn-def.h"
 #include "nspawn-expose-ports.h"
 #include "nspawn-mount.h"
@@ -96,9 +97,7 @@
 #include "resolve-util.h"
 #include "rlimit-util.h"
 #include "rm-rf.h"
-#if HAVE_SECCOMP
 #include "seccomp-util.h"
-#endif
 #include "selinux-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
@@ -190,6 +189,7 @@ static char **arg_network_veth_extra = NULL;
 static char *arg_network_bridge = NULL;
 static char *arg_network_zone = NULL;
 static char *arg_network_namespace_path = NULL;
+struct ether_addr arg_network_provided_mac = {};
 static PagerFlags arg_pager_flags = 0;
 static unsigned long arg_personality = PERSONALITY_INVALID;
 static char *arg_image = NULL;
@@ -229,7 +229,7 @@ static DeviceNode* arg_extra_nodes = NULL;
 static size_t arg_n_extra_nodes = 0;
 static char **arg_sysctl = NULL;
 static ConsoleMode arg_console_mode = _CONSOLE_MODE_INVALID;
-static Credential *arg_credentials = NULL;
+static MachineCredential *arg_credentials = NULL;
 static size_t arg_n_credentials = 0;
 static char **arg_bind_user = NULL;
 static bool arg_suppress_sync = false;
@@ -670,6 +670,13 @@ static int parse_environment(void) {
         if (e)
                 arg_container_service_name = e;
 
+        e = getenv("SYSTEMD_NSPAWN_NETWORK_MAC");
+        if (e) {
+                r = parse_ether_addr(e, &arg_network_provided_mac);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse provided MAC address via environment variable");
+        }
+
         r = getenv_bool("SYSTEMD_SUPPRESS_SYNC");
         if (r >= 0)
                 arg_suppress_sync = r;
@@ -978,13 +985,12 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_UUID:
-                        r = sd_id128_from_string(optarg, &arg_uuid);
-                        if (r < 0)
-                                return log_error_errno(r, "Invalid UUID: %s", optarg);
-
-                        if (sd_id128_is_null(arg_uuid))
+                        r = id128_from_string_nonzero(optarg, &arg_uuid);
+                        if (r == -ENXIO)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Machine UUID may not be all zeroes.");
+                        if (r < 0)
+                                return log_error_errno(r, "Invalid UUID: %s", optarg);
 
                         arg_settings_mask |= SETTING_MACHINE_ID;
                         break;
@@ -1561,106 +1567,24 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_pager_flags |= PAGER_DISABLE;
                         break;
 
-                case ARG_SET_CREDENTIAL: {
-                        _cleanup_free_ char *word = NULL, *data = NULL;
-                        const char *p = optarg;
-                        Credential *a;
-                        ssize_t l;
-
-                        r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                case ARG_SET_CREDENTIAL:
+                        r = machine_credential_set(&arg_credentials, &arg_n_credentials, optarg);
                         if (r == -ENOMEM)
                                 return log_oom();
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --set-credential= parameter: %m");
-                        if (r == 0 || !p)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Missing value for --set-credential=: %s", optarg);
-
-                        if (!credential_name_valid(word))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential name is not valid: %s", word);
-
-                        for (size_t i = 0; i < arg_n_credentials; i++)
-                                if (streq(arg_credentials[i].id, word))
-                                        return log_error_errno(SYNTHETIC_ERRNO(EEXIST), "Duplicate credential '%s', refusing.", word);
-
-                        l = cunescape(p, UNESCAPE_ACCEPT_NUL, &data);
-                        if (l < 0)
-                                return log_error_errno(l, "Failed to unescape credential data: %s", p);
-
-                        a = reallocarray(arg_credentials, arg_n_credentials + 1, sizeof(Credential));
-                        if (!a)
-                                return log_oom();
-
-                        a[arg_n_credentials++] = (Credential) {
-                                .id = TAKE_PTR(word),
-                                .data = TAKE_PTR(data),
-                                .size = l,
-                        };
-
-                        arg_credentials = a;
-
+                                return log_error_errno(r, "Failed to set credential from %s: %m", optarg);
                         arg_settings_mask |= SETTING_CREDENTIALS;
                         break;
-                }
 
-                case ARG_LOAD_CREDENTIAL: {
-                        ReadFullFileFlags flags = READ_FULL_FILE_SECURE;
-                        _cleanup_(erase_and_freep) char *data = NULL;
-                        _cleanup_free_ char *word = NULL, *j = NULL;
-                        const char *p = optarg;
-                        Credential *a;
-                        size_t size, i;
-
-                        r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                case ARG_LOAD_CREDENTIAL:
+                        r = machine_credential_load(&arg_credentials, &arg_n_credentials, optarg);
                         if (r == -ENOMEM)
                                 return log_oom();
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --load-credential= parameter: %m");
-                        if (r == 0 || !p)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Missing value for --load-credential=: %s", optarg);
-
-                        if (!credential_name_valid(word))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential name is not valid: %s", word);
-
-                        for (i = 0; i < arg_n_credentials; i++)
-                                if (streq(arg_credentials[i].id, word))
-                                        return log_error_errno(SYNTHETIC_ERRNO(EEXIST), "Duplicate credential '%s', refusing.", word);
-
-                        if (path_is_absolute(p))
-                                flags |= READ_FULL_FILE_CONNECT_SOCKET;
-                        else {
-                                const char *e;
-
-                                r = get_credentials_dir(&e);
-                                if (r < 0)
-                                        return log_error_errno(r, "Credential not available (no credentials passed at all): %s", word);
-
-                                j = path_join(e, p);
-                                if (!j)
-                                        return log_oom();
-                        }
-
-                        r = read_full_file_full(AT_FDCWD, j ?: p, UINT64_MAX, SIZE_MAX,
-                                                flags,
-                                                NULL,
-                                                &data, &size);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to read credential '%s': %m", j ?: p);
-
-                        a = reallocarray(arg_credentials, arg_n_credentials + 1, sizeof(Credential));
-                        if (!a)
-                                return log_oom();
-
-                        a[arg_n_credentials++] = (Credential) {
-                                .id = TAKE_PTR(word),
-                                .data = TAKE_PTR(data),
-                                .size = size,
-                        };
-
-                        arg_credentials = a;
+                                return log_error_errno(r, "Failed to load credential from %s: %m", optarg);
 
                         arg_settings_mask |= SETTING_CREDENTIALS;
                         break;
-                }
 
                 case ARG_BIND_USER:
                         if (!valid_user_group_name(optarg, 0))
@@ -2481,7 +2405,7 @@ static int setup_credentials(const char *root) {
                 if (fd < 0)
                         return log_error_errno(errno, "Failed to create credential file %s: %m", j);
 
-                r = loop_write(fd, arg_credentials[i].data, arg_credentials[i].size, /* do_poll= */ false);
+                r = loop_write(fd, arg_credentials[i].data, arg_credentials[i].size);
                 if (r < 0)
                         return log_error_errno(r, "Failed to write credential to file %s: %m", j);
 
@@ -2839,16 +2763,15 @@ static int setup_machine_id(const char *directory) {
          * container behaves nicely). */
 
         r = id128_get_machine(directory, &arg_uuid);
-        if (r < 0) {
-                if (!ERRNO_IS_MACHINE_ID_UNSET(r)) /* If the file is missing, empty, or uninitialized, we don't mind */
-                        return log_error_errno(r, "Failed to read machine ID from container image: %m");
-
+        if (ERRNO_IS_NEG_MACHINE_ID_UNSET(r)) {
+                /* If the file is missing, empty, or uninitialized, we don't mind */
                 if (sd_id128_is_null(arg_uuid)) {
                         r = sd_id128_randomize(&arg_uuid);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to acquire randomized machine UUID: %m");
                 }
-        }
+        } else if (r < 0)
+                return log_error_errno(r, "Failed to read machine ID from container image: %m");
 
         return 0;
 }
@@ -3410,9 +3333,8 @@ static int inner_child(
         if (arg_seccomp) {
 
                 if (is_seccomp_available()) {
-
                         r = seccomp_load(arg_seccomp);
-                        if (ERRNO_IS_SECCOMP_FATAL(r))
+                        if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                                 return log_error_errno(r, "Failed to install seccomp filter: %m");
                         if (r < 0)
                                 log_debug_errno(r, "Failed to install seccomp filter: %m");
@@ -3512,9 +3434,7 @@ static int inner_child(
         if (!env_use)
                 return log_oom();
 
-        /* Let the parent know that we are ready and
-         * wait until the parent is ready with the
-         * setup, too... */
+        /* Let the parent know that we are ready and wait until the parent is ready with the setup, too... */
         if (!barrier_place_and_sync(barrier)) /* #5 */
                 return log_error_errno(SYNTHETIC_ERRNO(ESRCH), "Parent died too early");
 
@@ -3686,6 +3606,7 @@ static int outer_child(
                                 directory,
                                 arg_uid_shift,
                                 arg_uid_range,
+                                /* userns_fd= */ -EBADF,
                                 DISSECT_IMAGE_MOUNT_ROOT_ONLY|
                                 DISSECT_IMAGE_DISCARD_ON_LOOP|
                                 DISSECT_IMAGE_USR_NO_ROOT|
@@ -3823,9 +3744,24 @@ static int outer_child(
         if (arg_userns_mode != USER_NAMESPACE_NO &&
             IN_SET(arg_userns_ownership, USER_NAMESPACE_OWNERSHIP_MAP, USER_NAMESPACE_OWNERSHIP_AUTO) &&
             arg_uid_shift != 0) {
+                _cleanup_free_ char *usr_subtree = NULL;
+                char *dirs[3];
+                size_t i = 0;
 
-                r = remount_idmap(directory, arg_uid_shift, arg_uid_range, UID_INVALID, REMOUNT_IDMAPPING_HOST_ROOT);
-                if (r == -EINVAL || ERRNO_IS_NOT_SUPPORTED(r)) {
+                dirs[i++] = (char*) directory;
+
+                if (dissected_image && dissected_image->partitions[PARTITION_USR].found) {
+                        usr_subtree = path_join(directory, "/usr");
+                        if (!usr_subtree)
+                                return log_oom();
+
+                        dirs[i++] = usr_subtree;
+                }
+
+                dirs[i] = NULL;
+
+                r = remount_idmap(dirs, arg_uid_shift, arg_uid_range, UID_INVALID, REMOUNT_IDMAPPING_HOST_ROOT);
+                if (r == -EINVAL || ERRNO_IS_NEG_NOT_SUPPORTED(r)) {
                         /* This might fail because the kernel or file system doesn't support idmapping. We
                          * can't really distinguish this nicely, nor do we have any guarantees about the
                          * error codes we see, could be EOPNOTSUPP or EINVAL. */
@@ -3850,6 +3786,7 @@ static int outer_child(
                                 directory,
                                 arg_uid_shift,
                                 arg_uid_range,
+                                /* userns_fd= */ -EBADF,
                                 DISSECT_IMAGE_MOUNT_NON_ROOT_ONLY|
                                 DISSECT_IMAGE_DISCARD_ON_LOOP|
                                 DISSECT_IMAGE_USR_NO_ROOT|
@@ -4262,15 +4199,13 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         }
 
         n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
-        if (n < 0) {
-                if (ERRNO_IS_TRANSIENT(n))
-                        return 0;
-                if (n == -EXFULL) {
-                        log_warning("Got message with truncated control data (too many fds sent?), ignoring.");
-                        return 0;
-                }
+        if (ERRNO_IS_NEG_TRANSIENT(n))
+                return 0;
+        else if (n == -EXFULL) {
+                log_warning("Got message with truncated control data (too many fds sent?), ignoring.");
+                return 0;
+        } else if (n < 0)
                 return log_warning_errno(n, "Couldn't read notification socket: %m");
-        }
 
         cmsg_close_all(&msghdr);
 
@@ -4758,8 +4693,8 @@ static int run_container(
         _cleanup_(release_lock_file) LockFile uid_shift_lock = LOCK_FILE_INIT;
         _cleanup_close_ int etc_passwd_lock = -EBADF;
         _cleanup_close_pair_ int
-                fd_inner_socket_pair[2] = PIPE_EBADF,
-                fd_outer_socket_pair[2] = PIPE_EBADF;
+                fd_inner_socket_pair[2] = EBADF_PAIR,
+                fd_outer_socket_pair[2] = EBADF_PAIR;
 
         _cleanup_close_ int notify_socket = -EBADF, mntns_fd = -EBADF, fd_kmsg_fifo = -EBADF;
         _cleanup_(barrier_destroy) Barrier barrier = BARRIER_NULL;
@@ -4983,7 +4918,7 @@ static int run_container(
 
                 if (arg_network_veth) {
                         r = setup_veth(arg_machine, *pid, veth_name,
-                                       arg_network_bridge || arg_network_zone);
+                                       arg_network_bridge || arg_network_zone, &arg_network_provided_mac);
                         if (r < 0)
                                 return r;
                         else if (r > 0)
@@ -5066,7 +5001,8 @@ static int run_container(
                                 arg_property,
                                 arg_property_message,
                                 arg_keep_unit,
-                                arg_container_service_name);
+                                arg_container_service_name,
+                                arg_start_mode);
                 if (r < 0)
                         return r;
 
@@ -5079,7 +5015,9 @@ static int run_container(
                                 arg_custom_mounts, arg_n_custom_mounts,
                                 arg_kill_signal,
                                 arg_property,
-                                arg_property_message);
+                                arg_property_message,
+                                /* allow_pidfds= */ true,
+                                arg_start_mode);
                 if (r < 0)
                         return r;
 
@@ -5129,6 +5067,11 @@ static int run_container(
         if (r < 0)
                 return r;
 
+        /* Wait that the child is completely ready now, and has mounted their own copies of procfs and so on,
+         * before we take the fully visible instances away. */
+        if (!barrier_sync(&barrier)) /* #5.1 */
+                return log_error_errno(SYNTHETIC_ERRNO(ESRCH), "Child died too early.");
+
         if (arg_userns_mode != USER_NAMESPACE_NO) {
                 r = wipe_fully_visible_fs(mntns_fd);
                 if (r < 0)
@@ -5136,8 +5079,9 @@ static int run_container(
                 mntns_fd = safe_close(mntns_fd);
         }
 
-        /* Let the child know that we are ready and wait that the child is completely ready now. */
-        if (!barrier_place_and_sync(&barrier)) /* #5 */
+        /* And now let the child know that we completed removing the procfs instances, and it can start the
+         * payload. */
+        if (!barrier_place(&barrier)) /* #5.2 */
                 return log_error_errno(SYNTHETIC_ERRNO(ESRCH), "Child died too early.");
 
         /* At this point we have made use of the UID we picked, and thus nss-systemd/systemd-machined.service
@@ -5250,7 +5194,7 @@ static int run_container(
         if (arg_private_network) {
                 /* Move network interfaces back to the parent network namespace. We use `safe_fork`
                  * to avoid having to move the parent to the child network namespace. */
-                r = safe_fork(NULL, FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_WAIT|FORK_LOG, NULL);
+                r = safe_fork(NULL, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_WAIT|FORK_LOG, NULL);
                 if (r < 0)
                         return r;
 
@@ -5412,13 +5356,11 @@ static int cant_be_in_netns(void) {
                 return log_error_errno(errno, "Failed to allocate udev control socket: %m");
 
         r = connect_unix_path(fd, AT_FDCWD, "/run/udev/control");
-        if (r < 0) {
-                if (r == -ENOENT || ERRNO_IS_DISCONNECT(r))
-                        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
-                                               "Sorry, but --image= requires access to the host's /run/ hierarchy, since we need access to udev.");
-
+        if (r == -ENOENT || ERRNO_IS_NEG_DISCONNECT(r))
+                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                       "Sorry, but --image= requires access to the host's /run/ hierarchy, since we need access to udev.");
+        if (r < 0)
                 return log_error_errno(r, "Failed to connect socket to udev control socket: %m");
-        }
 
         r = getpeercred(fd, &ucred);
         if (r < 0)
@@ -5632,17 +5574,29 @@ static int run(int argc, char *argv[]) {
                 if (arg_start_mode == START_BOOT) {
                         _cleanup_free_ char *b = NULL;
                         const char *p;
+                        int check_os_release, is_os_tree;
 
                         if (arg_pivot_root_new) {
                                 b = path_join(arg_directory, arg_pivot_root_new);
-                                if (!b)
-                                        return log_oom();
+                                if (!b) {
+                                        r = log_oom();
+                                        goto finish;
+                                }
 
                                 p = b;
                         } else
                                 p = arg_directory;
 
-                        if (path_is_os_tree(p) <= 0) {
+                        check_os_release = getenv_bool("SYSTEMD_NSPAWN_CHECK_OS_RELEASE");
+                        if (check_os_release < 0 && check_os_release != -ENXIO) {
+                                r = log_error_errno(check_os_release, "Failed to parse $SYSTEMD_NSPAWN_CHECK_OS_RELEASE: %m");
+                                goto finish;
+                        }
+
+                        is_os_tree = path_is_os_tree(p);
+                        if (is_os_tree == 0 && check_os_release == 0)
+                                log_debug("Directory %s is missing an os-release file, continuing anyway.", p);
+                        else if (is_os_tree <= 0) {
                                 r = log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                     "Directory %s doesn't look like an OS root directory (os-release file is missing). Refusing.", p);
                                 goto finish;
@@ -5654,8 +5608,10 @@ static int run(int argc, char *argv[]) {
                                 p = path_join(arg_directory, arg_pivot_root_new, "/usr/");
                         else
                                 p = path_join(arg_directory, "/usr/");
-                        if (!p)
-                                return log_oom();
+                        if (!p) {
+                                r = log_oom();
+                                goto finish;
+                        }
 
                         if (laccess(p, F_OK) < 0) {
                                 r = log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -5905,7 +5861,7 @@ finish:
         expose_port_free_all(arg_expose_ports);
         rlimit_free_all(arg_rlimit);
         device_node_array_free(arg_extra_nodes, arg_n_extra_nodes);
-        credential_free_all(arg_credentials, arg_n_credentials);
+        machine_credential_free_all(arg_credentials, arg_n_credentials);
 
         if (r < 0)
                 return r;

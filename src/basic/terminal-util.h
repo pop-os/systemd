@@ -68,6 +68,9 @@
 #define ANSI_HIGHLIGHT_YELLOW_FALLBACK           "\x1B[0;1;33m"
 #define ANSI_HIGHLIGHT_YELLOW_FALLBACK_UNDERLINE "\x1B[0;1;4;33m"
 
+/* Background colors */
+#define ANSI_BACKGROUND_BLUE "\x1B[44m"
+
 /* Reset/clear ANSI styles */
 #define ANSI_NORMAL "\x1B[0m"
 
@@ -82,6 +85,7 @@
 
 int reset_terminal_fd(int fd, bool switch_to_text);
 int reset_terminal(const char *name);
+int set_terminal_cursor_position(int fd, unsigned int row, unsigned int column);
 
 int open_terminal(const char *name, int mode);
 
@@ -185,20 +189,20 @@ static inline const char *ansi_underline(void) {
         return underline_enabled() ? ANSI_UNDERLINE : ANSI_NORMAL;
 }
 
-#define DEFINE_ANSI_FUNC_UNDERLINE(name, NAME)                            \
-        static inline const char *ansi_##name(void) {                     \
-                return underline_enabled() ? ANSI_##NAME##_UNDERLINE : \
-                        colors_enabled() ? ANSI_##NAME : "";              \
+#define DEFINE_ANSI_FUNC_UNDERLINE(name, NAME)                          \
+        static inline const char *ansi_##name(void) {                   \
+                return underline_enabled() ? ANSI_##NAME##_UNDERLINE :  \
+                        colors_enabled() ? ANSI_##NAME : "";            \
         }
 
 
-#define DEFINE_ANSI_FUNC_UNDERLINE_256(name, NAME, FALLBACK)                                                           \
-        static inline const char *ansi_##name(void) {                                                                  \
-                switch (get_color_mode()) {                                                                            \
-                        case COLOR_OFF: return "";                                                                     \
+#define DEFINE_ANSI_FUNC_UNDERLINE_256(name, NAME, FALLBACK)                                                        \
+        static inline const char *ansi_##name(void) {                                                               \
+                switch (get_color_mode()) {                                                                         \
+                        case COLOR_OFF: return "";                                                                  \
                         case COLOR_16: return underline_enabled() ? ANSI_##FALLBACK##_UNDERLINE : ANSI_##FALLBACK;  \
                         default : return underline_enabled() ? ANSI_##NAME##_UNDERLINE: ANSI_##NAME;                \
-                }                                                                                                      \
+                }                                                                                                   \
         }
 
 DEFINE_ANSI_FUNC(normal,            NORMAL);

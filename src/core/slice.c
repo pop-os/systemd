@@ -96,6 +96,10 @@ static int slice_verify(Slice *s) {
         if (r < 0)
                 return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
 
+        /* If recursive errors are to be ignored, the parent slice should not be verified */
+        if (UNIT(s)->manager && FLAGS_SET(UNIT(s)->manager->test_run_flags, MANAGER_TEST_RUN_IGNORE_DEPENDENCIES))
+                return 0;
+
         if (parent ? !unit_has_name(UNIT_GET_SLICE(UNIT(s)), parent) : !!UNIT_GET_SLICE(UNIT(s)))
                 return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Located outside of parent slice. Refusing.");
 
@@ -247,10 +251,6 @@ static int slice_stop(Unit *u) {
         return 1;
 }
 
-static int slice_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, code, value, -1, -1, error);
-}
-
 static int slice_serialize(Unit *u, FILE *f, FDSet *fds) {
         Slice *s = SLICE(u);
 
@@ -286,13 +286,13 @@ static int slice_deserialize_item(Unit *u, const char *key, const char *value, F
         return 0;
 }
 
-_pure_ static UnitActiveState slice_active_state(Unit *u) {
+static UnitActiveState slice_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[SLICE(u)->state];
 }
 
-_pure_ static const char *slice_sub_state_to_string(Unit *u) {
+static const char *slice_sub_state_to_string(Unit *u) {
         assert(u);
 
         return slice_state_to_string(SLICE(u)->state);
@@ -435,8 +435,6 @@ const UnitVTable slice_vtable = {
 
         .start = slice_start,
         .stop = slice_stop,
-
-        .kill = slice_kill,
 
         .freeze = slice_freeze,
         .thaw = slice_thaw,

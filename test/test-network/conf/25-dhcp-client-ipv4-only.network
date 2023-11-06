@@ -8,6 +8,7 @@ IPv6AcceptRA=no
 Address=192.168.5.250/24
 
 [DHCPv4]
+RequestAddress=192.168.5.110
 UseDomains=yes
 UseMTU=yes
 UseRoutes=yes
@@ -28,6 +29,7 @@ AllowList=192.168.5.0/24 192.168.6.0/24
 DenyList=192.168.5.0/24
 # just a random label which should exist
 NetLabel=system_u:object_r:root_t:s0
+NFTSet=address:inet:sd_test:addr4 prefix:inet:sd_test:network4 ifindex:inet:sd_test:ifindex
 
 [Route]
 Destination=192.168.5.0/24

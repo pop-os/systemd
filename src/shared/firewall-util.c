@@ -20,20 +20,39 @@ static const char * const firewall_backend_table[_FW_BACKEND_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP_TO_STRING(firewall_backend, FirewallBackend);
 
-static void firewall_backend_probe(FirewallContext *ctx) {
+static void firewall_backend_probe(FirewallContext *ctx, bool init_tables) {
+        const char *e;
+
         assert(ctx);
 
         if (ctx->backend != _FW_BACKEND_INVALID)
                 return;
 
-        if (fw_nftables_init(ctx) >= 0)
-                ctx->backend = FW_BACKEND_NFTABLES;
-        else
+        e = secure_getenv("SYSTEMD_FIREWALL_BACKEND");
+        if (e) {
+                if (streq(e, "nftables"))
+                        ctx->backend = FW_BACKEND_NFTABLES;
+                else if (streq(e, "iptables"))
 #if HAVE_LIBIPTC
-                ctx->backend = FW_BACKEND_IPTABLES;
+                        ctx->backend = FW_BACKEND_IPTABLES;
 #else
-                ctx->backend = FW_BACKEND_NONE;
+                        log_debug("Unsupported firewall backend requested, ignoring: %s", e);
 #endif
+                else
+                        log_debug("Unrecognized $SYSTEMD_FIREWALL_BACKEND value, ignoring: %s", e);
+        }
+
+        if (ctx->backend == _FW_BACKEND_INVALID) {
+
+                if (fw_nftables_init_full(ctx, init_tables) >= 0)
+                        ctx->backend = FW_BACKEND_NFTABLES;
+                else
+#if HAVE_LIBIPTC
+                        ctx->backend = FW_BACKEND_IPTABLES;
+#else
+                        ctx->backend = FW_BACKEND_NONE;
+#endif
+        }
 
         if (ctx->backend != FW_BACKEND_NONE)
                 log_debug("Using %s as firewall backend.", firewall_backend_to_string(ctx->backend));
@@ -41,7 +60,7 @@ static void firewall_backend_probe(FirewallContext *ctx) {
                 log_debug("No firewall backend found.");
 }
 
-int fw_ctx_new(FirewallContext **ret) {
+int fw_ctx_new_full(FirewallContext **ret, bool init_tables) {
         _cleanup_free_ FirewallContext *ctx = NULL;
 
         ctx = new(FirewallContext, 1);
@@ -52,10 +71,14 @@ int fw_ctx_new(FirewallContext **ret) {
                 .backend = _FW_BACKEND_INVALID,
         };
 
-        firewall_backend_probe(ctx);
+        firewall_backend_probe(ctx, init_tables);
 
         *ret = TAKE_PTR(ctx);
         return 0;
+}
+
+int fw_ctx_new(FirewallContext **ret) {
+        return fw_ctx_new_full(ret, /* init_tables= */ true);
 }
 
 FirewallContext *fw_ctx_free(FirewallContext *ctx) {

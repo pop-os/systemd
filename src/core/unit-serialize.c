@@ -90,7 +90,7 @@ static const char *const io_accounting_metric_field_last[_CGROUP_IO_ACCOUNTING_M
         [CGROUP_IO_WRITE_OPERATIONS] = "io-accounting-write-operations-last",
 };
 
-int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool switching_root) {
+int unit_serialize_state(Unit *u, FILE *f, FDSet *fds, bool switching_root) {
         int r;
 
         assert(u);
@@ -264,7 +264,7 @@ static int unit_deserialize_job(Unit *u, FILE *f) {
                 _deserialize_matched;                                   \
         })
 
-int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
+int unit_deserialize_state(Unit *u, FILE *f, FDSet *fds) {
         int r;
 
         assert(u);
@@ -272,19 +272,15 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
         assert(fds);
 
         for (;;) {
-                _cleanup_free_ char *line = NULL;
-                char *l, *v;
+                _cleanup_free_ char *l  = NULL;
                 ssize_t m;
                 size_t k;
+                char *v;
 
-                r = read_line(f, LONG_LINE_MAX, &line);
+                r = deserialize_read_line(f, &l);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to read serialization line: %m");
-                if (r == 0) /* eof */
-                        break;
-
-                l = strstrip(line);
-                if (isempty(l)) /* End marker */
+                        return r;
+                if (r == 0) /* eof or end marker */
                         break;
 
                 k = strcspn(l, "=");
@@ -391,16 +387,9 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                 else if (STR_IN_SET(l, "ipv4-socket-bind-bpf-link-fd", "ipv6-socket-bind-bpf-link-fd")) {
                         int fd;
 
-                        if ((fd = parse_fd(v)) < 0 || !fdset_contains(fds, fd))
-                                log_unit_debug(u, "Failed to parse %s value: %s, ignoring.", l, v);
-                        else {
-                                if (fdset_remove(fds, fd) < 0) {
-                                        log_unit_debug(u, "Failed to remove %s value=%d from fdset", l, fd);
-                                        continue;
-                                }
-
+                        fd = deserialize_fd(fds, v);
+                        if (fd >= 0)
                                 (void) bpf_socket_bind_add_initial_link_fd(u, fd);
-                        }
                         continue;
 
                 } else if (streq(l, "ip-bpf-ingress-installed")) {
@@ -423,16 +412,10 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                 } else if (streq(l, "restrict-ifaces-bpf-fd")) {
                         int fd;
 
-                        if ((fd = parse_fd(v)) < 0 || !fdset_contains(fds, fd)) {
-                                log_unit_debug(u, "Failed to parse restrict-ifaces-bpf-fd value: %s", v);
-                                continue;
-                        }
-                        if (fdset_remove(fds, fd) < 0) {
-                                log_unit_debug(u, "Failed to remove restrict-ifaces-bpf-fd %d from fdset", fd);
-                                continue;
-                        }
+                        fd = deserialize_fd(fds, v);
+                        if (fd >= 0)
+                                (void) restrict_network_interfaces_add_initial_link_fd(u, fd);
 
-                        (void) restrict_network_interfaces_add_initial_link_fd(u, fd);
                         continue;
 
                 } else if (streq(l, "ref-uid")) {
@@ -556,26 +539,24 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
         return 0;
 }
 
-int unit_deserialize_skip(FILE *f) {
+int unit_deserialize_state_skip(FILE *f) {
         int r;
+
         assert(f);
 
         /* Skip serialized data for this unit. We don't know what it is. */
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
-                char *l;
 
-                r = read_line(f, LONG_LINE_MAX, &line);
+                r = read_stripped_line(f, LONG_LINE_MAX, &line);
                 if (r < 0)
                         return log_error_errno(r, "Failed to read serialization line: %m");
                 if (r == 0)
                         return 0;
 
-                l = strstrip(line);
-
                 /* End marker */
-                if (isempty(l))
+                if (isempty(line))
                         return 1;
         }
 }
@@ -830,6 +811,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                         "%s\tRefuseManualStart: %s\n"
                         "%s\tRefuseManualStop: %s\n"
                         "%s\tDefaultDependencies: %s\n"
+                        "%s\tSurviveFinalKillSignal: %s\n"
                         "%s\tOnSuccessJobMode: %s\n"
                         "%s\tOnFailureJobMode: %s\n"
                         "%s\tIgnoreOnIsolate: %s\n",
@@ -837,6 +819,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                         prefix, yes_no(u->refuse_manual_start),
                         prefix, yes_no(u->refuse_manual_stop),
                         prefix, yes_no(u->default_dependencies),
+                        prefix, yes_no(u->survive_final_kill_signal),
                         prefix, job_mode_to_string(u->on_success_job_mode),
                         prefix, job_mode_to_string(u->on_failure_job_mode),
                         prefix, yes_no(u->ignore_on_isolate));

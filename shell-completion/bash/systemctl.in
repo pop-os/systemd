@@ -12,7 +12,7 @@ __systemctl() {
 }
 
 __systemd_properties() {
-    {{ROOTLIBEXECDIR}}/systemd --dump-bus-properties
+    {{LIBEXECDIR}}/systemd --dump-bus-properties
 }
 
 __contains_word () {

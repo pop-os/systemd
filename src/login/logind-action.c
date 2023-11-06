@@ -201,20 +201,20 @@ int manager_handle_action(
         }
 
         if (handle == HANDLE_SUSPEND)
-                supported = can_sleep(SLEEP_SUSPEND) > 0;
+                supported = sleep_supported(SLEEP_SUSPEND) > 0;
         else if (handle == HANDLE_HIBERNATE)
-                supported = can_sleep(SLEEP_HIBERNATE) > 0;
+                supported = sleep_supported(SLEEP_HIBERNATE) > 0;
         else if (handle == HANDLE_HYBRID_SLEEP)
-                supported = can_sleep(SLEEP_HYBRID_SLEEP) > 0;
+                supported = sleep_supported(SLEEP_HYBRID_SLEEP) > 0;
         else if (handle == HANDLE_SUSPEND_THEN_HIBERNATE)
-                supported = can_sleep(SLEEP_SUSPEND_THEN_HIBERNATE) > 0;
+                supported = sleep_supported(SLEEP_SUSPEND_THEN_HIBERNATE) > 0;
         else if (handle == HANDLE_KEXEC)
                 supported = access(KEXEC, X_OK) >= 0;
         else
                 supported = true;
 
-        if (!supported && IN_SET(handle, HANDLE_HIBERNATE, HANDLE_HYBRID_SLEEP, HANDLE_SUSPEND_THEN_HIBERNATE)) {
-                supported = can_sleep(SLEEP_SUSPEND) > 0;
+        if (!supported && HANDLE_ACTION_IS_SLEEP(handle) && handle != HANDLE_SUSPEND) {
+                supported = sleep_supported(SLEEP_SUSPEND) > 0;
                 if (supported) {
                         log_notice("Requested %s operation is not supported, using regular suspend instead.",
                                    handle_action_to_string(handle));
@@ -239,7 +239,7 @@ int manager_handle_action(
             manager_is_inhibited(m, inhibit_operation, INHIBIT_BLOCK, NULL, false, false, 0, &offending)) {
                 _cleanup_free_ char *comm = NULL, *u = NULL;
 
-                (void) get_process_comm(offending->pid, &comm);
+                (void) pidref_get_comm(&offending->pid, &comm);
                 u = uid_to_name(offending->uid);
 
                 /* If this is just a recheck of the lid switch then don't warn about anything */
@@ -248,7 +248,7 @@ int manager_handle_action(
                          handle_action_to_string(handle),
                          inhibit_what_to_string(inhibit_operation),
                          offending->uid, strna(u),
-                         offending->pid, strna(comm));
+                         offending->pid.pid, strna(comm));
 
                 return is_edge ? -EPERM : 0;
         }
@@ -281,6 +281,8 @@ static const char* const handle_action_verb_table[_HANDLE_ACTION_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP_TO_STRING(handle_action_verb, HandleAction);
 
+/* These strings are sent out by PrepareForShutdownWithMetadata signals as metadata, so the values cannot
+ * change as they are public APIs. */
 static const char* const handle_action_table[_HANDLE_ACTION_MAX] = {
         [HANDLE_IGNORE]                 = "ignore",
         [HANDLE_POWEROFF]               = "poweroff",

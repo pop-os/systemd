@@ -129,7 +129,7 @@ static void device_init(Unit *u) {
          * indefinitely for plugged in devices, something which cannot
          * happen for the other units since their operations time out
          * anyway. */
-        u->job_running_timeout = u->manager->default_device_timeout_usec;
+        u->job_running_timeout = u->manager->defaults.device_timeout_usec;
 
         u->ignore_on_isolate = true;
 
@@ -494,13 +494,13 @@ static void device_dump(Unit *u, FILE *f, const char *prefix) {
                         prefix, *i);
 }
 
-_pure_ static UnitActiveState device_active_state(Unit *u) {
+static UnitActiveState device_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[DEVICE(u)->state];
 }
 
-_pure_ static const char *device_sub_state_to_string(Unit *u) {
+static const char *device_sub_state_to_string(Unit *u) {
         assert(u);
 
         return device_state_to_string(DEVICE(u)->state);

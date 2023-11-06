@@ -260,6 +260,8 @@ TEST(strextend_with_separator) {
 
 TEST(strrep) {
         _cleanup_free_ char *one = NULL, *three = NULL, *zero = NULL;
+        char *onea, *threea;
+
         one = strrep("waldo", 1);
         three = strrep("waldo", 3);
         zero = strrep("waldo", 0);
@@ -267,6 +269,12 @@ TEST(strrep) {
         assert_se(streq(one, "waldo"));
         assert_se(streq(three, "waldowaldowaldo"));
         assert_se(streq(zero, ""));
+
+        onea = strrepa("waldo", 1);
+        threea = strrepa("waldo", 3);
+
+        assert_se(streq(onea, "waldo"));
+        assert_se(streq(threea, "waldowaldowaldo"));
 }
 
 TEST(string_has_cc) {
@@ -1290,6 +1298,30 @@ TEST(strextendn) {
         assert_se(streq_ptr(strextendn(&x, "...", 3), "xxxxxx......"));
         assert_se(streq_ptr(strextendn(&x, "...", 4), "xxxxxx........."));
         x = mfree(x);
+}
+
+TEST(strlevenshtein) {
+        assert_se(strlevenshtein(NULL, NULL) == 0);
+        assert_se(strlevenshtein("", "") == 0);
+        assert_se(strlevenshtein("", NULL) == 0);
+        assert_se(strlevenshtein(NULL, "") == 0);
+
+        assert_se(strlevenshtein("a", "a") == 0);
+        assert_se(strlevenshtein("a", "b") == 1);
+        assert_se(strlevenshtein("b", "a") == 1);
+        assert_se(strlevenshtein("a", "") == 1);
+        assert_se(strlevenshtein("", "a") == 1);
+
+        assert_se(strlevenshtein("xxx", "xxx") == 0);
+        assert_se(strlevenshtein("xxx", "yyy") == 3);
+        assert_se(strlevenshtein("yyy", "xxx") == 3);
+        assert_se(strlevenshtein("xx", "xxx") == 1);
+        assert_se(strlevenshtein("xxx", "xx") == 1);
+        assert_se(strlevenshtein("x", "xxx") == 2);
+        assert_se(strlevenshtein("xxx", "x") == 2);
+
+        assert_se(strlevenshtein("sitting", "kitten") == 3);
+        assert_se(strlevenshtein("sunday", "saturday") == 3);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

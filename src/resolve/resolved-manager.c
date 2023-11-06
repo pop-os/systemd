@@ -19,6 +19,7 @@
 #include "hostname-util.h"
 #include "idn-util.h"
 #include "io-util.h"
+#include "iovec-util.h"
 #include "memstream-util.h"
 #include "missing_network.h"
 #include "missing_socket.h"
@@ -796,13 +797,10 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         iov = IOVEC_MAKE(DNS_PACKET_DATA(p), p->allocated);
 
         l = recvmsg_safe(fd, &mh, 0);
-        if (l < 0) {
-                if (ERRNO_IS_TRANSIENT(l))
-                        return 0;
-                return l;
-        }
-        if (l == 0)
+        if (ERRNO_IS_NEG_TRANSIENT(l))
                 return 0;
+        if (l <= 0)
+                return l;
 
         assert(!(mh.msg_flags & MSG_TRUNC));
 
@@ -914,11 +912,10 @@ static int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
                         return -errno;
 
                 r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r))
-                                continue;
+                if (ERRNO_IS_NEG_TRANSIENT(r))
+                        continue;
+                if (r < 0)
                         return r;
-                }
                 if (r == 0)
                         return -ETIMEDOUT;
         }
@@ -942,11 +939,10 @@ static int write_loop(int fd, void *message, size_t length) {
                         return -errno;
 
                 r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r))
-                                continue;
+                if (ERRNO_IS_NEG_TRANSIENT(r))
+                        continue;
+                if (r < 0)
                         return r;
-                }
                 if (r == 0)
                         return -ETIMEDOUT;
         }
@@ -1109,6 +1105,7 @@ int manager_monitor_send(
                 int error,
                 DnsQuestion *question_idna,
                 DnsQuestion *question_utf8,
+                DnsPacket *question_bypass,
                 DnsQuestion *collected_questions,
                 DnsAnswer *answer) {
 
@@ -1123,10 +1120,21 @@ int manager_monitor_send(
         if (set_isempty(m->varlink_subscription))
                 return 0;
 
-        /* Merge both questions format into one */
+        /* Merge all questions into one */
         r = dns_question_merge(question_idna, question_utf8, &merged);
         if (r < 0)
                 return log_error_errno(r, "Failed to merge UTF8/IDNA questions: %m");
+
+        if (question_bypass) {
+                _cleanup_(dns_question_unrefp) DnsQuestion *merged2 = NULL;
+
+                r = dns_question_merge(merged, question_bypass->question, &merged2);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to merge UTF8/IDNA questions and DNS packet question: %m");
+
+                dns_question_unref(merged);
+                merged = TAKE_PTR(merged2);
+        }
 
         /* Convert the current primary question to JSON */
         r = dns_question_to_json(merged, &jquestion);
@@ -1139,7 +1147,7 @@ int manager_monitor_send(
                 return log_error_errno(r, "Failed to convert question to JSON: %m");
 
         DNS_ANSWER_FOREACH_ITEM(rri, answer) {
-                _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *w = NULL;
+                _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
 
                 r = dns_resource_record_to_json(rri->rr, &v);
                 if (r < 0)
@@ -1149,14 +1157,12 @@ int manager_monitor_send(
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate RR wire format: %m");
 
-                r = json_build(&w, JSON_BUILD_OBJECT(
-                                               JSON_BUILD_PAIR_CONDITION(v, "rr", JSON_BUILD_VARIANT(v)),
-                                               JSON_BUILD_PAIR("raw", JSON_BUILD_BASE64(rri->rr->wire_format, rri->rr->wire_format_size)),
-                                               JSON_BUILD_PAIR_CONDITION(rri->ifindex > 0, "ifindex", JSON_BUILD_INTEGER(rri->ifindex))));
-                if (r < 0)
-                        return log_error_errno(r, "Failed to make answer RR object: %m");
-
-                r = json_variant_append_array(&janswer, w);
+                r = json_variant_append_arrayb(
+                                &janswer,
+                                JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_CONDITION(v, "rr", JSON_BUILD_VARIANT(v)),
+                                                JSON_BUILD_PAIR("raw", JSON_BUILD_BASE64(rri->rr->wire_format, rri->rr->wire_format_size)),
+                                                JSON_BUILD_PAIR_CONDITION(rri->ifindex > 0, "ifindex", JSON_BUILD_INTEGER(rri->ifindex))));
                 if (r < 0)
                         return log_debug_errno(r, "Failed to append notification entry to array: %m");
         }
@@ -1798,4 +1804,54 @@ int socket_disable_pmtud(int fd, int af) {
         default:
                 return -EAFNOSUPPORT;
         }
+}
+
+int dns_manager_dump_statistics_json(Manager *m, JsonVariant **ret) {
+        uint64_t size = 0, hit = 0, miss = 0;
+
+        assert(m);
+        assert(ret);
+
+        LIST_FOREACH(scopes, s, m->dns_scopes) {
+                size += dns_cache_size(&s->cache);
+                hit += s->cache.n_hit;
+                miss += s->cache.n_miss;
+        }
+
+        return json_build(ret,
+                          JSON_BUILD_OBJECT(
+                                        JSON_BUILD_PAIR("transactions", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("currentTransactions", hashmap_size(m->dns_transactions)),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTransactions", m->n_transactions_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTimeouts", m->n_timeouts_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTimeoutsServedStale", m->n_timeouts_served_stale_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalFailedResponses", m->n_failure_responses_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalFailedResponsesServedStale", m->n_failure_responses_served_stale_total)
+                                        )),
+                                        JSON_BUILD_PAIR("cache", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("size", size),
+                                                JSON_BUILD_PAIR_UNSIGNED("hits", hit),
+                                                JSON_BUILD_PAIR_UNSIGNED("misses", miss)
+                                        )),
+                                        JSON_BUILD_PAIR("dnssec", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("secure", m->n_dnssec_verdict[DNSSEC_SECURE]),
+                                                JSON_BUILD_PAIR_UNSIGNED("insecure", m->n_dnssec_verdict[DNSSEC_INSECURE]),
+                                                JSON_BUILD_PAIR_UNSIGNED("bogus", m->n_dnssec_verdict[DNSSEC_BOGUS]),
+                                                JSON_BUILD_PAIR_UNSIGNED("indeterminate", m->n_dnssec_verdict[DNSSEC_INDETERMINATE])
+                                        ))));
+}
+
+void dns_manager_reset_statistics(Manager *m) {
+
+        assert(m);
+
+        LIST_FOREACH(scopes, s, m->dns_scopes)
+                s->cache.n_hit = s->cache.n_miss = 0;
+
+        m->n_transactions_total = 0;
+        m->n_timeouts_total = 0;
+        m->n_timeouts_served_stale_total = 0;
+        m->n_failure_responses_total = 0;
+        m->n_failure_responses_served_stale_total = 0;
+        zero(m->n_dnssec_verdict);
 }

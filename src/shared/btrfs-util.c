@@ -42,36 +42,6 @@
  * device nodes (that reference drivers) rather than fds to normal
  * files or directories. */
 
-static int validate_subvolume_name(const char *name) {
-
-        if (!filename_is_valid(name))
-                return -EINVAL;
-
-        if (strlen(name) > BTRFS_SUBVOL_NAME_MAX)
-                return -E2BIG;
-
-        return 0;
-}
-
-static int extract_subvolume_name(const char *path, char **ret) {
-        _cleanup_free_ char *fn = NULL;
-        int r;
-
-        assert(path);
-        assert(ret);
-
-        r = path_extract_filename(path, &fn);
-        if (r < 0)
-                return r;
-
-        r = validate_subvolume_name(fn);
-        if (r < 0)
-                return r;
-
-        *ret = TAKE_PTR(fn);
-        return 0;
-}
-
 int btrfs_is_subvol_at(int dir_fd, const char *path) {
         struct stat st;
 
@@ -86,71 +56,6 @@ int btrfs_is_subvol_at(int dir_fd, const char *path) {
                 return 0;
 
         return is_fs_type_at(dir_fd, path, BTRFS_SUPER_MAGIC);
-}
-
-int btrfs_subvol_make_fd(int fd, const char *subvolume) {
-        struct btrfs_ioctl_vol_args args = {};
-        _cleanup_close_ int real_fd = -EBADF;
-        int r;
-
-        assert(subvolume);
-
-        r = validate_subvolume_name(subvolume);
-        if (r < 0)
-                return r;
-
-        /* If an O_PATH fd was specified, let's convert here to a proper one, as btrfs ioctl's can't deal
-         * with O_PATH. */
-        fd = fd_reopen_condition(fd, O_RDONLY|O_CLOEXEC|O_DIRECTORY, O_PATH|O_DIRECTORY, &real_fd);
-        if (fd < 0)
-                return fd;
-
-        strncpy(args.name, subvolume, sizeof(args.name)-1);
-
-        return RET_NERRNO(ioctl(fd, BTRFS_IOC_SUBVOL_CREATE, &args));
-}
-
-int btrfs_subvol_make(const char *path) {
-        _cleanup_free_ char *subvolume = NULL;
-        _cleanup_close_ int fd = -EBADF;
-        int r;
-
-        assert(path);
-
-        r = extract_subvolume_name(path, &subvolume);
-        if (r < 0)
-                return r;
-
-        fd = open_parent(path, O_CLOEXEC, 0);
-        if (fd < 0)
-                return fd;
-
-        return btrfs_subvol_make_fd(fd, subvolume);
-}
-
-int btrfs_subvol_make_fallback(const char *path, mode_t mode) {
-        mode_t old, combined;
-        int r;
-
-        assert(path);
-
-        /* Let's work like mkdir(), i.e. take the specified mode, and mask it with the current umask. */
-        old = umask(~mode);
-        combined = old | ~mode;
-        if (combined != ~mode)
-                umask(combined);
-        r = btrfs_subvol_make(path);
-        umask(old);
-
-        if (r >= 0)
-                return 1; /* subvol worked */
-        if (r != -ENOTTY)
-                return r;
-
-        if (mkdir(path, mode) < 0)
-                return -errno;
-
-        return 0; /* plain directory */
 }
 
 int btrfs_subvol_set_read_only_at(int dir_fd, const char *path, bool b) {
@@ -215,7 +120,7 @@ int btrfs_get_block_device_at(int dir_fd, const char *path, dev_t *ret) {
         r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
         if (r < 0)
                 return r;
-        if (!r)
+        if (r == 0)
                 return -ENOTTY;
 
         if (ioctl(fd, BTRFS_IOC_FS_INFO, &fsi) < 0)
@@ -277,7 +182,7 @@ int btrfs_subvol_get_id_fd(int fd, uint64_t *ret) {
         r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
         if (r < 0)
                 return r;
-        if (!r)
+        if (r == 0)
                 return -ENOTTY;
 
         if (ioctl(fd, BTRFS_IOC_INO_LOOKUP, &args) < 0)
@@ -397,7 +302,7 @@ int btrfs_subvol_get_info_fd(int fd, uint64_t subvol_id, BtrfsSubvolInfo *ret) {
                 r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                 if (r < 0)
                         return r;
-                if (!r)
+                if (r == 0)
                         return -ENOTTY;
         }
 
@@ -488,7 +393,7 @@ int btrfs_qgroup_get_quota_fd(int fd, uint64_t qgroupid, BtrfsQuotaInfo *ret) {
                 r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                 if (r < 0)
                         return r;
-                if (!r)
+                if (r == 0)
                         return -ENOTTY;
         }
 
@@ -705,7 +610,7 @@ int btrfs_quota_enable_fd(int fd, bool b) {
         r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
         if (r < 0)
                 return r;
-        if (!r)
+        if (r == 0)
                 return -ENOTTY;
 
         return RET_NERRNO(ioctl(fd, BTRFS_IOC_QUOTA_CTL, &args));
@@ -739,7 +644,7 @@ int btrfs_qgroup_set_limit_fd(int fd, uint64_t qgroupid, uint64_t referenced_max
                 r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                 if (r < 0)
                         return r;
-                if (!r)
+                if (r == 0)
                         return -ENOTTY;
         }
 
@@ -1131,7 +1036,7 @@ int btrfs_subvol_remove_at(int dir_fd, const char *path, BtrfsRemoveFlags flags)
         if (fd < 0)
                 return fd;
 
-        r = validate_subvolume_name(subvolume);
+        r = btrfs_validate_subvolume_name(subvolume);
         if (r < 0)
                 return r;
 
@@ -1166,7 +1071,7 @@ int btrfs_qgroup_copy_limits(int fd, uint64_t old_qgroupid, uint64_t new_qgroupi
         r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
         if (r < 0)
                 return r;
-        if (!r)
+        if (r == 0)
                 return -ENOTTY;
 
         while (btrfs_ioctl_search_args_compare(&args) <= 0) {
@@ -1551,7 +1456,7 @@ int btrfs_subvol_snapshot_at_full(
         if (new_fd < 0)
                 return new_fd;
 
-        r = validate_subvolume_name(subvolume);
+        r = btrfs_validate_subvolume_name(subvolume);
         if (r < 0)
                 return r;
 
@@ -1565,15 +1470,17 @@ int btrfs_subvol_snapshot_at_full(
                 if (!(flags & BTRFS_SNAPSHOT_FALLBACK_COPY))
                         return -EISDIR;
 
-                r = btrfs_subvol_make_fd(new_fd, subvolume);
-                if (ERRNO_IS_NOT_SUPPORTED(r) && (flags & BTRFS_SNAPSHOT_FALLBACK_DIRECTORY)) {
-                        /* If the destination doesn't support subvolumes, then use a plain directory, if that's requested. */
-                        if (mkdirat(new_fd, subvolume, 0755) < 0)
-                                return -errno;
+                r = btrfs_subvol_make(new_fd, subvolume);
+                if (r < 0) {
+                        if (ERRNO_IS_NOT_SUPPORTED(r) && (flags & BTRFS_SNAPSHOT_FALLBACK_DIRECTORY)) {
+                                /* If the destination doesn't support subvolumes, then use a plain directory, if that's requested. */
+                                if (mkdirat(new_fd, subvolume, 0755) < 0)
+                                        return -errno;
 
-                        plain_directory = true;
-                } else if (r < 0)
-                        return r;
+                                plain_directory = true;
+                        } else
+                                return r;
+                }
 
                 if (FLAGS_SET(flags, BTRFS_SNAPSHOT_LOCK_BSD)) {
                         subvolume_fd = xopenat_lock(new_fd, subvolume,
@@ -1668,7 +1575,7 @@ int btrfs_qgroup_find_parents(int fd, uint64_t qgroupid, uint64_t **ret) {
                 r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                 if (r < 0)
                         return r;
-                if (!r)
+                if (r == 0)
                         return -ENOTTY;
         }
 
@@ -1915,7 +1822,7 @@ int btrfs_subvol_get_parent(int fd, uint64_t subvol_id, uint64_t *ret) {
                 r = fd_is_fs_type(fd, BTRFS_SUPER_MAGIC);
                 if (r < 0)
                         return r;
-                if (!r)
+                if (r == 0)
                         return -ENOTTY;
         }
 
@@ -1963,4 +1870,301 @@ int btrfs_forget_device(const char *path) {
                 return -errno;
 
         return RET_NERRNO(ioctl(control_fd, BTRFS_IOC_FORGET_DEV, &args));
+}
+
+typedef struct BtrfsStripe {
+        uint64_t devid;
+        uint64_t offset;
+} BtrfsStripe;
+
+typedef struct BtrfsChunk {
+        uint64_t offset;
+        uint64_t length;
+        uint64_t type;
+
+        BtrfsStripe *stripes;
+        uint16_t n_stripes;
+        uint64_t stripe_len;
+} BtrfsChunk;
+
+typedef struct BtrfsChunkTree {
+        BtrfsChunk **chunks;
+        size_t n_chunks;
+} BtrfsChunkTree;
+
+static BtrfsChunk* btrfs_chunk_free(BtrfsChunk *chunk) {
+        if (!chunk)
+                return NULL;
+
+        free(chunk->stripes);
+
+        return mfree(chunk);
+}
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(BtrfsChunk*, btrfs_chunk_free);
+
+static void btrfs_chunk_tree_done(BtrfsChunkTree *tree) {
+        assert(tree);
+
+        FOREACH_ARRAY(i, tree->chunks, tree->n_chunks)
+                btrfs_chunk_free(*i);
+
+        free(tree->chunks);
+}
+
+static int btrfs_read_chunk_tree_fd(int fd, BtrfsChunkTree *ret) {
+
+        struct btrfs_ioctl_search_args search_args = {
+                .key.tree_id = BTRFS_CHUNK_TREE_OBJECTID,
+
+                .key.min_type = BTRFS_CHUNK_ITEM_KEY,
+                .key.max_type = BTRFS_CHUNK_ITEM_KEY,
+
+                .key.min_objectid = BTRFS_FIRST_CHUNK_TREE_OBJECTID,
+                .key.max_objectid = BTRFS_FIRST_CHUNK_TREE_OBJECTID,
+
+                .key.min_offset = 0,
+                .key.max_offset = UINT64_MAX,
+
+                .key.min_transid = 0,
+                .key.max_transid = UINT64_MAX,
+        };
+
+        _cleanup_(btrfs_chunk_tree_done) BtrfsChunkTree tree = {};
+
+        assert(fd >= 0);
+        assert(ret);
+
+        while (btrfs_ioctl_search_args_compare(&search_args) <= 0) {
+                const struct btrfs_ioctl_search_header *sh;
+                unsigned i;
+
+                search_args.key.nr_items = 256;
+
+                if (ioctl(fd, BTRFS_IOC_TREE_SEARCH, &search_args) < 0)
+                        return -errno;
+
+                if (search_args.key.nr_items == 0)
+                        break;
+
+                FOREACH_BTRFS_IOCTL_SEARCH_HEADER(i, sh, search_args) {
+                        _cleanup_(btrfs_chunk_freep) BtrfsChunk *chunk = NULL;
+                        const struct btrfs_chunk *item;
+
+                        btrfs_ioctl_search_args_set(&search_args, sh);
+
+                        if (sh->objectid != BTRFS_FIRST_CHUNK_TREE_OBJECTID)
+                                continue;
+                        if (sh->type != BTRFS_CHUNK_ITEM_KEY)
+                                continue;
+
+                        chunk = new(BtrfsChunk, 1);
+                        if (!chunk)
+                                return -ENOMEM;
+
+                        item = BTRFS_IOCTL_SEARCH_HEADER_BODY(sh);
+
+                        *chunk = (BtrfsChunk) {
+                                .offset = sh->offset,
+                                .length = le64toh(item->length),
+                                .type = le64toh(item->type),
+                                .n_stripes = le16toh(item->num_stripes),
+                                .stripe_len = le64toh(item->stripe_len),
+                        };
+
+                        chunk->stripes = new(BtrfsStripe, chunk->n_stripes);
+                        if (!chunk->stripes)
+                                return -ENOMEM;
+
+                        for (size_t j = 0; j < chunk->n_stripes; j++) {
+                                const struct btrfs_stripe *stripe = &item->stripe + j;
+
+                                chunk->stripes[j] = (BtrfsStripe) {
+                                        .devid = le64toh(stripe->devid),
+                                        .offset = le64toh(stripe->offset),
+                                };
+                        }
+
+                        if (!GREEDY_REALLOC(tree.chunks, tree.n_chunks + 1))
+                                return -ENOMEM;
+
+                        tree.chunks[tree.n_chunks++] = TAKE_PTR(chunk);
+                }
+
+                if (!btrfs_ioctl_search_args_inc(&search_args))
+                        break;
+        }
+
+        *ret = TAKE_STRUCT(tree);
+        return 0;
+}
+
+static BtrfsChunk* btrfs_find_chunk_from_logical_address(const BtrfsChunkTree *tree, uint64_t logical) {
+        size_t min_index, max_index;
+
+        assert(tree);
+        assert(tree->chunks || tree->n_chunks == 0);
+
+        if (tree->n_chunks == 0)
+                return NULL;
+
+        /* bisection */
+        min_index = 0;
+        max_index = tree->n_chunks - 1;
+
+        while (min_index <= max_index) {
+                size_t mid = (min_index + max_index) / 2;
+
+                if (logical < tree->chunks[mid]->offset) {
+                        if (mid < 1)
+                                return NULL;
+
+                        max_index = mid - 1;
+                } else if (logical >= tree->chunks[mid]->offset + tree->chunks[mid]->length)
+                        min_index = mid + 1;
+                else
+                        return tree->chunks[mid];
+        }
+
+        return NULL;
+}
+
+static int btrfs_is_nocow_fd(int fd) {
+        struct statfs sfs;
+        unsigned flags;
+
+        assert(fd >= 0);
+
+        if (fstatfs(fd, &sfs) < 0)
+                return -errno;
+
+        if (!is_fs_type(&sfs, BTRFS_SUPER_MAGIC))
+                return -ENOTTY;
+
+        if (ioctl(fd, FS_IOC_GETFLAGS, &flags) < 0)
+                return -errno;
+
+        return FLAGS_SET(flags, FS_NOCOW_FL) && !FLAGS_SET(flags, FS_COMPR_FL);
+}
+
+int btrfs_get_file_physical_offset_fd(int fd, uint64_t *ret) {
+
+        struct btrfs_ioctl_search_args search_args = {
+                .key.min_type = BTRFS_EXTENT_DATA_KEY,
+                .key.max_type = BTRFS_EXTENT_DATA_KEY,
+
+                .key.min_offset = 0,
+                .key.max_offset = UINT64_MAX,
+
+                .key.min_transid = 0,
+                .key.max_transid = UINT64_MAX,
+        };
+
+        _cleanup_(btrfs_chunk_tree_done) BtrfsChunkTree tree = {};
+        uint64_t subvol_id;
+        struct stat st;
+        int r;
+
+        assert(fd >= 0);
+        assert(ret);
+
+        if (fstat(fd, &st) < 0)
+                return -errno;
+
+        r = stat_verify_regular(&st);
+        if (r < 0)
+                return r;
+
+        r = btrfs_is_nocow_fd(fd);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Cannot get physical address for btrfs extent: CoW enabled");
+
+        r = btrfs_subvol_get_id_fd(fd, &subvol_id);
+        if (r < 0)
+                return r;
+
+        r = btrfs_read_chunk_tree_fd(fd, &tree);
+        if (r < 0)
+                return r;
+
+        search_args.key.tree_id = subvol_id;
+        search_args.key.min_objectid = search_args.key.max_objectid = st.st_ino;
+
+        while (btrfs_ioctl_search_args_compare(&search_args) <= 0) {
+                const struct btrfs_ioctl_search_header *sh;
+                unsigned i;
+
+                search_args.key.nr_items = 256;
+
+                if (ioctl(fd, BTRFS_IOC_TREE_SEARCH, &search_args) < 0)
+                        return -errno;
+
+                if (search_args.key.nr_items == 0)
+                        break;
+
+                FOREACH_BTRFS_IOCTL_SEARCH_HEADER(i, sh, search_args) {
+                        const struct btrfs_file_extent_item *item;
+                        uint64_t logical_offset;
+                        BtrfsChunk *chunk;
+
+                        btrfs_ioctl_search_args_set(&search_args, sh);
+
+                        if (sh->type != BTRFS_EXTENT_DATA_KEY)
+                                continue;
+
+                        if (sh->objectid != st.st_ino)
+                                continue;
+
+                        item = BTRFS_IOCTL_SEARCH_HEADER_BODY(sh);
+
+                        if (!IN_SET(item->type, BTRFS_FILE_EXTENT_REG, BTRFS_FILE_EXTENT_PREALLOC))
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Cannot get physical address for btrfs extent: invalid type %" PRIu8,
+                                                       item->type);
+
+                        if (item->compression != 0 || item->encryption != 0 || item->other_encoding != 0)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Cannot get physical address for btrfs extent: has incompatible property");
+
+                        logical_offset = le64toh(item->disk_bytenr);
+                        if (logical_offset == 0)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Cannot get physical address for btrfs extent: failed to get logical offset");
+
+                        chunk = btrfs_find_chunk_from_logical_address(&tree, logical_offset);
+                        if (!chunk)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Cannot get physical address for btrfs extent: no matching chunk found");
+
+                        if ((chunk->type & BTRFS_BLOCK_GROUP_PROFILE_MASK) != 0)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Cannot get physical address for btrfs extent: unsupported profile");
+
+                        uint64_t relative_chunk, relative_stripe, stripe_nr;
+                        uint16_t stripe_index;
+
+                        assert(logical_offset >= chunk->offset);
+                        assert(chunk->n_stripes > 0);
+                        assert(chunk->stripe_len > 0);
+
+                        relative_chunk = logical_offset - chunk->offset;
+                        stripe_nr = relative_chunk / chunk->stripe_len;
+                        relative_stripe = relative_chunk - stripe_nr * chunk->stripe_len;
+                        stripe_index = stripe_nr % chunk->n_stripes;
+
+                        *ret = chunk->stripes[stripe_index].offset +
+                                stripe_nr / chunk->n_stripes * chunk->stripe_len +
+                                relative_stripe;
+
+                        return 0;
+                }
+
+                if (!btrfs_ioctl_search_args_inc(&search_args))
+                        break;
+        }
+
+        return -ENODATA;
 }

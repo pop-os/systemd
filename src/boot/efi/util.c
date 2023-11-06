@@ -1,32 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "device-path-util.h"
+#include "memory-util-fundamental.h"
 #include "proto/device-path.h"
 #include "proto/simple-text-io.h"
 #include "ticks.h"
 #include "util.h"
 #include "version.h"
-
-EFI_STATUS parse_boolean(const char *v, bool *b) {
-        assert(b);
-
-        if (!v)
-                return EFI_INVALID_PARAMETER;
-
-        if (streq8(v, "1") || streq8(v, "yes") || streq8(v, "y") || streq8(v, "true") || streq8(v, "t") ||
-            streq8(v, "on")) {
-                *b = true;
-                return EFI_SUCCESS;
-        }
-
-        if (streq8(v, "0") || streq8(v, "no") || streq8(v, "n") || streq8(v, "false") || streq8(v, "f") ||
-            streq8(v, "off")) {
-                *b = false;
-                return EFI_SUCCESS;
-        }
-
-        return EFI_INVALID_PARAMETER;
-}
 
 EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, size_t size, uint32_t flags) {
         assert(vendor);
@@ -82,6 +62,21 @@ EFI_STATUS efivar_set_uint64_le(const EFI_GUID *vendor, const char16_t *name, ui
         buf[7] = (uint8_t)(value >> 56U & 0xFF);
 
         return efivar_set_raw(vendor, name, buf, sizeof(buf), flags);
+}
+
+EFI_STATUS efivar_unset(const EFI_GUID *vendor, const char16_t *name, uint32_t flags) {
+        EFI_STATUS err;
+
+        assert(vendor);
+        assert(name);
+
+        /* We could be wiping a non-volatile variable here and the spec makes no guarantees that won't incur
+         * in an extra write (and thus wear out). So check and clear only if needed. */
+        err = efivar_get_raw(vendor, name, NULL, NULL);
+        if (err == EFI_SUCCESS)
+                return efivar_set_raw(vendor, name, NULL, 0, flags);
+
+        return err;
 }
 
 EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **ret) {
@@ -265,26 +260,36 @@ char16_t *xstr8_to_path(const char *str8) {
         return path;
 }
 
-void mangle_stub_cmdline(char16_t *cmdline) {
-        char16_t *p = cmdline;
+static bool shall_be_whitespace(char16_t c) {
+        return c <= 0x20U || c == 0x7FU; /* All control characters + space */
+}
+
+char16_t* mangle_stub_cmdline(char16_t *cmdline) {
+        char16_t *p, *q, *e;
 
         if (!cmdline)
-                return;
+                return cmdline;
 
-        for (; *cmdline != '\0'; cmdline++)
-                /* Convert ASCII control characters to spaces. */
-                if (*cmdline <= 0x1F)
-                        *cmdline = ' ';
+        p = q = cmdline;
 
-        /* chomp the trailing whitespaces */
-        while (cmdline != p) {
-                --cmdline;
+        /* Skip initial whitespace */
+        while (shall_be_whitespace(*p))
+                p++;
 
-                if (*cmdline != ' ')
-                        break;
+        /* Turn inner control characters into proper spaces */
+        for (e = p; *p != 0; p++) {
+                if (shall_be_whitespace(*p)) {
+                        *(q++) = ' ';
+                        continue;
+                }
 
-                *cmdline = '\0';
+                *(q++) = *p;
+                e = q; /* remember last non-whitespace char */
         }
+
+        /* Chop off trailing whitespace */
+        *e = 0;
+        return cmdline;
 }
 
 EFI_STATUS chunked_read(EFI_FILE *file, size_t *size, void *buf) {
@@ -363,7 +368,7 @@ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t siz
                 return err;
 
         /* Note that chunked_read() changes size to reflect the actual bytes read. */
-        memset(buf + size, 0, extra);
+        memzero(buf + size, extra);
 
         *ret = TAKE_PTR(buf);
         if (ret_size)
@@ -545,7 +550,7 @@ uint64_t get_os_indications_supported(void) {
 
 __attribute__((noinline)) void notify_debugger(const char *identity, volatile bool wait) {
 #ifdef EFI_DEBUG
-        printf("%s@%p %s\n", identity, &__ImageBase, GIT_VERSION);
+        printf("%s@%p %s\n", identity, __executable_start, GIT_VERSION);
         if (wait)
                 printf("Waiting for debugger to attach...\n");
 
@@ -564,13 +569,13 @@ __attribute__((noinline)) void notify_debugger(const char *identity, volatile bo
 }
 
 #if defined(__i386__) || defined(__x86_64__)
-static inline uint8_t inb(uint16_t port) {
+static uint8_t inb(uint16_t port) {
         uint8_t value;
         asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
         return value;
 }
 
-static inline void outb(uint16_t port, uint8_t value) {
+static void outb(uint16_t port, uint8_t value) {
         asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
@@ -641,6 +646,34 @@ void *find_configuration_table(const EFI_GUID *guid) {
         return NULL;
 }
 
+static void remove_boot_count(char16_t *path) {
+        char16_t *prefix_end;
+        const char16_t *tail;
+        uint64_t ignored;
+
+        assert(path);
+
+        prefix_end = strchr16(path, '+');
+        if (!prefix_end)
+                return;
+
+        tail = prefix_end + 1;
+
+        if (!parse_number16(tail, &ignored, &tail))
+                return;
+
+        if (*tail == '-') {
+                ++tail;
+                if (!parse_number16(tail, &ignored, &tail))
+                        return;
+        }
+
+        if (!IN_SET(*tail, '\0', '.'))
+                return;
+
+        strcpy16(prefix_end, tail);
+}
+
 char16_t *get_extra_dir(const EFI_DEVICE_PATH *file_path) {
         if (!file_path)
                 return NULL;
@@ -661,5 +694,6 @@ char16_t *get_extra_dir(const EFI_DEVICE_PATH *file_path) {
                 return NULL;
 
         convert_efi_path(file_path_str);
+        remove_boot_count(file_path_str);
         return xasprintf("%ls.extra.d", file_path_str);
 }

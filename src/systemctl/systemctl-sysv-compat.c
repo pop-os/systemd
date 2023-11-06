@@ -47,7 +47,7 @@ int talk_initctl(char rl) {
                 .runlevel = rl,
         };
 
-        r = loop_write(fd, &request, sizeof(request), false);
+        r = loop_write(fd, &request, sizeof(request));
         if (r < 0)
                 return log_error_errno(r, "Failed to write to %s: %m", path);
 
@@ -137,7 +137,7 @@ int enable_sysv_units(const char *verb, char **args) {
         while (args[f]) {
 
                 const char *argv[] = {
-                        ROOTLIBEXECDIR "/systemd-sysv-install",
+                        LIBEXECDIR "/systemd-sysv-install",
                         NULL, /* --root= */
                         NULL, /* verb */
                         NULL, /* service */
@@ -210,7 +210,7 @@ int enable_sysv_units(const char *verb, char **args) {
                 if (!arg_quiet)
                         log_info("Executing: %s", l);
 
-                j = safe_fork("(sysv-install)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
+                j = safe_fork("(sysv-install)", FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
                 if (j < 0)
                         return j;
                 if (j == 0) {

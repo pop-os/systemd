@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
-# pylint: disable=missing-docstring,redefined-outer-name,invalid-name
-# pylint: disable=unspecified-encoding,no-else-return,line-too-long,too-many-lines
-# pylint: disable=multiple-imports,too-many-instance-attributes,consider-using-with
-# pylint: disable=global-statement
+# pylint: disable=redefined-outer-name,no-else-return,multiple-imports
+# pylint: disable=consider-using-with,global-statement
 
 # udev test
 #
@@ -43,7 +41,7 @@ SYS_SCRIPT     = Path(__file__).with_name('sys-script.py')
 try:
     UDEV_BIN   = Path(os.environ['UDEV_RULE_RUNNER'])
 except KeyError:
-    UDEV_BIN   = Path(__file__).parent / 'manual/udev-rule-runner'
+    UDEV_BIN   = Path(__file__).parent / 'manual/test-udev-rule-runner'
 UDEV_BIN = UDEV_BIN.absolute()
 
 # Those will be set by the udev_setup() fixture

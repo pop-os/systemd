@@ -21,7 +21,7 @@
 #include "errno-util.h"
 #include "fd-util.h"
 #include "format-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "log.h"
 #include "macro.h"
 #include "missing_syscall.h"
@@ -541,7 +541,7 @@ static int write_to_syslog(
                 if (!syslog_is_stream)
                         break;
 
-                if (IOVEC_INCREMENT(iovec, ELEMENTSOF(iovec), n))
+                if (iovec_increment(iovec, ELEMENTSOF(iovec), n))
                         break;
         }
 
@@ -1276,7 +1276,7 @@ static bool should_parse_proc_cmdline(void) {
         if (getpid_cached() == 1)
                 return true;
 
-        /* Otherwise, parse the commandline if invoked directly by systemd. */
+        /* Otherwise, parse the command line if invoked directly by systemd. */
         return invoked_by_systemd();
 }
 
@@ -1451,7 +1451,7 @@ void log_received_signal(int level, const struct signalfd_siginfo *si) {
         if (pid_is_valid(si->ssi_pid)) {
                 _cleanup_free_ char *p = NULL;
 
-                (void) get_process_comm(si->ssi_pid, &p);
+                (void) pid_get_comm(si->ssi_pid, &p);
 
                 log_full(level,
                          "Received SIG%s from PID %"PRIu32" (%s).",

@@ -3,6 +3,8 @@
 #include <linux/nexthop.h>
 
 #include "dhcp-server-internal.h"
+#include "dhcp6-internal.h"
+#include "dhcp6-lease-internal.h"
 #include "dns-domain.h"
 #include "ip-protocol-list.h"
 #include "netif-util.h"
@@ -20,13 +22,6 @@
 #include "sort-util.h"
 #include "user-util.h"
 #include "wifi-util.h"
-
-static int json_append_one(JsonVariant **v, const char *name, JsonVariant *w) {
-        assert(v);
-        assert(name);
-
-        return json_append(v, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_VARIANT_NON_NULL(name, w)));
-}
 
 static int address_build_json(Address *address, JsonVariant **ret) {
         _cleanup_free_ char *scope = NULL, *flags = NULL, *state = NULL;
@@ -86,7 +81,7 @@ static int addresses_append_json(Set *addresses, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "Addresses", array);
+        return json_variant_set_field_non_null(v, "Addresses", array);
 }
 
 static int neighbor_build_json(Neighbor *n, JsonVariant **ret) {
@@ -127,7 +122,7 @@ static int neighbors_append_json(Set *neighbors, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "Neighbors", array);
+        return json_variant_set_field_non_null(v, "Neighbors", array);
 }
 
 static int nexthop_group_build_json(NextHop *nexthop, JsonVariant **ret) {
@@ -139,15 +134,11 @@ static int nexthop_group_build_json(NextHop *nexthop, JsonVariant **ret) {
         assert(ret);
 
         HASHMAP_FOREACH(g, nexthop->group) {
-                _cleanup_(json_variant_unrefp) JsonVariant *e = NULL;
-
-                r = json_build(&e, JSON_BUILD_OBJECT(
-                                        JSON_BUILD_PAIR_UNSIGNED("ID", g->id),
-                                        JSON_BUILD_PAIR_UNSIGNED("Weight", g->weight+1)));
-                if (r < 0)
-                        return r;
-
-                r = json_variant_append_array(&array, e);
+                r = json_variant_append_arrayb(
+                                &array,
+                                JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("ID", g->id),
+                                                JSON_BUILD_PAIR_UNSIGNED("Weight", g->weight+1)));
                 if (r < 0)
                         return r;
         }
@@ -212,7 +203,7 @@ static int nexthops_append_json(Set *nexthops, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "NextHops", array);
+        return json_variant_set_field_non_null(v, "NextHops", array);
 }
 
 static int route_build_json(Route *route, JsonVariant **ret) {
@@ -294,7 +285,7 @@ static int routes_append_json(Set *routes, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "Routes", array);
+        return json_variant_set_field_non_null(v, "Routes", array);
 }
 
 static int routing_policy_rule_build_json(RoutingPolicyRule *rule, JsonVariant **ret) {
@@ -373,7 +364,7 @@ static int routing_policy_rules_append_json(Set *rules, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "RoutingPolicyRules", array);
+        return json_variant_set_field_non_null(v, "RoutingPolicyRules", array);
 }
 
 static int network_append_json(Network *network, JsonVariant **v) {
@@ -382,7 +373,8 @@ static int network_append_json(Network *network, JsonVariant **v) {
         if (!network)
                 return 0;
 
-        return json_append(v, JSON_BUILD_OBJECT(
+        return json_variant_merge_objectb(
+                        v, JSON_BUILD_OBJECT(
                                 JSON_BUILD_PAIR_STRING("NetworkFile", network->filename),
                                 JSON_BUILD_PAIR_STRV("NetworkFileDropins", network->dropins),
                                 JSON_BUILD_PAIR_BOOLEAN("RequiredForOnline", network->required_for_online),
@@ -421,7 +413,9 @@ static int device_append_json(sd_device *device, JsonVariant **v) {
         if (sd_device_get_property_value(device, "ID_MODEL_FROM_DATABASE", &model) < 0)
                 (void) sd_device_get_property_value(device, "ID_MODEL", &model);
 
-        return json_append(v, JSON_BUILD_OBJECT(
+        return json_variant_merge_objectb(
+                        v,
+                        JSON_BUILD_OBJECT(
                                 JSON_BUILD_PAIR_STRING_NON_EMPTY("LinkFile", link),
                                 JSON_BUILD_PAIR_STRV_NON_EMPTY("LinkFileDropins", link_dropins),
                                 JSON_BUILD_PAIR_STRING_NON_EMPTY("Path", path),
@@ -430,9 +424,6 @@ static int device_append_json(sd_device *device, JsonVariant **v) {
 }
 
 static int dns_append_json_one(Link *link, const struct in_addr_full *a, NetworkConfigSource s, const union in_addr_union *p, JsonVariant **array) {
-        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
-        int r;
-
         assert(link);
         assert(a);
         assert(array);
@@ -440,18 +431,16 @@ static int dns_append_json_one(Link *link, const struct in_addr_full *a, Network
         if (a->ifindex != 0 && a->ifindex != link->ifindex)
                 return 0;
 
-        r = json_build(&v, JSON_BUILD_OBJECT(
-                                JSON_BUILD_PAIR_INTEGER("Family", a->family),
-                                JSON_BUILD_PAIR_IN_ADDR("Address", &a->address, a->family),
-                                JSON_BUILD_PAIR_UNSIGNED_NON_ZERO("Port", a->port),
-                                JSON_BUILD_PAIR_CONDITION(a->ifindex != 0, "InterfaceIndex", JSON_BUILD_INTEGER(a->ifindex)),
-                                JSON_BUILD_PAIR_STRING_NON_EMPTY("ServerName", a->server_name),
-                                JSON_BUILD_PAIR_STRING("ConfigSource", network_config_source_to_string(s)),
-                                JSON_BUILD_PAIR_IN_ADDR_NON_NULL("ConfigProvider", p, a->family)));
-        if (r < 0)
-                return r;
-
-        return json_variant_append_array(array, v);
+        return json_variant_append_arrayb(
+                        array,
+                        JSON_BUILD_OBJECT(
+                                        JSON_BUILD_PAIR_INTEGER("Family", a->family),
+                                        JSON_BUILD_PAIR_IN_ADDR("Address", &a->address, a->family),
+                                        JSON_BUILD_PAIR_UNSIGNED_NON_ZERO("Port", a->port),
+                                        JSON_BUILD_PAIR_CONDITION(a->ifindex != 0, "InterfaceIndex", JSON_BUILD_INTEGER(a->ifindex)),
+                                        JSON_BUILD_PAIR_STRING_NON_EMPTY("ServerName", a->server_name),
+                                        JSON_BUILD_PAIR_STRING("ConfigSource", network_config_source_to_string(s)),
+                                        JSON_BUILD_PAIR_IN_ADDR_NON_NULL("ConfigProvider", p, a->family)));
 }
 
 static int dns_append_json(Link *link, JsonVariant **v) {
@@ -534,7 +523,7 @@ static int dns_append_json(Link *link, JsonVariant **v) {
                 }
         }
 
-        return json_append_one(v, "DNS", array);
+        return json_variant_set_field_non_null(v, "DNS", array);
 }
 
 static int server_append_json_one_addr(int family, const union in_addr_union *a, NetworkConfigSource s, const union in_addr_union *p, JsonVariant **array) {
@@ -658,7 +647,7 @@ static int ntp_append_json(Link *link, JsonVariant **v) {
                 }
         }
 
-        return json_append_one(v, "NTP", array);
+        return json_variant_set_field_non_null(v, "NTP", array);
 }
 
 static int sip_append_json(Link *link, JsonVariant **v) {
@@ -691,7 +680,7 @@ static int sip_append_json(Link *link, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "SIP", array);
+        return json_variant_set_field_non_null(v, "SIP", array);
 }
 
 static int domain_append_json(int family, const char *domain, NetworkConfigSource s, const union in_addr_union *p, JsonVariant **array) {
@@ -787,7 +776,7 @@ static int domains_append_json(Link *link, bool is_route, JsonVariant **v) {
                 }
         }
 
-        return json_append_one(v, is_route ? "RouteDomains" : "SearchDomains", array);
+        return json_variant_set_field_non_null(v, is_route ? "RouteDomains" : "SearchDomains", array);
 }
 
 static int nta_append_json(const char *nta, NetworkConfigSource s, JsonVariant **array) {
@@ -825,7 +814,7 @@ static int ntas_append_json(Link *link, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "DNSSECNegativeTrustAnchors", array);
+        return json_variant_set_field_non_null(v, "DNSSECNegativeTrustAnchors", array);
 }
 
 static int dns_misc_append_json(Link *link, JsonVariant **v) {
@@ -909,7 +898,7 @@ static int dns_misc_append_json(Link *link, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "DNSSettings", array);
+        return json_variant_set_field_non_null(v, "DNSSettings", array);
 }
 
 static int captive_portal_append_json(Link *link, JsonVariant **v) {
@@ -923,7 +912,36 @@ static int captive_portal_append_json(Link *link, JsonVariant **v) {
         if (r <= 0)
                 return r;
 
-        return json_append(v, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_STRING("CaptivePortal", captive_portal)));
+        return json_variant_merge_objectb(v, JSON_BUILD_OBJECT(JSON_BUILD_PAIR_STRING("CaptivePortal", captive_portal)));
+}
+
+static int pref64_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *array = NULL, *w = NULL;
+        NDiscPREF64 *i;
+        int r;
+
+        assert(link);
+        assert(v);
+
+        if (!link->network || !link->network->ipv6_accept_ra_use_pref64)
+                return 0;
+
+        SET_FOREACH(i, link->ndisc_pref64) {
+                r = json_variant_append_arrayb(&array,
+                                               JSON_BUILD_OBJECT(
+                                                               JSON_BUILD_PAIR_IN6_ADDR_NON_NULL("Prefix", &i->prefix),
+                                                               JSON_BUILD_PAIR_UNSIGNED("PrefixLength", i->prefix_len),
+                                                               JSON_BUILD_PAIR_FINITE_USEC("LifetimeUSec", i->lifetime_usec),
+                                                               JSON_BUILD_PAIR_IN6_ADDR_NON_NULL("ConfigProvider", &i->router)));
+                if (r < 0)
+                        return r;
+        }
+
+        r = json_variant_set_field_non_null(&w, "PREF64", array);
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "NDisc", w);
 }
 
 static int dhcp_server_offered_leases_append_json(Link *link, JsonVariant **v) {
@@ -938,28 +956,24 @@ static int dhcp_server_offered_leases_append_json(Link *link, JsonVariant **v) {
                 return 0;
 
         HASHMAP_FOREACH(lease, link->dhcp_server->bound_leases_by_client_id) {
-                _cleanup_(json_variant_unrefp) JsonVariant *e = NULL;
                 struct in_addr address = { .s_addr = lease->address };
 
-                r = json_build(&e,
-                               JSON_BUILD_OBJECT(
-                                               JSON_BUILD_PAIR_BYTE_ARRAY(
-                                                               "ClientId",
-                                                               lease->client_id.data,
-                                                               lease->client_id.length),
-                                               JSON_BUILD_PAIR_IN4_ADDR_NON_NULL("Address", &address),
-                                               JSON_BUILD_PAIR_STRING_NON_EMPTY("Hostname", lease->hostname),
-                                               JSON_BUILD_PAIR_FINITE_USEC(
-                                                               "ExpirationUSec", lease->expiration)));
-                if (r < 0)
-                        return r;
-
-                r = json_variant_append_array(&array, e);
+                r = json_variant_append_arrayb(
+                                &array,
+                                JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_BYTE_ARRAY(
+                                                                "ClientId",
+                                                                lease->client_id.data,
+                                                                lease->client_id.length),
+                                                JSON_BUILD_PAIR_IN4_ADDR_NON_NULL("Address", &address),
+                                                JSON_BUILD_PAIR_STRING_NON_EMPTY("Hostname", lease->hostname),
+                                                JSON_BUILD_PAIR_FINITE_USEC(
+                                                                "ExpirationUSec", lease->expiration)));
                 if (r < 0)
                         return r;
         }
 
-        return json_append_one(v, "Leases", array);
+        return json_variant_set_field_non_null(v, "Leases", array);
 }
 
 static int dhcp_server_static_leases_append_json(Link *link, JsonVariant **v) {
@@ -992,7 +1006,7 @@ static int dhcp_server_static_leases_append_json(Link *link, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "StaticLeases", array);
+        return json_variant_set_field_non_null(v, "StaticLeases", array);
 }
 
 static int dhcp_server_append_json(Link *link, JsonVariant **v) {
@@ -1020,7 +1034,219 @@ static int dhcp_server_append_json(Link *link, JsonVariant **v) {
         if (r < 0)
                 return r;
 
-        return json_append_one(v, "DHCPServer", w);
+        return json_variant_set_field_non_null(v, "DHCPServer", w);
+}
+
+static int dhcp6_client_vendor_options_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *array = NULL;
+        sd_dhcp6_option **options = NULL;
+        int r, n_vendor_options;
+
+        assert(link);
+        assert(v);
+
+        if (!link->dhcp6_lease)
+                return 0;
+
+        n_vendor_options = sd_dhcp6_lease_get_vendor_options(link->dhcp6_lease, &options);
+
+        FOREACH_ARRAY(option, options, n_vendor_options) {
+                r = json_variant_append_arrayb(&array,
+                                            JSON_BUILD_OBJECT(
+                                                            JSON_BUILD_PAIR_UNSIGNED("EnterpriseId", (*option)->enterprise_identifier),
+                                                            JSON_BUILD_PAIR_UNSIGNED("SubOptionCode", (*option)->option),
+                                                            JSON_BUILD_PAIR_HEX("SubOptionData", (*option)->data, (*option)->length)));
+                if (r < 0)
+                        return 0;
+        }
+
+        return json_variant_set_field_non_null(v, "VendorSpecificOptions", array);
+}
+
+static int dhcp6_client_lease_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
+        usec_t ts, t1, t2;
+        int r;
+
+        assert(link);
+        assert(v);
+
+        if (!link->dhcp6_lease)
+                return 0;
+
+        r = sd_dhcp6_lease_get_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &ts);
+        if (r < 0)
+                return r;
+
+        r = sd_dhcp6_lease_get_t1_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &t1);
+        if (r < 0)
+                return r;
+
+        r = sd_dhcp6_lease_get_t2_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &t2);
+        if (r < 0)
+                return r;
+
+        r = json_build(&w, JSON_BUILD_OBJECT(
+                                JSON_BUILD_PAIR_FINITE_USEC("Timeout1USec", t1),
+                                JSON_BUILD_PAIR_FINITE_USEC("Timeout2USec", t2),
+                                JSON_BUILD_PAIR_FINITE_USEC("LeaseTimestampUSec", ts)));
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "Lease", w);
+}
+
+static int dhcp6_client_pd_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *array = NULL;
+        int r;
+
+        assert(link);
+        assert(link->network);
+        assert(v);
+
+        if (!link->network->dhcp6_use_pd_prefix ||
+            !sd_dhcp6_lease_has_pd_prefix(link->dhcp6_lease))
+                return 0;
+
+        FOREACH_DHCP6_PD_PREFIX(link->dhcp6_lease) {
+                usec_t lifetime_preferred_usec, lifetime_valid_usec;
+                struct in6_addr prefix;
+                uint8_t prefix_len;
+
+                r = sd_dhcp6_lease_get_pd_prefix(link->dhcp6_lease, &prefix, &prefix_len);
+                if (r < 0)
+                        return r;
+
+                r = sd_dhcp6_lease_get_pd_lifetime_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME,
+                                                             &lifetime_preferred_usec, &lifetime_valid_usec);
+                if (r < 0)
+                        return r;
+
+                r = json_variant_append_arrayb(&array, JSON_BUILD_OBJECT(
+                                               JSON_BUILD_PAIR_IN6_ADDR("Prefix", &prefix),
+                                               JSON_BUILD_PAIR_UNSIGNED("PrefixLength", prefix_len),
+                                               JSON_BUILD_PAIR_FINITE_USEC("PreferredLifetimeUSec", lifetime_preferred_usec),
+                                               JSON_BUILD_PAIR_FINITE_USEC("ValidLifetimeUSec", lifetime_valid_usec)));
+                if (r < 0)
+                        return r;
+        }
+
+        return json_variant_set_field_non_null(v, "Prefixes", array);
+}
+
+static int dhcp6_client_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
+        int r;
+
+        assert(link);
+        assert(v);
+
+        if (!link->dhcp6_client)
+                return 0;
+
+        r = dhcp6_client_lease_append_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = dhcp6_client_pd_append_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = dhcp6_client_vendor_options_append_json(link, &w);
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "DHCPv6Client", w);
+}
+
+static int dhcp_client_lease_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
+        usec_t lease_timestamp_usec, t1, t2;
+        int r;
+
+        assert(link);
+        assert(v);
+
+        if (!link->dhcp_client || !link->dhcp_lease)
+                return 0;
+
+        r = sd_dhcp_lease_get_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &lease_timestamp_usec);
+        if (r < 0)
+                return 0;
+
+        r = sd_dhcp_lease_get_t1_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &t1);
+        if (r < 0)
+                return 0;
+
+        r = sd_dhcp_lease_get_t2_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &t2);
+        if (r < 0)
+                return 0;
+
+        r = json_build(&w, JSON_BUILD_OBJECT(
+                                JSON_BUILD_PAIR_FINITE_USEC("LeaseTimestampUSec", lease_timestamp_usec),
+                                JSON_BUILD_PAIR_FINITE_USEC("Timeout1USec", t1),
+                                JSON_BUILD_PAIR_FINITE_USEC("Timeout2USec", t2)));
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "Lease", w);
+}
+
+static int dhcp_client_pd_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *addresses = NULL, *array = NULL;
+        uint8_t ipv4masklen, sixrd_prefixlen;
+        struct in6_addr sixrd_prefix;
+        const struct in_addr *br_addresses;
+        size_t n_br_addresses = 0;
+        int r;
+
+        assert(link);
+        assert(link->network);
+        assert(v);
+
+        if (!link->network->dhcp_use_6rd || !sd_dhcp_lease_has_6rd(link->dhcp_lease))
+                return 0;
+
+        r = sd_dhcp_lease_get_6rd(link->dhcp_lease, &ipv4masklen, &sixrd_prefixlen, &sixrd_prefix, &br_addresses, &n_br_addresses);
+        if (r < 0)
+                return r;
+
+        FOREACH_ARRAY(br_address, br_addresses, n_br_addresses) {
+                r = json_variant_append_arrayb(&addresses, JSON_BUILD_IN4_ADDR(br_address));
+                if (r < 0)
+                        return r;
+        }
+
+        r = json_build(&array, JSON_BUILD_OBJECT(
+                                       JSON_BUILD_PAIR_IN6_ADDR("Prefix", &sixrd_prefix),
+                                       JSON_BUILD_PAIR_UNSIGNED("PrefixLength", sixrd_prefixlen),
+                                       JSON_BUILD_PAIR_UNSIGNED("IPv4MaskLength", ipv4masklen),
+                                       JSON_BUILD_PAIR_VARIANT_NON_NULL("BorderRouters", addresses)));
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "6rdPrefix", array);
+}
+
+static int dhcp_client_append_json(Link *link, JsonVariant **v) {
+        _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
+        int r;
+
+        assert(link);
+        assert(v);
+
+        if (!link->dhcp_client)
+                return 0;
+
+        r = dhcp_client_lease_append_json(link, &w);
+        if (r < 0)
+                return r;
+
+        r = dhcp_client_pd_append_json(link, &w);
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field_non_null(v, "DHCPv4Client", w);
 }
 
 int link_build_json(Link *link, JsonVariant **ret) {
@@ -1118,6 +1344,10 @@ int link_build_json(Link *link, JsonVariant **ret) {
         if (r < 0)
                 return r;
 
+        r = pref64_append_json(link, &v);
+        if (r < 0)
+                return r;
+
         r = addresses_append_json(link->addresses, &v);
         if (r < 0)
                 return r;
@@ -1135,6 +1365,14 @@ int link_build_json(Link *link, JsonVariant **ret) {
                 return r;
 
         r = dhcp_server_append_json(link, &v);
+        if (r < 0)
+                return r;
+
+        r = dhcp_client_append_json(link, &v);
+        if (r < 0)
+                return r;
+
+        r = dhcp6_client_append_json(link, &v);
         if (r < 0)
                 return r;
 
@@ -1167,7 +1405,7 @@ static int links_append_json(Manager *manager, JsonVariant **v) {
                         return r;
         }
 
-        return json_append_one(v, "Interfaces", array);
+        return json_variant_set_field_non_null(v, "Interfaces", array);
 }
 
 int manager_build_json(Manager *manager, JsonVariant **ret) {

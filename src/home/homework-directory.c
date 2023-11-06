@@ -131,7 +131,7 @@ int home_create_directory_or_subvolume(UserRecord *h, HomeSetup *setup, UserReco
 
         case USER_SUBVOLUME:
                 WITH_UMASK(0077)
-                        r = btrfs_subvol_make(d);
+                        r = btrfs_subvol_make(AT_FDCWD, d);
 
                 if (r >= 0) {
                         log_info("Subvolume created.");
@@ -285,7 +285,7 @@ int home_resize_directory(
                 return r;
 
         r = home_update_quota_auto(h, NULL);
-        if (ERRNO_IS_NOT_SUPPORTED(r))
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                 return -ESOCKTNOSUPPORT; /* make recognizable */
         if (r < 0)
                 return r;

@@ -79,6 +79,7 @@ fanotify_mark	368
 fchdir	133
 fchmod	94
 fchmodat	333
+fchmodat2	452
 fchown	95
 fchown32	207
 fchownat	325
@@ -90,7 +91,6 @@ finit_module	379
 flistxattr	234
 flock	143
 fork	2
-fp_udfiex_crtl
 fremovexattr	237
 fsconfig	431
 fsetxattr	228
@@ -202,6 +202,7 @@ lsetxattr	227
 lstat	107
 lstat64	196
 madvise	220
+map_shadow_stack
 mbind	319
 membarrier	389
 memfd_create	385

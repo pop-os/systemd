@@ -14,9 +14,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         FILE *g = NULL;
         int r;
 
-        /* Disable most logging if not running standalone */
-        if (!getenv("SYSTEMD_LOG_LEVEL"))
-                log_set_max_level(LOG_CRIT);
+        fuzz_setup_logging();
 
         f = data_to_file(data, size);
         assert_se(f);
@@ -107,7 +105,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         log_debug_errno(r, "json_variant_filter: %d/%m", r);
 
         /* I assume we can merge v with itself… */
-        r = json_variant_merge(&v, v);
+        r = json_variant_merge_object(&v, v);
         log_debug_errno(r, "json_variant_merge: %d/%m", r);
 
         r = json_variant_append_array(&v, v);

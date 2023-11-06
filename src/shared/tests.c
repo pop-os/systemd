@@ -118,18 +118,6 @@ void test_setup_logging(int level) {
         log_open();
 }
 
-int log_tests_skipped(const char *message) {
-        log_notice("%s: %s, skipping tests.",
-                   program_invocation_short_name, message);
-        return EXIT_TEST_SKIP;
-}
-
-int log_tests_skipped_errno(int r, const char *message) {
-        log_notice_errno(r, "%s: %s, skipping tests: %m",
-                         program_invocation_short_name, message);
-        return EXIT_TEST_SKIP;
-}
-
 int write_tmpfile(char *pattern, const char *contents) {
         _cleanup_close_ int fd = -EBADF;
 
@@ -339,6 +327,8 @@ const char *ci_environment(void) {
                 return (ans = "github-actions");
         if (getenv("AUTOPKGTEST_ARTIFACTS") || getenv("AUTOPKGTEST_TMP"))
                 return (ans = "autopkgtest");
+        if (getenv("SALSA_CI_IMAGES"))
+                return (ans = "salsa-ci");
 
         FOREACH_STRING(var, "CI", "CONTINOUS_INTEGRATION") {
                 /* Those vars are booleans according to Semaphore and Travis docs:

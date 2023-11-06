@@ -18,6 +18,7 @@
 #include "fs-util.h"
 #include "hexdecoct.h"
 #include "io-util.h"
+#include "iovec-util.h"
 #include "macro.h"
 #include "memory-util.h"
 #include "path-util.h"
@@ -579,11 +580,10 @@ static int bus_socket_read_auth(sd_bus *b) {
                 } else
                         handle_cmsg = true;
         }
-        if (k < 0) {
-                if (ERRNO_IS_TRANSIENT(k))
-                        return 0;
+        if (ERRNO_IS_NEG_TRANSIENT(k))
+                return 0;
+        if (k < 0)
                 return (int) k;
-        }
         if (k == 0) {
                 if (handle_cmsg)
                         cmsg_close_all(&mh); /* paranoia, we shouldn't have gotten any fds on EOF */
@@ -921,7 +921,7 @@ static int bind_description(sd_bus *b, int fd, int family) {
          * - a random 64-bit value (to avoid collisions)
          * - our "comm" process name (suppressed if contains "/" to avoid parsing issues)
          * - the description string of the bus connection. */
-        (void) get_process_comm(0, &comm);
+        (void) pid_get_comm(0, &comm);
         if (comm && strchr(comm, '/'))
                 comm = mfree(comm);
 
@@ -1298,11 +1298,10 @@ int bus_socket_read_message(sd_bus *bus) {
                 } else
                         handle_cmsg = true;
         }
-        if (k < 0) {
-                if (ERRNO_IS_TRANSIENT(k))
-                        return 0;
+        if (ERRNO_IS_NEG_TRANSIENT(k))
+                return 0;
+        if (k < 0)
                 return (int) k;
-        }
         if (k == 0) {
                 if (handle_cmsg)
                         cmsg_close_all(&mh); /* On EOF we shouldn't have gotten an fd, but let's make sure */
@@ -1361,11 +1360,10 @@ int bus_socket_process_opening(sd_bus *b) {
         assert(b->state == BUS_OPENING);
 
         events = fd_wait_for_event(b->output_fd, POLLOUT, 0);
-        if (events < 0) {
-                if (ERRNO_IS_TRANSIENT(events))
-                        return 0;
+        if (ERRNO_IS_NEG_TRANSIENT(events))
+                return 0;
+        if (events < 0)
                 return events;
-        }
         if (!(events & (POLLOUT|POLLERR|POLLHUP)))
                 return 0;
 

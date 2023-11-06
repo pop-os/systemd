@@ -79,6 +79,7 @@ shared_sources = files(
         'geneve-util.c',
         'gpt.c',
         'group-record.c',
+        'hibernate-util.c',
         'hostname-setup.c',
         'hwdb-util.c',
         'id128-print.c',
@@ -92,6 +93,7 @@ shared_sources = files(
         'install.c',
         'ip-protocol-list.c',
         'ipvlan-util.c',
+        'journal-file-util.c',
         'journal-importer.c',
         'journal-util.c',
         'json.c',
@@ -109,6 +111,7 @@ shared_sources = files(
         'loop-util.c',
         'loopback-setup.c',
         'lsm-util.c',
+        'machine-credential.c',
         'machine-id-setup.c',
         'machine-pool.c',
         'macvlan-util.c',
@@ -131,6 +134,8 @@ shared_sources = files(
         'password-quality-util-passwdqc.c',
         'password-quality-util-pwquality.c',
         'pcre2-util.c',
+        'pcrextend-util.c',
+        'pe-binary.c',
         'pkcs11-util.c',
         'pretty-print.c',
         'ptyfwd.c',
@@ -145,7 +150,7 @@ shared_sources = files(
         'selinux-util.c',
         'serialize.c',
         'service-util.c',
-        'sleep-util.c',
+        'sleep-config.c',
         'smack-util.c',
         'socket-label.c',
         'socket-netlink.c',
@@ -156,6 +161,7 @@ shared_sources = files(
         'tmpfile-util-label.c',
         'tomoyo-util.c',
         'tpm2-util.c',
+        'tpm2-event-log.c',
         'udev-util.c',
         'user-record-nss.c',
         'user-record-show.c',
@@ -163,10 +169,23 @@ shared_sources = files(
         'userdb-dropin.c',
         'userdb.c',
         'varlink.c',
+        'varlink-idl.c',
+        'varlink-io.systemd.c',
+        'varlink-io.systemd.Journal.c',
+        'varlink-io.systemd.ManagedOOM.c',
+        'varlink-io.systemd.PCRExtend.c',
+        'varlink-io.systemd.Resolve.Monitor.c',
+        'varlink-io.systemd.Resolve.c',
+        'varlink-io.systemd.UserDatabase.c',
+        'varlink-io.systemd.oom.c',
+        'varlink-io.systemd.service.c',
+        'varlink-io.systemd.sysext.c',
+        'varlink-org.varlink.service.c',
         'verb-log-control.c',
         'verbs.c',
         'vlan-util.c',
         'volatile-util.c',
+        'wall.c',
         'watchdog.c',
         'web-util.c',
         'wifi-util.c',
@@ -299,7 +318,7 @@ libshared_deps = [threads,
                   libcrypt,
                   libdl,
                   libgcrypt,
-                  libiptc,
+                  libiptc_cflags,
                   libkmod,
                   liblz4,
                   libmount,
@@ -309,12 +328,11 @@ libshared_deps = [threads,
                   librt,
                   libseccomp,
                   libselinux,
-                  libxenctrl,
+                  libxenctrl_cflags,
                   libxz,
-                  libzstd,
-                  versiondep]
+                  libzstd]
 
-libshared_sym_path = '@0@/libshared.sym'.format(meson.current_source_dir())
+libshared_sym_path = meson.current_source_dir() / 'libshared.sym'
 libshared_build_dir = meson.current_build_dir()
 
 libshared_static = static_library(
@@ -332,6 +350,7 @@ libshared = shared_library(
         c_args : ['-fvisibility=default'],
         link_args : ['-shared',
                      '-Wl,--version-script=' + libshared_sym_path],
+        link_depends : libshared_sym_path,
         link_whole : [libshared_static,
                       libbasic,
                       libbasic_gcrypt,
@@ -339,19 +358,17 @@ libshared = shared_library(
         dependencies : [libshared_deps,
                         userspace],
         install : true,
-        install_dir : rootpkglibdir)
+        install_dir : pkglibdir)
 
 shared_fdisk_sources = files(
         'fdisk-util.c',
 )
 
-if get_option('fdisk') != 'false'
-        libshared_fdisk = static_library(
-                'shared-fdisk',
-                shared_fdisk_sources,
-                include_directories : includes,
-                dependencies : [libfdisk,
-                                userspace],
-                c_args : ['-fvisibility=default'],
-                build_by_default : false)
-endif
+libshared_fdisk = static_library(
+        'shared-fdisk',
+        shared_fdisk_sources,
+        include_directories : includes,
+        dependencies : [libfdisk,
+                        userspace],
+        c_args : ['-fvisibility=default'],
+        build_by_default : false)

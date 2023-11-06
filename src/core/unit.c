@@ -25,6 +25,7 @@
 #include "dropin.h"
 #include "env-util.h"
 #include "escape.h"
+#include "exec-credential.h"
 #include "execute.h"
 #include "fd-util.h"
 #include "fileio-label.h"
@@ -32,7 +33,7 @@
 #include "format-util.h"
 #include "id128-util.h"
 #include "install.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "label-util.h"
 #include "load-dropin.h"
 #include "load-fragment.h"
@@ -128,8 +129,15 @@ Unit* unit_new(Manager *m, size_t size) {
 
         u->last_section_private = -1;
 
-        u->start_ratelimit = (RateLimit) { m->default_start_limit_interval, m->default_start_limit_burst };
-        u->auto_start_stop_ratelimit = (const RateLimit) { 10 * USEC_PER_SEC, 16 };
+        u->start_ratelimit = (RateLimit) {
+                m->defaults.start_limit_interval,
+                m->defaults.start_limit_burst
+        };
+
+        u->auto_start_stop_ratelimit = (const RateLimit) {
+                10 * USEC_PER_SEC,
+                16
+        };
 
         return u;
 }
@@ -176,26 +184,26 @@ static void unit_init(Unit *u) {
                  * context, _before_ the rest of the settings have
                  * been initialized */
 
-                cc->cpu_accounting = u->manager->default_cpu_accounting;
-                cc->io_accounting = u->manager->default_io_accounting;
-                cc->blockio_accounting = u->manager->default_blockio_accounting;
-                cc->memory_accounting = u->manager->default_memory_accounting;
-                cc->tasks_accounting = u->manager->default_tasks_accounting;
-                cc->ip_accounting = u->manager->default_ip_accounting;
+                cc->cpu_accounting = u->manager->defaults.cpu_accounting;
+                cc->io_accounting = u->manager->defaults.io_accounting;
+                cc->blockio_accounting = u->manager->defaults.blockio_accounting;
+                cc->memory_accounting = u->manager->defaults.memory_accounting;
+                cc->tasks_accounting = u->manager->defaults.tasks_accounting;
+                cc->ip_accounting = u->manager->defaults.ip_accounting;
 
                 if (u->type != UNIT_SLICE)
-                        cc->tasks_max = u->manager->default_tasks_max;
+                        cc->tasks_max = u->manager->defaults.tasks_max;
 
-                cc->memory_pressure_watch = u->manager->default_memory_pressure_watch;
-                cc->memory_pressure_threshold_usec = u->manager->default_memory_pressure_threshold_usec;
+                cc->memory_pressure_watch = u->manager->defaults.memory_pressure_watch;
+                cc->memory_pressure_threshold_usec = u->manager->defaults.memory_pressure_threshold_usec;
         }
 
         ec = unit_get_exec_context(u);
         if (ec) {
                 exec_context_init(ec);
 
-                if (u->manager->default_oom_score_adjust_set) {
-                        ec->oom_score_adjust = u->manager->default_oom_score_adjust;
+                if (u->manager->defaults.oom_score_adjust_set) {
+                        ec->oom_score_adjust = u->manager->defaults.oom_score_adjust;
                         ec->oom_score_adjust_set = true;
                 }
 
@@ -207,7 +215,7 @@ static void unit_init(Unit *u) {
                         /* User manager might have its umask redefined by PAM or UMask=. In this
                          * case let the units it manages inherit this value by default. They can
                          * still tune this value through their own unit file */
-                        (void) get_process_umask(getpid_cached(), &ec->umask);
+                        (void) get_process_umask(0, &ec->umask);
                 }
         }
 
@@ -1375,30 +1383,15 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
                 r = unit_add_two_dependencies_by_name(u, UNIT_AFTER, UNIT_REQUIRES, varlink_socket_unit, true, UNIT_DEPENDENCY_FILE);
                 if (r < 0)
                         return r;
-        } else
+        } else {
                 r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_JOURNALD_SOCKET, true, UNIT_DEPENDENCY_FILE);
-        if (r < 0)
-                return r;
-
-        if (exec_context_has_credentials(c) && u->manager->prefix[EXEC_DIRECTORY_RUNTIME]) {
-                _cleanup_free_ char *p = NULL, *m = NULL;
-
-                /* Let's make sure the credentials directory of this service is unmounted *after* the service
-                 * itself shuts down. This only matters if mount namespacing is not used for the service, and
-                 * hence the credentials mount appears on the host. */
-
-                p = path_join(u->manager->prefix[EXEC_DIRECTORY_RUNTIME], "credentials", u->id);
-                if (!p)
-                        return -ENOMEM;
-
-                r = unit_name_from_path(p, ".mount", &m);
-                if (r < 0)
-                        return r;
-
-                r = unit_add_dependency_by_name(u, UNIT_AFTER, m, /* add_reference= */ true, UNIT_DEPENDENCY_FILE);
                 if (r < 0)
                         return r;
         }
+
+        r = unit_add_default_credential_dependencies(u, c);
+        if (r < 0)
+                return r;
 
         return 0;
 }
@@ -1859,18 +1852,6 @@ int unit_test_start_limit(Unit *u) {
                          u->reboot_arg, -1, reason);
 
         return -ECANCELED;
-}
-
-bool unit_shall_confirm_spawn(Unit *u) {
-        assert(u);
-
-        if (manager_is_confirm_spawn_disabled(u->manager))
-                return false;
-
-        /* For some reasons units remaining in the same process group
-         * as PID 1 fail to acquire the console even if it's not used
-         * by any process. So skip the confirmation question for them. */
-        return !unit_get_exec_context(u)->same_pgrp;
 }
 
 static bool unit_verify_deps(Unit *u) {
@@ -2560,8 +2541,7 @@ static int unit_log_resources(Unit *u) {
         r = 0;
 
 finish:
-        for (size_t i = 0; i < n_message_parts; i++)
-                free(message_parts[i]);
+        free_many_charp(message_parts, n_message_parts);
 
         for (size_t i = 0; i < n_iovec; i++)
                 free(iovec[i].iov_base);
@@ -2842,117 +2822,154 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, bool reload_su
         }
 }
 
-int unit_watch_pid(Unit *u, pid_t pid, bool exclusive) {
+int unit_watch_pidref(Unit *u, PidRef *pid, bool exclusive) {
+        _cleanup_(pidref_freep) PidRef *pid_dup = NULL;
         int r;
 
-        assert(u);
-        assert(pid_is_valid(pid));
+        /* Adds a specific PID to the set of PIDs this unit watches. */
 
-        /* Watch a specific PID */
+        assert(u);
+        assert(pidref_is_set(pid));
 
         /* Caller might be sure that this PID belongs to this unit only. Let's take this
          * opportunity to remove any stalled references to this PID as they can be created
          * easily (when watching a process which is not our direct child). */
         if (exclusive)
-                manager_unwatch_pid(u->manager, pid);
+                manager_unwatch_pidref(u->manager, pid);
 
-        r = set_ensure_allocated(&u->pids, NULL);
+        if (set_contains(u->pids, pid)) /* early exit if already being watched */
+                return 0;
+
+        r = pidref_dup(pid, &pid_dup);
         if (r < 0)
                 return r;
 
-        r = hashmap_ensure_allocated(&u->manager->watch_pids, NULL);
+        /* First, insert into the set of PIDs maintained by the unit */
+        r = set_ensure_put(&u->pids, &pidref_hash_ops, pid_dup);
         if (r < 0)
                 return r;
 
-        /* First try, let's add the unit keyed by "pid". */
-        r = hashmap_put(u->manager->watch_pids, PID_TO_PTR(pid), u);
-        if (r == -EEXIST)  {
-                Unit **array;
-                bool found = false;
-                size_t n = 0;
+        pid = TAKE_PTR(pid_dup); /* continue with our copy now that we have installed it properly in our set */
 
-                /* OK, the "pid" key is already assigned to a different unit. Let's see if the "-pid" key (which points
-                 * to an array of Units rather than just a Unit), lists us already. */
-
-                array = hashmap_get(u->manager->watch_pids, PID_TO_PTR(-pid));
-                if (array)
-                        for (; array[n]; n++)
-                                if (array[n] == u)
-                                        found = true;
-
-                if (!found) {
-                        Unit **new_array;
-
-                        /* Allocate a new array */
-                        new_array = new(Unit*, n + 2);
-                        if (!new_array)
-                                return -ENOMEM;
-
-                        memcpy_safe(new_array, array, sizeof(Unit*) * n);
-                        new_array[n] = u;
-                        new_array[n+1] = NULL;
-
-                        /* Add or replace the old array */
-                        r = hashmap_replace(u->manager->watch_pids, PID_TO_PTR(-pid), new_array);
-                        if (r < 0) {
-                                free(new_array);
-                                return r;
-                        }
-
-                        free(array);
-                }
-        } else if (r < 0)
+        /* Second, insert it into the simple global table, see if that works */
+        r = hashmap_ensure_put(&u->manager->watch_pids, &pidref_hash_ops, pid, u);
+        if (r != -EEXIST)
                 return r;
 
-        r = set_put(u->pids, PID_TO_PTR(pid));
+        /* OK, the key is already assigned to a different unit. That's fine, then add us via the second
+         * hashmap that points to an array. */
+
+        PidRef *old_pid = NULL;
+        Unit **array = hashmap_get2(u->manager->watch_pids_more, pid, (void**) &old_pid);
+
+        /* Count entries in array */
+        size_t n = 0;
+        for (; array && array[n]; n++)
+                ;
+
+        /* Allocate a new array */
+        _cleanup_free_ Unit **new_array = new(Unit*, n + 2);
+        if (!new_array)
+                return -ENOMEM;
+
+        /* Append us to the end */
+        memcpy_safe(new_array, array, sizeof(Unit*) * n);
+        new_array[n] = u;
+        new_array[n+1] = NULL;
+
+        /* Make sure the hashmap is allocated */
+        r = hashmap_ensure_allocated(&u->manager->watch_pids_more, &pidref_hash_ops);
         if (r < 0)
                 return r;
 
+        /* Add or replace the old array */
+        r = hashmap_replace(u->manager->watch_pids_more, old_pid ?: pid, new_array);
+        if (r < 0)
+                return r;
+
+        TAKE_PTR(new_array); /* Now part of the hash table */
+        free(array);         /* Which means we can now delete the old version */
         return 0;
 }
 
-void unit_unwatch_pid(Unit *u, pid_t pid) {
-        Unit **array;
+int unit_watch_pid(Unit *u, pid_t pid, bool exclusive) {
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        int r;
 
         assert(u);
         assert(pid_is_valid(pid));
 
-        /* First let's drop the unit in case it's keyed as "pid". */
-        (void) hashmap_remove_value(u->manager->watch_pids, PID_TO_PTR(pid), u);
+        r = pidref_set_pid(&pidref, pid);
+        if (r < 0)
+                return r;
 
-        /* Then, let's also drop the unit, in case it's in the array keyed by -pid */
-        array = hashmap_get(u->manager->watch_pids, PID_TO_PTR(-pid));
-        if (array) {
+        return unit_watch_pidref(u, &pidref, exclusive);
+}
+
+void unit_unwatch_pidref(Unit *u, PidRef *pid) {
+        assert(u);
+        assert(pidref_is_set(pid));
+
+        /* Remove from the set we maintain for this unit. (And destroy the returned pid eventually) */
+        _cleanup_(pidref_freep) PidRef *pid1 = set_remove(u->pids, pid);
+        if (!pid1)
+                return; /* Early exit if this PID was never watched by us */
+
+        /* First let's drop the unit from the simple hash table, if it is included there */
+        PidRef *pid2 = NULL;
+        Unit *uu = hashmap_get2(u->manager->watch_pids, pid, (void**) &pid2);
+
+        /* Quick validation: iff we are in the watch_pids table then the PidRef object must be the same as in our local pids set */
+        assert((uu == u) == (pid1 == pid2));
+
+        if (uu == u)
+                /* OK, we are in the first table. Let's remove it there then, and we are done already. */
+                assert_se(hashmap_remove_value(u->manager->watch_pids, pid2, uu) == uu);
+        else {
+                /* We weren't in the first table, then let's consult the 2nd table that points to an array */
+                PidRef *pid3 = NULL;
+                Unit **array = hashmap_get2(u->manager->watch_pids_more, pid, (void**) &pid3);
+
                 /* Let's iterate through the array, dropping our own entry */
-
-                size_t m = 0;
-                for (size_t n = 0; array[n]; n++)
+                size_t m = 0, n = 0;
+                for (; array && array[n]; n++)
                         if (array[n] != u)
                                 array[m++] = array[n];
-                array[m] = NULL;
+                if (n == m)
+                        return; /* Not there */
+
+                array[m] = NULL; /* set trailing NULL marker on the new end */
 
                 if (m == 0) {
                         /* The array is now empty, remove the entire entry */
-                        assert_se(hashmap_remove(u->manager->watch_pids, PID_TO_PTR(-pid)) == array);
+                        assert_se(hashmap_remove_value(u->manager->watch_pids_more, pid3, array) == array);
                         free(array);
+                } else {
+                        /* The array is not empty, but let's make sure the entry is not keyed by the PidRef
+                         * we will delete, but by the PidRef object of the Unit that is now first in the
+                         * array. */
+
+                        PidRef *new_pid3 = ASSERT_PTR(set_get(array[0]->pids, pid));
+                        assert_se(hashmap_replace(u->manager->watch_pids_more, new_pid3, array) >= 0);
                 }
         }
+}
 
-        (void) set_remove(u->pids, PID_TO_PTR(pid));
+void unit_unwatch_pid(Unit *u, pid_t pid) {
+        return unit_unwatch_pidref(u, &PIDREF_MAKE_FROM_PID(pid));
 }
 
 void unit_unwatch_all_pids(Unit *u) {
         assert(u);
 
         while (!set_isempty(u->pids))
-                unit_unwatch_pid(u, PTR_TO_PID(set_first(u->pids)));
+                unit_unwatch_pidref(u, set_first(u->pids));
 
         u->pids = set_free(u->pids);
 }
 
 static void unit_tidy_watch_pids(Unit *u) {
-        pid_t except1, except2;
-        void *e;
+        PidRef *except1, *except2, *e;
 
         assert(u);
 
@@ -2962,13 +2979,11 @@ static void unit_tidy_watch_pids(Unit *u) {
         except2 = unit_control_pid(u);
 
         SET_FOREACH(e, u->pids) {
-                pid_t pid = PTR_TO_PID(e);
-
-                if (pid == except1 || pid == except2)
+                if (pidref_equal(except1, e) || pidref_equal(except2, e))
                         continue;
 
-                if (!pid_is_unwaited(pid))
-                        unit_unwatch_pid(u, pid);
+                if (pidref_is_unwaited(e) <= 0)
+                        unit_unwatch_pidref(u, e);
         }
 }
 
@@ -3291,17 +3306,22 @@ int unit_add_dependency(
 }
 
 int unit_add_two_dependencies(Unit *u, UnitDependency d, UnitDependency e, Unit *other, bool add_reference, UnitDependencyMask mask) {
-        int r, s;
+        int r = 0, s = 0;
 
         assert(u);
+        assert(d >= 0 || e >= 0);
 
-        r = unit_add_dependency(u, d, other, add_reference, mask);
-        if (r < 0)
-                return r;
+        if (d >= 0) {
+                r = unit_add_dependency(u, d, other, add_reference, mask);
+                if (r < 0)
+                        return r;
+        }
 
-        s = unit_add_dependency(u, e, other, add_reference, mask);
-        if (s < 0)
-                return s;
+        if (e >= 0) {
+                s = unit_add_dependency(u, e, other, add_reference, mask);
+                if (s < 0)
+                        return s;
+        }
 
         return r > 0 || s > 0;
 }
@@ -3788,7 +3808,7 @@ int unit_add_blockdev_dependency(Unit *u, const char *what, UnitDependencyMask m
 }
 
 int unit_coldplug(Unit *u) {
-        int r = 0, q;
+        int r = 0;
 
         assert(u);
 
@@ -3798,30 +3818,20 @@ int unit_coldplug(Unit *u) {
 
         u->coldplugged = true;
 
-        STRV_FOREACH(i, u->deserialized_refs) {
-                q = bus_unit_track_add_name(u, *i);
-                if (q < 0 && r >= 0)
-                        r = q;
-        }
+        STRV_FOREACH(i, u->deserialized_refs)
+                RET_GATHER(r, bus_unit_track_add_name(u, *i));
+
         u->deserialized_refs = strv_free(u->deserialized_refs);
 
-        if (UNIT_VTABLE(u)->coldplug) {
-                q = UNIT_VTABLE(u)->coldplug(u);
-                if (q < 0 && r >= 0)
-                        r = q;
-        }
+        if (UNIT_VTABLE(u)->coldplug)
+                RET_GATHER(r, UNIT_VTABLE(u)->coldplug(u));
 
-        if (u->job) {
-                q = job_coldplug(u->job);
-                if (q < 0 && r >= 0)
-                        r = q;
-        }
-        if (u->nop_job) {
-                q = job_coldplug(u->nop_job);
-                if (q < 0 && r >= 0)
-                        r = q;
-        }
+        if (u->job)
+                RET_GATHER(r, job_coldplug(u->job));
+        if (u->nop_job)
+                RET_GATHER(r, job_coldplug(u->nop_job));
 
+        unit_modify_nft_set(u, /* add = */ true);
         return r;
 }
 
@@ -3860,9 +3870,13 @@ static bool fragment_mtime_newer(const char *path, usec_t mtime, bool path_maske
 }
 
 bool unit_need_daemon_reload(Unit *u) {
-        _cleanup_strv_free_ char **t = NULL;
+        _cleanup_strv_free_ char **dropins = NULL;
 
         assert(u);
+        assert(u->manager);
+
+        if (u->manager->unit_file_state_outdated)
+                return true;
 
         /* For unit files, we allow masking… */
         if (fragment_mtime_newer(u->fragment_path, u->fragment_mtime,
@@ -3874,8 +3888,8 @@ bool unit_need_daemon_reload(Unit *u) {
                 return true;
 
         if (u->load_state == UNIT_LOADED)
-                (void) unit_find_dropin_paths(u, &t);
-        if (!strv_equal(u->dropin_paths, t))
+                (void) unit_find_dropin_paths(u, &dropins);
+        if (!strv_equal(u->dropin_paths, dropins))
                 return true;
 
         /* … any drop-ins that are masked are simply omitted from the list. */
@@ -3961,18 +3975,6 @@ bool unit_will_restart(Unit *u) {
         return UNIT_VTABLE(u)->will_restart(u);
 }
 
-int unit_kill(Unit *u, KillWho w, int signo, int code, int value, sd_bus_error *error) {
-        assert(u);
-        assert(w >= 0 && w < _KILL_WHO_MAX);
-        assert(SIGNAL_VALID(signo));
-        assert(IN_SET(code, SI_USER, SI_QUEUE));
-
-        if (!UNIT_VTABLE(u)->kill)
-                return -EOPNOTSUPP;
-
-        return UNIT_VTABLE(u)->kill(u, w, signo, code, value, error);
-}
-
 void unit_notify_cgroup_oom(Unit *u, bool managed_oom) {
         assert(u);
 
@@ -4004,46 +4006,46 @@ static Set *unit_pid_set(pid_t main_pid, pid_t control_pid) {
         return TAKE_PTR(pid_set);
 }
 
-static int kill_common_log(pid_t pid, int signo, void *userdata) {
+static int kill_common_log(const PidRef *pid, int signo, void *userdata) {
         _cleanup_free_ char *comm = NULL;
         Unit *u = ASSERT_PTR(userdata);
 
-        (void) get_process_comm(pid, &comm);
+        (void) pidref_get_comm(pid, &comm);
+
         log_unit_info(u, "Sending signal SIG%s to process " PID_FMT " (%s) on client request.",
-                      signal_to_string(signo), pid, strna(comm));
+                      signal_to_string(signo), pid->pid, strna(comm));
 
         return 1;
 }
 
-static int kill_or_sigqueue(pid_t pid, int signo, int code, int value) {
-        assert(pid > 0);
+static int kill_or_sigqueue(PidRef* pidref, int signo, int code, int value) {
+        assert(pidref_is_set(pidref));
         assert(SIGNAL_VALID(signo));
 
         switch (code) {
 
         case SI_USER:
-                log_debug("Killing " PID_FMT " with signal SIG%s.", pid, signal_to_string(signo));
-                return RET_NERRNO(kill(pid, signo));
+                log_debug("Killing " PID_FMT " with signal SIG%s.", pidref->pid, signal_to_string(signo));
+                return pidref_kill(pidref, signo);
 
         case SI_QUEUE:
-                log_debug("Enqueuing value %i to " PID_FMT " on signal SIG%s.", value, pid, signal_to_string(signo));
-                return RET_NERRNO(sigqueue(pid, signo, (const union sigval) { .sival_int = value }));
+                log_debug("Enqueuing value %i to " PID_FMT " on signal SIG%s.", value, pidref->pid, signal_to_string(signo));
+                return pidref_sigqueue(pidref, signo, value);
 
         default:
                 assert_not_reached();
         }
 }
 
-int unit_kill_common(
+int unit_kill(
                 Unit *u,
                 KillWho who,
                 int signo,
                 int code,
                 int value,
-                pid_t main_pid,
-                pid_t control_pid,
                 sd_bus_error *error) {
 
+        PidRef *main_pid, *control_pid;
         bool killed = false;
         int ret = 0, r;
 
@@ -4057,24 +4059,30 @@ int unit_kill_common(
         assert(SIGNAL_VALID(signo));
         assert(IN_SET(code, SI_USER, SI_QUEUE));
 
+        main_pid = unit_main_pid(u);
+        control_pid = unit_control_pid(u);
+
+        if (!UNIT_HAS_CGROUP_CONTEXT(u) && !main_pid && !control_pid)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Unit type does not support process killing.");
+
         if (IN_SET(who, KILL_MAIN, KILL_MAIN_FAIL)) {
-                if (main_pid < 0)
+                if (!main_pid)
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_PROCESS, "%s units have no main processes", unit_type_to_string(u->type));
-                if (main_pid == 0)
+                if (!pidref_is_set(main_pid))
                         return sd_bus_error_set_const(error, BUS_ERROR_NO_SUCH_PROCESS, "No main process to kill");
         }
 
         if (IN_SET(who, KILL_CONTROL, KILL_CONTROL_FAIL)) {
-                if (control_pid < 0)
+                if (!control_pid)
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_PROCESS, "%s units have no control processes", unit_type_to_string(u->type));
-                if (control_pid == 0)
+                if (!pidref_is_set(control_pid))
                         return sd_bus_error_set_const(error, BUS_ERROR_NO_SUCH_PROCESS, "No control process to kill");
         }
 
-        if (control_pid > 0 &&
+        if (pidref_is_set(control_pid) &&
             IN_SET(who, KILL_CONTROL, KILL_CONTROL_FAIL, KILL_ALL, KILL_ALL_FAIL)) {
                 _cleanup_free_ char *comm = NULL;
-                (void) get_process_comm(control_pid, &comm);
+                (void) pidref_get_comm(control_pid, &comm);
 
                 r = kill_or_sigqueue(control_pid, signo, code, value);
                 if (r < 0) {
@@ -4084,23 +4092,22 @@ int unit_kill_common(
                         sd_bus_error_set_errnof(
                                         error, r,
                                         "Failed to send signal SIG%s to control process " PID_FMT " (%s): %m",
-                                        signal_to_string(signo), control_pid, strna(comm));
+                                        signal_to_string(signo), control_pid->pid, strna(comm));
                         log_unit_warning_errno(
                                         u, r,
                                         "Failed to send signal SIG%s to control process " PID_FMT " (%s) on client request: %m",
-                                        signal_to_string(signo), control_pid, strna(comm));
+                                        signal_to_string(signo), control_pid->pid, strna(comm));
                 } else {
                         log_unit_info(u, "Sent signal SIG%s to control process " PID_FMT " (%s) on client request.",
-                                      signal_to_string(signo), control_pid, strna(comm));
+                                      signal_to_string(signo), control_pid->pid, strna(comm));
                         killed = true;
                 }
         }
 
-        if (main_pid > 0 &&
+        if (pidref_is_set(main_pid) &&
             IN_SET(who, KILL_MAIN, KILL_MAIN_FAIL, KILL_ALL, KILL_ALL_FAIL)) {
-
                 _cleanup_free_ char *comm = NULL;
-                (void) get_process_comm(main_pid, &comm);
+                (void) pidref_get_comm(main_pid, &comm);
 
                 r = kill_or_sigqueue(main_pid, signo, code, value);
                 if (r < 0) {
@@ -4110,17 +4117,17 @@ int unit_kill_common(
                                 sd_bus_error_set_errnof(
                                                 error, r,
                                                 "Failed to send signal SIG%s to main process " PID_FMT " (%s): %m",
-                                                signal_to_string(signo), main_pid, strna(comm));
+                                                signal_to_string(signo), main_pid->pid, strna(comm));
                         }
 
                         log_unit_warning_errno(
                                         u, r,
                                         "Failed to send signal SIG%s to main process " PID_FMT " (%s) on client request: %m",
-                                        signal_to_string(signo), main_pid, strna(comm));
+                                        signal_to_string(signo), main_pid->pid, strna(comm));
 
                 } else {
                         log_unit_info(u, "Sent signal SIG%s to main process " PID_FMT " (%s) on client request.",
-                                      signal_to_string(signo), main_pid, strna(comm));
+                                      signal_to_string(signo), main_pid->pid, strna(comm));
                         killed = true;
                 }
         }
@@ -4132,11 +4139,11 @@ int unit_kill_common(
                 _cleanup_set_free_ Set *pid_set = NULL;
 
                 /* Exclude the main/control pids from being killed via the cgroup */
-                pid_set = unit_pid_set(main_pid, control_pid);
+                pid_set = unit_pid_set(main_pid ? main_pid->pid : 0, control_pid ? control_pid->pid : 0);
                 if (!pid_set)
                         return log_oom();
 
-                r = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, signo, 0, pid_set, kill_common_log, u);
+                r = cg_kill_recursive(u->cgroup_path, signo, 0, pid_set, kill_common_log, u);
                 if (r < 0) {
                         if (!IN_SET(r, -ESRCH, -ENOENT)) {
                                 if (ret == 0) {
@@ -4287,8 +4294,8 @@ int unit_patch_contexts(Unit *u) {
         if (ec) {
                 /* This only copies in the ones that need memory */
                 for (unsigned i = 0; i < _RLIMIT_MAX; i++)
-                        if (u->manager->rlimit[i] && !ec->rlimit[i]) {
-                                ec->rlimit[i] = newdup(struct rlimit, u->manager->rlimit[i], 1);
+                        if (u->manager->defaults.rlimit[i] && !ec->rlimit[i]) {
+                                ec->rlimit[i] = newdup(struct rlimit, u->manager->defaults.rlimit[i], 1);
                                 if (!ec->rlimit[i])
                                         return -ENOMEM;
                         }
@@ -4363,12 +4370,12 @@ int unit_patch_contexts(Unit *u) {
 
                                 /* When RootImage= or MountImages= is specified, the following devices are touched. */
                                 FOREACH_STRING(p, "/dev/loop-control", "/dev/mapper/control") {
-                                        r = cgroup_add_device_allow(cc, p, "rw");
+                                        r = cgroup_context_add_device_allow(cc, p, CGROUP_DEVICE_READ|CGROUP_DEVICE_WRITE);
                                         if (r < 0)
                                                 return r;
                                 }
                                 FOREACH_STRING(p, "block-loop", "block-blkext", "block-device-mapper") {
-                                        r = cgroup_add_device_allow(cc, p, "rwm");
+                                        r = cgroup_context_add_device_allow(cc, p, CGROUP_DEVICE_READ|CGROUP_DEVICE_WRITE|CGROUP_DEVICE_MKNOD);
                                         if (r < 0)
                                                 return r;
                                 }
@@ -4383,14 +4390,14 @@ int unit_patch_contexts(Unit *u) {
                         }
 
                         if (ec->protect_clock) {
-                                r = cgroup_add_device_allow(cc, "char-rtc", "r");
+                                r = cgroup_context_add_device_allow(cc, "char-rtc", CGROUP_DEVICE_READ);
                                 if (r < 0)
                                         return r;
                         }
 
                         /* If there are encrypted credentials we might need to access the TPM. */
                         if (exec_context_has_encrypted_credentials(ec)) {
-                                r = cgroup_add_device_allow(cc, "char-tpm", "rw");
+                                r = cgroup_context_add_device_allow(cc, "char-tpm", CGROUP_DEVICE_READ|CGROUP_DEVICE_WRITE);
                                 if (r < 0)
                                         return r;
                         }
@@ -4722,10 +4729,12 @@ int unit_make_transient(Unit *u) {
         return 0;
 }
 
-static int log_kill(pid_t pid, int sig, void *userdata) {
+static int log_kill(const PidRef *pid, int sig, void *userdata) {
         _cleanup_free_ char *comm = NULL;
 
-        (void) get_process_comm(pid, &comm);
+        assert(pidref_is_set(pid));
+
+        (void) pidref_get_comm(pid, &comm);
 
         /* Don't log about processes marked with brackets, under the assumption that these are temporary processes
            only, like for example systemd's own PAM stub process. */
@@ -4736,7 +4745,7 @@ static int log_kill(pid_t pid, int sig, void *userdata) {
 
         log_unit_notice(userdata,
                         "Killing process " PID_FMT " (%s) with signal SIG%s.",
-                        pid,
+                        pid->pid,
                         strna(comm),
                         signal_to_string(sig));
 
@@ -4778,8 +4787,8 @@ int unit_kill_context(
                 Unit *u,
                 KillContext *c,
                 KillOperation k,
-                pid_t main_pid,
-                pid_t control_pid,
+                PidRef* main_pid,
+                PidRef* control_pid,
                 bool main_pid_alien) {
 
         bool wait_for_exit = false, send_sighup;
@@ -4806,40 +4815,40 @@ int unit_kill_context(
                 IN_SET(k, KILL_TERMINATE, KILL_TERMINATE_AND_LOG) &&
                 sig != SIGHUP;
 
-        if (main_pid > 0) {
+        if (pidref_is_set(main_pid)) {
                 if (log_func)
                         log_func(main_pid, sig, u);
 
-                r = kill_and_sigcont(main_pid, sig);
+                r = pidref_kill_and_sigcont(main_pid, sig);
                 if (r < 0 && r != -ESRCH) {
                         _cleanup_free_ char *comm = NULL;
-                        (void) get_process_comm(main_pid, &comm);
+                        (void) pidref_get_comm(main_pid, &comm);
 
-                        log_unit_warning_errno(u, r, "Failed to kill main process " PID_FMT " (%s), ignoring: %m", main_pid, strna(comm));
+                        log_unit_warning_errno(u, r, "Failed to kill main process " PID_FMT " (%s), ignoring: %m", main_pid->pid, strna(comm));
                 } else {
                         if (!main_pid_alien)
                                 wait_for_exit = true;
 
                         if (r != -ESRCH && send_sighup)
-                                (void) kill(main_pid, SIGHUP);
+                                (void) pidref_kill(main_pid, SIGHUP);
                 }
         }
 
-        if (control_pid > 0) {
+        if (pidref_is_set(control_pid)) {
                 if (log_func)
                         log_func(control_pid, sig, u);
 
-                r = kill_and_sigcont(control_pid, sig);
+                r = pidref_kill_and_sigcont(control_pid, sig);
                 if (r < 0 && r != -ESRCH) {
                         _cleanup_free_ char *comm = NULL;
-                        (void) get_process_comm(control_pid, &comm);
+                        (void) pidref_get_comm(control_pid, &comm);
 
-                        log_unit_warning_errno(u, r, "Failed to kill control process " PID_FMT " (%s), ignoring: %m", control_pid, strna(comm));
+                        log_unit_warning_errno(u, r, "Failed to kill control process " PID_FMT " (%s), ignoring: %m", control_pid->pid, strna(comm));
                 } else {
                         wait_for_exit = true;
 
                         if (r != -ESRCH && send_sighup)
-                                (void) kill(control_pid, SIGHUP);
+                                (void) pidref_kill(control_pid, SIGHUP);
                 }
         }
 
@@ -4848,15 +4857,16 @@ int unit_kill_context(
                 _cleanup_set_free_ Set *pid_set = NULL;
 
                 /* Exclude the main/control pids from being killed via the cgroup */
-                pid_set = unit_pid_set(main_pid, control_pid);
+                pid_set = unit_pid_set(main_pid ? main_pid->pid : 0, control_pid ? control_pid->pid : 0);
                 if (!pid_set)
                         return -ENOMEM;
 
-                r = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
-                                      sig,
-                                      CGROUP_SIGCONT|CGROUP_IGNORE_SELF,
-                                      pid_set,
-                                      log_func, u);
+                r = cg_kill_recursive(
+                                u->cgroup_path,
+                                sig,
+                                CGROUP_SIGCONT|CGROUP_IGNORE_SELF,
+                                pid_set,
+                                log_func, u);
                 if (r < 0) {
                         if (!IN_SET(r, -EAGAIN, -ESRCH, -ENOENT))
                                 log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", empty_to_root(u->cgroup_path));
@@ -4877,15 +4887,17 @@ int unit_kill_context(
                         if (send_sighup) {
                                 set_free(pid_set);
 
-                                pid_set = unit_pid_set(main_pid, control_pid);
+                                pid_set = unit_pid_set(main_pid ? main_pid->pid : 0, control_pid ? control_pid->pid : 0);
                                 if (!pid_set)
                                         return -ENOMEM;
 
-                                (void) cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
-                                                         SIGHUP,
-                                                         CGROUP_IGNORE_SELF,
-                                                         pid_set,
-                                                         NULL, NULL);
+                                (void) cg_kill_recursive(
+                                                u->cgroup_path,
+                                                SIGHUP,
+                                                CGROUP_IGNORE_SELF,
+                                                pid_set,
+                                                /* kill_log= */ NULL,
+                                                /* userdata= */ NULL);
                         }
                 }
         }
@@ -4910,14 +4922,14 @@ int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask) 
         if (hashmap_contains(u->requires_mounts_for, path)) /* Exit quickly if the path is already covered. */
                 return 0;
 
-        _cleanup_free_ char *p = strdup(path);
-        if (!p)
-                return -ENOMEM;
-
         /* Use the canonical form of the path as the stored key. We call path_is_normalized()
          * only after simplification, since path_is_normalized() rejects paths with '.'.
          * path_is_normalized() also verifies that the path fits in PATH_MAX. */
-        path = path_simplify(p);
+        _cleanup_free_ char *p = NULL;
+        r = path_simplify_alloc(path, &p);
+        if (r < 0)
+                return r;
+        path = p;
 
         if (!path_is_normalized(path))
                 return -EPERM;
@@ -5123,22 +5135,57 @@ bool unit_is_pristine(Unit *u) {
                !u->merged_into;
 }
 
-pid_t unit_control_pid(Unit *u) {
+PidRef* unit_control_pid(Unit *u) {
         assert(u);
 
         if (UNIT_VTABLE(u)->control_pid)
                 return UNIT_VTABLE(u)->control_pid(u);
 
-        return 0;
+        return NULL;
 }
 
-pid_t unit_main_pid(Unit *u) {
+PidRef* unit_main_pid(Unit *u) {
         assert(u);
 
         if (UNIT_VTABLE(u)->main_pid)
                 return UNIT_VTABLE(u)->main_pid(u);
 
-        return 0;
+        return NULL;
+}
+
+static void unit_modify_user_nft_set(Unit *u, bool add, NFTSetSource source, uint32_t element) {
+        int r;
+
+        assert(u);
+
+        if (!MANAGER_IS_SYSTEM(u->manager))
+                return;
+
+        CGroupContext *c;
+        c = unit_get_cgroup_context(u);
+        if (!c)
+                return;
+
+        if (!u->manager->fw_ctx) {
+                r = fw_ctx_new_full(&u->manager->fw_ctx, /* init_tables= */ false);
+                if (r < 0)
+                        return;
+
+                assert(u->manager->fw_ctx);
+        }
+
+        FOREACH_ARRAY(nft_set, c->nft_set_context.sets, c->nft_set_context.n_sets) {
+                if (nft_set->source != source)
+                        continue;
+
+                r = nft_set_element_modify_any(u->manager->fw_ctx, add, nft_set->nfproto, nft_set->table, nft_set->set, &element, sizeof(element));
+                if (r < 0)
+                        log_warning_errno(r, "Failed to %s NFT set: family %s, table %s, set %s, ID %u, ignoring: %m",
+                                          add? "add" : "delete", nfproto_to_string(nft_set->nfproto), nft_set->table, nft_set->set, element);
+                else
+                        log_debug("%s NFT set: family %s, table %s, set %s, ID %u",
+                                  add? "Added" : "Deleted", nfproto_to_string(nft_set->nfproto), nft_set->table, nft_set->set, element);
+        }
 }
 
 static void unit_unref_uid_internal(
@@ -5167,10 +5214,18 @@ static void unit_unref_uid_internal(
 }
 
 static void unit_unref_uid(Unit *u, bool destroy_now) {
+        assert(u);
+
+        unit_modify_user_nft_set(u, /* add = */ false, NFT_SET_SOURCE_USER, u->ref_uid);
+
         unit_unref_uid_internal(u, &u->ref_uid, destroy_now, manager_unref_uid);
 }
 
 static void unit_unref_gid(Unit *u, bool destroy_now) {
+        assert(u);
+
+        unit_modify_user_nft_set(u, /* add = */ false, NFT_SET_SOURCE_GROUP, u->ref_gid);
+
         unit_unref_uid_internal(u, (uid_t*) &u->ref_gid, destroy_now, manager_unref_gid);
 }
 
@@ -5265,6 +5320,9 @@ int unit_ref_uid_gid(Unit *u, uid_t uid, gid_t gid) {
         if (r < 0)
                 return log_unit_warning_errno(u, r, "Couldn't add UID/GID reference to unit, proceeding without: %m");
 
+        unit_modify_user_nft_set(u, /* add = */ true, NFT_SET_SOURCE_USER, uid);
+        unit_modify_user_nft_set(u, /* add = */ true, NFT_SET_SOURCE_GROUP, gid);
+
         return r;
 }
 
@@ -5301,6 +5359,7 @@ int unit_acquire_invocation_id(Unit *u) {
 }
 
 int unit_set_exec_params(Unit *u, ExecParameters *p) {
+        const char *confirm_spawn;
         int r;
 
         assert(u);
@@ -5313,7 +5372,13 @@ int unit_set_exec_params(Unit *u, ExecParameters *p) {
 
         p->runtime_scope = u->manager->runtime_scope;
 
-        p->confirm_spawn = manager_get_confirm_spawn(u->manager);
+        confirm_spawn = manager_get_confirm_spawn(u->manager);
+        if (confirm_spawn) {
+                p->confirm_spawn = strdup(confirm_spawn);
+                if (!p->confirm_spawn)
+                        return -ENOMEM;
+        }
+
         p->cgroup_supported = u->manager->cgroup_supported;
         p->prefix = u->manager->prefix;
         SET_FLAG(p->flags, EXEC_PASS_LOG_UNIT|EXEC_CHOWN_DIRECTORIES, MANAGER_IS_SYSTEM(u->manager));
@@ -5325,10 +5390,32 @@ int unit_set_exec_params(Unit *u, ExecParameters *p) {
         p->received_credentials_directory = u->manager->received_credentials_directory;
         p->received_encrypted_credentials_directory = u->manager->received_encrypted_credentials_directory;
 
+        p->shall_confirm_spawn = u->manager->confirm_spawn;
+
+        p->fallback_smack_process_label = u->manager->defaults.smack_process_label;
+
+        if (u->manager->restrict_fs && p->bpf_outer_map_fd < 0) {
+                int fd = lsm_bpf_map_restrict_fs_fd(u);
+                if (fd < 0)
+                        return fd;
+
+                p->bpf_outer_map_fd = fd;
+        }
+
+        p->user_lookup_fd = u->manager->user_lookup_fds[1];
+
+        p->cgroup_id = u->cgroup_id;
+        p->invocation_id = u->invocation_id;
+        sd_id128_to_string(p->invocation_id, p->invocation_id_string);
+        p->unit_id = strdup(u->id);
+        if (!p->unit_id)
+                return -ENOMEM;
+
         return 0;
 }
 
-int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret) {
+int unit_fork_helper_process(Unit *u, const char *name, PidRef *ret) {
+        pid_t pid;
         int r;
 
         assert(u);
@@ -5339,9 +5426,24 @@ int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret) {
 
         (void) unit_realize_cgroup(u);
 
-        r = safe_fork(name, FORK_REOPEN_LOG|FORK_DEATHSIG, ret);
-        if (r != 0)
+        r = safe_fork(name, FORK_REOPEN_LOG|FORK_DEATHSIG_SIGTERM, &pid);
+        if (r < 0)
                 return r;
+        if (r > 0) {
+                _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+                int q;
+
+                /* Parent */
+
+                q = pidref_set_pid(&pidref, pid);
+                if (q < 0)
+                        return q;
+
+                *ret = TAKE_PIDREF(pidref);
+                return r;
+        }
+
+        /* Child */
 
         (void) default_signals(SIGNALS_CRASH_HANDLER, SIGNALS_IGNORE);
         (void) ignore_signals(SIGPIPE);
@@ -5357,8 +5459,8 @@ int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret) {
         return 0;
 }
 
-int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid) {
-        pid_t pid;
+int unit_fork_and_watch_rm_rf(Unit *u, char **paths, PidRef *ret_pid) {
+        _cleanup_(pidref_done) PidRef pid = PIDREF_NULL;
         int r;
 
         assert(u);
@@ -5381,11 +5483,11 @@ int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid) {
                 _exit(ret);
         }
 
-        r = unit_watch_pid(u, pid, true);
+        r = unit_watch_pidref(u, &pid, /* exclusive= */ true);
         if (r < 0)
                 return r;
 
-        *ret_pid = pid;
+        *ret_pid = TAKE_PIDREF(pid);
         return 0;
 }
 
@@ -5762,10 +5864,12 @@ static bool ignore_leftover_process(const char *comm) {
         return comm && comm[0] == '('; /* Most likely our own helper process (PAM?), ignore */
 }
 
-int unit_log_leftover_process_start(pid_t pid, int sig, void *userdata) {
+int unit_log_leftover_process_start(const PidRef *pid, int sig, void *userdata) {
         _cleanup_free_ char *comm = NULL;
 
-        (void) get_process_comm(pid, &comm);
+        assert(pidref_is_set(pid));
+
+        (void) pidref_get_comm(pid, &comm);
 
         if (ignore_leftover_process(comm))
                 return 0;
@@ -5775,15 +5879,17 @@ int unit_log_leftover_process_start(pid_t pid, int sig, void *userdata) {
         log_unit_warning(userdata,
                          "Found left-over process " PID_FMT " (%s) in control group while starting unit. Ignoring.\n"
                          "This usually indicates unclean termination of a previous run, or service implementation deficiencies.",
-                         pid, strna(comm));
+                         pid->pid, strna(comm));
 
         return 1;
 }
 
-int unit_log_leftover_process_stop(pid_t pid, int sig, void *userdata) {
+int unit_log_leftover_process_stop(const PidRef *pid, int sig, void *userdata) {
         _cleanup_free_ char *comm = NULL;
 
-        (void) get_process_comm(pid, &comm);
+        assert(pidref_is_set(pid));
+
+        (void) pidref_get_comm(pid, &comm);
 
         if (ignore_leftover_process(comm))
                 return 0;
@@ -5792,7 +5898,7 @@ int unit_log_leftover_process_stop(pid_t pid, int sig, void *userdata) {
 
         log_unit_info(userdata,
                       "Unit process " PID_FMT " (%s) remains running after unit stopped.",
-                      pid, strna(comm));
+                      pid->pid, strna(comm));
 
         return 1;
 }
@@ -5805,7 +5911,13 @@ int unit_warn_leftover_processes(Unit *u, cg_kill_log_func_t log_func) {
         if (!u->cgroup_path)
                 return 0;
 
-        return cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, 0, 0, NULL, log_func, u);
+        return cg_kill_recursive(
+                        u->cgroup_path,
+                        /* sig= */ 0,
+                        /* flags= */ 0,
+                        /* set= */ NULL,
+                        log_func,
+                        u);
 }
 
 bool unit_needs_console(Unit *u) {
@@ -5830,7 +5942,7 @@ bool unit_needs_console(Unit *u) {
         return exec_context_may_touch_console(ec);
 }
 
-int unit_pid_attachable(Unit *u, pid_t pid, sd_bus_error *error) {
+int unit_pid_attachable(Unit *u, PidRef *pid, sd_bus_error *error) {
         int r;
 
         assert(u);
@@ -5839,21 +5951,21 @@ int unit_pid_attachable(Unit *u, pid_t pid, sd_bus_error *error) {
          * and not a kernel thread either */
 
         /* First, a simple range check */
-        if (!pid_is_valid(pid))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process identifier " PID_FMT " is not valid.", pid);
+        if (!pidref_is_set(pid))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process identifier is not valid.");
 
         /* Some extra safety check */
-        if (pid == 1 || pid == getpid_cached())
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process " PID_FMT " is a manager process, refusing.", pid);
+        if (pid->pid == 1 || pidref_is_self(pid))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process " PID_FMT " is a manager process, refusing.", pid->pid);
 
         /* Don't even begin to bother with kernel threads */
-        r = is_kernel_thread(pid);
+        r = pidref_is_kernel_thread(pid);
         if (r == -ESRCH)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_UNIX_PROCESS_ID_UNKNOWN, "Process with ID " PID_FMT " does not exist.", pid);
+                return sd_bus_error_setf(error, SD_BUS_ERROR_UNIX_PROCESS_ID_UNKNOWN, "Process with ID " PID_FMT " does not exist.", pid->pid);
         if (r < 0)
-                return sd_bus_error_set_errnof(error, r, "Failed to determine whether process " PID_FMT " is a kernel thread: %m", pid);
+                return sd_bus_error_set_errnof(error, r, "Failed to determine whether process " PID_FMT " is a kernel thread: %m", pid->pid);
         if (r > 0)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process " PID_FMT " is a kernel thread, refusing.", pid);
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process " PID_FMT " is a kernel thread, refusing.", pid->pid);
 
         return 0;
 }
@@ -6004,7 +6116,7 @@ void unit_destroy_runtime_data(Unit *u, const ExecContext *context) {
         if (context->runtime_directory_preserve_mode == EXEC_PRESERVE_NO)
                 exec_context_destroy_runtime_directory(context, u->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
 
-        exec_context_destroy_credentials(context, u->manager->prefix[EXEC_DIRECTORY_RUNTIME], u->id);
+        exec_context_destroy_credentials(u);
         exec_context_destroy_mount_ns_dir(u);
 }
 
@@ -6053,6 +6165,18 @@ int unit_can_clean(Unit *u, ExecCleanMask *ret) {
         assert(UNIT_VTABLE(u)->can_clean);
 
         return UNIT_VTABLE(u)->can_clean(u, ret);
+}
+
+bool unit_can_start_refuse_manual(Unit *u) {
+        return unit_can_start(u) && !u->refuse_manual_start;
+}
+
+bool unit_can_stop_refuse_manual(Unit *u) {
+        return unit_can_stop(u) && !u->refuse_manual_stop;
+}
+
+bool unit_can_isolate_refuse_manual(Unit *u) {
+        return unit_can_isolate(u) && !u->refuse_manual_start;
 }
 
 bool unit_can_freeze(Unit *u) {
@@ -6224,6 +6348,81 @@ int unit_get_transitive_dependency_set(Unit *u, UnitDependencyAtom atom, Set **r
 
         *ret = TAKE_PTR(units);
         return 0;
+}
+
+int unit_arm_timer(
+                Unit *u,
+                sd_event_source **source,
+                bool relative,
+                usec_t usec,
+                sd_event_time_handler_t handler) {
+
+        int r;
+
+        assert(u);
+        assert(source);
+        assert(handler);
+
+        if (*source) {
+                if (usec == USEC_INFINITY)
+                        return sd_event_source_set_enabled(*source, SD_EVENT_OFF);
+
+                r = (relative ? sd_event_source_set_time_relative : sd_event_source_set_time)(*source, usec);
+                if (r < 0)
+                        return r;
+
+                return sd_event_source_set_enabled(*source, SD_EVENT_ONESHOT);
+        }
+
+        if (usec == USEC_INFINITY)
+                return 0;
+
+        r = (relative ? sd_event_add_time_relative : sd_event_add_time)(
+                        u->manager->event,
+                        source,
+                        CLOCK_MONOTONIC,
+                        usec, 0,
+                        handler,
+                        u);
+        if (r < 0)
+                return r;
+
+        const char *d = strjoina(unit_type_to_string(u->type), "-timer");
+        (void) sd_event_source_set_description(*source, d);
+
+        return 0;
+}
+
+static int unit_get_nice(Unit *u) {
+        ExecContext *ec;
+
+        ec = unit_get_exec_context(u);
+        return ec ? ec->nice : 0;
+}
+
+static uint64_t unit_get_cpu_weight(Unit *u) {
+        CGroupContext *cc;
+
+        cc = unit_get_cgroup_context(u);
+        return cc ? cgroup_context_cpu_weight(cc, manager_state(u->manager)) : CGROUP_WEIGHT_DEFAULT;
+}
+
+int unit_compare_priority(Unit *a, Unit *b) {
+        int ret;
+
+        ret = CMP(a->type, b->type);
+        if (ret != 0)
+                return -ret;
+
+        ret = CMP(unit_get_cpu_weight(a), unit_get_cpu_weight(b));
+        if (ret != 0)
+                return -ret;
+
+        ret = CMP(unit_get_nice(a), unit_get_nice(b));
+        if (ret != 0)
+                return ret;
+
+        return strcmp(a->id, b->id);
 }
 
 const ActivationDetailsVTable * const activation_details_vtable[_UNIT_TYPE_MAX] = {

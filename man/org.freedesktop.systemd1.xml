@@ -702,8 +702,6 @@ node /org/freedesktop/systemd1 {
 
     <!--property ServiceWatchdogs is not documented!-->
 
-    <!--property SystemState is not documented!-->
-
     <!--property ExitCode is not documented!-->
 
     <!--property DefaultTimerAccuracyUSec is not documented!-->
@@ -1312,11 +1310,16 @@ node /org/freedesktop/systemd1 {
       <function>TryRestartUnit()</function> or <function>ReloadOrTryRestartUnit()</function> for the marked
       units.</para>
 
-      <para><function>BindMountUnit()</function> can be used to bind mount new files or directories into
-      a running service mount namespace.</para>
+      <para><function>BindMountUnit()</function> can be used to bind mount new files or directories into a
+      running service mount namespace. If supported by the kernel, any prior mount on the selected target
+      will be replaced by the new mount. If not supported, any prior mount will be over-mounted, but remain
+      pinned and inaccessible.
+      </para>
 
       <para><function>MountImageUnit()</function> can be used to mount new images into a running service
-      mount namespace.</para>
+      mount namespace. If supported by the kernel, any prior mount on the selected target will be replaced
+      by the new mount. If not supported, any prior mount will be over-mounted, but remain pinned and
+      inaccessible.</para>
 
       <para><function>KillUnit()</function> may be used to kill (i.e. send a signal to) all processes of a
       unit. It takes the unit <varname>name</varname>, an enum <varname>who</varname> and a UNIX
@@ -1630,17 +1633,6 @@ node /org/freedesktop/systemd1 {
 
       <variablelist>
         <varlistentry>
-          <term><literal>split-usr</literal></term>
-
-          <listitem><para><filename>/usr/</filename> was not available when systemd was first invoked. It
-          must either be part of the root file system, or it must be mounted before
-          <command>systemd</command> is invoked. See
-          <ulink url="https://www.freedesktop.org/wiki/Software/systemd/separate-usr-is-broken">
-          Booting Without /usr is Broken</ulink> for details why this is bad.</para>
-          </listitem>
-        </varlistentry>
-
-        <varlistentry>
           <term><literal>unmerged-usr</literal></term>
 
           <listitem><para><filename>/bin</filename>, <filename>/sbin</filename> and
@@ -1648,27 +1640,35 @@ node /org/freedesktop/systemd1 {
           For more information on this issue consult
           <ulink url="https://www.freedesktop.org/wiki/Software/systemd/TheCaseForTheUsrMerge">
             The Case for the /usr Merge
-          </ulink>.</para></listitem>
+          </ulink>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
 
         </varlistentry>
 
         <varlistentry>
           <term><literal>cgroups-missing</literal></term>
 
-          <listitem><para>Support for cgroups is unavailable.</para></listitem>
+          <listitem><para>Support for cgroups is unavailable.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><literal>cgroupsv1</literal></term>
 
-          <listitem><para>The system is using the old cgroup hierarchy.</para></listitem>
+          <listitem><para>The system is using the old cgroup hierarchy.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><literal>local-hwclock</literal></term>
 
           <listitem><para>The local hardware clock (RTC) is configured to be in local time rather than
-          UTC.</para></listitem>
+          UTC.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -1677,28 +1677,36 @@ node /org/freedesktop/systemd1 {
           <listitem><para>The system is running past the end of support declared by the vendor. See the
           description of <varname>SUPPORT_END=</varname> in
           <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><literal>old-kernel</literal></term>
 
           <listitem><para>The system is running a kernel version that is older than the minimum supported by
-          this version of systemd.</para></listitem>
+          this version of systemd.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><literal>var-run-bad</literal></term>
 
           <listitem><para><filename>/run/</filename> does not exist or <filename>/var/run</filename> is not a
-          symlink to <filename>/run/</filename>.</para></listitem>
+          symlink to <filename>/run/</filename>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><literal>overflowuid-not-65534</literal></term>
           <term><literal>overflowgid-not-65534</literal></term>
 
-          <listitem><para>The kernel overflow UID or GID have a value other than 65534.</para></listitem>
+          <listitem><para>The kernel overflow UID or GID have a value other than 65534.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -1706,7 +1714,9 @@ node /org/freedesktop/systemd1 {
           <term><literal>short-gid-range</literal></term>
 
           <listitem><para>The UID or GID range assigned to the running systemd instance covers less than
-          0…65534.</para></listitem>
+          0…65534.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <!-- mtab-not-symlink was removed in b492ce8a22d4527c1372b2d3fbd580627d70c917 -->
@@ -1788,6 +1798,52 @@ node /org/freedesktop/systemd1 {
       access to the unit. It's read from the unit file when it is loaded and cached until the service manager
       is reloaded. This property contains an empty string if SELinux is not used or if no label could be read
       (for example because the unit is not backed by a file on disk).</para>
+
+      <para><varname>SystemState</varname> contains the current state of the system manager. The possible
+      values are:</para>
+
+      <variablelist>
+        <varlistentry>
+          <term><literal>initializing</literal></term>
+
+          <listitem><para>The system is booting, and <filename>basic.target</filename> has not been reached
+          yet.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><literal>starting</literal></term>
+
+          <listitem><para>The system is booting, and <filename>basic.target</filename> has been reached.
+          </para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><literal>running</literal></term>
+
+          <listitem><para>The system has finished booting, and no units are in the failed state.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><literal>degraded</literal></term>
+
+          <listitem><para>The system has finished booting, but some units are in the failed state.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><literal>maintenance</literal></term>
+
+          <listitem><para>The system has finished booting, but it has been put in rescue or maintenance
+          mode.</para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><literal>stopping</literal></term>
+
+          <listitem><para>The system is shutting down.</para></listitem>
+        </varlistentry>
+      </variablelist>
     </refsect2>
 
     <refsect2>
@@ -1977,6 +2033,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b DefaultDependencies = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly b SurviveFinalKillSignal = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s OnSuccessJobMode = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s OnFailureJobMode = '...';
@@ -2090,6 +2148,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <!--property CanClean is not documented!-->
 
     <!--property CanFreeze is not documented!-->
+
+    <!--property SurviveFinalKillSignal is not documented!-->
 
     <!--property OnSuccessJobMode is not documented!-->
 
@@ -2302,6 +2362,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <variablelist class="dbus-property" generated="True" extra-ref="AllowIsolate"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DefaultDependencies"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="SurviveFinalKillSignal"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="OnSuccessJobMode"/>
 
@@ -2869,6 +2931,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly as Environment = ['...', ...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -3057,6 +3123,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       readonly s Group = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b DynamicUser = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly b SetLoginEnvironment = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b RemoveIPC = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -3487,6 +3555,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
 
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
+
     <!--property EnvironmentFiles is not documented!-->
 
     <!--property PassEnvironment is not documented!-->
@@ -3648,6 +3720,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <!--property Group is not documented!-->
 
     <!--property DynamicUser is not documented!-->
+
+    <!--property SetLoginEnvironment is not documented!-->
 
     <!--property RemoveIPC is not documented!-->
 
@@ -4117,6 +4191,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="Environment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="EnvironmentFiles"/>
@@ -4304,6 +4382,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
     <variablelist class="dbus-property" generated="True" extra-ref="Group"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DynamicUser"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="SetLoginEnvironment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="RemoveIPC"/>
 
@@ -4596,10 +4676,11 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
       <varname>ExtensionDirectories</varname>
       see systemd.exec(5) for their meaning.</para>
 
-      <para><varname>MemoryAvailable</varname> indicates how much unused memory is available to the unit before
-      the <literal>MemoryMax</literal> or <literal>MemoryHigh</literal> (whichever is lower) limit set by the cgroup
-      memory controller is reached. It will take into consideration limits on all parent slices, other than the
-      limits set on the unit itself.</para>
+      <para><varname>MemoryAvailable</varname> takes into account unit's and parents' <literal>MemoryMax</literal>
+      or <literal>MemoryHigh</literal> or physically available RAM versus given level's memory consumption
+      and takes minimum. Beware that other units below the tightest parent slice may consume the memory quicker
+      and less than reported value would remain for own allocation.
+      It works better in conjunction with <varname>MemoryAccounting=yes</varname> on involved units.</para>
 
       <para><varname>DelegateSubgroup</varname> contains the cgroup subgroup to place invoked unit processes
       in. As configured by the option of the same name in unit files. This is set to the empty string when it
@@ -4727,6 +4808,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
       readonly t TriggerLimitIntervalUSec = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly u TriggerLimitBurst = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly t PollLimitIntervalUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly u PollLimitBurst = ...;
       readonly u UID = ...;
       readonly u GID = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("invalidates")
@@ -4901,6 +4986,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly as Environment = ['...', ...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -5089,6 +5178,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
       readonly s Group = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b DynamicUser = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly b SetLoginEnvironment = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b RemoveIPC = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -5529,6 +5620,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
 
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
+
     <!--property EnvironmentFiles is not documented!-->
 
     <!--property PassEnvironment is not documented!-->
@@ -5690,6 +5785,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
     <!--property Group is not documented!-->
 
     <!--property DynamicUser is not documented!-->
+
+    <!--property SetLoginEnvironment is not documented!-->
 
     <!--property RemoveIPC is not documented!-->
 
@@ -5961,6 +6058,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
 
     <variablelist class="dbus-property" generated="True" extra-ref="TriggerLimitBurst"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="PollLimitIntervalUSec"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="PollLimitBurst"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="UID"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="GID"/>
@@ -6136,6 +6237,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureWatch"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="Environment"/>
 
@@ -6325,6 +6430,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
 
     <variablelist class="dbus-property" generated="True" extra-ref="DynamicUser"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="SetLoginEnvironment"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="RemoveIPC"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="SetCredential"/>
@@ -6496,6 +6603,10 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
     <variablelist class="dbus-property" generated="True" extra-ref="WatchdogSignal"/>
 
     <!--End of Autogenerated section-->
+
+    <para><varname>PollLimitIntervalUSec</varname>/<varname>PollLimitBurst</varname> properties configure the
+    polling limit for the socket unit. Expects a time in µs, resp. an unsigned integer. If either is set to
+    zero the limiting feature is turned off.</para>
 
     <refsect2>
       <title>Properties</title>
@@ -6796,6 +6907,10 @@ node /org/freedesktop/systemd1/unit/home_2emount {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly as Environment = ['...', ...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -6984,6 +7099,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
       readonly s Group = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b DynamicUser = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly b SetLoginEnvironment = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b RemoveIPC = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -7352,6 +7469,10 @@ node /org/freedesktop/systemd1/unit/home_2emount {
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
 
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
+
     <!--property EnvironmentFiles is not documented!-->
 
     <!--property PassEnvironment is not documented!-->
@@ -7513,6 +7634,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
     <!--property Group is not documented!-->
 
     <!--property DynamicUser is not documented!-->
+
+    <!--property SetLoginEnvironment is not documented!-->
 
     <!--property RemoveIPC is not documented!-->
 
@@ -7878,6 +8001,10 @@ node /org/freedesktop/systemd1/unit/home_2emount {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="Environment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="EnvironmentFiles"/>
@@ -8065,6 +8192,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
     <variablelist class="dbus-property" generated="True" extra-ref="Group"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DynamicUser"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="SetLoginEnvironment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="RemoveIPC"/>
 
@@ -8664,6 +8793,10 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly as Environment = ['...', ...];
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -8852,6 +8985,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
       readonly s Group = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b DynamicUser = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+      readonly b SetLoginEnvironment = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly b RemoveIPC = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -9206,6 +9341,10 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
 
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
+
     <!--property EnvironmentFiles is not documented!-->
 
     <!--property PassEnvironment is not documented!-->
@@ -9367,6 +9506,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
     <!--property Group is not documented!-->
 
     <!--property DynamicUser is not documented!-->
+
+    <!--property SetLoginEnvironment is not documented!-->
 
     <!--property RemoveIPC is not documented!-->
 
@@ -9718,6 +9859,10 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="Environment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="EnvironmentFiles"/>
@@ -9905,6 +10050,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
     <variablelist class="dbus-property" generated="True" extra-ref="Group"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="DynamicUser"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="SetLoginEnvironment"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="RemoveIPC"/>
 
@@ -10363,6 +10510,10 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
   };
   interface org.freedesktop.DBus.Peer { ... };
   interface org.freedesktop.DBus.Introspectable { ... };
@@ -10532,6 +10683,10 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
     <!--property MemoryPressureWatch is not documented!-->
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
+
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
 
     <!--Autogenerated cross-references for systemd.directives, do not edit-->
 
@@ -10710,6 +10865,10 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureWatch"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
 
     <!--End of Autogenerated section-->
 
@@ -10912,6 +11071,10 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
       readonly s MemoryPressureWatch = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
       readonly t MemoryPressureThresholdUSec = ...;
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly a(iiss) NFTSet = [...];
+      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+      readonly b CoredumpReceive = ...;
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
       readonly s KillMode = '...';
       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
@@ -11101,6 +11264,10 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
     <!--property MemoryPressureWatch is not documented!-->
 
     <!--property MemoryPressureThresholdUSec is not documented!-->
+
+    <!--property NFTSet is not documented!-->
+
+    <!--property CoredumpReceive is not documented!-->
 
     <!--property KillMode is not documented!-->
 
@@ -11310,6 +11477,10 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
 
     <variablelist class="dbus-property" generated="True" extra-ref="MemoryPressureThresholdUSec"/>
 
+    <variablelist class="dbus-property" generated="True" extra-ref="NFTSet"/>
+
+    <variablelist class="dbus-property" generated="True" extra-ref="CoredumpReceive"/>
+
     <variablelist class="dbus-property" generated="True" extra-ref="KillMode"/>
 
     <variablelist class="dbus-property" generated="True" extra-ref="KillSignal"/>
@@ -11482,4 +11653,185 @@ $ gdbus introspect --system --dest org.freedesktop.systemd1 \
   </refsect1>
 
   <xi:include href="org.freedesktop.locale1.xml" xpointer="versioning"/>
+
+  <refsect1>
+    <title>History</title>
+    <refsect2>
+      <title>The Manager Object</title>
+      <para><varname>RuntimeWatchdogPreUSec</varname> and
+      <varname>RuntimeWatchdogPreGovernor</varname> were added in version 251.</para>
+      <para><varname>WatchdogDevice</varname>,
+      <varname>WatchdogLastPingTimestamp</varname>,
+      <varname>WatchdogLastPingTimestampMonotonic</varname>,
+      <varname>DefaultDeviceTimeoutUSec</varname>,
+      <function>DumpUnitsMatchingPatterns()</function>, and
+      <function>DumpUnitsMatchingPatternsByFileDescriptor()</function> were added in version 252.</para>
+      <para><function>GetUnitByPIDFD()</function> and
+      <function>DisableUnitFilesWithFlagsAndInstallInfo()</function> were added in version 253.</para>
+      <para><varname>ConfidentialVirtualization</varname>,
+      <varname>DefaultIOAccounting</varname>,
+      <varname>DefaultIPAccounting</varname>,
+      <varname>DefaultMemoryPressureThresholdUSec</varname>,
+      <varname>DefaultMemoryPressureWatch</varname>,
+      <function>QueueSignalUnit()</function>,
+      <function>SoftReboot()</function>, and
+      <function>DumpUnitFileDescriptorStore()</function> were added in version 254.</para>
+    </refsect2>
+    <refsect2>
+      <title>Unit Objects</title>
+      <para><varname>Upholds</varname> and
+      <varname>UpheldBy</varname> were added in version 251.</para>
+      <para><varname>AccessSELinuxContext</varname> and
+      <varname>ActivationDetails</varname> were added in version 252.</para>
+      <para><function>QueueSignal()</function> was added in version 254.</para>
+      <para><varname>SurviveFinalKillSignal</varname> was added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Service Unit Objects</title>
+      <para><varname>ControlGroupId</varname> and
+      <varname>ExtensionDirectories</varname> were added in version 251.</para>
+      <para><varname>OpenFile</varname>,
+      <varname>ReloadSignal</varname>,
+      <varname>MemoryZSwapMax</varname>, and
+      <varname>LogFilterPatterns</varname> were added in version 253.</para>
+      <para><varname>RestartMode</varname>,
+      <varname>RestartSteps</varname>,
+      <varname>RestartMaxDelayUSec</varname>,
+      <varname>RestartUSecNext</varname>,
+      <varname>FileDescriptorStorePreserve</varname>,
+      <function>DumpFileDescriptorStore()</function>,
+      <varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>,
+      <varname>MemoryPressureThresholdUSec</varname>,
+      <varname>RootEphemeral</varname>,
+      <varname>ImportCredential</varname>,
+      <varname>MemoryKSM</varname>,
+      <varname>RootImagePolicy</varname>,
+      <varname>MountImagePolicy</varname>, and
+      <varname>ExtensionImagePolicy</varname> were added in version 254.</para>
+      <para><varname>NFTSet</varname>,
+      <varname>SetLoginEnvironment</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Socket Unit Objects</title>
+      <para><varname>ControlGroupId</varname> and
+      <varname>ExtensionDirectories</varname> were added in version 251.</para>
+      <para><varname>MemoryZSwapMax</varname> and
+      <varname>LogFilterPatterns</varname> were added in version 253.</para>
+      <para><varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>,
+      <varname>MemoryPressureThresholdUSec</varname>,
+      <varname>RootEphemeral</varname>,
+      <varname>ImportCredential</varname>,
+      <varname>MemoryKSM</varname>,
+      <varname>RootImagePolicy</varname>,
+      <varname>MountImagePolicy</varname>, and
+      <varname>ExtensionImagePolicy</varname> were added in version 254.</para>
+      <para><varname>PollLimitIntervalUSec</varname>,
+      <varname>PollLimitBurst</varname>,
+      <varname>NFTSet</varname>,
+      <varname>SetLoginEnvironment</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Mount Unit Objects</title>
+      <para><varname>ControlGroupId</varname> and
+      <varname>ExtensionDirectories</varname> were added in version 251.</para>
+      <para><varname>MemoryZSwapMax</varname> and
+      <varname>LogFilterPatterns</varname> were added in version 253.</para>
+      <para><varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>,
+      <varname>MemoryPressureThresholdUSec</varname>,
+      <varname>RootEphemeral</varname>,
+      <varname>ImportCredential</varname>,
+      <varname>MemoryKSM</varname>,
+      <varname>RootImagePolicy</varname>,
+      <varname>MountImagePolicy</varname>, and
+      <varname>ExtensionImagePolicy</varname> were added in version 254.</para>
+      <para><varname>NFTSet</varname>,
+      <varname>SetLoginEnvironment</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Swap Unit Objects</title>
+      <para><varname>ControlGroupId</varname> and
+      <varname>ExtensionDirectories</varname> were added in version 251.</para>
+      <para><varname>MemoryZSwapMax</varname> and
+      <varname>LogFilterPatterns</varname> were added in version 253.</para>
+      <para><varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>,
+      <varname>MemoryPressureThresholdUSec</varname>,
+      <varname>RootEphemeral</varname>,
+      <varname>ImportCredential</varname>,
+      <varname>MemoryKSM</varname>,
+      <varname>RootImagePolicy</varname>,
+      <varname>MountImagePolicy</varname>, and
+      <varname>ExtensionImagePolicy</varname> were added in version 254.</para>
+      <para><varname>NFTSet</varname>,
+      <varname>SetLoginEnvironment</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Slice Unit Objects</title>
+      <para><varname>ControlGroupId</varname> was added in version 251.</para>
+      <para><varname>MemoryZSwapMax</varname> was added in version 253.</para>
+      <para><varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>, and
+      <varname>MemoryPressureThresholdUSec</varname> were added in version 254.</para>
+      <para><varname>NFTSet</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Scope Unit Objects</title>
+      <para><varname>ControlGroupId</varname> was added in version 251.</para>
+      <para><varname>OOMPolicy</varname> and
+      <varname>MemoryZSwapMax</varname> were added in version 253.</para>
+      <para><varname>DelegateSubgroup</varname>,
+      <varname>DefaultStartupMemoryLow</varname>,
+      <varname>StartupMemoryLow</varname>,
+      <varname>StartupMemoryHigh</varname>,
+      <varname>StartupMemoryMax</varname>,
+      <varname>StartupMemorySwapMax</varname>,
+      <varname>StartupMemoryZSwapMax</varname>,
+      <varname>MemoryPressureWatch</varname>, and
+      <varname>MemoryPressureThresholdUSec</varname> were added in version 254.</para>
+      <para><varname>NFTSet</varname> and
+      <varname>CoredumpReceive</varname> were added in version 255.</para>
+    </refsect2>
+    <refsect2>
+      <title>Job Objects</title>
+      <para><varname>ActivationDetails</varname> was added in version 252.</para>
+    </refsect2>
+  </refsect1>
 </refentry>

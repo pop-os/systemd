@@ -48,13 +48,35 @@ else
                                libbasic_gcrypt]
 endif
 
-fuzzers += [
-        {
+executables += [
+        executable_template + {
+                'name' : 'systemctl',
+                'public' : true,
+                'sources' : systemctl_sources,
+                'link_with' : systemctl_link_with,
+                'dependencies' : [
+                        libcap,
+                        liblz4,
+                        libselinux,
+                        libxz,
+                        libzstd,
+                        threads,
+                ],
+        },
+        fuzz_template + {
                 'sources' : [
                         files('fuzz-systemctl-parse-argv.c'),
                         systemctl_sources,
                 ],
                 'link_with' : systemctl_link_with,
-                'c_args' : '-DFUZZ_SYSTEMCTL_PARSE_ARGV',
+                'c_args' : ['-DFUZZ_SYSTEMCTL_PARSE_ARGV'],
         },
 ]
+
+foreach alias : (['halt', 'poweroff', 'reboot', 'shutdown'] +
+                 (conf.get('HAVE_SYSV_COMPAT') == 1 ? ['runlevel', 'telinit'] : []))
+        install_emptydir(sbindir)
+        meson.add_install_script(sh, '-c',
+                                 ln_s.format(bindir / 'systemctl',
+                                             sbindir / alias))
+endforeach

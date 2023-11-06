@@ -20,7 +20,6 @@
 #include "networkd-bridge-mdb.h"
 #include "networkd-dhcp-common.h"
 #include "networkd-dhcp-server-static-lease.h"
-#include "networkd-dhcp-server.h"
 #include "networkd-ipv6-proxy-ndp.h"
 #include "networkd-manager.h"
 #include "networkd-ndisc.h"
@@ -181,11 +180,6 @@ int network_verify(Network *network) {
                                     network->filename);
                         network->link_local = ADDRESS_FAMILY_NO;
                 }
-                if (network->dhcp_server) {
-                        log_warning("%s: Cannot enable DHCPServer= when Bond= is specified, disabling DHCPServer=.",
-                                    network->filename);
-                        network->dhcp_server = false;
-                }
                 if (!ordered_hashmap_isempty(network->addresses_by_section))
                         log_warning("%s: Cannot set addresses when Bond= is specified, ignoring addresses.",
                                     network->filename);
@@ -214,8 +208,6 @@ int network_verify(Network *network) {
                                         m = MACVTAP(netdev);
                                 else
                                         continue;
-
-                                assert(m);
 
                                 if (m->mode == NETDEV_MACVLAN_MODE_PASSTHRU)
                                         network->link_local = ADDRESS_FAMILY_NO;
@@ -317,7 +309,9 @@ int network_verify(Network *network) {
         network_drop_invalid_nexthops(network);
         network_drop_invalid_bridge_fdb_entries(network);
         network_drop_invalid_bridge_mdb_entries(network);
-        network_drop_invalid_neighbors(network);
+        r = network_drop_invalid_neighbors(network);
+        if (r < 0)
+                return r;
         network_drop_invalid_address_labels(network);
         network_drop_invalid_prefixes(network);
         network_drop_invalid_route_prefixes(network);
@@ -328,8 +322,6 @@ int network_verify(Network *network) {
         if (r < 0)
                 return r; /* sr_iov_drop_invalid_sections() logs internally. */
         network_drop_invalid_static_leases(network);
-
-        network_adjust_dhcp_server(network);
 
         return 0;
 }
@@ -404,10 +396,12 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .dhcp_send_hostname = true,
                 .dhcp_send_release = true,
                 .dhcp_route_metric = DHCP_ROUTE_METRIC,
+                .dhcp_use_rapid_commit = true,
                 .dhcp_client_identifier = _DHCP_CLIENT_ID_INVALID,
                 .dhcp_route_table = RT_TABLE_MAIN,
                 .dhcp_ip_service_type = -1,
                 .dhcp_broadcast = -1,
+                .dhcp_ipv6_only_mode = -1,
 
                 .dhcp6_use_address = true,
                 .dhcp6_use_pd_prefix = true,
@@ -416,6 +410,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .dhcp6_use_ntp = true,
                 .dhcp6_use_captive_portal = true,
                 .dhcp6_use_rapid_commit = true,
+                .dhcp6_send_hostname = true,
                 .dhcp6_duid.type = _DUID_TYPE_INVALID,
                 .dhcp6_client_start_mode = _DHCP6_CLIENT_START_MODE_INVALID,
                 .dhcp6_send_release = true,
@@ -471,9 +466,9 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .ipv4_route_localnet = -1,
                 .ipv6_privacy_extensions = _IPV6_PRIVACY_EXTENSIONS_INVALID,
                 .ipv6_dad_transmits = -1,
-                .ipv6_hop_limit = -1,
                 .ipv6_proxy_ndp = -1,
                 .proxy_arp = -1,
+                .ipv4_rp_filter = _IP_REVERSE_PATH_FILTER_INVALID,
 
                 .ipv6_accept_ra = -1,
                 .ipv6_accept_ra_use_dns = true,
@@ -483,6 +478,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                 .ipv6_accept_ra_use_autonomous_prefix = true,
                 .ipv6_accept_ra_use_onlink_prefix = true,
                 .ipv6_accept_ra_use_mtu = true,
+                .ipv6_accept_ra_use_hop_limit = true,
+                .ipv6_accept_ra_use_icmp6_ratelimit = true,
                 .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
                 .ipv6_accept_ra_route_metric_high = IPV6RA_ROUTE_METRIC_HIGH,
                 .ipv6_accept_ra_route_metric_medium = IPV6RA_ROUTE_METRIC_MEDIUM,
@@ -524,6 +521,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                         "IPv6PrefixDelegation\0"
                         "IPv6Prefix\0"
                         "IPv6RoutePrefix\0"
+                        "IPv6PREF64Prefix\0"
                         "LLDP\0"
                         "TrafficControlQueueingDiscipline\0"
                         "CAN\0"
@@ -719,20 +717,24 @@ static Network *network_free(Network *network) {
         ordered_hashmap_free(network->dhcp_client_send_options);
         ordered_hashmap_free(network->dhcp_client_send_vendor_options);
         free(network->dhcp_netlabel);
+        nft_set_context_clear(&network->dhcp_nft_set_context);
 
         /* DHCPv6 client */
         free(network->dhcp6_mudurl);
+        free(network->dhcp6_hostname);
         strv_free(network->dhcp6_user_class);
         strv_free(network->dhcp6_vendor_class);
         set_free(network->dhcp6_request_options);
         ordered_hashmap_free(network->dhcp6_client_send_options);
         ordered_hashmap_free(network->dhcp6_client_send_vendor_options);
         free(network->dhcp6_netlabel);
+        nft_set_context_clear(&network->dhcp6_nft_set_context);
 
         /* DHCP PD */
         free(network->dhcp_pd_uplink_name);
         set_free(network->dhcp_pd_tokens);
         free(network->dhcp_pd_netlabel);
+        nft_set_context_clear(&network->dhcp_pd_nft_set_context);
 
         /* Router advertisement */
         ordered_set_free(network->router_search_domains);
@@ -748,6 +750,7 @@ static Network *network_free(Network *network) {
         set_free(network->ndisc_allow_listed_route_prefix);
         set_free(network->ndisc_tokens);
         free(network->ndisc_netlabel);
+        nft_set_context_clear(&network->ndisc_nft_set_context);
 
         /* LLDP */
         free(network->lldp_mudurl);
@@ -770,10 +773,11 @@ static Network *network_free(Network *network) {
         hashmap_free_with_destructor(network->nexthops_by_section, nexthop_free);
         hashmap_free_with_destructor(network->bridge_fdb_entries_by_section, bridge_fdb_free);
         hashmap_free_with_destructor(network->bridge_mdb_entries_by_section, bridge_mdb_free);
-        hashmap_free_with_destructor(network->neighbors_by_section, neighbor_free);
+        ordered_hashmap_free_with_destructor(network->neighbors_by_section, neighbor_free);
         hashmap_free_with_destructor(network->address_labels_by_section, address_label_free);
         hashmap_free_with_destructor(network->prefixes_by_section, prefix_free);
         hashmap_free_with_destructor(network->route_prefixes_by_section, route_prefix_free);
+        hashmap_free_with_destructor(network->pref64_prefixes_by_section, pref64_prefix_free);
         hashmap_free_with_destructor(network->rules_by_section, routing_policy_rule_free);
         hashmap_free_with_destructor(network->dhcp_static_leases_by_section, dhcp_static_lease_free);
         ordered_hashmap_free_with_destructor(network->sr_iov_by_section, sr_iov_free);
@@ -826,7 +830,7 @@ bool network_has_static_ipv6_configurations(Network *network) {
                 if (mdb->family == AF_INET6)
                         return true;
 
-        HASHMAP_FOREACH(neighbor, network->neighbors_by_section)
+        ORDERED_HASHMAP_FOREACH(neighbor, network->neighbors_by_section)
                 if (neighbor->family == AF_INET6)
                         return true;
 
@@ -837,6 +841,9 @@ bool network_has_static_ipv6_configurations(Network *network) {
                 return true;
 
         if (!hashmap_isempty(network->route_prefixes_by_section))
+                return true;
+
+        if (!hashmap_isempty(network->pref64_prefixes_by_section))
                 return true;
 
         return false;
