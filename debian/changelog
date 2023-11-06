@@ -1,3 +1,41 @@
+systemd (255~rc1-1) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Update symbol versions for the final 254 release
+  * Remove mangling of man pages post build trying to fix up paths. With
+    merged-/usr being mandatory, this is no longer necessary as the paths
+    will now always point to the correct location.
+  * Use a drop-in to avoid startup failures of systemd-logind when dbus is
+    missing. Instead of patching the systemd-logind.service file, use a
+    drop-in. This way the Debian specific change becomes more visible and
+    easier to override.
+
+  [ Luca Boccassi ]
+  * New upstream version 255~rc1
+  * Drop test-skip-test-path-on-Salsa-CI.patch, merged upstream
+  * Drop Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch,
+    no longer necessary
+  * Refresh patches
+  * Temporarily keep systemd.pc and udev.pc poin to legacy unmerged paths.
+    This will be dropped in the short term, but there are still a lot of
+    FTBFS when changing, so keep it for now
+  * systemd/udev: assert that the system is merged-usr. Support for
+    unmerged system was dropped project-wide. Things will break subtly if
+    ran on such unsupported setups, so add an explicit assert at preinst.
+  * Drop deprecated split-usr and install files from /usr
+  * Install new pam_systemd_loadkey module. If configured, and systemd-
+    cryptsetup and logind are used, the crypsetup passphrase is passed to
+    the PAM stack for later authentication steps such as the GNOME
+    keyring.
+  * Install the default pcrlock config files
+  * Update libsystemd0.symbols
+  * autopkgtest: add dependencies on python3-pefile and nvme-cli for
+    upstream suite
+  * Backport patch to fix arm64 cross-build
+  * Update Lintian overrides
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 06 Nov 2023 20:25:25 +0000
+
 systemd (254.5-1) unstable; urgency=medium
 
   * New upstream version 254.5
