@@ -1020,7 +1020,7 @@ index 65521b1..cd8bac1 100644
  [Service]
 diff --git a/units/systemd-fsckd.service.in b/units/systemd-fsckd.service.in
 new file mode 100644
-index 0000000..f075b66
+index 0000000..845788c
 --- /dev/null
 +++ b/units/systemd-fsckd.service.in
 @@ -0,0 +1,17 @@
