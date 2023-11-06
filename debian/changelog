@@ -1,3 +1,12 @@
+systemd (255~rc1-2) experimental; urgency=medium
+
+  * Build-depend on python3-pefile on all architectures ukify
+  * meson: use enabled/disabled instead of true/false for 'feature'
+    options
+  * meson: use canonical paths for configured tools too
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 06 Nov 2023 22:36:23 +0000
+
 systemd (255~rc1-1) experimental; urgency=medium
 
   [ Michael Biebl ]
