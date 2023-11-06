@@ -16,7 +16,7 @@ systemd (255~rc1-1) experimental; urgency=medium
   * Drop Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch,
     no longer necessary
   * Refresh patches
-  * Temporarily keep systemd.pc and udev.pc poin to legacy unmerged paths.
+  * Temporarily keep systemd.pc and udev.pc pointing to legacy unmerged paths.
     This will be dropped in the short term, but there are still a lot of
     FTBFS when changing, so keep it for now
   * systemd/udev: assert that the system is merged-usr. Support for
