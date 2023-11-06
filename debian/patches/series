@@ -3,7 +3,6 @@ debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
-debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
