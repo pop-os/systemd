@@ -35,6 +35,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_252@LIBSYSTEMD_252 252
  LIBSYSTEMD_253@LIBSYSTEMD_253 253
  LIBSYSTEMD_254@LIBSYSTEMD_254 254
+ LIBSYSTEMD_255@LIBSYSTEMD_255 255~rc1
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -342,6 +343,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_wait@LIBSYSTEMD_221 221
  sd_device_enumerator_add_match_parent@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_property@LIBSYSTEMD_240 240
+ sd_device_enumerator_add_match_property_required@LIBSYSTEMD_255 255~rc1
  sd_device_enumerator_add_match_subsystem@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_sysattr@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_sysname@LIBSYSTEMD_240 240
@@ -518,6 +520,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_hwdb_seek@LIBSYSTEMD_240 240
  sd_hwdb_unref@LIBSYSTEMD_240 240
  sd_id128_from_string@LIBSYSTEMD_209 0
+ sd_id128_get_app_specific@LIBSYSTEMD_255 255~rc1
  sd_id128_get_boot@LIBSYSTEMD_209 0
  sd_id128_get_boot_app_specific@LIBSYSTEMD_240 240
  sd_id128_get_invocation@LIBSYSTEMD_232 232
