@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 19 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index cdf0671..e7f3a60 100644
+index cfa29f3..9149ab7 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1712,22 +1712,6 @@ static void cmdline_take_random_seed(void) {
+@@ -1653,22 +1653,6 @@ static void cmdline_take_random_seed(void) {
                     "This functionality should not be used outside of testing environments.");
  }
  
@@ -45,7 +45,7 @@ index cdf0671..e7f3a60 100644
  static void initialize_core_pattern(bool skip_setup) {
          int r;
  
-@@ -2980,8 +2964,6 @@ int main(int argc, char *argv[]) {
+@@ -2924,8 +2908,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  
@@ -53,17 +53,17 @@ index cdf0671..e7f3a60 100644
 -
                  r = fixup_environment();
                  if (r < 0) {
-                         log_emergency_errno(r, "Failed to fix up PID 1 environment: %m");
+                         log_struct_errno(LOG_EMERG, r,
 diff --git a/sysctl.d/50-coredump.conf.in b/sysctl.d/50-coredump.conf.in
-index 5fb551a..13495f1 100644
+index 90c080b..1730841 100644
 --- a/sysctl.d/50-coredump.conf.in
 +++ b/sysctl.d/50-coredump.conf.in
 @@ -13,7 +13,7 @@
  # the core dump.
  #
  # See systemd-coredump(8) and core(5).
--kernel.core_pattern=|{{ROOTLIBEXECDIR}}/systemd-coredump %P %u %g %s %t %c %h
-+kernel.core_pattern=|{{ROOTLIBEXECDIR}}/systemd-coredump %P %u %g %s %t 9223372036854775808 %h
+-kernel.core_pattern=|{{LIBEXECDIR}}/systemd-coredump %P %u %g %s %t %c %h
++kernel.core_pattern=|{{LIBEXECDIR}}/systemd-coredump %P %u %g %s %t 9223372036854775808 %h
  
  # Allow 16 coredumps to be dispatched in parallel by the kernel.
  # We collect metadata from /proc/%P/, and thus need to make sure the crashed
