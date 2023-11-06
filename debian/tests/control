@@ -202,6 +202,11 @@ Depends: systemd-tests,
   btrfs-progs,
   multipath-tools,
   kpartx,
+  gnutls-bin,
+  opensc,
+  softhsm2,
+  openssh-client,
+  openssh-server,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
