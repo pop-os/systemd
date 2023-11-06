@@ -44,6 +44,24 @@ int parse_boolean(const char *v) {
         return -EINVAL;
 }
 
+int parse_tristate_full(const char *v, const char *third, int *ret) {
+        int r;
+
+        if (isempty(v) || streq_ptr(v, third)) { /* Empty string is always taken as the third/invalid/auto state */
+                if (ret)
+                        *ret = -1;
+        } else {
+                r = parse_boolean(v);
+                if (r < 0)
+                        return r;
+
+                if (ret)
+                        *ret = r;
+        }
+
+        return 0;
+}
+
 int parse_pid(const char *s, pid_t* ret_pid) {
         unsigned long ul = 0;
         pid_t pid;
@@ -425,6 +443,21 @@ int safe_atou_full(const char *s, unsigned base, unsigned *ret_u) {
         return 0;
 }
 
+int safe_atou_bounded(const char *s, unsigned min, unsigned max, unsigned *ret) {
+        unsigned v;
+        int r;
+
+        r = safe_atou(s, &v);
+        if (r < 0)
+                return r;
+
+        if (v < min || v > max)
+                return -ERANGE;
+
+        *ret = v;
+        return 0;
+}
+
 int safe_atoi(const char *s, int *ret_i) {
         unsigned base = 0;
         char *x = NULL;
@@ -746,4 +779,23 @@ int parse_loadavg_fixed_point(const char *s, loadavg_t *ret) {
                 return r;
 
         return store_loadavg_fixed_point(i, f, ret);
+}
+
+/* Limitations are described in https://www.netfilter.org/projects/nftables/manpage.html and
+ * https://bugzilla.netfilter.org/show_bug.cgi?id=1175 */
+bool nft_identifier_valid(const char *id) {
+        if (!id)
+                return false;
+
+        size_t len = strlen(id);
+        if (len == 0 || len > 31)
+                return false;
+
+        if (!ascii_isalpha(id[0]))
+                return false;
+
+        for (size_t i = 1; i < len; i++)
+                if (!ascii_isalpha(id[i]) && !ascii_isdigit(id[i]) && !IN_SET(id[i], '/', '\\', '_', '.'))
+                        return false;
+        return true;
 }

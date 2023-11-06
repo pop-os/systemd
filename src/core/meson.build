@@ -34,7 +34,9 @@ libcore_sources = files(
         'dynamic-user.c',
         'efi-random.c',
         'emergency-action.c',
+        'exec-credential.c',
         'execute.c',
+        'execute-serialize.c',
         'generator-setup.c',
         'ima-setup.c',
         'import-creds.c',
@@ -116,6 +118,7 @@ libcore = shared_library(
         c_args : ['-fvisibility=default'],
         link_args : ['-shared',
                      '-Wl,--version-script=' + libshared_sym_path],
+        link_depends : libshared_sym_path,
         link_with : libshared,
         dependencies : [libacl,
                         libapparmor,
@@ -130,10 +133,9 @@ libcore = shared_library(
                         libseccomp,
                         libselinux,
                         threads,
-                        userspace,
-                        versiondep],
+                        userspace],
         install : true,
-        install_dir : rootpkglibdir)
+        install_dir : pkglibdir)
 
 core_includes = [includes, include_directories('.')]
 
@@ -142,8 +144,65 @@ systemd_sources = files(
         'crash-handler.c',
 )
 
-in_files = [['system.conf',                     pkgsysconfdir],
-            ['user.conf',                       pkgsysconfdir],
+systemd_executor_sources = files(
+        'executor.c',
+        'exec-invoke.c',
+)
+
+executables += [
+        libexec_template + {
+                'name' : 'systemd',
+                'dbus' : true,
+                'public' : true,
+                'sources' : systemd_sources,
+                'link_with' : [
+                        libcore,
+                        libshared,
+                ],
+                'dependencies' : libseccomp,
+        },
+        libexec_template + {
+                'name' : 'systemd-executor',
+                'public' : true,
+                'sources' : systemd_executor_sources,
+                'include_directories' : core_includes,
+                'link_with' : [
+                        libcore,
+                        libshared,
+                ],
+                'dependencies' : [
+                        libapparmor,
+                        libpam,
+                        libseccomp,
+                        libselinux,
+                ],
+        },
+        fuzz_template + {
+                'sources' : files('fuzz-unit-file.c'),
+                'link_with' : [
+                        libcore,
+                        libshared
+                ],
+                'dependencies' : libmount,
+        },
+        fuzz_template + {
+                'sources' : files('fuzz-manager-serialize.c'),
+                'link_with' : [
+                        libcore,
+                        libshared
+                ],
+        },
+        fuzz_template + {
+                'sources' : files('fuzz-execute-serialize.c'),
+                'link_with' : [
+                        libcore,
+                        libshared
+                ],
+        },
+]
+
+in_files = [['system.conf',                     pkgconfigfiledir],
+            ['user.conf',                       pkgconfigfiledir],
             ['org.freedesktop.systemd1.policy', polkitpolicydir]]
 
 foreach item : in_files
@@ -155,7 +214,7 @@ foreach item : in_files
                 input : file + '.in',
                 output: file,
                 command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
-                install : (dir == pkgsysconfdir) ? install_sysconfdir_samples : (dir != 'no'),
+                install : (dir == pkgconfigfiledir) ? install_sysconfdir_samples : (dir != 'no'),
                 install_dir : dir)
 endforeach
 
@@ -173,38 +232,29 @@ install_data('org.freedesktop.systemd1.conf',
 install_data('org.freedesktop.systemd1.service',
              install_dir : dbussystemservicedir)
 
-meson.add_install_script('sh', '-c', mkdir_p.format(systemshutdowndir))
-meson.add_install_script('sh', '-c', mkdir_p.format(systemsleepdir))
-meson.add_install_script('sh', '-c', mkdir_p.format(systemgeneratordir))
-meson.add_install_script('sh', '-c', mkdir_p.format(usergeneratordir))
+install_emptydir(systemshutdowndir)
+install_emptydir(systemsleepdir)
+install_emptydir(systemgeneratordir)
+install_emptydir(usergeneratordir)
 
 if install_sysconfdir
-        meson.add_install_script('sh', '-c', mkdir_p.format(pkgsysconfdir / 'system'))
-        meson.add_install_script('sh', '-c', mkdir_p.format(pkgsysconfdir / 'user'))
-        meson.add_install_script('sh', '-c', mkdir_p.format(sysconfdir / 'xdg/systemd'))
+        install_emptydir(pkgsysconfdir / 'system')
+        install_emptydir(pkgsysconfdir / 'user')
+        install_emptydir(sysconfdir / 'xdg/systemd')
+        meson.add_install_script(sh, '-c', ln_s.format(pkgsysconfdir / 'user',
+                                                       sysconfdir / 'xdg/systemd/user'))
 endif
+
+install_emptydir(sbindir)
+meson.add_install_script(sh, '-c', ln_s.format(libexecdir / 'systemd', sbindir / 'init'))
 
 ############################################################
 
-test_core_base = {
-        'link_with' : [libcore, libshared],
-        'includes' : core_includes,
+core_test_template = test_template + {
+        'link_with' : [
+                libcore,
+                libshared,
+        ],
+        'include_directories' : core_includes,
+        'suite' : 'core',
 }
-
-fuzzers += [
-        {
-                'sources' : files('fuzz-unit-file.c'),
-                'link_with' : [
-                        libcore,
-                        libshared
-                ],
-                'dependencies' : libmount,
-        },
-        {
-                'sources' : files('fuzz-manager-serialize.c'),
-                'link_with' : [
-                        libcore,
-                        libshared
-                ],
-        },
-]

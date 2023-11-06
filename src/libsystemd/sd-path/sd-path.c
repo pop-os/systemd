@@ -70,7 +70,6 @@ static int from_user_dir(const char *field, char **buffer, const char **ret) {
         _cleanup_free_ char *b = NULL;
         _cleanup_free_ const char *fn = NULL;
         const char *c = NULL;
-        size_t n;
         int r;
 
         assert(field);
@@ -93,26 +92,21 @@ static int from_user_dir(const char *field, char **buffer, const char **ret) {
                 return -errno;
         }
 
-        /* This is an awful parse, but it follows closely what
-         * xdg-user-dirs does upstream */
-
-        n = strlen(field);
+        /* This is an awful parse, but it follows closely what xdg-user-dirs does upstream */
         for (;;) {
                 _cleanup_free_ char *line = NULL;
-                char *l, *p, *e;
+                char *p, *e;
 
-                r = read_line(f, LONG_LINE_MAX, &line);
+                r = read_stripped_line(f, LONG_LINE_MAX, &line);
                 if (r < 0)
                         return r;
                 if (r == 0)
                         break;
 
-                l = strstrip(line);
-
-                if (!strneq(l, field, n))
+                p = startswith(line, field);
+                if (!p)
                         continue;
 
-                p = l + n;
                 p += strspn(p, WHITESPACE);
 
                 if (*p != '=')
@@ -317,7 +311,7 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return from_user_dir("XDG_DESKTOP_DIR", buffer, ret);
 
         case SD_PATH_SYSTEMD_UTIL:
-                *ret = ROOTPREFIX_NOSLASH "/lib/systemd";
+                *ret = PREFIX_NOSLASH "/lib/systemd";
                 return 0;
 
         case SD_PATH_SYSTEMD_SYSTEM_UNIT:
@@ -325,7 +319,7 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return 0;
 
         case SD_PATH_SYSTEMD_SYSTEM_PRESET:
-                *ret = ROOTPREFIX_NOSLASH "/lib/systemd/system-preset";
+                *ret = PREFIX_NOSLASH "/lib/systemd/system-preset";
                 return 0;
 
         case SD_PATH_SYSTEMD_USER_UNIT:
@@ -333,7 +327,7 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return 0;
 
         case SD_PATH_SYSTEMD_USER_PRESET:
-                *ret = ROOTPREFIX_NOSLASH "/lib/systemd/user-preset";
+                *ret = PREFIX_NOSLASH "/lib/systemd/user-preset";
                 return 0;
 
         case SD_PATH_SYSTEMD_SYSTEM_CONF:
@@ -353,11 +347,11 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return 0;
 
         case SD_PATH_SYSTEMD_SLEEP:
-                *ret = ROOTPREFIX_NOSLASH "/lib/systemd/system-sleep";
+                *ret = PREFIX_NOSLASH "/lib/systemd/system-sleep";
                 return 0;
 
         case SD_PATH_SYSTEMD_SHUTDOWN:
-                *ret = ROOTPREFIX_NOSLASH "/lib/systemd/system-shutdown";
+                *ret = PREFIX_NOSLASH "/lib/systemd/system-shutdown";
                 return 0;
 
         case SD_PATH_TMPFILES:
@@ -365,19 +359,19 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 return 0;
 
         case SD_PATH_SYSUSERS:
-                *ret = ROOTPREFIX_NOSLASH "/lib/sysusers.d";
+                *ret = PREFIX_NOSLASH "/lib/sysusers.d";
                 return 0;
 
         case SD_PATH_SYSCTL:
-                *ret = ROOTPREFIX_NOSLASH "/lib/sysctl.d";
+                *ret = PREFIX_NOSLASH "/lib/sysctl.d";
                 return 0;
 
         case SD_PATH_BINFMT:
-                *ret = ROOTPREFIX_NOSLASH "/lib/binfmt.d";
+                *ret = PREFIX_NOSLASH "/lib/binfmt.d";
                 return 0;
 
         case SD_PATH_MODULES_LOAD:
-                *ret = ROOTPREFIX_NOSLASH "/lib/modules-load.d";
+                *ret = PREFIX_NOSLASH "/lib/modules-load.d";
                 return 0;
 
         case SD_PATH_CATALOG:
@@ -537,9 +531,6 @@ static int get_search(uint64_t type, char ***list) {
                                                true,
                                                ARRAY_SBIN_BIN("/usr/local/"),
                                                ARRAY_SBIN_BIN("/usr/"),
-#if HAVE_SPLIT_USR
-                                               ARRAY_SBIN_BIN("/"),
-#endif
                                                NULL);
 
         case SD_PATH_SEARCH_LIBRARY_PRIVATE:
@@ -550,9 +541,6 @@ static int get_search(uint64_t type, char ***list) {
                                                false,
                                                "/usr/local/lib",
                                                "/usr/lib",
-#if HAVE_SPLIT_USR
-                                               "/lib",
-#endif
                                                NULL);
 
         case SD_PATH_SEARCH_LIBRARY_ARCH:
@@ -562,9 +550,6 @@ static int get_search(uint64_t type, char ***list) {
                                                "LD_LIBRARY_PATH",
                                                true,
                                                LIBDIR,
-#if HAVE_SPLIT_USR
-                                               ROOTLIBDIR,
-#endif
                                                NULL);
 
         case SD_PATH_SEARCH_SHARED:

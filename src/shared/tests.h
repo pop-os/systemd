@@ -28,8 +28,23 @@ int get_testdata_dir(const char *suffix, char **ret);
 const char* get_catalog_dir(void);
 bool slow_tests_enabled(void);
 void test_setup_logging(int level);
-int log_tests_skipped(const char *message);
-int log_tests_skipped_errno(int r, const char *message);
+
+#define log_tests_skipped(fmt, ...)                                     \
+        ({                                                              \
+                log_notice("%s: " fmt ", skipping tests.",              \
+                           program_invocation_short_name,               \
+                           ##__VA_ARGS__);                              \
+                EXIT_TEST_SKIP;                                         \
+        })
+
+#define log_tests_skipped_errno(error, fmt, ...)                        \
+        ({                                                              \
+                log_notice_errno(error,                                 \
+                                 "%s: " fmt ", skipping tests: %m",     \
+                                 program_invocation_short_name,         \
+                                 ##__VA_ARGS__);                        \
+                EXIT_TEST_SKIP;                                         \
+        })
 
 int write_tmpfile(char *pattern, const char *contents);
 
@@ -38,6 +53,12 @@ bool have_namespaces(void);
 /* We use the small but non-trivial limit here */
 #define CAN_MEMLOCK_SIZE (512 * 1024U)
 bool can_memlock(void);
+
+/* Define void* buffer and size_t length variables from a hex string. */
+#define DEFINE_HEX_PTR(name, hex)                                       \
+        _cleanup_free_ void *name = NULL;                               \
+        size_t name##_len = 0;                                          \
+        assert_se(unhexmem(hex, strlen_ptr(hex), &name, &name##_len) >= 0);
 
 #define TEST_REQ_RUNNING_SYSTEMD(x)                                 \
         if (sd_booted() > 0) {                                      \

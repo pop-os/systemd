@@ -28,6 +28,7 @@
 #include "cpu-set-util.h"
 #include "creds-util.h"
 #include "efi-api.h"
+#include "efi-loader.h"
 #include "env-file.h"
 #include "env-util.h"
 #include "extract-word.h"
@@ -692,6 +693,8 @@ static int condition_test_security(Condition *c, char **env) {
                 return has_tpm2();
         if (streq(c->parameter, "cvm"))
                 return detect_confidential_virtualization() > 0;
+        if (streq(c->parameter, "measured-uki"))
+                return efi_measured_uki(LOG_DEBUG);
 
         return false;
 }
@@ -748,7 +751,7 @@ static int condition_test_needs_update(Condition *c, char **env) {
         assert(c->parameter);
         assert(c->type == CONDITION_NEEDS_UPDATE);
 
-        r = proc_cmdline_get_bool("systemd.condition-needs-update", &b);
+        r = proc_cmdline_get_bool("systemd.condition-needs-update", /* flags = */ 0, &b);
         if (r < 0)
                 log_debug_errno(r, "Failed to parse systemd.condition-needs-update= kernel command line argument, ignoring: %m");
         if (r > 0)

@@ -22,7 +22,7 @@
 #include "stat-util.h"
 #include "string-table.h"
 #include "terminal-util.h"
-#include "tpm-pcr.h"
+#include "tpm2-pcr.h"
 #include "tpm2-util.h"
 #include "verbs.h"
 
@@ -181,8 +181,8 @@ static int add_credentials_to_table(Table *t, bool encrypted) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to determine backing file system of '%s': %m", de->d_name);
 
-                        secure = r ? "secure" : "weak"; /* ramfs is not swappable, hence "secure", everything else is "weak" */
-                        secure_color = r ? ansi_highlight_green() : ansi_highlight_yellow4();
+                        secure = r > 0 ? "secure" : "weak"; /* ramfs is not swappable, hence "secure", everything else is "weak" */
+                        secure_color = r > 0 ? ansi_highlight_green() : ansi_highlight_yellow4();
                 }
 
                 j = path_join(prefix, de->d_name);
@@ -860,7 +860,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TPM2_PCRS: /* For fixed hash PCR policies only */
-                        r = tpm2_parse_pcr_argument(optarg, &arg_tpm2_pcr_mask);
+                        r = tpm2_parse_pcr_argument_to_mask(optarg, &arg_tpm2_pcr_mask);
                         if (r < 0)
                                 return r;
 
@@ -874,7 +874,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TPM2_PUBLIC_KEY_PCRS: /* For public key PCR policies only */
-                        r = tpm2_parse_pcr_argument(optarg, &arg_tpm2_public_key_pcr_mask);
+                        r = tpm2_parse_pcr_argument_to_mask(optarg, &arg_tpm2_public_key_pcr_mask);
                         if (r < 0)
                                 return r;
 
@@ -930,7 +930,7 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_tpm2_pcr_mask == UINT32_MAX)
                 arg_tpm2_pcr_mask = TPM2_PCR_MASK_DEFAULT;
         if (arg_tpm2_public_key_pcr_mask == UINT32_MAX)
-                arg_tpm2_public_key_pcr_mask = UINT32_C(1) << TPM_PCR_INDEX_KERNEL_IMAGE;
+                arg_tpm2_public_key_pcr_mask = UINT32_C(1) << TPM2_PCR_KERNEL_BOOT;
 
         return 1;
 }

@@ -569,7 +569,7 @@ int vt_disallocate(const char *name) {
                           "\033[r"   /* clear scrolling region */
                           "\033[H"   /* move home */
                           "\033[3J", /* clear screen including scrollback, requires Linux 2.6.40 */
-                          10, false);
+                          10);
         return 0;
 }
 
@@ -1191,7 +1191,7 @@ static int ptsname_namespace(int pty, char **ret) {
 
 int openpt_allocate_in_namespace(pid_t pid, int flags, char **ret_slave) {
         _cleanup_close_ int pidnsfd = -EBADF, mntnsfd = -EBADF, usernsfd = -EBADF, rootfd = -EBADF, fd = -EBADF;
-        _cleanup_close_pair_ int pair[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
         pid_t child;
         int r;
 
@@ -1204,7 +1204,7 @@ int openpt_allocate_in_namespace(pid_t pid, int flags, char **ret_slave) {
         if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
                 return -errno;
 
-        r = namespace_fork("(sd-openptns)", "(sd-openpt)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
+        r = namespace_fork("(sd-openptns)", "(sd-openpt)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                            pidnsfd, mntnsfd, -1, usernsfd, rootfd, &child);
         if (r < 0)
                 return r;
@@ -1244,7 +1244,7 @@ int openpt_allocate_in_namespace(pid_t pid, int flags, char **ret_slave) {
 
 int open_terminal_in_namespace(pid_t pid, const char *name, int mode) {
         _cleanup_close_ int pidnsfd = -EBADF, mntnsfd = -EBADF, usernsfd = -EBADF, rootfd = -EBADF;
-        _cleanup_close_pair_ int pair[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
         pid_t child;
         int r;
 
@@ -1255,7 +1255,7 @@ int open_terminal_in_namespace(pid_t pid, const char *name, int mode) {
         if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
                 return -errno;
 
-        r = namespace_fork("(sd-terminalns)", "(sd-terminal)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
+        r = namespace_fork("(sd-terminalns)", "(sd-terminal)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                            pidnsfd, mntnsfd, -1, usernsfd, rootfd, &child);
         if (r < 0)
                 return r;
@@ -1534,4 +1534,19 @@ void get_log_colors(int priority, const char **on, const char **off, const char 
                 if (highlight)
                         *highlight = ansi_highlight_red();
         }
+}
+
+int set_terminal_cursor_position(int fd, unsigned int row, unsigned int column) {
+        int r;
+        char cursor_position[STRLEN("\x1B[") + DECIMAL_STR_MAX(int) * 2 + STRLEN(";H") + 1];
+
+        assert(fd >= 0);
+
+        xsprintf(cursor_position, "\x1B[%u;%uH", row, column);
+
+        r = loop_write(fd, cursor_position, SIZE_MAX);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to set cursor position, ignoring: %m");
+
+        return 0;
 }

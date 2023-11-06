@@ -261,11 +261,6 @@ static int path_is_vendor_or_generator(const LookupPaths *lp, const char *path) 
         if (path_startswith(rpath, "/usr"))
                 return true;
 
-#if HAVE_SPLIT_USR
-        if (path_startswith(rpath, "/lib"))
-                return true;
-#endif
-
         if (path_is_generator(lp, rpath))
                 return true;
 
@@ -290,6 +285,7 @@ InstallChangeType install_changes_add(
 
         _cleanup_free_ char *p = NULL, *s = NULL;
         InstallChange *c;
+        int r;
 
         assert(!changes == !n_changes);
         assert(INSTALL_CHANGE_TYPE_VALID(type));
@@ -308,21 +304,13 @@ InstallChangeType install_changes_add(
                 return -ENOMEM;
         *changes = c;
 
-        if (path) {
-                p = strdup(path);
-                if (!p)
-                        return -ENOMEM;
+        r = path_simplify_alloc(path, &p);
+        if (r < 0)
+                return r;
 
-                path_simplify(p);
-        }
-
-        if (source) {
-                s = strdup(source);
-                if (!s)
-                        return -ENOMEM;
-
-                path_simplify(s);
-        }
+        r = path_simplify_alloc(source, &s);
+        if (r < 0)
+                return r;
 
         c[(*n_changes)++] = (InstallChange) {
                 .type = type,
@@ -593,11 +581,9 @@ static int mark_symlink_for_removal(
         if (r < 0)
                 return r;
 
-        n = strdup(p);
-        if (!n)
-                return -ENOMEM;
-
-        path_simplify(n);
+        r = path_simplify_alloc(p, &n);
+        if (r < 0)
+                return r;
 
         r = set_consume(*remove_symlinks_to, n);
         if (r == -EEXIST)
@@ -2339,7 +2325,7 @@ int unit_file_unmask(
                 if (!unit_name_is_valid(*name, UNIT_NAME_ANY))
                         return -EINVAL;
 
-                /* If root_dir is set, we don't care about kernel commandline or generators.
+                /* If root_dir is set, we don't care about kernel command line or generators.
                  * But if it is not set, we need to check for interference. */
                 if (!root_dir) {
                         _cleanup_(install_info_clear) InstallInfo info = {
@@ -3260,23 +3246,21 @@ static int read_presets(RuntimeScope scope, const char *root_dir, UnitFilePreset
                         _cleanup_free_ char *line = NULL;
                         _cleanup_(unit_file_preset_rule_done) UnitFilePresetRule rule = {};
                         const char *parameter;
-                        char *l;
 
-                        r = read_line(f, LONG_LINE_MAX, &line);
+                        r = read_stripped_line(f, LONG_LINE_MAX, &line);
                         if (r < 0)
                                 return r;
                         if (r == 0)
                                 break;
 
-                        l = strstrip(line);
                         n++;
 
-                        if (isempty(l))
+                        if (isempty(line))
                                 continue;
-                        if (strchr(COMMENTS, *l))
+                        if (strchr(COMMENTS, line[0]))
                                 continue;
 
-                        parameter = first_word(l, "enable");
+                        parameter = first_word(line, "enable");
                         if (parameter) {
                                 char *unit_name;
                                 char **instances = NULL;
@@ -3295,7 +3279,7 @@ static int read_presets(RuntimeScope scope, const char *root_dir, UnitFilePreset
                                 };
                         }
 
-                        parameter = first_word(l, "disable");
+                        parameter = first_word(line, "disable");
                         if (parameter) {
                                 char *pattern;
 
@@ -3309,7 +3293,7 @@ static int read_presets(RuntimeScope scope, const char *root_dir, UnitFilePreset
                                 };
                         }
 
-                        parameter = first_word(l, "ignore");
+                        parameter = first_word(line, "ignore");
                         if (parameter) {
                                 char *pattern;
 

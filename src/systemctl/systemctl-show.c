@@ -278,25 +278,15 @@ typedef struct UnitStatusInfo {
         LIST_HEAD(ExecStatusInfo, exec_status_info_list);
 } UnitStatusInfo;
 
-static void unit_status_info_free(UnitStatusInfo *info) {
-        ExecStatusInfo *p;
-        UnitCondition *c;
-
+static void unit_status_info_done(UnitStatusInfo *info) {
         strv_free(info->documentation);
         strv_free(info->dropin_paths);
         strv_free(info->triggered_by);
         strv_free(info->triggers);
         strv_free(info->listen);
 
-        while ((c = info->conditions)) {
-                LIST_REMOVE(conditions, info->conditions, c);
-                unit_condition_free(c);
-        }
-
-        while ((p = info->exec_status_info_list)) {
-                LIST_REMOVE(exec_status_info_list, info->exec_status_info_list, p);
-                exec_status_info_free(p);
-        }
+        LIST_CLEAR(conditions, info->conditions, unit_condition_free);
+        LIST_CLEAR(exec_status_info_list, info->exec_status_info_list, exec_status_info_free);
 }
 
 static void format_active_state(const char *active_state, const char **active_on, const char **active_off) {
@@ -636,7 +626,7 @@ static void print_status_info(
                                 if (arg_transport == BUS_TRANSPORT_LOCAL) {
                                         _cleanup_free_ char *comm = NULL;
 
-                                        (void) get_process_comm(i->main_pid, &comm);
+                                        (void) pid_get_comm(i->main_pid, &comm);
                                         if (comm)
                                                 printf(" (%s)", comm);
                                 }
@@ -666,12 +656,12 @@ static void print_status_info(
                         if (i->main_pid > 0)
                                 fputs("; Control PID: ", stdout);
                         else
-                                fputs("Cntrl PID: ", stdout); /* if first in column, abbreviated so it fits alignment */
+                                fputs("  Cntrl PID: ", stdout); /* if first in column, abbreviated so it fits alignment */
 
                         printf(PID_FMT, i->control_pid);
 
                         if (arg_transport == BUS_TRANSPORT_LOCAL) {
-                                (void) get_process_comm(i->control_pid, &c);
+                                (void) pid_get_comm(i->control_pid, &c);
                                 if (c)
                                         printf(" (%s)", c);
                         }
@@ -831,6 +821,8 @@ static void print_status_info(
 }
 
 static void show_unit_help(UnitStatusInfo *i) {
+        bool previous_man_page = false;
+
         assert(i);
 
         if (!i->documentation) {
@@ -838,11 +830,29 @@ static void show_unit_help(UnitStatusInfo *i) {
                 return;
         }
 
-        STRV_FOREACH(p, i->documentation)
-                if (startswith(*p, "man:"))
-                        show_man_page(*p + 4, false);
-                else
-                        log_info("Can't show: %s", *p);
+        STRV_FOREACH(doc, i->documentation) {
+                const char *p;
+
+                p = startswith(*doc, "man:");
+
+                if (p ? doc != i->documentation : previous_man_page) {
+                        puts("");
+                        fflush(stdout);
+                }
+
+                previous_man_page = p;
+
+                if (p)
+                        show_man_page(p, /* null_stdio= */ false);
+                else {
+                        _cleanup_free_ char *t = NULL;
+
+                        if ((p = startswith(*doc, "file://")))
+                                (void) terminal_urlify_path(p, NULL, &t);
+
+                        printf("Additional documentation: %s\n", t ?: p ?: *doc);
+                }
+        }
 }
 
 static int map_main_pid(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata) {
@@ -2065,7 +2075,7 @@ static int show_one(
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_set_free_ Set *found_properties = NULL;
-        _cleanup_(unit_status_info_free) UnitStatusInfo info = {
+        _cleanup_(unit_status_info_done) UnitStatusInfo info = {
                 .runtime_max_sec = USEC_INFINITY,
                 .memory_current = UINT64_MAX,
                 .memory_high = CGROUP_LIMIT_MAX,

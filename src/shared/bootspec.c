@@ -15,7 +15,7 @@
 #include "fileio.h"
 #include "find-esp.h"
 #include "path-util.h"
-#include "pe-header.h"
+#include "pe-binary.h"
 #include "pretty-print.h"
 #include "recurse-dir.h"
 #include "sort-util.h"
@@ -325,9 +325,8 @@ static int boot_entry_load_type1(
 
         for (;;) {
                 _cleanup_free_ char *buf = NULL, *field = NULL;
-                const char *p;
 
-                r = read_line(f, LONG_LINE_MAX, &buf);
+                r = read_stripped_line(f, LONG_LINE_MAX, &buf);
                 if (r == 0)
                         break;
                 if (r == -ENOBUFS)
@@ -337,10 +336,10 @@ static int boot_entry_load_type1(
 
                 line++;
 
-                p = strstrip(buf);
-                if (IN_SET(p[0], '#', '\0'))
+                if (IN_SET(buf[0], '#', '\0'))
                         continue;
 
+                const char *p = buf;
                 r = extract_first_word(&p, &field, NULL, 0);
                 if (r < 0) {
                         log_syntax(NULL, LOG_WARNING, tmp.path, line, r, "Failed to parse, ignoring line: %m");
@@ -450,9 +449,8 @@ int boot_loader_read_conf(BootConfig *config, FILE *file, const char *path) {
 
         for (;;) {
                 _cleanup_free_ char *buf = NULL, *field = NULL;
-                const char *p;
 
-                r = read_line(file, LONG_LINE_MAX, &buf);
+                r = read_stripped_line(file, LONG_LINE_MAX, &buf);
                 if (r == 0)
                         break;
                 if (r == -ENOBUFS)
@@ -462,10 +460,10 @@ int boot_loader_read_conf(BootConfig *config, FILE *file, const char *path) {
 
                 line++;
 
-                p = strstrip(buf);
-                if (IN_SET(p[0], '#', '\0'))
+                if (IN_SET(buf[0], '#', '\0'))
                         continue;
 
+                const char *p = buf;
                 r = extract_first_word(&p, &field, NULL, 0);
                 if (r < 0) {
                         log_syntax(NULL, LOG_WARNING, path, line, r, "Failed to parse, ignoring line: %m");
@@ -576,13 +574,14 @@ static int config_check_inode_relevant_and_unseen(BootConfig *config, int fd, co
                 log_debug("Inode '%s' already seen before, ignoring.", fname);
                 return false;
         }
+
         d = memdup(&st, sizeof(st));
         if (!d)
                 return log_oom();
-        if (set_ensure_put(&config->inodes_seen, &inode_hash_ops, d) < 0)
+
+        if (set_ensure_consume(&config->inodes_seen, &inode_hash_ops, TAKE_PTR(d)) < 0)
                 return log_oom();
 
-        TAKE_PTR(d);
         return true;
 }
 
@@ -757,92 +756,36 @@ static int find_sections(
                 char **ret_osrelease,
                 char **ret_cmdline) {
 
-        _cleanup_free_ struct PeSectionHeader *sections = NULL;
-        _cleanup_free_ char *osrelease = NULL, *cmdline = NULL;
-        ssize_t n;
+        _cleanup_free_ IMAGE_SECTION_HEADER *sections = NULL;
+        _cleanup_free_ IMAGE_DOS_HEADER *dos_header = NULL;
+        _cleanup_free_ char *osrel = NULL, *cmdline = NULL;
+        _cleanup_free_ PeHeader *pe_header = NULL;
+        int r;
 
-        struct DosFileHeader dos;
-        n = pread(fd, &dos, sizeof(dos), 0);
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read DOS header, ignoring: %m", path);
-        if (n != sizeof(dos))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading DOS header, ignoring.", path);
+        assert(fd >= 0);
+        assert(path);
 
-        if (dos.Magic[0] != 'M' || dos.Magic[1] != 'Z')
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: DOS executable magic missing, ignoring.", path);
+        r = pe_load_headers(fd, &dos_header, &pe_header);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse PE file '%s': %m", path);
 
-        uint64_t start = unaligned_read_le32(&dos.ExeHeader);
+        r = pe_load_sections(fd, dos_header, pe_header, &sections);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse PE sections of '%s': %m", path);
 
-        struct PeHeader pe;
-        n = pread(fd, &pe, sizeof(pe), start);
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read PE header, ignoring: %m", path);
-        if (n != sizeof(pe))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading PE header, ignoring.", path);
+        if (!pe_is_uki(pe_header, sections))
+                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "Parsed PE file '%s' is not a UKI.", path);
 
-        if (pe.Magic[0] != 'P' || pe.Magic[1] != 'E' || pe.Magic[2] != 0 || pe.Magic[3] != 0)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: PE executable magic missing, ignoring.", path);
+        r = pe_read_section_data(fd, pe_header, sections, ".osrel", PE_SECTION_SIZE_MAX, (void**) &osrel, NULL);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to read .osrel section of '%s': %m", path);
 
-        size_t n_sections = unaligned_read_le16(&pe.FileHeader.NumberOfSections);
-        if (n_sections > 96)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: PE header has too many sections, ignoring.", path);
-
-        sections = new(struct PeSectionHeader, n_sections);
-        if (!sections)
-                return log_oom();
-
-        n = pread(fd, sections,
-                  n_sections * sizeof(struct PeSectionHeader),
-                  start + sizeof(pe) + unaligned_read_le16(&pe.FileHeader.SizeOfOptionalHeader));
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read section data, ignoring: %m", path);
-        if ((size_t) n != n_sections * sizeof(struct PeSectionHeader))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading sections, ignoring.", path);
-
-        for (size_t i = 0; i < n_sections; i++) {
-                _cleanup_free_ char *k = NULL;
-                uint32_t offset, size;
-                char **b;
-
-                if (strneq((char*) sections[i].Name, ".osrel", sizeof(sections[i].Name)))
-                        b = &osrelease;
-                else if (strneq((char*) sections[i].Name, ".cmdline", sizeof(sections[i].Name)))
-                        b = &cmdline;
-                else
-                        continue;
-
-                if (*b)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Duplicate section %s, ignoring.", path, sections[i].Name);
-
-                offset = unaligned_read_le32(&sections[i].PointerToRawData);
-                size = unaligned_read_le32(&sections[i].VirtualSize);
-
-                if (size > PE_SECTION_SIZE_MAX)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Section %s too large, ignoring.", path, sections[i].Name);
-
-                k = new(char, size+1);
-                if (!k)
-                        return log_oom();
-
-                n = pread(fd, k, size, offset);
-                if (n < 0)
-                        return log_warning_errno(errno, "%s: Failed to read section payload, ignoring: %m", path);
-                if ((size_t) n != size)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading section payload, ignoring:", path);
-
-                /* Allow one trailing NUL byte, but nothing more. */
-                if (size > 0 && memchr(k, 0, size - 1))
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Section contains embedded NUL byte, ignoring.", path);
-
-                k[size] = 0;
-                *b = TAKE_PTR(k);
-        }
-
-        if (!osrelease)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Image lacks .osrel section, ignoring.", path);
+        r = pe_read_section_data(fd, pe_header, sections, ".cmdline", PE_SECTION_SIZE_MAX, (void**) &cmdline, NULL);
+        if (r < 0 && r != -ENXIO) /* cmdline is optional */
+                return log_warning_errno(r, "Failed to read .cmdline section of '%s': %m", path);
 
         if (ret_osrelease)
-                *ret_osrelease = TAKE_PTR(osrelease);
+                *ret_osrelease = TAKE_PTR(osrel);
         if (ret_cmdline)
                 *ret_cmdline = TAKE_PTR(cmdline);
 
@@ -1200,6 +1143,8 @@ int boot_config_augment_from_loader(
                 "auto-windows",                  "Windows Boot Manager",
                 "auto-efi-shell",                "EFI Shell",
                 "auto-efi-default",              "EFI Default Loader",
+                "auto-poweroff",                 "Power Off The System",
+                "auto-reboot",                   "Reboot The System",
                 "auto-reboot-to-firmware-setup", "Reboot Into Firmware Interface",
                 NULL,
         };
@@ -1428,7 +1373,8 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                                         return log_oom();
                         }
 
-                        r = json_append(&v, JSON_BUILD_OBJECT(
+                        r = json_variant_merge_objectb(
+                                        &v, JSON_BUILD_OBJECT(
                                                        JSON_BUILD_PAIR("type", JSON_BUILD_STRING(boot_entry_type_json_to_string(e->type))),
                                                        JSON_BUILD_PAIR_CONDITION(e->id, "id", JSON_BUILD_STRING(e->id)),
                                                        JSON_BUILD_PAIR_CONDITION(e->path, "path", JSON_BUILD_STRING(e->path)),
@@ -1451,7 +1397,8 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                         /* Sanitizers (only memory sanitizer?) do not like function call with too many
                          * arguments and trigger false positive warnings. Let's not add too many json objects
                          * at once. */
-                        r = json_append(&v, JSON_BUILD_OBJECT(
+                        r = json_variant_merge_objectb(
+                                        &v, JSON_BUILD_OBJECT(
                                                        JSON_BUILD_PAIR("isReported", JSON_BUILD_BOOLEAN(e->reported_by_loader)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_left != UINT_MAX, "triesLeft", JSON_BUILD_UNSIGNED(e->tries_left)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_done != UINT_MAX, "triesDone", JSON_BUILD_UNSIGNED(e->tries_done)),

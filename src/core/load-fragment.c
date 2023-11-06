@@ -7,9 +7,6 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/oom.h>
-#if HAVE_SECCOMP
-#include <seccomp.h>
-#endif
 #include <sched.h>
 #include <sys/resource.h>
 
@@ -35,11 +32,14 @@
 #include "env-util.h"
 #include "errno-list.h"
 #include "escape.h"
+#include "exec-credential.h"
+#include "execute.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "firewall-util.h"
 #include "fs-util.h"
 #include "hexdecoct.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "ioprio-util.h"
 #include "ip-protocol-list.h"
 #include "journal-file.h"
@@ -56,9 +56,7 @@
 #include "pcre2-util.h"
 #include "percent-util.h"
 #include "process-util.h"
-#if HAVE_SECCOMP
 #include "seccomp-util.h"
-#endif
 #include "securebits-util.h"
 #include "selinux-util.h"
 #include "signal-util.h"
@@ -3919,23 +3917,23 @@ int config_parse_tasks_max(
                 void *userdata) {
 
         const Unit *u = userdata;
-        TasksMax *tasks_max = data;
+        CGroupTasksMax *tasks_max = data;
         uint64_t v;
         int r;
 
         if (isempty(rvalue)) {
-                *tasks_max = u ? u->manager->default_tasks_max : TASKS_MAX_UNSET;
+                *tasks_max = u ? u->manager->defaults.tasks_max : CGROUP_TASKS_MAX_UNSET;
                 return 0;
         }
 
         if (streq(rvalue, "infinity")) {
-                *tasks_max = TASKS_MAX_UNSET;
+                *tasks_max = CGROUP_TASKS_MAX_UNSET;
                 return 0;
         }
 
         r = parse_permyriad(rvalue);
         if (r >= 0)
-                *tasks_max = (TasksMax) { r, 10000U }; /* r‱ */
+                *tasks_max = (CGroupTasksMax) { r, 10000U }; /* r‱ */
         else {
                 r = safe_atou64(rvalue, &v);
                 if (r < 0) {
@@ -3948,7 +3946,7 @@ int config_parse_tasks_max(
                         return 0;
                 }
 
-                *tasks_max = (TasksMax) { v };
+                *tasks_max = (CGroupTasksMax) { v };
         }
 
         return 0;
@@ -4153,6 +4151,7 @@ int config_parse_device_allow(
                 void *userdata) {
 
         _cleanup_free_ char *path = NULL, *resolved = NULL;
+        CGroupDevicePermissions permissions;
         CGroupContext *c = data;
         const char *p = rvalue;
         int r;
@@ -4192,12 +4191,13 @@ int config_parse_device_allow(
                 }
         }
 
-        if (!isempty(p) && !in_charset(p, "rwm")) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid device rights '%s', ignoring.", p);
+        permissions = isempty(p) ? 0 : cgroup_device_permissions_from_string(p);
+        if (permissions < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, permissions, "Invalid device rights '%s', ignoring.", p);
                 return 0;
         }
 
-        return cgroup_add_device_allow(c, resolved, p);
+        return cgroup_context_add_device_allow(c, resolved, permissions);
 }
 
 int config_parse_io_device_weight(
@@ -5980,7 +5980,7 @@ int config_parse_bpf_foreign_program(
         if (r < 0)
                 return 0;
 
-        r = cgroup_add_bpf_foreign_program(c, attach_type, resolved);
+        r = cgroup_context_add_bpf_foreign_program(c, attach_type, resolved);
         if (r < 0)
                 return log_error_errno(r, "Failed to add foreign BPF program to cgroup context: %m");
 
@@ -6097,39 +6097,37 @@ int config_parse_restrict_network_interfaces(
         return 0;
 }
 
-static int merge_by_names(Unit **u, Set *names, const char *id) {
+static int merge_by_names(Unit *u, Set *names, const char *id) {
         char *k;
         int r;
 
         assert(u);
-        assert(*u);
 
         /* Let's try to add in all names that are aliases of this unit */
         while ((k = set_steal_first(names))) {
                 _cleanup_free_ _unused_ char *free_k = k;
 
                 /* First try to merge in the other name into our unit */
-                r = unit_merge_by_name(*u, k);
+                r = unit_merge_by_name(u, k);
                 if (r < 0) {
                         Unit *other;
 
                         /* Hmm, we couldn't merge the other unit into ours? Then let's try it the other way
                          * round. */
 
-                        other = manager_get_unit((*u)->manager, k);
+                        other = manager_get_unit(u->manager, k);
                         if (!other)
                                 return r; /* return previous failure */
 
-                        r = unit_merge(other, *u);
+                        r = unit_merge(other, u);
                         if (r < 0)
                                 return r;
 
-                        *u = other;
-                        return merge_by_names(u, names, NULL);
+                        return merge_by_names(other, names, NULL);
                 }
 
                 if (streq_ptr(id, k))
-                        unit_choose_id(*u, id);
+                        unit_choose_id(u, id);
         }
 
         return 0;
@@ -6251,15 +6249,7 @@ int unit_load_fragment(Unit *u) {
                 }
         }
 
-        Unit *merged = u;
-        r = merge_by_names(&merged, names, id);
-        if (r < 0)
-                return r;
-
-        if (merged != u)
-                u->load_state = UNIT_MERGED;
-
-        return 0;
+        return merge_by_names(u, names, id);
 }
 
 void unit_dump_config_items(FILE *f) {
@@ -6709,4 +6699,22 @@ int config_parse_open_file(
         LIST_APPEND(open_files, *head, TAKE_PTR(of));
 
         return 0;
+}
+
+int config_parse_cgroup_nft_set(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        CGroupContext *c = ASSERT_PTR(data);
+        Unit *u = ASSERT_PTR(userdata);
+
+        return config_parse_nft_set(unit, filename, line, section, section_line, lvalue, ltype, rvalue, &c->nft_set_context, u);
 }

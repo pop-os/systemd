@@ -19,7 +19,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "in-addr-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "local-addresses.h"
 #include "machine-dbus.h"
 #include "machine.h"
@@ -223,7 +223,7 @@ int bus_machine_method_get_addresses(sd_bus_message *message, void *userdata, sd
         }
 
         case MACHINE_CONTAINER: {
-                _cleanup_close_pair_ int pair[2] = PIPE_EBADF;
+                _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
                 _cleanup_free_ char *us = NULL, *them = NULL;
                 _cleanup_close_ int netns_fd = -EBADF;
                 const char *p;
@@ -233,7 +233,7 @@ int bus_machine_method_get_addresses(sd_bus_message *message, void *userdata, sd
                 if (r < 0)
                         return r;
 
-                p = procfs_file_alloca(m->leader, "ns/net");
+                p = procfs_file_alloca(m->leader.pid, "ns/net");
                 r = readlink_malloc(p, &them);
                 if (r < 0)
                         return r;
@@ -241,14 +241,14 @@ int bus_machine_method_get_addresses(sd_bus_message *message, void *userdata, sd
                 if (streq(us, them))
                         return sd_bus_error_setf(error, BUS_ERROR_NO_PRIVATE_NETWORKING, "Machine %s does not use private networking", m->name);
 
-                r = namespace_open(m->leader, NULL, NULL, &netns_fd, NULL, NULL);
+                r = namespace_open(m->leader.pid, NULL, NULL, &netns_fd, NULL, NULL);
                 if (r < 0)
                         return r;
 
                 if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair) < 0)
                         return -errno;
 
-                r = namespace_fork("(sd-addrns)", "(sd-addr)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
+                r = namespace_fork("(sd-addrns)", "(sd-addr)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                                    -1, -1, netns_fd, -1, -1, &child);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
@@ -371,18 +371,18 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
 
         case MACHINE_CONTAINER: {
                 _cleanup_close_ int mntns_fd = -EBADF, root_fd = -EBADF, pidns_fd = -EBADF;
-                _cleanup_close_pair_ int pair[2] = PIPE_EBADF;
+                _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
                 _cleanup_fclose_ FILE *f = NULL;
                 pid_t child;
 
-                r = namespace_open(m->leader, &pidns_fd, &mntns_fd, NULL, NULL, &root_fd);
+                r = namespace_open(m->leader.pid, &pidns_fd, &mntns_fd, NULL, NULL, &root_fd);
                 if (r < 0)
                         return r;
 
                 if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair) < 0)
                         return -errno;
 
-                r = namespace_fork("(sd-osrelns)", "(sd-osrel)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
+                r = namespace_fork("(sd-osrelns)", "(sd-osrel)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                                    pidns_fd, mntns_fd, -1, -1, root_fd,
                                    &child);
                 if (r < 0)
@@ -496,7 +496,7 @@ static int container_bus_new(Machine *m, sd_bus_error *error, sd_bus **ret) {
                 if (r < 0)
                         return r;
 
-                if (asprintf(&address, "x-machine-unix:pid=%" PID_PRI, m->leader) < 0)
+                if (asprintf(&address, "x-machine-unix:pid=%" PID_PRI, m->leader.pid) < 0)
                         return -ENOMEM;
 
                 bus->address = address;
@@ -880,10 +880,13 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
                 return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Can't bind mount on container with user namespacing applied.");
 
         propagate_directory = strjoina("/run/systemd/nspawn/propagate/", m->name);
-        r = bind_mount_in_namespace(m->leader,
-                                    propagate_directory,
-                                    "/run/host/incoming/",
-                                    src, dest, read_only, make_file_or_directory);
+        r = bind_mount_in_namespace(
+                        &m->leader,
+                        propagate_directory,
+                        "/run/host/incoming/",
+                        src, dest,
+                        read_only,
+                        make_file_or_directory);
         if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to mount %s on %s in machine's namespace: %m", src, dest);
 
@@ -893,7 +896,7 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
 int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *host_basename = NULL, *container_basename = NULL;
         const char *src, *dest, *host_path, *container_path;
-        _cleanup_close_pair_ int errno_pipe_fd[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int errno_pipe_fd[2] = EBADF_PAIR;
         CopyFlags copy_flags = COPY_REFLINK|COPY_MERGE|COPY_HARDLINKS;
         _cleanup_close_ int hostfd = -EBADF;
         Machine *m = ASSERT_PTR(userdata);
@@ -997,7 +1000,7 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
 
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
 
-                q = procfs_file_alloca(m->leader, "ns/mnt");
+                q = procfs_file_alloca(m->leader.pid, "ns/mnt");
                 mntfd = open(q, O_RDONLY|O_NOCTTY|O_CLOEXEC);
                 if (mntfd < 0) {
                         r = log_error_errno(errno, "Failed to open mount namespace of leader: %m");
@@ -1019,9 +1022,9 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
                  * 0 or to the actual UID shift depending on the direction we copy. If no UID shift is set we'll copy
                  * the UID/GIDs as they are. */
                 if (copy_from)
-                        r = copy_tree_at(containerfd, container_basename, hostfd, host_basename, uid_shift == 0 ? UID_INVALID : 0, uid_shift == 0 ? GID_INVALID : 0, copy_flags, NULL);
+                        r = copy_tree_at(containerfd, container_basename, hostfd, host_basename, uid_shift == 0 ? UID_INVALID : 0, uid_shift == 0 ? GID_INVALID : 0, copy_flags, NULL, NULL);
                 else
-                        r = copy_tree_at(hostfd, host_basename, containerfd, container_basename, uid_shift == 0 ? UID_INVALID : uid_shift, uid_shift == 0 ? GID_INVALID : uid_shift, copy_flags, NULL);
+                        r = copy_tree_at(hostfd, host_basename, containerfd, container_basename, uid_shift == 0 ? UID_INVALID : uid_shift, uid_shift == 0 ? GID_INVALID : uid_shift, copy_flags, NULL, NULL);
 
                 hostfd = safe_close(hostfd);
                 containerfd = safe_close(containerfd);
@@ -1090,17 +1093,17 @@ int bus_machine_method_open_root_directory(sd_bus_message *message, void *userda
 
         case MACHINE_CONTAINER: {
                 _cleanup_close_ int mntns_fd = -EBADF, root_fd = -EBADF;
-                _cleanup_close_pair_ int pair[2] = PIPE_EBADF;
+                _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
                 pid_t child;
 
-                r = namespace_open(m->leader, NULL, &mntns_fd, NULL, NULL, &root_fd);
+                r = namespace_open(m->leader.pid, NULL, &mntns_fd, NULL, NULL, &root_fd);
                 if (r < 0)
                         return r;
 
                 if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
                         return -errno;
 
-                r = namespace_fork("(sd-openrootns)", "(sd-openroot)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
+                r = namespace_fork("(sd-openrootns)", "(sd-openroot)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                                    -1, mntns_fd, -1, -1, root_fd, &child);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
@@ -1266,7 +1269,7 @@ static const sd_bus_vtable machine_vtable[] = {
         SD_BUS_PROPERTY("Service", "s", NULL, offsetof(Machine, service), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Unit", "s", NULL, offsetof(Machine, unit), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Scope", "s", NULL, offsetof(Machine, unit), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("Leader", "u", NULL, offsetof(Machine, leader), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Leader", "u", NULL, offsetof(Machine, leader.pid), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Class", "s", property_get_class, offsetof(Machine, class), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RootDirectory", "s", NULL, offsetof(Machine, root_directory), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("NetworkInterfaces", "ai", property_get_netif, 0, SD_BUS_VTABLE_PROPERTY_CONST),

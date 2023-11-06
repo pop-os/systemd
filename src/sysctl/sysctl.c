@@ -28,7 +28,7 @@
 #include "sysctl-util.h"
 
 static char **arg_prefixes = NULL;
-static bool arg_cat_config = false;
+static CatFlags arg_cat_flags = CAT_CONFIG_OFF;
 static bool arg_strict = false;
 static PagerFlags arg_pager_flags = 0;
 
@@ -113,7 +113,7 @@ static int sysctl_write_or_warn(const char *key, const char *value, bool ignore_
 static int apply_glob_option_with_prefix(OrderedHashmap *sysctl_options, Option *option, const char *prefix) {
         _cleanup_strv_free_ char **paths = NULL;
         _cleanup_free_ char *pattern = NULL;
-        int r, k;
+        int r;
 
         assert(sysctl_options);
         assert(option);
@@ -173,28 +173,23 @@ static int apply_glob_option_with_prefix(OrderedHashmap *sysctl_options, Option 
                         continue;
                 }
 
-                k = sysctl_write_or_warn(key, option->value,
-                                         /* ignore_failure = */ option->ignore_failure,
-                                         /* ignore_enoent = */ !arg_strict);
-                if (k < 0 && r >= 0)
-                        r = k;
+                RET_GATHER(r,
+                           sysctl_write_or_warn(key, option->value,
+                                                /* ignore_failure = */ option->ignore_failure,
+                                                /* ignore_enoent = */ !arg_strict));
         }
 
         return r;
 }
 
 static int apply_glob_option(OrderedHashmap *sysctl_options, Option *option) {
-        int r = 0, k;
+        int r = 0;
 
         if (strv_isempty(arg_prefixes))
                 return apply_glob_option_with_prefix(sysctl_options, option, NULL);
 
-        STRV_FOREACH(i, arg_prefixes) {
-                k = apply_glob_option_with_prefix(sysctl_options, option, *i);
-                if (k < 0 && r >= 0)
-                        r = k;
-        }
-
+        STRV_FOREACH(i, arg_prefixes)
+                RET_GATHER(r, apply_glob_option_with_prefix(sysctl_options, option, *i));
         return r;
 }
 
@@ -215,8 +210,7 @@ static int apply_all(OrderedHashmap *sysctl_options) {
                         k = sysctl_write_or_warn(option->key, option->value,
                                                  /* ignore_failure = */ option->ignore_failure,
                                                  /* ignore_enoent = */ !arg_strict);
-                if (k < 0 && r >= 0)
-                        r = k;
+                RET_GATHER(r, k);
         }
 
         return r;
@@ -244,10 +238,10 @@ static int parse_file(OrderedHashmap **sysctl_options, const char *path, bool ig
                 _cleanup_free_ char *l = NULL;
                 bool ignore_failure = false;
                 Option *existing;
-                char *p, *value;
+                char *value;
                 int k;
 
-                k = read_line(f, LONG_LINE_MAX, &l);
+                k = read_stripped_line(f, LONG_LINE_MAX, &l);
                 if (k == 0)
                         break;
                 if (k < 0)
@@ -255,13 +249,12 @@ static int parse_file(OrderedHashmap **sysctl_options, const char *path, bool ig
 
                 c++;
 
-                p = strstrip(l);
-
-                if (isempty(p))
+                if (isempty(l))
                         continue;
-                if (strchr(COMMENTS "\n", *p))
+                if (strchr(COMMENTS, l[0]))
                         continue;
 
+                char *p = l;
                 value = strchr(p, '=');
                 if (value) {
                         if (p[0] == '-') {
@@ -338,6 +331,12 @@ static int read_credential_lines(OrderedHashmap **sysctl_options) {
         return 0;
 }
 
+static int cat_config(char **files) {
+        pager_open(arg_pager_flags);
+
+        return cat_files(NULL, files, arg_cat_flags);
+}
+
 static int help(void) {
         _cleanup_free_ char *link = NULL;
         int r;
@@ -351,6 +350,7 @@ static int help(void) {
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
                "     --cat-config       Show configuration files\n"
+               "     --tldr             Show non-comment parts of configuration\n"
                "     --prefix=PATH      Only apply rules with the specified prefix\n"
                "     --no-pager         Do not pipe output into a pager\n"
                "\nSee the %s for details.\n",
@@ -365,6 +365,7 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_CAT_CONFIG,
+                ARG_TLDR,
                 ARG_PREFIX,
                 ARG_NO_PAGER,
                 ARG_STRICT,
@@ -374,6 +375,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "help",       no_argument,       NULL, 'h'            },
                 { "version",    no_argument,       NULL, ARG_VERSION    },
                 { "cat-config", no_argument,       NULL, ARG_CAT_CONFIG },
+                { "tldr",       no_argument,       NULL, ARG_TLDR       },
                 { "prefix",     required_argument, NULL, ARG_PREFIX     },
                 { "no-pager",   no_argument,       NULL, ARG_NO_PAGER   },
                 { "strict",     no_argument,       NULL, ARG_STRICT     },
@@ -396,7 +398,11 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case ARG_CAT_CONFIG:
-                        arg_cat_config = true;
+                        arg_cat_flags = CAT_CONFIG_ON;
+                        break;
+
+                case ARG_TLDR:
+                        arg_cat_flags = CAT_TLDR;
                         break;
 
                 case ARG_PREFIX: {
@@ -435,16 +441,16 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached();
                 }
 
-        if (arg_cat_config && argc > optind)
+        if (arg_cat_flags != CAT_CONFIG_OFF && argc > optind)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Positional arguments are not allowed with --cat-config");
+                                       "Positional arguments are not allowed with --cat-config/--tldr.");
 
         return 1;
 }
 
 static int run(int argc, char *argv[]) {
         _cleanup_ordered_hashmap_free_ OrderedHashmap *sysctl_options = NULL;
-        int r, k;
+        int r;
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -455,15 +461,11 @@ static int run(int argc, char *argv[]) {
         umask(0022);
 
         if (argc > optind) {
-                int i;
-
                 r = 0;
 
-                for (i = optind; i < argc; i++) {
-                        k = parse_file(&sysctl_options, argv[i], false);
-                        if (k < 0 && r == 0)
-                                r = k;
-                }
+                for (int i = optind; i < argc; i++)
+                        RET_GATHER(r, parse_file(&sysctl_options, argv[i], false));
+
         } else {
                 _cleanup_strv_free_ char **files = NULL;
 
@@ -471,26 +473,16 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to enumerate sysctl.d files: %m");
 
-                if (arg_cat_config) {
-                        pager_open(arg_pager_flags);
+                if (arg_cat_flags != CAT_CONFIG_OFF)
+                        return cat_config(files);
 
-                        return cat_files(NULL, files, 0);
-                }
+                STRV_FOREACH(f, files)
+                        RET_GATHER(r, parse_file(&sysctl_options, *f, true));
 
-                STRV_FOREACH(f, files) {
-                        k = parse_file(&sysctl_options, *f, true);
-                        if (k < 0 && r == 0)
-                                r = k;
-                }
-
-                k = read_credential_lines(&sysctl_options);
-                if (k < 0 && r == 0)
-                        r = k;
+                RET_GATHER(r, read_credential_lines(&sysctl_options));
         }
 
-        k = apply_all(sysctl_options);
-        if (k < 0 && r == 0)
-                r = k;
+        RET_GATHER(r, apply_all(sysctl_options));
 
         return r;
 }

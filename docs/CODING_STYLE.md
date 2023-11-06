@@ -132,6 +132,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   if (r < 0)
           return log_error_errno(r, "Some function failed: %m");
   /* → empty line here is good */
+  ```
 
 - In shell scripts, do not use whitespace after the redirection operator
   (`>some/file` instead of `> some/file`, `<<EOF` instead of `<< EOF`).
@@ -620,7 +621,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   sure to imply `AT_EMPTY_PATH` if an empty or `NULL` path argument is
   specified (and convert that latter to an empty string). This differs from the
   underlying kernel semantics, where `AT_EMPTY_PATH` must always be specified
-  explicitly, and `NULL` is not acepted as path.
+  explicitly, and `NULL` is not accepted as path.
 
 ## Command Line
 

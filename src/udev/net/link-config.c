@@ -364,7 +364,6 @@ Link *link_free(Link *link) {
 
         sd_device_unref(link->device);
         free(link->kind);
-        free(link->driver);
         strv_free(link->altnames);
         return mfree(link);
 }
@@ -417,8 +416,8 @@ int link_new(LinkConfigContext *ctx, sd_netlink **rtnl, sd_device *device, Link 
                         log_link_debug_errno(link, r, "Failed to get permanent hardware address, ignoring: %m");
         }
 
-        r = ethtool_get_driver(&ctx->ethtool_fd, link->ifname, &link->driver);
-        if (r < 0)
+        r = sd_device_get_property_value(link->device, "ID_NET_DRIVER", &link->driver);
+        if (r < 0 && r != -ENOENT)
                 log_link_debug_errno(link, r, "Failed to get driver, ignoring: %m");
 
         *ret = TAKE_PTR(link);
@@ -702,7 +701,7 @@ static bool enable_name_policy(void) {
         if (cached >= 0)
                 return cached;
 
-        r = proc_cmdline_get_bool("net.ifnames", &b);
+        r = proc_cmdline_get_bool("net.ifnames", /* flags = */ 0, &b);
         if (r < 0)
                 log_warning_errno(r, "Failed to parse net.ifnames= kernel command line option, ignoring: %m");
         if (r <= 0)

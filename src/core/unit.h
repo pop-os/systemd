@@ -9,14 +9,15 @@
 #include "sd-id128.h"
 
 #include "bpf-program.h"
+#include "cgroup.h"
 #include "condition.h"
 #include "emergency-action.h"
 #include "install.h"
 #include "list.h"
-#include "show-status.h"
+#include "pidref.h"
 #include "set.h"
+#include "show-status.h"
 #include "unit-file.h"
-#include "cgroup.h"
 
 typedef struct UnitRef UnitRef;
 
@@ -321,10 +322,9 @@ typedef struct Unit {
         /* Queue of units that should be checked if they can release resources now */
         LIST_FIELDS(Unit, release_resources_queue);
 
-        /* PIDs we keep an eye on. Note that a unit might have many
-         * more, but these are the ones we care enough about to
-         * process SIGCHLD for */
-        Set *pids;
+        /* PIDs we keep an eye on. Note that a unit might have many more, but these are the ones we care
+         * enough about to process SIGCHLD for */
+        Set *pids; /* → PidRef* */
 
         /* Used in SIGCHLD and sd_notify() message event invocation logic to avoid that we dispatch the same event
          * multiple times on the same unit. */
@@ -449,6 +449,9 @@ typedef struct Unit {
 
         /* Create default dependencies */
         bool default_dependencies;
+
+        /* Configure so that the unit survives a system transition without stopping/starting. */
+        bool survive_final_kill_signal;
 
         /* Refuse manual starting, allow starting only indirectly via dependency. */
         bool refuse_manual_start;
@@ -624,8 +627,6 @@ typedef struct UnitVTable {
         int (*stop)(Unit *u);
         int (*reload)(Unit *u);
 
-        int (*kill)(Unit *u, KillWho w, int signo, int code, int value, sd_bus_error *error);
-
         /* Clear out the various runtime/state/cache/logs/configuration data */
         int (*clean)(Unit *u, ExecCleanMask m);
 
@@ -719,10 +720,10 @@ typedef struct UnitVTable {
         usec_t (*get_timeout_start_usec)(Unit *u);
 
         /* Returns the main PID if there is any defined, or 0. */
-        pid_t (*main_pid)(Unit *u);
+        PidRef* (*main_pid)(Unit *u);
 
-        /* Returns the main PID if there is any defined, or 0. */
-        pid_t (*control_pid)(Unit *u);
+        /* Returns the control PID if there is any defined, or 0. */
+        PidRef* (*control_pid)(Unit *u);
 
         /* Returns true if the unit currently needs access to the console */
         bool (*needs_console)(Unit *u);
@@ -913,13 +914,14 @@ int unit_stop(Unit *u);
 int unit_reload(Unit *u);
 
 int unit_kill(Unit *u, KillWho w, int signo, int code, int value, sd_bus_error *error);
-int unit_kill_common(Unit *u, KillWho who, int signo, int code, int value, pid_t main_pid, pid_t control_pid, sd_bus_error *error);
 
 void unit_notify_cgroup_oom(Unit *u, bool managed_oom);
 
 void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, bool reload_success);
 
+int unit_watch_pidref(Unit *u, PidRef *pid, bool exclusive);
 int unit_watch_pid(Unit *u, pid_t pid, bool exclusive);
+void unit_unwatch_pidref(Unit *u, PidRef *pid);
 void unit_unwatch_pid(Unit *u, pid_t pid);
 void unit_unwatch_all_pids(Unit *u);
 
@@ -992,7 +994,7 @@ char* unit_concat_strv(char **l, UnitWriteFlags flags);
 int unit_write_setting(Unit *u, UnitWriteFlags flags, const char *name, const char *data);
 int unit_write_settingf(Unit *u, UnitWriteFlags mode, const char *name, const char *format, ...) _printf_(4,5);
 
-int unit_kill_context(Unit *u, KillContext *c, KillOperation k, pid_t main_pid, pid_t control_pid, bool main_pid_alien);
+int unit_kill_context(Unit *u, KillContext *c, KillOperation k, PidRef *main_pid, PidRef *control_pid, bool main_pid_alien);
 
 int unit_make_transient(Unit *u);
 
@@ -1006,8 +1008,8 @@ bool unit_is_unneeded(Unit *u);
 bool unit_is_upheld_by_active(Unit *u, Unit **ret_culprit);
 bool unit_is_bound_by_inactive(Unit *u, Unit **ret_culprit);
 
-pid_t unit_control_pid(Unit *u);
-pid_t unit_main_pid(Unit *u);
+PidRef* unit_control_pid(Unit *u);
+PidRef* unit_main_pid(Unit *u);
 
 void unit_warn_if_dir_nonempty(Unit *u, const char* where);
 int unit_fail_if_noncanonical(Unit *u, const char* where);
@@ -1022,12 +1024,10 @@ void unit_notify_user_lookup(Unit *u, uid_t uid, gid_t gid);
 int unit_set_invocation_id(Unit *u, sd_id128_t id);
 int unit_acquire_invocation_id(Unit *u);
 
-bool unit_shall_confirm_spawn(Unit *u);
-
 int unit_set_exec_params(Unit *s, ExecParameters *p);
 
-int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret);
-int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid);
+int unit_fork_helper_process(Unit *u, const char *name, PidRef *ret);
+int unit_fork_and_watch_rm_rf(Unit *u, char **paths, PidRef *ret);
 
 void unit_remove_dependencies(Unit *u, UnitDependencyMask mask);
 
@@ -1036,13 +1036,14 @@ void unit_unlink_state_files(Unit *u);
 
 int unit_prepare_exec(Unit *u);
 
-int unit_log_leftover_process_start(pid_t pid, int sig, void *userdata);
-int unit_log_leftover_process_stop(pid_t pid, int sig, void *userdata);
+int unit_log_leftover_process_start(const PidRef* pid, int sig, void *userdata);
+int unit_log_leftover_process_stop(const PidRef* pid, int sig, void *userdata);
+
 int unit_warn_leftover_processes(Unit *u, cg_kill_log_func_t log_func);
 
 bool unit_needs_console(Unit *u);
 
-int unit_pid_attachable(Unit *unit, pid_t pid, sd_bus_error *error);
+int unit_pid_attachable(Unit *unit, PidRef *pid, sd_bus_error *error);
 
 static inline bool unit_has_job_type(Unit *u, JobType type) {
         return u && u->job && u->job->type == type;
@@ -1077,6 +1078,10 @@ void unit_destroy_runtime_data(Unit *u, const ExecContext *context);
 int unit_clean(Unit *u, ExecCleanMask mask);
 int unit_can_clean(Unit *u, ExecCleanMask *ret_mask);
 
+bool unit_can_start_refuse_manual(Unit *u);
+bool unit_can_stop_refuse_manual(Unit *u);
+bool unit_can_isolate_refuse_manual(Unit *u);
+
 bool unit_can_freeze(Unit *u);
 int unit_freeze(Unit *u);
 void unit_frozen(Unit *u);
@@ -1088,6 +1093,10 @@ int unit_freeze_vtable_common(Unit *u);
 int unit_thaw_vtable_common(Unit *u);
 
 Condition *unit_find_failed_condition(Unit *u);
+
+int unit_arm_timer(Unit *u, sd_event_source **source, bool relative, usec_t usec, sd_event_time_handler_t handler);
+
+int unit_compare_priority(Unit *a, Unit *b);
 
 /* Macros which append UNIT= or USER_UNIT= to the message */
 

@@ -136,9 +136,24 @@ static inline ConfigSection* config_section_free(ConfigSection *cs) {
 }
 DEFINE_TRIVIAL_CLEANUP_FUNC(ConfigSection*, config_section_free);
 
-int config_section_new(const char *filename, unsigned line, ConfigSection **s);
+int config_section_new(const char *filename, unsigned line, ConfigSection **ret);
 extern const struct hash_ops config_section_hash_ops;
-unsigned hashmap_find_free_section_line(Hashmap *hashmap);
+int _hashmap_by_section_find_unused_line(
+                HashmapBase *entries_by_section,
+                const char *filename,
+                unsigned *ret);
+static inline int hashmap_by_section_find_unused_line(
+                Hashmap *entries_by_section,
+                const char *filename,
+                unsigned *ret) {
+        return _hashmap_by_section_find_unused_line(HASHMAP_BASE(entries_by_section), filename, ret);
+}
+static inline int ordered_hashmap_by_section_find_unused_line(
+                OrderedHashmap *entries_by_section,
+                const char *filename,
+                unsigned *ret) {
+        return _hashmap_by_section_find_unused_line(HASHMAP_BASE(entries_by_section), filename, ret);
+}
 
 static inline bool section_is_invalid(ConfigSection *section) {
         /* If this returns false, then it does _not_ mean the section is valid. */
@@ -370,3 +385,97 @@ typedef enum ConfigParseStringFlags {
                                                                                \
                 return free_and_replace(*enums, xs);                           \
         }
+
+int config_parse_unsigned_bounded(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *name,
+                const char *value,
+                unsigned min,
+                unsigned max,
+                bool ignoring,
+                unsigned *ret);
+
+static inline int config_parse_uint32_bounded(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *name,
+                const char *value,
+                uint32_t min,
+                uint32_t max,
+                bool ignoring,
+                uint32_t *ret) {
+
+        unsigned t;
+        int r;
+
+        r = config_parse_unsigned_bounded(
+                        unit, filename, line, section, section_line, name, value,
+                        min, max, ignoring,
+                        &t);
+        if (r <= 0)
+                return r;
+        assert(t <= UINT32_MAX);
+        *ret = t;
+        return 1;
+}
+
+static inline int config_parse_uint16_bounded(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *name,
+                const char *value,
+                uint16_t min,
+                uint16_t max,
+                bool ignoring,
+                uint16_t *ret) {
+
+        unsigned t;
+        int r;
+
+        r = config_parse_unsigned_bounded(
+                        unit, filename, line, section, section_line, name, value,
+                        min, max, ignoring,
+                        &t);
+        if (r <= 0)
+                return r;
+        assert(t <= UINT16_MAX);
+        *ret = t;
+        return 1;
+}
+
+static inline int config_parse_uint8_bounded(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *name,
+                const char *value,
+                uint8_t min,
+                uint8_t max,
+                bool ignoring,
+                uint8_t *ret) {
+
+        unsigned t;
+        int r;
+
+        r = config_parse_unsigned_bounded(
+                        unit, filename, line, section, section_line, name, value,
+                        min, max, ignoring,
+                        &t);
+        if (r <= 0)
+                return r;
+        assert(t <= UINT8_MAX);
+        *ret = t;
+        return 1;
+}

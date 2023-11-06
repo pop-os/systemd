@@ -22,6 +22,7 @@
 #include "memory-util.h"
 #include "mkdir.h"
 #include "openssl-util.h"
+#include "parse-util.h"
 #include "path-util.h"
 #include "random-util.h"
 #include "sparse-endian.h"
@@ -170,7 +171,7 @@ int read_credential_with_decryption(const char *name, void **ret, size_t *ret_si
                         UINT64_MAX, SIZE_MAX,
                         READ_FULL_FILE_SECURE,
                         NULL,
-                        (char**) data, &sz);
+                        (char**) &data, &sz);
         if (r == -ENOENT)
                 goto not_found;
         if (r < 0)
@@ -251,6 +252,17 @@ int read_credential_strings_many_internal(
 
         va_end(ap);
         return ret;
+}
+
+int read_credential_bool(const char *name) {
+        _cleanup_free_ void *data = NULL;
+        int r;
+
+        r = read_credential(name, &data, NULL);
+        if (r < 0)
+                return IN_SET(r, -ENXIO, -ENOENT) ? 0 : r;
+
+        return parse_boolean(data);
 }
 
 int get_credential_user_password(const char *username, char **ret_password, bool *ret_is_hashed) {
@@ -370,7 +382,7 @@ static int make_credential_host_secret(
         if (r < 0)
                 goto fail;
 
-        r = loop_write(fd, &buf, sizeof(buf), false);
+        r = loop_write(fd, &buf, sizeof(buf));
         if (r < 0)
                 goto fail;
 
@@ -813,26 +825,65 @@ int encrypt_credential_and_warn(
                 if (!pubkey)
                         tpm2_pubkey_pcr_mask = 0;
 
-                r = tpm2_seal(tpm2_device,
-                              tpm2_hash_pcr_mask,
-                              pubkey, pubkey_size,
-                              tpm2_pubkey_pcr_mask,
+                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+                r = tpm2_context_new(tpm2_device, &tpm2_context);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to create TPM2 context: %m");
+
+                r = tpm2_get_best_pcr_bank(tpm2_context, tpm2_hash_pcr_mask | tpm2_pubkey_pcr_mask, &tpm2_pcr_bank);
+                if (r < 0)
+                        return log_error_errno(r, "Could not find best pcr bank: %m");
+
+                TPML_PCR_SELECTION tpm2_hash_pcr_selection;
+                tpm2_tpml_pcr_selection_from_mask(tpm2_hash_pcr_mask, tpm2_pcr_bank, &tpm2_hash_pcr_selection);
+
+                _cleanup_free_ Tpm2PCRValue *tpm2_hash_pcr_values = NULL;
+                size_t tpm2_n_hash_pcr_values;
+                r = tpm2_pcr_read(tpm2_context, &tpm2_hash_pcr_selection, &tpm2_hash_pcr_values, &tpm2_n_hash_pcr_values);
+                if (r < 0)
+                        return log_error_errno(r, "Could not read PCR values: %m");
+
+                TPM2B_PUBLIC public;
+                if (pubkey) {
+                        r = tpm2_tpm2b_public_from_pem(pubkey, pubkey_size, &public);
+                        if (r < 0)
+                                return log_error_errno(r, "Could not convert public key to TPM2B_PUBLIC: %m");
+                }
+
+                TPM2B_DIGEST tpm2_policy = TPM2B_DIGEST_MAKE(NULL, TPM2_SHA256_DIGEST_SIZE);
+                r = tpm2_calculate_sealing_policy(
+                                tpm2_hash_pcr_values,
+                                tpm2_n_hash_pcr_values,
+                                pubkey ? &public : NULL,
+                                /* use_pin= */ false,
+                                /* pcrlock_policy= */ NULL,
+                                &tpm2_policy);
+                if (r < 0)
+                        return log_error_errno(r, "Could not calculate sealing policy digest: %m");
+
+                r = tpm2_seal(tpm2_context,
+                              /* seal_key_handle= */ 0,
+                              &tpm2_policy,
                               /* pin= */ NULL,
                               &tpm2_key, &tpm2_key_size,
                               &tpm2_blob, &tpm2_blob_size,
-                              &tpm2_policy_hash, &tpm2_policy_hash_size,
-                              &tpm2_pcr_bank,
                               &tpm2_primary_alg,
                               /* ret_srk_buf= */ NULL,
-                              /* ret_srk_buf_size= */ 0);
+                              /* ret_srk_buf_size= */ NULL);
                 if (r < 0) {
                         if (sd_id128_equal(with_key, _CRED_AUTO_INITRD))
                                 log_warning("TPM2 present and used, but we didn't manage to talk to it. Credential will be refused if SecureBoot is enabled.");
                         else if (!sd_id128_equal(with_key, _CRED_AUTO))
-                                return r;
+                                return log_error_errno(r, "Failed to seal to TPM2: %m");
 
                         log_notice_errno(r, "TPM2 sealing didn't work, continuing without TPM2: %m");
                 }
+
+                tpm2_policy_hash_size = tpm2_policy.size;
+                tpm2_policy_hash = malloc(tpm2_policy_hash_size);
+                if (!tpm2_policy_hash)
+                        return log_oom();
+                memcpy(tpm2_policy_hash, tpm2_policy.buffer, tpm2_policy_hash_size);
 
                 assert(tpm2_blob_size <= CREDENTIAL_FIELD_SIZE_MAX);
                 assert(tpm2_policy_hash_size <= CREDENTIAL_FIELD_SIZE_MAX);
@@ -1055,7 +1106,7 @@ int decrypt_credential_and_warn(
         if (with_tpm2_pk) {
                 r = tpm2_load_pcr_signature(tpm2_signature_path, &signature_json);
                 if (r < 0)
-                        return r;
+                        return log_error_errno(r, "Failed to load pcr signature: %m");
         }
 
         if (is_tpm2_absent) {
@@ -1154,9 +1205,14 @@ int decrypt_credential_and_warn(
                                     le32toh(z->size));
                 }
 
+                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+                r = tpm2_context_new(tpm2_device, &tpm2_context);
+                if (r < 0)
+                        return r;
+
                  // TODO: Add the SRK data to the credential structure so it can be plumbed
                  // through and used to verify the TPM session.
-                r = tpm2_unseal(tpm2_device,
+                r = tpm2_unseal(tpm2_context,
                                 le64toh(t->pcr_mask),
                                 le16toh(t->pcr_bank),
                                 z ? z->data : NULL,
@@ -1164,6 +1220,7 @@ int decrypt_credential_and_warn(
                                 z ? le64toh(z->pcr_mask) : 0,
                                 signature_json,
                                 /* pin= */ NULL,
+                                /* pcrlock_policy= */ NULL,
                                 le16toh(t->primary_alg),
                                 t->policy_hash_and_blob,
                                 le32toh(t->blob_size),
@@ -1174,8 +1231,7 @@ int decrypt_credential_and_warn(
                                 &tpm2_key,
                                 &tpm2_key_size);
                 if (r < 0)
-                        return r;
-
+                        return log_error_errno(r, "Failed to unseal secret using TPM2: %m");
 #else
                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Credential requires TPM2 support, but TPM2 support not available.");
 #endif

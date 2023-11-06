@@ -207,7 +207,9 @@
 
         <para>Note that this option always applies to the created mount unit
         only regardless whether <option>x-systemd.automount</option> has been
-        specified.</para></listitem>
+        specified.</para>
+
+        <xi:include href="version-info.xml" xpointer="v220"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -230,7 +232,9 @@
 
         <para>Note that these options always apply to the created mount unit
         only regardless whether <option>x-systemd.automount</option> has been
-        specified.</para></listitem>
+        specified.</para>
+
+        <xi:include href="version-info.xml" xpointer="v233"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -245,7 +249,9 @@
         <filename>local-fs.target</filename>, are not automatically
         created. See <varname>WantedBy=</varname> and <varname>RequiredBy=</varname> in
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details.</para></listitem>
+        for details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -257,20 +263,23 @@
         an absolute path. This option may be specified more than once.
         See <varname>RequiresMountsFor=</varname> in
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details.</para></listitem>
+        for details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v220"/></listitem>
        </varlistentry>
 
       <varlistentry>
-        <term><option>x-systemd.device-bound</option></term>
+        <term><option>x-systemd.device-bound=</option></term>
 
-        <listitem><para>The block device backed file system will be upgraded
-        to <varname>BindsTo=</varname> dependency. This option is only useful
-        when mounting file systems manually with
-        <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        as the default dependency in this case is <varname>Requires=</varname>.
-        This option is already implied by entries in <filename>/etc/fstab</filename>
-        or by mount units.
-        </para></listitem>
+        <listitem><para>Takes a boolean argument. If true or no argument, a <varname>BindsTo=</varname> dependency
+        on the backing device is set. If false, the mount unit is not stopped no matter whether the backing device
+        is still present. This is useful when the file system is backed by volume managers. If not set, and the mount
+        comes from unit fragments, i.e. generated from <filename>/etc/fstab</filename> by <citerefentry>
+        <refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry> or loaded from
+        a manually configured mount unit, a combination of <varname>Requires=</varname> and <varname>StopPropagatedFrom=</varname>
+        dependencies is set on the backing device. If doesn't, only <varname>Requires=</varname> is used.</para>
+
+        <xi:include href="version-info.xml" xpointer="v233"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -279,7 +288,9 @@
         <listitem><para>An automount unit will be created for the file
         system. See
         <citerefentry><refentrytitle>systemd.automount</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details.</para></listitem>
+        for details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -288,7 +299,9 @@
         <listitem><para>Configures the idle timeout of the
         automount unit. See <varname>TimeoutIdleSec=</varname> in
         <citerefentry><refentrytitle>systemd.automount</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details.</para></listitem>
+        for details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v220"/></listitem>
       </varlistentry>
 
       <varlistentry id='device-timeout'>
@@ -305,6 +318,8 @@
         <filename>/etc/fstab</filename>, and will be
         ignored when part of the <varname>Options=</varname>
         setting in a unit file.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/>
         </listitem>
       </varlistentry>
 
@@ -325,6 +340,8 @@
 
         <para>See <varname>TimeoutSec=</varname> below for
         details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v233"/>
         </listitem>
       </varlistentry>
 
@@ -347,6 +364,8 @@
         <para><citerefentry project='man-pages'><refentrytitle>wipefs</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         may be used to remove any signatures from a block device to force
         <option>x-systemd.makefs</option> to reinitialize the device.</para>
+
+        <xi:include href="version-info.xml" xpointer="v236"/>
         </listitem>
       </varlistentry>
 
@@ -363,7 +382,9 @@
 
         <para>Note that this option can only be used in
         <filename>/etc/fstab</filename>, and will be ignored when part of the
-        <varname>Options=</varname> setting in a unit file.</para></listitem>
+        <varname>Options=</varname> setting in a unit file.</para>
+
+        <xi:include href="version-info.xml" xpointer="v236"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -377,7 +398,9 @@
         <para>Note that this option can only be used in <filename>/etc/fstab</filename>, and will be ignored
         when part of the <varname>Options=</varname> setting in a unit file. It is also implied for the root
         and <filename>/usr/</filename> partitions discovered by
-        <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para></listitem>
+        <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -388,6 +411,8 @@
         This option disables that behaviour, and causes the mount to fail
         immediately instead. This option is translated into the
         <varname>ReadWriteOnly=</varname> setting in a unit file.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/>
         </listitem>
       </varlistentry>
 
@@ -404,6 +429,8 @@
         <filename>local-fs-pre.target</filename> and <filename>local-fs.target</filename>.
         They also pull in <filename>network-online.target</filename> and are ordered after
         it and <filename>network.target</filename>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/>
         </listitem>
       </varlistentry>
 
@@ -419,6 +446,8 @@
         <para>Note that if <option>x-systemd.automount</option> (see above) is used, neither
         <option>auto</option> nor <option>noauto</option> have any effect. The matching automount unit will
         be added as a dependency to the appropriate target.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/>
         </listitem>
       </varlistentry>
 
@@ -429,6 +458,8 @@
         <filename>local-fs.target</filename> or <filename>remote-fs.target</filename>. Moreover the mount unit is not
         ordered before these target units. This means that the boot will continue without waiting for the mount unit
         and regardless whether the mount point can be mounted successfully.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/>
         </listitem>
       </varlistentry>
 
@@ -442,7 +473,9 @@
         leave the partition mounted until final shutdown. Or in other words, if this flag is set it is
         assumed the mount shall be active during the entire regular runtime of the system, i.e. established
         before the initrd transitions into the host all the way until the host transitions to the final
-        shutdown phase.</para></listitem>
+        shutdown phase.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/></listitem>
       </varlistentry>
     </variablelist>
 
@@ -524,7 +557,9 @@
         corresponds with
         <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
         <parameter>-s</parameter> switch. Defaults to
-        off.</para></listitem>
+        off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v215"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -537,7 +572,9 @@
         This corresponds with
         <citerefentry project='man-pages'><refentrytitle>umount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
         <parameter>-l</parameter> switch. Defaults to
-        off.</para></listitem>
+        off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v232"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -550,7 +587,9 @@
         not succeed. This corresponds with
         <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
         <parameter>-w</parameter> switch. Defaults to
-        off.</para></listitem>
+        off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -561,7 +600,9 @@
         This corresponds with
         <citerefentry project='man-pages'><refentrytitle>umount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
         <parameter>-f</parameter> switch. Defaults to
-        off.</para></listitem>
+        off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v232"/></listitem>
       </varlistentry>
 
       <varlistentry>

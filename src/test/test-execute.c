@@ -23,9 +23,7 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "rm-rf.h"
-#if HAVE_SECCOMP
 #include "seccomp-util.h"
-#endif
 #include "service.h"
 #include "signal-util.h"
 #include "static-destruct.h"
@@ -40,6 +38,8 @@
 
 static char *user_runtime_unit_dir = NULL;
 static bool can_unshare;
+static bool have_net_dummy;
+static unsigned n_ran_tests = 0;
 
 STATIC_DESTRUCTOR_REGISTER(user_runtime_unit_dir, freep);
 
@@ -229,6 +229,8 @@ static void _test(const char *file, unsigned line, const char *func,
         start_parent_slices(unit);
         assert_se(unit_start(unit, NULL) >= 0);
         check_main_result(file, line, func, m, unit, status_expected, code_expected);
+
+        ++n_ran_tests;
 }
 #define test(m, unit_name, status_expected, code_expected) \
         _test(PROJECT_FILE, __LINE__, __func__, m, unit_name, status_expected, code_expected)
@@ -400,7 +402,7 @@ static void test_exec_personality(Manager *m) {
 
 #elif defined(__i386__)
         test(m, "exec-personality-x86.service", 0, CLD_EXITED);
-#elif defined(__loongarch64)
+#elif defined(__loongarch_lp64)
         test(m, "exec-personality-loongarch64.service", 0, CLD_EXITED);
 #else
         log_notice("Unknown personality, skipping %s", __func__);
@@ -583,7 +585,7 @@ static int find_libraries(const char *exec, char ***ret) {
         _cleanup_(sd_event_source_unrefp) sd_event_source *sigchld_source = NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *stdout_source = NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *stderr_source = NULL;
-        _cleanup_close_pair_ int outpipe[2] = PIPE_EBADF, errpipe[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int outpipe[2] = EBADF_PAIR, errpipe[2] = EBADF_PAIR;
         _cleanup_strv_free_ char **libraries = NULL;
         _cleanup_free_ char *result = NULL;
         pid_t pid;
@@ -600,7 +602,7 @@ static int find_libraries(const char *exec, char ***ret) {
         r = safe_fork_full("(spawn-ldd)",
                            (int[]) { -EBADF, outpipe[1], errpipe[1] },
                            NULL, 0,
-                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_REARRANGE_STDIO|FORK_LOG, &pid);
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REARRANGE_STDIO|FORK_LOG, &pid);
         assert_se(r >= 0);
         if (r == 0) {
                 execlp("ldd", "ldd", exec, NULL);
@@ -1073,6 +1075,9 @@ static void test_exec_ambientcapabilities(Manager *m) {
 static void test_exec_privatenetwork(Manager *m) {
         int r;
 
+        if (!have_net_dummy)
+                return (void)log_notice("Skipping %s, dummy network interface not available", __func__);
+
         r = find_executable("ip", NULL);
         if (r < 0) {
                 log_notice_errno(r, "Skipping %s, could not find ip binary: %m", __func__);
@@ -1085,6 +1090,9 @@ static void test_exec_privatenetwork(Manager *m) {
 
 static void test_exec_networknamespacepath(Manager *m) {
         int r;
+
+        if (!have_net_dummy)
+                return (void)log_notice("Skipping %s, dummy network interface not available", __func__);
 
         r = find_executable("ip", NULL);
         if (r < 0) {
@@ -1176,6 +1184,7 @@ static void run_tests(RuntimeScope scope, char **patterns) {
         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
         _cleanup_free_ char *unit_paths = NULL;
         _cleanup_(manager_freep) Manager *m = NULL;
+        usec_t start, finish;
         int r;
 
         static const test_entry tests[] = {
@@ -1257,18 +1266,31 @@ static void run_tests(RuntimeScope scope, char **patterns) {
                 return (void) log_tests_skipped_errno(r, "manager_new");
         assert_se(r >= 0);
 
-        m->default_std_output = EXEC_OUTPUT_NULL; /* don't rely on host journald */
+        m->defaults.std_output = EXEC_OUTPUT_NULL; /* don't rely on host journald */
         assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
         /* Uncomment below if you want to make debugging logs stored to journal. */
         //manager_override_log_target(m, LOG_TARGET_AUTO);
         //manager_override_log_level(m, LOG_DEBUG);
 
+        /* Measure and print the time that it takes to run tests, excluding startup of the manager object,
+         * to try and measure latency of spawning services */
+        n_ran_tests = 0;
+        start = now(CLOCK_MONOTONIC);
+
         for (const test_entry *test = tests; test->f; test++)
                 if (strv_fnmatch_or_empty(patterns, test->name, FNM_NOESCAPE))
                         test->f(m);
                 else
                         log_info("Skipping %s because it does not match any pattern.", test->name);
+
+        finish = now(CLOCK_MONOTONIC);
+
+        log_info("ran %u tests with %s manager + unshare=%s in: %s",
+                 n_ran_tests,
+                 scope == RUNTIME_SCOPE_SYSTEM ? "system" : "user",
+                 yes_no(can_unshare),
+                 FORMAT_TIMESPAN(finish - start, USEC_PER_MSEC));
 }
 
 static int prepare_ns(const char *process_name) {
@@ -1277,7 +1299,7 @@ static int prepare_ns(const char *process_name) {
         r = safe_fork(process_name,
                       FORK_RESET_SIGNALS |
                       FORK_CLOSE_ALL_FDS |
-                      FORK_DEATHSIG |
+                      FORK_DEATHSIG_SIGTERM |
                       FORK_WAIT |
                       FORK_REOPEN_LOG |
                       FORK_LOG |
@@ -1409,18 +1431,23 @@ static int intro(void) {
                 return log_tests_skipped("/sys is mounted read-only");
 
         /* Create dummy network interface for testing PrivateNetwork=yes */
-        (void) system("ip link add dummy-test-exec type dummy");
+        have_net_dummy = system("ip link add dummy-test-exec type dummy") == 0;
 
-        /* Create a network namespace and a dummy interface in it for NetworkNamespacePath= */
-        (void) system("ip netns add test-execute-netns");
-        (void) system("ip netns exec test-execute-netns ip link add dummy-test-ns type dummy");
+        if (have_net_dummy) {
+                /* Create a network namespace and a dummy interface in it for NetworkNamespacePath= */
+                (void) system("ip netns add test-execute-netns");
+                (void) system("ip netns exec test-execute-netns ip link add dummy-test-ns type dummy");
+        }
 
         return EXIT_SUCCESS;
 }
 
 static int outro(void) {
-        (void) system("ip link del dummy-test-exec");
-        (void) system("ip netns del test-execute-netns");
+        if (have_net_dummy) {
+                (void) system("ip link del dummy-test-exec");
+                (void) system("ip netns del test-execute-netns");
+        }
+
         (void) rmdir(PRIVATE_UNIT_DIR);
 
         return EXIT_SUCCESS;

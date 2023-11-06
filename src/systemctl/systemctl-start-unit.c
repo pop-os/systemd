@@ -168,8 +168,9 @@ fail:
 
                 log_debug_errno(r, "Failed to %s %s, ignoring: %s", job_type, name, bus_error_message(error, r));
                 return 0;
-        } else
-                log_error_errno(r, "Failed to %s %s: %s", job_type, name, bus_error_message(error, r));
+        }
+
+        log_error_errno(r, "Failed to %s %s: %s", job_type, name, bus_error_message(error, r));
 
         if (!sd_bus_error_has_names(error, BUS_ERROR_NO_SUCH_UNIT,
                                            BUS_ERROR_UNIT_MASKED,
@@ -391,9 +392,9 @@ int verb_start(int argc, char *argv[], void *userdata) {
 
                 /* When stopping units, warn if they can still be triggered by
                  * another active unit (socket, path, timer) */
-                if (!arg_quiet)
-                        STRV_FOREACH(name, stopped_units)
-                                (void) check_triggering_units(bus, *name);
+                if (!arg_quiet && !arg_no_warn)
+                        STRV_FOREACH(unit, stopped_units)
+                                warn_triggering_units(bus, *unit, "Stopping", /* ignore_masked = */ true);
         }
 
         if (arg_wait) {

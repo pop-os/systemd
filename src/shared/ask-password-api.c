@@ -28,6 +28,7 @@
 #include "fs-util.h"
 #include "glyph-util.h"
 #include "io-util.h"
+#include "iovec-util.h"
 #include "keyring-util.h"
 #include "log.h"
 #include "macro.h"
@@ -158,16 +159,14 @@ static int ask_password_keyring(const char *keyname, AskPasswordFlags flags, cha
                 return -EUNATCH;
 
         r = lookup_key(keyname, &serial);
-        if (r < 0) {
-                /* when retrieving the distinction between "kernel or container manager don't support
-                 * or allow this" and "no matching key known" doesn't matter. Note that we propagate
-                 * EACCESS here (even if EPERM not) since that is used if the keyring is available but
-                 * we lack access to the key. */
-                if (ERRNO_IS_NOT_SUPPORTED(r) || r == -EPERM)
-                        return -ENOKEY;
-
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r) || r == -EPERM)
+                /* When retrieving, the distinction between "kernel or container manager don't support or
+                 * allow this" and "no matching key known" doesn't matter. Note that we propagate EACCESS
+                 * here (even if EPERM not) since that is used if the keyring is available, but we lack
+                 * access to the key. */
+                return -ENOKEY;
+        if (r < 0)
                 return r;
-        }
 
         return retrieve_key(serial, ret);
 }
@@ -183,7 +182,7 @@ static int backspace_chars(int ttyfd, size_t p) {
         for (size_t i = 0; i < p; i++)
                 memcpy(buf + 3 * i, "\b \b", 3);
 
-        return loop_write(ttyfd, buf, 3*p, false);
+        return loop_write(ttyfd, buf, 3 * p);
 }
 
 static int backspace_string(int ttyfd, const char *str) {
@@ -254,7 +253,7 @@ int ask_password_plymouth(
         if (!packet)
                 return -ENOMEM;
 
-        r = loop_write(fd, packet, n + 1, true);
+        r = loop_write_full(fd, packet, n + 1, USEC_INFINITY);
         if (r < 0)
                 return r;
 
@@ -313,7 +312,7 @@ int ask_password_plymouth(
                                 if (asprintf(&packet, "*\002%c%s%n", (int) (strlen(message) + 1), message, &n) < 0)
                                         return -ENOMEM;
 
-                                r = loop_write(fd, packet, n+1, true);
+                                r = loop_write_full(fd, packet, n + 1, USEC_INFINITY);
                                 if (r < 0)
                                         return r;
 
@@ -431,20 +430,21 @@ int ask_password_tty(
                         use_color = colors_enabled();
 
                 if (use_color)
-                        (void) loop_write(ttyfd, ANSI_HIGHLIGHT, SIZE_MAX, false);
+                        (void) loop_write(ttyfd, ANSI_HIGHLIGHT, SIZE_MAX);
 
-                (void) loop_write(ttyfd, message, SIZE_MAX, false);
-                (void) loop_write(ttyfd, " ", 1, false);
+                (void) loop_write(ttyfd, message, SIZE_MAX);
+                (void) loop_write(ttyfd, " ", 1);
 
                 if (!FLAGS_SET(flags, ASK_PASSWORD_SILENT) && !FLAGS_SET(flags, ASK_PASSWORD_ECHO)) {
                         if (use_color)
-                                (void) loop_write(ttyfd, ansi_grey(), SIZE_MAX, false);
-                        (void) loop_write(ttyfd, PRESS_TAB, SIZE_MAX, false);
+                                (void) loop_write(ttyfd, ansi_grey(), SIZE_MAX);
+
+                        (void) loop_write(ttyfd, PRESS_TAB, SIZE_MAX);
                         press_tab_visible = true;
                 }
 
                 if (use_color)
-                        (void) loop_write(ttyfd, ANSI_NORMAL, SIZE_MAX, false);
+                        (void) loop_write(ttyfd, ANSI_NORMAL, SIZE_MAX);
 
                 new_termios = old_termios;
                 new_termios.c_lflag &= ~(ICANON|ECHO);
@@ -529,7 +529,7 @@ int ask_password_tty(
 
                 if (c == 4) { /* C-d also known as EOT */
                         if (ttyfd >= 0)
-                                (void) loop_write(ttyfd, SKIPPED, SIZE_MAX, false);
+                                (void) loop_write(ttyfd, SKIPPED, SIZE_MAX);
 
                         goto skipped;
                 }
@@ -579,10 +579,10 @@ int ask_password_tty(
                                  * first key (and only as first key), or ... */
 
                                 if (ttyfd >= 0)
-                                        (void) loop_write(ttyfd, NO_ECHO, SIZE_MAX, false);
+                                        (void) loop_write(ttyfd, NO_ECHO, SIZE_MAX);
 
                         } else if (ttyfd >= 0)
-                                (void) loop_write(ttyfd, "\a", 1, false);
+                                (void) loop_write(ttyfd, "\a", 1);
 
                 } else if (c == '\t' && !FLAGS_SET(flags, ASK_PASSWORD_SILENT)) {
 
@@ -592,13 +592,13 @@ int ask_password_tty(
                         /* ... or by pressing TAB at any time. */
 
                         if (ttyfd >= 0)
-                                (void) loop_write(ttyfd, NO_ECHO, SIZE_MAX, false);
+                                (void) loop_write(ttyfd, NO_ECHO, SIZE_MAX);
 
                 } else if (p >= sizeof(passphrase)-1) {
 
                         /* Reached the size limit */
                         if (ttyfd >= 0)
-                                (void) loop_write(ttyfd, "\a", 1, false);
+                                (void) loop_write(ttyfd, "\a", 1);
 
                 } else {
                         passphrase[p++] = c;
@@ -608,9 +608,11 @@ int ask_password_tty(
                                 n = utf8_encoded_valid_unichar(passphrase + codepoint, SIZE_MAX);
                                 if (n >= 0) {
                                         if (FLAGS_SET(flags, ASK_PASSWORD_ECHO))
-                                                (void) loop_write(ttyfd, passphrase + codepoint, n, false);
+                                                (void) loop_write(ttyfd, passphrase + codepoint, n);
                                         else
-                                                (void) loop_write(ttyfd, "*", 1, false);
+                                                (void) loop_write(ttyfd,
+                                                                  special_glyph(SPECIAL_GLYPH_BULLET),
+                                                                  SIZE_MAX);
                                         codepoint = p;
                                 }
                         }
@@ -642,7 +644,7 @@ skipped:
 
 finish:
         if (ttyfd >= 0 && reset_tty) {
-                (void) loop_write(ttyfd, "\n", 1, false);
+                (void) loop_write(ttyfd, "\n", 1);
                 (void) tcsetattr(ttyfd, TCSADRAIN, &old_termios);
         }
 
@@ -867,14 +869,12 @@ int ask_password_agent(
                 };
 
                 n = recvmsg_safe(socket_fd, &msghdr, 0);
-                if (n < 0) {
-                        if (ERRNO_IS_TRANSIENT(n))
-                                continue;
-                        if (n == -EXFULL) {
-                                log_debug("Got message with truncated control data, ignoring.");
-                                continue;
-                        }
-
+                if (ERRNO_IS_NEG_TRANSIENT(n))
+                        continue;
+                else if (n == -EXFULL) {
+                        log_debug("Got message with truncated control data, ignoring.");
+                        continue;
+                } else if (n < 0) {
                         r = (int) n;
                         goto finish;
                 }

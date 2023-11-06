@@ -483,14 +483,15 @@ static void analyze_coredump_file(
                 r = -errno;
         } else
                 r = access_fd(fd, R_OK);
-        if (ERRNO_IS_PRIVILEGE(r)) {
-                *ret_state = "inaccessible";
-                *ret_color = ansi_highlight_yellow();
-                *ret_size = UINT64_MAX;
-                return;
-        }
-        if (r < 0)
+        if (r < 0) {
+                if (ERRNO_IS_PRIVILEGE(r)) {
+                        *ret_state = "inaccessible";
+                        *ret_color = ansi_highlight_yellow();
+                        *ret_size = UINT64_MAX;
+                        return;
+                }
                 goto error;
+        }
 
         if (fstat(fd, &st) < 0)
                 goto error;
@@ -1252,7 +1253,7 @@ static int run_debug(int argc, char **argv, void *userdata) {
 
         fork_name = strjoina("(", debugger_call[0], ")");
 
-        r = safe_fork(fork_name, FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG|FORK_FLUSH_STDIO, &pid);
+        r = safe_fork(fork_name, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG|FORK_FLUSH_STDIO, &pid);
         if (r < 0)
                 goto finish;
         if (r == 0) {

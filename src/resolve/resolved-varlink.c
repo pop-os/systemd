@@ -5,6 +5,8 @@
 #include "resolved-dns-synthesize.h"
 #include "resolved-varlink.h"
 #include "socket-netlink.h"
+#include "varlink-io.systemd.Resolve.h"
+#include "varlink-io.systemd.Resolve.Monitor.h"
 
 typedef struct LookupParameters {
         int ifindex;
@@ -313,8 +315,8 @@ static int vl_method_resolve_hostname(Varlink *link, JsonVariant *parameters, Va
         if (FLAGS_SET(flags, VARLINK_METHOD_ONEWAY))
                 return -EINVAL;
 
-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
-        if (r < 0)
+        r = varlink_dispatch(link, parameters, dispatch_table, &p);
+        if (r != 0)
                 return r;
 
         if (p.ifindex < 0)
@@ -427,7 +429,6 @@ static void vl_method_resolve_address_complete(DnsQuery *query) {
         question = dns_query_question_for_protocol(q, q->answer_protocol);
 
         DNS_ANSWER_FOREACH_IFINDEX(rr, ifindex, q->answer) {
-                _cleanup_(json_variant_unrefp) JsonVariant *entry = NULL;
                 _cleanup_free_ char *normalized = NULL;
 
                 r = dns_question_matches_rr(question, rr, NULL);
@@ -440,14 +441,11 @@ static void vl_method_resolve_address_complete(DnsQuery *query) {
                 if (r < 0)
                         goto finish;
 
-                r = json_build(&entry,
-                               JSON_BUILD_OBJECT(
-                                               JSON_BUILD_PAIR_CONDITION(ifindex > 0, "ifindex", JSON_BUILD_INTEGER(ifindex)),
-                                               JSON_BUILD_PAIR("name", JSON_BUILD_STRING(normalized))));
-                if (r < 0)
-                        goto finish;
-
-                r = json_variant_append_array(&array, entry);
+                r = json_variant_append_arrayb(
+                                &array,
+                                JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_CONDITION(ifindex > 0, "ifindex", JSON_BUILD_INTEGER(ifindex)),
+                                                JSON_BUILD_PAIR("name", JSON_BUILD_STRING(normalized))));
                 if (r < 0)
                         goto finish;
         }
@@ -493,8 +491,8 @@ static int vl_method_resolve_address(Varlink *link, JsonVariant *parameters, Var
         if (FLAGS_SET(flags, VARLINK_METHOD_ONEWAY))
                 return -EINVAL;
 
-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
-        if (r < 0)
+        r = varlink_dispatch(link, parameters, dispatch_table, &p);
+        if (r != 0)
                 return r;
 
         if (p.ifindex < 0)
@@ -532,7 +530,7 @@ static int vl_method_resolve_address(Varlink *link, JsonVariant *parameters, Var
         return 1;
 }
 
-static int vl_method_subscribe_dns_resolves(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+static int vl_method_subscribe_query_results(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
         Manager *m;
         int r;
 
@@ -598,6 +596,96 @@ static int vl_method_dump_cache(Varlink *link, JsonVariant *parameters, VarlinkM
                                               JSON_BUILD_PAIR("dump", JSON_BUILD_VARIANT(list))));
 }
 
+static int dns_server_dump_state_to_json_list(DnsServer *server, JsonVariant **list) {
+        _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
+        int r;
+
+        assert(list);
+        assert(server);
+
+        r = dns_server_dump_state_to_json(server, &j);
+        if (r < 0)
+                return r;
+
+        return json_variant_append_array(list, j);
+}
+
+static int vl_method_dump_server_state(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+        _cleanup_(json_variant_unrefp) JsonVariant *list = NULL;
+        Manager *m;
+        int r;
+        Link *l;
+
+        assert(link);
+
+        if (json_variant_elements(parameters) > 0)
+                return varlink_error_invalid_parameter(link, parameters);
+
+        m = ASSERT_PTR(varlink_server_get_userdata(varlink_get_server(link)));
+
+        LIST_FOREACH(servers, server, m->dns_servers) {
+                r = dns_server_dump_state_to_json_list(server, &list);
+                if (r < 0)
+                        return r;
+        }
+
+        LIST_FOREACH(servers, server, m->fallback_dns_servers) {
+                r = dns_server_dump_state_to_json_list(server, &list);
+                if (r < 0)
+                        return r;
+        }
+
+        HASHMAP_FOREACH(l, m->links)
+                LIST_FOREACH(servers, server, l->dns_servers) {
+                        r = dns_server_dump_state_to_json_list(server, &list);
+                        if (r < 0)
+                                return r;
+                }
+
+        if (!list) {
+                r = json_variant_new_array(&list, NULL, 0);
+                if (r < 0)
+                        return r;
+        }
+
+        return varlink_replyb(link, JSON_BUILD_OBJECT(
+                                              JSON_BUILD_PAIR("dump", JSON_BUILD_VARIANT(list))));
+}
+
+static int vl_method_dump_statistics(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+        _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
+        Manager *m;
+        int r;
+
+        assert(link);
+
+        if (json_variant_elements(parameters) > 0)
+                return varlink_error_invalid_parameter(link, parameters);
+
+        m = ASSERT_PTR(varlink_server_get_userdata(varlink_get_server(link)));
+
+        r = dns_manager_dump_statistics_json(m, &j);
+        if (r < 0)
+                return r;
+
+        return varlink_replyb(link, JSON_BUILD_VARIANT(j));
+}
+
+static int vl_method_reset_statistics(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+        Manager *m;
+
+        assert(link);
+
+        if (json_variant_elements(parameters) > 0)
+                return varlink_error_invalid_parameter(link, parameters);
+
+        m = ASSERT_PTR(varlink_server_get_userdata(varlink_get_server(link)));
+
+        dns_manager_reset_statistics(m);
+
+        return varlink_replyb(link, JSON_BUILD_EMPTY_OBJECT);
+}
+
 static int varlink_monitor_server_init(Manager *m) {
         _cleanup_(varlink_server_unrefp) VarlinkServer *server = NULL;
         int r;
@@ -613,10 +701,17 @@ static int varlink_monitor_server_init(Manager *m) {
 
         varlink_server_set_userdata(server, m);
 
+        r = varlink_server_add_interface(server, &vl_interface_io_systemd_Resolve_Monitor);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add Resolve.Monitor interface to varlink server: %m");
+
         r = varlink_server_bind_method_many(
                         server,
-                        "io.systemd.Resolve.Monitor.SubscribeQueryResults", vl_method_subscribe_dns_resolves,
-                        "io.systemd.Resolve.Monitor.DumpCache", vl_method_dump_cache);
+                        "io.systemd.Resolve.Monitor.SubscribeQueryResults", vl_method_subscribe_query_results,
+                        "io.systemd.Resolve.Monitor.DumpCache", vl_method_dump_cache,
+                        "io.systemd.Resolve.Monitor.DumpServerState", vl_method_dump_server_state,
+                        "io.systemd.Resolve.Monitor.DumpStatistics", vl_method_dump_statistics,
+                        "io.systemd.Resolve.Monitor.ResetStatistics", vl_method_reset_statistics);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 
@@ -651,6 +746,10 @@ static int varlink_main_server_init(Manager *m) {
                 return log_error_errno(r, "Failed to allocate varlink server object: %m");
 
         varlink_server_set_userdata(s, m);
+
+        r = varlink_server_add_interface(s, &vl_interface_io_systemd_Resolve);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add Resolve interface to varlink server: %m");
 
         r = varlink_server_bind_method_many(
                         s,

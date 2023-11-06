@@ -59,11 +59,6 @@ test_one() (
         touch "$i"
     done
 
-    # For split-usr system
-    for i in "$out"/systemd-*.service; do
-        sed -i -e 's:ExecStart=/lib/systemd/:ExecStart=/usr/lib/systemd/:' "$i"
-    done
-
     if [[ "${input##*/}" =~ \.fstab\.input ]]; then
         for i in "$out"/*.{automount,mount,swap}; do
             sed -i -e 's:SourcePath=.*$:SourcePath=/etc/fstab:' "$i"
@@ -133,6 +128,14 @@ test_one() (
 )
 
 for f in "$src"/test-*.input; do
+    # If /mnt is a symlink, then the expected output from this
+    # test scenario will not match the actual output
+    if test "$f" = "$src/test-18-options.fstab.input" -a "$(readlink /mnt)" != "/mnt"
+    then
+        echo "Skip $f because /mnt is a symlink"
+        continue
+    fi
+
     test_one "$f" yes
     test_one "$f" no
 done

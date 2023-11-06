@@ -88,6 +88,15 @@ char** strv_free_erase(char **l) {
         return mfree(l);
 }
 
+void strv_free_many(char ***strvs, size_t n) {
+        assert(strvs || n == 0);
+
+        FOREACH_ARRAY (i, strvs, n)
+                strv_free(*i);
+
+        free(strvs);
+}
+
 char** strv_copy_n(char * const *l, size_t m) {
         _cleanup_strv_free_ char **result = NULL;
         char **k;
@@ -212,9 +221,7 @@ int strv_extend_strv(char ***a, char * const *b, bool filter_duplicates) {
         return (int) i;
 
 rollback:
-        for (size_t j = 0; j < i; j++)
-                free(t[p + j]);
-
+        free_many_charp(t + p, i);
         t[p] = NULL;
         return -ENOMEM;
 }

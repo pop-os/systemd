@@ -57,6 +57,9 @@ udevadm info --property DEVNAME --value /sys/class/net/$netdev
 udevadm info --property HELLO /sys/class/net/$netdev
 udevadm info -p class/net/$netdev
 udevadm info -p /class/net/$netdev
+udevadm info --json=off -p class/net/$netdev
+udevadm info --json=pretty -p class/net/$netdev | jq .
+udevadm info --json=short -p class/net/$netdev | jq .
 udevadm info -n null
 udevadm info -q all /sys/class/net/$netdev
 udevadm info -q name /dev/null
@@ -74,18 +77,32 @@ udevadm info -x -q path /sys/class/net/$netdev
 udevadm info -P TEST_ /sys/class/net/$netdev
 udevadm info -d /dev/null
 udevadm info -e >/dev/null
+udevadm info -e --json=off >/dev/null
+udevadm info -e --json=pretty | jq . >/dev/null
+udevadm info -e --json=short | jq . >/dev/null
+udevadm info -e --subsystem-match acpi >/dev/null
+udevadm info -e --subsystem-nomatch acpi >/dev/null
+udevadm info -e --attr-match ifindex=2 >/dev/null
+udevadm info -e --attr-nomatch ifindex=2 >/dev/null
+udevadm info -e --property-match SUBSYSTEM=acpi >/dev/null
+udevadm info -e --tag-match systemd >/dev/null
+udevadm info -e --sysname-match lo >/dev/null
+udevadm info -e --name-match /sys/class/net/$netdev >/dev/null
+udevadm info -e --parent-match /sys/class/net/$netdev >/dev/null
+udevadm info -e --initialized-match >/dev/null
+udevadm info -e --initialized-nomatch >/dev/null
 # udevadm info -c
 udevadm info -w /sys/class/net/$netdev
 udevadm info --wait-for-initialization=5 /sys/class/net/$netdev
 udevadm info -h
 
-assert_rc 124 timeout 5 udevadm monitor
-assert_rc 124 timeout 5 udevadm monitor -k
-assert_rc 124 timeout 5 udevadm monitor -u
-assert_rc 124 timeout 5 udevadm monitor -s net
-assert_rc 124 timeout 5 udevadm monitor --subsystem-match net/$netdev
-assert_rc 124 timeout 5 udevadm monitor -t systemd
-assert_rc 124 timeout 5 udevadm monitor --tag-match hello
+assert_rc 124 timeout 1 udevadm monitor
+assert_rc 124 timeout 1 udevadm monitor -k
+assert_rc 124 timeout 1 udevadm monitor -u
+assert_rc 124 timeout 1 udevadm monitor -s net
+assert_rc 124 timeout 1 udevadm monitor --subsystem-match net/$netdev
+assert_rc 124 timeout 1 udevadm monitor -t systemd
+assert_rc 124 timeout 1 udevadm monitor --tag-match hello
 udevadm monitor -h
 
 udevadm settle

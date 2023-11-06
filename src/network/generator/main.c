@@ -33,7 +33,7 @@ static int network_save(Network *network, const char *dest_dir) {
 
         if (asprintf(&p, "%s/%s-%s.network",
                      dest_dir,
-                     isempty(network->ifname) ? "91" : "90",
+                     isempty(network->ifname) ? "71" : "70",
                      isempty(network->ifname) ? "default" : network->ifname) < 0)
                 return log_oom();
 
@@ -59,7 +59,7 @@ static int netdev_save(NetDev *netdev, const char *dest_dir) {
 
         netdev_dump(netdev, f);
 
-        if (asprintf(&p, "%s/90-%s.netdev", dest_dir, netdev->ifname) < 0)
+        if (asprintf(&p, "%s/70-%s.netdev", dest_dir, netdev->ifname) < 0)
                 return log_oom();
 
         r = conservative_rename(temp_path, p);
@@ -86,7 +86,7 @@ static int link_save(Link *link, const char *dest_dir) {
 
         if (asprintf(&p, "%s/%s-%s.link",
                      dest_dir,
-                     !isempty(link->ifname) ? "90" : !hw_addr_is_null(&link->mac) ? "91" : "92",
+                     !isempty(link->ifname) ? "70" : !hw_addr_is_null(&link->mac) ? "71" : "72",
                      link->filename) < 0)
                 return log_oom();
 
@@ -102,32 +102,22 @@ static int context_save(Context *context) {
         Network *network;
         NetDev *netdev;
         Link *link;
-        int k, r;
-        const char *p;
+        int r;
 
-        p = prefix_roota(arg_root, NETWORKD_UNIT_DIRECTORY);
+        const char *p = prefix_roota(arg_root, NETWORKD_UNIT_DIRECTORY);
 
         r = mkdir_p(p, 0755);
         if (r < 0)
                 return log_error_errno(r, "Failed to create directory " NETWORKD_UNIT_DIRECTORY ": %m");
 
-        HASHMAP_FOREACH(network, context->networks_by_name) {
-                k = network_save(network, p);
-                if (k < 0 && r >= 0)
-                        r = k;
-        }
+        HASHMAP_FOREACH(network, context->networks_by_name)
+                RET_GATHER(r, network_save(network, p));
 
-        HASHMAP_FOREACH(netdev, context->netdevs_by_name) {
-                k = netdev_save(netdev, p);
-                if (k < 0 && r >= 0)
-                        r = k;
-        }
+        HASHMAP_FOREACH(netdev, context->netdevs_by_name)
+                RET_GATHER(r, netdev_save(netdev, p));
 
-        HASHMAP_FOREACH(link, context->links_by_filename) {
-                k = link_save(link, p);
-                if (k < 0 && r >= 0)
-                        r = k;
-        }
+        HASHMAP_FOREACH(link, context->links_by_filename)
+                RET_GATHER(r, link_save(link, p));
 
         return r;
 }

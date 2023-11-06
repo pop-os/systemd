@@ -47,6 +47,8 @@ uint32_t seccomp_local_archs[] = {
                 SCMP_ARCH_AARCH64,     /* native */
 #elif defined(__arm__)
                 SCMP_ARCH_ARM,
+#elif defined(__loongarch_lp64)
+                SCMP_ARCH_LOONGARCH64,
 #elif defined(__mips__) && __BYTE_ORDER == __BIG_ENDIAN && _MIPS_SIM == _MIPS_SIM_ABI32
                 SCMP_ARCH_MIPSEL,
                 SCMP_ARCH_MIPS,        /* native */
@@ -126,6 +128,10 @@ const char* seccomp_arch_to_string(uint32_t c) {
                 return "arm";
         case SCMP_ARCH_AARCH64:
                 return "arm64";
+#ifdef SCMP_ARCH_LOONGARCH64
+        case SCMP_ARCH_LOONGARCH64:
+                return "loongarch64";
+#endif
         case SCMP_ARCH_MIPS:
                 return "mips";
         case SCMP_ARCH_MIPS64:
@@ -183,6 +189,10 @@ int seccomp_arch_from_string(const char *n, uint32_t *ret) {
                 *ret = SCMP_ARCH_ARM;
         else if (streq(n, "arm64"))
                 *ret = SCMP_ARCH_AARCH64;
+#ifdef SCMP_ARCH_LOONGARCH64
+        else if (streq(n, "loongarch64"))
+                *ret = SCMP_ARCH_LOONGARCH64;
+#endif
         else if (streq(n, "mips"))
                 *ret = SCMP_ARCH_MIPS;
         else if (streq(n, "mips64"))
@@ -468,6 +478,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "fchdir\0"
                 "fchmod\0"
                 "fchmodat\0"
+                "fchmodat2\0"
                 "fcntl\0"
                 "fcntl64\0"
                 "fgetxattr\0"
@@ -1092,10 +1103,11 @@ int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilter
                         return log_debug_errno(r, "Failed to add filter set: %m");
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1153,7 +1165,7 @@ int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Hashmap* filter
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install system call filter for architecture %s, skipping: %m",
@@ -1194,10 +1206,10 @@ int seccomp_parse_syscall_filter(
                 }
 
                 NULSTR_FOREACH(i, set->value) {
-                        /* Call ourselves again, for the group to parse. Note that we downgrade logging here (i.e. take
-                         * away the SECCOMP_PARSE_LOG flag) since any issues in the group table are our own problem,
-                         * not a problem in user configuration data and we shouldn't pretend otherwise by complaining
-                         * about them. */
+                        /* Call ourselves again, for the group to parse. Note that we downgrade logging here
+                         * (i.e. take away the SECCOMP_PARSE_LOG flag) since any issues in the group table
+                         * are our own problem, not a problem in user configuration data and we shouldn't
+                         * pretend otherwise by complaining about them. */
                         r = seccomp_parse_syscall_filter(i, errno_num, filter, flags &~ SECCOMP_PARSE_LOG, unit, filename, line);
                         if (r < 0)
                                 return r;
@@ -1215,9 +1227,9 @@ int seccomp_parse_syscall_filter(
                         return 0;
                 }
 
-                /* If we previously wanted to forbid a syscall and now we want to allow it, then remove
-                 * it from the list. The entries in allow-list with non-negative error value will be
-                 * handled with SCMP_ACT_ERRNO() instead of the default action. */
+                /* If we previously wanted to forbid a syscall and now we want to allow it, then remove it
+                 * from the list. The entries in allow-list with non-negative error value will be handled
+                 * with SCMP_ACT_ERRNO() instead of the default action. */
                 if (!FLAGS_SET(flags, SECCOMP_PARSE_INVERT) == FLAGS_SET(flags, SECCOMP_PARSE_ALLOW_LIST) ||
                     (FLAGS_SET(flags, SECCOMP_PARSE_INVERT | SECCOMP_PARSE_ALLOW_LIST) && errno_num >= 0)) {
                         r = hashmap_put(filter, INT_TO_PTR(id + 1), INT_TO_PTR(errno_num));
@@ -1275,19 +1287,20 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                                 SCMP_SYS(clone3),
                                 0);
                 if (r < 0)
-                        log_debug_errno(r, "Failed to add clone3() rule for architecture %s, ignoring: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add clone3() rule for architecture %s, ignoring: %m",
+                                        seccomp_arch_to_string(arch));
 
                 if ((retain & NAMESPACE_FLAGS_ALL) == 0)
-                        /* If every single kind of namespace shall be prohibited, then let's block the whole setns() syscall
-                         * altogether. */
+                        /* If every single kind of namespace shall be prohibited, then let's block the whole
+                         * setns() syscall altogether. */
                         r = seccomp_rule_add_exact(
                                         seccomp,
                                         SCMP_ACT_ERRNO(EPERM),
                                         SCMP_SYS(setns),
                                         0);
                 else
-                        /* Otherwise, block only the invocations with the appropriate flags in the loop below, but also the
-                         * special invocation with a zero flags argument, right here. */
+                        /* Otherwise, block only the invocations with the appropriate flags in the loop
+                         * below, but also the special invocation with a zero flags argument, right here. */
                         r = seccomp_rule_add_exact(
                                         seccomp,
                                         SCMP_ACT_ERRNO(EPERM),
@@ -1295,7 +1308,8 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                                         1,
                                         SCMP_A1(SCMP_CMP_EQ, 0));
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add setns() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add setns() rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
@@ -1317,7 +1331,8 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                                         1,
                                         SCMP_A0(SCMP_CMP_MASKED_EQ, f, f));
                         if (r < 0) {
-                                log_debug_errno(r, "Failed to add unshare() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                log_debug_errno(r, "Failed to add unshare() rule for architecture %s, skipping: %m",
+                                                seccomp_arch_to_string(arch));
                                 break;
                         }
 
@@ -1337,7 +1352,8 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                                                 1,
                                                 SCMP_A1(SCMP_CMP_MASKED_EQ, f, f));
                         if (r < 0) {
-                                log_debug_errno(r, "Failed to add clone() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                log_debug_errno(r, "Failed to add clone() rule for architecture %s, skipping: %m",
+                                                seccomp_arch_to_string(arch));
                                 break;
                         }
 
@@ -1349,7 +1365,8 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                                                 1,
                                                 SCMP_A1(SCMP_CMP_MASKED_EQ, f, f));
                                 if (r < 0) {
-                                        log_debug_errno(r, "Failed to add setns() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                        log_debug_errno(r, "Failed to add setns() rule for architecture %s, skipping: %m",
+                                                        seccomp_arch_to_string(arch));
                                         break;
                                 }
                         }
@@ -1358,10 +1375,11 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                         continue;
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install namespace restriction rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install namespace restriction rules for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1378,6 +1396,9 @@ int seccomp_protect_sysctl(void) {
 
                 if (IN_SET(arch,
                            SCMP_ARCH_AARCH64,
+#ifdef SCMP_ARCH_LOONGARCH64
+                           SCMP_ARCH_LOONGARCH64,
+#endif
 #ifdef SCMP_ARCH_RISCV64
                            SCMP_ARCH_RISCV64,
 #endif
@@ -1396,15 +1417,17 @@ int seccomp_protect_sysctl(void) {
                                 SCMP_SYS(_sysctl),
                                 0);
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add _sysctl() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add _sysctl() rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install sysctl protection rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install sysctl protection rules for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1433,10 +1456,11 @@ int seccomp_protect_syslog(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install syslog protection rules for architecture %s, skipping %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install syslog protection rules for architecture %s, skipping %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1458,6 +1482,9 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                 case SCMP_ARCH_X32:
                 case SCMP_ARCH_ARM:
                 case SCMP_ARCH_AARCH64:
+#ifdef SCMP_ARCH_LOONGARCH64
+                case SCMP_ARCH_LOONGARCH64:
+#endif
                 case SCMP_ARCH_MIPSEL64N32:
                 case SCMP_ARCH_MIPS64N32:
                 case SCMP_ARCH_MIPSEL64:
@@ -1529,7 +1556,8 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                                                 SCMP_SYS(socket),
                                                 0);
                                 if (r < 0) {
-                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m",
+                                                        seccomp_arch_to_string(arch));
                                         continue;
                                 }
 
@@ -1543,7 +1571,8 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                                                 1,
                                                 SCMP_A0(SCMP_CMP_LT, first));
                                 if (r < 0) {
-                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m",
+                                                        seccomp_arch_to_string(arch));
                                         continue;
                                 }
 
@@ -1555,7 +1584,8 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                                                 1,
                                                 SCMP_A0(SCMP_CMP_GT, last));
                                 if (r < 0) {
-                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m",
+                                                        seccomp_arch_to_string(arch));
                                         continue;
                                 }
 
@@ -1575,7 +1605,8 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                                                 break;
                                 }
                                 if (r < 0) {
-                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                        log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m",
+                                                        seccomp_arch_to_string(arch));
                                         continue;
                                 }
                         }
@@ -1597,16 +1628,18 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                                         break;
                         }
                         if (r < 0) {
-                                log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m",
+                                                seccomp_arch_to_string(arch));
                                 continue;
                         }
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install socket family rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install socket family rules for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1663,7 +1696,8 @@ int seccomp_restrict_realtime_full(int error_code) {
                                         1,
                                         SCMP_A1(SCMP_CMP_EQ, p));
                         if (r < 0) {
-                                log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m",
+                                                seccomp_arch_to_string(arch));
                                 continue;
                         }
                 }
@@ -1677,15 +1711,17 @@ int seccomp_restrict_realtime_full(int error_code) {
                                 1,
                                 SCMP_A1(SCMP_CMP_GT, max_policy));
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install realtime protection rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install realtime protection rules for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -1712,7 +1748,7 @@ static int add_seccomp_syscall_filter(scmp_filter_ctx seccomp,
 }
 
 /* For known architectures, check that syscalls are indeed defined or not. */
-#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || (defined(__riscv) && __riscv_xlen == 64)
+#if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch_lp64) || (defined(__riscv) && __riscv_xlen == 64)
 assert_cc(SCMP_SYS(shmget) > 0);
 assert_cc(SCMP_SYS(shmat) > 0);
 assert_cc(SCMP_SYS(shmdt) > 0);
@@ -1761,16 +1797,19 @@ int seccomp_memory_deny_write_execute(void) {
                 case SCMP_ARCH_X86_64:
                 case SCMP_ARCH_X32:
                 case SCMP_ARCH_AARCH64:
+#ifdef SCMP_ARCH_LOONGARCH64
+                case SCMP_ARCH_LOONGARCH64:
+#endif
 #ifdef SCMP_ARCH_RISCV64
                 case SCMP_ARCH_RISCV64:
 #endif
-                        filter_syscall = SCMP_SYS(mmap); /* amd64, x32, arm64 and riscv64 have only mmap */
+                        filter_syscall = SCMP_SYS(mmap); /* amd64, x32, arm64, loongarch64 and riscv64 have only mmap */
                         shmat_syscall = SCMP_SYS(shmat);
                         break;
 
                 /* Please add more definitions here, if you port systemd to other architectures! */
 
-#if !defined(__i386__) && !defined(__x86_64__) && !defined(__hppa__) && !defined(__hppa64__) && !defined(__powerpc__) && !defined(__powerpc64__) && !defined(__arm__) && !defined(__aarch64__) && !defined(__s390__) && !defined(__s390x__) && !(defined(__riscv) && __riscv_xlen == 64)
+#if !defined(__i386__) && !defined(__x86_64__) && !defined(__hppa__) && !defined(__hppa64__) && !defined(__powerpc__) && !defined(__powerpc64__) && !defined(__arm__) && !defined(__aarch64__) && !defined(__s390__) && !defined(__s390x__) && !(defined(__riscv) && __riscv_xlen == 64) && !defined(__loongarch_lp64)
 #warning "Consider adding the right mmap() syscall definitions here!"
 #endif
                 }
@@ -1816,7 +1855,7 @@ int seccomp_memory_deny_write_execute(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install MemoryDenyWriteExecute= rule for architecture %s, skipping: %m",
@@ -1889,7 +1928,7 @@ int seccomp_restrict_archs(Set *archs) {
                 return r;
 
         r = seccomp_load(seccomp);
-        if (ERRNO_IS_SECCOMP_FATAL(r))
+        if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                 return r;
         if (r < 0)
                 log_debug_errno(r, "Failed to restrict system call architectures, skipping: %m");
@@ -1979,15 +2018,17 @@ int seccomp_lock_personality(unsigned long personality) {
                                 1,
                                 SCMP_A0(SCMP_CMP_NE, personality));
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to enable personality lock for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to enable personality lock for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -2010,7 +2051,8 @@ int seccomp_protect_hostname(void) {
                                 SCMP_SYS(sethostname),
                                 0);
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add sethostname() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add sethostname() rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
@@ -2020,15 +2062,17 @@ int seccomp_protect_hostname(void) {
                                 SCMP_SYS(setdomainname),
                                 0);
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add setdomainname() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add setdomainname() rule for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
                         continue;
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to apply hostname restrictions for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to apply hostname restrictions for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -2037,7 +2081,7 @@ int seccomp_protect_hostname(void) {
 static int seccomp_restrict_sxid(scmp_filter_ctx seccomp, mode_t m) {
         /* Checks the mode_t parameter of the following system calls:
          *
-         *       → chmod() + fchmod() + fchmodat()
+         *       → chmod() + fchmod() + fchmodat() + fchmodat2()
          *       → open() + creat() + openat()
          *       → mkdir() + mkdirat()
          *       → mknod() + mknodat()
@@ -2077,6 +2121,28 @@ static int seccomp_restrict_sxid(scmp_filter_ctx seccomp, mode_t m) {
                         SCMP_A2(SCMP_CMP_MASKED_EQ, m, m));
         if (r < 0)
                 log_debug_errno(r, "Failed to add filter for fchmodat: %m");
+        else
+                any = true;
+
+#if defined(__SNR_fchmodat2)
+        r = seccomp_rule_add_exact(
+                        seccomp,
+                        SCMP_ACT_ERRNO(EPERM),
+                        SCMP_SYS(fchmodat2),
+                        1,
+                        SCMP_A2(SCMP_CMP_MASKED_EQ, m, m));
+#else
+        /* It looks like this libseccomp does not know about fchmodat2().
+         * Pretend the fchmodat2() system call is not supported at all,
+         * regardless of the kernel version. */
+        r = seccomp_rule_add_exact(
+                        seccomp,
+                        SCMP_ACT_ERRNO(ENOSYS),
+                        __NR_fchmodat2,
+                        0);
+#endif
+        if (r < 0)
+                log_debug_errno(r, "Failed to add filter for fchmodat2: %m");
         else
                 any = true;
 
@@ -2193,20 +2259,23 @@ int seccomp_restrict_suid_sgid(void) {
 
                 r = seccomp_restrict_sxid(seccomp, S_ISUID);
                 if (r < 0)
-                        log_debug_errno(r, "Failed to add suid rule for architecture %s, ignoring: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add suid rule for architecture %s, ignoring: %m",
+                                        seccomp_arch_to_string(arch));
 
                 k = seccomp_restrict_sxid(seccomp, S_ISGID);
                 if (k < 0)
-                        log_debug_errno(r, "Failed to add sgid rule for architecture %s, ignoring: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(k, "Failed to add sgid rule for architecture %s, ignoring: %m",
+                                        seccomp_arch_to_string(arch));
 
                 if (r < 0 && k < 0)
                         continue;
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to apply suid/sgid restrictions for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to apply suid/sgid restrictions for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;
@@ -2348,10 +2417,11 @@ int seccomp_suppress_sync(void) {
 #endif
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to apply sync() suppression for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to apply sync() suppression for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;

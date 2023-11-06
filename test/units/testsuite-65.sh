@@ -165,6 +165,11 @@ systemd-analyze cat-config /etc/systemd/system.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf systemd/journald.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf foo/bar systemd/journald.conf >/dev/null
 systemd-analyze cat-config foo/bar
+systemd-analyze cat-config --tldr systemd/system.conf >/dev/null
+systemd-analyze cat-config --tldr /etc/systemd/system.conf >/dev/null
+systemd-analyze cat-config --tldr systemd/system.conf systemd/journald.conf >/dev/null
+systemd-analyze cat-config --tldr systemd/system.conf foo/bar systemd/journald.conf >/dev/null
+systemd-analyze cat-config --tldr foo/bar
 # security
 systemd-analyze security
 systemd-analyze security --json=off
@@ -235,6 +240,18 @@ set -e
 
 rm /tmp/testfile.service
 rm /tmp/testfile2.service
+
+cat <<EOF >/tmp/sample.service
+[Unit]
+Description = A Sample Service
+
+[Service]
+ExecStart = echo hello
+Slice=support.slice
+EOF
+
+# Zero exit status since no additional dependencies are recursively loaded when the unit file is loaded
+systemd-analyze verify --recursive-errors=no /tmp/sample.service
 
 cat <<EOF >/tmp/testfile.service
 [Service]
@@ -546,6 +563,12 @@ cat <<EOF >/tmp/testfile.json
     "weight": 25,
     "range": 1
     },
+"CapabilityBoundingSet_CAP_BPF":
+    {"description_good": "Service may load BPF programs",
+    "description_bad": "Service may not load BPF programs",
+    "weight": 25,
+    "range": 1
+    },
 "UMask":
     {"weight": 100,
     "range": 10
@@ -815,13 +838,13 @@ check deny yes /run/systemd/system/deny-list.service
 check deny no deny-list.service
 
 output=$(systemd-run -p "SystemCallFilter=@system-service" -p "SystemCallFilter=~@resources:ENOANO @privileged" -p "SystemCallFilter=@clock" sleep 60 2>&1)
-name=$(echo "$output" | awk '{ print $4 }')
+name=$(echo "$output" | awk '{ print $4 }' | cut -d';' -f1)
 
 check allow yes /run/systemd/transient/"$name"
 check allow no "$name"
 
 output=$(systemd-run -p "SystemCallFilter=~@known" -p "SystemCallFilter=@system-service" -p "SystemCallFilter=~@resources:ENOANO @privileged" -p "SystemCallFilter=@clock" sleep 60 2>&1)
-name=$(echo "$output" | awk '{ print $4 }')
+name=$(echo "$output" | awk '{ print $4 }' | cut -d';' -f1)
 
 check deny yes /run/systemd/transient/"$name"
 check deny no "$name"

@@ -67,11 +67,11 @@ TEST(copy_tree_replace_file) {
 
         /* The file exists- now overwrite original contents, and test the COPY_REPLACE flag. */
 
-        assert_se(copy_tree(src, dst, UID_INVALID, GID_INVALID, COPY_REFLINK, NULL) == -EEXIST);
+        assert_se(copy_tree(src, dst, UID_INVALID, GID_INVALID, COPY_REFLINK, NULL, NULL) == -EEXIST);
 
         assert_se(read_file_at_and_streq(AT_FDCWD, dst, "foo foo foo\n"));
 
-        assert_se(copy_tree(src, dst, UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_REPLACE, NULL) == 0);
+        assert_se(copy_tree(src, dst, UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_REPLACE, NULL, NULL) == 0);
 
         assert_se(read_file_at_and_streq(AT_FDCWD, dst, "bar bar\n"));
 }
@@ -92,14 +92,14 @@ TEST(copy_tree_replace_dirs) {
         assert_se(write_string_file_at(dst, "bar", "dest file 2", WRITE_STRING_FILE_CREATE) == 0);
 
         /* Copying without COPY_REPLACE should fail because the destination file already exists. */
-        assert_se(copy_tree_at(src, ".", dst, ".", UID_INVALID, GID_INVALID, COPY_REFLINK, NULL) == -EEXIST);
+        assert_se(copy_tree_at(src, ".", dst, ".", UID_INVALID, GID_INVALID, COPY_REFLINK, NULL, NULL) == -EEXIST);
 
         assert_se(read_file_at_and_streq(src, "foo", "src file 1\n"));
         assert_se(read_file_at_and_streq(src, "bar", "src file 2\n"));
         assert_se(read_file_at_and_streq(dst, "foo", "dest file 1\n"));
         assert_se(read_file_at_and_streq(dst, "bar", "dest file 2\n"));
 
-        assert_se(copy_tree_at(src, ".", dst, ".", UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_REPLACE|COPY_MERGE, NULL) == 0);
+        assert_se(copy_tree_at(src, ".", dst, ".", UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_REPLACE|COPY_MERGE, NULL, NULL) == 0);
 
         assert_se(read_file_at_and_streq(src, "foo", "src file 1\n"));
         assert_se(read_file_at_and_streq(src, "bar", "src file 2\n"));
@@ -191,7 +191,7 @@ TEST(copy_tree) {
         assert_se(hashmap_ensure_put(&denylist, &inode_hash_ops, cp, INT_TO_PTR(DENY_INODE)) >= 0);
         TAKE_PTR(cp);
 
-        assert_se(copy_tree(original_dir, copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_MERGE|COPY_HARDLINKS, denylist) == 0);
+        assert_se(copy_tree(original_dir, copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK|COPY_MERGE|COPY_HARDLINKS, denylist, NULL) == 0);
 
         STRV_FOREACH(p, files) {
                 _cleanup_free_ char *buf = NULL, *f = NULL, *c = NULL;
@@ -243,8 +243,8 @@ TEST(copy_tree) {
         assert_se(stat(unixsockp, &st) >= 0);
         assert_se(S_ISSOCK(st.st_mode));
 
-        assert_se(copy_tree(original_dir, copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK, denylist) < 0);
-        assert_se(copy_tree("/tmp/inexistent/foo/bar/fsdoi", copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK, denylist) < 0);
+        assert_se(copy_tree(original_dir, copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK, denylist, NULL) < 0);
+        assert_se(copy_tree("/tmp/inexistent/foo/bar/fsdoi", copy_dir, UID_INVALID, GID_INVALID, COPY_REFLINK, denylist, NULL) < 0);
 
         ignorep = strjoina(copy_dir, "ignore/file");
         assert_se(RET_NERRNO(access(ignorep, F_OK)) == -ENOENT);
@@ -254,7 +254,7 @@ TEST(copy_tree) {
 }
 
 TEST(copy_bytes) {
-        _cleanup_close_pair_ int pipefd[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int pipefd[2] = EBADF_PAIR;
         _cleanup_close_ int infd = -EBADF;
         int r, r2;
         char buf[1024], buf2[1024];
@@ -470,10 +470,10 @@ TEST_RET(copy_holes_with_gaps) {
                 return log_tests_skipped("Filesystem doesn't support hole punching");
 
         assert_se(lseek(fd, blksz, SEEK_CUR) >= 0);
-        assert_se(loop_write(fd, buf, blksz, 0) >= 0);
-        assert_se(loop_write(fd, buf, blksz, 0) >= 0);
+        assert_se(loop_write(fd, buf, blksz) >= 0);
+        assert_se(loop_write(fd, buf, blksz) >= 0);
         assert_se(lseek(fd, 2 * blksz, SEEK_CUR) >= 0);
-        assert_se(loop_write(fd, buf, blksz, 0) >= 0);
+        assert_se(loop_write(fd, buf, blksz) >= 0);
         assert_se(lseek(fd, 0, SEEK_SET) >= 0);
         assert_se(fsync(fd) >= 0);
 

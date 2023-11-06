@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
-# pylint: disable=missing-docstring,redefined-outer-name,invalid-name
 # pylint: disable=unused-import,import-outside-toplevel,useless-else-on-loop
 # pylint: disable=consider-using-with,wrong-import-position,unspecified-encoding
-# pylint: disable=protected-access
+# pylint: disable=protected-access,redefined-outer-name
 
 import base64
 import json
@@ -144,6 +143,9 @@ def test_apply_config(tmp_path):
     assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
 
 def test_parse_args_minimal():
+    with pytest.raises(ValueError):
+        ukify.parse_args([])
+
     opts = ukify.parse_args('arg1 arg2'.split())
     assert opts.linux == pathlib.Path('arg1')
     assert opts.initrd == [pathlib.Path('arg2')]
@@ -264,6 +266,7 @@ def test_parse_sections():
 
 def test_config_priority(tmp_path):
     config = tmp_path / 'config1.conf'
+    # config: use pesign and give certdir + certname
     config.write_text(textwrap.dedent(
         f'''
         [UKI]
@@ -280,10 +283,8 @@ def test_config_priority(tmp_path):
         Stub = some/path4
         PCRBanks = sha512,sha1
         SigningEngine = engine1
-        SignTool = pesign
-        SecureBootPrivateKey = some/path5
-        SecureBootCertificate = some/path6
-        SecureBootCertificateDir = some/path7
+        SecureBootSigningTool = pesign
+        SecureBootCertificateDir = some/path5
         SecureBootCertificateName = some/name1
         SignKernel = no
 
@@ -293,6 +294,7 @@ def test_config_priority(tmp_path):
         Phases = {':'.join(ukify.KNOWN_PHASES)}
         '''))
 
+    # args: use sbsign and give key + cert, should override pesign
     opts = ukify.parse_args(
         ['build',
          '--linux=/ARG1',
@@ -309,11 +311,9 @@ def test_config_priority(tmp_path):
          '--pcr-public-key=PKEY2',
          '--pcr-banks=SHA1,SHA256',
          '--signing-engine=ENGINE',
-         '--signtool=pesign',
+         '--signtool=sbsign',
          '--secureboot-private-key=SBKEY',
          '--secureboot-certificate=SBCERT',
-         '--secureboot-certificate-dir=SBPATH',
-         '--secureboot-certificate-name=SBNAME',
          '--sign-kernel',
          '--no-sign-kernel',
          '--tools=TOOLZ///',
@@ -343,11 +343,11 @@ def test_config_priority(tmp_path):
                                     pathlib.Path('some/path8')]
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
-    assert opts.signtool == 'pesign'
-    assert opts.sb_key == 'SBKEY'
-    assert opts.sb_cert == 'SBCERT'
-    assert opts.sb_certdir == 'SBPATH'
-    assert opts.sb_cert_name == 'SBNAME'
+    assert opts.signtool == 'sbsign' # from args
+    assert opts.sb_key == 'SBKEY' # from args
+    assert opts.sb_cert == 'SBCERT' # from args
+    assert opts.sb_certdir == 'some/path5' # from config
+    assert opts.sb_cert_name == 'some/name1' # from config
     assert opts.sign_kernel is False
     assert opts.tools == [pathlib.Path('TOOLZ/')]
     assert opts.output == pathlib.Path('OUTPUT')
@@ -356,6 +356,13 @@ def test_config_priority(tmp_path):
 def test_help(capsys):
     with pytest.raises(SystemExit):
         ukify.parse_args(['--help'])
+    out = capsys.readouterr()
+    assert '--section' in out.out
+    assert not out.err
+
+def test_help_display(capsys):
+    with pytest.raises(SystemExit):
+        ukify.parse_args(['inspect', '--help'])
     out = capsys.readouterr()
     assert '--section' in out.out
     assert not out.err
@@ -602,6 +609,52 @@ def test_efi_signing_pesign(kernel_initrd, tmpdir):
     ], text=True)
 
     assert f"The signer's common name is {author}" in dump
+
+def test_inspect(kernel_initrd, tmpdir, capsys):
+    if kernel_initrd is None:
+        pytest.skip('linux+initrd not found')
+    if not shutil.which('sbsign'):
+        pytest.skip('sbsign not found')
+
+    ourdir = pathlib.Path(__file__).parent
+    cert = unbase64(ourdir / 'example.signing.crt.base64')
+    key = unbase64(ourdir / 'example.signing.key.base64')
+
+    output = f'{tmpdir}/signed2.efi'
+    uname_arg='1.2.3'
+    osrel_arg='Linux'
+    cmdline_arg='ARG1 ARG2 ARG3'
+    opts = ukify.parse_args([
+        'build',
+        *kernel_initrd,
+        f'--cmdline={cmdline_arg}',
+        f'--os-release={osrel_arg}',
+        f'--uname={uname_arg}',
+        f'--output={output}',
+        f'--secureboot-certificate={cert.name}',
+        f'--secureboot-private-key={key.name}',
+    ])
+
+    ukify.check_inputs(opts)
+    ukify.make_uki(opts)
+
+    opts = ukify.parse_args(['inspect', output])
+    ukify.inspect_sections(opts)
+
+    text = capsys.readouterr().out
+
+    expected_osrel = f'.osrel:\n  size: {len(osrel_arg)}'
+    assert expected_osrel in text
+    expected_cmdline = f'.cmdline:\n  size: {len(cmdline_arg)}'
+    assert expected_cmdline in text
+    expected_uname = f'.uname:\n  size: {len(uname_arg)}'
+    assert expected_uname in text
+
+    expected_initrd = '.initrd:\n  size:'
+    assert expected_initrd in text
+    expected_linux = '.linux:\n  size:'
+    assert expected_linux in text
+
 
 def test_pcr_signing(kernel_initrd, tmpdir):
     if kernel_initrd is None:

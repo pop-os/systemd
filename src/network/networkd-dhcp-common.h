@@ -48,7 +48,7 @@ typedef struct DUID {
         DUIDType type;
 
         uint8_t raw_data_len;
-        uint8_t raw_data[MAX_DUID_LEN];
+        uint8_t raw_data[MAX_DUID_DATA_LEN];
         usec_t llt_time;
         bool set;
 } DUID;
@@ -96,6 +96,7 @@ DHCPOptionDataType dhcp_option_data_type_from_string(const char *d) _pure_;
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_route_metric);
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_accept_ra_route_metric);
+CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_send_hostname);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_dns);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_domains);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_ntp);

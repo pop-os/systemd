@@ -29,7 +29,7 @@ static const UnitActiveState state_translation_table[_SCOPE_STATE_MAX] = {
         [SCOPE_ABANDONED] = UNIT_ACTIVE,
         [SCOPE_STOP_SIGTERM] = UNIT_DEACTIVATING,
         [SCOPE_STOP_SIGKILL] = UNIT_DEACTIVATING,
-        [SCOPE_FAILED] = UNIT_FAILED
+        [SCOPE_FAILED] = UNIT_FAILED,
 };
 
 static int scope_dispatch_timer(sd_event_source *source, usec_t usec, void *userdata);
@@ -41,7 +41,7 @@ static void scope_init(Unit *u) {
         assert(u->load_state == UNIT_STUB);
 
         s->runtime_max_usec = USEC_INFINITY;
-        s->timeout_stop_usec = u->manager->default_timeout_stop_usec;
+        s->timeout_stop_usec = u->manager->defaults.timeout_stop_usec;
         u->ignore_on_isolate = true;
         s->user = s->group = NULL;
         s->oom_policy = _OOM_POLICY_INVALID;
@@ -76,34 +76,10 @@ static usec_t scope_running_timeout(Scope *s) {
                         delta);
 }
 
-static int scope_arm_timer(Scope *s, usec_t usec) {
-        int r;
-
+static int scope_arm_timer(Scope *s, bool relative, usec_t usec) {
         assert(s);
 
-        if (s->timer_event_source) {
-                r = sd_event_source_set_time(s->timer_event_source, usec);
-                if (r < 0)
-                        return r;
-
-                return sd_event_source_set_enabled(s->timer_event_source, SD_EVENT_ONESHOT);
-        }
-
-        if (usec == USEC_INFINITY)
-                return 0;
-
-        r = sd_event_add_time(
-                        UNIT(s)->manager->event,
-                        &s->timer_event_source,
-                        CLOCK_MONOTONIC,
-                        usec, 0,
-                        scope_dispatch_timer, s);
-        if (r < 0)
-                return r;
-
-        (void) sd_event_source_set_description(s->timer_event_source, "scope-timer");
-
-        return 0;
+        return unit_arm_timer(UNIT(s), &s->timer_event_source, relative, usec, scope_dispatch_timer);
 }
 
 static void scope_set_state(Scope *s, ScopeState state) {
@@ -119,7 +95,7 @@ static void scope_set_state(Scope *s, ScopeState state) {
         if (!IN_SET(state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL, SCOPE_START_CHOWN, SCOPE_RUNNING))
                 s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
 
-        if (IN_SET(state, SCOPE_DEAD, SCOPE_FAILED)) {
+        if (!IN_SET(old_state, SCOPE_DEAD, SCOPE_FAILED) && IN_SET(state, SCOPE_DEAD, SCOPE_FAILED)) {
                 unit_unwatch_all_pids(UNIT(s));
                 unit_dequeue_rewatch_pids(UNIT(s));
         }
@@ -197,7 +173,7 @@ static int scope_add_extras(Scope *s) {
                 return r;
 
         if (s->oom_policy < 0)
-                s->oom_policy = s->cgroup_context.delegate ? OOM_CONTINUE : UNIT(s)->manager->default_oom_policy;
+                s->oom_policy = s->cgroup_context.delegate ? OOM_CONTINUE : UNIT(s)->manager->defaults.oom_policy;
 
         s->cgroup_context.memory_oom_group = s->oom_policy == OOM_KILL;
 
@@ -260,16 +236,16 @@ static int scope_coldplug(Unit *u) {
         if (s->deserialized_state == s->state)
                 return 0;
 
-        r = scope_arm_timer(s, scope_coldplug_timeout(s));
+        r = scope_arm_timer(s, /* relative= */ false, scope_coldplug_timeout(s));
         if (r < 0)
                 return r;
 
         if (!IN_SET(s->deserialized_state, SCOPE_DEAD, SCOPE_FAILED)) {
                 if (u->pids) {
-                        void *pidp;
+                        PidRef *pid;
 
-                        SET_FOREACH(pidp, u->pids) {
-                                r = unit_watch_pid(u, PTR_TO_PID(pidp), false);
+                        SET_FOREACH(pid, u->pids) {
+                                r = unit_watch_pidref(u, pid, /* exclusive= */ false);
                                 if (r < 0 && r != -EEXIST)
                                         return r;
                         }
@@ -345,15 +321,21 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
                                 state != SCOPE_STOP_SIGTERM ? KILL_KILL :
                                 s->was_abandoned            ? KILL_TERMINATE_AND_LOG :
                                                               KILL_TERMINATE,
-                                -1, -1, false);
-                if (r < 0)
+                                /* main_pid= */ NULL,
+                                /* control_pid= */ NULL,
+                                /* main_pid_alien= */ false);
+                if (r < 0) {
+                        log_unit_warning_errno(UNIT(s), r, "Failed to kill processes: %m");
                         goto fail;
+                }
         }
 
         if (r > 0) {
-                r = scope_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), s->timeout_stop_usec));
-                if (r < 0)
+                r = scope_arm_timer(s, /* relative= */ true, s->timeout_stop_usec);
+                if (r < 0) {
+                        log_unit_warning_errno(UNIT(s), r, "Failed to install timer: %m");
                         goto fail;
+                }
 
                 scope_set_state(s, state);
         } else if (state == SCOPE_STOP_SIGTERM)
@@ -364,24 +346,22 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
         return;
 
 fail:
-        log_unit_warning_errno(UNIT(s), r, "Failed to kill processes: %m");
-
         scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
 }
 
 static int scope_enter_start_chown(Scope *s) {
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
         Unit *u = UNIT(s);
-        pid_t pid;
         int r;
 
         assert(s);
         assert(s->user);
 
-        r = scope_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), u->manager->default_timeout_start_usec));
+        r = scope_arm_timer(s, /* relative= */ true, u->manager->defaults.timeout_start_usec);
         if (r < 0)
                 return r;
 
-        r = unit_fork_helper_process(u, "(sd-chown-cgroup)", &pid);
+        r = unit_fork_helper_process(u, "(sd-chown-cgroup)", &pidref);
         if (r < 0)
                 goto fail;
 
@@ -418,7 +398,7 @@ static int scope_enter_start_chown(Scope *s) {
                 _exit(EXIT_SUCCESS);
         }
 
-        r = unit_watch_pid(UNIT(s), pid, true);
+        r = unit_watch_pidref(UNIT(s), &pidref, /* exclusive= */ true);
         if (r < 0)
                 goto fail;
 
@@ -447,13 +427,11 @@ static int scope_enter_running(Scope *s) {
         r = unit_attach_pids_to_cgroup(u, u->pids, NULL);
         if (r < 0) {
                 log_unit_warning_errno(u, r, "Failed to add PIDs to scope's control group: %m");
-                scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
-                return r;
+                goto fail;
         }
         if (r == 0) {
-                log_unit_warning(u, "No PIDs left to attach to the scope's control group, refusing.");
-                scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
-                return -ECHILD;
+                r = log_unit_warning_errno(u, SYNTHETIC_ERRNO(ECHILD), "No PIDs left to attach to the scope's control group, refusing.");
+                goto fail;
         }
         log_unit_debug(u, "%i %s added to scope's control group.", r, r == 1 ? "process" : "processes");
 
@@ -462,7 +440,7 @@ static int scope_enter_running(Scope *s) {
         scope_set_state(s, SCOPE_RUNNING);
 
         /* Set the maximum runtime timeout. */
-        scope_arm_timer(s, scope_running_timeout(s));
+        scope_arm_timer(s, /* relative= */ false, scope_running_timeout(s));
 
         /* On unified we use proper notifications hence we can unwatch the PIDs
          * we just attached to the scope. This can also be done on legacy as
@@ -473,6 +451,10 @@ static int scope_enter_running(Scope *s) {
         /* Start watching the PIDs currently in the scope (legacy hierarchy only) */
         (void) unit_enqueue_rewatch_pids(u);
         return 1;
+
+fail:
+        scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
+        return r;
 }
 
 static int scope_start(Unit *u) {
@@ -531,10 +513,6 @@ static void scope_reset_failed(Unit *u) {
         s->result = SCOPE_SUCCESS;
 }
 
-static int scope_kill(Unit *u, KillWho who, int signo, int code, int value, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, code, value, -1, -1, error);
-}
-
 static int scope_get_timeout(Unit *u, usec_t *timeout) {
         Scope *s = SCOPE(u);
         usec_t t;
@@ -555,7 +533,7 @@ static int scope_get_timeout(Unit *u, usec_t *timeout) {
 
 static int scope_serialize(Unit *u, FILE *f, FDSet *fds) {
         Scope *s = SCOPE(u);
-        void *pidp;
+        PidRef *pid;
 
         assert(s);
         assert(f);
@@ -567,8 +545,8 @@ static int scope_serialize(Unit *u, FILE *f, FDSet *fds) {
         if (s->controller)
                 (void) serialize_item(f, "controller", s->controller);
 
-        SET_FOREACH(pidp, u->pids)
-                serialize_item_format(f, "pids", PID_FMT, PTR_TO_PID(pidp));
+        SET_FOREACH(pid, u->pids)
+                serialize_pidref(f, fds, "pids", pid);
 
         return 0;
 }
@@ -606,14 +584,12 @@ static int scope_deserialize_item(Unit *u, const char *key, const char *value, F
                         return log_oom();
 
         } else if (streq(key, "pids")) {
-                pid_t pid;
+                _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
 
-                if (parse_pid(value, &pid) < 0)
-                        log_unit_debug(u, "Failed to parse pids value: %s", value);
-                else {
-                        r = set_ensure_put(&u->pids, NULL, PID_TO_PTR(pid));
+                if (deserialize_pidref(fds, value, &pidref) >= 0) {
+                        r = unit_watch_pidref(u, &pidref, /* exclusive= */ false);
                         if (r < 0)
-                                return r;
+                                log_unit_debug(u, "Failed to watch PID, ignoring: %s", value);
                 }
         } else
                 log_unit_debug(u, "Unknown serialization key: %s", key);
@@ -747,13 +723,13 @@ int scope_abandon(Scope *s) {
         return 0;
 }
 
-_pure_ static UnitActiveState scope_active_state(Unit *u) {
+static UnitActiveState scope_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[SCOPE(u)->state];
 }
 
-_pure_ static const char *scope_sub_state_to_string(Unit *u) {
+static const char *scope_sub_state_to_string(Unit *u) {
         assert(u);
 
         return scope_state_to_string(SCOPE(u)->state);
@@ -827,8 +803,6 @@ const UnitVTable scope_vtable = {
 
         .start = scope_start,
         .stop = scope_stop,
-
-        .kill = scope_kill,
 
         .freeze = unit_freeze_vtable_common,
         .thaw = unit_thaw_vtable_common,

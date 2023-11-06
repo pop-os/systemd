@@ -12,6 +12,10 @@
 typedef unsigned long loadavg_t;
 
 int parse_boolean(const char *v) _pure_;
+int parse_tristate_full(const char *v, const char *third, int *ret);
+static inline int parse_tristate(const char *v, int *ret) {
+        return parse_tristate_full(v, NULL, ret);
+}
 int parse_pid(const char *s, pid_t* ret_pid);
 int parse_mode(const char *s, mode_t *ret);
 int parse_ifindex(const char *s);
@@ -30,10 +34,11 @@ int parse_fd(const char *t);
 #define SAFE_ATO_MASK_FLAGS(base) ((base) & ~SAFE_ATO_ALL_FLAGS)
 
 int safe_atou_full(const char *s, unsigned base, unsigned *ret_u);
-
 static inline int safe_atou(const char *s, unsigned *ret_u) {
         return safe_atou_full(s, 0, ret_u);
 }
+
+int safe_atou_bounded(const char *s, unsigned min, unsigned max, unsigned *ret);
 
 int safe_atoi(const char *s, int *ret_i);
 int safe_atolli(const char *s, long long int *ret_i);
@@ -152,3 +157,5 @@ int parse_oom_score_adjust(const char *s, int *ret);
  * to a loadavg_t. */
 int store_loadavg_fixed_point(unsigned long i, unsigned long f, loadavg_t *ret);
 int parse_loadavg_fixed_point(const char *s, loadavg_t *ret);
+
+bool nft_identifier_valid(const char *id);

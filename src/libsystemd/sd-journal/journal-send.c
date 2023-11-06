@@ -19,6 +19,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "io-util.h"
+#include "iovec-util.h"
 #include "journal-send.h"
 #include "memfd-util.h"
 #include "missing_syscall.h"
@@ -438,7 +439,7 @@ _public_ int sd_journal_stream_fd(const char *identifier, int priority, int leve
         header[l++] = '0';
         header[l++] = '\n';
 
-        r = loop_write(fd, header, l, false);
+        r = loop_write(fd, header, l);
         if (r < 0)
                 return r;
 
@@ -529,7 +530,7 @@ _public_ int sd_journal_send_with_location(const char *file, const char *line, c
 
         r = sd_journal_sendv(iov, n_iov);
 
-        iov[0] = iov[1] = iov[2] = IOVEC_NULL;
+        iov[0] = iov[1] = iov[2] = (struct iovec) {};
 
         return r;
 }

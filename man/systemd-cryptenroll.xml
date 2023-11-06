@@ -22,7 +22,9 @@
 
   <refsynopsisdiv>
     <cmdsynopsis>
-      <command>systemd-cryptenroll <arg choice="opt" rep="repeat">OPTIONS</arg> <arg choice="opt">DEVICE</arg></command>
+      <command>systemd-cryptenroll</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="opt">DEVICE</arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -244,7 +246,9 @@
 
         <listitem><para>Enroll a regular password/passphrase. This command is mostly equivalent to
         <command>cryptsetup luksAddKey</command>, however may be combined with
-        <option>--wipe-slot=</option> in one call, see below.</para></listitem>
+        <option>--wipe-slot=</option> in one call, see below.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -253,7 +257,9 @@
         <listitem><para>Enroll a recovery key. Recovery keys are mostly identical to passphrases, but are
         computer-generated instead of being chosen by a human, and thus have a guaranteed high entropy. The
         key uses a character set that is easy to type in, and may be scanned off screen via a QR code.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -262,7 +268,9 @@
         <listitem><para>Use a file instead of a password/passphrase read from stdin to unlock the volume.
         Expects the PATH to the file containing your key to unlock the volume. Currently there is nothing like
         <option>--key-file-offset=</option> or <option>--key-file-size=</option> so this file has to only
-        contain the full key.</para></listitem>
+        contain the full key.</para>
+
+        <xi:include href="version-info.xml" xpointer="v252"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -273,7 +281,9 @@
         <filename>/dev/hidraw1</filename>). Alternatively the special value <literal>auto</literal> may be
         specified, in order to automatically determine the device node of a currently plugged in security
         token (of which there must be exactly one). This automatic discovery is unsupported if
-        <option>--fido2-device=</option> option is also specified.</para></listitem>
+        <option>--fido2-device=</option> option is also specified.</para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -295,7 +305,9 @@
         <para>See
         <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry> for a
         more comprehensive example of a <command>systemd-cryptenroll</command> invocation and its matching
-        <filename>/etc/crypttab</filename> line.</para></listitem>
+        <filename>/etc/crypttab</filename> line.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -308,7 +320,9 @@
         denotes 2048-bit RSA with PKCS#1.5 padding and SHA-256. <literal>eddsa</literal> denotes
         EDDSA over Curve25519 with SHA-512.</para>
 
-        <para>Note that your authenticator may not support some algorithms.</para></listitem>
+        <para>Note that your authenticator may not support some algorithms.</para>
+
+        <xi:include href="version-info.xml" xpointer="v251"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -332,7 +346,9 @@
         <para>See
         <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry> for a
         more comprehensive example of a <command>systemd-cryptenroll</command> invocation and its matching
-        <filename>/etc/crypttab</filename> line.</para></listitem>
+        <filename>/etc/crypttab</filename> line.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -342,7 +358,9 @@
         a PIN when unlocking the volume (the FIDO2 <literal>clientPin</literal> feature). Defaults to
         <literal>yes</literal>. (Note: this setting is without effect if the security token does not support
         the <literal>clientPin</literal> feature at all, or does not allow enabling or disabling
-        it.)</para></listitem>
+        it.)</para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -352,7 +370,9 @@
         verify presence (tap the token, the FIDO2 <literal>up</literal> feature) when unlocking the volume.
         Defaults to <literal>yes</literal>. (Note: this setting is without effect if the security token does not support
         the <literal>up</literal> feature at all, or does not allow enabling or disabling it.)
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -361,7 +381,9 @@
         <listitem><para>When enrolling a FIDO2 security token, controls whether to require user verification
         when unlocking the volume (the FIDO2 <literal>uv</literal> feature). Defaults to
         <literal>no</literal>. (Note: this setting is without effect if the security token does not support
-        the <literal>uv</literal> feature at all, or does not allow enabling or disabling it.)</para></listitem>
+        the <literal>uv</literal> feature at all, or does not allow enabling or disabling it.)</para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -384,20 +406,55 @@
         <filename>/etc/crypttab</filename> line.</para>
 
         <para>Use <option>--tpm2-pcrs=</option> (see below) to configure which TPM2 PCR indexes to bind the
-        enrollment to.</para></listitem>
+        enrollment to.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--tpm2-seal-key-handle=</option><replaceable>HANDLE</replaceable></term>
+
+        <listitem><para>Configures which parent key to use for sealing, using the TPM handle (index) of the
+        key. This is used to "seal" (encrypt) a secret and must be used later to "unseal" (decrypt) the
+        secret. Expects a hexadecimal 32bit integer, optionally prefixed with
+        <literal>0x</literal>. Allowable values are any handle index in the persistent
+        (<literal>0x81000000</literal>-<literal>0x81ffffff</literal>) or transient
+        (<literal>0x80000000</literal>-<literal>0x80ffffff</literal>) ranges. Since transient handles are
+        lost after a TPM reset, and may be flushed during TPM context switching, they should not be used
+        except for very specific use cases, e.g. testing.</para>
+
+        <para>The default is the Storage Root Key (SRK) handle index <literal>0x81000001</literal>. A value
+        of 0 will use the default. For the SRK handle, a new key will be created and stored in the TPM if one
+        does not already exist; for any other handle, the key must already exist in the TPM at the specified
+        handle index.</para>
+
+        <para>This should not be changed unless you know what you are doing.</para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--tpm2-pcrs=</option><arg rep="repeat">PCR</arg></term>
 
         <listitem><para>Configures the TPM2 PCRs (Platform Configuration Registers) to bind to when
-        enrollment is requested via <option>--tpm2-device=</option>. Takes a list of PCR names or numeric
-        indices in the range 0…23. Multiple PCR indexes are separated by <literal>+</literal>. If not
-        specified, the default is to use PCR 7 only. If an empty string is specified, binds the enrollment to
-        no PCRs at all. See the table above for a list of available PCRs.</para>
+        enrollment is requested via <option>--tpm2-device=</option>. Takes a list of PCR entries, where each
+        entry starts with a name or numeric index in the range 0…23, optionally followed by
+        <literal>:</literal> and a hash algorithm name (specifying the PCR bank), optionally followed by
+        <literal>=</literal> and a hash digest value. Multiple PCR entries are separated by
+        <literal>+</literal>. If not specified, the default is to use PCR 7 only. If an empty string is
+        specified, binds the enrollment to no PCRs at all. See the table above for a list of available
+        PCRs.</para>
 
         <para>Example: <option>--tpm2-pcrs=boot-loader-code+platform-config+boot-loader-config</option>
         specifies that PCR registers 4, 1, and 5 should be used.</para>
+        <para>Example: <option>--tpm2-pcrs=7:sha256</option> specifies that PCR register 7 from the SHA256
+        bank should be used.</para>
+        <para>Example: <option>--tpm2-pcrs=4:sha1=3a3f780f11a4b49969fcaa80cd6e3957c33b2275</option>
+        specifies that PCR register 4 from the SHA1 bank should be used, and a hash digest value of
+        3a3f780f11a4b49969fcaa80cd6e3957c33b2275 will be used instead of reading the current PCR
+        value.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/>
         </listitem>
       </varlistentry>
 
@@ -417,7 +474,9 @@
         project='mankier'><refentrytitle>tpm2_getcap</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         and <citerefentry
         project='mankier'><refentrytitle>tpm2_dictionarylockout</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-        commands, respectively.</para></listitem>
+        commands, respectively.</para>
+
+        <xi:include href="version-info.xml" xpointer="v251"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -455,7 +514,23 @@
         to ensure that access to a volume is not lost if a public key is enrolled for which no valid
         signature for the current PCR state is available. If the supplied signature does not unlock the
         current PCR state and public key combination, no slot is enrolled and the operation will fail. If no
-        signature file is specified or found no such safety verification is done.</para></listitem>
+        signature file is specified or found no such safety verification is done.</para>
+
+        <xi:include href="version-info.xml" xpointer="v252"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--tpm2-pcrlock=</option><arg>PATH</arg></term>
+
+        <listitem><para>Configures a TPM2 pcrlock policy to bind encryption to. Expects a path to a pcrlock
+        policy file as generated by the
+        <citerefentry><refentrytitle>systemd-pcrlock</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        tool. If a TPM2 device is enrolled and this option is not used but a file
+        <filename>pcrlock.json</filename> is found in <filename>/run/systemd/</filename> or
+        <filename>/var/lib/systemd/</filename> it is automatically used. Assign an empty string to turn this
+        behaviour off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -491,6 +566,8 @@
         <para>Or for replacing an enrolled empty password by TPM2:</para>
 
         <programlisting>systemd-cryptenroll /dev/sda1 --wipe-slot=empty --tpm2-device=auto</programlisting>
+
+        <xi:include href="version-info.xml" xpointer="v248"/>
         </listitem>
       </varlistentry>
 
@@ -504,6 +581,14 @@
     <title>Exit status</title>
 
     <para>On success, 0 is returned, a non-zero failure code otherwise.</para>
+  </refsect1>
+
+  <refsect1>
+    <title>Examples</title>
+
+    <para><citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry> and
+    <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    contain various examples employing <command>systemd-cryptenroll</command>.</para>
   </refsect1>
 
   <refsect1>

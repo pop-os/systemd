@@ -403,7 +403,7 @@ static int parse_package_metadata(const char *name, JsonVariant *id_json, Elf *e
                         /* If we have a build-id, merge it in the same JSON object so that it appears all
                          * nicely together in the logs/metadata. */
                         if (id_json) {
-                                r = json_variant_merge(&v, id_json);
+                                r = json_variant_merge_object(&v, id_json);
                                 if (r < 0)
                                         return log_error_errno(r, "json_variant_merge of package meta with buildId failed: %m");
                         }
@@ -419,7 +419,7 @@ static int parse_package_metadata(const char *name, JsonVariant *id_json, Elf *e
                         if (r < 0)
                                 return log_error_errno(r, "Failed to build JSON object: %m");
 
-                        r = json_variant_merge(c->package_metadata, w);
+                        r = json_variant_merge_object(c->package_metadata, w);
                         if (r < 0)
                                 return log_error_errno(r, "json_variant_merge of package meta with buildId failed: %m");
 
@@ -588,7 +588,7 @@ static int parse_core(int fd, const char *executable, char **ret, JsonVariant **
 
         assert(fd >= 0);
 
-        if (lseek(fd, 0, SEEK_SET) == (off_t) -1)
+        if (lseek(fd, 0, SEEK_SET) < 0)
                 return log_warning_errno(errno, "Failed to seek to beginning of the core file: %m");
 
         if (ret && !memstream_init(&c.m))
@@ -644,7 +644,7 @@ static int parse_elf(int fd, const char *executable, char **ret, JsonVariant **r
 
         assert(fd >= 0);
 
-        if (lseek(fd, 0, SEEK_SET) == (off_t) -1)
+        if (lseek(fd, 0, SEEK_SET) < 0)
                 return log_warning_errno(errno, "Failed to seek to beginning of the ELF file: %m");
 
         if (ret && !memstream_init(&c.m))
@@ -712,7 +712,7 @@ static int parse_elf(int fd, const char *executable, char **ret, JsonVariant **r
                 if (r < 0)
                         return log_warning_errno(r, "Failed to build JSON object: %m");
 
-                r = json_variant_merge(&elf_metadata, json_architecture);
+                r = json_variant_merge_object(&elf_metadata, json_architecture);
                 if (r < 0)
                         return log_warning_errno(r, "Failed to merge JSON objects: %m");
 
@@ -722,7 +722,7 @@ static int parse_elf(int fd, const char *executable, char **ret, JsonVariant **r
 #endif
 
         /* We always at least have the ELF type, so merge that (and possibly the arch). */
-        r = json_variant_merge(&elf_metadata, package_metadata);
+        r = json_variant_merge_object(&elf_metadata, package_metadata);
         if (r < 0)
                 return log_warning_errno(r, "Failed to merge JSON objects: %m");
 
@@ -739,9 +739,9 @@ static int parse_elf(int fd, const char *executable, char **ret, JsonVariant **r
 }
 
 int parse_elf_object(int fd, const char *executable, bool fork_disable_dump, char **ret, JsonVariant **ret_package_metadata) {
-        _cleanup_close_pair_ int error_pipe[2] = PIPE_EBADF,
-                                 return_pipe[2] = PIPE_EBADF,
-                                 json_pipe[2] = PIPE_EBADF;
+        _cleanup_close_pair_ int error_pipe[2] = EBADF_PAIR,
+                                 return_pipe[2] = EBADF_PAIR,
+                                 json_pipe[2] = EBADF_PAIR;
         _cleanup_(json_variant_unrefp) JsonVariant *package_metadata = NULL;
         _cleanup_free_ char *buf = NULL;
         int r;
@@ -826,7 +826,7 @@ int parse_elf_object(int fd, const char *executable, bool fork_disable_dump, cha
                          * Failure is ignored, because partial output is still useful. */
                         (void) fcntl(return_pipe[1], F_SETPIPE_SZ, len);
 
-                        r = loop_write(return_pipe[1], buf, len, false);
+                        r = loop_write(return_pipe[1], buf, len);
                         if (r == -EAGAIN)
                                 log_warning("Write failed, backtrace will be truncated.");
                         else if (r < 0)

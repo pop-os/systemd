@@ -123,7 +123,7 @@ static void transaction_merge_and_delete_job(Transaction *tr, Job *j, Job *other
         transaction_delete_job(tr, other, true);
 }
 
-_pure_ static bool job_is_conflicted_by(Job *j) {
+static bool job_is_conflicted_by(Job *j) {
         assert(j);
 
         /* Returns true if this job is pulled in by a least one
@@ -308,7 +308,7 @@ static void transaction_drop_redundant(Transaction *tr) {
         } while (again);
 }
 
-_pure_ static bool job_matters_to_anchor(Job *job) {
+static bool job_matters_to_anchor(Job *job) {
         assert(job);
         assert(!job->transaction_prev);
 
@@ -781,19 +781,11 @@ int transaction_activate(
 
         assert(hashmap_isempty(tr->jobs));
 
-        if (!hashmap_isempty(m->jobs)) {
-                /* Are there any jobs now? Then make sure we have the
-                 * idle pipe around. We don't really care too much
-                 * whether this works or not, as the idle pipe is a
-                 * feature for cosmetics, not actually useful for
-                 * anything beyond that. */
-
-                if (m->idle_pipe[0] < 0 && m->idle_pipe[1] < 0 &&
-                    m->idle_pipe[2] < 0 && m->idle_pipe[3] < 0) {
-                        (void) pipe2(m->idle_pipe, O_NONBLOCK|O_CLOEXEC);
-                        (void) pipe2(m->idle_pipe + 2, O_NONBLOCK|O_CLOEXEC);
-                }
-        }
+        /* Are there any jobs now? Then make sure we have the idle pipe around. We don't really care too much
+         * whether this works or not, as the idle pipe is a feature for cosmetics, not actually useful for
+         * anything beyond that. */
+        if (!hashmap_isempty(m->jobs))
+                (void) manager_allocate_idle_pipe(m);
 
         return 0;
 }

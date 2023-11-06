@@ -40,7 +40,7 @@ monitor_check_rr() (
     # displayed. We turn off pipefail for this, since we don't care about the
     # lhs of this pipe expression, we only care about the rhs' result to be
     # clean
-    timeout -v 30s journalctl -u resmontest.service --since "$since" -f --full | grep -m1 "$match"
+    timeout -v 30s journalctl -u resolvectl-monitor.service --since "$since" -f --full | grep -m1 "$match"
 )
 
 # Test for resolvectl, resolvconf
@@ -238,7 +238,8 @@ resolvectl status
 resolvectl log-level debug
 
 # Start monitoring queries
-systemd-run -u resmontest.service -p Type=notify resolvectl monitor
+systemd-run -u resolvectl-monitor.service -p Type=notify resolvectl monitor
+systemd-run -u resolvectl-monitor-json.service -p Type=notify resolvectl monitor --json=short
 
 # Check if all the zones are valid (zone-check always returns 0, so let's check
 # if it produces any errors/warnings)
@@ -317,6 +318,7 @@ FILTERED_NAMES=(
     "255.255.255.255.in-addr.arpa"
     "0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa"
     "hello.invalid"
+    "hello.alt"
 )
 
 for name in "${FILTERED_NAMES[@]}"; do
@@ -528,9 +530,27 @@ grep -qF "fd00:dead:beef:cafe::123" "$RUN_OUT"
 #run dig +dnssec this.does.not.exist.untrusted.test
 #grep -qF "status: NXDOMAIN" "$RUN_OUT"
 
-systemctl stop resmontest.service
+# Issue: https://github.com/systemd/systemd/issues/29580 (part #1)
+dig @127.0.0.54 signed.test
 
-# Test serve stale feature if nftables is installed
+systemctl stop resolvectl-monitor.service
+systemctl stop resolvectl-monitor-json.service
+
+# Issue: https://github.com/systemd/systemd/issues/29580 (part #2)
+#
+# Check for any warnings regarding malformed messages
+(! journalctl -u resolvectl-monitor.service -u reseolvectl-monitor-json.service -p warning --grep malformed)
+# Verify that all queries recorded by `resolvectl monitor --json` produced a valid JSON
+# with expected fields
+journalctl -p info -o cat _SYSTEMD_UNIT="resolvectl-monitor-json.service" | while read -r line; do
+    # Check that both "question" and "answer" fields are arrays
+    #
+    # The expression is slightly more complicated due to the fact that the "answer" field is optional,
+    # so we need to select it only if it's present, otherwise the type == "array" check would fail
+    echo "$line" | jq -e '[. | .question, (select(has("answer")) | .answer) | type == "array"] | all'
+done
+
+# Test serve stale feature and NFTSet= if nftables is installed
 if command -v nft >/dev/null; then
     ### Test without serve stale feature ###
     NFT_FILTER_NAME=dns_port_filter
@@ -589,8 +609,101 @@ if command -v nft >/dev/null; then
     grep -qE "NXDOMAIN" "$RUN_OUT"
 
     nft flush ruleset
+
+    ### NFTSet= test
+    nft add table inet sd_test
+    nft add set inet sd_test c '{ type cgroupsv2; }'
+    nft add set inet sd_test u '{ typeof meta skuid; }'
+    nft add set inet sd_test g '{ typeof meta skgid; }'
+
+    # service
+    systemd-run --unit test-nft.service --service-type=exec -p DynamicUser=yes \
+                -p 'NFTSet=cgroup:inet:sd_test:c user:inet:sd_test:u group:inet:sd_test:g' sleep 10000
+    run nft list set inet sd_test c
+    grep -qF "test-nft.service" "$RUN_OUT"
+    uid=$(getent passwd test-nft | cut -d':' -f3)
+    run nft list set inet sd_test u
+    grep -qF "$uid" "$RUN_OUT"
+    gid=$(getent passwd test-nft | cut -d':' -f4)
+    run nft list set inet sd_test g
+    grep -qF "$gid" "$RUN_OUT"
+    systemctl stop test-nft.service
+
+    # scope
+    run systemd-run --scope -u test-nft.scope -p 'NFTSet=cgroup:inet:sd_test:c' nft list set inet sd_test c
+    grep -qF "test-nft.scope" "$RUN_OUT"
+
+    mkdir -p /run/systemd/system
+    # socket
+    {
+        echo "[Socket]"
+        echo "ListenStream=12345"
+        echo "BindToDevice=lo"
+        echo "NFTSet=cgroup:inet:sd_test:c"
+    } >/run/systemd/system/test-nft.socket
+    {
+        echo "[Service]"
+        echo "ExecStart=/usr/bin/sleep 10000"
+    } >/run/systemd/system/test-nft.service
+    systemctl daemon-reload
+    systemctl start test-nft.socket
+    systemctl status test-nft.socket
+    run nft list set inet sd_test c
+    grep -qF "test-nft.socket" "$RUN_OUT"
+    systemctl stop test-nft.socket
+    rm -f /run/systemd/system/test-nft.{socket,service}
+
+    # slice
+    mkdir /run/systemd/system/system.slice.d
+    {
+        echo "[Slice]"
+        echo "NFTSet=cgroup:inet:sd_test:c"
+    } >/run/systemd/system/system.slice.d/00-test-nft.conf
+    systemctl daemon-reload
+    run nft list set inet sd_test c
+    grep -qF "system.slice" "$RUN_OUT"
+    rm -rf /run/systemd/system/system.slice.d
+
+    nft flush ruleset
 else
-    echo "nftables is not installed. Skipped serve stale feature test."
+    echo "nftables is not installed. Skipped serve stale feature and NFTSet= tests."
 fi
+
+### Test resolvectl show-server-state ###
+run resolvectl show-server-state
+grep -qF "10.0.0.1" "$RUN_OUT"
+grep -qF "Interface" "$RUN_OUT"
+
+run resolvectl show-server-state --json=short
+grep -qF "10.0.0.1" "$RUN_OUT"
+grep -qF "Interface" "$RUN_OUT"
+
+run resolvectl show-server-state --json=pretty
+grep -qF "10.0.0.1" "$RUN_OUT"
+grep -qF "Interface" "$RUN_OUT"
+
+### Test resolvectl statistics ###
+run resolvectl statistics
+grep -qF "Transactions" "$RUN_OUT"
+grep -qF "Cache" "$RUN_OUT"
+grep -qF "Failure Transactions" "$RUN_OUT"
+grep -qF "DNSSEC Verdicts" "$RUN_OUT"
+
+run resolvectl statistics --json=short
+grep -qF "transactions" "$RUN_OUT"
+grep -qF "cache" "$RUN_OUT"
+grep -qF "dnssec" "$RUN_OUT"
+
+run resolvectl statistics --json=pretty
+grep -qF "transactions" "$RUN_OUT"
+grep -qF "cache" "$RUN_OUT"
+grep -qF "dnssec" "$RUN_OUT"
+
+### Test resolvectl reset-statistics ###
+run resolvectl reset-statistics
+
+run resolvectl reset-statistics --json=pretty
+
+run resolvectl reset-statistics --json=short
 
 touch /testok

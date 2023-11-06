@@ -155,13 +155,13 @@ static int do_mcopy(const char *node, const char *root) {
         if (strv_extend(&argv, "::") < 0)
                 return log_oom();
 
-        r = safe_fork("(mcopy)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS, NULL);
+        r = safe_fork("(mcopy)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS, NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Avoid failures caused by mismatch in expectations between mkfs.vfat and mcopy by disabling
                  * the stricter mcopy checks using MTOOLS_SKIP_CHECK. */
-                execve(mcopy, argv, STRV_MAKE("MTOOLS_SKIP_CHECK=1"));
+                execve(mcopy, argv, STRV_MAKE("MTOOLS_SKIP_CHECK=1", "TZ=UTC", strv_find_prefix(environ, "SOURCE_DATE_EPOCH=")));
 
                 log_error_errno(errno, "Failed to execute mcopy: %m");
 
@@ -222,12 +222,13 @@ static int protofile_print_item(
                 data->has_filename_with_spaces = true;
         }
 
-        fprintf(data->file, "%s %c%c%c%03o 0 0 ",
+        fprintf(data->file, "%s %c%c%c%03o "UID_FMT" "GID_FMT" ",
                 copy ?: de->d_name,
                 type,
                 sx->stx_mode & S_ISUID ? 'u' : '-',
                 sx->stx_mode & S_ISGID ? 'g' : '-',
-                (unsigned) (sx->stx_mode & 0777));
+                (unsigned) (sx->stx_mode & 0777),
+                sx->stx_uid, sx->stx_gid);
 
         if (S_ISREG(sx->stx_mode)) {
                 _cleanup_free_ char *p = NULL;
@@ -300,7 +301,8 @@ static int make_protofile(const char *root, char **ret_path, bool *ret_has_filen
               "0 0\n"
               "d--755 0 0\n", f);
 
-        r = recurse_dir_at(AT_FDCWD, root, STATX_TYPE|STATX_MODE, UINT_MAX, RECURSE_DIR_SORT, protofile_print_item, &data);
+        r = recurse_dir_at(AT_FDCWD, root, STATX_TYPE|STATX_MODE|STATX_UID|STATX_GID, UINT_MAX,
+                           RECURSE_DIR_SORT, protofile_print_item, &data);
         if (r < 0)
                 return log_error_errno(r, "Failed to recurse through %s: %m", root);
 
@@ -329,12 +331,12 @@ int make_filesystem(
                 char * const *extra_mkfs_args) {
 
         _cleanup_free_ char *mkfs = NULL, *mangled_label = NULL;
-        _cleanup_strv_free_ char **argv = NULL;
+        _cleanup_strv_free_ char **argv = NULL, **env = NULL;
         _cleanup_(rm_rf_physical_and_freep) char *protofile_tmpdir = NULL;
         _cleanup_(unlink_and_freep) char *protofile = NULL;
         char vol_id[CONST_MAX(SD_ID128_UUID_STRING_MAX, 8U + 1U)] = {};
         int stdio_fds[3] = { -EBADF, STDERR_FILENO, STDERR_FILENO};
-        ForkFlags flags = FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|
+        ForkFlags flags = FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|
                         FORK_CLOSE_ALL_FDS|FORK_REARRANGE_STDIO|FORK_REOPEN_LOG;
         int r;
 
@@ -434,6 +436,14 @@ int make_filesystem(
                 if (quiet && strv_extend(&argv, "-q") < 0)
                         return log_oom();
 
+                if (sector_size > 0) {
+                        if (strv_extend(&env, "MKE2FS_DEVICE_SECTSIZE") < 0)
+                                        return log_oom();
+
+                        if (strv_extendf(&env, "%"PRIu64, sector_size) < 0)
+                                return log_oom();
+                }
+
         } else if (streq(fstype, "btrfs")) {
                 argv = strv_new(mkfs,
                                 "-L", label,
@@ -467,6 +477,14 @@ int make_filesystem(
 
                 if (quiet && strv_extend(&argv, "-q") < 0)
                         return log_oom();
+
+                if (sector_size > 0) {
+                        if (strv_extend(&argv, "-w") < 0)
+                                return log_oom();
+
+                        if (strv_extendf(&argv, "%"PRIu64, sector_size) < 0)
+                                return log_oom();
+                }
 
         } else if (streq(fstype, "xfs")) {
                 const char *j;
@@ -604,6 +622,12 @@ int make_filesystem(
                 return r;
         if (r == 0) {
                 /* Child */
+
+                STRV_FOREACH_PAIR(k, v, env)
+                        if (setenv(*k, *v, /* replace = */ true) < 0) {
+                                log_error_errno(r, "Failed to set %s=%s environment variable: %m", *k, *v);
+                                _exit(EXIT_FAILURE);
+                        }
 
                 /* mkfs.btrfs refuses to operate on block devices with mounted partitions, even if operating
                  * on unformatted free space, so let's trick it and other mkfs tools into thinking no

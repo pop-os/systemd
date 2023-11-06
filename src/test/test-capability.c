@@ -39,7 +39,7 @@ static void test_last_cap_file(void) {
         int r;
 
         r = read_one_line_file("/proc/sys/kernel/cap_last_cap", &content);
-        if (r == -ENOENT || (r < 0 && ERRNO_IS_PRIVILEGE(r))) /* kernel pre 3.2 or no access */
+        if (r == -ENOENT || ERRNO_IS_NEG_PRIVILEGE(r)) /* kernel pre 3.2 or no access */
                 return;
         assert_se(r >= 0);
 
@@ -235,7 +235,7 @@ static void test_ensure_cap_64_bit(void) {
         int r;
 
         r = read_one_line_file("/proc/sys/kernel/cap_last_cap", &content);
-        if (r == -ENOENT || (r < 0 && ERRNO_IS_PRIVILEGE(r))) /* kernel pre 3.2 or no access */
+        if (r == -ENOENT || ERRNO_IS_NEG_PRIVILEGE(r)) /* kernel pre 3.2 or no access */
                 return;
         assert_se(r >= 0);
 
@@ -254,7 +254,7 @@ static void test_capability_get_ambient(void) {
 
         assert_se(capability_get_ambient(&c) >= 0);
 
-        r = safe_fork("(getambient)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_WAIT|FORK_LOG, NULL);
+        r = safe_fork("(getambient)", FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_WAIT|FORK_LOG, NULL);
         assert_se(r >= 0);
 
         if (r == 0) {

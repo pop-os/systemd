@@ -96,7 +96,7 @@ bool cg_is_unified_wanted(void) {
                 return (wanted = r >= CGROUP_UNIFIED_ALL);
 
         /* If we were explicitly passed systemd.unified_cgroup_hierarchy, respect that. */
-        r = proc_cmdline_get_bool("systemd.unified_cgroup_hierarchy", &b);
+        r = proc_cmdline_get_bool("systemd.unified_cgroup_hierarchy", /* flags = */ 0, &b);
         if (r > 0)
                 return (wanted = b);
 
@@ -147,7 +147,7 @@ bool cg_is_hybrid_wanted(void) {
 
         /* Otherwise, let's see what the kernel command line has to say.  Since checking is expensive, cache
          * a non-error result. */
-        r = proc_cmdline_get_bool("systemd.legacy_systemd_cgroup_controller", &b);
+        r = proc_cmdline_get_bool("systemd.legacy_systemd_cgroup_controller", /* flags = */ 0, &b);
 
         /* The meaning of the kernel option is reversed wrt. to the return value of this function, hence the
          * negation. */
@@ -352,7 +352,7 @@ int cg_attach(const char *controller, const char *path, pid_t pid) {
         xsprintf(c, PID_FMT "\n", pid);
 
         r = write_string_file(fs, c, WRITE_STRING_FILE_DISABLE_BUFFER);
-        if (r == -EOPNOTSUPP && cg_is_threaded(controller, path) > 0)
+        if (r == -EOPNOTSUPP && cg_is_threaded(path) > 0)
                 /* When the threaded mode is used, we cannot read/write the file. Let's return recognizable error. */
                 return -EUCLEAN;
         if (r < 0)
@@ -611,7 +611,7 @@ int cg_migrate(
                          * them there. */
                         if (cfrom &&
                             empty_or_root(pfrom) &&
-                            is_kernel_thread(pid) > 0)
+                            pid_is_kernel_thread(pid) > 0)
                                 continue;
 
                         r = cg_attach(cto, pto, pid);

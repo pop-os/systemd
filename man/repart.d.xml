@@ -83,8 +83,9 @@
         <constant>ppc64-le</constant>, <constant>riscv32</constant>, <constant>riscv64</constant>,
         <constant>s390</constant>, <constant>s390x</constant>, <constant>tilegx</constant>,
         <constant>x86</constant> (32-bit, aka i386) and <constant>x86-64</constant> (64-bit, aka amd64).
+        </para>
 
-        The supported identifiers are:</para>
+        <para>The supported identifiers are:</para>
 
         <table>
           <title>GPT partition type identifiers</title>
@@ -238,7 +239,9 @@
 
         <para>Most of the partition type UUIDs listed above are defined in the <ulink
         url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable Partitions
-        Specification</ulink>.</para></listitem>
+        Specification</ulink>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -248,7 +251,9 @@
         setting is not used for matching. It is also not used when a label is already set for an existing
         partition. It is thus only used when a partition is newly created or when an existing one had a no
         label set (that is: an empty label). If not specified a label derived from the partition type is
-        automatically used. Simple specifier expansion is supported, see below.</para></listitem>
+        automatically used. Simple specifier expansion is supported, see below.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -258,7 +263,9 @@
         setting is not used for matching. It is also not used when a UUID is already set for an existing
         partition. It is thus only used when a partition is newly created or when an existing one had a
         all-zero UUID set. If set to <literal>null</literal>, the UUID is set to all zeroes. If not specified
-        a UUID derived from the partition type is automatically used.</para></listitem>
+        a UUID derived from the partition type is automatically used.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -276,7 +283,9 @@
         removed. If all partitions with a priority above 0 are removed and the partitions still do not fit on
         the device the operation fails. Note that this priority has no effect on ordering partitions, for
         that use the alphabetical order of the filenames of the partition definition files. Defaults to
-        0.</para></listitem>
+        0.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -292,7 +301,9 @@
         "elastic" fashion, based on the disk size and existing partitions. If a partition shall have a fixed
         size use both <varname>SizeMinBytes=</varname> and <varname>SizeMaxBytes=</varname> with the same
         value in order to fixate the size to one value, in which case the weight has no
-        effect.</para></listitem>
+        effect.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -304,7 +315,9 @@
         weight. Defaults to 0, i.e. by default no padding is applied.</para>
 
         <para>Padding is useful if empty space shall be left for later additions or a safety margin at the
-        end of the device or between partitions.</para></listitem>
+        end of the device or between partitions.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -326,7 +339,9 @@
         fulfill the constraints placing the partition will fail. For partitions that shall be created,
         depending on the setting of <varname>Priority=</varname> (see above) the partition might be dropped
         and the placing algorithm restarted. By default a minimum size constraint of 10M and no maximum size
-        constraint is set.</para></listitem>
+        constraint is set.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -337,7 +352,9 @@
         partition (the "padding"). Semantics are similar to <varname>SizeMinBytes=</varname> and
         <varname>SizeMaxBytes=</varname>, except that unlike partition sizes free space can be shrunk and can
         be as small as zero. By default no size constraints on padding are set, so that only
-        <varname>PaddingWeight=</varname> determines the size of the padding applied.</para></listitem>
+        <varname>PaddingWeight=</varname> determines the size of the padding applied.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -376,7 +393,9 @@
         the partition exists but is not or only partially populated.</para>
 
         <para>This option cannot be combined with <varname>Format=</varname> or
-        <varname>CopyFiles=</varname>.</para></listitem>
+        <varname>CopyFiles=</varname>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -397,7 +416,9 @@
         before the partition is created, ensuring that the partition only ever exists with a fully
         initialized file system.</para>
 
-        <para>This option cannot be combined with <varname>CopyBlocks=</varname>.</para></listitem>
+        <para>This option cannot be combined with <varname>CopyBlocks=</varname>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v247"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -439,13 +460,21 @@
         <citerefentry project='man-pages'><refentrytitle>mkfs.xfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         due to limitations of its protofile format.</para>
 
+        <para>Note that when populating XFS filesystems with <command>systemd-repart</command> and loop
+        devices are not available, extended attributes will not be copied into generated XFS filesystems
+        due to limitations <citerefentry project='man-pages'><refentrytitle>mkfs.xfs</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
+        protofile format.</para>
+
         <para>This option cannot be combined with <varname>CopyBlocks=</varname>.</para>
 
         <para>When
-        <citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        is invoked with the <option>--image=</option> or <option>--root=</option> command line switches the
-        source paths specified are taken relative to the specified root directory or disk image root.
-        </para></listitem>
+        <citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry> is
+        invoked with the <option>--copy-source=</option> command line switch the file paths are taken
+        relative to the specified directory. If <option>--copy-source=</option> is not used, but the
+        <option>--image=</option> or <option>--root=</option> switches are used, the source paths are taken
+        relative to the specified root directory or disk image root.</para>
+
+        <xi:include href="version-info.xml" xpointer="v247"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -470,7 +499,9 @@
         <citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         is invoked with the <option>--image=</option> or <option>--root=</option> command line switches the
         paths specified are taken relative to the specified root directory or disk image root.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -497,7 +528,26 @@
         <citerefentry><refentrytitle>systemd-tmpfiles</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         with its <option>--image=</option> option to pre-create other, more complex directory hierarchies (as
         well as other inodes) with fine-grained control of ownership, access modes and other file
-        attributes.</para></listitem>
+        attributes.</para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Subvolumes=</varname></term>
+
+        <listitem><para>Takes one or more absolute paths, separated by whitespace, each declaring a directory
+        that should be a subvolume within the new file system. This option may be used more than once to
+        specify multiple directories. Note that this setting does not create the directories themselves, that
+        can be configured with <varname>MakeDirectories=</varname> and <varname>CopyFiles=</varname>.</para>
+
+        <para>Note that this option only takes effect if the target filesystem supports subvolumes, such as
+        <literal>btrfs</literal>.</para>
+
+        <para>Note that due to limitations of <literal>mkfs.btrfs</literal>, this option is only supported
+        when running with <option>--offline=no</option>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -522,7 +572,9 @@
         of <varname>Format=</varname> and <varname>CopyBlocks=</varname> are increased by the space necessary
         for the LUKS2 superblock (see above).</para>
 
-        <para>This option has no effect if the partition already exists.</para></listitem>
+        <para>This option has no effect if the partition already exists.</para>
+
+        <xi:include href="version-info.xml" xpointer="v247"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -550,7 +602,9 @@
 
         <para>For each unique <varname>VerityMatchKey=</varname> value, a single verity data partition
         (<literal>Verity=data</literal>) and a single verity hash partition (<literal>Verity=hash</literal>)
-        must be defined.</para></listitem>
+        must be defined.</para>
+
+        <xi:include href="version-info.xml" xpointer="v252"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -558,7 +612,31 @@
 
         <listitem><para>Takes a short, user-chosen identifier string. This setting is used to find sibling
         verity partitions for the current verity partition. See the description for
-        <varname>Verity=</varname>.</para></listitem>
+        <varname>Verity=</varname>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v252"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>VerityDataBlockSizeBytes=</varname></term>
+
+        <listitem><para>Configures the data block size of the generated verity hash partition. Must be between 512 and
+        4096 bytes and must be a power of 2. Defaults to the sector size if configured explicitly, or the underlying
+        block device sector size, or 4K if systemd-repart is not operating on a block device.
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>VerityHashBlockSizeBytes=</varname></term>
+
+        <listitem><para>Configures the hash block size of the generated verity hash partition. Must be between 512 and
+        4096 bytes and must be a power of 2. Defaults to the sector size if configured explicitly, or the underlying
+        block device sector size, or 4K if systemd-repart is not operating on a block device.
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -566,7 +644,9 @@
 
         <listitem><para>Takes a boolean argument. If specified the partition is marked for removal during a
         factory reset operation. This functionality is useful to implement schemes where images can be reset
-        into their original state by removing partitions and creating them anew. Defaults to off.</para></listitem>
+        into their original state by removing partitions and creating them anew. Defaults to off.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -578,7 +658,9 @@
         <varname>NoAuto=</varname>, <varname>ReadOnly=</varname> and <varname>GrowFileSystem=</varname>; see
         below for details on the defaults for these three flags. Specify the flags value in hexadecimal (by
         prefixing it with <literal>0x</literal>), binary (prefix <literal>0b</literal>) or decimal (no
-        prefix).</para></listitem>
+        prefix).</para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -616,7 +698,9 @@
         <para><varname>NoAuto=</varname> defaults to off. <varname>ReadOnly=</varname> defaults to on for
         Verity partition types, and off for all others. <varname>GrowFileSystem=</varname> defaults to on for
         all partition types that support it, except if the partition is marked read-only (and thus
-        effectively, defaults to off for Verity partitions).</para></listitem>
+        effectively, defaults to off for Verity partitions).</para>
+
+        <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -627,7 +711,9 @@
         <citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry> is
         used. Simple specifier expansion is supported, see below. Defaults to <literal>%t</literal>. To
         disable split artifact generation for a partition, set <varname>SplitName=</varname> to
-        <literal>-</literal>.</para></listitem>
+        <literal>-</literal>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v252"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -643,7 +729,9 @@
         <varname>CopyFiles=</varname>. Note that unless the filesystem is a read-only filesystem,
         <command>systemd-repart</command> will have to populate the filesystem twice to guess the minimal
         required size, so enabling this option might slow down repart when populating large partitions.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -734,7 +822,8 @@
     <example>
       <title>Grow the root partition to the full disk size at first boot</title>
 
-      <para>With the following file the root partition is automatically grown to the full disk if possible during boot.</para>
+      <para>With the following file the root partition is automatically grown to the full disk if possible
+      during boot.</para>
 
       <para><programlisting># /usr/lib/repart.d/50-root.conf
 [Partition]
@@ -798,10 +887,11 @@ SizeMaxBytes=64M
     </example>
 
      <example>
-      <title>Create a data and verity partition from a OS tree</title>
+      <title>Create a data partition and corresponding verity partitions from a OS tree</title>
 
-      <para>Assuming we have an OS tree at /var/tmp/os-tree that we want to package in a root partition
-      together with a matching verity partition, we can do so as follows:</para>
+      <para>Assuming we have an OS tree at <filename index='false'>/var/tmp/os-tree</filename> that we want
+      to package in a root partition together with matching verity partitions, we can do so as follows:
+      </para>
 
       <para><programlisting># 50-root.conf
 [Partition]
@@ -809,12 +899,24 @@ Type=root
 CopyFiles=/var/tmp/os-tree
 Verity=data
 VerityMatchKey=root
+Minimize=guess
 </programlisting></para>
 
       <para><programlisting># 60-root-verity.conf
 [Partition]
 Type=root-verity
 Verity=hash
+VerityMatchKey=root
+# Explicitly set the hash and data block size to 4K
+VerityDataBlockSizeBytes=4096
+VerityHashBlockSizeBytes=4096
+Minimize=best
+</programlisting></para>
+
+<para><programlisting># 70-root-verity-sig.conf
+[Partition]
+Type=root-verity-sig
+Verity=signature
 VerityMatchKey=root
 </programlisting></para>
     </example>

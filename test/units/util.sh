@@ -3,6 +3,9 @@
 
 # Utility functions for shell tests
 
+# shellcheck disable=SC2034
+[[ -e /var/tmp/.systemd_reboot_count ]] && REBOOT_COUNT="$(</var/tmp/.systemd_reboot_count)" || REBOOT_COUNT=0
+
 assert_true() {(
     set +ex
 
@@ -15,7 +18,6 @@ assert_true() {(
         exit 1
     fi
 )}
-
 
 assert_eq() {(
     set +ex
@@ -56,6 +58,11 @@ assert_rc() {(
     rc=$?
     assert_eq "$rc" "$exp"
 )}
+
+assert_not_reached() {
+    echo >&2 "Code should not be reached at ${BASH_SOURCE[1]}:${BASH_LINENO[1]}, function ${FUNCNAME[1]}()"
+    exit 1
+}
 
 run_and_grep() {(
     set +ex
@@ -148,4 +155,37 @@ create_dummy_container() {
     mkdir -p "$root"
     cp -a /testsuite-13-container-template/* "$root"
     coverage_create_nspawn_dropin "$root"
+}
+
+# Bump the reboot counter and call systemctl with the given arguments
+systemctl_final() {
+    local counter
+
+    if [[ $# -eq 0 ]]; then
+        echo >&2 "Missing arguments"
+        exit 1
+    fi
+
+    [[ -e /var/tmp/.systemd_reboot_count ]] && counter="$(</var/tmp/.systemd_reboot_count)" || counter=0
+    echo "$((counter + 1))" >/var/tmp/.systemd_reboot_count
+
+    systemctl "$@"
+}
+
+cgroupfs_supports_user_xattrs() {
+    local xattr
+
+    xattr="user.supported_$RANDOM"
+    # shellcheck disable=SC2064
+    trap "setfattr --remove=$xattr /sys/fs/cgroup || :" RETURN
+
+    setfattr --name="$xattr" --value=254 /sys/fs/cgroup
+    [[ "$(getfattr --name="$xattr" --absolute-names --only-values /sys/fs/cgroup)" -eq 254 ]]
+}
+
+tpm_has_pcr() {
+    local algorithm="${1:?}"
+    local pcr="${2:?}"
+
+    [[ -f "/sys/class/tpm/tpm0/pcr-$algorithm/$pcr" ]]
 }

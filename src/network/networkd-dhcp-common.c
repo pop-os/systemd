@@ -6,7 +6,7 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "dhcp-identifier.h"
-#include "dhcp-internal.h"
+#include "dhcp-option.h"
 #include "dhcp6-internal.h"
 #include "escape.h"
 #include "hexdecoct.h"
@@ -481,6 +481,56 @@ int config_parse_ipv6_accept_ra_route_metric(
         return 0;
 }
 
+int config_parse_dhcp_send_hostname(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Network *network = userdata;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(IN_SET(ltype, AF_UNSPEC, AF_INET, AF_INET6));
+        assert(rvalue);
+        assert(data);
+
+        r = parse_boolean(rvalue);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse SendHostname=%s, ignoring assignment: %m", rvalue);
+                return 0;
+        }
+
+        switch (ltype) {
+        case AF_INET:
+                network->dhcp_send_hostname = r;
+                network->dhcp_send_hostname_set = true;
+                break;
+        case AF_INET6:
+                network->dhcp6_send_hostname = r;
+                network->dhcp6_send_hostname_set = true;
+                break;
+        case AF_UNSPEC:
+                /* For backward compatibility. */
+                if (!network->dhcp_send_hostname_set)
+                        network->dhcp_send_hostname = r;
+                if (!network->dhcp6_send_hostname_set)
+                        network->dhcp6_send_hostname = r;
+                break;
+        default:
+                assert_not_reached();
+        }
+
+        return 0;
+}
 int config_parse_dhcp_use_dns(
                 const char* unit,
                 const char *filename,
@@ -1154,9 +1204,17 @@ int config_parse_duid_type(
 
         type = duid_type_from_string(type_string);
         if (type < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, type,
-                           "Failed to parse DUID type '%s', ignoring.", type_string);
-                return 0;
+                uint16_t t;
+
+                r = safe_atou16(type_string, &t);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to parse DUID type '%s', ignoring.", type_string);
+                        return 0;
+                }
+
+                type = t;
+                assert(type == t); /* Check if type can store uint16_t. */
         }
 
         if (!isempty(p)) {
@@ -1243,7 +1301,7 @@ int config_parse_duid_rawdata(
                 void *data,
                 void *userdata) {
 
-        uint8_t raw_data[MAX_DUID_LEN];
+        uint8_t raw_data[MAX_DUID_DATA_LEN];
         unsigned count = 0;
         bool force = ltype;
         DUID *duid = ASSERT_PTR(data);
@@ -1271,7 +1329,7 @@ int config_parse_duid_rawdata(
                 if (r == 0)
                         break;
 
-                if (count >= MAX_DUID_LEN) {
+                if (count >= MAX_DUID_DATA_LEN) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0, "Max DUID length exceeded, ignoring assignment: %s.", rvalue);
                         return 0;
                 }

@@ -857,7 +857,7 @@ static void manager_mark_routes(Manager *manager, bool foreign, const Link *exce
 
 static int manager_drop_marked_routes(Manager *manager) {
         Route *route;
-        int k, r = 0;
+        int r = 0;
 
         assert(manager);
 
@@ -865,9 +865,7 @@ static int manager_drop_marked_routes(Manager *manager) {
                 if (!route_is_marked(route))
                         continue;
 
-                k = route_remove(route);
-                if (k < 0 && r >= 0)
-                        r = k;
+                RET_GATHER(r, route_remove(route));
         }
 
         return r;
@@ -891,14 +889,13 @@ static bool route_by_kernel(const Route *route) {
 }
 
 static void link_unmark_wireguard_routes(Link *link) {
-        Route *route, *existing;
-        Wireguard *w;
-
         assert(link);
 
-        w = WIREGUARD(link->netdev);
-        if (!w)
+        if (!link->netdev || link->netdev->kind != NETDEV_KIND_WIREGUARD)
                 return;
+
+        Route *route, *existing;
+        Wireguard *w = WIREGUARD(link->netdev);
 
         SET_FOREACH(route, w->routes)
                 if (route_get(NULL, link, route, &existing) >= 0)
@@ -907,7 +904,7 @@ static void link_unmark_wireguard_routes(Link *link) {
 
 int link_drop_foreign_routes(Link *link) {
         Route *route;
-        int k, r;
+        int r;
 
         assert(link);
         assert(link->manager);
@@ -962,23 +959,17 @@ int link_drop_foreign_routes(Link *link) {
                 if (!route_is_marked(route))
                         continue;
 
-                k = route_remove(route);
-                if (k < 0 && r >= 0)
-                        r = k;
+                RET_GATHER(r, route_remove(route));
         }
 
         manager_mark_routes(link->manager, /* foreign = */ true, NULL);
 
-        k = manager_drop_marked_routes(link->manager);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        return r;
+        return RET_GATHER(r, manager_drop_marked_routes(link->manager));
 }
 
 int link_drop_managed_routes(Link *link) {
         Route *route;
-        int k, r = 0;
+        int r = 0;
 
         assert(link);
 
@@ -994,18 +985,12 @@ int link_drop_managed_routes(Link *link) {
                 if (!route_exists(route))
                         continue;
 
-                k = route_remove(route);
-                if (k < 0 && r >= 0)
-                        r = k;
+                RET_GATHER(r, route_remove(route));
         }
 
         manager_mark_routes(link->manager, /* foreign = */ false, link);
 
-        k = manager_drop_marked_routes(link->manager);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        return r;
+        return RET_GATHER(r, manager_drop_marked_routes(link->manager));
 }
 
 void link_foreignize_routes(Link *link) {
@@ -1251,6 +1236,18 @@ static int route_configure(const Route *route, uint32_t lifetime_sec, Link *link
 
         if (!isempty(route->tcp_congestion_control_algo)) {
                 r = sd_netlink_message_append_string(m, RTAX_CC_ALGO, route->tcp_congestion_control_algo);
+                if (r < 0)
+                        return r;
+        }
+
+        if (route->hop_limit > 0) {
+                r = sd_netlink_message_append_u32(m, RTAX_HOPLIMIT, route->hop_limit);
+                if (r < 0)
+                        return r;
+        }
+
+        if (route->tcp_rto_usec > 0) {
+                r = sd_netlink_message_append_u32(m, RTAX_RTO_MIN, DIV_ROUND_UP(route->tcp_rto_usec, USEC_PER_MSEC));
                 if (r < 0)
                         return r;
         }
@@ -1529,7 +1526,6 @@ static int link_request_static_route(Link *link, Route *route) {
 
 static int link_request_wireguard_routes(Link *link, bool only_ipv4) {
         NetDev *netdev;
-        Wireguard *w;
         Route *route;
         int r;
 
@@ -1541,9 +1537,7 @@ static int link_request_wireguard_routes(Link *link, bool only_ipv4) {
         if (netdev_get(link->manager, link->ifname, &netdev) < 0)
                 return 0;
 
-        w = WIREGUARD(netdev);
-        if (!w)
-                return 0;
+        Wireguard *w = WIREGUARD(netdev);
 
         SET_FOREACH(route, w->routes) {
                 if (only_ipv4 && route->family != AF_INET)
@@ -1626,6 +1620,7 @@ static int process_route_one(
 
         _cleanup_(route_freep) Route *tmp = in;
         Route *route = NULL;
+        bool update_dhcp4;
         int r;
 
         assert(manager);
@@ -1633,6 +1628,8 @@ static int process_route_one(
         assert(IN_SET(type, RTM_NEWROUTE, RTM_DELROUTE));
 
         /* link may be NULL. This consumes 'in'. */
+
+        update_dhcp4 = link && tmp->family == AF_INET6 && tmp->dst_prefixlen == 0;
 
         (void) route_get(manager, link, tmp, &route);
 
@@ -1686,6 +1683,14 @@ static int process_route_one(
                 assert_not_reached();
         }
 
+        if (update_dhcp4) {
+                r = dhcp4_update_ipv6_connectivity(link);
+                if (r < 0) {
+                        log_link_warning_errno(link, r, "Failed to notify IPv6 connectivity to DHCPv4 client: %m");
+                        link_enter_failed(link);
+                }
+        }
+
         return 1;
 }
 
@@ -1733,7 +1738,7 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, Ma
                 }
 
                 r = link_get_by_index(m, ifindex, &link);
-                if (r < 0 || !link) {
+                if (r < 0) {
                         /* when enumerating we might be out of sync, but we will
                          * get the route again, so just ignore it */
                         if (!m->enumerating)
@@ -1947,7 +1952,9 @@ int network_add_ipv4ll_route(Network *network) {
         if (!network->ipv4ll_route)
                 return 0;
 
-        section_line = hashmap_find_free_section_line(network->routes_by_section);
+        r = hashmap_by_section_find_unused_line(network->routes_by_section, network->filename, &section_line);
+        if (r < 0)
+                return r;
 
         /* IPv4LLRoute= is in [Network] section. */
         r = route_new_static(network, network->filename, section_line, &n);
@@ -1980,7 +1987,9 @@ int network_add_default_route_on_device(Network *network) {
         if (!network->default_route_on_device)
                 return 0;
 
-        section_line = hashmap_find_free_section_line(network->routes_by_section);
+        r = hashmap_by_section_find_unused_line(network->routes_by_section, network->filename, &section_line);
+        if (r < 0)
+                return r;
 
         /* DefaultRouteOnDevice= is in [Network] section. */
         r = route_new_static(network, network->filename, section_line, &n);
@@ -2534,6 +2543,67 @@ int config_parse_route_type(
         return 0;
 }
 
+int config_parse_route_hop_limit(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_(route_free_or_set_invalidp) Route *n = NULL;
+        Network *network = userdata;
+        uint32_t k;
+        int r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r == -ENOMEM)
+                return log_oom();
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to allocate route, ignoring assignment: %m");
+                return 0;
+        }
+
+        if (isempty(rvalue)) {
+                n->hop_limit = 0;
+                TAKE_PTR(n);
+                return 0;
+        }
+
+        r = safe_atou32(rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Could not parse per route hop limit, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+        if (k > 255) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Specified per route hop limit \"%s\" is too large, ignoring assignment: %m", rvalue);
+                return 0;
+        }
+        if (k == 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Invalid per route hop limit \"%s\", ignoring assignment: %m", rvalue);
+                return 0;
+        }
+
+        n->hop_limit = k;
+
+        TAKE_PTR(n);
+        return 0;
+}
+
 int config_parse_tcp_congestion(
                 const char *unit,
                 const char *filename,
@@ -2643,8 +2713,7 @@ int config_parse_tcp_window(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(route_free_or_set_invalidp) Route *n = NULL;
-        Network *network = userdata;
+        uint32_t *window = ASSERT_PTR(data);
         uint32_t k;
         int r;
 
@@ -2653,15 +2722,6 @@ int config_parse_tcp_window(
         assert(lvalue);
         assert(rvalue);
         assert(data);
-
-        r = route_new_static(network, filename, section_line, &n);
-        if (r == -ENOMEM)
-                return log_oom();
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed to allocate route, ignoring assignment: %m");
-                return 0;
-        }
 
         r = safe_atou32(rvalue, &k);
         if (r < 0) {
@@ -2680,12 +2740,52 @@ int config_parse_tcp_window(
                 return 0;
         }
 
+        *window = k;
+        return 0;
+}
+
+int config_parse_route_tcp_window(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_(route_free_or_set_invalidp) Route *n = NULL;
+        Network *network = userdata;
+        uint32_t *d;
+        int r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r == -ENOMEM)
+                return log_oom();
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to allocate route, ignoring assignment: %m");
+                return 0;
+        }
+
         if (streq(lvalue, "InitialCongestionWindow"))
-                n->initcwnd = k;
+                d = &n->initcwnd;
         else if (streq(lvalue, "InitialAdvertisedReceiveWindow"))
-                n->initrwnd = k;
+                d = &n->initrwnd;
         else
                 assert_not_reached();
+
+        r = config_parse_tcp_window(unit, filename, line, section, section_line, lvalue, ltype, rvalue, d, userdata);
+        if (r < 0)
+                return r;
 
         TAKE_PTR(n);
         return 0;
@@ -2725,6 +2825,58 @@ int config_parse_route_mtu(
         r = config_parse_mtu(unit, filename, line, section, section_line, lvalue, ltype, rvalue, &n->mtu, userdata);
         if (r < 0)
                 return r;
+
+        TAKE_PTR(n);
+        return 0;
+}
+
+int config_parse_route_tcp_rto(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Network *network = userdata;
+        _cleanup_(route_free_or_set_invalidp) Route *n = NULL;
+        usec_t usec;
+        int r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r == -ENOMEM)
+                return log_oom();
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to allocate route, ignoring assignment: %m");
+                return 0;
+        }
+
+        r = parse_sec(rvalue, &usec);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse route TCP retransmission timeout (RTO), ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        if (IN_SET(usec, 0, USEC_INFINITY) ||
+            DIV_ROUND_UP(usec, USEC_PER_MSEC) > UINT32_MAX) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Route TCP retransmission timeout (RTO) must be in the range 0…%"PRIu32"ms, ignoring assignment: %s", UINT32_MAX, rvalue);
+                return 0;
+        }
+
+        n->tcp_rto_usec = usec;
 
         TAKE_PTR(n);
         return 0;

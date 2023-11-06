@@ -12,7 +12,6 @@ sources = files(
         'journald-stream.c',
         'journald-syslog.c',
         'journald-wall.c',
-        'managed-journal-file.c',
 )
 
 sources += custom_target(
@@ -29,141 +28,155 @@ libjournal_core = static_library(
                        userspace],
         build_by_default : false)
 
-journal_includes = [includes, include_directories('.')]
-
-systemd_journald_sources = files(
-        'journald.c',
-)
-
-systemd_cat_sources = files('cat.c')
-
-journalctl_sources = files('journalctl.c')
-
-if install_sysconfdir_samples
-        install_data('journald.conf',
-                     install_dir : pkgsysconfdir)
+if get_option('link-journalctl-shared')
+        journalctl_link_with = [libshared]
+else
+        journalctl_link_with = [
+                libbasic_gcrypt,
+                libshared_static,
+                libsystemd_static,
+        ]
 endif
 
-if get_option('create-log-dirs')
-        meson.add_install_script(
-                'sh', '-c',
-                mkdir_p.format('/var/log/journal'))
-        meson.add_install_script(
-                'sh', '-c',
-                '''chown 0:0 $DESTDIR/var/log/journal &&
-                   chmod 755 $DESTDIR/var/log/journal || :''')
-        if get_option('adm-group')
-                meson.add_install_script(
-                        'sh', '-c',
-                        'setfacl -nm g:adm:rx,d:g:adm:rx $DESTDIR/var/log/journal || :')
-        endif
-        if get_option('wheel-group')
-                meson.add_install_script(
-                        'sh', '-c',
-                        'setfacl -nm g:wheel:rx,d:g:wheel:rx $DESTDIR/var/log/journal || :')
-        endif
-endif
-
-############################################################
-
-test_journal_base = {
-        'link_with' : [libjournal_core, libshared],
+journal_test_template = test_template + {
+        'link_with' : [
+                libjournal_core,
+                libshared,
+        ],
 }
 
-tests += [
-        {
-                'sources' : files('test-journal-config.c'),
+journal_fuzz_template = fuzz_template + {
+        'link_with' : [
+                libjournal_core,
+                libshared,
+        ],
+        'dependencies' : libselinux,
+}
+
+executables += [
+        libexec_template + {
+                'name' : 'systemd-journald',
+                'sources' : files('journald.c'),
+                'link_with' : [
+                        libjournal_core,
+                        libshared,
+                ],
+                'dependencies' : [
+                        liblz4,
+                        libselinux,
+                        libxz,
+                        libzstd,
+                        threads,
+                ],
+        },
+        libexec_template + {
+                'name' : 'systemd-bsod',
+                'public' : true,
+                'conditions' : ['HAVE_QRENCODE'],
+                'sources' : files('bsod.c'),
+                'link_with' : libshared,
+                'dependencies' : libqrencode,
+        },
+        executable_template + {
+                'name' : 'systemd-cat',
+                'public' : true,
+                'sources' : files('cat.c'),
+                'link_with' : [
+                        libjournal_core,
+                        libshared,
+                ],
+                'dependencies' : threads,
+        },
+        executable_template + {
+                'name' : 'journalctl',
+                'public' : true,
+                'sources' : files('journalctl.c'),
+                'link_with' : journalctl_link_with,
+                'dependencies' : [
+                        libdl,
+                        liblz4,
+                        libxz,
+                        libzstd,
+                        threads,
+                ],
+        },
+        journal_test_template + {
+                'sources' : files('test-journald-config.c'),
                 'dependencies' : [
                         liblz4,
                         libselinux,
                         libxz,
                 ],
-                'base' : test_journal_base,
         },
-        {
-                'sources' : files('test-journal-flush.c'),
-                'base' : test_journal_base,
-        },
-        {
-                'sources' : files('test-journal-interleaving.c'),
-                'base' : test_journal_base,
-        },
-        {
-                'sources' : files('test-journal-stream.c'),
-                'base' : test_journal_base,
-        },
-        {
-                'sources' : files('test-journal-syslog.c'),
+        journal_test_template + {
+                'sources' : files('test-journald-syslog.c'),
                 'dependencies' : [
                         liblz4,
                         libselinux,
                         libxz,
                         threads,
                 ],
-                'base' : test_journal_base,
         },
-        {
-                'sources' : files('test-journal-verify.c'),
-                'base' : test_journal_base,
-                'timeout' : 90,
+        journal_test_template + {
+                'sources' : files('test-journald-tables.c'),
+                'dependencies' : [
+                        libselinux,
+                ],
         },
-        {
-                'sources' : files('test-journal.c'),
-                'base' : test_journal_base,
-        },
-        {
-                'sources' : files('test-journal-append.c'),
-                'base' : test_journal_base,
-                'type' : 'manual',
-        },
-]
-
-fuzzer_journald_base = {
-        'link_with' : [libjournal_core, libshared],
-        'dependencies' : [libselinux],
-}
-
-fuzzers += [
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-audit.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-kmsg.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-native.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-native-fd.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-stream.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
-        {
+        journal_fuzz_template + {
                 'sources' : files(
                         'fuzz-journald-syslog.c',
                         'fuzz-journald.c',
                 ),
-                'base' : fuzzer_journald_base,
         },
 ]
+
+if install_sysconfdir_samples
+        install_data('journald.conf',
+                     install_dir : pkgconfigfiledir)
+endif
+
+if get_option('create-log-dirs')
+        install_emptydir('/var/log/journal',
+                         install_mode : 'rwxr-xr-x')
+        if get_option('adm-group')
+                meson.add_install_script(
+                        sh, '-c',
+                        'setfacl -nm g:adm:rx,d:g:adm:rx $DESTDIR/var/log/journal || :')
+        endif
+        if get_option('wheel-group')
+                meson.add_install_script(
+                        sh, '-c',
+                        'setfacl -nm g:wheel:rx,d:g:wheel:rx $DESTDIR/var/log/journal || :')
+        endif
+endif

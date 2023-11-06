@@ -91,7 +91,7 @@ else
 fi
 
 if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
-    echo "WARNING! Cannot determine rootlibdir from pkg-config, assuming /usr/lib/systemd" >&2
+    echo "WARNING! Cannot determine libdir from pkg-config, assuming /usr/lib/systemd" >&2
     ROOTLIBDIR=/usr/lib/systemd
 fi
 
@@ -169,10 +169,12 @@ BASICTOOLS=(
     echo
     env
     false
+    findmnt
     flock
     getconf
     getent
     getfacl
+    getfattr
     grep
     gunzip
     gzip
@@ -187,6 +189,7 @@ BASICTOOLS=(
     login
     losetup
     lsattr
+    lsblk
     lz4cat
     mkfifo
     mknod
@@ -560,14 +563,15 @@ run_qemu() {
         "systemd.unit=testsuite.target"
         "systemd.wants=testsuite-$1.service"
         "noresume"
+        "oops=panic"
         ${TEST_MATCH_SUBTEST:+"systemd.setenv=TEST_MATCH_SUBTEST=$TEST_MATCH_SUBTEST"}
         ${TEST_MATCH_TESTCASE:+"systemd.setenv=TEST_MATCH_TESTCASE=$TEST_MATCH_TESTCASE"}
     )
 
-    if ! get_bool "$INTERACTIVE_DEBUG"; then
+    if ! get_bool "$INTERACTIVE_DEBUG" && ! get_bool "$TEST_SKIP_SHUTDOWN"; then
         kernel_params+=(
-            "oops=panic"
             "panic=1"
+            "softlockup_panic=1"
             "systemd.wants=end.service"
         )
     fi
@@ -630,7 +634,7 @@ run_qemu() {
         qemu_cmd=(timeout --foreground "$QEMU_TIMEOUT" "$QEMU_BIN")
     fi
 
-    (set -x; "${qemu_cmd[@]}" "${qemu_options[@]}" -append "${kernel_params[*]}")
+    (set -x; "${qemu_cmd[@]}" "${qemu_options[@]}" -append "${kernel_params[*]}" |& tee "${TESTDIR:?}/console.log")
     rc=$?
     if [ "$rc" -eq 124 ] && [ "$QEMU_TIMEOUT" != "infinity" ]; then
         derror "Test timed out after ${QEMU_TIMEOUT}s"
@@ -663,7 +667,9 @@ run_nspawn() {
         ${TEST_MATCH_TESTCASE:+"systemd.setenv=TEST_MATCH_TESTCASE=$TEST_MATCH_TESTCASE"}
     )
 
-    if ! get_bool "$INTERACTIVE_DEBUG"; then
+    if get_bool "$INTERACTIVE_DEBUG"; then
+        nspawn_options+=("--console=interactive")
+    elif ! get_bool "$TEST_SKIP_SHUTDOWN"; then
         kernel_params+=("systemd.wants=end.service")
     fi
 
@@ -697,7 +703,7 @@ run_nspawn() {
         nspawn_cmd+=("$SYSTEMD_NSPAWN")
     fi
 
-    (set -x; "${nspawn_cmd[@]}" "${nspawn_options[@]}" "${kernel_params[@]}")
+    (set -x; "${nspawn_cmd[@]}" "${nspawn_options[@]}" "${kernel_params[@]}" |& tee "${TESTDIR:?}/console.log")
     rc=$?
     if [ "$rc" -eq 124 ] && [ "$NSPAWN_TIMEOUT" != "infinity" ]; then
         derror "Test timed out after ${NSPAWN_TIMEOUT}s"
@@ -809,6 +815,15 @@ EOF
         echo MARKER=1 >"$initdir/usr/lib/systemd/system/some_file"
         mksquashfs "$initdir" "$oldinitdir/usr/share/app0.raw" -noappend
 
+        export initdir="$TESTDIR/conf0"
+        mkdir -p "$initdir/etc/extension-release.d" "$initdir/etc/systemd/system" "$initdir/opt"
+        grep "^ID=" "$os_release" >"$initdir/etc/extension-release.d/extension-release.conf0"
+        echo "${version_id}" >>"$initdir/etc/extension-release.d/extension-release.conf0"
+        ( echo "${version_id}"
+          echo "CONFEXT_IMAGE_ID=app" ) >>"$initdir/etc/extension-release.d/extension-release.conf0"
+        echo MARKER_1 >"$initdir/etc/systemd/system/some_file"
+        mksquashfs "$initdir" "$oldinitdir/usr/share/conf0.raw" -noappend
+
         export initdir="$TESTDIR/app1"
         mkdir -p "$initdir/usr/lib/extension-release.d" "$initdir/usr/lib/systemd/system" "$initdir/opt"
         grep "^ID=" "$os_release" >"$initdir/usr/lib/extension-release.d/extension-release.app2"
@@ -843,6 +858,33 @@ EOF
           echo "ARCHITECTURE=_any" ) >"$initdir/usr/lib/extension-release.d/extension-release.app-nodistro"
         echo MARKER=1 >"$initdir/usr/lib/systemd/system/some_file"
         mksquashfs "$initdir" "$oldinitdir/usr/share/app-nodistro.raw" -noappend
+
+        export initdir="$TESTDIR/service-scoped-test"
+        mkdir -p "$initdir/etc/extension-release.d" "$initdir/etc/systemd/system"
+        ( echo "ID=_any"
+          echo "ARCHITECTURE=_any" ) >"$initdir/etc/extension-release.d/extension-release.service-scoped-test"
+        echo MARKER_CONFEXT_123 >"$initdir/etc/systemd/system/some_file"
+        mksquashfs "$initdir" "$oldinitdir/etc/service-scoped-test.raw" -noappend
+
+        # We need to create a dedicated sysext image to test the reload mechanism. If we share an image to install the
+        # 'foo.service' it will be loaded from another test run, which will impact the targeted test.
+        export initdir="$TESTDIR/app-reload"
+        mkdir -p "$initdir/usr/lib/extension-release.d" "$initdir/usr/lib/systemd/system"
+        ( echo "ID=_any"
+          echo "ARCHITECTURE=_any"
+          echo "EXTENSION_RELOAD_MANAGER=1" ) >"$initdir/usr/lib/extension-release.d/extension-release.app-reload"
+        mkdir -p "$initdir/usr/lib/systemd/system/multi-user.target.d"
+        cat >"${initdir}/usr/lib/systemd/system/foo.service" <<EOF
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=echo foo
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        { echo "[Unit]"; echo "Upholds=foo.service"; } > "$initdir/usr/lib/systemd/system/multi-user.target.d/10-foo-service.conf"
+        mksquashfs "$initdir" "$oldinitdir/usr/share/app-reload.raw" -noappend
     )
 }
 
@@ -1090,7 +1132,7 @@ install_modules() {
     instmods scsi_debug
 
     if get_bool "$LOOKS_LIKE_SUSE"; then
-        instmods ext4
+        instmods ext4 af_packet
     fi
 }
 
@@ -1352,6 +1394,9 @@ install_systemd() {
     if [[ -n "$TEST_SYSTEMD_LOG_LEVEL" ]]; then
         echo DefaultEnvironment=SYSTEMD_LOG_LEVEL="$TEST_SYSTEMD_LOG_LEVEL" >>"$initdir/etc/systemd/system.conf.d/99-log-level.conf"
     fi
+    # Enable debug logging for user instances as well
+    mkdir -p "$initdir/etc/systemd/user.conf.d/"
+    echo -ne "[Manager]\nLogLevel=debug\n" >"$initdir/etc/systemd/user.conf.d/10-log-level.conf"
     # Store coredumps in journal
     mkdir -p "$initdir/etc/systemd/coredump.conf.d/"
     echo -ne "[Coredump]\nStorage=journal\n" >"$initdir/etc/systemd/coredump.conf.d/10-storage-journal.conf"
@@ -1772,7 +1817,7 @@ check_result_common() {
 
 check_result_nspawn() {
     local workspace="${1:?}"
-    local ret
+    local ret=0
 
     # Run a test-specific checks if defined by check_result_nspawn_hook()
     if declare -F check_result_nspawn_hook >/dev/null; then
@@ -1782,7 +1827,7 @@ check_result_nspawn() {
         fi
     fi
 
-    check_result_common "${workspace}" && ret=0 || ret=$?
+    check_result_common "${workspace}" || ret=$?
 
     _umount_dir "${initdir:?}"
 
@@ -1791,7 +1836,7 @@ check_result_nspawn() {
 
 # can be overridden in specific test
 check_result_qemu() {
-    local ret
+    local ret=0
     mount_initdir
 
     # Run a test-specific checks if defined by check_result_qemu_hook()
@@ -1802,7 +1847,7 @@ check_result_qemu() {
         fi
     fi
 
-    check_result_common "${initdir:?}" && ret=0 || ret=$?
+    check_result_common "${initdir:?}" || ret=$?
 
     _umount_dir "${initdir:?}"
 
@@ -2197,14 +2242,6 @@ install_keymaps() {
 
     dinfo "Install console keymaps"
 
-    if command -v meson >/dev/null \
-            && [[ "$(meson configure "${BUILD_DIR:?}" | grep 'split-usr' | awk '{ print $2 }')" == "true" ]] \
-            || [[ ! -L /lib ]]; then
-        prefix+=(
-            "/lib"
-        )
-    fi
-
     if (( $# == 0 )); then
         for p in "${prefix[@]}"; do
             # The first three paths may be deprecated.
@@ -2344,14 +2381,7 @@ inst_libs() {
         [[ "$line" = 'not a dynamic executable' ]] && break
         # Ignore errors about our own stuff missing. This is most likely caused
         # by ldd attempting to use the unprefixed RPATH.
-        [[ "$line" =~ libsystemd.*\ not\ found ]] && continue
-
-        if [[ "$line" =~ $so_regex ]]; then
-            file="${BASH_REMATCH[1]}"
-            [[ -e "${initdir:?}/$file" ]] && continue
-            inst_library "$file"
-            continue
-        fi
+        [[ "$line" =~ (libsystemd|libudev).*\ not\ found ]] && continue
 
         if [[ "$line" =~ not\ found ]]; then
             dfatal "Missing a shared library required by $bin."
@@ -2359,6 +2389,12 @@ inst_libs() {
             dfatal "$line"
             dfatal "Cannot create a test image."
             exit 1
+        fi
+
+        if [[ "$line" =~ $so_regex ]]; then
+            file="${BASH_REMATCH[1]}"
+            [[ -e "${initdir:?}/$file" ]] && continue
+            inst_library "$file"
         fi
     done < <(LC_ALL=C ldd "$bin" 2>/dev/null)
 }
@@ -3287,6 +3323,9 @@ test_setup() {
 test_run() {
     local test_id="${1:?}"
     mount_initdir
+
+    # Reset the boot counter, if present
+    rm -f "${initdir:?}/var/tmp/.systemd_reboot_count"
 
     if ! get_bool "${TEST_NO_QEMU:=}"; then
         if run_qemu "$test_id"; then

@@ -82,7 +82,7 @@ TEST(keymaps) {
 
 #define dump_glyph(x) log_info(STRINGIFY(x) ": %s", special_glyph(x))
 TEST(dump_special_glyphs) {
-        assert_cc(SPECIAL_GLYPH_WARNING_SIGN + 1 == _SPECIAL_GLYPH_MAX);
+        assert_cc(SPECIAL_GLYPH_WORLD + 1 == _SPECIAL_GLYPH_MAX);
 
         log_info("is_locale_utf8: %s", yes_no(is_locale_utf8()));
 
@@ -98,14 +98,18 @@ TEST(dump_special_glyphs) {
         dump_glyph(SPECIAL_GLYPH_MULTIPLICATION_SIGN);
         dump_glyph(SPECIAL_GLYPH_CIRCLE_ARROW);
         dump_glyph(SPECIAL_GLYPH_BULLET);
-        dump_glyph(SPECIAL_GLYPH_ARROW_LEFT);
-        dump_glyph(SPECIAL_GLYPH_ARROW_RIGHT);
-        dump_glyph(SPECIAL_GLYPH_ARROW_UP);
-        dump_glyph(SPECIAL_GLYPH_ARROW_DOWN);
-        dump_glyph(SPECIAL_GLYPH_ELLIPSIS);
         dump_glyph(SPECIAL_GLYPH_MU);
         dump_glyph(SPECIAL_GLYPH_CHECK_MARK);
         dump_glyph(SPECIAL_GLYPH_CROSS_MARK);
+        dump_glyph(SPECIAL_GLYPH_LIGHT_SHADE);
+        dump_glyph(SPECIAL_GLYPH_DARK_SHADE);
+        dump_glyph(SPECIAL_GLYPH_FULL_BLOCK);
+        dump_glyph(SPECIAL_GLYPH_SIGMA);
+        dump_glyph(SPECIAL_GLYPH_ARROW_UP);
+        dump_glyph(SPECIAL_GLYPH_ARROW_DOWN);
+        dump_glyph(SPECIAL_GLYPH_ARROW_LEFT);
+        dump_glyph(SPECIAL_GLYPH_ARROW_RIGHT);
+        dump_glyph(SPECIAL_GLYPH_ELLIPSIS);
         dump_glyph(SPECIAL_GLYPH_EXTERNAL_LINK);
         dump_glyph(SPECIAL_GLYPH_ECSTATIC_SMILEY);
         dump_glyph(SPECIAL_GLYPH_HAPPY_SMILEY);
@@ -121,6 +125,8 @@ TEST(dump_special_glyphs) {
         dump_glyph(SPECIAL_GLYPH_SPARKLES);
         dump_glyph(SPECIAL_GLYPH_LOW_BATTERY);
         dump_glyph(SPECIAL_GLYPH_WARNING_SIGN);
+        dump_glyph(SPECIAL_GLYPH_COMPUTER_DISK);
+        dump_glyph(SPECIAL_GLYPH_WORLD);
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

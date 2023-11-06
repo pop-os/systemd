@@ -99,6 +99,20 @@ void close_many(const int fds[], size_t n_fd) {
                 safe_close(fds[i]);
 }
 
+void close_many_unset(int fds[], size_t n_fd) {
+        assert(fds || n_fd <= 0);
+
+        for (size_t i = 0; i < n_fd; i++)
+                fds[i] = safe_close(fds[i]);
+}
+
+void close_many_and_free(int *fds, size_t n_fds) {
+        assert(fds || n_fds <= 0);
+
+        close_many(fds, n_fds);
+        free(fds);
+}
+
 int fclose_nointr(FILE *f) {
         assert(f);
 
@@ -191,7 +205,7 @@ int fd_cloexec_many(const int fds[], size_t n_fds, bool cloexec) {
         return ret;
 }
 
-_pure_ static bool fd_in_set(int fd, const int fdset[], size_t n_fdset) {
+static bool fd_in_set(int fd, const int fdset[], size_t n_fdset) {
         assert(n_fdset == 0 || fdset);
 
         for (size_t i = 0; i < n_fdset; i++) {
@@ -640,7 +654,7 @@ int rearrange_stdio(int original_input_fd, int original_output_fd, int original_
                       original_output_fd,
                       original_error_fd },
             null_fd = -EBADF,                        /* If we open /dev/null, we store the fd to it here */
-            copy_fd[3] = { -EBADF, -EBADF, -EBADF }, /* This contains all fds we duplicate here
+            copy_fd[3] = EBADF_TRIPLET,              /* This contains all fds we duplicate here
                                                       * temporarily, and hence need to close at the end. */
             r;
         bool null_readable, null_writable;
@@ -738,8 +752,7 @@ finish:
                 safe_close_above_stdio(original_error_fd);
 
         /* Close the copies we moved > 2 */
-        for (int i = 0; i < 3; i++)
-                safe_close(copy_fd[i]);
+        close_many(copy_fd, 3);
 
         /* Close our null fd, if it's > 2 */
         safe_close_above_stdio(null_fd);
@@ -936,11 +949,10 @@ int path_is_root_at(int dir_fd, const char *path) {
                 int mntid;
 
                 r = path_get_mnt_id_at_fallback(dir_fd, "", &mntid);
-                if (r < 0) {
-                        if (ERRNO_IS_NOT_SUPPORTED(r))
-                                return true; /* skip the mount ID check */
+                if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                        return true; /* skip the mount ID check */
+                if (r < 0)
                         return r;
-                }
                 assert(mntid >= 0);
 
                 st.nsx.stx_mnt_id = mntid;
@@ -951,11 +963,10 @@ int path_is_root_at(int dir_fd, const char *path) {
                 int mntid;
 
                 r = path_get_mnt_id_at_fallback(dir_fd, "..", &mntid);
-                if (r < 0) {
-                        if (ERRNO_IS_NOT_SUPPORTED(r))
-                                return true; /* skip the mount ID check */
+                if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                        return true; /* skip the mount ID check */
+                if (r < 0)
                         return r;
-                }
                 assert(mntid >= 0);
 
                 pst.nsx.stx_mnt_id = mntid;
@@ -976,4 +987,12 @@ const char *accmode_to_string(int flags) {
         default:
                 return NULL;
         }
+}
+
+char *format_proc_pid_fd_path(char buf[static PROC_PID_FD_PATH_MAX], pid_t pid, int fd) {
+        assert(buf);
+        assert(fd >= 0);
+        assert(pid >= 0);
+        assert_se(snprintf_ok(buf, PROC_PID_FD_PATH_MAX, "/proc/" PID_FMT "/fd/%i", pid == 0 ? getpid_cached() : pid, fd));
+        return buf;
 }

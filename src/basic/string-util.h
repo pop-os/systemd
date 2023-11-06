@@ -68,6 +68,10 @@ static inline const char* enable_disable(bool b) {
         return b ? "enable" : "disable";
 }
 
+static inline const char* enabled_disabled(bool b) {
+        return b ? "enabled" : "disabled";
+}
+
 /* This macro's return pointer will have the "const" qualifier set or unset the same way as the input
  * pointer. */
 #define empty_to_null(p)                                \
@@ -196,6 +200,17 @@ int strextendf_with_separator(char **x, const char *separator, const char *forma
 
 char *strrep(const char *s, unsigned n);
 
+#define strrepa(s, n)                                           \
+        ({                                                      \
+                char *_d_, *_p_;                                \
+                size_t _len_ = strlen(s) * n;                   \
+                _p_ = _d_ = newa(char, _len_ + 1);              \
+                for (unsigned _i_ = 0; _i_ < n; _i_++)          \
+                        _p_ = stpcpy(_p_, s);                   \
+                *_p_ = 0;                                       \
+                _d_;                                            \
+        })
+
 int split_pair(const char *s, const char *sep, char **l, char **r);
 
 int free_and_strdup(char **p, const char *s);
@@ -284,3 +299,5 @@ char *startswith_strv(const char *string, char **strv);
 bool version_is_valid(const char *s);
 
 bool version_is_valid_versionspec(const char *s);
+
+ssize_t strlevenshtein(const char *x, const char *y);
