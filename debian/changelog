@@ -1,3 +1,18 @@
+systemd (255~rc1-3) experimental; urgency=medium
+
+  * Do not ship repart.standalone and shutdown.standalone
+  * /usr/lib/sysvinit/telinit was dropped long ago, use /usr/sbin/telinit
+  * Add Suggests: libip4tc2 as it is now dlopen'ed
+  * Drop rc/rcS masking, no longer necessary
+  * Add Conflicts to avoid issues due to DEP17P3. libpam-elogind-compat,
+    opensysusers, bfh-container, molly-guard, and progress-linux-container
+    divert files from our packages, so DEP17P3 is triggered. Add
+    unversioned conflicts until those diversions are updated according to
+    DEP17M18, and then we can make the conflicts versioned. (Closes:
+    #1055485)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 07 Nov 2023 15:17:12 +0000
+
 systemd (255~rc1-2) experimental; urgency=medium
 
   * Build-depend on python3-pefile on all architectures ukify
