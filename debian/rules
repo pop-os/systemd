@@ -200,8 +200,8 @@ execute_after_dh_install-arch:
 		mv debian/systemd/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
 	done
 	# We don't want repart and shutdown standalone binaries for now
-	rm -f debian/systemd/bin/systemd-repart.standalone
-	rm -f debian/systemd/lib/systemd/systemd-shutdown.standalone
+	rm -f debian/systemd/usr/bin/systemd-repart.standalone
+	rm -f debian/systemd/usr/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
