@@ -106,6 +106,7 @@ Depends: ${shlibs:Depends},
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
+           opensysusers,
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
 Provides: systemd-sysusers (= ${binary:Version}),
@@ -129,6 +130,9 @@ Conflicts: sysvinit-core,
            systemd-shim,
            initscripts,
            orphan-sysvinit-scripts,
+           bfh-container,
+           molly-guard,
+           progress-linux-container,
 Replaces: sysvinit-core,
 Pre-Depends: systemd
 Depends: ${misc:Depends},
@@ -223,6 +227,7 @@ Depends: ${shlibs:Depends},
          systemd-sysv
 Recommends: dbus-user-session,
 Provides: logind (= ${binary:Version}), default-logind (= ${binary:Version})
+Conflicts: libpam-elogind-compat,
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.
