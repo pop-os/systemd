@@ -17,11 +17,6 @@
 /dev/null /usr/lib/systemd/system/cryptdisks.service
 /dev/null /usr/lib/systemd/system/cryptdisks-early.service
 
-# Those services are useless under systemd. Mask them so they can't
-# be run manually by accident.
-/dev/null /usr/lib/systemd/system/rc.service
-/dev/null /usr/lib/systemd/system/rcS.service
-
 # Enable Debian specific units
 /usr/lib/systemd/system/getty-static.service /usr/lib/systemd/system/getty.target.wants/getty-static.service
 
