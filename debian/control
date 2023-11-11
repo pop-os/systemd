@@ -131,7 +131,7 @@ Conflicts: sysvinit-core,
            initscripts,
            orphan-sysvinit-scripts,
            bfh-container,
-           molly-guard,
+           molly-guard (<< 0.8~),
            progress-linux-container,
 Replaces: sysvinit-core,
 Pre-Depends: systemd
