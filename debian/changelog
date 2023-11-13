@@ -1,3 +1,12 @@
+systemd (255~rc1-4) experimental; urgency=medium
+
+  * Add version to Conflict with molly-guard
+  * Move systemd-hwdb-update.service to udev package. Commit a12cf5d187cb
+    in 249-1 removed systemd-hwdb-update.service from udev, and 254.4-1
+    re-added it in systemd, so move it back to udev. (Closes: #1055863)
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 13 Nov 2023 13:51:12 +0000
+
 systemd (255~rc1-3) experimental; urgency=medium
 
   * Do not ship repart.standalone and shutdown.standalone
