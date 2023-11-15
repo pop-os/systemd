@@ -3049,7 +3049,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         if not manage_foreign_routes:
             copy_networkd_conf_dropin('networkd-manage-foreign-routes-no.conf')
 
-        copy_network_unit('25-route-static.network', '12-dummy.netdev')
+        copy_network_unit('25-route-static.network', '12-dummy.netdev',
+                          '25-route-static-test1.network', '11-dummy.netdev')
         start_networkd()
         self.wait_online(['dummy98:routable'])
 
@@ -3129,6 +3130,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         output = check_output('ip route show 192.168.10.1')
         print(output)
         self.assertIn('192.168.10.1 proto static', output)
+        self.assertIn('nexthop via 149.10.123.59 dev test1 weight 20', output)
+        self.assertIn('nexthop via 149.10.123.60 dev test1 weight 30', output)
         self.assertIn('nexthop via 149.10.124.59 dev dummy98 weight 10', output)
         self.assertIn('nexthop via 149.10.124.60 dev dummy98 weight 5', output)
 
@@ -3138,6 +3141,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         # old ip command does not show IPv6 gateways...
         self.assertIn('192.168.10.2 proto static', output)
         self.assertIn('nexthop', output)
+        self.assertIn('dev test1 weight 20', output)
+        self.assertIn('dev test1 weight 30', output)
         self.assertIn('dev dummy98 weight 10', output)
         self.assertIn('dev dummy98 weight 5', output)
 
@@ -3146,6 +3151,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         print(output)
         # old ip command does not show 'nexthop' keyword and weight...
         self.assertIn('2001:1234:5:7fff:ff:ff:ff:ff', output)
+        self.assertIn('via 2001:1234:5:6fff:ff:ff:ff:ff dev test1', output)
+        self.assertIn('via 2001:1234:5:7fff:ff:ff:ff:ff dev test1', output)
         self.assertIn('via 2001:1234:5:8fff:ff:ff:ff:ff dev dummy98', output)
         self.assertIn('via 2001:1234:5:9fff:ff:ff:ff:ff dev dummy98', output)
 
@@ -5170,6 +5177,10 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
         self.assertNotIn('DHCPREQUEST(veth-peer)', output)
         self.assertNotIn('DHCPREPLY(veth-peer)', output)
 
+        # Check json format
+        output = check_output(*networkctl_cmd, '--json=short', 'status', 'veth99', env=env)
+        check_json(output)
+
         # solicit mode
         stop_dnsmasq()
         start_dnsmasq('--dhcp-option=108,00:00:02:00',
@@ -5221,6 +5232,11 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
         self.assertIn('DHCPREPLY(veth-peer)', output)
         self.assertIn('sent size:  0 option: 14 rapid-commit', output)
 
+        # Check json format
+        output = check_output(*networkctl_cmd, '--json=short', 'status', 'veth99', env=env)
+        check_json(output)
+
+        # Testing without rapid commit support
         with open(os.path.join(network_unit_dir, '25-dhcp-client-ipv6-only.network'), mode='a', encoding='utf-8') as f:
             f.write('\n[DHCPv6]\nRapidCommit=no\n')
 
@@ -5269,6 +5285,10 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
         self.assertIn('DHCPREQUEST(veth-peer)', output)
         self.assertIn('DHCPREPLY(veth-peer)', output)
         self.assertNotIn('rapid-commit', output)
+
+        # Check json format
+        output = check_output(*networkctl_cmd, '--json=short', 'status', 'veth99', env=env)
+        check_json(output)
 
     def test_dhcp_client_ipv6_dbus_status(self):
         copy_network_unit('25-veth.netdev', '25-dhcp-server-veth-peer.network', '25-dhcp-client-ipv6-only.network')
@@ -6066,7 +6086,8 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
                           '11-dummy.netdev', '25-dhcp-pd-downstream-test1.network',
                           '25-dhcp-pd-downstream-dummy97.network',
                           '12-dummy.netdev', '25-dhcp-pd-downstream-dummy98.network',
-                          '13-dummy.netdev', '25-dhcp-pd-downstream-dummy99.network')
+                          '13-dummy.netdev', '25-dhcp-pd-downstream-dummy99.network',
+                          copy_dropins=False)
 
         self.setup_nftset('addr6', 'ipv6_addr')
         self.setup_nftset('network6', 'ipv6_addr', 'flags interval;')
@@ -6075,8 +6096,14 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
         start_networkd()
         self.wait_online(['veth-peer:routable'])
         start_isc_dhcpd(conf_file='isc-dhcpd-dhcp6pd.conf', ipv='-6')
-        self.wait_online(['veth99:routable', 'test1:routable', 'dummy98:routable', 'dummy99:degraded',
-                          'veth97:routable', 'veth97-peer:routable', 'veth98:routable', 'veth98-peer:routable'])
+        self.wait_online(['veth99:degraded'])
+
+        # First, test UseAddress=no and Assign=no (issue #29979).
+        # Note, due to the bug #29701, this test must be done at first.
+        print('### ip -6 address show dev veth99 scope global')
+        output = check_output('ip -6 address show dev veth99 scope global')
+        print(output)
+        self.assertNotIn('inet6 3ffe:501:ffff', output)
 
         # Check DBus assigned prefix information to veth99
         prefixInfo = get_dhcp6_prefix('veth99')
@@ -6093,6 +6120,11 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
         self.assertEqual(prefixInfo['PrefixLength'], 56)
         self.assertGreater(prefixInfo['PreferredLifetimeUSec'], 0)
         self.assertGreater(prefixInfo['ValidLifetimeUSec'], 0)
+
+        copy_network_unit('25-dhcp6pd-upstream.network.d/with-address.conf')
+        networkctl_reload()
+        self.wait_online(['veth99:routable', 'test1:routable', 'dummy98:routable', 'dummy99:degraded',
+                          'veth97:routable', 'veth97-peer:routable', 'veth98:routable', 'veth98-peer:routable'])
 
         print('### ip -6 address show dev veth-peer scope global')
         output = check_output('ip -6 address show dev veth-peer scope global')

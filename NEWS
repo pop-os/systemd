@@ -130,19 +130,36 @@ CHANGES WITH 255 in spe:
           machinectl bind and mount-image verbs will now cause the new mount to
           replace the old mount (if any), instead of overmounting it.
 
+        * Units now have MemoryPeak, MemorySwapPeak, MemorySwapCurrent and
+          MemoryZSwapCurrent properties, which respectively contain the values
+          of the cgroup v2's memory.peak, memory.swap.peak, memory.swap.current
+          and memory.zswap.current properties. This information is also show in
+          "systemctl status" output, if available.
+
         TPM2 Support + Disk Encryption & Authentication:
 
         * systemd-cryptenroll now allows specifying a PCR bank and explicit hash
           value in the --tpm2-pcrs= option.
 
-        * systemd-cryptenroll now allows specifying a TPM2 key handle to be used
-          instead of the default SRK via the new --tpm2-seal-key-handle= option.
+        * systemd-cryptenroll now allows specifying a TPM2 key handle (nv
+          index) to be used instead of the default SRK via the new
+          --tpm2-seal-key-handle= option.
+
+        * systemd-cryptenroll now allows TPM2 enrollment using only a TPM2
+          public key (in TPM2B_PUBLIC format) – without access to the TPM2
+          device itself – which enables offline sealing of LUKS images for a
+          specific TPM2 chip, as long as the SRK public key is known. Pass the
+          public to the tool via the new --tpm2-device-key= switch.
 
         * systemd-cryptsetup is now installed in /usr/bin/ and is no longer an
           internal-only executable.
 
         * The TPM2 Storage Root Key will now be set up, if not already present,
-          by a new systemd-tpm2-setup.service early boot service.
+          by a new systemd-tpm2-setup.service early boot service. The SRK will
+          be stored in PEM format and TPM2_PUBLIC format (the latter is useful
+          for systemd-cryptenroll --tpm2-device-key=, as mentioned above) for
+          easier access. A new "srk" verb has been added to systemd-analyze to
+          allow extracting it on demand if it is already set up.
 
         * The internal systemd-pcrphase executable has been renamed to
           systemd-pcrextend.
@@ -160,7 +177,7 @@ CHANGES WITH 255 in spe:
           journal, where they however were subject to rotation and similar.
 
         * A new component "systemd-pcrlock" has been added that allows managing
-          local TPM2 PCR policies for PCRs 0-7 and similar, which are hard to
+          local TPM2 PCR policies for PCRs 0-7 and similar, which are hard to
           predict by the OS vendor because of the inherently local nature of
           what measurements they contain, such as firmware versions of the
           system and extension cards and suchlike. pcrlock can predict PCR
@@ -173,12 +190,12 @@ CHANGES WITH 255 in spe:
           state. Alternatives for each component are supported to allowlist
           multiple kernel versions or boot loader version simultaneously
           without losing access to the disk encryption keys. The tool can also
-          be used to analyze and validate the local TPM2 event
-          log. systemd-cryptsetup, systemd-cryptenroll, systemd-repart have all
-          been updated to support such policies. There's currently no support
-          for locking the system's root disk against a pcrlock policy, this
-          will be added soon. Moreover, it is currently not possible to combine
-          a pcrlock policy with a signed PCR policy. This component is
+          be used to analyze and validate the local TPM2 event log.
+          systemd-cryptsetup, systemd-cryptenroll, systemd-repart have all been
+          updated to support such policies. There's currently no support for
+          locking the system's root disk against a pcrlock policy, this will be
+          added soon. Moreover, it is currently not possible to combine a
+          pcrlock policy with a signed PCR policy. This component is
           experimental and its public interface is subject to change.
 
         systemd-boot, systemd-stub, ukify, bootctl, kernel-install:
@@ -204,11 +221,11 @@ CHANGES WITH 255 in spe:
           set-timeout option, to allow completely disabling the boot menu,
           including the hotkey.
 
-        * systemd-boot will now measure the content of loader.conf in TPM2 PCR
-          5.
+        * systemd-boot will now measure the content of loader.conf in TPM2
+          PCR 5.
 
         * systemd-stub will now concatenate the content of all kernel
-          command-line addons before measuring them in TPM2 PCR 12, in a single
+          command-line addons before measuring them in TPM2 PCR 12, in a single
           measurement, instead of measuring them individually.
 
         * systemd-stub will now measure and load Devicetree Blob addons, which
@@ -218,6 +235,9 @@ CHANGES WITH 255 in spe:
         * systemd-stub will now ignore unauthenticated kernel command line options
           passed from systemd-boot when running inside Confidential VMs with UEFI
           SecureBoot enabled.
+
+        * systemd-stub will now load a Devicetree blob even if the firmware did
+          not load any beforehand (e.g.: for ACPI systems).
 
         * ukify is no longer considered experimental, and now ships in /usr/bin/.
 
@@ -229,6 +249,14 @@ CHANGES WITH 255 in spe:
 
         * The 90-loaderentry kernel-install hook now supports installing device
           trees.
+
+        * kernel-install now supports the --json=, --root=, --image=, and
+          --image-policy= options for the inspect verb.
+
+        * kernel-install now supports new list and add-all verbs. The former
+          lists all installed kernel images (if those are available in
+          /usr/lib/modules/). The latter will install all the kernels it can
+          find to the ESP.
 
         systemd-repart:
 
@@ -253,10 +281,18 @@ CHANGES WITH 255 in spe:
           files, to indicate which directories in the target partition should be
           btrfs subvolumes.
 
+        * A new --tpm2-device-key= option can be used to lock a disk against a
+          specific TPM2 public key. This matches the same switch the
+          systemd-cryptenroll tool now supports (see above).
+
         Journal:
 
         * The journalctl --lines= parameter now accepts +N to show the oldest N
           entries instead of the newest.
+
+        * journald now ensures that sealing happens once per epoch, and sets a
+          new compatibility flag to distinguish old journal files that were
+          created before this change, for backward compatibility.
 
         Device Management:
 
@@ -433,7 +469,7 @@ CHANGES WITH 255 in spe:
         * systemd-sysupdate now accepts directories in the MatchPattern= option.
 
         * systemd-run will now output the invocation ID of the launched
-          transient unit.
+          transient unit and its peak memory usage.
 
         * systemd-analyze, systemd-tmpfiles, systemd-sysusers, systemd-sysctl,
           and systemd-binfmt gained a new --tldr option that can be used instead
@@ -451,6 +487,9 @@ CHANGES WITH 255 in spe:
           as-is.
 
         * seccomp now supports the LoongArch64 architecture.
+
+        * seccomp may now be enabled for services running as a non-root User=
+          without NoNewPrivileges=yes.
 
         * systemd-id128 now supports a new -P option to show only values. The
           combination of -P and --app options is also supported.
@@ -505,11 +544,11 @@ CHANGES WITH 255 in spe:
         * All tools that parse timestamps now can also parse RFC3339 style
           timestamps that include the "T" and Z" characters.
 
-        * New documentation as been added:
+        * New documentation has been added:
 
           https://systemd.io/FILE_DESCRIPTOR_STORE
           https://systemd.io/TPM2_PCR_MEASUREMENTS
-          https://systemd.io/MOUNT_REQUIREMENTS.md
+          https://systemd.io/MOUNT_REQUIREMENTS
 
         * The codebase now recognizes the suffix .confext.raw and .sysext.raw
           as alternative to the .raw suffix generally accepted for DDIs. It is
@@ -535,26 +574,31 @@ CHANGES WITH 255 in spe:
           and %systemd_user_postun_with_reload do a reload for system and user
           units on upgrades.
 
+        * coredumpctl now propagates SIGTERM to the debugger process.
+
         Contributions from: 김인수, Abderrahim Kitouni, Adam Williamson,
         Alexandre Peixoto Ferreira, Alex Hudspith, Alvin Alvarado,
         André Paiusco, Antonio Alvarez Feijoo, Anton Lundin,
         Arseny Maslennikov, Arthur Shau, Balázs Úr, beh_10257,
-        Benjamin Peterson, Bertrand Jacquin, Brian Norris, Chris Patterson,
-        Christian Hergert, Christian Hesse, Christian Kirbach,
-        commondservice, Curtis Klein, cvlc12, Daan De Meyer,
-        Daniel P. Berrangé, Daniel Rusek, Dan Streetman,
+        Benjamin Peterson, Bertrand Jacquin, Brian Norris,
+        Cheng-Chia Tseng, Chris Patterson, Christian Hergert,
+        Christian Hesse, Christian Kirbach, Clayton Craft, commondservice,
+        Curtis Klein, cvlc12, Daan De Meyer, Daniele Medri,
+        Daniel P. Berrangé, Daniel Rusek, Dan Nicholson, Dan Streetman,
         David Rheinsberg, David Santamaría Rogado, David Tardon,
-        dependabot[bot], Dmitry V. Levin, Emanuele Giuseppe Esposito,
-        Emil Renner Berthing, Emil Velikov, Etienne Dechamps, Fabian Vogt,
-        felixdoerre, Franck Bui, Frantisek Sumsal, G2-Games,
-        Gioele Barabucci, Hugo Carvalho, huyubiao, IllusionMan1212,
-        Jade Lovelace, janana, Jan Janssen, Jan Kuparinen, Jan Macku,
-        Jin Liu, Joerg Behrmann, Johannes Segitz, Jordan Rome,
-        Jordan Williams, Julien Malka, Juno Computers, Khem Raj, khm,
-        Kingbom Dou, Kiran Vemula, Laszlo Gombos, Lennart Poettering,
-        Luca Boccassi, Lucas Adriano Salles, Lukas, Lukáš Nykrýn,
-        Maanya Goenka, Maarten, Malte Poll, Marc Pervaz Boocha,
-        Martin Beneš, Martin Wilck, Mathieu Tortuyaux, Matthias Schiffer,
+        dependabot[bot], Diego Viola, Dmitry V. Levin,
+        Emanuele Giuseppe Esposito, Emil Renner Berthing, Emil Velikov,
+        Etienne Dechamps, Fabian Vogt, felixdoerre, Felix Dörre,
+        Florian Schmaus, Franck Bui, Frantisek Sumsal, G2-Games,
+        Gioele Barabucci, Hugo Carvalho, huyubiao, Iago López Galeiras,
+        IllusionMan1212, Jade Lovelace, janana, Jan Janssen, Jan Kuparinen,
+        Jan Macku, Jeremy Fleischman, Jin Liu, jjimbo137, Joerg Behrmann,
+        Johannes Segitz, Jordan Rome, Jordan Williams, Julien Malka,
+        Juno Computers, Khem Raj, khm, Kingbom Dou, Kiran Vemula,
+        Laszlo Gombos, Lennart Poettering, Luca Boccassi,
+        Lucas Adriano Salles, Lukas, Lukáš Nykrýn, Maanya Goenka,
+        Maarten, Malte Poll, Marc Pervaz Boocha, Martin Beneš,
+        Martin Wilck, Mathieu Tortuyaux, Matthias Schiffer,
         Maxim Mikityanskiy, Max Kellermann, Michael A Cassaniti,
         Michael Biebl, Michael Kuhn, Michael Vasseur, Michal Koutný,
         Michal Sekletár, Mike Yuan, Milton D. Miller II, mordner,
@@ -563,14 +607,14 @@ CHANGES WITH 255 in spe:
         Pierre GRASSER, Piotr Drąg, Priit Laes, Rahil Bhimjiani,
         Raito Bezarius, Raul Cheleguini, Reto Schneider, Richard Maw,
         Robby Red, RoepLuke, Roland Hieber, Ronan Pigott, Sam James,
-        Sam Leonard, Sergey A, Susant Sahani, Sven Joachim,
+        Sam Leonard, Sergey A, Susant Sahani, Sven Joachim, Tad Fisher,
         Takashi Sakamoto, Thorsten Kukuk, Tj, Tomasz Świątek,
         Topi Miettinen, Valentin David, Valentin Lefebvre,
         Victor Westerhuis, Vincent Haupert, Vishal Chillara Srinivas,
-        Warren, Xiaotian Wu, xinpeng wang, Yu Watanabe,
-        Zbigniew Jędrzejewski-Szmek, наб
+        Vito Caputo, Warren, Xiaotian Wu, xinpeng wang, Yu Watanabe,
+        Zbigniew Jędrzejewski-Szmek, zeroskyx, наб
 
-        — Edinburgh, 2023-11-06
+        — Edinburgh, 2023-11-15
 
 CHANGES WITH 254:
 
@@ -718,9 +762,9 @@ CHANGES WITH 254:
           store enabled.
 
         * A new service option FileDescriptorStorePreserve= has been added that
-          allows tuning the life-cycle of the per-service file descriptor
-          store. If set to "yes", the entries in the fd store are retained even
-          after the service has been fully stopped.
+          allows tuning the lifecycle of the per-service file descriptor store.
+          If set to "yes", the entries in the fd store are retained even after
+          the service has been fully stopped.
 
         * The "systemctl clean" command may now be used to clear the fdstore of
           a service.
@@ -896,7 +940,7 @@ CHANGES WITH 254:
           kernel command line it invokes. This is useful for VMMs such as qemu
           to pass additional kernel command lines into the system even when
           booting via full UEFI. The contents of the field are measured into
-          TPM PCR 12.
+          TPM PCR 12.
 
         * The KERNEL_INSTALL_LAYOUT= setting for kernel-install gained a new
           value "auto". With this value, a kernel will be automatically
@@ -1419,7 +1463,7 @@ CHANGES WITH 253:
           manager is also enabled and used.
 
         * Some compatibility helpers were dropped: EmergencyAction= in the user
-          manager, as well as measuring kernel command line into PCR 8 in
+          manager, as well as measuring kernel command line into PCR 8 in
           systemd-stub, along with the -Defi-tpm-pcr-compat compile-time
           option.
 
@@ -1824,8 +1868,8 @@ CHANGES WITH 253:
           specified via root=.
 
         * systemd-pcrphase gained new options --machine-id and --file-system=
-          to measure the machine-id and mount point information into PCR 15. New
-          service unit files systemd-pcrmachine.service and
+          to measure the machine-id and mount point information into PCR 15.
+          New service unit files systemd-pcrmachine.service and
           systemd-pcrfs@.service have been added that invoke the tool with
           these switches during early boot.
 
@@ -2083,7 +2127,7 @@ CHANGES WITH 252 🎃:
           course users can always enroll non-TPM ways to unlock the volume.)
 
         * systemd-pcrphase is a new tool that is invoked at six places during
-          system runtime, and measures additional words into TPM2 PCR 11, to
+          system runtime, and measures additional words into TPM2 PCR 11, to
           mark milestones of the boot process. This allows binding access to
           specific TPM2-encrypted secrets to specific phases of the boot
           process. (Example: LUKS2 disk encryption key only accessible in the
@@ -2143,7 +2187,7 @@ CHANGES WITH 252 🎃:
           associated service unit, if any.
 
         * Boot phase transitions (start initrd → exit initrd → boot complete →
-          shutdown) will be measured into TPM2 PCR 11, so that secrets can be
+          shutdown) will be measured into TPM2 PCR 11, so that secrets can be
           bound to a specific runtime phase. E.g.: a LUKS encryption key can be
           unsealed only in the initrd.
 
@@ -2208,13 +2252,13 @@ CHANGES WITH 252 🎃:
           (e.g. comparisons for empty strings). Boot counting is now part of
           the main specification.
 
-        * New PCRs measurements are performed during boot: PCR 11 for the
-          kernel+initrd combo, PCR 13 for any sysext images. If a measurement
+        * New PCRs measurements are performed during boot: PCR 11 for the
+          kernel+initrd combo, PCR 13 for any sysext images. If a measurement
           took place this is now reported to userspace via the new
           StubPcrKernelImage and StubPcrInitRDSysExts EFI variables.
 
         * As before, systemd-stub will measure kernel parameters and system
-          credentials into PCR 12. It will now report this fact via the
+          credentials into PCR 12. It will now report this fact via the
           StubPcrKernelParameters EFI variable to userspace.
 
         * The UEFI monotonic boot counter is now included in the updated random
@@ -2659,17 +2703,17 @@ CHANGES WITH 251:
           seen with 250. For newer kernels, non-x86 systems, or older x86
           systems, there should be no visible changes.
 
-        * sd-boot will now measure the kernel command line into TPM PCR 12
-          rather than PCR 8. This improves usefulness of the measurements on
+        * sd-boot will now measure the kernel command line into TPM PCR 12
+          rather than PCR 8. This improves usefulness of the measurements on
           systems where sd-boot is chainloaded from Grub. Grub measures all
-          commands its executes into PCR 8, which makes it very hard to use
-          reasonably, hence separate ourselves from that and use PCR 12
+          commands its executes into PCR 8, which makes it very hard to use
+          reasonably, hence separate ourselves from that and use PCR 12
           instead, which is what certain Ubuntu editions already do. To retain
           compatibility with systems running older systemd systems a new meson
           option 'efi-tpm-pcr-compat' has been added (which defaults to false).
-          If enabled, the measurement is done twice: into the new-style PCR 12
-          *and* the old-style PCR 8. It's strongly advised to migrate all users
-          to PCR 12 for this purpose in the long run, as we intend to remove
+          If enabled, the measurement is done twice: into the new-style PCR 12
+          *and* the old-style PCR 8. It's strongly advised to migrate all users
+          to PCR 12 for this purpose in the long run, as we intend to remove
           this compatibility feature in two years' time.
 
         * busctl capture now writes output in the newer pcapng format instead

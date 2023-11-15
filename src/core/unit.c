@@ -114,13 +114,16 @@ Unit* unit_new(Manager *m, size_t size) {
         u->ref_uid = UID_INVALID;
         u->ref_gid = GID_INVALID;
         u->cpu_usage_last = NSEC_INFINITY;
+
+        unit_reset_memory_accounting_last(u);
+
+        unit_reset_io_accounting_last(u);
+
         u->cgroup_invalidated_mask |= CGROUP_MASK_BPF_FIREWALL;
         u->failure_action_exit_status = u->success_action_exit_status = -1;
 
         u->ip_accounting_ingress_map_fd = -EBADF;
         u->ip_accounting_egress_map_fd = -EBADF;
-        for (CGroupIOAccountingMetric i = 0; i < _CGROUP_IO_ACCOUNTING_METRIC_MAX; i++)
-                u->io_accounting_last[i] = UINT64_MAX;
 
         u->ipv4_allow_map_fd = -EBADF;
         u->ipv6_allow_map_fd = -EBADF;
@@ -1777,7 +1780,7 @@ static bool unit_test_condition(Unit *u) {
 
         assert(u);
 
-        dual_timestamp_get(&u->condition_timestamp);
+        dual_timestamp_now(&u->condition_timestamp);
 
         r = manager_get_effective_environment(u->manager, &env);
         if (r < 0) {
@@ -1801,7 +1804,7 @@ static bool unit_test_assert(Unit *u) {
 
         assert(u);
 
-        dual_timestamp_get(&u->assert_timestamp);
+        dual_timestamp_now(&u->assert_timestamp);
 
         r = manager_get_effective_environment(u->manager, &env);
         if (r < 0) {
@@ -2318,13 +2321,14 @@ static int raise_level(int log_level, bool condition_info, bool condition_notice
 }
 
 static int unit_log_resources(Unit *u) {
-        struct iovec iovec[1 + _CGROUP_IP_ACCOUNTING_METRIC_MAX + _CGROUP_IO_ACCOUNTING_METRIC_MAX + 4];
+        struct iovec iovec[1 + 2 + _CGROUP_IP_ACCOUNTING_METRIC_MAX + _CGROUP_IO_ACCOUNTING_METRIC_MAX + 4];
         bool any_traffic = false, have_ip_accounting = false, any_io = false, have_io_accounting = false;
         _cleanup_free_ char *igress = NULL, *egress = NULL, *rr = NULL, *wr = NULL;
         int log_level = LOG_DEBUG; /* May be raised if resources consumed over a threshold */
         size_t n_message_parts = 0, n_iovec = 0;
-        char* message_parts[1 + 2 + 2 + 1], *t;
+        char* message_parts[1 + 2 + 2 + 2 + 1], *t;
         nsec_t nsec = NSEC_INFINITY;
+        uint64_t memory_peak = UINT64_MAX, memory_swap_peak = UINT64_MAX;
         int r;
         const char* const ip_fields[_CGROUP_IP_ACCOUNTING_METRIC_MAX] = {
                 [CGROUP_IP_INGRESS_BYTES]   = "IP_METRIC_INGRESS_BYTES",
@@ -2366,6 +2370,42 @@ static int unit_log_resources(Unit *u) {
                 log_level = raise_level(log_level,
                                         nsec > MENTIONWORTHY_CPU_NSEC,
                                         nsec > NOTICEWORTHY_CPU_NSEC);
+        }
+
+        (void) unit_get_memory_accounting(u, CGROUP_MEMORY_PEAK, &memory_peak);
+        if (memory_peak != UINT64_MAX) {
+                /* Format peak memory for inclusion in the structured log message */
+                if (asprintf(&t, "MEMORY_PEAK=%" PRIu64, memory_peak) < 0) {
+                        r = log_oom();
+                        goto finish;
+                }
+                iovec[n_iovec++] = IOVEC_MAKE_STRING(t);
+
+                /* Format peak memory for inclusion in the human language message string */
+                t = strjoin(FORMAT_BYTES(memory_peak), " memory peak");
+                if (!t) {
+                        r = log_oom();
+                        goto finish;
+                }
+                message_parts[n_message_parts++] = t;
+        }
+
+        (void) unit_get_memory_accounting(u, CGROUP_MEMORY_SWAP_PEAK, &memory_swap_peak);
+        if (memory_swap_peak != UINT64_MAX) {
+                /* Format peak swap memory for inclusion in the structured log message */
+                if (asprintf(&t, "MEMORY_SWAP_PEAK=%" PRIu64, memory_swap_peak) < 0) {
+                        r = log_oom();
+                        goto finish;
+                }
+                iovec[n_iovec++] = IOVEC_MAKE_STRING(t);
+
+                /* Format peak swap memory for inclusion in the human language message string */
+                t = strjoin(FORMAT_BYTES(memory_swap_peak), " memory swap peak");
+                if (!t) {
+                        r = log_oom();
+                        goto finish;
+                }
+                message_parts[n_message_parts++] = t;
         }
 
         for (CGroupIOAccountingMetric k = 0; k < _CGROUP_IO_ACCOUNTING_METRIC_MAX; k++) {
@@ -2701,7 +2741,7 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, bool reload_su
 
         /* Update timestamps for state changes */
         if (!MANAGER_IS_RELOADING(m)) {
-                dual_timestamp_get(&u->state_change_timestamp);
+                dual_timestamp_now(&u->state_change_timestamp);
 
                 if (UNIT_IS_INACTIVE_OR_FAILED(os) && !UNIT_IS_INACTIVE_OR_FAILED(ns))
                         u->inactive_exit_timestamp = u->state_change_timestamp;
@@ -2845,14 +2885,14 @@ int unit_watch_pidref(Unit *u, PidRef *pid, bool exclusive) {
                 return r;
 
         /* First, insert into the set of PIDs maintained by the unit */
-        r = set_ensure_put(&u->pids, &pidref_hash_ops, pid_dup);
+        r = set_ensure_put(&u->pids, &pidref_hash_ops_free, pid_dup);
         if (r < 0)
                 return r;
 
         pid = TAKE_PTR(pid_dup); /* continue with our copy now that we have installed it properly in our set */
 
         /* Second, insert it into the simple global table, see if that works */
-        r = hashmap_ensure_put(&u->manager->watch_pids, &pidref_hash_ops, pid, u);
+        r = hashmap_ensure_put(&u->manager->watch_pids, &pidref_hash_ops_free, pid, u);
         if (r != -EEXIST)
                 return r;
 
@@ -2878,7 +2918,7 @@ int unit_watch_pidref(Unit *u, PidRef *pid, bool exclusive) {
         new_array[n+1] = NULL;
 
         /* Make sure the hashmap is allocated */
-        r = hashmap_ensure_allocated(&u->manager->watch_pids_more, &pidref_hash_ops);
+        r = hashmap_ensure_allocated(&u->manager->watch_pids_more, &pidref_hash_ops_free);
         if (r < 0)
                 return r;
 
@@ -2924,7 +2964,7 @@ void unit_unwatch_pidref(Unit *u, PidRef *pid) {
 
         if (uu == u)
                 /* OK, we are in the first table. Let's remove it there then, and we are done already. */
-                assert_se(hashmap_remove_value(u->manager->watch_pids, pid2, uu) == uu);
+                assert_se(hashmap_remove_value(u->manager->watch_pids, pid2, uu));
         else {
                 /* We weren't in the first table, then let's consult the 2nd table that points to an array */
                 PidRef *pid3 = NULL;
@@ -2942,7 +2982,7 @@ void unit_unwatch_pidref(Unit *u, PidRef *pid) {
 
                 if (m == 0) {
                         /* The array is now empty, remove the entire entry */
-                        assert_se(hashmap_remove_value(u->manager->watch_pids_more, pid3, array) == array);
+                        assert_se(hashmap_remove_value(u->manager->watch_pids_more, pid3, array));
                         free(array);
                 } else {
                         /* The array is not empty, but let's make sure the entry is not keyed by the PidRef
@@ -5040,10 +5080,7 @@ bool unit_type_supported(UnitType t) {
         static int8_t cache[_UNIT_TYPE_MAX] = {}; /* -1: disabled, 1: enabled: 0: don't know */
         int r;
 
-        if (_unlikely_(t < 0))
-                return false;
-        if (_unlikely_(t >= _UNIT_TYPE_MAX))
-                return false;
+        assert(t >= 0 && t < _UNIT_TYPE_MAX);
 
         if (cache[t] == 0) {
                 char *e;

@@ -70,6 +70,7 @@
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
+#include "plymouth-util.h"
 #include "process-util.h"
 #include "psi-util.h"
 #include "ratelimit.h"
@@ -1914,7 +1915,8 @@ static void manager_preset_all(Manager *m) {
                 return;
 
         /* If this is the first boot, and we are in the host system, then preset everything */
-        UnitFilePresetMode mode = FIRST_BOOT_FULL_PRESET ? UNIT_FILE_PRESET_FULL : UNIT_FILE_PRESET_ENABLE_ONLY;
+        UnitFilePresetMode mode =
+                ENABLE_FIRST_BOOT_FULL_PRESET ? UNIT_FILE_PRESET_FULL : UNIT_FILE_PRESET_ENABLE_ONLY;
 
         r = unit_file_preset_all(RUNTIME_SCOPE_SYSTEM, 0, NULL, mode, NULL, 0);
         if (r < 0)
@@ -1947,7 +1949,7 @@ static void manager_ready(Manager *m) {
 
 Manager* manager_reloading_start(Manager *m) {
         m->n_reloading++;
-        dual_timestamp_get(m->timestamps + MANAGER_TIMESTAMP_UNITS_LOAD);
+        dual_timestamp_now(m->timestamps + MANAGER_TIMESTAMP_UNITS_LOAD);
         return m;
 }
 
@@ -1971,11 +1973,11 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *roo
         if (r < 0)
                 return r;
 
-        dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_GENERATORS_START));
+        dual_timestamp_now(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_GENERATORS_START));
         r = manager_run_environment_generators(m);
         if (r >= 0)
                 r = manager_run_generators(m);
-        dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_GENERATORS_FINISH));
+        dual_timestamp_now(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_GENERATORS_FINISH));
         if (r < 0)
                 return r;
 
@@ -1997,10 +1999,10 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *roo
                         reloading = manager_reloading_start(m);
 
                 /* First, enumerate what we can from all config files */
-                dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_UNITS_LOAD_START));
+                dual_timestamp_now(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_UNITS_LOAD_START));
                 manager_enumerate_perpetual(m);
                 manager_enumerate(m);
-                dual_timestamp_get(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_UNITS_LOAD_FINISH));
+                dual_timestamp_now(m->timestamps + manager_timestamp_initrd_mangle(MANAGER_TIMESTAMP_UNITS_LOAD_FINISH));
 
                 /* Second, deserialize if there is something to deserialize */
                 if (serialization) {
@@ -3439,10 +3441,8 @@ void manager_send_unit_audit(Manager *m, Unit *u, int type, bool success) {
 }
 
 void manager_send_unit_plymouth(Manager *m, Unit *u) {
-        static const union sockaddr_union sa = PLYMOUTH_SOCKET;
         _cleanup_free_ char *message = NULL;
-        _cleanup_close_ int fd = -EBADF;
-        int n = 0;
+        int c, r;
 
         /* Don't generate plymouth events if the service was already
          * started and we're just deserializing */
@@ -3458,27 +3458,15 @@ void manager_send_unit_plymouth(Manager *m, Unit *u) {
         if (!UNIT_VTABLE(u)->notify_plymouth)
                 return;
 
-        /* We set SOCK_NONBLOCK here so that we rather drop the
-         * message then wait for plymouth */
-        fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-        if (fd < 0) {
-                log_error_errno(errno, "socket() failed: %m");
-                return;
-        }
-
-        if (connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0) {
-                if (!IN_SET(errno, EAGAIN, ENOENT) && !ERRNO_IS_DISCONNECT(errno))
-                        log_error_errno(errno, "connect() failed: %m");
-                return;
-        }
-
-        if (asprintf(&message, "U\002%c%s%n", (int) (strlen(u->id) + 1), u->id, &n) < 0)
+        c = asprintf(&message, "U\x02%c%s%c", (int) (strlen(u->id) + 1), u->id, '\x00');
+        if (c < 0)
                 return (void) log_oom();
 
-        errno = 0;
-        if (write(fd, message, n + 1) != n + 1)
-                if (!IN_SET(errno, EAGAIN, ENOENT) && !ERRNO_IS_DISCONNECT(errno))
-                        log_error_errno(errno, "Failed to write Plymouth message: %m");
+        /* We set SOCK_NONBLOCK here so that we rather drop the message then wait for plymouth */
+        r = plymouth_send_raw(message, c, SOCK_NONBLOCK);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NO_PLYMOUTH(r) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to communicate with plymouth: %m");
 }
 
 usec_t manager_get_watchdog(Manager *m, WatchdogType t) {
@@ -3890,7 +3878,7 @@ void manager_check_finished(Manager *m) {
         /* This is no longer the first boot */
         manager_set_first_boot(m, false);
 
-        dual_timestamp_get(m->timestamps + MANAGER_TIMESTAMP_FINISH);
+        dual_timestamp_now(m->timestamps + MANAGER_TIMESTAMP_FINISH);
 
         manager_notify_finished(m);
 

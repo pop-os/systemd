@@ -594,12 +594,6 @@ run_qemu() {
     fi
     qemu_options+=(${QEMU_OPTIONS_ARRAY:+"${QEMU_OPTIONS_ARRAY[@]}"})
 
-    if [[ -n "${KERNEL_APPEND:=}" ]]; then
-        local user_kernel_append
-        readarray user_kernel_append <<< "$KERNEL_APPEND"
-        kernel_params+=("${user_kernel_append[@]}")
-    fi
-
     if [[ -n "$INITRD" ]]; then
         if [[ -n "$INITRD_EXTRA" ]]; then
             # An addition initrd has been specified, let's combine it with the main one.
@@ -634,7 +628,7 @@ run_qemu() {
         qemu_cmd=(timeout --foreground "$QEMU_TIMEOUT" "$QEMU_BIN")
     fi
 
-    (set -x; "${qemu_cmd[@]}" "${qemu_options[@]}" -append "${kernel_params[*]}" |& tee "${TESTDIR:?}/console.log")
+    (set -x; "${qemu_cmd[@]}" "${qemu_options[@]}" -append "${kernel_params[*]} ${KERNEL_APPEND:-}" |& tee "${TESTDIR:?}/console.log")
     rc=$?
     if [ "$rc" -eq 124 ] && [ "$QEMU_TIMEOUT" != "infinity" ]; then
         derror "Test timed out after ${QEMU_TIMEOUT}s"
@@ -679,12 +673,6 @@ run_nspawn() {
         nspawn_options+=("${user_nspawn_arguments[@]}")
     fi
 
-    if [[ -n "${KERNEL_APPEND:=}" ]]; then
-        local user_kernel_append
-        readarray user_kernel_append <<< "$KERNEL_APPEND"
-        kernel_params+=("${user_kernel_append[@]}")
-    fi
-
     if [[ "$UNIFIED_CGROUP_HIERARCHY" = "hybrid" ]]; then
         dwarn "nspawn doesn't support SYSTEMD_NSPAWN_UNIFIED_HIERARCHY=hybrid, skipping"
         exit
@@ -703,7 +691,9 @@ run_nspawn() {
         nspawn_cmd+=("$SYSTEMD_NSPAWN")
     fi
 
-    (set -x; "${nspawn_cmd[@]}" "${nspawn_options[@]}" "${kernel_params[@]}" |& tee "${TESTDIR:?}/console.log")
+    # Word splitting here is intentional
+    # shellcheck disable=SC2086
+    (set -x; "${nspawn_cmd[@]}" "${nspawn_options[@]}" "${kernel_params[@]}" ${KERNEL_APPEND:-} |& tee "${TESTDIR:?}/console.log")
     rc=$?
     if [ "$rc" -eq 124 ] && [ "$NSPAWN_TIMEOUT" != "infinity" ]; then
         derror "Test timed out after ${NSPAWN_TIMEOUT}s"
@@ -934,16 +924,13 @@ setup_selinux() {
         return 0
     fi
 
-    local conf_dir=/etc/selinux
-    local fixfiles_tools=(awk bash cat chcon expr egrep find grep head secon setfiles rm sort uname uniq)
-
-    # Make sure the following statement can't expand to "/" to prevent
-    # a potential where-are-my-backups situation
-    rm -rf "${initdir:?}/$conf_dir"
-    if ! cp -ar "$conf_dir" "$initdir/$conf_dir"; then
-        dfatal "Failed to copy $conf_dir"
-        exit 1
-    fi
+    for dir in /etc/selinux /usr/share/selinux; do
+        rm -rf "${initdir:?}/$dir"
+        if ! cp -ar "$dir" "$initdir/$dir"; then
+            dfatal "Failed to copy $dir"
+            exit 1
+        fi
+    done
 
     # We use a custom autorelabel service instead of the SELinux provided set
     # of units & a generator, since the generator overrides the default target
@@ -954,13 +941,13 @@ setup_selinux() {
     # and does the relabeling unconditionally which always ends with a reboot, so
     # we end up in a reboot loop (and it also spews quite a lot of errors as it
     # wants /etc/fstab and dracut-initramfs-restore).
-
     touch "$initdir/.autorelabel"
     mkdir -p "$initdir/usr/lib/systemd/tests/testdata/units/basic.target.wants"
     ln -sf ../autorelabel.service "$initdir/usr/lib/systemd/tests/testdata/units/basic.target.wants/"
 
-    image_install "${fixfiles_tools[@]}"
-    image_install fixfiles sestatus
+    # Tools requires by fixfiles
+    image_install awk bash cat chcon expr egrep find grep head secon setfiles rm sort uname uniq
+    image_install fixfiles getenforce load_policy selinuxenabled sestatus
 }
 
 install_valgrind() {

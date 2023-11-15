@@ -87,6 +87,17 @@ int session_new(Session **ret, Manager *m, const char *id) {
         return 0;
 }
 
+static void session_reset_leader(Session *s) {
+        assert(s);
+
+        if (!pidref_is_set(&s->leader))
+                return;
+
+        assert_se(hashmap_remove_value(s->manager->sessions_by_leader, &s->leader, s));
+
+        return pidref_done(&s->leader);
+}
+
 Session* session_free(Session *s) {
         SessionDevice *sd;
 
@@ -129,12 +140,9 @@ Session* session_free(Session *s) {
                 free(s->scope);
         }
 
-        if (pidref_is_set(&s->leader)) {
-                (void) hashmap_remove_value(s->manager->sessions_by_leader, PID_TO_PTR(s->leader.pid), s);
-                pidref_done(&s->leader);
-        }
-
         free(s->scope_job);
+
+        session_reset_leader(s);
 
         sd_bus_message_unref(s->create_message);
 
@@ -180,16 +188,15 @@ int session_set_leader_consume(Session *s, PidRef _leader) {
         if (pidref_equal(&s->leader, &pidref))
                 return 0;
 
-        r = hashmap_put(s->manager->sessions_by_leader, PID_TO_PTR(pidref.pid), s);
-        if (r < 0)
-                return r;
-
-        if (pidref_is_set(&s->leader)) {
-                (void) hashmap_remove_value(s->manager->sessions_by_leader, PID_TO_PTR(s->leader.pid), s);
-                pidref_done(&s->leader);
-        }
+        session_reset_leader(s);
 
         s->leader = TAKE_PIDREF(pidref);
+
+        r = hashmap_ensure_put(&s->manager->sessions_by_leader, &pidref_hash_ops, &s->leader, s);
+        if (r < 0)
+                return r;
+        assert(r > 0);
+
         (void) audit_session_from_pid(s->leader.pid, &s->audit_id);
 
         return 1;
@@ -787,7 +794,7 @@ int session_start(Session *s, sd_bus_message *properties, sd_bus_error *error) {
                    LOG_MESSAGE("New session %s of user %s.", s->id, s->user->user_record->user_name));
 
         if (!dual_timestamp_is_set(&s->timestamp))
-                dual_timestamp_get(&s->timestamp);
+                dual_timestamp_now(&s->timestamp);
 
         if (s->seat)
                 seat_read_active_vt(s->seat);
@@ -941,7 +948,7 @@ int session_finalize(Session *s) {
                 seat_save(s->seat);
         }
 
-        pidref_done(&s->leader);
+        session_reset_leader(s);
 
         user_save(s->user);
         user_send_changed(s->user, "Display", NULL);
@@ -1081,7 +1088,7 @@ int session_set_idle_hint(Session *s, bool b) {
                 return 0;
 
         s->idle_hint = b;
-        dual_timestamp_get(&s->idle_hint_timestamp);
+        dual_timestamp_now(&s->idle_hint_timestamp);
 
         session_send_changed(s, "IdleHint", "IdleSinceHint", "IdleSinceHintMonotonic", NULL);
 

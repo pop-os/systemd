@@ -148,6 +148,8 @@ static size_t arg_key_size = 0;
 static EVP_PKEY *arg_private_key = NULL;
 static X509 *arg_certificate = NULL;
 static char *arg_tpm2_device = NULL;
+static uint32_t arg_tpm2_seal_key_handle = 0;
+static char *arg_tpm2_device_key = NULL;
 static Tpm2PCRValue *arg_tpm2_hash_pcr_values = NULL;
 static size_t arg_tpm2_n_hash_pcr_values = 0;
 static char *arg_tpm2_public_key = NULL;
@@ -174,6 +176,7 @@ STATIC_DESTRUCTOR_REGISTER(arg_key, erase_and_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_private_key, EVP_PKEY_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_certificate, X509_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_device, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_tpm2_device_key, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_hash_pcr_values, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_public_key, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_pcrlock, freep);
@@ -1686,10 +1689,10 @@ static int partition_read_definition(Partition *p, const char *path, const char 
                 { "Partition", "Priority",                 config_parse_int32,         0, &p->priority                },
                 { "Partition", "Weight",                   config_parse_weight,        0, &p->weight                  },
                 { "Partition", "PaddingWeight",            config_parse_weight,        0, &p->padding_weight          },
-                { "Partition", "SizeMinBytes",             config_parse_size4096,      1, &p->size_min                },
-                { "Partition", "SizeMaxBytes",             config_parse_size4096,     -1, &p->size_max                },
-                { "Partition", "PaddingMinBytes",          config_parse_size4096,      1, &p->padding_min             },
-                { "Partition", "PaddingMaxBytes",          config_parse_size4096,     -1, &p->padding_max             },
+                { "Partition", "SizeMinBytes",             config_parse_size4096,     -1, &p->size_min                },
+                { "Partition", "SizeMaxBytes",             config_parse_size4096,      1, &p->size_max                },
+                { "Partition", "PaddingMinBytes",          config_parse_size4096,     -1, &p->padding_min             },
+                { "Partition", "PaddingMaxBytes",          config_parse_size4096,      1, &p->padding_max             },
                 { "Partition", "FactoryReset",             config_parse_bool,          0, &p->factory_reset           },
                 { "Partition", "CopyBlocks",               config_parse_copy_blocks,   0, p                           },
                 { "Partition", "Format",                   config_parse_fstype,        0, &p->format                  },
@@ -3684,6 +3687,7 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
         _cleanup_free_ char *hp = NULL, *vol = NULL, *dm_name = NULL;
         const char *passphrase = NULL;
         size_t passphrase_size = 0;
+        TPM2Flags flags = 0;
         const char *vt;
         int r;
 
@@ -3790,11 +3794,6 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                         }
                 }
 
-                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
-                r = tpm2_context_new(arg_tpm2_device, &tpm2_context);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to create TPM2 context: %m");
-
                 TPM2B_PUBLIC public;
                 if (pubkey) {
                         r = tpm2_tpm2b_public_from_pem(pubkey, pubkey_size, &public);
@@ -3802,9 +3801,36 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                                 return log_error_errno(r, "Could not convert public key to TPM2B_PUBLIC: %m");
                 }
 
-                r = tpm2_pcr_read_missing_values(tpm2_context, arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values);
-                if (r < 0)
-                        return log_error_errno(r, "Could not read pcr values: %m");
+                _cleanup_(tpm2_pcrlock_policy_done) Tpm2PCRLockPolicy pcrlock_policy = {};
+                if (arg_tpm2_pcrlock) {
+                        r = tpm2_pcrlock_policy_load(arg_tpm2_pcrlock, &pcrlock_policy);
+                        if (r < 0)
+                                return r;
+
+                        flags |= TPM2_FLAGS_USE_PCRLOCK;
+                }
+
+                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+                TPM2B_PUBLIC device_key_public = {};
+                if (arg_tpm2_device_key) {
+                        r = tpm2_load_public_key_file(arg_tpm2_device_key, &device_key_public);
+                        if (r < 0)
+                                return r;
+
+                        if (!tpm2_pcr_values_has_all_values(arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Must provide all PCR values when using TPM2 device key.");
+                } else {
+                        r = tpm2_context_new(arg_tpm2_device, &tpm2_context);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to create TPM2 context: %m");
+
+                        if (!tpm2_pcr_values_has_all_values(arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values)) {
+                                r = tpm2_pcr_read_missing_values(tpm2_context, arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values);
+                                if (r < 0)
+                                        return log_error_errno(r, "Could not read pcr values: %m");
+                        }
+                }
 
                 uint16_t hash_pcr_bank = 0;
                 uint32_t hash_pcr_mask = 0;
@@ -3823,13 +3849,6 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                                 return log_error_errno(r, "Could not get hash mask: %m");
                 }
 
-                _cleanup_(tpm2_pcrlock_policy_done) Tpm2PCRLockPolicy pcrlock_policy = {};
-                if (arg_tpm2_pcrlock) {
-                        r = tpm2_pcrlock_policy_load(arg_tpm2_pcrlock, &pcrlock_policy);
-                        if (r < 0)
-                                return r;
-                }
-
                 TPM2B_DIGEST policy = TPM2B_DIGEST_MAKE(NULL, TPM2_SHA256_DIGEST_SIZE);
                 r = tpm2_calculate_sealing_policy(
                                 arg_tpm2_hash_pcr_values,
@@ -3841,14 +3860,26 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                 if (r < 0)
                         return log_error_errno(r, "Could not calculate sealing policy digest: %m");
 
-                r = tpm2_seal(tpm2_context,
-                              /* seal_key_handle= */ 0,
-                              &policy,
-                              /* pin= */ NULL,
-                              &secret, &secret_size,
-                              &blob, &blob_size,
-                              /* ret_primary_alg= */ NULL,
-                              &srk_buf, &srk_buf_size);
+                if (arg_tpm2_device_key)
+                        r = tpm2_calculate_seal(
+                                        arg_tpm2_seal_key_handle,
+                                        &device_key_public,
+                                        /* attributes= */ NULL,
+                                        /* secret= */ NULL, /* secret_size= */ 0,
+                                        &policy,
+                                        /* pin= */ NULL,
+                                        &secret, &secret_size,
+                                        &blob, &blob_size,
+                                        &srk_buf, &srk_buf_size);
+                else
+                        r = tpm2_seal(tpm2_context,
+                                      arg_tpm2_seal_key_handle,
+                                      &policy,
+                                      /* pin= */ NULL,
+                                      &secret, &secret_size,
+                                      &blob, &blob_size,
+                                      /* ret_primary_alg= */ NULL,
+                                      &srk_buf, &srk_buf_size);
                 if (r < 0)
                         return log_error_errno(r, "Failed to seal to TPM2: %m");
 
@@ -3863,8 +3894,8 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                 keyslot = sym_crypt_keyslot_add_by_volume_key(
                                 cd,
                                 CRYPT_ANY_SLOT,
-                                NULL,
-                                VOLUME_KEY_SIZE,
+                                /* volume_key= */ NULL,
+                                /* volume_key_size= */ VOLUME_KEY_SIZE,
                                 base64_encoded,
                                 base64_encoded_size);
                 if (keyslot < 0)
@@ -3881,7 +3912,7 @@ static int partition_encrypt(Context *context, Partition *p, PartitionTarget *ta
                                 policy.buffer, policy.size,
                                 NULL, 0, /* no salt because tpm2_seal has no pin */
                                 srk_buf, srk_buf_size,
-                                0,
+                                flags,
                                 &v);
                 if (r < 0)
                         return log_error_errno(r, "Failed to prepare TPM2 JSON token object: %m");
@@ -4146,7 +4177,7 @@ static int sign_verity_roothash(
 
         return 0;
 #else
-        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "openssl is not supported, cannot setup verity signature: %m");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot setup verity signature: %m");
 #endif
 }
 
@@ -4246,6 +4277,8 @@ static int context_copy_blocks(Context *context) {
                 assert(p->copy_blocks_size != UINT64_MAX);
                 assert(p->new_size >= p->copy_blocks_size + (p->encrypt != ENCRYPT_OFF ? LUKS2_METADATA_KEEP_FREE : 0));
 
+                usec_t start_timestamp = now(CLOCK_MONOTONIC);
+
                 r = partition_target_prepare(context, p, p->new_size,
                                              /*need_path=*/ p->encrypt != ENCRYPT_OFF || p->siblings[VERITY_HASH],
                                              &t);
@@ -4258,11 +4291,16 @@ static int context_copy_blocks(Context *context) {
                                 return r;
                 }
 
-                log_info("Copying in '%s' (%s) on block level into future partition %" PRIu64 ".",
-                         p->copy_blocks_path, FORMAT_BYTES(p->copy_blocks_size), p->partno);
+                if (p->copy_blocks_offset == UINT64_MAX)
+                        log_info("Copying in '%s' (%s) on block level into future partition %" PRIu64 ".",
+                                 p->copy_blocks_path, FORMAT_BYTES(p->copy_blocks_size), p->partno);
+                else {
+                        log_info("Copying in '%s' @ %" PRIu64 " (%s) on block level into future partition %" PRIu64 ".",
+                                 p->copy_blocks_path, p->copy_blocks_offset, FORMAT_BYTES(p->copy_blocks_size), p->partno);
 
-                if (p->copy_blocks_offset != UINT64_MAX && lseek(p->copy_blocks_fd, p->copy_blocks_offset, SEEK_SET) < 0)
-                        return log_error_errno(errno, "Failed to seek to copy blocks offset in %s: %m", p->copy_blocks_path);
+                        if (lseek(p->copy_blocks_fd, p->copy_blocks_offset, SEEK_SET) < 0)
+                                return log_error_errno(errno, "Failed to seek to copy blocks offset in %s: %m", p->copy_blocks_path);
+                }
 
                 r = copy_bytes(p->copy_blocks_fd, partition_target_fd(t), p->copy_blocks_size, COPY_REFLINK);
                 if (r < 0)
@@ -4279,6 +4317,14 @@ static int context_copy_blocks(Context *context) {
                 r = partition_target_sync(context, p, t);
                 if (r < 0)
                         return r;
+
+                usec_t time_spent = usec_sub_unsigned(now(CLOCK_MONOTONIC), start_timestamp);
+                if (time_spent > 250 * USEC_PER_MSEC) /* Show throughput, but not if we spent too little time on it, since it's just noise then */
+                        log_info("Block level copying and synchronization of partition %" PRIu64 " complete in %s (%s/s).",
+                                 p->partno, FORMAT_TIMESPAN(time_spent, 0), FORMAT_BYTES((uint64_t) ((double) p->copy_blocks_size / time_spent * USEC_PER_SEC)));
+                else
+                        log_info("Block level copying and synchronization of partition %" PRIu64 " complete in %s.",
+                                 p->partno, FORMAT_TIMESPAN(time_spent, 0));
 
                 if (p->siblings[VERITY_HASH] && !partition_type_defer(&p->siblings[VERITY_HASH]->type)) {
                         r = partition_format_verity_hash(context, p->siblings[VERITY_HASH],
@@ -4872,7 +4918,7 @@ static int parse_x509_certificate(const char *certificate, size_t certificate_si
 
         return 0;
 #else
-        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "openssl is not supported, cannot parse X509 certificate.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot parse X509 certificate.");
 #endif
 }
 
@@ -4899,7 +4945,7 @@ static int parse_private_key(const char *key, size_t key_size, EVP_PKEY **ret) {
 
         return 0;
 #else
-        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "openssl is not supported, cannot parse private key.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot parse private key.");
 #endif
 }
 
@@ -5463,7 +5509,7 @@ static int context_write_partition_table(Context *context) {
                 return 0;
         }
 
-        log_info("Applying changes.");
+        log_info("Applying changes to %s.", context->node);
 
         if (context->from_scratch && arg_empty != EMPTY_CREATE) {
                 /* Erase everything if we operate from scratch, except if the image was just created anyway, and thus is definitely empty. */
@@ -6389,12 +6435,18 @@ static int help(void) {
                "     --certificate=PATH   PEM certificate to use when generating verity\n"
                "                          roothash signatures\n"
                "     --tpm2-device=PATH   Path to TPM2 device node to use\n"
+               "     --tpm2-device-key=PATH\n"
+               "                          Enroll a TPM2 device using its public key\n"
+               "     --tpm2-seal-key-handle=HANDLE\n"
+               "                          Specify handle of key to use for sealing\n"
                "     --tpm2-pcrs=PCR1+PCR2+PCR3+…\n"
                "                          TPM2 PCR indexes to use for TPM2 enrollment\n"
                "     --tpm2-public-key=PATH\n"
                "                          Enroll signed TPM2 PCR policy against PEM public key\n"
                "     --tpm2-public-key-pcrs=PCR1+PCR2+PCR3+…\n"
                "                          Enroll signed TPM2 PCR policy for specified TPM2 PCRs\n"
+               "     --tpm2-pcrlock=PATH\n"
+               "                          Specify pcrlock policy to lock against\n"
                "     --seed=UUID          128-bit seed UUID to derive all UUIDs from\n"
                "     --size=BYTES         Grow loopback file to specified size\n"
                "     --json=pretty|short|off\n"
@@ -6447,6 +6499,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PRIVATE_KEY,
                 ARG_CERTIFICATE,
                 ARG_TPM2_DEVICE,
+                ARG_TPM2_DEVICE_KEY,
+                ARG_TPM2_SEAL_KEY_HANDLE,
                 ARG_TPM2_PCRS,
                 ARG_TPM2_PUBLIC_KEY,
                 ARG_TPM2_PUBLIC_KEY_PCRS,
@@ -6485,6 +6539,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "private-key",          required_argument, NULL, ARG_PRIVATE_KEY          },
                 { "certificate",          required_argument, NULL, ARG_CERTIFICATE          },
                 { "tpm2-device",          required_argument, NULL, ARG_TPM2_DEVICE          },
+                { "tpm2-device-key",      required_argument, NULL, ARG_TPM2_DEVICE_KEY      },
+                { "tpm2-seal-key-handle", required_argument, NULL, ARG_TPM2_SEAL_KEY_HANDLE },
                 { "tpm2-pcrs",            required_argument, NULL, ARG_TPM2_PCRS            },
                 { "tpm2-public-key",      required_argument, NULL, ARG_TPM2_PUBLIC_KEY      },
                 { "tpm2-public-key-pcrs", required_argument, NULL, ARG_TPM2_PUBLIC_KEY_PCRS },
@@ -6721,6 +6777,20 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_tpm2_device = TAKE_PTR(device);
                         break;
                 }
+
+                case ARG_TPM2_DEVICE_KEY:
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_tpm2_device_key);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_TPM2_SEAL_KEY_HANDLE:
+                        r = safe_atou32_full(optarg, 16, &arg_tpm2_seal_key_handle);
+                        if (r < 0)
+                                return log_error_errno(r, "Could not parse TPM2 seal key handle index '%s': %m", optarg);
+
+                        break;
 
                 case ARG_TPM2_PCRS:
                         auto_hash_pcr_values = false;
@@ -6968,7 +7038,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r != -ENOENT)
                                 log_warning_errno(r, "Search for pcrlock.json failed, assuming it does not exist: %m");
                 } else
-                        log_info("Automatically using pcrlock policy '%s'.", arg_tpm2_pcrlock);
+                        log_debug("Automatically using pcrlock policy '%s'.", arg_tpm2_pcrlock);
         }
 
         if (auto_public_key_pcr_mask) {

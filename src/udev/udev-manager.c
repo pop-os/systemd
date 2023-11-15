@@ -893,8 +893,8 @@ static int on_ctrl_msg(UdevCtrl *uctrl, UdevCtrlMessageType type, const UdevCtrl
                 manager_reload(manager, /* force = */ true);
                 break;
         case UDEV_CTRL_SET_ENV: {
-                _unused_ _cleanup_free_ char *old_val = NULL;
-                _cleanup_free_ char *key = NULL, *val = NULL, *old_key = NULL;
+                _unused_ _cleanup_free_ char *old_val = NULL, *old_key = NULL;
+                _cleanup_free_ char *key = NULL, *val = NULL;
                 const char *eq;
 
                 eq = strchr(value->buf, '=');
@@ -918,15 +918,9 @@ static int on_ctrl_msg(UdevCtrl *uctrl, UdevCtrlMessageType type, const UdevCtrl
                 }
 
                 eq++;
-                if (isempty(eq)) {
+                if (isempty(eq))
                         log_debug("Received udev control message (ENV), unsetting '%s'", key);
-
-                        r = hashmap_put(manager->properties, key, NULL);
-                        if (r < 0) {
-                                log_oom();
-                                return 1;
-                        }
-                } else {
+                else {
                         val = strdup(eq);
                         if (!val) {
                                 log_oom();
@@ -1224,15 +1218,6 @@ int manager_init(Manager *manager, int fd_ctrl, int fd_uevent) {
         r = device_monitor_new_full(&manager->monitor, MONITOR_GROUP_KERNEL, fd_uevent);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize device monitor: %m");
-
-        /* Bump receiver buffer, but only if we are not called via socket activation, as in that
-         * case systemd sets the receive buffer size for us, and the value in the .socket unit
-         * should take full effect. */
-        if (fd_uevent < 0) {
-                r = sd_device_monitor_set_receive_buffer_size(manager->monitor, 128 * 1024 * 1024);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to set receive buffer size for device monitor, ignoring: %m");
-        }
 
         (void) sd_device_monitor_set_description(manager->monitor, "manager");
 

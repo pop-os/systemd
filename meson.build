@@ -33,6 +33,7 @@ conf.set_quoted('RELATIVE_SOURCE_PATH', relative_source_path)
 
 conf.set10('BUILD_MODE_DEVELOPER', get_option('mode') == 'developer',
            description : 'tailor build to development or release builds')
+
 feature = get_option('log-message-verification')
 if feature.auto()
         have = conf.get('BUILD_MODE_DEVELOPER') == 1
@@ -287,7 +288,7 @@ conf.set('DEFAULT_TIMEOUT_SEC',                               get_option('defaul
 conf.set('DEFAULT_USER_TIMEOUT_SEC',                          get_option('default-user-timeout-sec'))
 conf.set('UPDATE_HELPER_USER_TIMEOUT_SEC',                    get_option('update-helper-user-timeout-sec'))
 
-conf.set10('FIRST_BOOT_FULL_PRESET',                          get_option('first-boot-full-preset'))
+conf.set10('ENABLE_FIRST_BOOT_FULL_PRESET',                   get_option('first-boot-full-preset'))
 
 #####################################################################
 
@@ -1229,7 +1230,7 @@ libcryptsetup = get_option('libcryptsetup')
 libcryptsetup_plugins = get_option('libcryptsetup-plugins')
 if libcryptsetup_plugins.enabled()
         if libcryptsetup.disabled()
-                error('libcryptsetup-plugins can not be requested without libcryptsetup')
+                error('libcryptsetup-plugins cannot be requested without libcryptsetup')
         endif
         libcryptsetup = libcryptsetup_plugins
 endif
@@ -1569,6 +1570,9 @@ endif
 have = feature.allowed() and (have_deps[0] or have_deps[1])
 conf.set10('ENABLE_REMOTE', have)
 
+feature = get_option('vmspawn').disable_auto_if(conf.get('BUILD_MODE_DEVELOPER') == 0)
+conf.set10('ENABLE_VMSPAWN', feature.allowed())
+
 foreach term : ['analyze',
                 'backlight',
                 'binfmt',
@@ -1610,7 +1614,6 @@ foreach term : ['analyze',
                 'userdb',
                 'utmp',
                 'vconsole',
-                'vmspawn',
                 'xdg-autostart']
         have = get_option(term)
         name = 'ENABLE_' + term.underscorify().to_upper()
