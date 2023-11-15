@@ -131,7 +131,24 @@ if tpm_has_pcr sha256 12; then
     systemd-cryptsetup attach test-volume "$IMAGE" - tpm2-device=auto,headless=1
     systemd-cryptsetup detach test-volume
 
-    rm -f /tmp/pcr.dat
+    # enroll TPM using device key instead of direct access, then verify unlock using TPM
+    tpm2_pcrread -Q -o /tmp/pcr.dat sha256:12
+    CURRENT_PCR_VALUE=$(cat /sys/class/tpm/tpm0/pcr-sha256/12)
+    tpm2_readpublic -c 0x81000001 -o /tmp/srk.pub
+    systemd-analyze srk > /tmp/srk2.pub
+    cmp /tmp/srk.pub /tmp/srk2.pub
+    if [ -f /run/systemd/tpm2-srk-public-key.tpm2b_public ] ; then
+        cmp /tmp/srk.pub /run/systemd/tpm2-srk-public-key.tpm2b_public
+    fi
+
+    # --tpm2-device-key= requires OpenSSL >= 3 with KDF-SS
+    if openssl_supports_kdf SSKDF; then
+        PASSWORD=passphrase systemd-cryptenroll --tpm2-device-key=/tmp/srk.pub --tpm2-pcrs="12:sha256=$CURRENT_PCR_VALUE" "$IMAGE"
+        systemd-cryptsetup attach test-volume "$IMAGE" - tpm2-device=auto,headless=1
+        systemd-cryptsetup detach test-volume
+    fi
+
+    rm -f /tmp/pcr.dat /tmp/srk.pub
 fi
 
 # Use default (0) seal key handle
@@ -168,17 +185,42 @@ systemd-cryptenroll --wipe-slot=tpm2 "$IMAGE"
 PRIMARY=/tmp/primary.ctx
 tpm2_createprimary -c "$PRIMARY"
 PERSISTENT_LINE=$(tpm2_evictcontrol -c "$PRIMARY" | grep persistent-handle)
-PERSISTENT="0x${PERSISTENT_LINE##*0x}"
+PERSISTENT_HANDLE="0x${PERSISTENT_LINE##*0x}"
 tpm2_flushcontext -t
 
 systemd-cryptenroll --wipe-slot=tpm2 "$IMAGE"
-PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="${PERSISTENT#0x}" "$IMAGE"
+PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="${PERSISTENT_HANDLE#0x}" "$IMAGE"
 systemd-cryptsetup attach test-volume "$IMAGE" - tpm2-device=auto,headless=1
 systemd-cryptsetup detach test-volume
 
 systemd-cryptenroll --wipe-slot=tpm2 "$IMAGE"
-PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="$PERSISTENT" "$IMAGE"
+PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="$PERSISTENT_HANDLE" "$IMAGE"
 systemd-cryptsetup attach test-volume "$IMAGE" - tpm2-device=auto,headless=1
 systemd-cryptsetup detach test-volume
+
+# --tpm2-device-key= requires OpenSSL >= 3 with KDF-SS
+if openssl_supports_kdf SSKDF; then
+    # Make sure that --tpm2-device-key= also works with systemd-repart
+    tpm2_readpublic -c 0x81000001 -o /tmp/srk.pub
+    mkdir /tmp/dditest
+    cat > /tmp/dditest/50-root.conf <<EOF
+[Partition]
+Type=root
+Format=ext4
+CopyFiles=/tmp/dditest:/
+Encrypt=tpm2
+EOF
+    PASSWORD=passphrase systemd-repart --tpm2-device-key=/tmp/srk.pub --definitions=/tmp/dditest --empty=create --size=50M /tmp/dditest.raw --tpm2-pcrs=
+    DEVICE="$(systemd-dissect --attach /tmp/dditest.raw)"
+    systemd-cryptsetup attach dditest "$DEVICE"p1 - tpm2-device=auto,headless=yes
+    mkdir /tmp/dditest.mnt
+    mount -t ext4 /dev/mapper/dditest /tmp/dditest.mnt
+    cmp /tmp/dditest.mnt/50-root.conf /tmp/dditest/50-root.conf
+    umount /tmp/dditest.mnt
+    rmdir /tmp/dditest.mnt
+    rm /tmp/dditest.raw
+    rm /tmp/dditest/50-root.conf
+    rmdir /tmp/dditest
+fi
 
 rm -f "$IMAGE" "$PRIMARY"

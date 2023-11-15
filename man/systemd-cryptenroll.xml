@@ -236,6 +236,30 @@
   </refsect1>
 
   <refsect1>
+    <title>Compatibility</title>
+
+    <para>Security technology both in systemd and in the general industry constantly evolves. In order to
+    provide best security guarantees, the way TPM2, FIDO2, PKCS#11 devices are enrolled is regularly updated
+    in newer versions of systemd. Whenever this happens the following compatibility guarantees are given:</para>
+
+    <itemizedlist>
+      <listitem><para>Old enrollments continue to be supported and may be unlocked with newer versions of
+      <citerefentry><refentrytitle>systemd-cryptsetup@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para></listitem>
+
+      <listitem><para>The opposite is not guaranteed however: it might not be possible to unlock volumes with
+      enrollments done with a newer version of <command>systemd-cryptenroll</command> with an older version
+      of <command>systemd-cryptsetup</command>.</para></listitem>
+    </itemizedlist>
+
+    <para>That said, it is generally recommended to use matching versions of
+    <command>systemd-cryptenroll</command> and <command>systemd-cryptsetup</command>, since this is best
+    tested and supported.</para>
+
+    <para>It might be advisable to re-enroll existing enrollments to take benefit of newer security features,
+    as they are added to systemd.</para>
+  </refsect1>
+
+  <refsect1>
     <title>Options</title>
 
     <para>The following options are understood:</para>
@@ -409,6 +433,34 @@
         enrollment to.</para>
 
         <xi:include href="version-info.xml" xpointer="v248"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--tpm2-device-key=</option><replaceable>PATH</replaceable></term>
+
+        <listitem><para>Enroll a TPM2 security chip using its public key. Expects a path referring to the
+        TPM2 public key in TPM2B_PUBLIC format. This cannot be used with <option>--tpm2-device=</option>, as
+        it performs the same operation, but without connecting to the TPM2 security chip; instead the
+        enrollment is calculated using the provided TPM2 key. This is useful in situations where the TPM2
+        security chip is not available at the time of enrollment.</para>
+
+        <para>The key, in most cases, should be the Storage Root Key (SRK) from a local TPM2 security
+        chip. If a key from a different handle (not the SRK) is used, you must specify its handle index using
+        <option>--tpm2-seal-key-handle=</option>.</para>
+
+        <para>The
+        <citerefentry><refentrytitle>systemd-tpm2-setup.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        service writes the SRK to <filename>/run/systemd/tpm2-srk-public-key.tpm2b_public</filename>
+        automatically during boot, in the correct format.</para>
+
+        <para>Alternatively, you may use <command>systemd-analyze srk</command> to retrieve the SRK from the
+        TPM2 security chip explicitly. See
+        <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        for details. Example:</para>
+
+        <programlisting>systemd-analyze srk &gt; srk.tpm2b_public</programlisting>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <varlistentry>

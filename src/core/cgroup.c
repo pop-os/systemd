@@ -4017,6 +4017,8 @@ int unit_get_memory_available(Unit *u, uint64_t *ret) {
 int unit_get_memory_current(Unit *u, uint64_t *ret) {
         int r;
 
+        // FIXME: Merge this into unit_get_memory_accounting after support for cgroup v1 is dropped
+
         assert(u);
         assert(ret);
 
@@ -4038,6 +4040,62 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
                 return r;
 
         return cg_get_attribute_as_uint64("memory", u->cgroup_path, r > 0 ? "memory.current" : "memory.usage_in_bytes", ret);
+}
+
+int unit_get_memory_accounting(Unit *u, CGroupMemoryAccountingMetric metric, uint64_t *ret) {
+
+        static const char* const attributes_table[_CGROUP_MEMORY_ACCOUNTING_METRIC_MAX] = {
+                [CGROUP_MEMORY_PEAK]          = "memory.peak",
+                [CGROUP_MEMORY_SWAP_CURRENT]  = "memory.swap.current",
+                [CGROUP_MEMORY_SWAP_PEAK]     = "memory.swap.peak",
+                [CGROUP_MEMORY_ZSWAP_CURRENT] = "memory.zswap.current",
+        };
+
+        uint64_t bytes;
+        int r;
+
+        assert(u);
+        assert(metric >= 0);
+        assert(metric < _CGROUP_MEMORY_ACCOUNTING_METRIC_MAX);
+
+        if (!UNIT_CGROUP_BOOL(u, memory_accounting))
+                return -ENODATA;
+
+        if (!u->cgroup_path)
+                return -ENODATA;
+
+        /* The root cgroup doesn't expose this information. */
+        if (unit_has_host_root_cgroup(u))
+                return -ENODATA;
+
+        if (!FLAGS_SET(u->cgroup_realized_mask, CGROUP_MASK_MEMORY))
+                return -ENODATA;
+
+        r = cg_all_unified();
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return -ENODATA;
+
+        r = cg_get_attribute_as_uint64("memory", u->cgroup_path, attributes_table[metric], &bytes);
+        if (r < 0 && (r != -ENODATA || metric > _CGROUP_MEMORY_ACCOUNTING_METRIC_CACHED_LAST))
+                return r;
+
+        if (metric <= _CGROUP_MEMORY_ACCOUNTING_METRIC_CACHED_LAST) {
+                uint64_t *last = &u->memory_accounting_last[metric];
+
+                if (r >= 0)
+                        *last = bytes;
+                else if (*last != UINT64_MAX)
+                        bytes = *last;
+                else
+                        return r;
+        }
+
+        if (ret)
+                *ret = bytes;
+
+        return 0;
 }
 
 int unit_get_tasks_current(Unit *u, uint64_t *ret) {
@@ -4315,20 +4373,34 @@ int unit_reset_cpu_accounting(Unit *u) {
         return 0;
 }
 
+void unit_reset_memory_accounting_last(Unit *u) {
+        assert(u);
+
+        FOREACH_ARRAY(i, u->memory_accounting_last, ELEMENTSOF(u->memory_accounting_last))
+                *i = UINT64_MAX;
+}
+
 int unit_reset_ip_accounting(Unit *u) {
-        int r = 0, q = 0;
+        int r = 0;
 
         assert(u);
 
         if (u->ip_accounting_ingress_map_fd >= 0)
-                r = bpf_firewall_reset_accounting(u->ip_accounting_ingress_map_fd);
+                RET_GATHER(r, bpf_firewall_reset_accounting(u->ip_accounting_ingress_map_fd));
 
         if (u->ip_accounting_egress_map_fd >= 0)
-                q = bpf_firewall_reset_accounting(u->ip_accounting_egress_map_fd);
+                RET_GATHER(r, bpf_firewall_reset_accounting(u->ip_accounting_egress_map_fd));
 
         zero(u->ip_accounting_extra);
 
-        return r < 0 ? r : q;
+        return r;
+}
+
+void unit_reset_io_accounting_last(Unit *u) {
+        assert(u);
+
+        FOREACH_ARRAY(i, u->io_accounting_last, _CGROUP_IO_ACCOUNTING_METRIC_MAX)
+                *i = UINT64_MAX;
 }
 
 int unit_reset_io_accounting(Unit *u) {
@@ -4336,8 +4408,7 @@ int unit_reset_io_accounting(Unit *u) {
 
         assert(u);
 
-        for (CGroupIOAccountingMetric i = 0; i < _CGROUP_IO_ACCOUNTING_METRIC_MAX; i++)
-                u->io_accounting_last[i] = UINT64_MAX;
+        unit_reset_io_accounting_last(u);
 
         r = unit_get_io_accounting_raw(u, u->io_accounting_base);
         if (r < 0) {
@@ -4349,15 +4420,16 @@ int unit_reset_io_accounting(Unit *u) {
 }
 
 int unit_reset_accounting(Unit *u) {
-        int r, q, v;
+        int r = 0;
 
         assert(u);
 
-        r = unit_reset_cpu_accounting(u);
-        q = unit_reset_io_accounting(u);
-        v = unit_reset_ip_accounting(u);
+        RET_GATHER(r, unit_reset_cpu_accounting(u));
+        RET_GATHER(r, unit_reset_io_accounting(u));
+        RET_GATHER(r, unit_reset_ip_accounting(u));
+        unit_reset_memory_accounting_last(u);
 
-        return r < 0 ? r : q < 0 ? q : v;
+        return r;
 }
 
 void unit_invalidate_cgroup(Unit *u, CGroupMask m) {
@@ -4575,3 +4647,12 @@ static const char* const cgroup_io_accounting_metric_table[_CGROUP_IO_ACCOUNTING
 };
 
 DEFINE_STRING_TABLE_LOOKUP(cgroup_io_accounting_metric, CGroupIOAccountingMetric);
+
+static const char* const cgroup_memory_accounting_metric_table[_CGROUP_MEMORY_ACCOUNTING_METRIC_MAX] = {
+        [CGROUP_MEMORY_PEAK]          = "MemoryPeak",
+        [CGROUP_MEMORY_SWAP_CURRENT]  = "MemorySwapCurrent",
+        [CGROUP_MEMORY_SWAP_PEAK]     = "MemorySwapPeak",
+        [CGROUP_MEMORY_ZSWAP_CURRENT] = "MemoryZSwapCurrent",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(cgroup_memory_accounting_metric, CGroupMemoryAccountingMetric);

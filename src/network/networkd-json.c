@@ -14,12 +14,13 @@
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-neighbor.h"
-#include "networkd-nexthop.h"
 #include "networkd-network.h"
+#include "networkd-nexthop.h"
 #include "networkd-route-util.h"
 #include "networkd-route.h"
 #include "networkd-routing-policy-rule.h"
 #include "sort-util.h"
+#include "udev-util.h"
 #include "user-util.h"
 #include "wifi-util.h"
 
@@ -407,11 +408,8 @@ static int device_append_json(sd_device *device, JsonVariant **v) {
 
         (void) sd_device_get_property_value(device, "ID_PATH", &path);
 
-        if (sd_device_get_property_value(device, "ID_VENDOR_FROM_DATABASE", &vendor) < 0)
-                (void) sd_device_get_property_value(device, "ID_VENDOR", &vendor);
-
-        if (sd_device_get_property_value(device, "ID_MODEL_FROM_DATABASE", &model) < 0)
-                (void) sd_device_get_property_value(device, "ID_MODEL", &model);
+        (void) device_get_vendor_string(device, &vendor);
+        (void) device_get_model_string(device, &model);
 
         return json_variant_merge_objectb(
                         v,
@@ -1057,7 +1055,7 @@ static int dhcp6_client_vendor_options_append_json(Link *link, JsonVariant **v) 
                                                             JSON_BUILD_PAIR_UNSIGNED("SubOptionCode", (*option)->option),
                                                             JSON_BUILD_PAIR_HEX("SubOptionData", (*option)->data, (*option)->length)));
                 if (r < 0)
-                        return 0;
+                        return r;
         }
 
         return json_variant_set_field_non_null(v, "VendorSpecificOptions", array);
@@ -1065,7 +1063,7 @@ static int dhcp6_client_vendor_options_append_json(Link *link, JsonVariant **v) 
 
 static int dhcp6_client_lease_append_json(Link *link, JsonVariant **v) {
         _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
-        usec_t ts, t1, t2;
+        usec_t ts = USEC_INFINITY, t1 = USEC_INFINITY, t2 = USEC_INFINITY;
         int r;
 
         assert(link);
@@ -1075,15 +1073,15 @@ static int dhcp6_client_lease_append_json(Link *link, JsonVariant **v) {
                 return 0;
 
         r = sd_dhcp6_lease_get_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &ts);
-        if (r < 0)
+        if (r < 0 && r != -ENODATA)
                 return r;
 
         r = sd_dhcp6_lease_get_t1_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &t1);
-        if (r < 0)
+        if (r < 0 && r != -ENODATA)
                 return r;
 
         r = sd_dhcp6_lease_get_t2_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &t2);
-        if (r < 0)
+        if (r < 0 && r != -ENODATA)
                 return r;
 
         r = json_build(&w, JSON_BUILD_OBJECT(
@@ -1161,7 +1159,7 @@ static int dhcp6_client_append_json(Link *link, JsonVariant **v) {
 
 static int dhcp_client_lease_append_json(Link *link, JsonVariant **v) {
         _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
-        usec_t lease_timestamp_usec, t1, t2;
+        usec_t lease_timestamp_usec = USEC_INFINITY, t1 = USEC_INFINITY, t2 = USEC_INFINITY;
         int r;
 
         assert(link);
@@ -1171,16 +1169,16 @@ static int dhcp_client_lease_append_json(Link *link, JsonVariant **v) {
                 return 0;
 
         r = sd_dhcp_lease_get_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &lease_timestamp_usec);
-        if (r < 0)
-                return 0;
+        if (r < 0 && r != -ENODATA)
+                return r;
 
         r = sd_dhcp_lease_get_t1_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &t1);
-        if (r < 0)
-                return 0;
+        if (r < 0 && r != -ENODATA)
+                return r;
 
         r = sd_dhcp_lease_get_t2_timestamp(link->dhcp_lease, CLOCK_BOOTTIME, &t2);
-        if (r < 0)
-                return 0;
+        if (r < 0 && r != -ENODATA)
+                return r;
 
         r = json_build(&w, JSON_BUILD_OBJECT(
                                 JSON_BUILD_PAIR_FINITE_USEC("LeaseTimestampUSec", lease_timestamp_usec),

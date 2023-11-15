@@ -365,6 +365,9 @@ typedef struct Unit {
         nsec_t cpu_usage_base;
         nsec_t cpu_usage_last; /* the most recently read value */
 
+        /* Most recently read value of memory accounting metrics */
+        uint64_t memory_accounting_last[_CGROUP_MEMORY_ACCOUNTING_METRIC_CACHED_LAST + 1];
+
         /* The current counter of OOM kills initiated by systemd-oomd */
         uint64_t managed_oom_kill_last;
 
