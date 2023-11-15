@@ -1,3 +1,21 @@
+systemd (255~rc2-1) unstable; urgency=medium
+
+  [ Matthias Geiger ]
+  * Bump version number for udev.postinst and udev.maintscript
+  * Fix udev.postinst to preserve the enablement of the init script. When
+    transferring ownership of the udev init script to sysvinit, the
+    service was disabled as it didn't check for enablement before calling
+    update-rc.d. Thanks to Mark Hindley for the original fix. (Closes:
+    #1053301)
+
+  [ Luca Boccassi ]
+  * New upstream version 255~rc2
+  * Drop fix-build-without-SBAT_DISTRO.patch, merged upstream
+  * Refresh patches
+  * Upload to unstable
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 15 Nov 2023 17:10:26 +0000
+
 systemd (255~rc1-4) experimental; urgency=medium
 
   * Add version to Conflict with molly-guard
