@@ -109,6 +109,7 @@ Conflicts: consolekit,
            opensysusers,
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
+        dracut (<< 059-5),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
 Description: system and service manager
