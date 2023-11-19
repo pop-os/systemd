@@ -13,7 +13,7 @@ if ! grep -E -q "^[^[:space:]]+ /dev devtmpfs" /proc/mounts; then
     [ ! -h /dev/stderr ] && ln -s /proc/self/fd/2 /dev/stderr
 fi
 
-SYSTEMD_LOG_LEVEL=notice /lib/systemd/systemd-udevd --daemon --resolve-names=never
+SYSTEMD_LOG_LEVEL=notice /usr/lib/systemd/systemd-udevd --daemon --resolve-names=never
 
 udevadm trigger --action=add
 
