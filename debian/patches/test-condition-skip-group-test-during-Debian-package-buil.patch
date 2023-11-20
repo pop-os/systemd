@@ -1,0 +1,47 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Sun, 19 Nov 2023 22:31:26 +0000
+Subject: test-condition: skip group test during Debian package build
+
+The group names won't match in a package build chroot and the test might
+fail, skip it.
+
+https://buildd.debian.org/status/fetch.php?pkg=systemd&arch=hppa&ver=255%7Erc2-2&stamp=1700424353&raw=0
+---
+ src/test/test-condition.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/test/test-condition.c b/src/test/test-condition.c
+index 5505d6c..bb98761 100644
+--- a/src/test/test-condition.c
++++ b/src/test/test-condition.c
+@@ -969,6 +969,8 @@ TEST(condition_test_group) {
+ 
+         max_gid = getgid();
+         for (i = 0; i < ngroups; i++) {
++                _cleanup_free_ char *name = NULL;
++
+                 assert_se(0 < asprintf(&gid, "%u", gids[i]));
+                 condition = condition_new(CONDITION_GROUP, gid, false, false);
+                 assert_se(condition);
+@@ -979,15 +981,16 @@ TEST(condition_test_group) {
+                 free(gid);
+                 max_gid = gids[i] > max_gid ? gids[i] : max_gid;
+ 
+-                groupname = gid_to_name(gids[i]);
+-                assert_se(groupname);
+-                condition = condition_new(CONDITION_GROUP, groupname, false, false);
++                name = gid_to_name(gids[i]);
++                assert_se(name);
++                if (STR_IN_SET(name, "sbuild", "buildd"))
++                        return; /* Debian package build in chroot, groupnames won't match, skip */
++                condition = condition_new(CONDITION_GROUP, name, false, false);
+                 assert_se(condition);
+                 r = condition_test(condition, environ);
+-                log_info("ConditionGroup=%s → %i", groupname, r);
++                log_info("ConditionGroup=%s → %i", name, r);
+                 assert_se(r > 0);
+                 condition_free(condition);
+-                free(groupname);
+                 max_gid = gids[i] > max_gid ? gids[i] : max_gid;
+         }
+ 

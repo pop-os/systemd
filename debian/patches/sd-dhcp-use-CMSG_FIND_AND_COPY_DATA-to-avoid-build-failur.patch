@@ -1,0 +1,47 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 15 Nov 2023 21:08:30 +0000
+Subject: sd-dhcp: use CMSG_FIND_AND_COPY_DATA to avoid build failures on x32
+ architectures
+
+On architectures where timeval is 64bit but size_t is 32bit
+we have to use CMSG_FIND_AND_COPY_DATA. This affects x32 and riscv32.
+
+Follow-up for 905d0ea7b0080dd
+---
+ src/libsystemd-network/sd-dhcp-client.c | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index bf19226..0993c20 100644
+--- a/src/libsystemd-network/sd-dhcp-client.c
++++ b/src/libsystemd-network/sd-dhcp-client.c
+@@ -2201,7 +2201,6 @@ static int client_receive_message_raw(
+                 .msg_control = &control,
+                 .msg_controllen = sizeof(control),
+         };
+-        struct cmsghdr *cmsg;
+         bool checksum = true;
+         triple_timestamp t = {};
+         ssize_t buflen, len;
+@@ -2231,15 +2230,13 @@ static int client_receive_message_raw(
+                 return 0;
+         }
+ 
+-        CMSG_FOREACH(cmsg, &msg)
+-                if (cmsg->cmsg_level == SOL_PACKET && cmsg->cmsg_type == PACKET_AUXDATA) {
+-                        struct tpacket_auxdata *aux = CMSG_TYPED_DATA(cmsg, struct tpacket_auxdata);
+-                        checksum = !(aux->tp_status & TP_STATUS_CSUMNOTREADY);
++        struct tpacket_auxdata *aux = CMSG_FIND_AND_COPY_DATA(&msg, SOL_PACKET, PACKET_AUXDATA, struct tpacket_auxdata);
++        if (aux)
++                checksum = !(aux->tp_status & TP_STATUS_CSUMNOTREADY);
+ 
+-                } else if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_TIMESTAMP) {
+-                        struct timeval *tv = CMSG_TYPED_DATA(cmsg, struct timeval);
+-                        triple_timestamp_from_realtime(&t, timeval_load(tv));
+-                }
++        struct timeval *tv = CMSG_FIND_AND_COPY_DATA(&msg, SOL_SOCKET, SCM_TIMESTAMP, struct timeval);
++        if (tv)
++                triple_timestamp_from_realtime(&t, timeval_load(tv));
+ 
+         if (dhcp_packet_verify_headers(packet, len, checksum, client->port) < 0)
+                 return 0;

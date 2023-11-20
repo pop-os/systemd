@@ -1,3 +1,6 @@
+test-condition-skip-group-test-during-Debian-package-buil.patch
+sd-dhcp-use-CMSG_FIND_AND_COPY_DATA-to-avoid-build-failur.patch
+libsystemd-network-introduce-triple_timestamp_from_cmsg.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
