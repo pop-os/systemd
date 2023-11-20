@@ -1,3 +1,17 @@
+systemd (255~rc2-3) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Use canonical paths for scripts in debian/extra. Update scripts for
+    udev-udeb, initramfs-tools integration scripts and dhclient hook
+    script to use the new canonical paths in /usr.
+
+  [ Luca Boccassi ]
+  * Bump conflict with molly-guard to 0.8.2. The previous workarounds are
+    not enough, so a new upload will be needed. (Closes: #1056292)
+  * Backport patches to fix FTBFS on hppa and x32
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 20 Nov 2023 20:58:27 +0000
+
 systemd (255~rc2-2) unstable; urgency=medium
 
   * Add versioned Breaks against dracut.
