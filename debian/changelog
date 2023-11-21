@@ -1,4 +1,4 @@
-systemd (249.11-0ubuntu3.12) UNRELEASED; urgency=medium
+systemd (249.11-0ubuntu3.12) jammy; urgency=medium
 
   * core/device: ignore DEVICE_FOUND_UDEV bit on switching root (LP: #2037281)
     File: debian/patches/lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
@@ -12,7 +12,7 @@ systemd (249.11-0ubuntu3.12) UNRELEASED; urgency=medium
     File: debian/tests/upstream
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d125a1ed3f01e59dba2f370c13801bfb76c16f5d
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 02 Nov 2023 09:52:13 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 21 Nov 2023 15:57:17 -0500
 
 systemd (249.11-0ubuntu3.11) jammy; urgency=medium
 
