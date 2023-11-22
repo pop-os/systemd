@@ -84,6 +84,7 @@ Depends: systemd-sysv,
   pkg-config,
   python3,
   python3-pefile,
+  dhcpcd-base,
 Restrictions: needs-root, isolation-container, breaks-testbed, allow-stderr
 
 Tests: unit-tests
