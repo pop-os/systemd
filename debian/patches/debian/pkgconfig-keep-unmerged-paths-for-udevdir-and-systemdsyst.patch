@@ -11,10 +11,10 @@ for a while longer
  2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/systemd.pc.in b/src/core/systemd.pc.in
-index 6cca2fa..51e2864 100644
+index f3b85b0..5482ec2 100644
 --- a/src/core/systemd.pc.in
 +++ b/src/core/systemd.pc.in
-@@ -20,7 +20,7 @@ sysconfdir=${sysconf_dir}
+@@ -25,7 +25,7 @@ sysconfdir=${sysconf_dir}
  systemd_util_dir=${prefix}/lib/systemd
  systemdutildir=${systemd_util_dir}
  
