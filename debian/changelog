@@ -1,3 +1,20 @@
+systemd (255~rc3-1) unstable; urgency=medium
+
+  * d/systemd.install: mark pcrlock.d as !stage1. pcrlock configs are only
+    installed when libtss and libssl are available which is not the case
+    for stage1 builds, so mark accordingly
+  * New upstream version 255~rc3
+  * Drop patches merged upstream
+  * Refresh patches
+  * systemd: reexec user manager sessions on upgrade. So far we only
+    reexec'ed PID1, and ignored user managers, which means bug or security
+    fixes were not applied for running sessions till the next reboot. Fix
+    this using 'systemctl kill', which is asynchronous but works even if
+    the D-Bus user session is not active.
+  * autopkgtest: install dhcpcd-base for boot-and-services
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 22 Nov 2023 21:33:09 +0000
+
 systemd (255~rc2-3) unstable; urgency=medium
 
   [ Michael Biebl ]
