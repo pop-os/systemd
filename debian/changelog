@@ -1,3 +1,9 @@
+systemd (255~rc3-2) unstable; urgency=medium
+
+  * systemd: ignore '_systemctl kill' failures in postinst
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 22 Nov 2023 22:23:49 +0000
+
 systemd (255~rc3-1) unstable; urgency=medium
 
   * d/systemd.install: mark pcrlock.d as !stage1. pcrlock configs are only
