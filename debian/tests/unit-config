@@ -13,7 +13,6 @@ from glob import glob
 system_unit_dir = subprocess.check_output(
     ['pkg-config', '--variable=systemdsystemunitdir', 'systemd'],
     universal_newlines=True).strip()
-system_unit_dir = '/usr' + system_unit_dir
 systemd_sysv_install = os.path.join(os.path.dirname(system_unit_dir),
                                     'systemd-sysv-install')
 
