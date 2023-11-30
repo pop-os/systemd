@@ -1,3 +1,19 @@
+systemd (255~rc3-3) unstable; urgency=medium
+
+  [ Oxan van Leeuwen ]
+  * Move kernel-install initrd script to earlier prefix. From systemd v255
+    onwards, the 60-ukify.install script automatically uses initrd files
+    that are present in the staging area. Move the initrd script to run
+    earlier, so that ukify can use the initrd. The only third-party
+    kernel-install script present in the Debian archive is
+    40-dkms.install, so it is not impacted by this change. Both dracut and
+    mkinitcpio upstream also ship their script with priority 50.
+
+  [ Luca Boccassi ]
+  * systemd.pc: point unit install directory to /usr/lib/systemd/system/
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 30 Nov 2023 21:09:08 +0000
+
 systemd (255~rc3-2) unstable; urgency=medium
 
   * systemd: ignore '_systemctl kill' failures in postinst
