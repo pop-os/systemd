@@ -1,3 +1,9 @@
+systemd (255~rc4-1) unstable; urgency=medium
+
+  * New upstream version 255~rc4
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 02 Dec 2023 02:16:07 +0000
+
 systemd (255~rc3-3) unstable; urgency=medium
 
   [ Oxan van Leeuwen ]
