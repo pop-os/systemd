@@ -1,3 +1,5 @@
+seccomp-util-override-default-action-only-when-the-filter.patch
+seccomp-util-also-use-ENOSYS-for-unknown-syscalls-in-secc.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
