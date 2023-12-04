@@ -1,3 +1,9 @@
+systemd (255~rc4-2) unstable; urgency=medium
+
+  * Backport patches to fix seccomp issues on armhf/armel/ppc64el
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 04 Dec 2023 16:56:42 +0000
+
 systemd (255~rc4-1) unstable; urgency=medium
 
   * New upstream version 255~rc4
