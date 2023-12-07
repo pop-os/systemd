@@ -25,6 +25,5 @@ debian/UBUNTU-read-only-etc-hacks.patch
 test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 test-skip-tests-for-unsupported-localectl-features.patch
 lp2013543-core-reorder-systemd-arguments-on-reexec.patch
-lp2009743/network-dhcp4-do-not-ignore-the-gateway-even-if-the-desti.patch
 meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 lp2033325-Revert-core-service-when-resetting-PID-also-reset-known-f.patch
