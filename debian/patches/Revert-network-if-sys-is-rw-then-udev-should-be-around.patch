@@ -12,10 +12,10 @@ LP: #1857123
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index f2839ec..6aa385a 100644
+index 2caf4ff..5e0c6dc 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -68,6 +68,7 @@
+@@ -69,6 +69,7 @@
  #include "tmpfile-util.h"
  #include "tuntap.h"
  #include "udev-util.h"
@@ -23,7 +23,7 @@ index f2839ec..6aa385a 100644
  #include "vrf.h"
  
  bool link_ipv6_enabled(Link *link) {
-@@ -1399,7 +1400,7 @@ static int link_check_initialized(Link *link) {
+@@ -1433,7 +1434,7 @@ static int link_check_initialized(Link *link) {
  
          assert(link);
  

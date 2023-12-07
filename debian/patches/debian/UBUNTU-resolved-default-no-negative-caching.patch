@@ -13,10 +13,10 @@ Co-authored-by: Dan Streetman <ddstreet@canonical.com>
  4 files changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
-index 2b9f482..73822b1 100644
+index d153865..93c8ac4 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
-@@ -255,10 +255,10 @@
+@@ -276,10 +276,10 @@
        <varlistentry>
          <term><varname>Cache=</varname></term>
          <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If
@@ -28,9 +28,9 @@ index 2b9f482..73822b1 100644
 +        when DNSSEC is used. If <literal>no-negative</literal> (the default), only positive answers are cached.</para>
  
          <para>Note that caching is turned off by default for host-local DNS servers.
-         See <varname>CacheFromLocalhost=</varname> for details.</para></listitem>
+         See <varname>CacheFromLocalhost=</varname> for details.</para>
 diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
-index eab4c7e..ad15c7a 100644
+index 6883935..3a8d35e 100644
 --- a/src/resolve/resolved-gperf.gperf
 +++ b/src/resolve/resolved-gperf.gperf
 @@ -26,7 +26,7 @@ Resolve.LLMNR,                     config_parse_resolve_support,         0,
@@ -43,10 +43,10 @@ index eab4c7e..ad15c7a 100644
  Resolve.ReadEtcHosts,              config_parse_bool,                    0,                   offsetof(Manager, read_etc_hosts)
  Resolve.ResolveUnicastSingleLabel, config_parse_bool,                    0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 54fc2b3..96ef261 100644
+index b52619e..1221bb9 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -566,7 +566,7 @@ int manager_new(Manager **ret) {
+@@ -588,7 +588,7 @@ int manager_new(Manager **ret) {
                  .mdns_support = DEFAULT_MDNS_MODE,
                  .dnssec_mode = DEFAULT_DNSSEC_MODE,
                  .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
@@ -56,10 +56,10 @@ index 54fc2b3..96ef261 100644
                  .read_resolv_conf = true,
                  .need_builtin_fallbacks = true,
 diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
-index 6d4176d..3c506f9 100644
+index 0031b15..ba9e687 100644
 --- a/src/resolve/resolved.conf.in
 +++ b/src/resolve/resolved.conf.in
-@@ -26,7 +26,7 @@
+@@ -28,7 +28,7 @@
  #DNSOverTLS={{DEFAULT_DNS_OVER_TLS_MODE_STR}}
  #MulticastDNS={{DEFAULT_MDNS_MODE_STR}}
  #LLMNR={{DEFAULT_LLMNR_MODE_STR}}

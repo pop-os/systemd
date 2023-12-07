@@ -9,10 +9,10 @@ LP: #1696970
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
-index ece872c..e026721 100644
+index 37eeabc..a4d9d06 100644
 --- a/units/systemd-journald.service.in
 +++ b/units/systemd-journald.service.in
-@@ -32,6 +32,7 @@ OOMScoreAdjust=-250
+@@ -37,6 +37,7 @@ OOMScoreAdjust=-250
  ProtectClock=yes
  Restart=always
  RestartSec=0

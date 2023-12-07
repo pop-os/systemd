@@ -10,25 +10,25 @@ there.
  1 file changed, 15 insertions(+), 19 deletions(-)
 
 diff --git a/test/units/testsuite-74.firstboot.sh b/test/units/testsuite-74.firstboot.sh
-index 92a6075..d9feae2 100755
+index be08575..f0e764b 100755
 --- a/test/units/testsuite-74.firstboot.sh
 +++ b/test/units/testsuite-74.firstboot.sh
 @@ -24,11 +24,7 @@ ROOT_HASHED_PASSWORD1='$6$foobarsalt$YbwdaATX6IsFxvWbY3QcZj2gB31R/LFRFrjlFrJtTTq
  # shellcheck disable=SC2016
  ROOT_HASHED_PASSWORD2='$6$foobarsalt$q.P2932zYMLbKnjFwIxPI8y3iuxeuJ2BgE372LcZMMnj3Gcg/9mJg2LPKUl.ha0TG/.fRNNnRQcLfzM0SNot3.'
-
+ 
 -# Debian and Ubuntu use /etc/default/locale instead of /etc/locale.conf. Make
 -# sure we use the appropriate path for locale configuration.
 -LOCALE_PATH="/etc/locale.conf"
 -[ -e "$LOCALE_PATH" ] || LOCALE_PATH="/etc/default/locale"
 -[ -e "$LOCALE_PATH" ] || systemd-firstboot --locale=C.UTF-8
 +[ -e /etc/locale.conf ] || systemd-firstboot --locale=C.UTF-8
-
+ 
  # Create a minimal root so we don't modify the testbed
  ROOT=test-root
 @@ -37,14 +33,14 @@ mkdir -p "$ROOT/bin"
  touch "$ROOT/bin/fooshell" "$ROOT/bin/barshell"
-
+ 
  systemd-firstboot --root="$ROOT" --locale=foo
 -grep -q "LANG=foo" "$ROOT$LOCALE_PATH"
 -rm -fv "$ROOT$LOCALE_PATH"
@@ -44,7 +44,7 @@ index 92a6075..d9feae2 100755
 -grep -q "LC_MESSAGES=bar" "$ROOT$LOCALE_PATH"
 +grep -q "LANG=foo" "$ROOT/etc/locale.conf"
 +grep -q "LC_MESSAGES=bar" "$ROOT/etc/locale.conf"
-
+ 
  systemd-firstboot --root="$ROOT" --keymap=foo
  grep -q "KEYMAP=foo" "$ROOT/etc/vconsole.conf"
 @@ -88,8 +84,8 @@ systemd-firstboot --root="$ROOT" \
@@ -69,7 +69,7 @@ index 92a6075..d9feae2 100755
  grep -q "KEYMAP=keymap-overwrite" "$ROOT/etc/vconsole.conf"
  readlink "$ROOT/etc/localtime" | grep -q "/CET$"
  grep -q "hostname-overwrite" "$ROOT/etc/hostname"
-@@ -124,7 +120,7 @@ rm -fr "$ROOT"
+@@ -133,7 +129,7 @@ rm -fr "$ROOT"
  mkdir "$ROOT"
  # Copy everything at once (--copy)
  systemd-firstboot --root="$ROOT" --copy
@@ -78,7 +78,7 @@ index 92a6075..d9feae2 100755
  diff <(awk -F: '/^root/ { print $7; }' /etc/passwd) <(awk -F: '/^root/ { print $7; }' "$ROOT/etc/passwd")
  diff <(awk -F: '/^root/ { print $2; }' /etc/shadow) <(awk -F: '/^root/ { print $2; }' "$ROOT/etc/shadow")
  [[ -e /etc/vconsole.conf ]] && diff /etc/vconsole.conf "$ROOT/etc/vconsole.conf"
-@@ -133,7 +129,7 @@ rm -fr "$ROOT"
+@@ -142,7 +138,7 @@ rm -fr "$ROOT"
  mkdir "$ROOT"
  # Copy everything at once, but now by using separate switches
  systemd-firstboot --root="$ROOT" --copy-locale --copy-keymap --copy-timezone --copy-root-password --copy-root-shell
@@ -87,7 +87,7 @@ index 92a6075..d9feae2 100755
  diff <(awk -F: '/^root/ { print $7; }' /etc/passwd) <(awk -F: '/^root/ { print $7; }' "$ROOT/etc/passwd")
  diff <(awk -F: '/^root/ { print $2; }' /etc/shadow) <(awk -F: '/^root/ { print $2; }' "$ROOT/etc/shadow")
  [[ -e /etc/vconsole.conf ]] && diff /etc/vconsole.conf "$ROOT/etc/vconsole.conf"
-@@ -148,8 +144,8 @@ set +o pipefail
+@@ -157,8 +153,8 @@ set +o pipefail
  # We can do only limited testing here, since it's all an interactive stuff,
  # so --prompt and --prompt-root-password are skipped on purpose
  echo -ne "\nfoo\nbar\n" | systemd-firstboot --root="$ROOT" --prompt-locale

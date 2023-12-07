@@ -23,10 +23,10 @@ Users may override this setting in the .network files by specifying
  2 files changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index 01d8897..9df3ac7 100644
+index e702465..99243ee 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
-@@ -334,8 +334,8 @@
+@@ -374,8 +374,8 @@
            [DHCPv6] section, regardless of the presence of routers on the link, or what flags the routers
            pass. See <varname>IPv6AcceptRA=</varname>.</para>
  
@@ -37,7 +37,7 @@ index 01d8897..9df3ac7 100644
  
            <para>See the [DHCPv4] or [DHCPv6] sections below for further configuration options for the
            DHCP client support.</para>
-@@ -1989,7 +1989,7 @@ allow my_server_t localnet_peer_t:peer recv;</programlisting>
+@@ -2473,7 +2473,7 @@ NFTSet=prefix:netdev:filter:eth_ipv4_prefix</programlisting>
            effect of the <option>Domains=</option> setting. If set to <option>route</option>, the domain name
            received from the DHCP server will be used for routing DNS queries only, but not for searching,
            similarly to the effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -46,7 +46,7 @@ index 01d8897..9df3ac7 100644
  
            <para>It is recommended to enable this option only on trusted networks, as setting this
            affects resolution of all hostnames, in particular of single-label names. It is generally
-@@ -2517,7 +2517,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
+@@ -3201,7 +3201,7 @@ Token=prefixstable:2002:da8:1::</programlisting></para>
            similarly to the effect of the <option>Domains=</option> setting. If set to
            <literal>route</literal>, the domain name received via IPv6 RA will be used for routing DNS queries
            only, but not for searching, similarly to the effect of the <option>Domains=</option> setting when
@@ -56,22 +56,22 @@ index 01d8897..9df3ac7 100644
            <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
            of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 7c5d691..394bbc0 100644
+index 6cbaf82..fb10a33 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -402,6 +402,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -395,6 +395,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .dhcp_use_gateway = -1,
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
 +                .dhcp_use_domains = DHCP_USE_DOMAINS_YES,
                  .dhcp_route_metric = DHCP_ROUTE_METRIC,
+                 .dhcp_use_rapid_commit = -1,
                  .dhcp_client_identifier = _DHCP_CLIENT_ID_INVALID,
-                 .dhcp_route_table = RT_TABLE_MAIN,
-@@ -475,6 +476,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -473,6 +474,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
  
                  .ipv6_accept_ra = -1,
                  .ipv6_accept_ra_use_dns = true,
 +                .ipv6_accept_ra_use_domains = DHCP_USE_DOMAINS_YES,
                  .ipv6_accept_ra_use_gateway = true,
+                 .ipv6_accept_ra_use_captive_portal = true,
                  .ipv6_accept_ra_use_route_prefix = true,
-                 .ipv6_accept_ra_use_autonomous_prefix = true,
