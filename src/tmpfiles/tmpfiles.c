@@ -22,7 +22,7 @@
 #include "btrfs-util.h"
 #include "build.h"
 #include "capability-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "chattr-util.h"
 #include "conf-files.h"
 #include "constants.h"
@@ -41,7 +41,7 @@
 #include "glob-util.h"
 #include "hexdecoct.h"
 #include "io-util.h"
-#include "label.h"
+#include "label-util.h"
 #include "log.h"
 #include "macro.h"
 #include "main-func.h"
@@ -86,35 +86,35 @@ typedef enum OperationMask {
 
 typedef enum ItemType {
         /* These ones take file names */
-        CREATE_FILE = 'f',
-        TRUNCATE_FILE = 'F', /* deprecated: use f+ */
-        CREATE_DIRECTORY = 'd',
-        TRUNCATE_DIRECTORY = 'D',
-        CREATE_SUBVOLUME = 'v',
+        CREATE_FILE                    = 'f',
+        TRUNCATE_FILE                  = 'F', /* deprecated: use f+ */
+        CREATE_DIRECTORY               = 'd',
+        TRUNCATE_DIRECTORY             = 'D',
+        CREATE_SUBVOLUME               = 'v',
         CREATE_SUBVOLUME_INHERIT_QUOTA = 'q',
-        CREATE_SUBVOLUME_NEW_QUOTA = 'Q',
-        CREATE_FIFO = 'p',
-        CREATE_SYMLINK = 'L',
-        CREATE_CHAR_DEVICE = 'c',
-        CREATE_BLOCK_DEVICE = 'b',
-        COPY_FILES = 'C',
+        CREATE_SUBVOLUME_NEW_QUOTA     = 'Q',
+        CREATE_FIFO                    = 'p',
+        CREATE_SYMLINK                 = 'L',
+        CREATE_CHAR_DEVICE             = 'c',
+        CREATE_BLOCK_DEVICE            = 'b',
+        COPY_FILES                     = 'C',
 
         /* These ones take globs */
-        WRITE_FILE = 'w',
-        EMPTY_DIRECTORY = 'e',
-        SET_XATTR = 't',
-        RECURSIVE_SET_XATTR = 'T',
-        SET_ACL = 'a',
-        RECURSIVE_SET_ACL = 'A',
-        SET_ATTRIBUTE = 'h',
-        RECURSIVE_SET_ATTRIBUTE = 'H',
-        IGNORE_PATH = 'x',
-        IGNORE_DIRECTORY_PATH = 'X',
-        REMOVE_PATH = 'r',
-        RECURSIVE_REMOVE_PATH = 'R',
-        RELABEL_PATH = 'z',
-        RECURSIVE_RELABEL_PATH = 'Z',
-        ADJUST_MODE = 'm', /* legacy, 'z' is identical to this */
+        WRITE_FILE                     = 'w',
+        EMPTY_DIRECTORY                = 'e',
+        SET_XATTR                      = 't',
+        RECURSIVE_SET_XATTR            = 'T',
+        SET_ACL                        = 'a',
+        RECURSIVE_SET_ACL              = 'A',
+        SET_ATTRIBUTE                  = 'h',
+        RECURSIVE_SET_ATTRIBUTE        = 'H',
+        IGNORE_PATH                    = 'x',
+        IGNORE_DIRECTORY_PATH          = 'X',
+        REMOVE_PATH                    = 'r',
+        RECURSIVE_REMOVE_PATH          = 'R',
+        RELABEL_PATH                   = 'z',
+        RECURSIVE_RELABEL_PATH         = 'Z',
+        ADJUST_MODE                    = 'm', /* legacy, 'z' is identical to this */
 } ItemType;
 
 typedef enum AgeBy {
@@ -125,7 +125,7 @@ typedef enum AgeBy {
 
         /* All file timestamp types are checked by default. */
         AGE_BY_DEFAULT_FILE = AGE_BY_ATIME | AGE_BY_BTIME | AGE_BY_CTIME | AGE_BY_MTIME,
-        AGE_BY_DEFAULT_DIR  = AGE_BY_ATIME | AGE_BY_BTIME | AGE_BY_MTIME
+        AGE_BY_DEFAULT_DIR  = AGE_BY_ATIME | AGE_BY_BTIME | AGE_BY_MTIME,
 } AgeBy;
 
 typedef struct Item {
@@ -138,6 +138,7 @@ typedef struct Item {
         char **xattrs;
 #if HAVE_ACL
         acl_t acl_access;
+        acl_t acl_access_exec;
         acl_t acl_default;
 #endif
         uid_t uid;
@@ -195,10 +196,11 @@ typedef enum {
         _CREATION_MODE_INVALID = -EINVAL,
 } CreationMode;
 
-static bool arg_cat_config = false;
-static bool arg_user = false;
+static CatFlags arg_cat_flags = CAT_CONFIG_OFF;
+static RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 static OperationMask arg_operation = 0;
 static bool arg_boot = false;
+static bool arg_graceful = false;
 static PagerFlags arg_pager_flags = 0;
 
 static char **arg_include_prefixes = NULL;
@@ -206,19 +208,20 @@ static char **arg_exclude_prefixes = NULL;
 static char *arg_root = NULL;
 static char *arg_image = NULL;
 static char *arg_replace = NULL;
+static ImagePolicy *arg_image_policy = NULL;
 
 #define MAX_DEPTH 256
 
-static OrderedHashmap *items = NULL, *globs = NULL;
-static Set *unix_sockets = NULL;
+typedef struct Context {
+        OrderedHashmap *items, *globs;
+        Set *unix_sockets;
+} Context;
 
-STATIC_DESTRUCTOR_REGISTER(items, ordered_hashmap_freep);
-STATIC_DESTRUCTOR_REGISTER(globs, ordered_hashmap_freep);
-STATIC_DESTRUCTOR_REGISTER(unix_sockets, set_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_include_prefixes, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_exclude_prefixes, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 static const char *const creation_mode_verb_table[_CREATION_MODE_MAX] = {
         [CREATION_NORMAL]   = "Created",
@@ -228,11 +231,21 @@ static const char *const creation_mode_verb_table[_CREATION_MODE_MAX] = {
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(creation_mode_verb, CreationMode);
 
+static void context_done(Context *c) {
+        assert(c);
+
+        ordered_hashmap_free(c->items);
+        ordered_hashmap_free(c->globs);
+
+        set_free(c->unix_sockets);
+}
+
 /* Different kinds of errors that mean that information is not available in the environment. */
-static inline bool ERRNO_IS_NOINFO(int r) {
+static bool ERRNO_IS_NOINFO(int r) {
         return IN_SET(abs(r),
                       EUNATCH,    /* os-release or machine-id missing */
                       ENOMEDIUM,  /* machine-id or another file empty */
+                      ENOPKG,     /* machine-id is uninitialized */
                       ENXIO);     /* env var is unset */
 }
 
@@ -251,9 +264,9 @@ static int specifier_directory(char specifier, const void *data, const char *roo
 
         static const struct table_entry paths_user[] = {
                 [DIRECTORY_RUNTIME] = { SD_PATH_USER_RUNTIME              },
-                [DIRECTORY_STATE] =   { SD_PATH_USER_CONFIGURATION        },
+                [DIRECTORY_STATE] =   { SD_PATH_USER_STATE_PRIVATE        },
                 [DIRECTORY_CACHE] =   { SD_PATH_USER_STATE_CACHE          },
-                [DIRECTORY_LOGS] =    { SD_PATH_USER_CONFIGURATION, "log" },
+                [DIRECTORY_LOGS] =    { SD_PATH_USER_STATE_PRIVATE, "log" },
         };
 
         const struct table_entry *paths;
@@ -262,7 +275,7 @@ static int specifier_directory(char specifier, const void *data, const char *roo
         int r;
 
         assert_cc(ELEMENTSOF(paths_system) == ELEMENTSOF(paths_user));
-        paths = arg_user ? paths_user : paths_system;
+        paths = arg_runtime_scope == RUNTIME_SCOPE_USER ? paths_user : paths_system;
 
         i = PTR_TO_UINT(data);
         assert(i < ELEMENTSOF(paths_system));
@@ -305,7 +318,7 @@ static int log_unresolvable_specifier(const char *filename, unsigned line) {
                    log_level,
                    filename, line, 0,
                    "Failed to resolve specifier: %s, skipping.",
-                   arg_user ? "Required $XDG_... variable not defined" : "uninitialized /etc/ detected");
+                   arg_runtime_scope == RUNTIME_SCOPE_USER ? "Required $XDG_... variable not defined" : "uninitialized /etc/ detected");
 
         if (!notified)
                 log_full(log_level,
@@ -423,12 +436,12 @@ static struct Item* find_glob(OrderedHashmap *h, const char *match) {
         return NULL;
 }
 
-static int load_unix_sockets(void) {
+static int load_unix_sockets(Context *c) {
         _cleanup_set_free_ Set *sockets = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
-        if (unix_sockets)
+        if (c->unix_sockets)
                 return 0;
 
         /* We maintain a cache of the sockets we found in /proc/net/unix to speed things up a little. */
@@ -475,17 +488,18 @@ static int load_unix_sockets(void) {
                         return log_warning_errno(r, "Failed to add AF_UNIX socket to set, ignoring: %m");
         }
 
-        unix_sockets = TAKE_PTR(sockets);
+        c->unix_sockets = TAKE_PTR(sockets);
         return 1;
 }
 
-static bool unix_socket_alive(const char *fn) {
+static bool unix_socket_alive(Context *c, const char *fn) {
+        assert(c);
         assert(fn);
 
-        if (load_unix_sockets() < 0)
+        if (load_unix_sockets(c) < 0)
                 return true;     /* We don't know, so assume yes */
 
-        return set_contains(unix_sockets, fn);
+        return set_contains(c->unix_sockets, fn);
 }
 
 /* Accessors for the argument in binary format */
@@ -506,7 +520,9 @@ static DIR* xopendirat_nomod(int dirfd, const char *path) {
         if (dir)
                 return dir;
 
-        log_debug_errno(errno, "Cannot open %sdirectory \"%s\": %m", dirfd == AT_FDCWD ? "" : "sub", path);
+        if (!IN_SET(errno, ENOENT, ELOOP))
+                log_debug_errno(errno, "Cannot open %sdirectory \"%s\": %m", dirfd == AT_FDCWD ? "" : "sub", path);
+
         if (errno != EPERM)
                 return NULL;
 
@@ -521,7 +537,7 @@ static DIR* opendir_nomod(const char *path) {
         return xopendirat_nomod(AT_FDCWD, path);
 }
 
-static inline nsec_t load_statx_timestamp_nsec(const struct statx_timestamp *ts) {
+static nsec_t load_statx_timestamp_nsec(const struct statx_timestamp *ts) {
         assert(ts);
 
         if (ts->tv_sec < 0)
@@ -588,6 +604,7 @@ static bool needs_cleanup(
 }
 
 static int dir_cleanup(
+                Context *c,
                 Item *i,
                 const char *p,
                 DIR *d,
@@ -605,6 +622,10 @@ static int dir_cleanup(
         bool deleted = false;
         int r = 0;
 
+        assert(c);
+        assert(i);
+        assert(d);
+
         FOREACH_DIRENT_ALL(de, d, break) {
                 _cleanup_free_ char *sub_path = NULL;
                 nsec_t atime_nsec, mtime_nsec, ctime_nsec, btime_nsec;
@@ -619,7 +640,7 @@ static int dir_cleanup(
                  * we have modern statx() we use it instead of fstat() and do proper mount point checks,
                  * while on older kernels's well do traditional st_dev based detection of mount points.
                  *
-                 * Using statx() for detecting mount points also has the benfit that we handle weird file
+                 * Using statx() for detecting mount points also has the benefit that we handle weird file
                  * systems such as overlayfs better where each file is originating from a different
                  * st_dev. */
 
@@ -682,12 +703,12 @@ static int dir_cleanup(
                 }
 
                 /* Is there an item configured for this path? */
-                if (ordered_hashmap_get(items, sub_path)) {
+                if (ordered_hashmap_get(c->items, sub_path)) {
                         log_debug("Ignoring \"%s\": a separate entry exists.", sub_path);
                         continue;
                 }
 
-                if (find_glob(globs, sub_path)) {
+                if (find_glob(c->globs, sub_path)) {
                         log_debug("Ignoring \"%s\": a separate glob exists.", sub_path);
                         continue;
                 }
@@ -716,11 +737,11 @@ static int dir_cleanup(
                                 }
 
                                 if (flock(dirfd(sub_dir), LOCK_EX|LOCK_NB) < 0) {
-                                        log_debug_errno(errno, "Couldn't acquire shared BSD lock on directory \"%s\", skipping: %m", p);
+                                        log_debug_errno(errno, "Couldn't acquire shared BSD lock on directory \"%s\", skipping: %m", sub_path);
                                         continue;
                                 }
 
-                                q = dir_cleanup(i,
+                                q = dir_cleanup(c, i,
                                                 sub_path, sub_dir,
                                                 atime_nsec, mtime_nsec, cutoff_nsec,
                                                 rootdev_major, rootdev_minor,
@@ -754,6 +775,8 @@ static int dir_cleanup(
                                         r = log_warning_errno(errno, "Failed to remove directory \"%s\", ignoring: %m", sub_path);
 
                 } else {
+                        _cleanup_close_ int fd = -EBADF;
+
                         /* Skip files for which the sticky bit is set. These are semantics we define, and are
                          * unknown elsewhere. See XDG_RUNTIME_DIR specification for details. */
                         if (sx.stx_mode & S_ISVTX) {
@@ -773,7 +796,7 @@ static int dir_cleanup(
                         }
 
                         /* Ignore sockets that are listed in /proc/net/unix */
-                        if (S_ISSOCK(sx.stx_mode) && unix_socket_alive(sub_path)) {
+                        if (S_ISSOCK(sx.stx_mode) && unix_socket_alive(c, sub_path)) {
                                 log_debug("Skipping \"%s\": live socket.", sub_path);
                                 continue;
                         }
@@ -793,6 +816,18 @@ static int dir_cleanup(
                         if (!needs_cleanup(atime_nsec, btime_nsec, ctime_nsec, mtime_nsec,
                                            cutoff_nsec, sub_path, age_by_file, false))
                                 continue;
+
+                        fd = xopenat(dirfd(d),
+                                     de->d_name,
+                                     O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NOATIME,
+                                     /* xopen_flags = */ 0,
+                                     /* mode = */ 0);
+                        if (fd < 0 && !IN_SET(fd, -ENOENT, -ELOOP))
+                                log_warning_errno(fd, "Opening file \"%s\" failed, ignoring: %m", sub_path);
+                        if (fd >= 0 && flock(fd, LOCK_EX|LOCK_NB) < 0 && errno == EAGAIN) {
+                                log_debug_errno(errno, "Couldn't acquire shared BSD lock on file \"%s\", skipping: %m", sub_path);
+                                continue;
+                        }
 
                         log_debug("Removing \"%s\".", sub_path);
                         if (unlinkat(dirfd(d), de->d_name, 0) < 0)
@@ -871,6 +906,7 @@ static mode_t process_mask_perms(mode_t mode, mode_t current) {
 }
 
 static int fd_set_perms(
+                Context *c,
                 Item *i,
                 int fd,
                 const char *path,
@@ -884,6 +920,7 @@ static int fd_set_perms(
         gid_t new_gid;
         int r;
 
+        assert(c);
         assert(i);
         assert(fd >= 0);
         assert(path);
@@ -982,7 +1019,7 @@ static int path_open_parent_safe(const char *path, bool allow_failure) {
                                       path,
                                       allow_failure ? ", ignoring" : "");
 
-        r = chase_symlinks(dn, arg_root, allow_failure ? CHASE_SAFE : CHASE_SAFE|CHASE_WARN, NULL, &fd);
+        r = chase(dn, arg_root, allow_failure ? CHASE_SAFE : CHASE_SAFE|CHASE_WARN, NULL, &fd);
         if (r == -ENOLINK) /* Unsafe symlink: already covered by CHASE_WARN */
                 return r;
         if (r < 0)
@@ -1007,7 +1044,7 @@ static int path_open_safe(const char *path) {
         if (!path_is_normalized(path))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to open invalid path '%s'.", path);
 
-        r = chase_symlinks(path, arg_root, CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL, &fd);
+        r = chase(path, arg_root, CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL, &fd);
         if (r == -ENOLINK)
                 return r; /* Unsafe symlink: already covered by CHASE_WARN */
         if (r < 0)
@@ -1017,12 +1054,14 @@ static int path_open_safe(const char *path) {
 }
 
 static int path_set_perms(
+                Context *c,
                 Item *i,
                 const char *path,
                 CreationMode creation) {
 
         _cleanup_close_ int fd = -EBADF;
 
+        assert(c);
         assert(i);
         assert(path);
 
@@ -1030,7 +1069,7 @@ static int path_set_perms(
         if (fd < 0)
                 return fd;
 
-        return fd_set_perms(i, fd, path, /* st= */ NULL, creation);
+        return fd_set_perms(c, i, fd, path, /* st= */ NULL, creation);
 }
 
 static int parse_xattrs_from_arg(Item *i) {
@@ -1070,12 +1109,14 @@ static int parse_xattrs_from_arg(Item *i) {
 }
 
 static int fd_set_xattrs(
+                Context *c,
                 Item *i,
                 int fd,
                 const char *path,
                 const struct stat *st,
                 CreationMode creation) {
 
+        assert(c);
         assert(i);
         assert(fd >= 0);
         assert(path);
@@ -1090,12 +1131,14 @@ static int fd_set_xattrs(
 }
 
 static int path_set_xattrs(
+                Context *c,
                 Item *i,
                 const char *path,
                 CreationMode creation) {
 
         _cleanup_close_ int fd = -EBADF;
 
+        assert(c);
         assert(i);
         assert(path);
 
@@ -1103,7 +1146,7 @@ static int path_set_xattrs(
         if (fd < 0)
                 return fd;
 
-        return fd_set_xattrs(i, fd, path, /* st = */ NULL, creation);
+        return fd_set_xattrs(c, i, fd, path, /* st = */ NULL, creation);
 }
 
 static int parse_acls_from_arg(Item *item) {
@@ -1115,18 +1158,148 @@ static int parse_acls_from_arg(Item *item) {
         /* If append_or_force (= modify) is set, we will not modify the acl
          * afterwards, so the mask can be added now if necessary. */
 
-        r = parse_acl(item->argument, &item->acl_access, &item->acl_default, !item->append_or_force);
+        r = parse_acl(item->argument, &item->acl_access, &item->acl_access_exec,
+                      &item->acl_default, !item->append_or_force);
         if (r < 0)
-                log_warning_errno(r, "Failed to parse ACL \"%s\": %m. Ignoring", item->argument);
+                log_full_errno(arg_graceful && IN_SET(r, -EINVAL, -ENOENT, -ESRCH) ? LOG_DEBUG : LOG_WARNING,
+                               r, "Failed to parse ACL \"%s\", ignoring: %m", item->argument);
 #else
-        log_warning("ACLs are not supported. Ignoring.");
+        log_warning("ACLs are not supported, ignoring.");
 #endif
 
         return 0;
 }
 
 #if HAVE_ACL
+static int parse_acl_cond_exec(
+                const char *path,
+                acl_t access, /* could be empty (NULL) */
+                acl_t cond_exec,
+                const struct stat *st,
+                bool append,
+                acl_t *ret) {
+
+        _cleanup_(acl_freep) acl_t parsed = NULL;
+        acl_entry_t entry;
+        acl_permset_t permset;
+        bool has_exec;
+        int r;
+
+        assert(path);
+        assert(ret);
+        assert(st);
+
+        parsed = access ? acl_dup(access) : acl_init(0);
+        if (!parsed)
+                return -errno;
+
+        /* Since we substitute 'X' with 'x' in parse_acl(), we just need to copy the entries over
+         * for directories */
+        if (S_ISDIR(st->st_mode)) {
+                for (r = acl_get_entry(cond_exec, ACL_FIRST_ENTRY, &entry);
+                     r > 0;
+                     r = acl_get_entry(cond_exec, ACL_NEXT_ENTRY, &entry)) {
+
+                        acl_entry_t parsed_entry;
+
+                        if (acl_create_entry(&parsed, &parsed_entry) < 0)
+                                return -errno;
+
+                        if (acl_copy_entry(parsed_entry, entry) < 0)
+                                return -errno;
+                }
+                if (r < 0)
+                        return -errno;
+
+                goto finish;
+        }
+
+        has_exec = st->st_mode & S_IXUSR;
+
+        if (!has_exec && append) {
+                _cleanup_(acl_freep) acl_t old = NULL;
+
+                old = acl_get_file(path, ACL_TYPE_ACCESS);
+                if (!old)
+                        return -errno;
+
+                for (r = acl_get_entry(old, ACL_FIRST_ENTRY, &entry);
+                     r > 0;
+                     r = acl_get_entry(old, ACL_NEXT_ENTRY, &entry)) {
+
+                        if (acl_get_permset(entry, &permset) < 0)
+                                return -errno;
+
+                        r = acl_get_perm(permset, ACL_EXECUTE);
+                        if (r < 0)
+                                return -errno;
+                        if (r > 0) {
+                                has_exec = true;
+                                break;
+                        }
+                }
+                if (r < 0)
+                        return -errno;
+        }
+
+        /* Check if we're about to set the execute bit in acl_access */
+        if (!has_exec && access) {
+                for (r = acl_get_entry(access, ACL_FIRST_ENTRY, &entry);
+                     r > 0;
+                     r = acl_get_entry(access, ACL_NEXT_ENTRY, &entry)) {
+
+                        if (acl_get_permset(entry, &permset) < 0)
+                                return -errno;
+
+                        r = acl_get_perm(permset, ACL_EXECUTE);
+                        if (r < 0)
+                                return -errno;
+                        if (r > 0) {
+                                has_exec = true;
+                                break;
+                        }
+                }
+                if (r < 0)
+                        return -errno;
+        }
+
+        for (r = acl_get_entry(cond_exec, ACL_FIRST_ENTRY, &entry);
+             r > 0;
+             r = acl_get_entry(cond_exec, ACL_NEXT_ENTRY, &entry)) {
+
+                acl_entry_t parsed_entry;
+
+                if (acl_create_entry(&parsed, &parsed_entry) < 0)
+                        return -errno;
+
+                if (acl_copy_entry(parsed_entry, entry) < 0)
+                        return -errno;
+
+                if (!has_exec) {
+                        if (acl_get_permset(parsed_entry, &permset) < 0)
+                                return -errno;
+
+                        if (acl_delete_perm(permset, ACL_EXECUTE) < 0)
+                                return -errno;
+                }
+        }
+        if (r < 0)
+                return -errno;
+
+finish:
+        if (!append) { /* want_mask = true */
+                r = calc_acl_mask_if_needed(&parsed);
+                if (r < 0)
+                        return r;
+        }
+
+        *ret = TAKE_PTR(parsed);
+
+        return 0;
+}
+
 static int path_set_acl(
+                Context *c,
                 const char *path,
                 const char *pretty,
                 acl_type_t type,
@@ -1137,8 +1310,9 @@ static int path_set_acl(
         _cleanup_(acl_freep) acl_t dup = NULL;
         int r;
 
-        /* Returns 0 for success, positive error if already warned,
-         * negative error otherwise. */
+        assert(c);
+
+        /* Returns 0 for success, positive error if already warned, negative error otherwise. */
 
         if (modify) {
                 r = acls_for_file(path, type, acl, &dup);
@@ -1182,6 +1356,7 @@ static int path_set_acl(
 #endif
 
 static int fd_set_acls(
+                Context *c,
                 Item *item,
                 int fd,
                 const char *path,
@@ -1190,8 +1365,10 @@ static int fd_set_acls(
 
         int r = 0;
 #if HAVE_ACL
+        _cleanup_(acl_freep) acl_t access_with_exec_parsed = NULL;
         struct stat stbuf;
 
+        assert(c);
         assert(item);
         assert(fd >= 0);
         assert(path);
@@ -1212,12 +1389,23 @@ static int fd_set_acls(
                 return 0;
         }
 
-        if (item->acl_access)
-                r = path_set_acl(FORMAT_PROC_FD_PATH(fd), path, ACL_TYPE_ACCESS, item->acl_access, item->append_or_force);
+        if (item->acl_access_exec) {
+                r = parse_acl_cond_exec(FORMAT_PROC_FD_PATH(fd),
+                                        item->acl_access,
+                                        item->acl_access_exec,
+                                        st,
+                                        item->append_or_force,
+                                        &access_with_exec_parsed);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse conditionalized execute bit for \"%s\": %m", path);
+
+                r = path_set_acl(c, FORMAT_PROC_FD_PATH(fd), path, ACL_TYPE_ACCESS, access_with_exec_parsed, item->append_or_force);
+        } else if (item->acl_access)
+                r = path_set_acl(c, FORMAT_PROC_FD_PATH(fd), path, ACL_TYPE_ACCESS, item->acl_access, item->append_or_force);
 
         /* set only default acls to folders */
         if (r == 0 && item->acl_default && S_ISDIR(st->st_mode))
-                r = path_set_acl(FORMAT_PROC_FD_PATH(fd), path, ACL_TYPE_DEFAULT, item->acl_default, item->append_or_force);
+                r = path_set_acl(c, FORMAT_PROC_FD_PATH(fd), path, ACL_TYPE_DEFAULT, item->acl_default, item->append_or_force);
 
         if (ERRNO_IS_NOT_SUPPORTED(r)) {
                 log_debug_errno(r, "ACLs not supported by file system at %s", path);
@@ -1225,7 +1413,7 @@ static int fd_set_acls(
         }
 
         if (r > 0)
-                return -r; /* already warned */
+                return -r; /* already warned in path_set_acl */
 
         /* The above procfs paths don't work if /proc is not mounted. */
         if (r == -ENOENT && proc_mounted() == 0)
@@ -1237,11 +1425,17 @@ static int fd_set_acls(
         return r;
 }
 
-static int path_set_acls(Item *item, const char *path, CreationMode creation) {
+static int path_set_acls(
+                Context *c,
+                Item *item,
+                const char *path,
+                CreationMode creation) {
+
         int r = 0;
 #if HAVE_ACL
         _cleanup_close_ int fd = -EBADF;
 
+        assert(c);
         assert(item);
         assert(path);
 
@@ -1249,7 +1443,7 @@ static int path_set_acls(Item *item, const char *path, CreationMode creation) {
         if (fd < 0)
                 return fd;
 
-        r = fd_set_acls(item, fd, path, /* st= */ NULL, creation);
+        r = fd_set_acls(c, item, fd, path, /* st= */ NULL, creation);
 #endif
         return r;
 }
@@ -1339,6 +1533,7 @@ static int parse_attribute_from_arg(Item *item) {
 }
 
 static int fd_set_attribute(
+                Context *c,
                 Item *item,
                 int fd,
                 const char *path,
@@ -1350,6 +1545,7 @@ static int fd_set_attribute(
         unsigned f;
         int r;
 
+        assert(c);
         assert(item);
         assert(fd >= 0);
         assert(path);
@@ -1381,7 +1577,7 @@ static int fd_set_attribute(
                 return log_error_errno(procfs_fd, "Failed to re-open '%s': %m", path);
 
         unsigned previous, current;
-        r = chattr_full(NULL, procfs_fd, f, item->attribute_mask, &previous, &current, CHATTR_FALLBACK_BITWISE);
+        r = chattr_full(procfs_fd, NULL, f, item->attribute_mask, &previous, &current, CHATTR_FALLBACK_BITWISE);
         if (r == -ENOANO)
                 log_warning("Cannot set file attributes for '%s', maybe due to incompatibility in specified attributes, "
                             "previous=0x%08x, current=0x%08x, expected=0x%08x, ignoring.",
@@ -1394,8 +1590,16 @@ static int fd_set_attribute(
         return 0;
 }
 
-static int path_set_attribute(Item *item, const char *path, CreationMode creation) {
+static int path_set_attribute(
+                Context *c,
+                Item *item,
+                const char *path,
+                CreationMode creation) {
+
         _cleanup_close_ int fd = -EBADF;
+
+        assert(c);
+        assert(item);
 
         if (!item->attribute_set || item->attribute_mask == 0)
                 return 0;
@@ -1404,7 +1608,7 @@ static int path_set_attribute(Item *item, const char *path, CreationMode creatio
         if (fd < 0)
                 return fd;
 
-        return fd_set_attribute(item, fd, path, /* st= */ NULL, creation);
+        return fd_set_attribute(c, item, fd, path, /* st= */ NULL, creation);
 }
 
 static int write_argument_data(Item *i, int fd, const char *path) {
@@ -1421,18 +1625,19 @@ static int write_argument_data(Item *i, int fd, const char *path) {
 
         log_debug("Writing to \"%s\".", path);
 
-        r = loop_write(fd, item_binary_argument(i), item_binary_argument_size(i), /* do_poll= */ false);
+        r = loop_write(fd, item_binary_argument(i), item_binary_argument_size(i));
         if (r < 0)
                 return log_error_errno(r, "Failed to write file \"%s\": %m", path);
 
         return 0;
 }
 
-static int write_one_file(Item *i, const char *path, CreationMode creation) {
+static int write_one_file(Context *c, Item *i, const char *path, CreationMode creation) {
         _cleanup_close_ int fd = -EBADF, dir_fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         int r;
 
+        assert(c);
         assert(i);
         assert(path);
         assert(i->type == WRITE_FILE);
@@ -1471,16 +1676,21 @@ static int write_one_file(Item *i, const char *path, CreationMode creation) {
         if (r < 0)
                 return r;
 
-        return fd_set_perms(i, fd, path, NULL, creation);
+        return fd_set_perms(c, i, fd, path, NULL, creation);
 }
 
-static int create_file(Item *i, const char *path) {
+static int create_file(
+                Context *c,
+                Item *i,
+                const char *path) {
+
         _cleanup_close_ int fd = -EBADF, dir_fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         struct stat stbuf, *st = NULL;
         CreationMode creation;
         int r = 0;
 
+        assert(c);
         assert(i);
         assert(path);
         assert(i->type == CREATE_FILE);
@@ -1536,10 +1746,14 @@ static int create_file(Item *i, const char *path) {
                 creation = CREATION_NORMAL;
         }
 
-        return fd_set_perms(i, fd, path, st, creation);
+        return fd_set_perms(c, i, fd, path, st, creation);
 }
 
-static int truncate_file(Item *i, const char *path) {
+static int truncate_file(
+                Context *c,
+                Item *i,
+                const char *path) {
+
         _cleanup_close_ int fd = -EBADF, dir_fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         struct stat stbuf, *st = NULL;
@@ -1547,6 +1761,7 @@ static int truncate_file(Item *i, const char *path) {
         bool erofs = false;
         int r = 0;
 
+        assert(c);
         assert(i);
         assert(path);
         assert(i->type == TRUNCATE_FILE || (i->type == CREATE_FILE && i->append_or_force));
@@ -1625,10 +1840,10 @@ static int truncate_file(Item *i, const char *path) {
                         return r;
         }
 
-        return fd_set_perms(i, fd, path, st, creation);
+        return fd_set_perms(c, i, fd, path, st, creation);
 }
 
-static int copy_files(Item *i) {
+static int copy_files(Context *c, Item *i) {
         _cleanup_close_ int dfd = -EBADF, fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         struct stat st, a;
@@ -1650,8 +1865,8 @@ static int copy_files(Item *i) {
                          dfd, bn,
                          i->uid_set ? i->uid : UID_INVALID,
                          i->gid_set ? i->gid : GID_INVALID,
-                         COPY_REFLINK | COPY_MERGE_EMPTY | COPY_MAC_CREATE | COPY_HARDLINKS,
-                         NULL);
+                         COPY_REFLINK | ((i->append_or_force) ? COPY_MERGE : COPY_MERGE_EMPTY) | COPY_MAC_CREATE | COPY_HARDLINKS,
+                         NULL, NULL);
 
         fd = openat(dfd, bn, O_NOFOLLOW|O_CLOEXEC|O_PATH);
         if (fd < 0) {
@@ -1672,7 +1887,7 @@ static int copy_files(Item *i) {
                 return 0;
         }
 
-        return fd_set_perms(i, fd, i->path, &st, _CREATION_MODE_INVALID);
+        return fd_set_perms(c, i, fd, i->path, &st, _CREATION_MODE_INVALID);
 }
 
 static int create_directory_or_subvolume(
@@ -1717,12 +1932,12 @@ static int create_directory_or_subvolume(
                         subvol = false;
                 else {
                         WITH_UMASK((~mode) & 0777)
-                                r = btrfs_subvol_make_fd(pfd, bn);
+                                r = btrfs_subvol_make(pfd, bn);
                 }
         } else
                 r = 0;
 
-        if (!subvol || ERRNO_IS_NOT_SUPPORTED(r))
+        if (!subvol || ERRNO_IS_NEG_NOT_SUPPORTED(r))
                 WITH_UMASK(0000)
                         r = mkdirat_label(pfd, bn, mode);
 
@@ -1760,11 +1975,16 @@ static int create_directory_or_subvolume(
         return fd;
 }
 
-static int create_directory(Item *i, const char *path) {
+static int create_directory(
+                Context *c,
+                Item *i,
+                const char *path) {
+
         _cleanup_close_ int fd = -EBADF;
         CreationMode creation;
         struct stat st;
 
+        assert(c);
         assert(i);
         assert(IN_SET(i->type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY));
 
@@ -1774,15 +1994,20 @@ static int create_directory(Item *i, const char *path) {
         if (fd < 0)
                 return fd;
 
-        return fd_set_perms(i, fd, path, &st, creation);
+        return fd_set_perms(c, i, fd, path, &st, creation);
 }
 
-static int create_subvolume(Item *i, const char *path) {
+static int create_subvolume(
+                Context *c,
+                Item *i,
+                const char *path) {
+
         _cleanup_close_ int fd = -EBADF;
         CreationMode creation;
         struct stat st;
         int r, q = 0;
 
+        assert(c);
         assert(i);
         assert(IN_SET(i->type, CREATE_SUBVOLUME, CREATE_SUBVOLUME_NEW_QUOTA, CREATE_SUBVOLUME_INHERIT_QUOTA));
 
@@ -1809,22 +2034,28 @@ static int create_subvolume(Item *i, const char *path) {
                         log_debug("Quota for subvolume \"%s\" already in place, no change made.", i->path);
         }
 
-        r = fd_set_perms(i, fd, path, &st, creation);
+        r = fd_set_perms(c, i, fd, path, &st, creation);
         if (q < 0) /* prefer the quota change error from above */
                 return q;
 
         return r;
 }
 
-static int empty_directory(Item *i, const char *path, CreationMode creation) {
+static int empty_directory(
+                Context *c,
+                Item *i,
+                const char *path,
+                CreationMode creation) {
+
         _cleanup_close_ int fd = -EBADF;
         struct stat st;
         int r;
 
+        assert(c);
         assert(i);
         assert(i->type == EMPTY_DIRECTORY);
 
-        r = chase_symlinks(path, arg_root, CHASE_SAFE|CHASE_WARN, NULL, &fd);
+        r = chase(path, arg_root, CHASE_SAFE|CHASE_WARN, NULL, &fd);
         if (r == -ENOLINK) /* Unsafe symlink: already covered by CHASE_WARN */
                 return r;
         if (r == -ENOENT) {
@@ -1843,16 +2074,21 @@ static int empty_directory(Item *i, const char *path, CreationMode creation) {
                 return 0;
         }
 
-        return fd_set_perms(i, fd, path, &st, creation);
+        return fd_set_perms(c, i, fd, path, &st, creation);
 }
 
-static int create_device(Item *i, mode_t file_type) {
+static int create_device(
+                Context *c,
+                Item *i,
+                mode_t file_type) {
+
         _cleanup_close_ int dfd = -EBADF, fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         CreationMode creation;
         struct stat st;
         int r;
 
+        assert(c);
         assert(i);
         assert(IN_SET(i->type, CREATE_BLOCK_DEVICE, CREATE_CHAR_DEVICE));
         assert(IN_SET(file_type, S_IFBLK, S_IFCHR));
@@ -1942,7 +2178,7 @@ static int create_device(Item *i, mode_t file_type) {
                   i->type == CREATE_BLOCK_DEVICE ? "block" : "char",
                   i->path, major(i->mode), minor(i->mode));
 
-        return fd_set_perms(i, fd, i->path, &st, creation);
+        return fd_set_perms(c, i, fd, i->path, &st, creation);
 
 handle_privilege:
         log_debug_errno(r,
@@ -1951,13 +2187,14 @@ handle_privilege:
         return 0;
 }
 
-static int create_fifo(Item *i) {
+static int create_fifo(Context *c, Item *i) {
         _cleanup_close_ int pfd = -EBADF, fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         CreationMode creation;
         struct stat st;
         int r;
 
+        assert(c);
         assert(i);
         assert(i->type == CREATE_FIFO);
 
@@ -2033,10 +2270,10 @@ static int create_fifo(Item *i) {
 
         log_debug("%s fifo \"%s\".", creation_mode_verb_to_string(creation), i->path);
 
-        return fd_set_perms(i, fd, i->path, &st, creation);
+        return fd_set_perms(c, i, fd, i->path, &st, creation);
 }
 
-static int create_symlink(Item *i) {
+static int create_symlink(Context *c, Item *i) {
         _cleanup_close_ int pfd = -EBADF, fd = -EBADF;
         _cleanup_free_ char *bn = NULL;
         CreationMode creation;
@@ -2044,6 +2281,7 @@ static int create_symlink(Item *i) {
         bool good = false;
         int r;
 
+        assert(c);
         assert(i);
 
         r = path_extract_filename(i->path, &bn);
@@ -2122,13 +2360,14 @@ static int create_symlink(Item *i) {
         }
 
         log_debug("%s symlink \"%s\".", creation_mode_verb_to_string(creation), i->path);
-        return fd_set_perms(i, fd, i->path, &st, creation);
+        return fd_set_perms(c, i, fd, i->path, &st, creation);
 }
 
-typedef int (*action_t)(Item *i, const char *path, CreationMode creation);
-typedef int (*fdaction_t)(Item *i, int fd, const char *path, const struct stat *st, CreationMode creation);
+typedef int (*action_t)(Context *c, Item *i, const char *path, CreationMode creation);
+typedef int (*fdaction_t)(Context *c, Item *i, int fd, const char *path, const struct stat *st, CreationMode creation);
 
 static int item_do(
+                Context *c,
                 Item *i,
                 int fd,
                 const char *path,
@@ -2138,6 +2377,7 @@ static int item_do(
         struct stat st;
         int r = 0, q;
 
+        assert(c);
         assert(i);
         assert(path);
         assert(fd >= 0);
@@ -2148,7 +2388,7 @@ static int item_do(
         }
 
         /* This returns the first error we run into, but nevertheless tries to go on */
-        r = action(i, fd, path, &st, creation);
+        r = action(c, i, fd, path, &st, creation);
 
         if (S_ISDIR(st.st_mode)) {
                 _cleanup_closedir_ DIR *d = NULL;
@@ -2180,7 +2420,7 @@ static int item_do(
                                         q = log_oom();
                                 else
                                         /* Pass ownership of dirent fd over */
-                                        q = item_do(i, de_fd, de_path, CREATION_EXISTING, action);
+                                        q = item_do(c, i, de_fd, de_path, CREATION_EXISTING, action);
                         }
 
                         if (q < 0 && r == 0)
@@ -2192,11 +2432,14 @@ finish:
         return r;
 }
 
-static int glob_item(Item *i, action_t action) {
+static int glob_item(Context *c, Item *i, action_t action) {
         _cleanup_globfree_ glob_t g = {
                 .gl_opendir = (void *(*)(const char *)) opendir_nomod,
         };
         int r = 0, k;
+
+        assert(c);
+        assert(i);
 
         k = safe_glob(i->path, GLOB_NOSORT|GLOB_BRACE, &g);
         if (k < 0 && k != -ENOENT)
@@ -2204,7 +2447,7 @@ static int glob_item(Item *i, action_t action) {
 
         STRV_FOREACH(fn, g.gl_pathv) {
                 /* We pass CREATION_EXISTING here, since if we are globbing for it, it always has to exist */
-                k = action(i, *fn, CREATION_EXISTING);
+                k = action(c, i, *fn, CREATION_EXISTING);
                 if (k < 0 && r == 0)
                         r = k;
         }
@@ -2212,7 +2455,11 @@ static int glob_item(Item *i, action_t action) {
         return r;
 }
 
-static int glob_item_recursively(Item *i, fdaction_t action) {
+static int glob_item_recursively(
+                Context *c,
+                Item *i,
+                fdaction_t action) {
+
         _cleanup_globfree_ glob_t g = {
                 .gl_opendir = (void *(*)(const char *)) opendir_nomod,
         };
@@ -2238,7 +2485,7 @@ static int glob_item_recursively(Item *i, fdaction_t action) {
                         continue;
                 }
 
-                k = item_do(i, fd, *fn, CREATION_EXISTING, action);
+                k = item_do(c, i, fd, *fn, CREATION_EXISTING, action);
                 if (k < 0 && r == 0)
                         r = k;
 
@@ -2422,9 +2669,10 @@ static int mkdir_parents_item(Item *i, mode_t child_mode) {
         return 0;
 }
 
-static int create_item(Item *i) {
+static int create_item(Context *c, Item *i) {
         int r;
 
+        assert(c);
         assert(i);
 
         log_debug("Running create action for entry %c %s", (char) i->type, i->path);
@@ -2444,9 +2692,9 @@ static int create_item(Item *i) {
                         return r;
 
                 if ((i->type == CREATE_FILE && i->append_or_force) || i->type == TRUNCATE_FILE)
-                        r = truncate_file(i, i->path);
+                        r = truncate_file(c, i, i->path);
                 else
-                        r = create_file(i, i->path);
+                        r = create_file(c, i, i->path);
                 if (r < 0)
                         return r;
                 break;
@@ -2456,13 +2704,13 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = copy_files(i);
+                r = copy_files(c, i);
                 if (r < 0)
                         return r;
                 break;
 
         case WRITE_FILE:
-                r = glob_item(i, write_one_file);
+                r = glob_item(c, i, write_one_file);
                 if (r < 0)
                         return r;
 
@@ -2474,7 +2722,7 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = create_directory(i, i->path);
+                r = create_directory(c, i, i->path);
                 if (r < 0)
                         return r;
                 break;
@@ -2486,13 +2734,13 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = create_subvolume(i, i->path);
+                r = create_subvolume(c, i, i->path);
                 if (r < 0)
                         return r;
                 break;
 
         case EMPTY_DIRECTORY:
-                r = glob_item(i, empty_directory);
+                r = glob_item(c, i, empty_directory);
                 if (r < 0)
                         return r;
                 break;
@@ -2502,7 +2750,7 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = create_fifo(i);
+                r = create_fifo(c, i);
                 if (r < 0)
                         return r;
                 break;
@@ -2512,7 +2760,7 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = create_symlink(i);
+                r = create_symlink(c, i);
                 if (r < 0)
                         return r;
 
@@ -2532,7 +2780,7 @@ static int create_item(Item *i) {
                 if (r < 0)
                         return r;
 
-                r = create_device(i, i->type == CREATE_BLOCK_DEVICE ? S_IFBLK : S_IFCHR);
+                r = create_device(c, i, i->type == CREATE_BLOCK_DEVICE ? S_IFBLK : S_IFCHR);
                 if (r < 0)
                         return r;
 
@@ -2540,49 +2788,49 @@ static int create_item(Item *i) {
 
         case ADJUST_MODE:
         case RELABEL_PATH:
-                r = glob_item(i, path_set_perms);
+                r = glob_item(c, i, path_set_perms);
                 if (r < 0)
                         return r;
                 break;
 
         case RECURSIVE_RELABEL_PATH:
-                r = glob_item_recursively(i, fd_set_perms);
+                r = glob_item_recursively(c, i, fd_set_perms);
                 if (r < 0)
                         return r;
                 break;
 
         case SET_XATTR:
-                r = glob_item(i, path_set_xattrs);
+                r = glob_item(c, i, path_set_xattrs);
                 if (r < 0)
                         return r;
                 break;
 
         case RECURSIVE_SET_XATTR:
-                r = glob_item_recursively(i, fd_set_xattrs);
+                r = glob_item_recursively(c, i, fd_set_xattrs);
                 if (r < 0)
                         return r;
                 break;
 
         case SET_ACL:
-                r = glob_item(i, path_set_acls);
+                r = glob_item(c, i, path_set_acls);
                 if (r < 0)
                         return r;
                 break;
 
         case RECURSIVE_SET_ACL:
-                r = glob_item_recursively(i, fd_set_acls);
+                r = glob_item_recursively(c, i, fd_set_acls);
                 if (r < 0)
                         return r;
                 break;
 
         case SET_ATTRIBUTE:
-                r = glob_item(i, path_set_attribute);
+                r = glob_item(c, i, path_set_attribute);
                 if (r < 0)
                         return r;
                 break;
 
         case RECURSIVE_SET_ATTRIBUTE:
-                r = glob_item_recursively(i, fd_set_attribute);
+                r = glob_item_recursively(c, i, fd_set_attribute);
                 if (r < 0)
                         return r;
                 break;
@@ -2591,9 +2839,15 @@ static int create_item(Item *i) {
         return 0;
 }
 
-static int remove_item_instance(Item *i, const char *instance, CreationMode creation) {
+static int remove_item_instance(
+                Context *c,
+                Item *i,
+                const char *instance,
+                CreationMode creation) {
+
         int r;
 
+        assert(c);
         assert(i);
 
         switch (i->type) {
@@ -2620,9 +2874,10 @@ static int remove_item_instance(Item *i, const char *instance, CreationMode crea
         return 0;
 }
 
-static int remove_item(Item *i) {
+static int remove_item(Context *c, Item *i) {
         int r;
 
+        assert(c);
         assert(i);
 
         log_debug("Running remove action for entry %c %s", (char) i->type, i->path);
@@ -2640,7 +2895,7 @@ static int remove_item(Item *i) {
 
         case REMOVE_PATH:
         case RECURSIVE_REMOVE_PATH:
-                return glob_item(i, remove_item_instance);
+                return glob_item(c, i, remove_item_instance);
 
         default:
                 return 0;
@@ -2665,6 +2920,7 @@ static char *age_by_to_string(AgeBy ab, bool is_dir) {
 }
 
 static int clean_item_instance(
+                Context *c,
                 Item *i,
                 const char* instance,
                 CreationMode creation) {
@@ -2731,7 +2987,7 @@ static int clean_item_instance(
                           ab_f, ab_d);
         }
 
-        return dir_cleanup(i, instance, d,
+        return dir_cleanup(c, i, instance, d,
                            load_statx_timestamp_nsec(&sx.stx_atime),
                            load_statx_timestamp_nsec(&sx.stx_mtime),
                            cutoff * NSEC_PER_USEC,
@@ -2740,12 +2996,14 @@ static int clean_item_instance(
                            i->age_by_file, i->age_by_dir);
 }
 
-static int clean_item(Item *i) {
+static int clean_item(Context *c, Item *i) {
+        assert(c);
         assert(i);
 
         log_debug("Running clean action for entry %c %s", (char) i->type, i->path);
 
         switch (i->type) {
+
         case CREATE_DIRECTORY:
         case CREATE_SUBVOLUME:
         case CREATE_SUBVOLUME_INHERIT_QUOTA:
@@ -2753,22 +3011,29 @@ static int clean_item(Item *i) {
         case TRUNCATE_DIRECTORY:
         case IGNORE_PATH:
         case COPY_FILES:
-                clean_item_instance(i, i->path, CREATION_EXISTING);
+                clean_item_instance(c, i, i->path, CREATION_EXISTING);
                 return 0;
+
         case EMPTY_DIRECTORY:
         case IGNORE_DIRECTORY_PATH:
-                return glob_item(i, clean_item_instance);
+                return glob_item(c, i, clean_item_instance);
+
         default:
                 return 0;
         }
 }
 
-static int process_item(Item *i, OperationMask operation) {
+static int process_item(
+                Context *c,
+                Item *i,
+                OperationMask operation) {
+
         OperationMask todo;
         _cleanup_free_ char *_path = NULL;
         const char *path;
         int r, q, p;
 
+        assert(c);
         assert(i);
 
         todo = operation & ~i->done;
@@ -2789,7 +3054,7 @@ static int process_item(Item *i, OperationMask operation) {
                         path = _path;
         }
 
-        r = chase_symlinks(path, arg_root, CHASE_NO_AUTOFS|CHASE_NONEXISTENT|CHASE_WARN, NULL, NULL);
+        r = chase(path, arg_root, CHASE_NO_AUTOFS|CHASE_NONEXISTENT|CHASE_WARN, NULL, NULL);
         if (r == -EREMOTE) {
                 log_notice_errno(r, "Skipping %s", i->path); /* We log the configured path, to not confuse the user. */
                 return 0;
@@ -2797,37 +3062,42 @@ static int process_item(Item *i, OperationMask operation) {
         if (r < 0)
                 log_debug_errno(r, "Failed to determine whether '%s' is below autofs, ignoring: %m", i->path);
 
-        r = FLAGS_SET(operation, OPERATION_CREATE) ? create_item(i) : 0;
+        r = FLAGS_SET(operation, OPERATION_CREATE) ? create_item(c, i) : 0;
         /* Failure can only be tolerated for create */
         if (i->allow_failure)
                 r = 0;
 
-        q = FLAGS_SET(operation, OPERATION_REMOVE) ? remove_item(i) : 0;
-        p = FLAGS_SET(operation, OPERATION_CLEAN) ? clean_item(i) : 0;
+        q = FLAGS_SET(operation, OPERATION_REMOVE) ? remove_item(c, i) : 0;
+        p = FLAGS_SET(operation, OPERATION_CLEAN) ? clean_item(c, i) : 0;
 
         return r < 0 ? r :
                 q < 0 ? q :
                 p;
 }
 
-static int process_item_array(ItemArray *array, OperationMask operation) {
+static int process_item_array(
+                Context *c,
+                ItemArray *array,
+                OperationMask operation) {
+
         int r = 0;
         size_t n;
 
+        assert(c);
         assert(array);
 
         /* Create any parent first. */
         if (FLAGS_SET(operation, OPERATION_CREATE) && array->parent)
-                r = process_item_array(array->parent, operation & OPERATION_CREATE);
+                r = process_item_array(c, array->parent, operation & OPERATION_CREATE);
 
         /* Clean up all children first */
         if ((operation & (OPERATION_REMOVE|OPERATION_CLEAN)) && !set_isempty(array->children)) {
-                ItemArray *c;
+                ItemArray *cc;
 
-                SET_FOREACH(c, array->children) {
+                SET_FOREACH(cc, array->children) {
                         int k;
 
-                        k = process_item_array(c, operation & (OPERATION_REMOVE|OPERATION_CLEAN));
+                        k = process_item_array(c, cc, operation & (OPERATION_REMOVE|OPERATION_CLEAN));
                         if (k < 0 && r == 0)
                                 r = k;
                 }
@@ -2836,7 +3106,7 @@ static int process_item_array(ItemArray *array, OperationMask operation) {
         for (n = 0; n < array->n_items; n++) {
                 int k;
 
-                k = process_item(array->items + n, operation);
+                k = process_item(c, array->items + n, operation);
                 if (k < 0 && r == 0)
                         r = k;
         }
@@ -2854,6 +3124,9 @@ static void item_free_contents(Item *i) {
 #if HAVE_ACL
         if (i->acl_access)
                 acl_free(i->acl_access);
+
+        if (i->acl_access_exec)
+                acl_free(i->acl_access_exec);
 
         if (i->acl_default)
                 acl_free(i->acl_default);
@@ -3005,7 +3278,7 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
          * might create the paths that are intermediary to the listed paths. We can't really cover the generic case,
          * but the least we can do is cover the specific case of /var/run vs. /run, as /var/run is a legacy name for
          * /run only, and we explicitly document that and require that on systemd systems the former is a symlink to
-         * the latter. Moreover files below this path are by far the primary usecase for tmpfiles.d/. */
+         * the latter. Moreover files below this path are by far the primary use case for tmpfiles.d/. */
 
         k = path_startswith(*path, "/var/run/");
         if (isempty(k)) /* Don't complain about other paths than /var/run, and not about /var/run itself either. */
@@ -3150,6 +3423,7 @@ static bool is_duplicated_item(ItemArray *existing, const Item *i) {
 }
 
 static int parse_line(
+                Context *c,
                 const char *fname,
                 unsigned line,
                 const char *buffer,
@@ -3166,8 +3440,10 @@ static int parse_line(
         ItemArray *existing;
         OrderedHashmap *h;
         int r, pos;
-        bool append_or_force = false, boot = false, allow_failure = false, try_replace = false, unbase64 = false, from_cred = false;
+        bool append_or_force = false, boot = false, allow_failure = false, try_replace = false,
+                unbase64 = false, from_cred = false, missing_user_or_group = false;
 
+        assert(c);
         assert(fname);
         assert(line >= 1);
         assert(buffer);
@@ -3191,7 +3467,7 @@ static int parse_line(
                 { 'S', specifier_directory,       UINT_TO_PTR(DIRECTORY_STATE)   },
                 { 't', specifier_directory,       UINT_TO_PTR(DIRECTORY_RUNTIME) },
 
-                COMMON_CREDS_SPECIFIERS(arg_user ? LOOKUP_SCOPE_USER : LOOKUP_SCOPE_SYSTEM),
+                COMMON_CREDS_SPECIFIERS(arg_runtime_scope),
                 COMMON_TMP_SPECIFIERS,
                 {}
         };
@@ -3199,7 +3475,7 @@ static int parse_line(
         r = extract_many_words(
                         &buffer,
                         NULL,
-                        EXTRACT_UNQUOTE,
+                        EXTRACT_UNQUOTE | EXTRACT_CUNESCAPE,
                         &action,
                         &path,
                         &mode,
@@ -3513,12 +3789,15 @@ static int parse_line(
                         u = user;
 
                 r = find_uid(u, &i.uid, uid_cache);
-                if (r < 0) {
+                if (r == -ESRCH && arg_graceful) {
+                        log_syntax(NULL, LOG_DEBUG, fname, line, r,
+                                   "%s: user '%s' not found, not adjusting ownership.", i.path, u);
+                        missing_user_or_group = true;
+                } else if (r < 0) {
                         *invalid_config = true;
                         return log_syntax(NULL, LOG_ERR, fname, line, r, "Failed to resolve user '%s': %m", u);
-                }
-
-                i.uid_set = true;
+                } else
+                        i.uid_set = true;
         }
 
         if (!empty_or_dash(group)) {
@@ -3531,12 +3810,15 @@ static int parse_line(
                         g = group;
 
                 r = find_gid(g, &i.gid, gid_cache);
-                if (r < 0) {
+                if (r == -ESRCH && arg_graceful) {
+                        log_syntax(NULL, LOG_DEBUG, fname, line, r,
+                                   "%s: group '%s' not found, not adjusting ownership.", i.path, g);
+                        missing_user_or_group = true;
+                } else if (r < 0) {
                         *invalid_config = true;
-                        return log_syntax(NULL, LOG_ERR, fname, line, r, "Failed to resolve group '%s'.", g);
-                }
-
-                i.gid_set = true;
+                        return log_syntax(NULL, LOG_ERR, fname, line, r, "Failed to resolve group '%s': %m", g);
+                } else
+                        i.gid_set = true;
         }
 
         if (!empty_or_dash(mode)) {
@@ -3561,7 +3843,20 @@ static int parse_line(
                 i.mode = m;
                 i.mode_set = true;
         } else
-                i.mode = IN_SET(i.type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA) ? 0755 : 0644;
+                i.mode = IN_SET(i.type,
+                                CREATE_DIRECTORY,
+                                TRUNCATE_DIRECTORY,
+                                CREATE_SUBVOLUME,
+                                CREATE_SUBVOLUME_INHERIT_QUOTA,
+                                CREATE_SUBVOLUME_NEW_QUOTA) ? 0755 : 0644;
+
+        if (missing_user_or_group && (i.mode & ~0777) != 0) {
+                /* Refuse any special bits for nodes where we couldn't resolve the ownership properly. */
+                mode_t adjusted = i.mode & 0777;
+                log_syntax(NULL, LOG_INFO, fname, line, 0,
+                           "Changing mode 0%o to 0%o because of changed ownership.", i.mode, adjusted);
+                i.mode = adjusted;
+        }
 
         if (!empty_or_dash(age)) {
                 const char *a = age;
@@ -3601,7 +3896,7 @@ static int parse_line(
                 i.age_set = true;
         }
 
-        h = needs_glob(i.type) ? globs : items;
+        h = needs_glob(i.type) ? c->globs : c->items;
 
         existing = ordered_hashmap_get(h, i.path);
         if (existing) {
@@ -3625,8 +3920,7 @@ static int parse_line(
         if (!GREEDY_REALLOC(existing->items, existing->n_items + 1))
                 return log_oom();
 
-        existing->items[existing->n_items++] = i;
-        i = (struct Item) {};
+        existing->items[existing->n_items++] = TAKE_STRUCT(i);
 
         /* Sort item array, to enforce stable ordering of application */
         typesafe_qsort(existing->items, existing->n_items, item_compare);
@@ -3642,7 +3936,9 @@ static int cat_config(char **config_dirs, char **args) {
         if (r < 0)
                 return r;
 
-        return cat_files(NULL, files, 0);
+        pager_open(arg_pager_flags);
+
+        return cat_files(NULL, files, arg_cat_flags);
 }
 
 static int exclude_default_prefixes(void) {
@@ -3680,15 +3976,18 @@ static int help(void) {
                "     --user                 Execute user configuration\n"
                "     --version              Show package version\n"
                "     --cat-config           Show configuration files\n"
+               "     --tldr                 Show non-comment parts of configuration\n"
                "     --create               Create marked files/directories\n"
                "     --clean                Clean up marked directories\n"
                "     --remove               Remove marked files/directories\n"
                "     --boot                 Execute actions only safe at boot\n"
+               "     --graceful             Quietly ignore unknown users or groups\n"
                "     --prefix=PATH          Only apply rules with the specified prefix\n"
                "     --exclude-prefix=PATH  Ignore rules with the specified prefix\n"
                "  -E                        Ignore rules prefixed with /dev, /proc, /run, /sys\n"
                "     --root=PATH            Operate on an alternate filesystem root\n"
                "     --image=PATH           Operate on disk image as filesystem root\n"
+               "     --image-policy=POLICY  Specify disk image dissection policy\n"
                "     --replace=PATH         Treat arguments as replacement for PATH\n"
                "     --no-pager             Do not pipe output into a pager\n"
                "\nSee the %s for details.\n",
@@ -3705,15 +4004,18 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_CAT_CONFIG,
+                ARG_TLDR,
                 ARG_USER,
                 ARG_CREATE,
                 ARG_CLEAN,
                 ARG_REMOVE,
                 ARG_BOOT,
+                ARG_GRACEFUL,
                 ARG_PREFIX,
                 ARG_EXCLUDE_PREFIX,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_REPLACE,
                 ARG_NO_PAGER,
         };
@@ -3723,14 +4025,17 @@ static int parse_argv(int argc, char *argv[]) {
                 { "user",           no_argument,         NULL, ARG_USER           },
                 { "version",        no_argument,         NULL, ARG_VERSION        },
                 { "cat-config",     no_argument,         NULL, ARG_CAT_CONFIG     },
+                { "tldr",           no_argument,         NULL, ARG_TLDR           },
                 { "create",         no_argument,         NULL, ARG_CREATE         },
                 { "clean",          no_argument,         NULL, ARG_CLEAN          },
                 { "remove",         no_argument,         NULL, ARG_REMOVE         },
                 { "boot",           no_argument,         NULL, ARG_BOOT           },
+                { "graceful",       no_argument,         NULL, ARG_GRACEFUL       },
                 { "prefix",         required_argument,   NULL, ARG_PREFIX         },
                 { "exclude-prefix", required_argument,   NULL, ARG_EXCLUDE_PREFIX },
                 { "root",           required_argument,   NULL, ARG_ROOT           },
                 { "image",          required_argument,   NULL, ARG_IMAGE          },
+                { "image-policy",   required_argument,   NULL, ARG_IMAGE_POLICY   },
                 { "replace",        required_argument,   NULL, ARG_REPLACE        },
                 { "no-pager",       no_argument,         NULL, ARG_NO_PAGER       },
                 {}
@@ -3752,11 +4057,15 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case ARG_CAT_CONFIG:
-                        arg_cat_config = true;
+                        arg_cat_flags = CAT_CONFIG_ON;
+                        break;
+
+                case ARG_TLDR:
+                        arg_cat_flags = CAT_TLDR;
                         break;
 
                 case ARG_USER:
-                        arg_user = true;
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
                         break;
 
                 case ARG_CREATE:
@@ -3773,6 +4082,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_BOOT:
                         arg_boot = true;
+                        break;
+
+                case ARG_GRACEFUL:
+                        arg_graceful = true;
                         break;
 
                 case ARG_PREFIX:
@@ -3810,6 +4123,12 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
+                        if (r < 0)
+                                return r;
+                        break;
+
                 case ARG_REPLACE:
                         if (!path_is_absolute(optarg) ||
                             !endswith(optarg, ".conf"))
@@ -3830,19 +4149,19 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached();
                 }
 
-        if (arg_operation == 0 && !arg_cat_config)
+        if (arg_operation == 0 && arg_cat_flags == CAT_CONFIG_OFF)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "You need to specify at least one of --clean, --create or --remove.");
+                                       "You need to specify at least one of --clean, --create, or --remove.");
 
-        if (arg_replace && arg_cat_config)
+        if (arg_replace && arg_cat_flags != CAT_CONFIG_OFF)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Option --replace= is not supported with --cat-config");
+                                       "Option --replace= is not supported with --cat-config/--tldr.");
 
         if (arg_replace && optind >= argc)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "When --replace= is given, some configuration items must be specified");
+                                       "When --replace= is given, some configuration items must be specified.");
 
-        if (arg_root && arg_user)
+        if (arg_root && arg_runtime_scope == RUNTIME_SCOPE_USER)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Combination of --user and --root= is not supported.");
 
@@ -3853,12 +4172,13 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int read_config_file(
+                Context *c,
                 char **config_dirs,
                 const char *fn,
                 bool ignore_enoent,
                 bool *invalid_config) {
 
-        _cleanup_(hashmap_freep) Hashmap *uid_cache = NULL, *gid_cache = NULL;
+        _cleanup_hashmap_free_ Hashmap *uid_cache = NULL, *gid_cache = NULL;
         _cleanup_fclose_ FILE *_f = NULL;
         _cleanup_free_ char *pp = NULL;
         unsigned v = 0;
@@ -3866,6 +4186,7 @@ static int read_config_file(
         ItemArray *ia;
         int r = 0;
 
+        assert(c);
         assert(fn);
 
         if (streq(fn, "-")) {
@@ -3891,10 +4212,9 @@ static int read_config_file(
         for (;;) {
                 _cleanup_free_ char *line = NULL;
                 bool invalid_line = false;
-                char *l;
                 int k;
 
-                k = read_line(f, LONG_LINE_MAX, &line);
+                k = read_stripped_line(f, LONG_LINE_MAX, &line);
                 if (k < 0)
                         return log_error_errno(k, "Failed to read '%s': %m", fn);
                 if (k == 0)
@@ -3902,11 +4222,10 @@ static int read_config_file(
 
                 v++;
 
-                l = strstrip(line);
-                if (IN_SET(*l, 0, '#'))
+                if (IN_SET(line[0], 0, '#'))
                         continue;
 
-                k = parse_line(fn, v, l, &invalid_line, &uid_cache, &gid_cache);
+                k = parse_line(c, fn, v, line, &invalid_line, &uid_cache, &gid_cache);
                 if (k < 0) {
                         if (invalid_line)
                                 /* Allow reporting with a special code if the caller requested this */
@@ -3918,7 +4237,7 @@ static int read_config_file(
         }
 
         /* we have to determine age parameter for each entry of type X */
-        ORDERED_HASHMAP_FOREACH(ia, globs)
+        ORDERED_HASHMAP_FOREACH(ia, c->globs)
                 for (size_t ni = 0; ni < ia->n_items; ni++) {
                         ItemArray *ja;
                         Item *i = ia->items + ni, *candidate_item = NULL;
@@ -3926,7 +4245,7 @@ static int read_config_file(
                         if (i->type != IGNORE_DIRECTORY_PATH)
                                 continue;
 
-                        ORDERED_HASHMAP_FOREACH(ja, items)
+                        ORDERED_HASHMAP_FOREACH(ja, c->items)
                                 for (size_t nj = 0; nj < ja->n_items; nj++) {
                                         Item *j = ja->items + nj;
 
@@ -3963,11 +4282,17 @@ static int read_config_file(
         return r;
 }
 
-static int parse_arguments(char **config_dirs, char **args, bool *invalid_config) {
+static int parse_arguments(
+                Context *c,
+                char **config_dirs,
+                char **args,
+                bool *invalid_config) {
         int r;
 
+        assert(c);
+
         STRV_FOREACH(arg, args) {
-                r = read_config_file(config_dirs, *arg, false, invalid_config);
+                r = read_config_file(c, config_dirs, *arg, false, invalid_config);
                 if (r < 0)
                         return r;
         }
@@ -3975,10 +4300,17 @@ static int parse_arguments(char **config_dirs, char **args, bool *invalid_config
         return 0;
 }
 
-static int read_config_files(char **config_dirs, char **args, bool *invalid_config) {
+static int read_config_files(
+                Context *c,
+                char **config_dirs,
+                char **args,
+                bool *invalid_config) {
+
         _cleanup_strv_free_ char **files = NULL;
         _cleanup_free_ char *p = NULL;
         int r;
+
+        assert(c);
 
         r = conf_files_list_with_replacement(arg_root, config_dirs, arg_replace, &files, &p);
         if (r < 0)
@@ -3988,21 +4320,24 @@ static int read_config_files(char **config_dirs, char **args, bool *invalid_conf
                 if (p && path_equal(*f, p)) {
                         log_debug("Parsing arguments at position \"%s\"%s", *f, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
 
-                        r = parse_arguments(config_dirs, args, invalid_config);
+                        r = parse_arguments(c, config_dirs, args, invalid_config);
                         if (r < 0)
                                 return r;
                 } else
                         /* Just warn, ignore result otherwise.
                          * read_config_file() has some debug output, so no need to print anything. */
-                        (void) read_config_file(config_dirs, *f, true, invalid_config);
+                        (void) read_config_file(c, config_dirs, *f, true, invalid_config);
 
         return 0;
 }
 
-static int read_credential_lines(bool *invalid_config) {
+static int read_credential_lines(Context *c, bool *invalid_config) {
+
         _cleanup_free_ char *j = NULL;
         const char *d;
         int r;
+
+        assert(c);
 
         r = get_credentials_dir(&d);
         if (r == -ENXIO)
@@ -4014,15 +4349,16 @@ static int read_credential_lines(bool *invalid_config) {
         if (!j)
                 return log_oom();
 
-        (void) read_config_file(/* config_dirs= */ NULL, j, /* ignore_enoent= */ true, invalid_config);
+        (void) read_config_file(c, /* config_dirs= */ NULL, j, /* ignore_enoent= */ true, invalid_config);
         return 0;
 }
 
-static int link_parent(ItemArray *a) {
+static int link_parent(Context *c, ItemArray *a) {
         const char *path;
         char *prefix;
         int r;
 
+        assert(c);
         assert(a);
 
         /* Finds the closest "parent" item array for the specified item array. Then registers the specified item array
@@ -4037,9 +4373,9 @@ static int link_parent(ItemArray *a) {
         PATH_FOREACH_PREFIX(prefix, path) {
                 ItemArray *j;
 
-                j = ordered_hashmap_get(items, prefix);
+                j = ordered_hashmap_get(c->items, prefix);
                 if (!j)
-                        j = ordered_hashmap_get(globs, prefix);
+                        j = ordered_hashmap_get(c->globs, prefix);
                 if (j) {
                         r = set_ensure_put(&j->children, NULL, a);
                         if (r < 0)
@@ -4059,9 +4395,10 @@ DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(item_array_hash_ops, char, string_
 static int run(int argc, char *argv[]) {
 #ifndef STANDALONE
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
 #endif
         _cleanup_strv_free_ char **config_dirs = NULL;
+        _cleanup_(context_done) Context c = {};
         bool invalid_config = false;
         ItemArray *a;
         enum {
@@ -4090,14 +4427,22 @@ static int run(int argc, char *argv[]) {
         /* Descending down file system trees might take a lot of fds */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
 
-        if (arg_user) {
+        switch (arg_runtime_scope) {
+
+        case RUNTIME_SCOPE_USER:
                 r = user_config_paths(&config_dirs);
                 if (r < 0)
                         return log_error_errno(r, "Failed to initialize configuration directory list: %m");
-        } else {
+                break;
+
+        case RUNTIME_SCOPE_SYSTEM:
                 config_dirs = strv_split_nulstr(CONF_PATHS_NULSTR("tmpfiles.d"));
                 if (!config_dirs)
                         return log_oom();
+                break;
+
+        default:
+                assert_not_reached();
         }
 
         if (DEBUG_LOGGING) {
@@ -4117,15 +4462,12 @@ static int run(int argc, char *argv[]) {
                 log_debug("Looking for configuration files in (higher priority first):%s", t);
         }
 
-        if (arg_cat_config) {
-                pager_open(arg_pager_flags);
-
+        if (arg_cat_flags != CAT_CONFIG_OFF)
                 return cat_config(config_dirs, argv + optind);
-        }
 
         umask(0022);
 
-        r = mac_selinux_init();
+        r = mac_init();
         if (r < 0)
                 return r;
 
@@ -4135,18 +4477,20 @@ static int run(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_REQUIRE_ROOT |
                                 DISSECT_IMAGE_VALIDATE_OS |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_FSCK |
                                 DISSECT_IMAGE_GROWFS,
-                                &unlink_dir,
+                                &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;
 
-                arg_root = strdup(unlink_dir);
+                arg_root = strdup(mounted_dir);
                 if (!arg_root)
                         return log_oom();
         }
@@ -4154,9 +4498,9 @@ static int run(int argc, char *argv[]) {
         assert(!arg_image);
 #endif
 
-        items = ordered_hashmap_new(&item_array_hash_ops);
-        globs = ordered_hashmap_new(&item_array_hash_ops);
-        if (!items || !globs)
+        c.items = ordered_hashmap_new(&item_array_hash_ops);
+        c.globs = ordered_hashmap_new(&item_array_hash_ops);
+        if (!c.items || !c.globs)
                 return log_oom();
 
         /* If command line arguments are specified along with --replace, read all
@@ -4166,24 +4510,24 @@ static int run(int argc, char *argv[]) {
          * read configuration and execute it.
          */
         if (arg_replace || optind >= argc)
-                r = read_config_files(config_dirs, argv + optind, &invalid_config);
+                r = read_config_files(&c, config_dirs, argv + optind, &invalid_config);
         else
-                r = parse_arguments(config_dirs, argv + optind, &invalid_config);
+                r = parse_arguments(&c, config_dirs, argv + optind, &invalid_config);
         if (r < 0)
                 return r;
 
-        r = read_credential_lines(&invalid_config);
+        r = read_credential_lines(&c, &invalid_config);
         if (r < 0)
                 return r;
 
         /* Let's now link up all child/parent relationships */
-        ORDERED_HASHMAP_FOREACH(a, items) {
-                r = link_parent(a);
+        ORDERED_HASHMAP_FOREACH(a, c.items) {
+                r = link_parent(&c, a);
                 if (r < 0)
                         return r;
         }
-        ORDERED_HASHMAP_FOREACH(a, globs) {
-                r = link_parent(a);
+        ORDERED_HASHMAP_FOREACH(a, c.globs) {
+                r = link_parent(&c, a);
                 if (r < 0)
                         return r;
         }
@@ -4204,15 +4548,15 @@ static int run(int argc, char *argv[]) {
                         continue;
 
                 /* The non-globbing ones usually create things, hence we apply them first */
-                ORDERED_HASHMAP_FOREACH(a, items) {
-                        k = process_item_array(a, op);
+                ORDERED_HASHMAP_FOREACH(a, c.items) {
+                        k = process_item_array(&c, a, op);
                         if (k < 0 && r >= 0)
                                 r = k;
                 }
 
                 /* The globbing ones usually alter things, hence we apply them second. */
-                ORDERED_HASHMAP_FOREACH(a, globs) {
-                        k = process_item_array(a, op);
+                ORDERED_HASHMAP_FOREACH(a, c.globs) {
+                        k = process_item_array(&c, a, op);
                         if (k < 0 && r >= 0)
                                 r = k;
                 }

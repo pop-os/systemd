@@ -39,15 +39,18 @@ static char *runtime_dir = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(runtime_dir, rm_rf_physical_and_freep);
 
+/* For testing type compatibility. */
+_unused_ ConfigPerfItemLookup unused_lookup = load_fragment_gperf_lookup;
+
 TEST_RET(unit_file_get_set) {
         int r;
-        Hashmap *h;
+        _cleanup_hashmap_free_ Hashmap *h = NULL;
         UnitFileList *p;
 
-        h = hashmap_new(&string_hash_ops);
+        h = hashmap_new(&unit_file_list_hash_ops_free);
         assert_se(h);
 
-        r = unit_file_get_list(LOOKUP_SCOPE_SYSTEM, NULL, h, NULL, NULL);
+        r = unit_file_get_list(RUNTIME_SCOPE_SYSTEM, NULL, h, NULL, NULL);
         if (IN_SET(r, -EPERM, -EACCES))
                 return log_tests_skipped_errno(r, "unit_file_get_list");
 
@@ -58,8 +61,6 @@ TEST_RET(unit_file_get_set) {
 
         HASHMAP_FOREACH(p, h)
                 printf("%s = %s\n", p->path, unit_file_state_to_string(p->state));
-
-        unit_file_list_free(h);
 
         return 0;
 }
@@ -106,7 +107,7 @@ TEST(config_parse_exec) {
         _cleanup_(manager_freep) Manager *m = NULL;
         _cleanup_(unit_freep) Unit *u = NULL;
 
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
@@ -465,7 +466,7 @@ TEST(config_parse_log_extra_fields) {
         _cleanup_(unit_freep) Unit *u = NULL;
         ExecContext c = {};
 
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
@@ -550,56 +551,56 @@ TEST(install_printf, .sd_booted = true) {
                 strcpy(i.path, d2);                                     \
         } while (false)
 
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%n", "name.service");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%N", "name");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%p", "name");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%i", "");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%j", "name");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%g", "root");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%G", "0");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%u", "root");
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%U", "0");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%n", "name.service");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%N", "name");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%p", "name");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%i", "");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%j", "name");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%g", "root");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%G", "0");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%u", "root");
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%U", "0");
 
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%m", mid);
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%b", bid);
-        expect(LOOKUP_SCOPE_SYSTEM, i, "%H", host);
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%m", mid);
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%b", bid);
+        expect(RUNTIME_SCOPE_SYSTEM, i, "%H", host);
 
-        expect(LOOKUP_SCOPE_SYSTEM, i2, "%g", "root");
-        expect(LOOKUP_SCOPE_SYSTEM, i2, "%G", "0");
-        expect(LOOKUP_SCOPE_SYSTEM, i2, "%u", "root");
-        expect(LOOKUP_SCOPE_SYSTEM, i2, "%U", "0");
+        expect(RUNTIME_SCOPE_SYSTEM, i2, "%g", "root");
+        expect(RUNTIME_SCOPE_SYSTEM, i2, "%G", "0");
+        expect(RUNTIME_SCOPE_SYSTEM, i2, "%u", "root");
+        expect(RUNTIME_SCOPE_SYSTEM, i2, "%U", "0");
 
-        expect(LOOKUP_SCOPE_USER, i2, "%g", group);
-        expect(LOOKUP_SCOPE_USER, i2, "%G", gid);
-        expect(LOOKUP_SCOPE_USER, i2, "%u", user);
-        expect(LOOKUP_SCOPE_USER, i2, "%U", uid);
+        expect(RUNTIME_SCOPE_USER, i2, "%g", group);
+        expect(RUNTIME_SCOPE_USER, i2, "%G", gid);
+        expect(RUNTIME_SCOPE_USER, i2, "%u", user);
+        expect(RUNTIME_SCOPE_USER, i2, "%U", uid);
 
         /* gcc-12.0.1-0.9.fc36.x86_64 insist that streq(…, NULL) is called,
          * even though the call is inside of a conditional where the pointer is checked. :( */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnonnull"
-        expect(LOOKUP_SCOPE_GLOBAL, i2, "%g", NULL);
-        expect(LOOKUP_SCOPE_GLOBAL, i2, "%G", NULL);
-        expect(LOOKUP_SCOPE_GLOBAL, i2, "%u", NULL);
-        expect(LOOKUP_SCOPE_GLOBAL, i2, "%U", NULL);
+        expect(RUNTIME_SCOPE_GLOBAL, i2, "%g", NULL);
+        expect(RUNTIME_SCOPE_GLOBAL, i2, "%G", NULL);
+        expect(RUNTIME_SCOPE_GLOBAL, i2, "%u", NULL);
+        expect(RUNTIME_SCOPE_GLOBAL, i2, "%U", NULL);
 #pragma GCC diagnostic pop
 
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%n", "name@inst.service");
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%N", "name@inst");
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%p", "name");
-        expect(LOOKUP_SCOPE_USER, i3, "%g", group);
-        expect(LOOKUP_SCOPE_USER, i3, "%G", gid);
-        expect(LOOKUP_SCOPE_USER, i3, "%u", user);
-        expect(LOOKUP_SCOPE_USER, i3, "%U", uid);
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%n", "name@inst.service");
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%N", "name@inst");
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%p", "name");
+        expect(RUNTIME_SCOPE_USER, i3, "%g", group);
+        expect(RUNTIME_SCOPE_USER, i3, "%G", gid);
+        expect(RUNTIME_SCOPE_USER, i3, "%u", user);
+        expect(RUNTIME_SCOPE_USER, i3, "%U", uid);
 
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%m", mid);
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%b", bid);
-        expect(LOOKUP_SCOPE_SYSTEM, i3, "%H", host);
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%m", mid);
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%b", bid);
+        expect(RUNTIME_SCOPE_SYSTEM, i3, "%H", host);
 
-        expect(LOOKUP_SCOPE_USER, i4, "%g", group);
-        expect(LOOKUP_SCOPE_USER, i4, "%G", gid);
-        expect(LOOKUP_SCOPE_USER, i4, "%u", user);
-        expect(LOOKUP_SCOPE_USER, i4, "%U", uid);
+        expect(RUNTIME_SCOPE_USER, i4, "%g", group);
+        expect(RUNTIME_SCOPE_USER, i4, "%G", gid);
+        expect(RUNTIME_SCOPE_USER, i4, "%u", user);
+        expect(RUNTIME_SCOPE_USER, i4, "%U", uid);
 }
 
 static uint64_t make_cap(int cap) {
@@ -828,7 +829,7 @@ TEST(config_parse_unit_env_file) {
         _cleanup_strv_free_ char **files = NULL;
         int r;
 
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
@@ -925,7 +926,7 @@ TEST(config_parse_memory_limit) {
                 r = config_parse_memory_limit(NULL, "fake", 1, "section", 1,
                                               limit_tests[i].limit, 1,
                                               limit_tests[i].value, &c, NULL);
-                log_info("%s=%s\t%"PRIu64"==%"PRIu64"\n",
+                log_info("%s=%s\t%"PRIu64"==%"PRIu64,
                          limit_tests[i].limit, limit_tests[i].value,
                          *limit_tests[i].result, limit_tests[i].expected);
                 assert_se(r >= 0);
@@ -961,7 +962,7 @@ TEST(unit_is_recursive_template_dependency) {
         Unit *u;
         int r;
 
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
@@ -1055,7 +1056,7 @@ TEST(config_parse_open_file) {
         _cleanup_(open_file_freep) OpenFile *of = NULL;
         int r;
 
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;

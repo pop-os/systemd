@@ -9,8 +9,14 @@
 typedef struct Link Link;
 typedef struct Manager Manager;
 typedef struct Address Address;
+typedef struct Route Route;
 
 unsigned routes_max(void);
+
+bool link_find_default_gateway(Link *link, int family, Route **gw);
+static inline bool link_has_default_gateway(Link *link, int family) {
+        return link_find_default_gateway(link, family, NULL);
+}
 
 int manager_find_uplink(Manager *m, int family, Link *exclude, Link **ret);
 
@@ -44,6 +50,6 @@ int route_protocol_full_to_string_alloc(int t, char **ret);
 int route_flags_to_string_alloc(uint32_t flags, char **ret);
 
 int manager_get_route_table_from_string(const Manager *m, const char *table, uint32_t *ret);
-int manager_get_route_table_to_string(const Manager *m, uint32_t table, char **ret);
+int manager_get_route_table_to_string(const Manager *m, uint32_t table, bool append_num, char **ret);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_route_table_names);

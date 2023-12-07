@@ -26,7 +26,7 @@ _public_ int sd_bus_get_unique_name(sd_bus *bus, const char **unique) {
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(unique, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         if (!bus->bus_client)
                 return -EINVAL;
@@ -89,7 +89,7 @@ _public_ int sd_bus_request_name(
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(name, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         r = validate_request_name_parameters(bus, name, flags, &param);
         if (r < 0)
@@ -193,7 +193,7 @@ _public_ int sd_bus_request_name_async(
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(name, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         r = validate_request_name_parameters(bus, name, flags, &param);
         if (r < 0)
@@ -247,7 +247,7 @@ _public_ int sd_bus_release_name(
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(name, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         r = validate_release_name_parameters(bus, name);
         if (r < 0)
@@ -340,7 +340,7 @@ _public_ int sd_bus_release_name_async(
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(name, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         r = validate_release_name_parameters(bus, name);
         if (r < 0)
@@ -367,7 +367,7 @@ _public_ int sd_bus_list_names(sd_bus *bus, char ***acquired, char ***activatabl
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(acquired || activatable, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         if (!bus->bus_client)
                 return -EINVAL;
@@ -438,7 +438,7 @@ _public_ int sd_bus_get_name_creds(
         assert_return(name, -EINVAL);
         assert_return((mask & ~SD_BUS_CREDS_AUGMENT) <= _SD_BUS_CREDS_ALL, -EOPNOTSUPP);
         assert_return(mask == 0 || creds, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
         assert_return(service_name_is_valid(name), -EINVAL);
 
         if (!bus->bus_client)
@@ -590,10 +590,9 @@ _public_ int sd_bus_get_name_creds(
                                                 if (r < 0)
                                                         return r;
 
-                                                free(c->label);
-                                                c->label = strndup(p, sz);
-                                                if (!c->label)
-                                                        return -ENOMEM;
+                                                r = free_and_strndup(&c->label, p, sz);
+                                                if (r < 0)
+                                                        return r;
 
                                                 c->mask |= SD_BUS_CREDS_SELINUX_CONTEXT;
 
@@ -693,7 +692,7 @@ _public_ int sd_bus_get_name_creds(
                                                 "s",
                                                 unique ?: name);
                                 if (r < 0) {
-                                        if (!sd_bus_error_has_name(&error, "org.freedesktop.DBus.Error.SELinuxSecurityContextUnknown"))
+                                        if (!sd_bus_error_has_name(&error, SD_BUS_ERROR_SELINUX_SECURITY_CONTEXT_UNKNOWN))
                                                 return r;
 
                                         /* no data is fine */
@@ -722,9 +721,51 @@ _public_ int sd_bus_get_name_creds(
         return 0;
 }
 
+static int parse_sockaddr_string(const char *t, char **ret_comm, char **ret_description) {
+        _cleanup_free_ char *comm = NULL, *description = NULL;
+        const char *e, *sl;
+
+        assert(t);
+        assert(ret_comm);
+        assert(ret_description);
+
+        e = strstrafter(t, "/bus/");
+        if (!e) {
+                log_debug("Didn't find /bus/ substring in peer socket address, ignoring.");
+                goto not_found;
+        }
+
+        sl = strchr(e, '/');
+        if (!sl) {
+                log_debug("Didn't find / substring after /bus/ in peer socket address, ignoring.");
+                goto not_found;
+        }
+
+        if (sl - e > 0) {
+                comm = strndup(e, sl - e);
+                if (!comm)
+                        return -ENOMEM;
+        }
+
+        sl++;
+        if (!isempty(sl)) {
+                description = strdup(sl);
+                if (!description)
+                        return -ENOMEM;
+        }
+
+        *ret_comm = TAKE_PTR(comm);
+        *ret_description = TAKE_PTR(description);
+        return 0;
+
+not_found:
+        *ret_comm = *ret_description = NULL;
+        return 0;
+}
+
 _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **ret) {
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *c = NULL;
-        bool do_label, do_groups;
+        bool do_label, do_groups, do_sockaddr_peer;
         pid_t pid = 0;
         int r;
 
@@ -732,7 +773,7 @@ _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **r
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return((mask & ~SD_BUS_CREDS_AUGMENT) <= _SD_BUS_CREDS_ALL, -EOPNOTSUPP);
         assert_return(ret, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
 
         if (!BUS_IS_OPEN(bus->state))
                 return -ENOTCONN;
@@ -742,9 +783,12 @@ _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **r
 
         do_label = bus->label && (mask & SD_BUS_CREDS_SELINUX_CONTEXT);
         do_groups = bus->n_groups != SIZE_MAX && (mask & SD_BUS_CREDS_SUPPLEMENTARY_GIDS);
+        do_sockaddr_peer = bus->sockaddr_size_peer >= offsetof(struct sockaddr_un, sun_path) + 1 &&
+                bus->sockaddr_peer.sa.sa_family == AF_UNIX &&
+                bus->sockaddr_peer.un.sun_path[0] == 0;
 
         /* Avoid allocating anything if we have no chance of returning useful data */
-        if (!bus->ucred_valid && !do_label && !do_groups)
+        if (!bus->ucred_valid && !do_label && !do_groups && !do_sockaddr_peer)
                 return -ENODATA;
 
         c = bus_creds_new();
@@ -786,6 +830,35 @@ _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **r
                 c->mask |= SD_BUS_CREDS_SUPPLEMENTARY_GIDS;
         }
 
+        if (do_sockaddr_peer) {
+                _cleanup_free_ char *t = NULL;
+
+                assert(bus->sockaddr_size_peer >= offsetof(struct sockaddr_un, sun_path) + 1);
+                assert(bus->sockaddr_peer.sa.sa_family == AF_UNIX);
+                assert(bus->sockaddr_peer.un.sun_path[0] == 0);
+
+                /* So this is an abstract namespace socket, good. Now let's find the data we are interested in */
+                r = make_cstring(bus->sockaddr_peer.un.sun_path + 1,
+                                 bus->sockaddr_size_peer - offsetof(struct sockaddr_un, sun_path) - 1,
+                                 MAKE_CSTRING_ALLOW_TRAILING_NUL,
+                                 &t);
+                if (r == -ENOMEM)
+                        return r;
+                if (r < 0)
+                        log_debug_errno(r, "Can't extract string from peer socket address, ignoring: %m");
+                else {
+                        r = parse_sockaddr_string(t, &c->comm, &c->description);
+                        if (r < 0)
+                                return r;
+
+                        if (c->comm)
+                                c->mask |= SD_BUS_CREDS_COMM & mask;
+
+                        if (c->description)
+                                c->mask |= SD_BUS_CREDS_DESCRIPTION & mask;
+                }
+        }
+
         r = bus_creds_add_more(c, mask, pid, 0);
         if (r < 0 && r != -ESRCH) /* If the process vanished, then don't complain, just return what we got */
                 return r;
@@ -803,9 +876,10 @@ _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **r
 int bus_add_match_internal(
                 sd_bus *bus,
                 const char *match,
+                uint64_t timeout_usec,
                 uint64_t *ret_counter) {
 
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         const char *e;
         int r;
 
@@ -816,16 +890,26 @@ int bus_add_match_internal(
 
         e = append_eavesdrop(bus, match);
 
-        r = sd_bus_call_method(
+        r = sd_bus_message_new_method_call(
                         bus,
+                        &m,
                         "org.freedesktop.DBus",
                         "/org/freedesktop/DBus",
                         "org.freedesktop.DBus",
-                        "AddMatch",
+                        "AddMatch");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(m, "s", e);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_call(
+                        bus,
+                        m,
+                        timeout_usec,
                         NULL,
-                        &reply,
-                        "s",
-                        e);
+                        &reply);
         if (r < 0)
                 return r;
 
@@ -841,9 +925,12 @@ int bus_add_match_internal_async(
                 sd_bus_slot **ret_slot,
                 const char *match,
                 sd_bus_message_handler_t callback,
-                void *userdata) {
+                void *userdata,
+                uint64_t timeout_usec) {
 
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         const char *e;
+        int r;
 
         assert(bus);
 
@@ -852,17 +939,27 @@ int bus_add_match_internal_async(
 
         e = append_eavesdrop(bus, match);
 
-        return sd_bus_call_method_async(
+        r = sd_bus_message_new_method_call(
                         bus,
-                        ret_slot,
+                        &m,
                         "org.freedesktop.DBus",
                         "/org/freedesktop/DBus",
                         "org.freedesktop.DBus",
-                        "AddMatch",
+                        "AddMatch");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(m, "s", e);
+        if (r < 0)
+                return r;
+
+        return sd_bus_call_async(
+                        bus,
+                        ret_slot,
+                        m,
                         callback,
                         userdata,
-                        "s",
-                        e);
+                        timeout_usec);
 }
 
 int bus_remove_match_internal(
@@ -903,7 +1000,7 @@ _public_ int sd_bus_get_name_machine_id(sd_bus *bus, const char *name, sd_id128_
         assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(name, -EINVAL);
         assert_return(machine, -EINVAL);
-        assert_return(!bus_pid_changed(bus), -ECHILD);
+        assert_return(!bus_origin_changed(bus), -ECHILD);
         assert_return(service_name_is_valid(name), -EINVAL);
 
         if (!bus->bus_client)

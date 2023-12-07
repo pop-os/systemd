@@ -23,10 +23,9 @@ Build-Depends: debhelper-compat (= 13),
                xsltproc <!nodoc>,
                docbook-xsl <!nodoc>,
                docbook-xml <!nodoc>,
-               meson (>= 0.53.2),
+               meson (>= 0.60.0),
                gettext,
                gperf,
-               gnu-efi [amd64 i386 arm64 armhf riscv64],
                libcap-dev,
                libcrypt-dev,
                libpam0g-dev,
@@ -66,9 +65,11 @@ Build-Depends: debhelper-compat (= 13),
                python3:native,
                python3-jinja2:native,
                python3-lxml:native,
+               python3-pefile <!stage1 !nocheck>,
+               python3-pyelftools [amd64 i386 arm64 armhf riscv64] <!stage1>,
                python3-pyparsing <!nocheck>,
                python3-evdev:native <!nocheck>,
-               tzdata <!nocheck>,
+               tzdata-legacy <!nocheck> | tzdata (<< 2023c-8) <!nocheck>,
                libcap2-bin <!nocheck>,
                iproute2 <!nocheck>,
                zstd <!nocheck>,
@@ -88,12 +89,15 @@ Suggests: systemd-container,
           systemd-userdbd,
           systemd-boot,
           libfido2-1,
+          libip4tc2,
           libp11-kit0,
           libqrencode4,
           libtss2-esys-3.0.2-0,
           libtss2-mu0,
           libtss2-rc0,
-          polkitd | policykit-1,
+          polkitd,
+          python3:any,
+          python3-pefile,
 Pre-Depends: ${shlibs:Pre-Depends},
              ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -105,11 +109,11 @@ Replaces: systemd-repart (<< 250.2-3~)
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
-Breaks: resolvconf (<< 1.83~),
-        udev (<< 247~),
-        less (<< 563),
+           opensysusers,
+Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
         systemd-repart (<< 250.2-3~),
+        dracut (<< 059-5),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
           systemd-repart (= ${binary:Version}),
@@ -130,6 +134,11 @@ Priority: important
 Conflicts: sysvinit-core,
            file-rc,
            systemd-shim,
+           initscripts,
+           orphan-sysvinit-scripts,
+           bfh-container,
+           molly-guard (<< 0.8.2~),
+           progress-linux-container,
 Replaces: sysvinit-core,
 Pre-Depends: systemd
 Depends: systemd (= ${binary:Version}),
@@ -194,10 +203,8 @@ Priority: standard
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd
-Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon
-Replaces: time-daemon,
-          systemd (<< 245.4-2~),
+Replaces: time-daemon
 Provides: time-daemon
 Description: minimalistic service to synchronize local time with NTP servers
  The package contains the systemd-timesyncd system service that may be used to
@@ -227,6 +234,7 @@ Depends: ${shlibs:Depends},
          systemd-sysv
 Recommends: dbus-user-session,
 Provides: logind (= ${binary:Version}), default-logind (= ${binary:Version})
+Conflicts: libpam-elogind-compat,
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.
@@ -342,12 +350,14 @@ Multi-Arch: foreign
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          libudev1 (= ${binary:Version}),
          systemd-dev (>= ${source:Version}),
          s390-tools [s390],
 Recommends: systemd-hwe-hwdb,
 Breaks: systemd (<< ${binary:Version}),
+# DEP17 M7: moving files between / and /usr, and between packages, so use Conflicts:
+Conflicts: systemd (<< 255~rc1-4~),
+Replaces: systemd (<< 255~rc1-4~),
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
  /dev/, handles hotplug events and loads drivers at boot time.
@@ -447,6 +457,7 @@ Build-Profiles: <!stage1>
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         libnss-systemd (= ${binary:Version}),
          systemd (= ${binary:Version}),
 Description: dynamic user/group manager
  systemd-userdbd is a system service that multiplexes user/group lookups to all
@@ -471,6 +482,7 @@ Description: home area manager
  directories on user login, tools and documentation.
 
 Package: systemd-boot
+Build-Profiles: <!stage1>
 Architecture: amd64 i386 arm64 armhf riscv64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -489,6 +501,7 @@ Description: simple UEFI boot manager - tools and services
  systemd-boot.
 
 Package: systemd-boot-efi
+Build-Profiles: <!stage1>
 Architecture: amd64 i386 arm64 armhf riscv64
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends},
@@ -511,7 +524,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
          default-dbus-system-bus | dbus-system-bus
-Suggests: polkitd | policykit-1,
+Suggests: polkitd,
 Provides: resolvconf
 Conflicts: resolvconf
 Replaces: resolvconf,
@@ -531,8 +544,10 @@ Section: devel
 Depends: ${misc:Depends},
 Breaks: systemd (<< 253-2~),
         udev (<< 253-2~),
+        systemd-homed (<< 254.1-3~),
 Replaces: systemd (<< 253-2~),
           udev (<< 253-2~),
+          systemd-homed (<< 254.1-3~),
 Description: systemd development files
  This package contains the systemd and udev pkg-config files. Note that these
  are different from the libsystemd's and libudev's pkg-config files, which can

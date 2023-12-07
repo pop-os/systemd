@@ -78,6 +78,7 @@ struct sd_journal {
         OrderedHashmap *files;
         IteratedCache *files_cache;
         MMapCache *mmap;
+        Hashmap *newest_by_boot_id; /* key: boot_id, value: prioq, ordered by monotonic timestamp of last update */
 
         Location current_location;
 
@@ -86,7 +87,7 @@ struct sd_journal {
 
         Match *level0, *level1, *level2;
 
-        pid_t original_pid;
+        uint64_t origin_id;
 
         int inotify_fd;
         unsigned current_invalidate_counter, last_invalidate_counter;

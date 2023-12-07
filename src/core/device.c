@@ -55,23 +55,30 @@ static int device_by_path(Manager *m, const char *path, Unit **ret) {
 
 static void device_unset_sysfs(Device *d) {
         Hashmap *devices;
-        Device *first;
 
         assert(d);
 
         if (!d->sysfs)
                 return;
 
-        /* Remove this unit from the chain of devices which share the
-         * same sysfs path. */
-        devices = UNIT(d)->manager->devices_by_sysfs;
-        first = hashmap_get(devices, d->sysfs);
-        LIST_REMOVE(same_sysfs, first, d);
+        /* Remove this unit from the chain of devices which share the same sysfs path. */
 
-        if (first)
-                hashmap_remove_and_replace(devices, d->sysfs, first->sysfs, first);
+        devices = UNIT(d)->manager->devices_by_sysfs;
+
+        if (d->same_sysfs_prev)
+                /* If this is not the first unit, then simply remove this unit. */
+                d->same_sysfs_prev->same_sysfs_next = d->same_sysfs_next;
+        else if (d->same_sysfs_next)
+                /* If this is the first unit, replace with the next unit. */
+                assert_se(hashmap_replace(devices, d->same_sysfs_next->sysfs, d->same_sysfs_next) >= 0);
         else
+                /* Otherwise, remove the entry. */
                 hashmap_remove(devices, d->sysfs);
+
+        if (d->same_sysfs_next)
+                d->same_sysfs_next->same_sysfs_prev = d->same_sysfs_prev;
+
+        d->same_sysfs_prev = d->same_sysfs_next = NULL;
 
         d->sysfs = mfree(d->sysfs);
 }
@@ -122,7 +129,7 @@ static void device_init(Unit *u) {
          * indefinitely for plugged in devices, something which cannot
          * happen for the other units since their operations time out
          * anyway. */
-        u->job_running_timeout = u->manager->default_device_timeout_usec;
+        u->job_running_timeout = u->manager->defaults.device_timeout_usec;
 
         u->ignore_on_isolate = true;
 
@@ -175,7 +182,7 @@ static void device_set_state(Device *d, DeviceState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(d), "Changed %s -> %s", device_state_to_string(old_state), device_state_to_string(state));
 
-        unit_notify(UNIT(d), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(d), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static void device_found_changed(Device *d, DeviceFound previous, DeviceFound now) {
@@ -487,13 +494,13 @@ static void device_dump(Unit *u, FILE *f, const char *prefix) {
                         prefix, *i);
 }
 
-_pure_ static UnitActiveState device_active_state(Unit *u) {
+static UnitActiveState device_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[DEVICE(u)->state];
 }
 
-_pure_ static const char *device_sub_state_to_string(Unit *u) {
+static const char *device_sub_state_to_string(Unit *u) {
         assert(u);
 
         return device_state_to_string(DEVICE(u)->state);
@@ -509,9 +516,7 @@ static int device_update_description(Unit *u, sd_device *dev, const char *path) 
 
         desc = path;
 
-        if (dev &&
-            (sd_device_get_property_value(dev, "ID_MODEL_FROM_DATABASE", &model) >= 0 ||
-             sd_device_get_property_value(dev, "ID_MODEL", &model) >= 0)) {
+        if (dev && device_get_model_string(dev, &model) >= 0) {
                 desc = model;
 
                 /* Try to concatenate the device model string with a label, if there is one */
@@ -793,7 +798,7 @@ static int device_setup_devlink_unit_one(Manager *m, const char *devlink, Set **
 
 static int device_setup_extra_units(Manager *m, sd_device *dev, Set **ready_units, Set **not_ready_units) {
         _cleanup_strv_free_ char **aliases = NULL;
-        const char *devlink, *syspath, *devname = NULL;
+        const char *syspath, *devname = NULL;
         Device *l;
         int r;
 
@@ -1010,7 +1015,6 @@ static void device_shutdown(Manager *m) {
 
 static void device_enumerate(Manager *m) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        sd_device *dev;
         int r;
 
         assert(m);
@@ -1021,11 +1025,6 @@ static void device_enumerate(Manager *m) {
                         log_error_errno(r, "Failed to allocate device monitor: %m");
                         goto fail;
                 }
-
-                /* This will fail if we are unprivileged, but that
-                 * should not matter much, as user instances won't run
-                 * during boot. */
-                (void) sd_device_monitor_set_receive_buffer_size(m->device_monitor, 128*1024*1024);
 
                 r = sd_device_monitor_filter_add_match_tag(m->device_monitor, "systemd");
                 if (r < 0) {
@@ -1134,6 +1133,8 @@ static int device_dispatch_io(sd_device_monitor *monitor, sd_device *dev, void *
                 log_device_warning_errno(dev, r, "Failed to get udev action, ignoring: %m");
                 return 0;
         }
+
+        log_device_debug(dev, "Got '%s' action on syspath '%s'.", device_action_to_string(action), sysfs);
 
         if (action == SD_DEVICE_MOVE)
                 device_remove_old_on_move(m, dev);

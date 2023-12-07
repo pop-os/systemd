@@ -702,7 +702,7 @@ int link_request_stacked_netdev(Link *link, NetDev *netdev) {
 
         link->stacked_netdevs_created = false;
         r = link_queue_request_full(link, REQUEST_TYPE_NETDEV_STACKED,
-                                    netdev_ref(netdev), (mfree_func_t) netdev_unref,
+                                    netdev, (mfree_func_t) netdev_unref,
                                     trivial_hash_func, trivial_compare_func,
                                     stacked_netdev_process_request,
                                     &link->create_stacked_netdev_messages,
@@ -710,9 +710,12 @@ int link_request_stacked_netdev(Link *link, NetDev *netdev) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to request stacked netdev '%s': %m",
                                             netdev->ifname);
+        if (r == 0)
+                return 0;
 
+        netdev_ref(netdev);
         log_link_debug(link, "Requested stacked netdev '%s'", netdev->ifname);
-        return 0;
+        return 1;
 }
 
 static int independent_netdev_process_request(Request *req, Link *link, void *userdata) {
@@ -736,6 +739,10 @@ static int netdev_request_to_create(NetDev *netdev) {
         int r;
 
         assert(netdev);
+        assert(netdev->manager);
+
+        if (netdev->manager->test_mode)
+                return 0;
 
         if (netdev_is_stacked(netdev))
                 return 0;
@@ -787,7 +794,7 @@ int netdev_load_one(Manager *manager, const char *filename) {
 
         dropin_dirname = strjoina(basename(filename), ".d");
         r = config_parse_many(
-                        STRV_MAKE_CONST(filename), NETWORK_DIRS, dropin_dirname,
+                        STRV_MAKE_CONST(filename), NETWORK_DIRS, dropin_dirname, /* root = */ NULL,
                         NETDEV_COMMON_SECTIONS NETDEV_OTHER_SECTIONS,
                         config_item_perf_lookup, network_netdev_gperf_lookup,
                         CONFIG_PARSE_WARN,
@@ -823,7 +830,7 @@ int netdev_load_one(Manager *manager, const char *filename) {
                 NETDEV_VTABLE(netdev)->init(netdev);
 
         r = config_parse_many(
-                        STRV_MAKE_CONST(filename), NETWORK_DIRS, dropin_dirname,
+                        STRV_MAKE_CONST(filename), NETWORK_DIRS, dropin_dirname, /* root = */ NULL,
                         NETDEV_VTABLE(netdev)->sections,
                         config_item_perf_lookup, network_netdev_gperf_lookup,
                         CONFIG_PARSE_WARN,

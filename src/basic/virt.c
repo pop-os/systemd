@@ -153,7 +153,7 @@ static Virtualization detect_vm_device_tree(void) {
 #endif
 }
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch64)
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch_lp64)
 static Virtualization detect_vm_dmi_vendor(void) {
         static const char* const dmi_vendors[] = {
                 "/sys/class/dmi/id/product_name", /* Test this before sys_vendor to detect KVM over QEMU */
@@ -209,7 +209,7 @@ static Virtualization detect_vm_dmi_vendor(void) {
 }
 
 static int detect_vm_smbios(void) {
-        /* The SMBIOS BIOS Charateristics Extension Byte 2 (Section 2.1.2.2 of
+        /* The SMBIOS BIOS Characteristics Extension Byte 2 (Section 2.1.2.2 of
          * https://www.dmtf.org/sites/default/files/standards/documents/DSP0134_3.4.0.pdf), specifies that
          * the 4th bit being set indicates a VM. The BIOS Characteristics table is exposed via the kernel in
          * /sys/firmware/dmi/entries/0-0. Note that in the general case, this bit being unset should not
@@ -243,10 +243,10 @@ static int detect_vm_smbios(void) {
         log_debug("DMI BIOS Extension table does not indicate virtualization.");
         return SMBIOS_VM_BIT_UNSET;
 }
-#endif /* defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch64) */
+#endif /* defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch_lp64) */
 
 static Virtualization detect_vm_dmi(void) {
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch64)
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch_lp64)
 
         int r;
         r = detect_vm_dmi_vendor();
@@ -492,8 +492,6 @@ Virtualization detect_vm(void) {
                         return xen_dom0;
                 if (xen_dom0 == 0)
                         goto finish;
-
-                v = VIRTUALIZATION_NONE;
         } else if (v != VIRTUALIZATION_NONE)
                 assert_not_reached();
 
@@ -888,15 +886,15 @@ int running_in_chroot(void) {
         if (getenv_bool("SYSTEMD_IGNORE_CHROOT") > 0)
                 return 0;
 
-        if (getpid_cached() == 1)
-                return false;  /* We're PID 1, we can't be in a chroot. */
-
-        r = files_same("/proc/1/root", "/", 0);
+        r = inode_same("/proc/1/root", "/", 0);
         if (r == -ENOENT) {
                 r = proc_mounted();
                 if (r == 0) {
+                        if (getpid_cached() == 1)
+                                return false; /* We will mount /proc, assuming we're not in a chroot. */
+
                         log_debug("/proc is not mounted, assuming we're in a chroot.");
-                        return 1;
+                        return true;
                 }
                 if (r > 0)  /* If we have fake /proc/, we can't do the check properly. */
                         return -ENOSYS;

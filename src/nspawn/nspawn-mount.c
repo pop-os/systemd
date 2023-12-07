@@ -4,12 +4,12 @@
 #include <linux/magic.h>
 
 #include "alloc-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "fs-util.h"
-#include "label.h"
+#include "label-util.h"
 #include "mkdir-label.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -598,6 +598,8 @@ int mount_all(const char *dest,
                   MOUNT_FATAL }, /* If /etc/os-release doesn't exist use the version in /usr/lib as fallback */
                 { NULL,                     "/run/host/os-release",         NULL,    NULL,                             MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT,
                   MOUNT_FATAL },
+                { NULL,                     "/run/host/os-release",         NULL,    NULL,                             MS_PRIVATE,
+                  MOUNT_FATAL },  /* Turn off propagation (we only want that for the mount propagation tunnel dir) */
                 { NULL,                     "/run/host",                    NULL,    NULL,                             MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT,
                   MOUNT_FATAL|MOUNT_IN_USERNS },
 #if HAVE_SELINUX
@@ -605,6 +607,8 @@ int mount_all(const char *dest,
                   MOUNT_MKDIR },  /* Bind mount first (mkdir/chown the mount point in case /sys/ is mounted as minimal skeleton tmpfs) */
                 { NULL,                     "/sys/fs/selinux",              NULL,    NULL,                             MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT,
                   0 },            /* Then, make it r/o (don't mkdir/chown the mount point here, the previous entry already did that) */
+                { NULL,                     "/sys/fs/selinux",              NULL,    NULL,                             MS_PRIVATE,
+                  0 },            /* Turn off propagation (we only want that for the mount propagation tunnel dir) */
 #endif
         };
 
@@ -632,7 +636,7 @@ int mount_all(const char *dest,
                 if (!tmpfs_tmp && FLAGS_SET(mount_table[k].mount_settings, MOUNT_APPLY_TMPFS_TMP))
                         continue;
 
-                r = chase_symlinks(mount_table[k].where, dest, CHASE_NONEXISTENT|CHASE_PREFIX_ROOT, &where, NULL);
+                r = chase(mount_table[k].where, dest, CHASE_NONEXISTENT|CHASE_PREFIX_ROOT, &where, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve %s%s: %m", strempty(dest), mount_table[k].where);
 
@@ -689,9 +693,9 @@ int mount_all(const char *dest,
                 if (FLAGS_SET(mount_table[k].mount_settings, MOUNT_PREFIX_ROOT)) {
                         /* Optionally prefix the mount source with the root dir. This is useful in bind
                          * mounts to be created within the container image before we transition into it. Note
-                         * that MOUNT_IN_USERNS is run after we transitioned hence prefixing is not ncessary
+                         * that MOUNT_IN_USERNS is run after we transitioned hence prefixing is not necessary
                          * for those. */
-                        r = chase_symlinks(mount_table[k].what, dest, CHASE_PREFIX_ROOT, &prefixed, NULL);
+                        r = chase(mount_table[k].what, dest, CHASE_PREFIX_ROOT, &prefixed, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to resolve %s%s: %m", strempty(dest), mount_table[k].what);
                 }
@@ -775,7 +779,7 @@ static int mount_bind(const char *dest, CustomMount *m, uid_t uid_shift, uid_t u
         if (stat(m->source, &source_st) < 0)
                 return log_error_errno(errno, "Failed to stat %s: %m", m->source);
 
-        r = chase_symlinks(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
+        r = chase(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, m->destination);
         if (r > 0) { /* Path exists already? */
@@ -824,7 +828,7 @@ static int mount_bind(const char *dest, CustomMount *m, uid_t uid_shift, uid_t u
         }
 
         if (idmapping != REMOUNT_IDMAPPING_NONE) {
-                r = remount_idmap(where, uid_shift, uid_range, source_st.st_uid, idmapping);
+                r = remount_idmap(STRV_MAKE(where), uid_shift, uid_range, source_st.st_uid, idmapping);
                 if (r < 0)
                         return log_error_errno(r, "Failed to map ids for bind mount %s: %m", where);
         }
@@ -840,7 +844,7 @@ static int mount_tmpfs(const char *dest, CustomMount *m, uid_t uid_shift, const 
         assert(dest);
         assert(m);
 
-        r = chase_symlinks(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
+        r = chase(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, m->destination);
         if (r == 0) { /* Doesn't exist yet? */
@@ -880,7 +884,7 @@ static int mount_overlay(const char *dest, CustomMount *m) {
         assert(dest);
         assert(m);
 
-        r = chase_symlinks(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
+        r = chase(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, m->destination);
         if (r == 0) { /* Doesn't exist yet? */
@@ -922,7 +926,7 @@ static int mount_inaccessible(const char *dest, CustomMount *m) {
         assert(dest);
         assert(m);
 
-        r = chase_symlinks_and_stat(m->destination, dest, CHASE_PREFIX_ROOT, &where, &st, NULL);
+        r = chase_and_stat(m->destination, dest, CHASE_PREFIX_ROOT, &where, &st);
         if (r < 0) {
                 log_full_errno(m->graceful ? LOG_DEBUG : LOG_ERR, r, "Failed to resolve %s/%s: %m", dest, m->destination);
                 return m->graceful ? 0 : r;
@@ -952,7 +956,7 @@ static int mount_arbitrary(const char *dest, CustomMount *m) {
         assert(dest);
         assert(m);
 
-        r = chase_symlinks(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
+        r = chase(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, m->destination);
         if (r == 0) { /* Doesn't exist yet? */

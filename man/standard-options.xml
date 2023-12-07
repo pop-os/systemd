@@ -3,7 +3,9 @@
   "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
-<variablelist>
+<variablelist
+    xmlns:xi="http://www.w3.org/2001/XInclude">
+
   <varlistentry id='help'>
     <term><option>-h</option></term>
     <term><option>--help</option></term>
@@ -26,6 +28,16 @@
 
     <listitem>
       <para>Do not pipe output into a pager.</para>
+    </listitem>
+  </varlistentry>
+
+  <varlistentry id='no-pager-255'>
+    <term><option>--no-pager</option></term>
+
+    <listitem>
+      <para>Do not pipe output into a pager.</para>
+
+      <xi:include href="version-info.xml" xpointer="v255"/>
     </listitem>
   </varlistentry>
 
@@ -62,6 +74,16 @@
     </listitem>
   </varlistentry>
 
+  <varlistentry id='tldr'>
+    <term><option>--tldr</option></term>
+
+    <listitem>
+      <para>Copy the contents of config files to standard output. Only the "interesting" parts of the
+      configuration files are printed, comments and empty lines are skipped. Before each file, the filename
+      is printed as a comment.</para>
+    </listitem>
+  </varlistentry>
+
   <varlistentry id='json'>
     <term><option>--json=</option><replaceable>MODE</replaceable></term>
 
@@ -86,4 +108,36 @@
       numerical signal numbers and the program will exit immediately.</para>
     </listitem>
   </varlistentry>
+
+  <varlistentry id='image-policy-open'>
+    <term><option>--image-policy=<replaceable>policy</replaceable></option></term>
+
+    <listitem><para>Takes an image policy string as argument, as per
+    <citerefentry><refentrytitle>systemd.image-policy</refentrytitle><manvolnum>7</manvolnum></citerefentry>. The
+    policy is enforced when operating on the disk image specified via <option>--image=</option>, see
+    above. If not specified defaults to the <literal>*</literal> policy, i.e. all recognized file systems
+    in the image are used.</para></listitem>
+  </varlistentry>
+
+  <varlistentry id='esp-path'>
+    <term><option>--esp-path=</option></term>
+
+    <listitem>
+      <para>Path to the EFI System Partition (ESP). If not specified, <filename>/efi/</filename>,
+      <filename>/boot/</filename>, and <filename>/boot/efi/</filename> are checked in turn. It is
+      recommended to mount the ESP to <filename>/efi/</filename>, if possible.</para>
+    </listitem>
+  </varlistentry>
+
+  <varlistentry id='boot-path'>
+    <term><option>--boot-path=</option></term>
+
+    <listitem>
+      <para>Path to the Extended Boot Loader partition, as defined in the
+      <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink>.
+      If not specified, <filename>/boot/</filename> is checked. It is recommended to mount the Extended Boot
+      Loader partition to <filename>/boot/</filename>, if possible.</para>
+    </listitem>
+  </varlistentry>
+
 </variablelist>

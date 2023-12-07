@@ -150,6 +150,35 @@
       <arg choice="plain">inspect-elf</arg>
       <arg choice="plain" rep="repeat"><replaceable>FILE</replaceable></arg>
     </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">malloc</arg>
+      <arg choice="opt" rep="repeat"><replaceable>D-BUS SERVICE</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">fdstore</arg>
+      <arg choice="opt" rep="repeat"><replaceable>UNIT</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">image-policy</arg>
+      <arg choice="plain" rep="repeat"><replaceable>POLICY</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">pcrs</arg>
+      <arg choice="opt" rep="repeat"><replaceable>PCR</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">srk</arg> &gt;<arg choice="plain"><replaceable>FILE</replaceable></arg>
+    </cmdsynopsis>
   </refsynopsisdiv>
 
   <refsect1>
@@ -280,6 +309,19 @@ Timestamp units-load-finish: Thu 2019-03-14 23:28:07 CET
 ...
 </programlisting>
       </example>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze malloc [<replaceable>D-Bus service</replaceable>…]</command></title>
+
+      <para>This command can be used to request the output of the internal memory state (as returned by
+      <citerefentry project='man-pages'><refentrytitle>malloc_info</refentrytitle><manvolnum>3</manvolnum></citerefentry>)
+      of a D-Bus service. If no service is specified, the query will be sent to
+      <filename>org.freedesktop.systemd1</filename> (the system or user service manager). The output format
+      is not guaranteed to be stable and should not be parsed by applications.</para>
+
+      <para>The service must implement the <filename>org.freedesktop.MemoryAllocation1</filename> interface.
+      In the systemd suite, it is currently only implemented by the manager.</para>
     </refsect2>
 
     <refsect2>
@@ -706,7 +748,7 @@ $ systemd-analyze verify /tmp/source
 Failed to prepare filename /tmp/source: Invalid argument
 
 $ systemd-analyze verify /tmp/source:alias.service
-/tmp/systemd-analyze-XXXXXX/alias.service:7: Unknown key name 'MysteryKey' in section 'Service', ignoring.
+alias.service:7: Unknown key name 'MysteryKey' in section 'Service', ignoring.
         </programlisting>
       </example>
 
@@ -766,9 +808,10 @@ $ systemd-analyze verify /tmp/source:alias.service
       Packaging Metadata</ulink> documentation for more information.</para>
 
       <example>
-        <title>Table output</title>
+        <title>Print information about a core file as JSON</title>
 
-        <programlisting>$ systemd-analyze inspect-elf --json=pretty /tmp/core.fsverity.1000.f77dac5dc161402aa44e15b7dd9dcf97.58561.1637106137000000
+        <programlisting>$ systemd-analyze inspect-elf --json=pretty \
+        core.fsverity.1000.f77dac5dc161402aa44e15b7dd9dcf97.58561.1637106137000000
 {
         "elfType" : "coredump",
         "elfArchitecture" : "AMD x86-64",
@@ -787,8 +830,117 @@ $ systemd-analyze verify /tmp/source:alias.service
 }
         </programlisting>
       </example>
-
     </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze fdstore <optional><replaceable>UNIT</replaceable>...</optional></command></title>
+
+      <para>Lists the current contents of the specified service unit's file descriptor store. This shows
+      names, inode types, device numbers, inode numbers, paths and open modes of the open file
+      descriptors. The specified units must have <varname>FileDescriptorStoreMax=</varname> enabled, see
+      <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+      details.</para>
+
+      <example>
+        <title>Table output</title>
+        <programlisting>$ systemd-analyze fdstore systemd-journald.service
+FDNAME TYPE DEVNO   INODE RDEVNO PATH             FLAGS
+stored sock 0:8   4218620 -      socket:[4218620] ro
+stored sock 0:8   4213198 -      socket:[4213198] ro
+stored sock 0:8   4213190 -      socket:[4213190] ro
+…</programlisting>
+      </example>
+
+      <para>Note: the "DEVNO" column refers to the major/minor numbers of the device node backing the file
+      system the file descriptor's inode is on. The "RDEVNO" column refers to the major/minor numbers of the
+      device node itself if the file descriptor refers to one. Compare with corresponding
+      <varname>.st_dev</varname> and <varname>.st_rdev</varname> fields in <type>struct stat</type> (see
+      <citerefentry
+      project='man-pages'><refentrytitle>stat</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
+      details). The listed inode numbers in the "INODE" column are on the file system indicated by
+      "DEVNO".</para>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze image-policy <optional><replaceable>POLICY</replaceable>…</optional></command></title>
+
+      <para>This command analyzes the specified image policy string, as per
+      <citerefentry><refentrytitle>systemd.image-policy</refentrytitle><manvolnum>7</manvolnum></citerefentry>. The
+      policy is normalized and simplified. For each currently defined partition identifier (as per the <ulink
+      url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable
+      Partitions Specification</ulink>) the effect of the image policy string is shown in tabular form.</para>
+
+      <example>
+        <title>Example Output</title>
+
+        <programlisting>$ systemd-analyze image-policy swap=encrypted:usr=read-only-on+verity:root=encrypted
+Analyzing policy: root=encrypted:usr=verity+read-only-on:swap=encrypted
+       Long form: root=encrypted:usr=verity+read-only-on:swap=encrypted:=unused+absent
+
+PARTITION       MODE        READ-ONLY GROWFS
+root            encrypted   -         -
+usr             verity      yes       -
+home            ignore      -         -
+srv             ignore      -         -
+esp             ignore      -         -
+xbootldr        ignore      -         -
+swap            encrypted   -         -
+root-verity     ignore      -         -
+usr-verity      unprotected yes       -
+root-verity-sig ignore      -         -
+usr-verity-sig  ignore      -         -
+tmp             ignore      -         -
+var             ignore      -         -
+default         ignore      -         -</programlisting>
+      </example>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze pcrs <optional><replaceable>PCR</replaceable>…</optional></command></title>
+
+      <para>This command shows the known TPM2 PCRs along with their identifying names and current values.</para>
+
+      <example>
+        <title>Example Output</title>
+
+        <programlisting>$ systemd-analyze pcrs
+NR NAME                SHA256
+ 0 platform-code       bcd2eb527108bbb1f5528409bcbe310aa9b74f687854cc5857605993f3d9eb11
+ 1 platform-config     b60622856eb7ce52637b80f30a520e6e87c347daa679f3335f4f1a600681bb01
+ 2 external-code       1471262403e9a62f9c392941300b4807fbdb6f0bfdd50abfab752732087017dd
+ 3 external-config     3d458cfe55cc03ea1f443f1562beec8df51c75e14a9fcf9a7234a13f198e7969
+ 4 boot-loader-code    939f7fa1458e1f7ce968874d908e524fc0debf890383d355e4ce347b7b78a95c
+ 5 boot-loader-config  864c61c5ea5ecbdb6951e6cb6d9c1f4b4eac79772f7fe13b8bece569d83d3768
+ 6 -                   3d458cfe55cc03ea1f443f1562beec8df51c75e14a9fcf9a7234a13f198e7969
+ 7 secure-boot-policy  9c905bd9b9891bfb889b90a54c4b537b889cfa817c4389cc25754823a9443255
+ 8 -                   0000000000000000000000000000000000000000000000000000000000000000
+ 9 kernel-initrd       9caa29b128113ef42aa53d421f03437be57211e5ebafc0fa8b5d4514ee37ff0c
+10 ima                 5ea9e3dab53eb6b483b6ec9e3b2c712bea66bca1b155637841216e0094387400
+11 kernel-boot         0000000000000000000000000000000000000000000000000000000000000000
+12 kernel-config       627ffa4b405e911902fe1f1a8b0164693b31acab04f805f15bccfe2209c7eace
+13 sysexts             0000000000000000000000000000000000000000000000000000000000000000
+14 shim-policy         0000000000000000000000000000000000000000000000000000000000000000
+15 system-identity     0000000000000000000000000000000000000000000000000000000000000000
+16 debug               0000000000000000000000000000000000000000000000000000000000000000
+17 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+18 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+19 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+20 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+21 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+22 -                   ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+23 application-support 0000000000000000000000000000000000000000000000000000000000000000</programlisting>
+      </example>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze srk &gt; <replaceable>FILE</replaceable></command></title>
+
+      <para>This command reads the Storage Root Key (SRK) from the TPM2 device, and writes it in marshalled
+      TPM2B_PUBLIC format to stdout. Example:</para>
+
+      <programlisting>systemd-analyze srk &gt; srk.tpm2b_public</programlisting>
+    </refsect2>
+
   </refsect1>
 
   <refsect1>
@@ -801,21 +953,27 @@ $ systemd-analyze verify /tmp/source:alias.service
         <term><option>--system</option></term>
 
         <listitem><para>Operates on the system systemd instance. This
-        is the implied default.</para></listitem>
+        is the implied default.</para>
+
+        <xi:include href="version-info.xml" xpointer="v209"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--user</option></term>
 
         <listitem><para>Operates on the user systemd
-        instance.</para></listitem>
+        instance.</para>
+
+        <xi:include href="version-info.xml" xpointer="v186"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--global</option></term>
 
         <listitem><para>Operates on the system-wide configuration for
-        user systemd instance.</para></listitem>
+        user systemd instance.</para>
+
+        <xi:include href="version-info.xml" xpointer="v238"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -832,7 +990,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         <varname>Requisite=</varname>,
         <varname>Wants=</varname> and <varname>Conflicts=</varname>
         are shown. If neither is passed, this shows dependencies of
-        all these types.</para></listitem>
+        all these types.</para>
+
+        <xi:include href="version-info.xml" xpointer="v198"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -856,7 +1016,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         relation. In other words, patterns specified with those two
         options will trim the list of edges matched by the positional
         arguments, if any are given, and fully determine the list of
-        edges shown otherwise.</para></listitem>
+        edges shown otherwise.</para>
+
+        <xi:include href="version-info.xml" xpointer="v201"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -868,7 +1030,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         earlier, than the latest unit in the same level. The unit of
         <replaceable>timespan</replaceable> is seconds unless
         specified with a different unit, e.g.
-        "50ms".</para></listitem>
+        "50ms".</para>
+
+        <xi:include href="version-info.xml" xpointer="v203"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -876,7 +1040,9 @@ $ systemd-analyze verify /tmp/source:alias.service
 
         <listitem><para>Do not invoke
         <citerefentry project='man-pages'><refentrytitle>man</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-        to verify the existence of man pages listed in <varname>Documentation=</varname>.</para></listitem>
+        to verify the existence of man pages listed in <varname>Documentation=</varname>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -885,7 +1051,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         <listitem><para>Invoke unit generators, see
         <citerefentry><refentrytitle>systemd.generator</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
         Some generators require root privileges. Under a normal user, running with
-        generators enabled will generally result in some warnings.</para></listitem>
+        generators enabled will generally result in some warnings.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -899,22 +1067,30 @@ $ systemd-analyze verify /tmp/source:alias.service
         unit. With <command>one</command>, return a non-zero process exit status when warnings arise during
         verification of either the specified unit or its immediate dependencies. If this option is not
         specified, zero is returned as the exit status regardless whether warnings arise during verification
-        or not.</para></listitem>
+        or not.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--root=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>With <command>cat-files</command> and <command>verify</command>,
-        operate on files underneath the specified root path <replaceable>PATH</replaceable>.</para></listitem>
+        operate on files underneath the specified root path <replaceable>PATH</replaceable>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v239"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--image=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>With <command>cat-files</command> and <command>verify</command>,
-        operate on files inside the specified image path <replaceable>PATH</replaceable>.</para></listitem>
+        operate on files inside the specified image path <replaceable>PATH</replaceable>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
+
+      <xi:include href="standard-options.xml" xpointer="image-policy-open" />
 
       <varlistentry>
         <term><option>--offline=<replaceable>BOOL</replaceable></option></term>
@@ -925,7 +1101,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         This means that <option>--offline=</option> can be used with <option>--root=</option> and
         <option>--image=</option> as well. If a unit's overall exposure level is above that set by
         <option>--threshold=</option> (default value is 100), <option>--offline=</option> will return
-        an error.</para></listitem>
+        an error.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -934,7 +1112,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         <listitem><para>With <command>security</command> <option>--offline=</option>, takes into
         consideration the specified portable profile when assessing unit settings.
         The profile can be passed by name, in which case the well-known system locations will
-        be searched, or it can be the full path to a specific drop-in file.</para></listitem>
+        be searched, or it can be the full path to a specific drop-in file.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -944,7 +1124,9 @@ $ systemd-analyze verify /tmp/source:alias.service
         to compare the overall exposure level with, for the specified unit files. If a unit's
         overall exposure level, is greater than that set by the user, <command>security</command>
         will return an error. <option>--threshold=</option> can be used with <option>--offline=</option>
-        as well and its default value is 100.</para></listitem>
+        as well and its default value is 100.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1095,6 +1277,9 @@ $ systemd-analyze verify /tmp/source:alias.service
                 <entry>CapabilityBoundingSet_CAP_SYS_TTY_CONFIG</entry>
               </row>
               <row>
+                <entry>CapabilityBoundingSet_CAP_BPF</entry>
+              </row>
+              <row>
                 <entry>UMask</entry>
               </row>
               <row>
@@ -1206,7 +1391,9 @@ $ systemd-analyze verify /tmp/source:alias.service
           </tgroup>
         </table>
 
-        <para>See example "JSON Policy" below.</para></listitem>
+        <para>See example "JSON Policy" below.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1232,21 +1419,27 @@ $ systemd-analyze verify /tmp/source:alias.service
         from when it was initially started, <varname>deactivated</varname> which is the time after startup
         that the service was deactivated, <varname>deactivating</varname> which is the time after startup
         that the service was initially told to deactivate.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--iterations=<replaceable>NUMBER</replaceable></option></term>
 
         <listitem><para>When used with the <command>calendar</command> command, show the specified number of
-        iterations the specified calendar expression will elapse next. Defaults to 1.</para></listitem>
+        iterations the specified calendar expression will elapse next. Defaults to 1.</para>
+
+        <xi:include href="version-info.xml" xpointer="v242"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--base-time=<replaceable>TIMESTAMP</replaceable></option></term>
 
         <listitem><para>When used with the <command>calendar</command> command, show next iterations relative
-        to the specified point in time. If not specified defaults to the current time.</para></listitem>
+        to the specified point in time. If not specified defaults to the current time.</para>
+
+        <xi:include href="version-info.xml" xpointer="v244"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1260,14 +1453,18 @@ $ systemd-analyze verify /tmp/source:alias.service
         compiled in set of unit load paths; see
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>. All
         units files present in the directory containing the specified unit will be used in preference to the
-        other paths.</para></listitem>
+        other paths.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--table</option></term>
 
         <listitem><para>When used with the <command>plot</command> command, the raw time data is output in a table.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1275,7 +1472,9 @@ $ systemd-analyze verify /tmp/source:alias.service
 
         <listitem><para>When used with the <command>plot</command> command in combination with either
         <option>--table</option> or <option>--json=</option>, no legends or hints are included in the output.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="host" />
@@ -1284,7 +1483,19 @@ $ systemd-analyze verify /tmp/source:alias.service
       <varlistentry>
         <term><option>--quiet</option></term>
 
-        <listitem><para>Suppress hints and other non-essential output.</para></listitem>
+        <listitem><para>Suppress hints and other non-essential output.</para>
+
+        <xi:include href="version-info.xml" xpointer="v250"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--tldr</option></term>
+
+        <listitem><para>With <command>cat-config</command>, only print the "interesting" parts of the
+        configuration files, skipping comments and empty lines and section headers followed only by
+        comments and empty lines.</para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="help" />

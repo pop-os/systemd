@@ -476,10 +476,9 @@ static void read_credentials(Manager *m) {
         if (!m->read_resolv_conf)
                 return;
 
-        r = read_credential_strings_many(
-                        "network.dns", &dns,
-                        "network.search_domains", &domains);
-        if (r < 0 && !IN_SET(r, -ENXIO, -ENOENT))
+        r = read_credential_strings_many("network.dns", &dns,
+                                         "network.search_domains", &domains);
+        if (r < 0)
                 log_warning_errno(r, "Failed to read credentials, ignoring: %m");
 
         if (dns) {
@@ -513,12 +512,17 @@ static int proc_cmdline_callback(const char *key, const char *value, void *data)
         struct ProcCmdlineInfo *info = ASSERT_PTR(data);
         int r;
 
+        assert(key);
         assert(info->manager);
 
         /* The kernel command line option names are chosen to be compatible with what various tools already
          * interpret, for example dracut and SUSE Linux. */
 
-        if (proc_cmdline_key_streq(key, "nameserver")) {
+        if (streq(key, "nameserver")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 if (!info->dns_server_unlinked) {
                         /* The kernel command line overrides any prior configuration */
                         dns_server_unlink_all(manager_get_first_dns_server(info->manager, DNS_SERVER_SYSTEM));
@@ -531,7 +535,10 @@ static int proc_cmdline_callback(const char *key, const char *value, void *data)
 
                 info->manager->read_resolv_conf = false;
 
-        } else if (proc_cmdline_key_streq(key, "domain")) {
+        } else if (streq(key, "domain")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
 
                 if (!info->search_domain_unlinked) {
                         dns_search_domain_unlink_all(info->manager->search_domains);
@@ -563,14 +570,9 @@ int manager_parse_config_file(Manager *m) {
 
         assert(m);
 
-        r = config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/resolved.conf",
-                        CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
-                        "Resolve\0",
-                        config_item_perf_lookup, resolved_gperf_lookup,
-                        CONFIG_PARSE_WARN,
-                        m,
-                        NULL);
+        r = config_parse_config_file("resolved.conf", "Resolve\0",
+                                     config_item_perf_lookup, resolved_gperf_lookup,
+                                     CONFIG_PARSE_WARN, m);
         if (r < 0)
                 return r;
 

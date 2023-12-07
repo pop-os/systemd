@@ -3,8 +3,8 @@
 set -ex
 set -o pipefail
 
-# shellcheck source=test/units/assert.sh
-. "$(dirname "$0")"/assert.sh
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
 
 systemctl log-level debug
 
@@ -16,7 +16,7 @@ touch /tmp/test63
 
 # Make sure systemd has sufficient time to hit the trigger limit for test63.path.
 # shellcheck disable=SC2016
-timeout 30 bash -c 'while ! test "$(systemctl show test63.path -P ActiveState)" = failed; do sleep .2; done'
+timeout 30 bash -c 'until test "$(systemctl show test63.path -P ActiveState)" = failed; do sleep .2; done'
 test "$(systemctl show test63.service -P ActiveState)" = inactive
 test "$(systemctl show test63.service -P Result)" = success
 test "$(systemctl show test63.path -P Result)" = trigger-limit-hit
@@ -34,7 +34,7 @@ test "$(systemctl show test63.path -P Result)" = success
 # Test that glob matching works too, with $TRIGGER_PATH
 systemctl start test63-glob.path
 touch /tmp/test63-glob-foo
-timeout 60 bash -c 'while ! systemctl -q is-active test63-glob.service; do sleep .2; done'
+timeout 60 bash -c 'until systemctl -q is-active test63-glob.service; do sleep .2; done'
 test "$(systemctl show test63-glob.service -P ActiveState)" = active
 test "$(systemctl show test63-glob.service -P Result)" = success
 
@@ -82,4 +82,4 @@ assert_in "test63-issue-24577-dep.service" "$output"
 
 systemctl log-level info
 
-echo OK >/testok
+touch /testok

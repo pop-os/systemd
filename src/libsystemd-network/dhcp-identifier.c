@@ -6,6 +6,7 @@
 
 #include "dhcp-identifier.h"
 #include "netif-util.h"
+#include "network-common.h"
 #include "siphash24.h"
 #include "sparse-endian.h"
 #include "string-table.h"
@@ -23,43 +24,7 @@ static const char * const duid_type_table[_DUID_TYPE_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP_TO_STRING(duid_type, DUIDType);
 
-int dhcp_validate_duid_len(DUIDType duid_type, size_t duid_len, bool strict) {
-        struct duid d;
-
-        assert_cc(sizeof(d.raw) >= MAX_DUID_LEN);
-        if (duid_len > MAX_DUID_LEN)
-                return -EINVAL;
-
-        if (!strict)
-                /* Strict validation is not requested. We only ensure that the
-                 * DUID is not too long. */
-                return 0;
-
-        switch (duid_type) {
-        case DUID_TYPE_LLT:
-                if (duid_len <= sizeof(d.llt))
-                        return -EINVAL;
-                break;
-        case DUID_TYPE_EN:
-                if (duid_len != sizeof(d.en))
-                        return -EINVAL;
-                break;
-        case DUID_TYPE_LL:
-                if (duid_len <= sizeof(d.ll))
-                        return -EINVAL;
-                break;
-        case DUID_TYPE_UUID:
-                if (duid_len != sizeof(d.uuid))
-                        return -EINVAL;
-                break;
-        default:
-                /* accept unknown type in order to be forward compatible */
-                break;
-        }
-        return 0;
-}
-
-static int dhcp_identifier_set_duid_llt(
+int dhcp_identifier_set_duid_llt(
                 const struct hw_addr_data *hw_addr,
                 uint16_t arp_type,
                 usec_t t,
@@ -97,7 +62,7 @@ static int dhcp_identifier_set_duid_llt(
         return 0;
 }
 
-static int dhcp_identifier_set_duid_ll(
+int dhcp_identifier_set_duid_ll(
                 const struct hw_addr_data *hw_addr,
                 uint16_t arp_type,
                 struct duid *ret_duid,
@@ -126,13 +91,16 @@ static int dhcp_identifier_set_duid_ll(
         return 0;
 }
 
-int dhcp_identifier_set_duid_en(bool test_mode, struct duid *ret_duid, size_t *ret_len) {
+int dhcp_identifier_set_duid_en(struct duid *ret_duid, size_t *ret_len) {
         sd_id128_t machine_id;
+        bool test_mode;
         uint64_t hash;
         int r;
 
         assert(ret_duid);
         assert(ret_len);
+
+        test_mode = network_test_mode_enabled();
 
         if (!test_mode) {
                 r = sd_id128_get_machine(&machine_id);
@@ -150,9 +118,9 @@ int dhcp_identifier_set_duid_en(bool test_mode, struct duid *ret_duid, size_t *r
         /* a bit of snake-oil perhaps, but no need to expose the machine-id
          * directly; duid->en.id might not be aligned, so we need to copy */
         hash = htole64(siphash24(&machine_id, sizeof(machine_id), HASH_KEY.bytes));
-        memcpy(ret_duid->en.id, &hash, sizeof(ret_duid->en.id));
+        memcpy(ret_duid->en.id, &hash, sizeof(hash));
 
-        *ret_len = offsetof(struct duid, en.id) + sizeof(ret_duid->en.id);
+        *ret_len = offsetof(struct duid, en.id) + sizeof(hash);
 
         if (test_mode)
                 assert_se(memcmp(ret_duid, (const uint8_t[]) { 0x00, 0x02, 0x00, 0x00, 0xab, 0x11, 0x61, 0x77, 0x40, 0xde, 0x13, 0x42, 0xc3, 0xa2 }, *ret_len) == 0);
@@ -160,7 +128,7 @@ int dhcp_identifier_set_duid_en(bool test_mode, struct duid *ret_duid, size_t *r
         return 0;
 }
 
-static int dhcp_identifier_set_duid_uuid(struct duid *ret_duid, size_t *ret_len) {
+int dhcp_identifier_set_duid_uuid(struct duid *ret_duid, size_t *ret_len) {
         sd_id128_t machine_id;
         int r;
 
@@ -179,27 +147,28 @@ static int dhcp_identifier_set_duid_uuid(struct duid *ret_duid, size_t *ret_len)
         return 0;
 }
 
-int dhcp_identifier_set_duid(
+int dhcp_identifier_set_duid_raw(
                 DUIDType duid_type,
-                const struct hw_addr_data *hw_addr,
-                uint16_t arp_type,
-                usec_t llt_time,
-                bool test_mode,
+                const uint8_t *buf,
+                size_t buf_len,
                 struct duid *ret_duid,
                 size_t *ret_len) {
 
-        switch (duid_type) {
-        case DUID_TYPE_LLT:
-                return dhcp_identifier_set_duid_llt(hw_addr, arp_type, llt_time, ret_duid, ret_len);
-        case DUID_TYPE_EN:
-                return dhcp_identifier_set_duid_en(test_mode, ret_duid, ret_len);
-        case DUID_TYPE_LL:
-                return dhcp_identifier_set_duid_ll(hw_addr, arp_type, ret_duid, ret_len);
-        case DUID_TYPE_UUID:
-                return dhcp_identifier_set_duid_uuid(ret_duid, ret_len);
-        default:
+        assert(buf || buf_len == 0);
+        assert(ret_duid);
+        assert(ret_len);
+
+        if (duid_type < 0 || duid_type > UINT16_MAX)
                 return -EINVAL;
-        }
+
+        if (buf_len > MAX_DUID_DATA_LEN)
+                return -EINVAL;
+
+        unaligned_write_be16(&ret_duid->type, duid_type);
+        memcpy_safe(ret_duid->raw.data, buf, buf_len);
+
+        *ret_len = offsetof(struct duid, raw.data) + buf_len;
+        return 0;
 }
 
 int dhcp_identifier_set_iaid(

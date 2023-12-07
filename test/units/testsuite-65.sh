@@ -3,14 +3,8 @@
 # shellcheck disable=SC2016
 set -eux
 
-# shellcheck source=test/units/assert.sh
-. "$(dirname "$0")"/assert.sh
-
-runas() {
-    declare userid=$1
-    shift
-    XDG_RUNTIME_DIR=/run/user/"$(id -u "$userid")" setpriv --reuid="$userid" --init-groups "$@"
-}
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
 
 systemctl log-level debug
 export SYSTEMD_LOG_LEVEL=debug
@@ -79,6 +73,7 @@ systemd-analyze dump "*" >/dev/null
 systemd-analyze dump "*.socket" >/dev/null
 systemd-analyze dump "*.socket" "*.service" aaaaaaa ... >/dev/null
 systemd-analyze dump systemd-journald.service >/dev/null
+systemd-analyze malloc >/dev/null
 (! systemd-analyze dump "")
 # unit-files
 systemd-analyze unit-files >/dev/null
@@ -170,6 +165,11 @@ systemd-analyze cat-config /etc/systemd/system.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf systemd/journald.conf >/dev/null
 systemd-analyze cat-config systemd/system.conf foo/bar systemd/journald.conf >/dev/null
 systemd-analyze cat-config foo/bar
+systemd-analyze cat-config --tldr systemd/system.conf >/dev/null
+systemd-analyze cat-config --tldr /etc/systemd/system.conf >/dev/null
+systemd-analyze cat-config --tldr systemd/system.conf systemd/journald.conf >/dev/null
+systemd-analyze cat-config --tldr systemd/system.conf foo/bar systemd/journald.conf >/dev/null
+systemd-analyze cat-config --tldr foo/bar
 # security
 systemd-analyze security
 systemd-analyze security --json=off
@@ -240,6 +240,18 @@ set -e
 
 rm /tmp/testfile.service
 rm /tmp/testfile2.service
+
+cat <<EOF >/tmp/sample.service
+[Unit]
+Description = A Sample Service
+
+[Service]
+ExecStart = echo hello
+Slice=support.slice
+EOF
+
+# Zero exit status since no additional dependencies are recursively loaded when the unit file is loaded
+systemd-analyze verify --recursive-errors=no /tmp/sample.service
 
 cat <<EOF >/tmp/testfile.service
 [Service]
@@ -551,6 +563,12 @@ cat <<EOF >/tmp/testfile.json
     "weight": 25,
     "range": 1
     },
+"CapabilityBoundingSet_CAP_BPF":
+    {"description_good": "Service may load BPF programs",
+    "description_bad": "Service may not load BPF programs",
+    "weight": 25,
+    "range": 1
+    },
 "UMask":
     {"weight": 100,
     "range": 10
@@ -820,19 +838,34 @@ check deny yes /run/systemd/system/deny-list.service
 check deny no deny-list.service
 
 output=$(systemd-run -p "SystemCallFilter=@system-service" -p "SystemCallFilter=~@resources:ENOANO @privileged" -p "SystemCallFilter=@clock" sleep 60 2>&1)
-name=$(echo "$output" | awk '{ print $4 }')
+name=$(echo "$output" | awk '{ print $4 }' | cut -d';' -f1)
 
 check allow yes /run/systemd/transient/"$name"
 check allow no "$name"
 
 output=$(systemd-run -p "SystemCallFilter=~@known" -p "SystemCallFilter=@system-service" -p "SystemCallFilter=~@resources:ENOANO @privileged" -p "SystemCallFilter=@clock" sleep 60 2>&1)
-name=$(echo "$output" | awk '{ print $4 }')
+name=$(echo "$output" | awk '{ print $4 }' | cut -d';' -f1)
 
 check deny yes /run/systemd/transient/"$name"
 check deny no "$name"
 
+# Let's also test the "image-policy" verb
+
+systemd-analyze image-policy '*' 2>&1 | grep -q -F "Long form: =verity+signed+encrypted+unprotected+unused+absent"
+systemd-analyze image-policy '-' 2>&1 | grep -q -F "Long form: =unused+absent"
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -F "Long form: usr=verity:home=encrypted:=unused+absent"
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^home \+encrypted \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^usr \+verity \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^root \+ignore \+'
+systemd-analyze image-policy 'home=encrypted:usr=verity' 2>&1 | grep -q -e '^usr-verity \+unprotected \+'
+
+(! systemd-analyze image-policy 'doedel')
+
+# Output is very hard to predict, but let's run it for coverage anyway
+systemd-analyze pcrs
+systemd-analyze pcrs --json=pretty
+systemd-analyze pcrs 14 7 0 ima
+
 systemd-analyze log-level info
 
-echo OK >/testok
-
-exit 0
+touch /testok

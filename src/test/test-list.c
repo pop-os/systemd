@@ -1,8 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "alloc-util.h"
 #include "list.h"
+#include "tests.h"
 
 int main(int argc, const char *argv[]) {
+        test_setup_logging(LOG_DEBUG);
+
         size_t i;
         typedef struct list_item {
                 LIST_FIELDS(struct list_item, item_list);
@@ -253,6 +257,30 @@ int main(int argc, const char *argv[]) {
         assert_se(LIST_POP(item_list, head) == items + 1);
         assert_se(LIST_POP(item_list, head) == items + 0);
         assert_se(LIST_POP(item_list, head) == NULL);
+
+        /* No-op on an empty list */
+
+        LIST_CLEAR(item_list, head, free);
+
+        /* A non-empty list is cleared */
+
+        assert_se(LIST_PREPEND(item_list, head, new0(list_item, 1)));
+        assert_se(LIST_PREPEND(item_list, head, new0(list_item, 1)));
+
+        LIST_CLEAR(item_list, head, free);
+
+        assert_se(head == NULL);
+
+        /* A list can be cleared partially */
+
+        assert_se(LIST_PREPEND(item_list, head, new0(list_item, 1)));
+        assert_se(LIST_PREPEND(item_list, head, new0(list_item, 1)));
+        assert_se(LIST_PREPEND(item_list, head, items + 0) == items + 0);
+
+        LIST_CLEAR(item_list, head->item_list_next, free);
+
+        assert_se(head == items + 0);
+        assert_se(head->item_list_next == NULL);
 
         return 0;
 }

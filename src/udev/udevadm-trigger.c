@@ -112,7 +112,8 @@ static int exec_list(
                         if (ret == 0 && !ignore)
                                 ret = r;
                         continue;
-                }
+                } else
+                        log_device_debug(d, "Triggered device with action '%s'.", action_str);
 
                 if (uuid_supported < 0)
                         uuid_supported = true;
@@ -254,6 +255,7 @@ static int help(void) {
                "  -t --type=                        Type of events to trigger\n"
                "          devices                     sysfs devices (default)\n"
                "          subsystems                  sysfs subsystems and drivers\n"
+               "          all                         sysfs devices, subsystems, and drivers\n"
                "  -c --action=ACTION|help           Event action value, default is \"change\"\n"
                "  -s --subsystem-match=SUBSYSTEM    Trigger devices from a matching subsystem\n"
                "  -S --subsystem-nomatch=SUBSYSTEM  Exclude devices from a matching subsystem\n"

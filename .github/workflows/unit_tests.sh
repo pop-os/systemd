@@ -3,7 +3,6 @@
 
 # shellcheck disable=SC2206
 PHASES=(${@:-SETUP RUN RUN_ASAN_UBSAN CLEANUP})
-RELEASE="$(lsb_release -cs)"
 ADDITIONAL_DEPS=(
     clang
     expect
@@ -19,9 +18,9 @@ ADDITIONAL_DEPS=(
     libtss2-dev
     libxkbcommon-dev
     libzstd-dev
-    perl
     python3-libevdev
     python3-pefile
+    python3-pyelftools
     python3-pyparsing
     rpm
     zstd
@@ -46,9 +45,9 @@ for phase in "${PHASES[@]}"; do
     case $phase in
         SETUP)
             info "Setup phase"
-            bash -c "echo 'deb-src http://archive.ubuntu.com/ubuntu/ $RELEASE main restricted universe multiverse' >>/etc/apt/sources.list"
             # PPA with some newer build dependencies
-            add-apt-repository -y ppa:upstream-systemd-ci/systemd-ci
+            add-apt-repository -y --no-update ppa:upstream-systemd-ci/systemd-ci
+            add-apt-repository -y --no-update --enable-source
             apt-get -y update
             apt-get -y build-dep systemd
             apt-get -y install "${ADDITIONAL_DEPS[@]}"
@@ -60,7 +59,7 @@ for phase in "${PHASES[@]}"; do
                 export CXX=clang++
                 if [[ "$phase" == RUN_CLANG ]]; then
                     # The docs build is slow and is not affected by compiler/flags, so do it just once
-                    MESON_ARGS+=(-Dman=true)
+                    MESON_ARGS+=(-Dman=enabled)
                 else
                     MESON_ARGS+=(-Dmode=release --optimization=2)
                 fi
@@ -70,10 +69,6 @@ for phase in "${PHASES[@]}"; do
                     mv /etc/machine-id /etc/machine-id.bak
                 fi
             fi
-            # The install_tag feature introduced in 0.60 causes meson to fail with fatal-meson-warnings
-            # "Project targeting '>= 0.53.2' but tried to use feature introduced in '0.60.0': install_tag arg in custom_target"
-            # It can be safely removed from the CI since it isn't actually used anywhere to test anything.
-            find . -type f -name meson.build -exec sed -i '/install_tag/d' '{}' '+'
             MESON_ARGS+=(--fatal-meson-warnings)
             run_meson -Dnobody-group=nogroup --werror -Dtests=unsafe -Dslow-tests=true -Dfuzz-tests=true "${MESON_ARGS[@]}" build
             ninja -C build -v
@@ -91,13 +86,9 @@ for phase in "${PHASES[@]}"; do
                 MESON_ARGS+=(-Db_lundef=false -Dfuzz-tests=true)
 
                 if [[ "$phase" == "RUN_CLANG_ASAN_UBSAN_NO_DEPS" ]]; then
-                    MESON_ARGS+=(-Dskip-deps=true)
+                    MESON_ARGS+=(--auto-features=disabled)
                 fi
             fi
-            # The install_tag feature introduced in 0.60 causes meson to fail with fatal-meson-warnings
-            # "Project targeting '>= 0.53.2' but tried to use feature introduced in '0.60.0': install_tag arg in custom_target"
-            # It can be safely removed from the CI since it isn't actually used anywhere to test anything.
-            find . -type f -name meson.build -exec sed -i '/install_tag/d' '{}' '+'
             MESON_ARGS+=(--fatal-meson-warnings)
             run_meson -Dnobody-group=nogroup --werror -Dtests=unsafe -Db_sanitize=address,undefined "${MESON_ARGS[@]}" build
             ninja -C build -v

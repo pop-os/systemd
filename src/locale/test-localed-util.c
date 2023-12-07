@@ -44,6 +44,7 @@ TEST(find_converted_keymap) {
 
         assert_se(r == 1);
         assert_se(streq(ans, "pl"));
+        ans = mfree(ans);
 
         assert_se(find_converted_keymap(
                         &(X11Context) {
@@ -73,6 +74,7 @@ TEST(find_legacy_keymap) {
 TEST(vconsole_convert_to_x11) {
         _cleanup_(x11_context_clear) X11Context xc = {};
         _cleanup_(vc_context_clear) VCContext vc = {};
+        int r;
 
         log_info("/* test empty keymap */");
         assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
@@ -111,6 +113,34 @@ TEST(vconsole_convert_to_x11) {
         assert_se(vconsole_convert_to_x11(&vc, &xc) >= 0);
         assert_se(streq(xc.layout, "us"));
         assert_se(xc.variant == NULL);
+        x11_context_clear(&xc);
+
+        /* "gh" has no mapping in kbd-model-map and kbd provides a converted keymap for this layout. */
+        log_info("/* test with a converted keymap (gh:) */");
+        assert_se(free_and_strdup(&vc.keymap, "gh") >= 0);
+        r = vconsole_convert_to_x11(&vc, &xc);
+        if (r == 0) {
+                log_info("Skipping rest of %s: keymaps are not installed", __func__);
+                return;
+        }
+        assert_se(r > 0);
+        assert_se(streq(xc.layout, "gh"));
+        assert_se(xc.variant == NULL);
+        x11_context_clear(&xc);
+
+        log_info("/* test with converted keymap and with a known variant (gh:ewe) */");
+        assert_se(free_and_strdup(&vc.keymap, "gh-ewe") >= 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) > 0);
+        assert_se(streq(xc.layout, "gh"));
+        assert_se(streq(xc.variant, "ewe"));
+        x11_context_clear(&xc);
+
+        log_info("/* test with converted keymap and with an unknown variant (gh:ewe) */");
+        assert_se(free_and_strdup(&vc.keymap, "gh-foobar") > 0);
+        assert_se(vconsole_convert_to_x11(&vc, &xc) > 0);
+        assert_se(streq(xc.layout, "gh"));
+        assert_se(xc.variant == NULL);
+        x11_context_clear(&xc);
 }
 
 TEST(x11_convert_to_vconsole) {
@@ -143,6 +173,25 @@ TEST(x11_convert_to_vconsole) {
         assert_se(streq(vc.keymap, "es-dvorak"));
         vc_context_clear(&vc);
 
+        /* es no-variant test is not very good as the desired match
+        comes first in the list so will win if both candidates score
+        the same. in this case the desired match comes second so will
+        not win unless we correctly give the no-variant match a bonus
+        */
+        log_info("/* test without variant, desired match second (bg,us:) */");
+        assert_se(free_and_strdup(&xc.layout, "bg,us") >= 0);
+        assert_se(free_and_strdup(&xc.variant, NULL) >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "bg_bds-utf8"));
+        vc_context_clear(&vc);
+
+        /* same, but with variant specified as "," */
+        log_info("/* test with variant as ',', desired match second (bg,us:) */");
+        assert_se(free_and_strdup(&xc.variant, ",") >= 0);
+        assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
+        assert_se(streq(vc.keymap, "bg_bds-utf8"));
+        vc_context_clear(&vc);
+
         log_info("/* test with old mapping (fr:latin9) */");
         assert_se(free_and_strdup(&xc.layout, "fr") >= 0);
         assert_se(free_and_strdup(&xc.variant, "latin9") >= 0);
@@ -150,11 +199,14 @@ TEST(x11_convert_to_vconsole) {
         assert_se(streq(vc.keymap, "fr-latin9"));
         vc_context_clear(&vc);
 
+        /* https://bugzilla.redhat.com/show_bug.cgi?id=1039185 */
+        /* us,ru is the x config users want, but they still want ru
+        as the console layout in this case */
         log_info("/* test with a compound mapping (us,ru:) */");
         assert_se(free_and_strdup(&xc.layout, "us,ru") >= 0);
         assert_se(free_and_strdup(&xc.variant, NULL) >= 0);
         assert_se(x11_convert_to_vconsole(&xc, &vc) >= 0);
-        assert_se(streq(vc.keymap, "us"));
+        assert_se(streq(vc.keymap, "ru"));
         vc_context_clear(&vc);
 
         log_info("/* test with a compound mapping (ru,us:) */");

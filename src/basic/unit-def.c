@@ -68,6 +68,14 @@ const char *unit_dbus_interface_from_name(const char *name) {
         return unit_dbus_interface_from_type(t);
 }
 
+const char* unit_type_to_capitalized_string(UnitType t) {
+        const char *di = unit_dbus_interface_from_type(t);
+        if (!di)
+                return NULL;
+
+        return ASSERT_PTR(startswith(di, "org.freedesktop.systemd1."));
+}
+
 static const char* const unit_type_table[_UNIT_TYPE_MAX] = {
         [UNIT_SERVICE]   = "service",
         [UNIT_SOCKET]    = "socket",
@@ -180,27 +188,31 @@ static const char* const scope_state_table[_SCOPE_STATE_MAX] = {
 DEFINE_STRING_TABLE_LOOKUP(scope_state, ScopeState);
 
 static const char* const service_state_table[_SERVICE_STATE_MAX] = {
-        [SERVICE_DEAD]           = "dead",
-        [SERVICE_CONDITION]      = "condition",
-        [SERVICE_START_PRE]      = "start-pre",
-        [SERVICE_START]          = "start",
-        [SERVICE_START_POST]     = "start-post",
-        [SERVICE_RUNNING]        = "running",
-        [SERVICE_EXITED]         = "exited",
-        [SERVICE_RELOAD]         = "reload",
-        [SERVICE_RELOAD_SIGNAL]  = "reload-signal",
-        [SERVICE_RELOAD_NOTIFY]  = "reload-notify",
-        [SERVICE_STOP]           = "stop",
-        [SERVICE_STOP_WATCHDOG]  = "stop-watchdog",
-        [SERVICE_STOP_SIGTERM]   = "stop-sigterm",
-        [SERVICE_STOP_SIGKILL]   = "stop-sigkill",
-        [SERVICE_STOP_POST]      = "stop-post",
-        [SERVICE_FINAL_WATCHDOG] = "final-watchdog",
-        [SERVICE_FINAL_SIGTERM]  = "final-sigterm",
-        [SERVICE_FINAL_SIGKILL]  = "final-sigkill",
-        [SERVICE_FAILED]         = "failed",
-        [SERVICE_AUTO_RESTART]   = "auto-restart",
-        [SERVICE_CLEANING]       = "cleaning",
+        [SERVICE_DEAD]                       = "dead",
+        [SERVICE_CONDITION]                  = "condition",
+        [SERVICE_START_PRE]                  = "start-pre",
+        [SERVICE_START]                      = "start",
+        [SERVICE_START_POST]                 = "start-post",
+        [SERVICE_RUNNING]                    = "running",
+        [SERVICE_EXITED]                     = "exited",
+        [SERVICE_RELOAD]                     = "reload",
+        [SERVICE_RELOAD_SIGNAL]              = "reload-signal",
+        [SERVICE_RELOAD_NOTIFY]              = "reload-notify",
+        [SERVICE_STOP]                       = "stop",
+        [SERVICE_STOP_WATCHDOG]              = "stop-watchdog",
+        [SERVICE_STOP_SIGTERM]               = "stop-sigterm",
+        [SERVICE_STOP_SIGKILL]               = "stop-sigkill",
+        [SERVICE_STOP_POST]                  = "stop-post",
+        [SERVICE_FINAL_WATCHDOG]             = "final-watchdog",
+        [SERVICE_FINAL_SIGTERM]              = "final-sigterm",
+        [SERVICE_FINAL_SIGKILL]              = "final-sigkill",
+        [SERVICE_FAILED]                     = "failed",
+        [SERVICE_DEAD_BEFORE_AUTO_RESTART]   = "dead-before-auto-restart",
+        [SERVICE_FAILED_BEFORE_AUTO_RESTART] = "failed-before-auto-restart",
+        [SERVICE_DEAD_RESOURCES_PINNED]      = "dead-resources-pinned",
+        [SERVICE_AUTO_RESTART]               = "auto-restart",
+        [SERVICE_AUTO_RESTART_QUEUED]        = "auto-restart-queued",
+        [SERVICE_CLEANING]                   = "cleaning",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(service_state, ServiceState);

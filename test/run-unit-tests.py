@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 import argparse
-import glob
 import os
 import pathlib
 import subprocess
@@ -33,9 +32,11 @@ def argument_parser():
 
 opts = argument_parser().parse_args()
 
-tests = glob.glob('/usr/lib/systemd/tests/test-*')
+unittestdir = pathlib.Path(__file__).parent.absolute() / 'unit-tests'
+
+tests = list(unittestdir.glob('test-*'))
 if opts.unsafe:
-    tests += glob.glob('/usr/lib/systemd/tests/unsafe/test-*')
+    tests += unittestdir.glob('unsafe/test-*')
 
 if not opts.artifact_directory and os.getenv('ARTIFACT_DIRECTORY'):
     opts.artifact_directory = os.getenv('ARTIFACT_DIRECTORY')
@@ -50,6 +51,9 @@ for test in tests:
         total.good += 1
     elif ex.returncode == 77:
         print(f'{YELLOW}SKIP: {name}{RESET_ALL}')
+        total.skip += 1
+    elif ex.returncode == 127:
+        print(f'{YELLOW}SKIP: {name} (no interpreter) {RESET_ALL}')
         total.skip += 1
     else:
         print(f'{RED}FAIL: {name}{RESET_ALL}')

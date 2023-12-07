@@ -25,6 +25,7 @@
 #define CREDENTIAL_ENCRYPTED_SIZE_MAX (CREDENTIAL_SIZE_MAX + 128U*1024U)
 
 bool credential_name_valid(const char *s);
+bool credential_glob_valid(const char *s);
 
 /* Where creds have been passed to the local execution context */
 int get_credentials_dir(const char **ret);
@@ -34,12 +35,15 @@ int get_encrypted_credentials_dir(const char **ret);
 #define SYSTEM_CREDENTIALS_DIRECTORY "/run/credentials/@system"
 #define ENCRYPTED_SYSTEM_CREDENTIALS_DIRECTORY "/run/credentials/@encrypted"
 
-int read_credential(const char *name, void **ret, size_t *ret_size);
+int read_credential(const char *name, void **ret, size_t *ret_size); /* use in services! */
+int read_credential_with_decryption(const char *name, void **ret, size_t *ret_size); /* use in generators + pid1! */
 
 int read_credential_strings_many_internal(const char *first_name, char **first_value, ...);
 
 #define read_credential_strings_many(first_name, first_value, ...) \
         read_credential_strings_many_internal(first_name, first_value, __VA_ARGS__, NULL)
+
+int read_credential_bool(const char *name);
 
 typedef enum CredentialSecretFlags {
         CREDENTIAL_SECRET_GENERATE             = 1 << 0,

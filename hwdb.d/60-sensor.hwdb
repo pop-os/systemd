@@ -123,8 +123,16 @@ sensor:modalias:acpi:MXC6655*:dmi:*:svnAquarius*:pnNS483:*
 #########################################
 # Archos
 #########################################
+
+# Archos 80 Cesium
 sensor:modalias:acpi:SMO8500*:dmi:*:svnARCHOS:pnARCHOS80Cesium:*
+# Archos 101 Cesium
+sensor:modalias:acpi:KIOX000A*:dmi:*:svnARCHOS:pnARCHOS101CESIUM:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
+
+# Archos 101 Cesium Educ
+sensor:modalias:acpi:KIOX000A*:dmi:*:svnARCHOS:pnARCHOS101CesiumEduc:*
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
 
 #########################################
 # AsusTek
@@ -200,6 +208,14 @@ sensor:modalias:acpi:BMI0160*:dmi:*:svnAYANEO:pn*NEXT*:*
 sensor:modalias:acpi:KIOX010A:*:dmi:*:svnAMI:*:skuH2M6:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
  ACCEL_LOCATION=display
+
+#########################################
+# BUSH
+#########################################
+
+# Bush Windows tablet
+sensor:modalias:acpi:KIOX000A*:dmi:*:svnBUSH*:pnBushWindowstablet:*
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 1, 0, 0
 
 #########################################
 # Chuwi
@@ -367,6 +383,15 @@ sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0C02:*
 sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0C40:*
 sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0C41:*
 sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0C42:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CBD:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CBF:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC0:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC1:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC3:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC4:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC5:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC7:*
+sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0CC8:*
  ACCEL_LOCATION=base
 
 # Dell Venue 8 Pro 3845
@@ -384,6 +409,11 @@ sensor:modalias:acpi:INVN6500*:dmi:*svnDell*:pnVenue10Pro5055:*
 # DBook D10 / Juno Tablet
 sensor:modalias:acpi:KIOX000A*:dmi:bvnAmericanMegatrendsInternational,LLC.:bvrJP2V*:svnDefaultstring:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+
+# T11 / Juno Tablet 2
+sensor:modalias:acpi:NSA2513*:dmi:*:svnDigitek:*
+sensor:modalias:acpi:NSA2513*:dmi:*:svnDefaultstring:*
+ ACCEL_MOUNT_MATRIX=0, -1, 0; 1, 0, 0; 0, 0, 1
 
 #########################################
 # DEXP
@@ -906,12 +936,26 @@ sensor:modalias:acpi:SMO8500*:dmi:*:svnProwise:pnPT301:*
  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, 1, 0; 0, 0, 1
 
 #########################################
+# Purism
+#########################################
+
+# Librem11
+sensor:modalias:acpi:MXC6655*:dmi:*:svnPurism*:pnlibrem_11*
+ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
+
+#########################################
 # Reeder
 #########################################
 
 # A8iW-Rev.A
 sensor:modalias:acpi:SMO8500*:dmi:*:rvnReeder:rnA8iW-Rev.A:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+
+#########################################
+# RCA
+#########################################
+sensor:modalias:acpi:KIOX000A*:dmi:*:svnRCA:pnW101SA23T1:*
+ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 #########################################
 # Schneider
@@ -939,6 +983,10 @@ sensor:modalias:acpi:KIOX020A*:dmi:*:svnTECLAST:pnF6Pro:*
 
 # Teclast Tbook 11 (E5A6)
 sensor:modalias:acpi:KIOX000A*:dmi:*:svnTECLAST:pnTbooK11:*
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+
+# Teclast X3 Plus (G4K3)
+sensor:modalias:acpi:KIOX000A*:dmi:*svnTECLAST:pnX3Plus:*:skuG4K3_A1:*
  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
 
 # Teclast X4 2-in-1 (G4M6)

@@ -3,7 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
-<refentry id="systemd-resolved.service" conditional='ENABLE_RESOLVE'>
+<refentry id="systemd-resolved.service" conditional='ENABLE_RESOLVE'
+          xmlns:xi="http://www.w3.org/2001/XInclude">
 
   <refentryinfo>
     <title>systemd-resolved.service</title>
@@ -243,7 +244,7 @@
   <refsect1>
     <title>Compatibility with the traditional glibc stub resolver</title>
 
-    <para>This section provides a short summary of differences in the stub resolver implemented by
+    <para>This section provides a short summary of differences in the resolver implemented by
     <citerefentry><refentrytitle>nss-resolve</refentrytitle><manvolnum>8</manvolnum></citerefentry> together
     with <command>systemd-resolved</command> and the traditional stub resolver implemented in
     <filename>nss-dns</filename>.</para>
@@ -308,6 +309,19 @@ search foobar.com barbar.com
       <varname>$RES_OPTIONS</varname> described in
       <citerefentry project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
       are not supported currently.</para></listitem>
+
+      <listitem><para>The <filename>nss-dns</filename> resolver maintains little state between subsequent DNS
+      queries, and for each query always talks to the first listed DNS server from
+      <filename>/etc/resolv.conf</filename> first, and on failure continues with the next until reaching the
+      end of the list which is when the query fails. The resolver in
+      <filename>systemd-resolved.service</filename> however maintains state, and will continuously talk to
+      the same server for all queries on a particular lookup scope until some form of error is seen at which
+      point it switches to the next, and then continuously stays with it for all queries on the scope until
+      the next failure, and so on, eventually returning to the first configured server. This is done to
+      optimize lookup times, in particular given that the resolver typically must first probe server feature
+      sets when talking to a server, which is time consuming. This different behaviour implies that listed
+      DNS servers per lookup scope must be equivalent in the zones they serve, so that sending a query to one
+      of them will yield the same results as sending it to another configured DNS server.</para></listitem>
     </itemizedlist>
   </refsect1>
 
@@ -367,7 +381,9 @@ search foobar.com barbar.com
         <listitem><para>Upon reception of the <constant>SIGUSR1</constant> process signal
         <command>systemd-resolved</command> will dump the contents of all DNS resource record caches it
         maintains, as well as all feature level information it learnt about configured DNS servers into the
-        system logs.</para></listitem>
+        system logs.</para>
+
+        <xi:include href="version-info.xml" xpointer="v231"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -379,7 +395,9 @@ search foobar.com barbar.com
         <command>systemd-resolved</command> flushes the caches automatically anyway any time the host's
         network configuration changes. Sending this signal to <command>systemd-resolved</command> is
         equivalent to the <command>resolvectl flush-caches</command> command, however the latter is
-        recommended since it operates in a synchronous way.</para></listitem>
+        recommended since it operates in a synchronous way.</para>
+
+        <xi:include href="version-info.xml" xpointer="v231"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -394,7 +412,9 @@ search foobar.com barbar.com
         any time the DNS server configuration changes. Sending this signal to
         <command>systemd-resolved</command> is equivalent to the <command>resolvectl
         reset-server-features</command> command, however the latter is recommended since it operates in a
-        synchronous way.</para></listitem>
+        synchronous way.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -403,11 +423,11 @@ search foobar.com barbar.com
     <title>Credentials</title>
 
     <para><command>systemd-resolved</command> supports the service credentials logic as implemented by
-    <varname>LoadCredential=</varname>/<varname>SetCredential=</varname> (see
-    <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
+    <varname>ImportCredential=</varname>/<varname>LoadCredential=</varname>/<varname>SetCredential=</varname>
+    (see <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
     details). The following credentials are used when passed in:</para>
 
-    <variablelist>
+    <variablelist class='system-credentials'>
       <varlistentry>
         <term><varname>network.dns</varname></term>
         <term><varname>network.search_domains</varname></term>
@@ -415,7 +435,9 @@ search foobar.com barbar.com
         <listitem><para>May contain a space separated list of DNS server IP addresses and DNS search
         domains. This information is only used when no explicit configuration via
         <filename>/etc/systemd/resolved.conf</filename>, <filename>/etc/resolv.conf</filename> or the kernel
-        command line has been provided.</para></listitem>
+        command line has been provided.</para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -437,9 +459,32 @@ search foobar.com barbar.com
         <varname>Domains=</varname> settings of
         <citerefentry><refentrytitle>resolved.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         will be ignored. These two kernel command line options hence override system
-        configuration.</para></listitem>
+        configuration.</para>
+
+        <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
     </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>IP Ports</title>
+
+    <para>The <command>systemd-resolved</command> service listens on the following IP ports:</para>
+
+    <itemizedlist>
+      <listitem><para>Port 53 on IPv4 addresses 127.0.0.53 and 127.0.0.54 (both are on the local loopback
+      interface <literal>lo</literal>). This is the local DNS stub, as discussed above. Both UDP and TCP are
+      covered.</para></listitem>
+
+      <listitem><para>Port 5353 on all local addresses, both IPv4 and IPv6 (0.0.0.0 and ::0), for
+      MulticastDNS on UDP. Note that even though the socket is bound to all local interfaces via the selected
+      "wildcard" IP addresses, the incoming datagrams are filtered by the network interface they are coming
+      in on, and separate MulticastDNS link-local scopes are maintained for each, taking into consideration
+      whether MulticastDNS is enabled for the interface or not.</para></listitem>
+
+      <listitem><para>Port 5355 on all local addresses, both IPv4 and IP6 (0.0.0.0 and ::0), for LLMNR, on
+      both TCP and UDP. As with MulticastDNS filtering by incoming network interface is applied.</para></listitem>
+    </itemizedlist>
   </refsect1>
 
   <refsect1>

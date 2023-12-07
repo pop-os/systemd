@@ -16,7 +16,7 @@
 #include "fd-util.h"
 #include "icmp6-util.h"
 #include "in-addr-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "macro.h"
 #include "memory-util.h"
 #include "network-common.h"
@@ -25,6 +25,7 @@
 #include "socket-util.h"
 #include "string-util.h"
 #include "strv.h"
+#include "unaligned.h"
 
 int sd_radv_new(sd_radv **ret) {
         _cleanup_(sd_radv_unrefp) sd_radv *ra = NULL;
@@ -99,19 +100,9 @@ static sd_radv *radv_free(sd_radv *ra) {
         if (!ra)
                 return NULL;
 
-        while (ra->prefixes) {
-                sd_radv_prefix *p = ra->prefixes;
-
-                LIST_REMOVE(prefix, ra->prefixes, p);
-                sd_radv_prefix_unref(p);
-        }
-
-        while (ra->route_prefixes) {
-                sd_radv_route_prefix *p = ra->route_prefixes;
-
-                LIST_REMOVE(prefix, ra->route_prefixes, p);
-                sd_radv_route_prefix_unref(p);
-        }
+        LIST_CLEAR(prefix, ra->prefixes, sd_radv_prefix_unref);
+        LIST_CLEAR(prefix, ra->route_prefixes, sd_radv_route_prefix_unref);
+        LIST_CLEAR(prefix, ra->pref64_prefixes, sd_radv_pref64_prefix_unref);
 
         free(ra->rdnss);
         free(ra->dnssl);
@@ -133,18 +124,6 @@ static bool router_lifetime_is_valid(usec_t lifetime_usec) {
         return lifetime_usec == 0 ||
                 (lifetime_usec >= RADV_MIN_ROUTER_LIFETIME_USEC &&
                  lifetime_usec <= RADV_MAX_ROUTER_LIFETIME_USEC);
-}
-
-static be32_t usec_to_be32_sec(usec_t usec) {
-        if (usec == USEC_INFINITY)
-                /* UINT32_MAX is handled as infinity. */
-                return htobe32(UINT32_MAX);
-
-        if (usec >= UINT32_MAX * USEC_PER_SEC)
-                /* Finite but too large. Let's use the largest finite value. */
-                return htobe32(UINT32_MAX - 1);
-
-        return htobe32(usec / USEC_PER_SEC);
 }
 
 static int radv_send(sd_radv *ra, const struct in6_addr *dst, usec_t lifetime_usec) {
@@ -190,9 +169,10 @@ static int radv_send(sd_radv *ra, const struct in6_addr *dst, usec_t lifetime_us
 
         adv.nd_ra_type = ND_ROUTER_ADVERT;
         adv.nd_ra_curhoplimit = ra->hop_limit;
+        adv.nd_ra_retransmit = usec_to_be32_msec(ra->retransmit_usec);
         adv.nd_ra_flags_reserved = ra->flags;
         assert_cc(RADV_MAX_ROUTER_LIFETIME_USEC <= UINT16_MAX * USEC_PER_SEC);
-        adv.nd_ra_router_lifetime = htobe16(DIV_ROUND_UP(lifetime_usec, USEC_PER_SEC));
+        adv.nd_ra_router_lifetime = usec_to_be16_sec(lifetime_usec);
         iov[msg.msg_iovlen++] = IOVEC_MAKE(&adv, sizeof(adv));
 
         /* MAC address is optional, either because the link does not use L2
@@ -230,11 +210,25 @@ static int radv_send(sd_radv *ra, const struct in6_addr *dst, usec_t lifetime_us
                 iov[msg.msg_iovlen++] = IOVEC_MAKE(&rt->opt, sizeof(rt->opt));
         }
 
+        LIST_FOREACH(prefix, p, ra->pref64_prefixes)
+                iov[msg.msg_iovlen++] = IOVEC_MAKE(&p->opt, sizeof(p->opt));
+
         if (ra->rdnss)
                 iov[msg.msg_iovlen++] = IOVEC_MAKE(ra->rdnss, ra->rdnss->length * 8);
 
         if (ra->dnssl)
                 iov[msg.msg_iovlen++] = IOVEC_MAKE(ra->dnssl, ra->dnssl->length * 8);
+
+        if (FLAGS_SET(ra->flags, ND_RA_FLAG_HOME_AGENT)) {
+                ra->home_agent.nd_opt_home_agent_info_type = ND_OPT_HOME_AGENT_INFO;
+                ra->home_agent.nd_opt_home_agent_info_len = 1;
+
+                /* 0 means to place the current Router Lifetime value */
+                if (ra->home_agent.nd_opt_home_agent_info_lifetime == 0)
+                        ra->home_agent.nd_opt_home_agent_info_lifetime = adv.nd_ra_router_lifetime;
+
+                iov[msg.msg_iovlen++] = IOVEC_MAKE(&ra->home_agent, sizeof(ra->home_agent));
+        }
 
         if (sendmsg(ra->fd, &msg, 0) < 0)
                 return -errno;
@@ -252,10 +246,9 @@ static int radv_recv(sd_event_source *s, int fd, uint32_t revents, void *userdat
         assert(ra->event);
 
         ssize_t buflen = next_datagram_size_fd(fd);
+        if (ERRNO_IS_NEG_TRANSIENT(buflen) || ERRNO_IS_NEG_DISCONNECT(buflen))
+                return 0;
         if (buflen < 0) {
-                if (ERRNO_IS_TRANSIENT(buflen) || ERRNO_IS_DISCONNECT(buflen))
-                        return 0;
-
                 log_radv_errno(ra, buflen, "Failed to determine datagram size to read, ignoring: %m");
                 return 0;
         }
@@ -265,36 +258,34 @@ static int radv_recv(sd_event_source *s, int fd, uint32_t revents, void *userdat
                 return -ENOMEM;
 
         r = icmp6_receive(fd, buf, buflen, &src, &timestamp);
-        if (r < 0) {
-                if (ERRNO_IS_TRANSIENT(r) || ERRNO_IS_DISCONNECT(r))
-                        return 0;
-
+        if (ERRNO_IS_NEG_TRANSIENT(r) || ERRNO_IS_NEG_DISCONNECT(r))
+                return 0;
+        if (r < 0)
                 switch (r) {
                 case -EADDRNOTAVAIL:
-                        log_radv(ra, "Received RS from non-link-local address %s. Ignoring",
-                                 IN6_ADDR_TO_STRING(&src));
-                        break;
+                        log_radv(ra, "Received RS from neither link-local nor null address. Ignoring");
+                        return 0;
 
                 case -EMULTIHOP:
                         log_radv(ra, "Received RS with invalid hop limit. Ignoring.");
-                        break;
+                        return 0;
 
                 case -EPFNOSUPPORT:
                         log_radv(ra, "Received invalid source address from ICMPv6 socket. Ignoring.");
-                        break;
+                        return 0;
 
                 default:
                         log_radv_errno(ra, r, "Unexpected error receiving from ICMPv6 socket, ignoring: %m");
-                        break;
+                        return 0;
                 }
-
-                return 0;
-        }
 
         if ((size_t) buflen < sizeof(struct nd_router_solicit)) {
                 log_radv(ra, "Too short packet received, ignoring");
                 return 0;
         }
+
+        /* TODO: if the sender address is null, check that the message does not have the source link-layer
+         * address option. See RFC 4861 Section 6.1.1. */
 
         const char *addr = IN6_ADDR_TO_STRING(&src);
 
@@ -510,23 +501,35 @@ int sd_radv_set_hop_limit(sd_radv *ra, uint8_t hop_limit) {
         return 0;
 }
 
-int sd_radv_set_router_lifetime(sd_radv *ra, uint64_t lifetime_usec) {
+int sd_radv_set_retransmit(sd_radv *ra, uint64_t usec) {
         assert_return(ra, -EINVAL);
 
         if (ra->state != RADV_STATE_IDLE)
                 return -EBUSY;
 
-        if (!router_lifetime_is_valid(lifetime_usec))
+        if (usec > RADV_MAX_RETRANSMIT_USEC)
+                return -EINVAL;
+
+        ra->retransmit_usec = usec;
+        return 0;
+}
+
+int sd_radv_set_router_lifetime(sd_radv *ra, uint64_t usec) {
+        assert_return(ra, -EINVAL);
+
+        if (ra->state != RADV_STATE_IDLE)
+                return -EBUSY;
+
+        if (!router_lifetime_is_valid(usec))
                 return -EINVAL;
 
         /* RFC 4191, Section 2.2, "...If the Router Lifetime is zero, the preference value MUST be set
          * to (00) by the sender..." */
-        if (lifetime_usec == 0 &&
+        if (usec == 0 &&
             (ra->flags & (0x3 << 3)) != (SD_NDISC_PREFERENCE_MEDIUM << 3))
                 return -EINVAL;
 
-        ra->lifetime_usec = lifetime_usec;
-
+        ra->lifetime_usec = usec;
         return 0;
 }
 
@@ -566,6 +569,41 @@ int sd_radv_set_preference(sd_radv *ra, unsigned preference) {
 
         ra->flags = (ra->flags & ~(0x3 << 3)) | (preference << 3);
 
+        return 0;
+}
+
+int sd_radv_set_home_agent_information(sd_radv *ra, int home_agent) {
+        assert_return(ra, -EINVAL);
+
+        if (ra->state != RADV_STATE_IDLE)
+                return -EBUSY;
+
+        SET_FLAG(ra->flags, ND_RA_FLAG_HOME_AGENT, home_agent);
+
+        return 0;
+}
+
+int sd_radv_set_home_agent_preference(sd_radv *ra, uint16_t preference) {
+        assert_return(ra, -EINVAL);
+
+        if (ra->state != RADV_STATE_IDLE)
+                return -EBUSY;
+
+        ra->home_agent.nd_opt_home_agent_info_preference = htobe16(preference);
+
+        return 0;
+}
+
+int sd_radv_set_home_agent_lifetime(sd_radv *ra, uint64_t lifetime_usec) {
+        assert_return(ra, -EINVAL);
+
+        if (ra->state != RADV_STATE_IDLE)
+                return -EBUSY;
+
+        if (lifetime_usec > RADV_HOME_AGENT_MAX_LIFETIME_USEC)
+                return -EINVAL;
+
+        ra->home_agent.nd_opt_home_agent_info_lifetime = usec_to_be16_sec(lifetime_usec);
         return 0;
 }
 
@@ -742,9 +780,81 @@ int sd_radv_add_route_prefix(sd_radv *ra, sd_radv_route_prefix *p) {
         return 0;
 }
 
+int sd_radv_add_pref64_prefix(sd_radv *ra, sd_radv_pref64_prefix *p) {
+        sd_radv_pref64_prefix *found = NULL;
+        int r;
+
+        assert_return(ra, -EINVAL);
+        assert_return(p, -EINVAL);
+
+        const char *addr_p = IN6_ADDR_PREFIX_TO_STRING(&p->in6_addr, p->prefixlen);
+
+        LIST_FOREACH(prefix, cur, ra->pref64_prefixes) {
+                r = in_addr_prefix_intersect(AF_INET6,
+                                             (const union in_addr_union*) &cur->in6_addr,
+                                             cur->prefixlen,
+                                             (const union in_addr_union*) &p->in6_addr,
+                                             p->prefixlen);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        continue;
+
+                if (cur->prefixlen == p->prefixlen) {
+                        found = cur;
+                        break;
+                }
+
+                return log_radv_errno(ra, SYNTHETIC_ERRNO(EEXIST),
+                                      "IPv6 PREF64 prefix %s conflicts with %s, ignoring.",
+                                      addr_p,
+                                      IN6_ADDR_PREFIX_TO_STRING(&cur->in6_addr, cur->prefixlen));
+        }
+
+        if (found) {
+                /* p and cur may be equivalent. First increment the reference counter. */
+                sd_radv_pref64_prefix_ref(p);
+
+                /* Then, remove the old entry. */
+                LIST_REMOVE(prefix, ra->pref64_prefixes, found);
+                sd_radv_pref64_prefix_unref(found);
+
+                /* Finally, add the new entry. */
+                LIST_APPEND(prefix, ra->pref64_prefixes, p);
+
+                log_radv(ra, "Updated/replaced IPv6 PREF64 prefix %s (lifetime: %s)",
+                         strna(addr_p),
+                         FORMAT_TIMESPAN(p->lifetime_usec, USEC_PER_SEC));
+        } else {
+                /* The route prefix is new. Let's simply add it. */
+
+                sd_radv_pref64_prefix_ref(p);
+                LIST_APPEND(prefix, ra->pref64_prefixes, p);
+                ra->n_pref64_prefixes++;
+
+                log_radv(ra, "Added PREF64 prefix %s", strna(addr_p));
+        }
+
+        if (ra->state == RADV_STATE_IDLE)
+                return 0;
+
+        if (ra->ra_sent == 0)
+                return 0;
+
+        /* If RAs have already been sent, send an RA immediately to announce the newly-added route prefix */
+        r = radv_send(ra, NULL, ra->lifetime_usec);
+        if (r < 0)
+                log_radv_errno(ra, r, "Unable to send Router Advertisement for added PREF64 prefix %s, ignoring: %m",
+                               strna(addr_p));
+        else
+                log_radv(ra, "Sent Router Advertisement for added PREF64 prefix %s.", strna(addr_p));
+
+        return 0;
+}
+
 int sd_radv_set_rdnss(
                 sd_radv *ra,
-                uint32_t lifetime,
+                uint64_t lifetime_usec,
                 const struct in6_addr *dns,
                 size_t n_dns) {
 
@@ -753,6 +863,9 @@ int sd_radv_set_rdnss(
 
         assert_return(ra, -EINVAL);
         assert_return(n_dns < 128, -EINVAL);
+
+        if (lifetime_usec > RADV_RDNSS_MAX_LIFETIME_USEC)
+                return -EINVAL;
 
         if (!dns || n_dns == 0) {
                 ra->rdnss = mfree(ra->rdnss);
@@ -769,7 +882,7 @@ int sd_radv_set_rdnss(
 
         opt_rdnss->type = RADV_OPT_RDNSS;
         opt_rdnss->length = len / 8;
-        opt_rdnss->lifetime = htobe32(lifetime);
+        opt_rdnss->lifetime = usec_to_be32_sec(lifetime_usec);
 
         memcpy(opt_rdnss + 1, dns, n_dns * sizeof(struct in6_addr));
 
@@ -782,7 +895,7 @@ int sd_radv_set_rdnss(
 
 int sd_radv_set_dnssl(
                 sd_radv *ra,
-                uint32_t lifetime,
+                uint64_t lifetime_usec,
                 char **search_list) {
 
         _cleanup_free_ struct sd_radv_opt_dns *opt_dnssl = NULL;
@@ -790,6 +903,9 @@ int sd_radv_set_dnssl(
         uint8_t *p;
 
         assert_return(ra, -EINVAL);
+
+        if (lifetime_usec > RADV_DNSSL_MAX_LIFETIME_USEC)
+                return -EINVAL;
 
         if (strv_isempty(search_list)) {
                 ra->dnssl = mfree(ra->dnssl);
@@ -807,7 +923,7 @@ int sd_radv_set_dnssl(
 
         opt_dnssl->type = RADV_OPT_DNSSL;
         opt_dnssl->length = len / 8;
-        opt_dnssl->lifetime = htobe32(lifetime);
+        opt_dnssl->lifetime = usec_to_be32_sec(lifetime_usec);
 
         p = (uint8_t *)(opt_dnssl + 1);
         len -= sizeof(struct sd_radv_opt_dns);
@@ -984,6 +1100,62 @@ int sd_radv_route_prefix_set_lifetime(sd_radv_route_prefix *p, uint64_t lifetime
 
         p->lifetime_usec = lifetime_usec;
         p->valid_until = valid_until;
+
+        return 0;
+}
+
+int sd_radv_pref64_prefix_new(sd_radv_pref64_prefix **ret) {
+        sd_radv_pref64_prefix *p;
+
+        assert_return(ret, -EINVAL);
+
+        p = new(sd_radv_pref64_prefix, 1);
+        if (!p)
+                return -ENOMEM;
+
+        *p = (sd_radv_pref64_prefix) {
+                .n_ref = 1,
+
+                .opt.type = RADV_OPT_PREF64,
+                .opt.length = 2,
+        };
+
+        *ret = p;
+        return 0;
+}
+
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_radv_pref64_prefix, sd_radv_pref64_prefix, mfree);
+
+int sd_radv_pref64_prefix_set_prefix(
+                sd_radv_pref64_prefix *p,
+                const struct in6_addr *prefix,
+                uint8_t prefixlen,
+                uint64_t lifetime_usec) {
+
+        uint16_t pref64_lifetime;
+        uint8_t prefixlen_code;
+        int r;
+
+        assert_return(p, -EINVAL);
+        assert_return(prefix, -EINVAL);
+
+        r = pref64_prefix_length_to_plc(prefixlen, &prefixlen_code);
+        if (r < 0)
+                return log_radv_errno(NULL, r,
+                                      "Unsupported PREF64 prefix length %u. Valid lengths are 32, 40, 48, 56, 64 and 96", prefixlen);
+
+        if (lifetime_usec > PREF64_MAX_LIFETIME_USEC)
+                return -EINVAL;
+
+        /* RFC 8781 - 4.1 rounding up lifetime to multiply of 8 */
+        pref64_lifetime = DIV_ROUND_UP(lifetime_usec, 8 * USEC_PER_SEC) << 3;
+        pref64_lifetime |= prefixlen_code;
+
+        unaligned_write_be16(&p->opt.lifetime_and_plc, pref64_lifetime);
+        memcpy(&p->opt.prefix, prefix, sizeof(p->opt.prefix));
+
+        p->in6_addr = *prefix;
+        p->prefixlen = prefixlen;
 
         return 0;
 }

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
+#include "pidref.h"
+
 typedef struct Inhibitor Inhibitor;
 
 typedef enum InhibitWhat {
@@ -40,7 +42,7 @@ struct Inhibitor {
         char *why;
         InhibitMode mode;
 
-        pid_t pid;
+        PidRef pid;
         uid_t uid;
 
         dual_timestamp since;
@@ -65,6 +67,10 @@ bool inhibitor_is_orphan(Inhibitor *i);
 
 InhibitWhat manager_inhibit_what(Manager *m, InhibitMode mm);
 bool manager_is_inhibited(Manager *m, InhibitWhat w, InhibitMode mm, dual_timestamp *since, bool ignore_inactive, bool ignore_uid, uid_t uid, Inhibitor **offending);
+
+static inline bool inhibit_what_is_valid(InhibitWhat w) {
+        return w > 0 && w < _INHIBIT_WHAT_MAX;
+}
 
 const char *inhibit_what_to_string(InhibitWhat k);
 int inhibit_what_from_string(const char *s);

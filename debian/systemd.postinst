@@ -32,38 +32,23 @@ if [ "$1" = "triggered" ]; then
     exit 0
 fi
 
-# Enable getty and remote-fs.target by default on new installs
+# Enable getty, remote-fs.target and systemd-pstore by default on new installs
 if [ -z "$2" ]; then
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable getty@tty1.service || true
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable remote-fs.target || true
-fi
-
-# Enable systemd-pstore by default on new installs and upgrades, see #952767
-if dpkg --compare-versions "$2" lt "245.4-4~"; then
     systemctl ${DPKG_ROOT:+--root="$DPKG_ROOT"} enable systemd-pstore.service || true
 fi
 
 # Create /etc/machine-id
 systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 
-# Enable persistent journal, in auto-mode, by default on new installs and upgrades
-if dpkg --compare-versions "$2" lt "244.1-2~"; then
+# Enable persistent journal, in auto-mode, by default on new installs
+if [ -z "$2" ]; then
     mkdir -p "$DPKG_ROOT/var/log/journal"
 fi
 
 # Initial update of the Message Catalogs database
 _update_catalog
-
-if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
-    # systemd-pstore.service is now enabled via sysinit.target
-    rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
-    rmdir --ignore-fail-on-non-empty /etc/systemd/system/systemd-remount-fs.service.wants 2> /dev/null || true
-fi
-
-if dpkg --compare-versions "$2" lt-nl "245.4-5~"; then
-    # Clean up removed ondemand service
-    rm -f /etc/systemd/system/multi-user.target.wants/ondemand.service
-fi
 
 # Move the old locale file into /etc. Symlinks will be created by tmpfiles.d later
 if [ -f /etc/default/locale ] && [ ! -L /etc/default/locale ] && [ ! -f /etc/locale.conf ]; then
@@ -80,29 +65,13 @@ systemd-tmpfiles --create || :
 
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
-    # LP: #2013543 - the systemd cmdline can get mangled depending on the
-    # contents of /proc/cmdline, which causes systemd to fail to deserialize
-    # it's previous state on daemon-reexec. This means that for upgrades from
-    # affected versions, we need a reboot and cannot re-exec here, else the
-    # bug could be triggered.
-    if dpkg --compare-versions "$2" lt "249.11-0ubuntu3.10~" ||
-        dpkg --compare-versions "$2" eq "252.5-2ubuntu3" ||
-        dpkg --compare-versions "$2" eq "253.5-1ubuntu1"; then
-        if ! grep -Fqsx systemd /run/reboot-required.pkgs; then
-            echo systemd >> /run/reboot-required.pkgs || true
-        fi
-
-        # Reload to avoid warnings when restarting services below
-        _systemctl daemon-reload || true
-    else
-        _systemctl daemon-reexec || true
-    fi
+    _systemctl daemon-reexec || true
+    # Re-exec user instances so that running user managers are updated too.
+    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
+    # D-Bus as dbus-user-session is not guaranteed to be available.
+    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
     # do not restart logind
     # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
-    if dpkg --compare-versions "$2" lt-nl "246.2-2~"; then
-        # the socket configuration changed
-        _systemctl stop systemd-networkd.socket || true
-    fi
     _systemctl try-restart systemd-networkd.service || true
     _systemctl try-restart systemd-journald.service || true
 fi

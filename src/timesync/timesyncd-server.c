@@ -60,12 +60,27 @@ ServerAddress* server_address_free(ServerAddress *a) {
         return mfree(a);
 }
 
+static int enable_ntp_server_defer_event(Manager *m, ServerType type) {
+        int r;
+
+        assert(m);
+        assert((type >= 0) && (type < _SERVER_TYPE_MAX));
+
+        m->ntp_server_change_mask |= 1U << type;
+
+        r = bus_manager_emit_ntp_server_changed(m);
+        if (r < 0)
+                return r;
+
+        return 1;
+}
+
 int server_name_new(
                 Manager *m,
                 ServerName **ret,
                 ServerType type,
                 const char *string) {
-
+        int r;
         ServerName *n;
 
         assert(m);
@@ -103,6 +118,10 @@ int server_name_new(
                 assert_not_reached();
         }
 
+        r = enable_ntp_server_defer_event(m, type);
+        if (r < 0)
+                log_debug_errno(r, "Failed to enable ntp server defer event, ignoring: %m");
+
         if (type != SERVER_FALLBACK &&
             m->current_server_name &&
             m->current_server_name->type == SERVER_FALLBACK)
@@ -117,6 +136,8 @@ int server_name_new(
 }
 
 ServerName *server_name_free(ServerName *n) {
+        int r;
+
         if (!n)
                 return NULL;
 
@@ -133,6 +154,10 @@ ServerName *server_name_free(ServerName *n) {
                         LIST_REMOVE(names, n->manager->runtime_servers, n);
                 else
                         assert_not_reached();
+
+                r = enable_ntp_server_defer_event(n->manager, n->type);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to enable ntp server defer event, ignoring: %m");
 
                 if (n->manager->current_server_name == n)
                         manager_set_server_name(n->manager, NULL);

@@ -1,13 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "analyze.h"
 #include "analyze-plot.h"
 #include "analyze-time-data.h"
+#include "analyze.h"
 #include "bus-error.h"
 #include "bus-map-properties.h"
 #include "format-table.h"
 #include "os-util.h"
 #include "sort-util.h"
+#include "strv.h"
+#include "unit-def.h"
 #include "version.h"
 
 #define SCALE_X (0.1 / 1000.0) /* pixels per us */
@@ -80,8 +82,8 @@ static int acquire_host_info(sd_bus *bus, HostInfo **hi) {
         if (!host)
                 return log_oom();
 
-        if (arg_scope != LOOKUP_SCOPE_SYSTEM) {
-                r = bus_connect_transport(arg_transport, arg_host, false, &system_bus);
+        if (arg_runtime_scope != RUNTIME_SCOPE_SYSTEM) {
+                r = bus_connect_transport(arg_transport, arg_host, RUNTIME_SCOPE_SYSTEM, &system_bus);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to connect to system bus, ignoring: %m");
                         goto manager;
@@ -89,7 +91,7 @@ static int acquire_host_info(sd_bus *bus, HostInfo **hi) {
         }
 
         r = bus_map_all_properties(
-                        system_bus ? : bus,
+                        system_bus ?: bus,
                         "org.freedesktop.hostname1",
                         "/org/freedesktop/hostname1",
                         hostname_map,
@@ -158,12 +160,32 @@ static void svg_graph_box(double height, double begin, double end) {
                             SCALE_Y * height);
         }
 }
+
+static void plot_tooltip(const UnitTimes *ut) {
+        assert(ut);
+        assert(ut->name);
+
+        svg("%s:\n", ut->name);
+
+        UnitDependency i;
+        VA_ARGS_FOREACH(i, UNIT_AFTER, UNIT_BEFORE, UNIT_REQUIRES, UNIT_REQUISITE, UNIT_WANTS, UNIT_CONFLICTS, UNIT_UPHOLDS)
+                if (!strv_isempty(ut->deps[i])) {
+                        svg("\n%s:\n", unit_dependency_to_string(i));
+                        STRV_FOREACH(s, ut->deps[i])
+                                svg("  %s\n", *s);
+                }
+}
+
 static int plot_unit_times(UnitTimes *u, double width, int y) {
         bool b;
 
         if (!u->name)
                 return 0;
 
+        svg("<g>\n");
+        svg("<title>");
+        plot_tooltip(u);
+        svg("</title>\n");
         svg_bar("activating", u->activating, u->activated, y);
         svg_bar("active", u->activated, u->deactivating, y);
         svg_bar("deactivating", u->deactivating, u->deactivated, y);
@@ -175,6 +197,7 @@ static int plot_unit_times(UnitTimes *u, double width, int y) {
                          u->name, FORMAT_TIMESPAN(u->time, USEC_PER_MSEC));
         else
                 svg_text(b, u->activating, y, "%s", u->name);
+        svg("</g>\n");
 
         return 1;
 }
@@ -206,21 +229,21 @@ static int produce_plot_as_svg(
 
         if (boot->firmware_time > boot->loader_time)
                 m++;
-        if (boot->loader_time > 0) {
+        if (timestamp_is_set(boot->loader_time)) {
                 m++;
                 if (width < 1000.0)
                         width = 1000.0;
         }
-        if (boot->initrd_time > 0)
+        if (timestamp_is_set(boot->initrd_time))
                 m++;
-        if (boot->kernel_done_time > 0)
+        if (timestamp_is_set(boot->kernel_done_time))
                 m++;
 
         for (u = times; u->has_data; u++) {
                 double text_start, text_width;
 
                 if (u->activating > boot->finish_time) {
-                        u->name = mfree(u->name);
+                        unit_times_clear(u);
                         continue;
                 }
 
@@ -295,22 +318,22 @@ static int produce_plot_as_svg(
         svg("<g transform=\"translate(%.3f,100)\">\n", 20.0 + (SCALE_X * boot->firmware_time));
         svg_graph_box(m, -(double) boot->firmware_time, boot->finish_time);
 
-        if (boot->firmware_time > 0) {
+        if (timestamp_is_set(boot->firmware_time)) {
                 svg_bar("firmware", -(double) boot->firmware_time, -(double) boot->loader_time, y);
                 svg_text(true, -(double) boot->firmware_time, y, "firmware");
                 y++;
         }
-        if (boot->loader_time > 0) {
+        if (timestamp_is_set(boot->loader_time)) {
                 svg_bar("loader", -(double) boot->loader_time, 0, y);
                 svg_text(true, -(double) boot->loader_time, y, "loader");
                 y++;
         }
-        if (boot->kernel_done_time > 0) {
+        if (timestamp_is_set(boot->kernel_done_time)) {
                 svg_bar("kernel", 0, boot->kernel_done_time, y);
                 svg_text(true, 0, y, "kernel");
                 y++;
         }
-        if (boot->initrd_time > 0) {
+        if (timestamp_is_set(boot->initrd_time)) {
                 svg_bar("initrd", boot->initrd_time, boot->userspace_time, y);
                 if (boot->initrd_security_start_time < boot->initrd_security_finish_time)
                         svg_bar("security", boot->initrd_security_start_time, boot->initrd_security_finish_time, y);
@@ -330,7 +353,7 @@ static int produce_plot_as_svg(
         }
 
         svg_bar("active", boot->userspace_time, boot->finish_time, y);
-        if (boot->security_start_time > 0)
+        if (timestamp_is_set(boot->security_start_time))
                 svg_bar("security", boot->security_start_time, boot->security_finish_time, y);
         svg_bar("generators", boot->generators_start_time, boot->generators_finish_time, y);
         svg_bar("unitsload", boot->unitsload_start_time, boot->unitsload_finish_time, y);
@@ -354,7 +377,7 @@ static int produce_plot_as_svg(
         svg_bar("deactivating", 0, 300000, y);
         svg_text(true, 400000, y, "Deactivating");
         y++;
-        if (boot->security_start_time > 0) {
+        if (timestamp_is_set(boot->security_start_time)) {
                 svg_bar("security", 0, 300000, y);
                 svg_text(true, 400000, y, "Setting up security module");
                 y++;
@@ -431,7 +454,7 @@ int verb_plot(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(unit_times_free_arrayp) UnitTimes *times = NULL;
         _cleanup_free_ char *pretty_times = NULL;
-        bool use_full_bus = arg_scope == LOOKUP_SCOPE_SYSTEM;
+        bool use_full_bus = arg_runtime_scope == RUNTIME_SCOPE_SYSTEM;
         BootTimes *boot;
         int n, r;
 
@@ -447,7 +470,7 @@ int verb_plot(int argc, char *argv[], void *userdata) {
         if (n < 0)
                 return n;
 
-        if (use_full_bus || arg_scope != LOOKUP_SCOPE_SYSTEM) {
+        if (use_full_bus || arg_runtime_scope != RUNTIME_SCOPE_SYSTEM) {
                 n = acquire_host_info(bus, &host);
                 if (n < 0)
                         return n;

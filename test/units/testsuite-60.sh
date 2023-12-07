@@ -3,8 +3,8 @@
 set -eux
 set -o pipefail
 
-# shellcheck source=test/units/assert.sh
-. "$(dirname "$0")"/assert.sh
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
 
 teardown_test_dependencies() (
     set +eux
@@ -241,8 +241,6 @@ EOF
     done
 }
 
-: >/failed
-
 systemd-analyze log-level debug
 systemd-analyze log-target journal
 
@@ -288,8 +286,8 @@ done
 
 # Figure out if we have entered the rate limit state.
 # If the infra is slow we might not enter the rate limit state; in that case skip the exit check.
-if timeout 2m bash -c "while ! journalctl -u init.scope --since=$TS | grep -q '(mount-monitor-dispatch) entered rate limit'; do sleep 1; done"; then
-    timeout 2m bash -c "while ! journalctl -u init.scope --since=$TS | grep -q '(mount-monitor-dispatch) left rate limit'; do sleep 1; done"
+if timeout 2m bash -c "until journalctl -u init.scope --since=$TS | grep -q '(mount-monitor-dispatch) entered rate limit'; do sleep 1; done"; then
+    timeout 2m bash -c "until journalctl -u init.scope --since=$TS | grep -q '(mount-monitor-dispatch) left rate limit'; do sleep 1; done"
 fi
 
 # Verify that the mount units are always cleaned up at the end.
@@ -308,4 +306,3 @@ test_issue_23796
 systemd-analyze log-level info
 
 touch /testok
-rm /failed

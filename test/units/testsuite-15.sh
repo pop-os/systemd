@@ -3,15 +3,20 @@
 set -eux
 set -o pipefail
 
-clear_unit () {
-    local UNIT_NAME="${1:?}"
-    systemctl stop "$UNIT_NAME" 2>/dev/null || :
-    rm -f  /{etc,run,usr/lib}/systemd/system/"$UNIT_NAME"
-    rm -fr /{etc,run,usr/lib}/systemd/system/"$UNIT_NAME".d
-    rm -fr /{etc,run,usr/lib}/systemd/system/"$UNIT_NAME".{wants,requires}
-    if [[ $UNIT_NAME == *@ ]]; then
-        local base="${UNIT_NAME%@*}"
-        local suffix="${UNIT_NAME##*.}"
+# shellcheck source=test/units/test-control.sh
+. "$(dirname "$0")"/test-control.sh
+
+clear_unit() {
+    local unit_name="${1:?}"
+    local base suffix
+
+    systemctl stop "$unit_name" 2>/dev/null || :
+    rm -f  /{etc,run,usr/lib}/systemd/system/"$unit_name"
+    rm -fr /{etc,run,usr/lib}/systemd/system/"$unit_name".d
+    rm -fr /{etc,run,usr/lib}/systemd/system/"$unit_name".{wants,requires}
+    if [[ $unit_name == *@* ]]; then
+        base="${unit_name%@*}"
+        suffix="${unit_name##*.}"
         systemctl stop "$base@"*."$suffix" 2>/dev/null || :
         rm -f  /{etc,run,usr/lib}/systemd/system/"$base@"*."$suffix"
         rm -fr /{etc,run,usr/lib}/systemd/system/"$base@"*."$suffix".d
@@ -19,34 +24,34 @@ clear_unit () {
     fi
 }
 
-clear_units () {
+clear_units() {
     for u in "$@"; do
         clear_unit "$u"
     done
     systemctl daemon-reload
 }
 
-create_service () {
-    local SERVICE_NAME="${1:?}"
-    clear_units "${SERVICE_NAME}".service
+create_service() {
+    local service_name="${1:?}"
+    clear_units "${service_name}".service
 
-    cat >/etc/systemd/system/"$SERVICE_NAME".service <<EOF
+    cat >/etc/systemd/system/"$service_name".service <<EOF
 [Unit]
-Description=$SERVICE_NAME unit
+Description=$service_name unit
 
 [Service]
 ExecStart=sleep 100000
 EOF
-    mkdir -p /{etc,run,usr/lib}/systemd/system/"$SERVICE_NAME".service.{d,wants,requires}
+    mkdir -p /{etc,run,usr/lib}/systemd/system/"$service_name".service.{d,wants,requires}
 }
 
-create_services () {
+create_services() {
     for u in "$@"; do
         create_service "$u"
     done
 }
 
-check_ok () {
+check_ok() {
     x="$(systemctl show --value -p "${2:?}" "${1:?}")"
     case "$x" in
         *${3:?}*) return 0 ;;
@@ -54,11 +59,11 @@ check_ok () {
     esac
 }
 
-check_ko () {
+check_ko() {
     ! check_ok "$@"
 }
 
-test_basic_dropins () {
+testcase_basic_dropins() {
     echo "Testing basic dropins..."
 
     echo "*** test a wants b wants c"
@@ -111,20 +116,20 @@ test_basic_dropins () {
     create_services test15-a test15-b
     check_ko test15-a ExecCondition "/bin/echo a"
     check_ko test15-b ExecCondition "/bin/echo b"
-    mkdir -p /usr/lib/systemd/system/service.d
-    cat >/usr/lib/systemd/system/service.d/override.conf <<EOF
+    mkdir -p /run/systemd/system/service.d
+    cat >/run/systemd/system/service.d/override.conf <<EOF
 [Service]
 ExecCondition=/bin/echo %n
 EOF
     systemctl daemon-reload
     check_ok test15-a ExecCondition "/bin/echo test15-a"
     check_ok test15-b ExecCondition "/bin/echo test15-b"
-    rm -rf /usr/lib/systemd/system/service.d
+    rm -rf /run/systemd/system/service.d
 
     clear_units test15-{a,b,c,c1}.service
 }
 
-test_linked_units () {
+testcase_linked_units() {
     echo "Testing linked units..."
     echo "*** test linked unit (same basename)"
 
@@ -151,7 +156,7 @@ test_linked_units () {
     clear_units test15-{a,b}.service
 }
 
-test_template_alias() {
+testcase_template_alias() {
     echo "Testing instance alias..."
     echo "*** forward"
 
@@ -177,7 +182,7 @@ test_template_alias() {
     clear_units test15-{a,b}@.service
 }
 
-test_hierarchical_service_dropins () {
+testcase_hierarchical_service_dropins() {
     echo "Testing hierarchical service dropins..."
     echo "*** test service.d/ top level drop-in"
     create_services a-b-c
@@ -187,11 +192,11 @@ test_hierarchical_service_dropins () {
     check_ko a-b-c ExecCondition "echo a-b-c.service.d"
 
     for dropin in service.d a-.service.d a-b-.service.d a-b-c.service.d; do
-        mkdir -p /usr/lib/systemd/system/$dropin
-        echo "
+        mkdir -p "/run/systemd/system/$dropin"
+        cat >"/run/systemd/system/$dropin/override.conf" <<EOF
 [Service]
 ExecCondition=echo $dropin
-        " >/usr/lib/systemd/system/$dropin/override.conf
+EOF
         systemctl daemon-reload
         check_ok a-b-c ExecCondition "echo $dropin"
 
@@ -217,13 +222,13 @@ ExecCondition=echo $dropin
         systemctl stop a-b-c2.service
     done
     for dropin in service.d a-.service.d a-b-.service.d a-b-c.service.d; do
-        rm -rf /usr/lib/systemd/system/$dropin
+        rm -rf "/run/systemd/system/$dropin"
     done
 
     clear_units a-b-c.service
 }
 
-test_hierarchical_slice_dropins () {
+testcase_hierarchical_slice_dropins() {
     echo "Testing hierarchical slice dropins..."
     echo "*** test slice.d/ top level drop-in"
     # Slice units don't even need a fragment, so we test the defaults here
@@ -232,11 +237,11 @@ test_hierarchical_slice_dropins () {
 
     # Test drop-ins
     for dropin in slice.d a-.slice.d a-b-.slice.d a-b-c.slice.d; do
-        mkdir -p /usr/lib/systemd/system/$dropin
-        echo "
+        mkdir -p "/run/systemd/system/$dropin"
+        cat >"/run/systemd/system/$dropin/override.conf" <<EOF
 [Slice]
 MemoryMax=1000000000
-        " >/usr/lib/systemd/system/$dropin/override.conf
+EOF
         systemctl daemon-reload
         check_ok a-b-c.slice MemoryMax "1000000000"
 
@@ -268,21 +273,21 @@ MemoryMax=1000000000
                StopUnit 'ss' \
                'a-b-c.slice' 'replace'
 
-        rm /usr/lib/systemd/system/$dropin/override.conf
+        rm -f "/run/systemd/system/$dropin/override.conf"
     done
 
     # Test unit with a fragment
-    echo "
+    cat >/run/systemd/system/a-b-c.slice <<EOF
 [Slice]
 MemoryMax=1000000001
-        " >/usr/lib/systemd/system/a-b-c.slice
+EOF
     systemctl daemon-reload
     check_ok a-b-c.slice MemoryMax "1000000001"
 
     clear_units a-b-c.slice
 }
 
-test_transient_service_dropins () {
+testcase_transient_service_dropins() {
     echo "Testing dropins for a transient service..."
     echo "*** test transient service drop-ins"
 
@@ -317,7 +322,7 @@ test_transient_service_dropins () {
        /etc/systemd/system/a-b-.service.d/drop3.conf
 }
 
-test_transient_slice_dropins () {
+testcase_transient_slice_dropins() {
     echo "Testing dropins for a transient slice..."
     echo "*** test transient slice drop-ins"
 
@@ -367,7 +372,7 @@ test_transient_slice_dropins () {
        /etc/systemd/system/a-b-.slice.d/drop3.conf
 }
 
-test_template_dropins () {
+testcase_template_dropins() {
     echo "Testing template dropins..."
 
     create_services foo bar@ yup@
@@ -516,7 +521,7 @@ EOF
     clear_units foo.service {bar,yup,bar-alias}@{,1,2,3}.service
 }
 
-test_alias_dropins () {
+testcase_alias_dropins() {
     echo "Testing alias dropins..."
 
     echo "*** test a wants b1 alias of b"
@@ -548,7 +553,7 @@ test_alias_dropins () {
     clear_units test15-{a,x,y}.service
 }
 
-test_masked_dropins () {
+testcase_masked_dropins() {
     echo "Testing masked dropins..."
 
     create_services test15-a test15-b
@@ -611,7 +616,7 @@ EOF
     echo "*** test a wants b both ways"
     create_services test15-a test15-b
     ln -sf /dev/null /etc/systemd/system/test15-a.service.wants/test15-b.service
-    cat >/usr/lib/systemd/system/test15-a.service.d/wants-b.conf<<EOF
+    cat >/usr/lib/systemd/system/test15-a.service.d/wants-b.conf <<EOF
 [Unit]
 Wants=test15-b.service
 EOF
@@ -669,7 +674,7 @@ EOF
     clear_units test15-{a,b}.service
 }
 
-test_invalid_dropins () {
+testcase_invalid_dropins() {
     echo "Testing invalid dropins..."
     # Assertion failed on earlier versions, command exits unsuccessfully on later versions
     systemctl cat nonexistent@.service || true
@@ -682,7 +687,7 @@ test_invalid_dropins () {
     return 0
 }
 
-test_symlink_dropin_directory () {
+testcase_symlink_dropin_directory() {
     # For issue #21920.
     echo "Testing symlink drop-in directory..."
     create_services test15-a
@@ -701,17 +706,6 @@ EOF
     clear_units test15-a.service
 }
 
-test_basic_dropins
-test_linked_units
-test_template_alias
-test_hierarchical_service_dropins
-test_hierarchical_slice_dropins
-test_transient_service_dropins
-test_transient_slice_dropins
-test_template_dropins
-test_alias_dropins
-test_masked_dropins
-test_invalid_dropins
-test_symlink_dropin_directory
+run_testcases
 
 touch /testok

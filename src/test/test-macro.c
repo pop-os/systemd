@@ -15,7 +15,7 @@ TEST(saturate_add) {
         assert_se(saturate_add(60, 60, 50) == 50);
 }
 
-TEST(align_power2) {
+TEST(ALIGN_POWER2) {
         unsigned long i, p2;
 
         assert_se(ALIGN_POWER2(0) == 0);
@@ -57,7 +57,7 @@ TEST(align_power2) {
         }
 }
 
-TEST(max) {
+TEST(MAX) {
         static const struct {
                 int a;
                 int b[CONST_MAX(10, 100)];
@@ -159,7 +159,7 @@ TEST(container_of) {
 
 #pragma GCC diagnostic pop
 
-TEST(div_round_up) {
+TEST(DIV_ROUND_UP) {
         int div;
 
         /* basic tests */
@@ -192,7 +192,7 @@ TEST(div_round_up) {
         assert_se(0xfffffffdU / 10U + !!(0xfffffffdU % 10U) == 429496730U);
 }
 
-TEST(ptr_to_int) {
+TEST(PTR_TO_INT) {
         /* Primary reason to have this test is to validate that pointers are large enough to hold entire int range */
         assert_se(PTR_TO_INT(INT_TO_PTR(0)) == 0);
         assert_se(PTR_TO_INT(INT_TO_PTR(1)) == 1);
@@ -201,7 +201,7 @@ TEST(ptr_to_int) {
         assert_se(PTR_TO_INT(INT_TO_PTR(INT_MIN)) == INT_MIN);
 }
 
-TEST(in_set) {
+TEST(IN_SET) {
         assert_se(IN_SET(1, 1, 2));
         assert_se(IN_SET(1, 1, 2, 3, 4));
         assert_se(IN_SET(2, 1, 2, 3, 4));
@@ -221,7 +221,7 @@ TEST(in_set) {
         assert_se(!IN_SET(t.x, 2, 3, 4));
 }
 
-TEST(foreach_pointer) {
+TEST(FOREACH_POINTER) {
         int a, b, c, *i;
         size_t k = 0;
 
@@ -300,7 +300,191 @@ TEST(foreach_pointer) {
         assert_se(k == 11);
 }
 
-TEST(align_to) {
+TEST(FOREACH_VA_ARGS) {
+        size_t i;
+
+        i = 0;
+        uint8_t u8, u8_1 = 1, u8_2 = 2, u8_3 = 3;
+        VA_ARGS_FOREACH(u8, u8_2, 8, 0xff, u8_1, u8_3, 0, 1) {
+                switch(i++) {
+                case 0: assert_se(u8 == u8_2); break;
+                case 1: assert_se(u8 == 8); break;
+                case 2: assert_se(u8 == 0xff); break;
+                case 3: assert_se(u8 == u8_1); break;
+                case 4: assert_se(u8 == u8_3); break;
+                case 5: assert_se(u8 == 0); break;
+                case 6: assert_se(u8 == 1); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 7);
+        i = 0;
+        VA_ARGS_FOREACH(u8, 0) {
+                assert_se(u8 == 0);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        i = 0;
+        VA_ARGS_FOREACH(u8, 0xff) {
+                assert_se(u8 == 0xff);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(u8)
+                assert_se(false);
+
+        i = 0;
+        uint32_t u32, u32_1 = 0xffff0000, u32_2 = 10, u32_3 = 0xffff;
+        VA_ARGS_FOREACH(u32, 1, 100, u32_2, 1000, u32_3, u32_1, 1, 0) {
+                switch(i++) {
+                case 0: assert_se(u32 == 1); break;
+                case 1: assert_se(u32 == 100); break;
+                case 2: assert_se(u32 == u32_2); break;
+                case 3: assert_se(u32 == 1000); break;
+                case 4: assert_se(u32 == u32_3); break;
+                case 5: assert_se(u32 == u32_1); break;
+                case 6: assert_se(u32 == 1); break;
+                case 7: assert_se(u32 == 0); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 8);
+        i = 0;
+        VA_ARGS_FOREACH(u32, 0) {
+                assert_se(u32 == 0);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        i = 0;
+        VA_ARGS_FOREACH(u32, 1000) {
+                assert_se(u32 == 1000);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(u32)
+                assert_se(false);
+
+        i = 0;
+        uint64_t u64, u64_1 = 0xffffffffffffffff, u64_2 = 50, u64_3 = 0xffff;
+        VA_ARGS_FOREACH(u64, 44, 0, u64_3, 100, u64_2, u64_1, 50000) {
+                switch(i++) {
+                case 0: assert_se(u64 == 44); break;
+                case 1: assert_se(u64 == 0); break;
+                case 2: assert_se(u64 == u64_3); break;
+                case 3: assert_se(u64 == 100); break;
+                case 4: assert_se(u64 == u64_2); break;
+                case 5: assert_se(u64 == u64_1); break;
+                case 6: assert_se(u64 == 50000); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 7);
+        i = 0;
+        VA_ARGS_FOREACH(u64, 0) {
+                assert_se(u64 == 0);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        i = 0;
+        VA_ARGS_FOREACH(u64, 0xff00ff00000000) {
+                assert_se(u64 == 0xff00ff00000000);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(u64)
+                assert_se(false);
+
+        struct test {
+                int a;
+                char b;
+        };
+
+        i = 0;
+        struct test s,
+                s_1 = { .a = 0, .b = 'c', },
+                s_2 = { .a = 100000, .b = 'z', },
+                s_3 = { .a = 0xff, .b = 'q', },
+                s_4 = { .a = 1, .b = 'x', };
+        VA_ARGS_FOREACH(s, s_1, (struct test){ .a = 10, .b = 'd', }, s_2, (struct test){}, s_3, s_4) {
+                switch(i++) {
+                case 0: assert_se(s.a == 0     ); assert_se(s.b == 'c'); break;
+                case 1: assert_se(s.a == 10    ); assert_se(s.b == 'd'); break;
+                case 2: assert_se(s.a == 100000); assert_se(s.b == 'z'); break;
+                case 3: assert_se(s.a == 0     ); assert_se(s.b == 0  ); break;
+                case 4: assert_se(s.a == 0xff  ); assert_se(s.b == 'q'); break;
+                case 5: assert_se(s.a == 1     ); assert_se(s.b == 'x'); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 6);
+        i = 0;
+        VA_ARGS_FOREACH(s, (struct test){ .a = 1, .b = 'A', }) {
+                assert_se(s.a == 1);
+                assert_se(s.b == 'A');
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(s)
+                assert_se(false);
+
+        i = 0;
+        struct test *p, *p_1 = &s_1, *p_2 = &s_2, *p_3 = &s_3, *p_4 = &s_4;
+        VA_ARGS_FOREACH(p, p_1, NULL, p_2, p_3, NULL, p_4, NULL) {
+                switch(i++) {
+                case 0: assert_se(p == p_1); break;
+                case 1: assert_se(p == NULL); break;
+                case 2: assert_se(p == p_2); break;
+                case 3: assert_se(p == p_3); break;
+                case 4: assert_se(p == NULL); break;
+                case 5: assert_se(p == p_4); break;
+                case 6: assert_se(p == NULL); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 7);
+        i = 0;
+        VA_ARGS_FOREACH(p, p_3) {
+                assert_se(p == p_3);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(p)
+                assert_se(false);
+
+        i = 0;
+        void *v, *v_1 = p_1, *v_2 = p_2, *v_3 = p_3;
+        uint32_t *u32p = &u32;
+        VA_ARGS_FOREACH(v, v_1, NULL, u32p, v_3, p_2, p_4, v_2, NULL) {
+                switch(i++) {
+                case 0: assert_se(v == v_1); break;
+                case 1: assert_se(v == NULL); break;
+                case 2: assert_se(v == u32p); break;
+                case 3: assert_se(v == v_3); break;
+                case 4: assert_se(v == p_2); break;
+                case 5: assert_se(v == p_4); break;
+                case 6: assert_se(v == v_2); break;
+                case 7: assert_se(v == NULL); break;
+                default: assert_se(false);
+                }
+        }
+        assert_se(i == 8);
+        i = 0;
+        VA_ARGS_FOREACH(v, NULL) {
+                assert_se(v == NULL);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        i = 0;
+        VA_ARGS_FOREACH(v, v_1) {
+                assert_se(v == v_1);
+                assert_se(i++ == 0);
+        }
+        assert_se(i == 1);
+        VA_ARGS_FOREACH(v)
+                assert_se(false);
+}
+
+TEST(ALIGN_TO) {
         assert_se(ALIGN_TO(0, 1) == 0);
         assert_se(ALIGN_TO(1, 1) == 1);
         assert_se(ALIGN_TO(2, 1) == 2);
@@ -329,6 +513,34 @@ TEST(align_to) {
         assert_se(ALIGN_TO(SIZE_MAX-1, 4) == SIZE_MAX); /* overflow */
         assert_se(ALIGN_TO(SIZE_MAX, 4) == SIZE_MAX);   /* overflow */
 
+        assert_se(ALIGN_TO_U64(0, 1) == 0);
+        assert_se(ALIGN_TO_U64(1, 1) == 1);
+        assert_se(ALIGN_TO_U64(2, 1) == 2);
+        assert_se(ALIGN_TO_U64(3, 1) == 3);
+        assert_se(ALIGN_TO_U64(4, 1) == 4);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-1, 1) == UINT64_MAX-1);
+        assert_se(ALIGN_TO_U64(UINT64_MAX, 1) == UINT64_MAX);
+
+        assert_se(ALIGN_TO_U64(0, 2) == 0);
+        assert_se(ALIGN_TO_U64(1, 2) == 2);
+        assert_se(ALIGN_TO_U64(2, 2) == 2);
+        assert_se(ALIGN_TO_U64(3, 2) == 4);
+        assert_se(ALIGN_TO_U64(4, 2) == 4);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-3, 2) == UINT64_MAX-3);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-2, 2) == UINT64_MAX-1);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-1, 2) == UINT64_MAX-1);
+        assert_se(ALIGN_TO_U64(UINT64_MAX, 2) == UINT64_MAX); /* overflow */
+
+        assert_se(ALIGN_TO_U64(0, 4) == 0);
+        assert_se(ALIGN_TO_U64(1, 4) == 4);
+        assert_se(ALIGN_TO_U64(2, 4) == 4);
+        assert_se(ALIGN_TO_U64(3, 4) == 4);
+        assert_se(ALIGN_TO_U64(4, 4) == 4);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-3, 4) == UINT64_MAX-3);
+        assert_se(ALIGN_TO_U64(UINT64_MAX-2, 4) == UINT64_MAX); /* overflow */
+        assert_se(ALIGN_TO_U64(UINT64_MAX-1, 4) == UINT64_MAX); /* overflow */
+        assert_se(ALIGN_TO_U64(UINT64_MAX, 4) == UINT64_MAX);   /* overflow */
+
         assert_cc(CONST_ALIGN_TO(96, 512) == 512);
         assert_cc(CONST_ALIGN_TO(511, 512) == 512);
         assert_cc(CONST_ALIGN_TO(512, 512) == 512);
@@ -337,6 +549,106 @@ TEST(align_to) {
 
         assert_cc(__builtin_types_compatible_p(typeof(CONST_ALIGN_TO(4, 3)), void));
         assert_cc(__builtin_types_compatible_p(typeof(CONST_ALIGN_TO(SIZE_MAX, 512)), void));
+}
+
+TEST(align_down) {
+        assert_se(ALIGN_DOWN(0, 1) == 0);
+        assert_se(ALIGN_DOWN(1, 1) == 1);
+        assert_se(ALIGN_DOWN(2, 1) == 2);
+        assert_se(ALIGN_DOWN(3, 1) == 3);
+        assert_se(ALIGN_DOWN(4, 1) == 4);
+        assert_se(ALIGN_DOWN(SIZE_MAX-1, 1) == SIZE_MAX-1);
+        assert_se(ALIGN_DOWN(SIZE_MAX, 1) == SIZE_MAX);
+
+        assert_se(ALIGN_DOWN(0, 2) == 0);
+        assert_se(ALIGN_DOWN(1, 2) == 0);
+        assert_se(ALIGN_DOWN(2, 2) == 2);
+        assert_se(ALIGN_DOWN(3, 2) == 2);
+        assert_se(ALIGN_DOWN(4, 2) == 4);
+        assert_se(ALIGN_DOWN(SIZE_MAX-1, 2) == SIZE_MAX-1);
+        assert_se(ALIGN_DOWN(SIZE_MAX, 2) == SIZE_MAX-1);
+
+        assert_se(ALIGN_DOWN(0, 4) == 0);
+        assert_se(ALIGN_DOWN(1, 4) == 0);
+        assert_se(ALIGN_DOWN(2, 4) == 0);
+        assert_se(ALIGN_DOWN(3, 4) == 0);
+        assert_se(ALIGN_DOWN(4, 4) == 4);
+        assert_se(ALIGN_DOWN(SIZE_MAX-1, 4) == SIZE_MAX-3);
+        assert_se(ALIGN_DOWN(SIZE_MAX, 4) == SIZE_MAX-3);
+
+        assert_se(ALIGN_DOWN_U64(0, 1) == 0);
+        assert_se(ALIGN_DOWN_U64(1, 1) == 1);
+        assert_se(ALIGN_DOWN_U64(2, 1) == 2);
+        assert_se(ALIGN_DOWN_U64(3, 1) == 3);
+        assert_se(ALIGN_DOWN_U64(4, 1) == 4);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX-1, 1) == UINT64_MAX-1);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX, 1) == UINT64_MAX);
+
+        assert_se(ALIGN_DOWN_U64(0, 2) == 0);
+        assert_se(ALIGN_DOWN_U64(1, 2) == 0);
+        assert_se(ALIGN_DOWN_U64(2, 2) == 2);
+        assert_se(ALIGN_DOWN_U64(3, 2) == 2);
+        assert_se(ALIGN_DOWN_U64(4, 2) == 4);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX-1, 2) == UINT64_MAX-1);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX, 2) == UINT64_MAX-1);
+
+        assert_se(ALIGN_DOWN_U64(0, 4) == 0);
+        assert_se(ALIGN_DOWN_U64(1, 4) == 0);
+        assert_se(ALIGN_DOWN_U64(2, 4) == 0);
+        assert_se(ALIGN_DOWN_U64(3, 4) == 0);
+        assert_se(ALIGN_DOWN_U64(4, 4) == 4);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX-1, 4) == UINT64_MAX-3);
+        assert_se(ALIGN_DOWN_U64(UINT64_MAX, 4) == UINT64_MAX-3);
+}
+
+TEST(align_offset) {
+        assert_se(ALIGN_OFFSET(0, 1) == 0);
+        assert_se(ALIGN_OFFSET(1, 1) == 0);
+        assert_se(ALIGN_OFFSET(2, 1) == 0);
+        assert_se(ALIGN_OFFSET(3, 1) == 0);
+        assert_se(ALIGN_OFFSET(4, 1) == 0);
+        assert_se(ALIGN_OFFSET(SIZE_MAX-1, 1) == 0);
+        assert_se(ALIGN_OFFSET(SIZE_MAX, 1) == 0);
+
+        assert_se(ALIGN_OFFSET(0, 2) == 0);
+        assert_se(ALIGN_OFFSET(1, 2) == 1);
+        assert_se(ALIGN_OFFSET(2, 2) == 0);
+        assert_se(ALIGN_OFFSET(3, 2) == 1);
+        assert_se(ALIGN_OFFSET(4, 2) == 0);
+        assert_se(ALIGN_OFFSET(SIZE_MAX-1, 2) == 0);
+        assert_se(ALIGN_OFFSET(SIZE_MAX, 2) == 1);
+
+        assert_se(ALIGN_OFFSET(0, 4) == 0);
+        assert_se(ALIGN_OFFSET(1, 4) == 1);
+        assert_se(ALIGN_OFFSET(2, 4) == 2);
+        assert_se(ALIGN_OFFSET(3, 4) == 3);
+        assert_se(ALIGN_OFFSET(4, 4) == 0);
+        assert_se(ALIGN_OFFSET(SIZE_MAX-1, 4) == 2);
+        assert_se(ALIGN_OFFSET(SIZE_MAX, 4) == 3);
+
+        assert_se(ALIGN_OFFSET_U64(0, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(1, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(2, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(3, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(4, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX-1, 1) == 0);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX, 1) == 0);
+
+        assert_se(ALIGN_OFFSET_U64(0, 2) == 0);
+        assert_se(ALIGN_OFFSET_U64(1, 2) == 1);
+        assert_se(ALIGN_OFFSET_U64(2, 2) == 0);
+        assert_se(ALIGN_OFFSET_U64(3, 2) == 1);
+        assert_se(ALIGN_OFFSET_U64(4, 2) == 0);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX-1, 2) == 0);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX, 2) == 1);
+
+        assert_se(ALIGN_OFFSET_U64(0, 4) == 0);
+        assert_se(ALIGN_OFFSET_U64(1, 4) == 1);
+        assert_se(ALIGN_OFFSET_U64(2, 4) == 2);
+        assert_se(ALIGN_OFFSET_U64(3, 4) == 3);
+        assert_se(ALIGN_OFFSET_U64(4, 4) == 0);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX-1, 4) == 2);
+        assert_se(ALIGN_OFFSET_U64(UINT64_MAX, 4) == 3);
 }
 
 TEST(flags) {
@@ -582,6 +894,147 @@ TEST(ALIGNED) {
         assert_se(!IS_ALIGNED32(p));
         assert_se(!IS_ALIGNED64(p));
 #endif
+}
+
+TEST(FOREACH_ARRAY) {
+        int a[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        int b[10] = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+        int x, n;
+
+        x = n = 0;
+        FOREACH_ARRAY(i, a, 10) {
+                x += *i;
+                n++;
+        }
+        assert_se(x == 45);
+        assert_se(n == 10);
+
+        x = n = 0;
+        FOREACH_ARRAY(i, a, 10)
+                FOREACH_ARRAY(j, b, 10) {
+                        x += (*i) * (*j);
+                        n++;
+                }
+        assert_se(x == 45 * 45);
+        assert_se(n == 10 * 10);
+
+        x = n = 0;
+        FOREACH_ARRAY(i, a, 5)
+                FOREACH_ARRAY(j, b, 5) {
+                        x += (*i) * (*j);
+                        n++;
+                }
+        assert_se(x == 10 * 35);
+        assert_se(n == 5 * 5);
+
+        x = n = 0;
+        FOREACH_ARRAY(i, a, 0)
+                FOREACH_ARRAY(j, b, 0) {
+                        x += (*i) * (*j);
+                        n++;
+                }
+        assert_se(x == 0);
+        assert_se(n == 0);
+
+        x = n = 0;
+        FOREACH_ARRAY(i, a, -1)
+                FOREACH_ARRAY(j, b, -1) {
+                        x += (*i) * (*j);
+                        n++;
+                }
+        assert_se(x == 0);
+        assert_se(n == 0);
+}
+
+#define TEST_ROUND_UP_BY_TYPE(type, max_value)                          \
+        ({                                                              \
+                type x, y;                                              \
+                x = 0, y = 1;                                           \
+                assert_se(ROUND_UP(x, y) == 0);                         \
+                x = 0, y = 2;                                           \
+                assert_se(ROUND_UP(x, y) == 0);                         \
+                x = 0, y = 3;                                           \
+                assert_se(ROUND_UP(x, y) == 0);                         \
+                x = 0, y = 4;                                           \
+                assert_se(ROUND_UP(x, y) == 0);                         \
+                x = 1, y = 1;                                           \
+                assert_se(ROUND_UP(x, y) == 1);                         \
+                x = 1, y = 2;                                           \
+                assert_se(ROUND_UP(x, y) == 2);                         \
+                x = 1, y = 3;                                           \
+                assert_se(ROUND_UP(x, y) == 3);                         \
+                x = 1, y = 4;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 2, y = 1;                                           \
+                assert_se(ROUND_UP(x, y) == 2);                         \
+                x = 2, y = 2;                                           \
+                assert_se(ROUND_UP(x, y) == 2);                         \
+                x = 2, y = 3;                                           \
+                assert_se(ROUND_UP(x, y) == 3);                         \
+                x = 2, y = 4;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 3, y = 1;                                           \
+                assert_se(ROUND_UP(x, y) == 3);                         \
+                x = 3, y = 2;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 3, y = 3;                                           \
+                assert_se(ROUND_UP(x, y) == 3);                         \
+                x = 3, y = 4;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 4, y = 1;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 4, y = 2;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = 4, y = 3;                                           \
+                assert_se(ROUND_UP(x, y) == 6);                         \
+                x = 4, y = 4;                                           \
+                assert_se(ROUND_UP(x, y) == 4);                         \
+                x = max_value, y = 1;                                   \
+                assert_se(ROUND_UP(x, y) == max_value);                 \
+                x = max_value, y = 2;                                   \
+                assert_se(ROUND_UP(x, y) == max_value);                 \
+                x = max_value, y = 3;                                   \
+                assert_se(ROUND_UP(x, y) == max_value);                 \
+                x = max_value, y = 4;                                   \
+                assert_se(ROUND_UP(x, y) == max_value);                 \
+                x = max_value-1, y = 1;                                 \
+                assert_se(ROUND_UP(x, y) == max_value-1);               \
+                x = max_value-1, y = 2;                                 \
+                assert_se(ROUND_UP(x, y) == max_value-1);               \
+                x = max_value-1, y = 4;                                 \
+                assert_se(ROUND_UP(x, y) == max_value);                 \
+        })
+
+TEST(ROUND_UP) {
+        TEST_ROUND_UP_BY_TYPE(uint8_t, UINT8_MAX);
+        TEST_ROUND_UP_BY_TYPE(uint16_t, UINT16_MAX);
+        TEST_ROUND_UP_BY_TYPE(uint32_t, UINT32_MAX);
+        TEST_ROUND_UP_BY_TYPE(uint64_t, UINT64_MAX);
+}
+
+TEST(u64_multiply_safe) {
+        assert_se(u64_multiply_safe(0, 0) == 0);
+        assert_se(u64_multiply_safe(10, 0) == 0);
+        assert_se(u64_multiply_safe(0, 10) == 0);
+        assert_se(u64_multiply_safe(10, 10) == 100);
+
+        assert_se(u64_multiply_safe(UINT64_MAX, 0) == 0);
+        assert_se(u64_multiply_safe(UINT64_MAX, 1) == UINT64_MAX);
+        assert_se(u64_multiply_safe(UINT64_MAX, 2) == 0);
+        assert_se(u64_multiply_safe(0, UINT64_MAX) == 0);
+        assert_se(u64_multiply_safe(1, UINT64_MAX) == UINT64_MAX);
+        assert_se(u64_multiply_safe(2, UINT64_MAX) == 0);
+
+        assert_se(u64_multiply_safe(UINT64_MAX / 2, 0) == 0);
+        assert_se(u64_multiply_safe(UINT64_MAX / 2, 1) == UINT64_MAX / 2);
+        assert_se(u64_multiply_safe(UINT64_MAX / 2, 2) == UINT64_MAX - 1);
+        assert_se(u64_multiply_safe(UINT64_MAX / 2, 3) == 0);
+        assert_se(u64_multiply_safe(0, UINT64_MAX / 2) == 0);
+        assert_se(u64_multiply_safe(1, UINT64_MAX / 2) == UINT64_MAX / 2);
+        assert_se(u64_multiply_safe(2, UINT64_MAX / 2) == UINT64_MAX - 1);
+        assert_se(u64_multiply_safe(3, UINT64_MAX / 2) == 0);
+
+        assert_se(u64_multiply_safe(UINT64_MAX, UINT64_MAX) == 0);
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

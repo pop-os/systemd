@@ -21,12 +21,14 @@
 #include "json.h"
 #include "log.h"
 #include "main-func.h"
+#include "memstream-util.h"
 #include "os-util.h"
 #include "pager.h"
 #include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
+#include "runtime-scope.h"
 #include "set.h"
 #include "sort-util.h"
 #include "strv.h"
@@ -47,7 +49,7 @@ static bool arg_show_machine = false;
 static char **arg_matches = NULL;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static const char *arg_host = NULL;
-static bool arg_user = false;
+static RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 static size_t arg_snaplen = 4096;
 static bool arg_list = false;
 static bool arg_quiet = false;
@@ -111,10 +113,21 @@ static int acquire_bus(bool set_monitor, sd_bus **ret) {
                 switch (arg_transport) {
 
                 case BUS_TRANSPORT_LOCAL:
-                        if (arg_user)
+
+                        switch (arg_runtime_scope) {
+
+                        case RUNTIME_SCOPE_USER:
                                 r = bus_set_address_user(bus);
-                        else
+                                break;
+
+                        case RUNTIME_SCOPE_SYSTEM:
                                 r = bus_set_address_system(bus);
+                                break;
+
+                        default:
+                                assert_not_reached();
+                        }
+
                         break;
 
                 case BUS_TRANSPORT_REMOTE:
@@ -122,7 +135,7 @@ static int acquire_bus(bool set_monitor, sd_bus **ret) {
                         break;
 
                 case BUS_TRANSPORT_MACHINE:
-                        r = bus_set_address_machine(bus, arg_user, arg_host);
+                        r = bus_set_address_machine(bus, arg_runtime_scope, arg_host);
                         break;
 
                 default:
@@ -395,7 +408,7 @@ static void print_subtree(const char *prefix, const char *path, char **l) {
                         n++;
                 }
 
-                printf("%s%s%s\n",
+                printf("%s%s %s\n",
                        prefix,
                        special_glyph(has_more ? SPECIAL_GLYPH_TREE_BRANCH : SPECIAL_GLYPH_TREE_RIGHT),
                        *l);
@@ -1023,12 +1036,12 @@ static int introspect(int argc, char **argv, void *userdata) {
                         return bus_log_parse_error(r);
 
                 for (;;) {
-                        _cleanup_fclose_ FILE *mf = NULL;
+                        _cleanup_(memstream_done) MemStream ms = {};
                         _cleanup_free_ char *buf = NULL;
                         const char *name, *contents;
-                        size_t sz = 0;
                         Member *z;
                         char type;
+                        FILE *mf;
 
                         r = sd_bus_message_enter_container(reply, 'e', "sv");
                         if (r < 0)
@@ -1050,7 +1063,7 @@ static int introspect(int argc, char **argv, void *userdata) {
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        mf = open_memstream_unlocked(&buf, &sz);
+                        mf = memstream_init(&ms);
                         if (!mf)
                                 return log_oom();
 
@@ -1058,7 +1071,9 @@ static int introspect(int argc, char **argv, void *userdata) {
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        mf = safe_fclose(mf);
+                        r = memstream_finalize(&ms, &buf, NULL);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to flush and close memstream: %m");
 
                         z = set_get(members, &((Member) {
                                                 .type = "property",
@@ -1293,7 +1308,10 @@ static int monitor(int argc, char **argv, int (*dump)(sd_bus_message *m, FILE *f
         if (r < 0)
                 return log_error_errno(r, "Failed to get unique name: %m");
 
-        log_info("Monitoring bus message stream.");
+        if (!arg_quiet && arg_json_format_flags == JSON_FORMAT_OFF)
+                log_info("Monitoring bus message stream.");
+
+        (void) sd_notify(/* unset_environment=false */ false, "READY=1");
 
         for (;;) {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
@@ -1324,7 +1342,8 @@ static int monitor(int argc, char **argv, int (*dump)(sd_bus_message *m, FILE *f
                         fflush(stdout);
 
                         if (sd_bus_message_is_signal(m, "org.freedesktop.DBus.Local", "Disconnected") > 0) {
-                                log_info("Connection terminated, exiting.");
+                                if (!arg_quiet && arg_json_format_flags == JSON_FORMAT_OFF)
+                                        log_info("Connection terminated, exiting.");
                                 return 0;
                         }
 
@@ -1468,7 +1487,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atou8(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as byte (unsigned 8bit integer): %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as byte (unsigned 8-bit integer): %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1479,7 +1498,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atoi16(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as signed 16bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as signed 16-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1490,7 +1509,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atou16(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as unsigned 16bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as unsigned 16-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1501,7 +1520,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atoi32(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as signed 32bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as signed 32-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1512,7 +1531,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atou32(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as unsigned 32bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as unsigned 32-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1523,7 +1542,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atoi64(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as signed 64bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as signed 64-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1534,7 +1553,7 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
                         r = safe_atou64(v, &z);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse '%s' as unsigned 64bit integer: %m", v);
+                                return log_error_errno(r, "Failed to parse '%s' as unsigned 64-bit integer: %m", v);
 
                         r = sd_bus_message_append_basic(m, t, &z);
                         break;
@@ -1612,8 +1631,11 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
                         p--;
 
                         r = signature_element_length(signature, &k);
-                        if (r < 0)
+                        if (r < 0 || k < 2) {
+                                if (r >= 0 && k < 2)
+                                        r = -ERANGE;
                                 return log_error_errno(r, "Invalid struct/dict entry signature: %m");
+                        }
 
                         {
                                 char s[k-1];
@@ -1656,9 +1678,22 @@ static int message_append_cmdline(sd_bus_message *m, const char *signature, char
 
 static int json_transform_one(sd_bus_message *m, JsonVariant **ret);
 
+static int json_transform_and_append(sd_bus_message *m, JsonVariant **ret) {
+        _cleanup_(json_variant_unrefp) JsonVariant *element = NULL;
+        int r;
+
+        assert(m);
+        assert(ret);
+
+        r = json_transform_one(m, &element);
+        if (r < 0)
+                return r;
+
+        return json_variant_append_array(ret, element);
+}
+
 static int json_transform_array_or_struct(sd_bus_message *m, JsonVariant **ret) {
-        JsonVariant **elements = NULL;
-        size_t n_elements = 0;
+        _cleanup_(json_variant_unrefp) JsonVariant *array = NULL;
         int r;
 
         assert(m);
@@ -1666,32 +1701,21 @@ static int json_transform_array_or_struct(sd_bus_message *m, JsonVariant **ret) 
 
         for (;;) {
                 r = sd_bus_message_at_end(m, false);
-                if (r < 0) {
-                        bus_log_parse_error(r);
-                        goto finish;
-                }
+                if (r < 0)
+                        return bus_log_parse_error(r);
                 if (r > 0)
                         break;
 
-                if (!GREEDY_REALLOC(elements, n_elements + 1)) {
-                        r = log_oom();
-                        goto finish;
-                }
-
-                r = json_transform_one(m, elements + n_elements);
+                r = json_transform_and_append(m, &array);
                 if (r < 0)
-                        goto finish;
-
-                n_elements++;
+                        return r;
         }
 
-        r = json_variant_new_array(ret, elements, n_elements);
+        if (!array)
+                return json_variant_new_array(ret, NULL, 0);
 
-finish:
-        json_variant_unref_many(elements, n_elements);
-        free(elements);
-
-        return r;
+        *ret = TAKE_PTR(array);
+        return 0;
 }
 
 static int json_transform_variant(sd_bus_message *m, const char *contents, JsonVariant **ret) {
@@ -1722,15 +1746,15 @@ static int json_transform_dict_array(sd_bus_message *m, JsonVariant **ret) {
         assert(m);
         assert(ret);
 
+        CLEANUP_ARRAY(elements, n_elements, json_variant_unref_many);
+
         for (;;) {
                 const char *contents;
                 char type;
 
                 r = sd_bus_message_at_end(m, false);
-                if (r < 0) {
-                        bus_log_parse_error(r);
-                        goto finish;
-                }
+                if (r < 0)
+                        return bus_log_parse_error(r);
                 if (r > 0)
                         break;
 
@@ -1740,43 +1764,31 @@ static int json_transform_dict_array(sd_bus_message *m, JsonVariant **ret) {
 
                 assert(type == 'e');
 
-                if (!GREEDY_REALLOC(elements, n_elements + 2)) {
-                        r = log_oom();
-                        goto finish;
-                }
+                if (!GREEDY_REALLOC(elements, n_elements + 2))
+                        return log_oom();
 
                 r = sd_bus_message_enter_container(m, type, contents);
-                if (r < 0) {
-                        bus_log_parse_error(r);
-                        goto finish;
-                }
+                if (r < 0)
+                        return bus_log_parse_error(r);
 
                 r = json_transform_one(m, elements + n_elements);
                 if (r < 0)
-                        goto finish;
+                        return r;
 
                 n_elements++;
 
                 r = json_transform_one(m, elements + n_elements);
                 if (r < 0)
-                        goto finish;
+                        return r;
 
                 n_elements++;
 
                 r = sd_bus_message_exit_container(m);
-                if (r < 0) {
-                        bus_log_parse_error(r);
-                        goto finish;
-                }
+                if (r < 0)
+                        return bus_log_parse_error(r);
         }
 
-        r = json_variant_new_object(ret, elements, n_elements);
-
-finish:
-        json_variant_unref_many(elements, n_elements);
-        free(elements);
-
-        return r;
+        return json_variant_new_object(ret, elements, n_elements);
 }
 
 static int json_transform_one(sd_bus_message *m, JsonVariant **ret) {
@@ -2408,11 +2420,11 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_USER:
-                        arg_user = true;
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
                         break;
 
                 case ARG_SYSTEM:
-                        arg_user = false;
+                        arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
                         break;
 
                 case ARG_ADDRESS:

@@ -18,6 +18,7 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "clean-ipc.h"
+#include "common-signal.h"
 #include "conf-files.h"
 #include "device-util.h"
 #include "dirent-util.h"
@@ -36,6 +37,7 @@
 #include "homed-varlink.h"
 #include "io-util.h"
 #include "mkdir.h"
+#include "openssl-util.h"
 #include "process-util.h"
 #include "quota-util.h"
 #include "random-util.h"
@@ -51,6 +53,7 @@
 #include "user-record-util.h"
 #include "user-record.h"
 #include "user-util.h"
+#include "varlink-io.systemd.UserDatabase.h"
 
 /* Where to look for private/public keys that are used to sign the user records. We are not using
  * CONF_PATHS_NULSTR() here since we want to insert /var/lib/systemd/home/ in the middle. And we insert that
@@ -222,6 +225,15 @@ int manager_new(Manager **ret) {
                 return r;
 
         r = sd_event_add_signal(m->event, NULL, SIGTERM, NULL, NULL);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || (r == -EHOSTDOWN) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to allocate memory pressure watch, ignoring: %m");
+
+        r = sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, NULL);
         if (r < 0)
                 return r;
 
@@ -992,6 +1004,10 @@ static int manager_bind_varlink(Manager *m) {
 
         varlink_server_set_userdata(m->varlink_server, m);
 
+        r = varlink_server_add_interface(m->varlink_server, &vl_interface_io_systemd_UserDatabase);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add UserDatabase interface to varlink server: %m");
+
         r = varlink_server_bind_method_many(
                         m->varlink_server,
                         "io.systemd.UserDatabase.GetUserRecord",  vl_method_get_user_record,
@@ -1086,7 +1102,7 @@ static ssize_t read_datagram(
                     cmsg->cmsg_type == SCM_CREDENTIALS &&
                     cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred))) {
                         assert(!sender);
-                        sender = (struct ucred*) CMSG_DATA(cmsg);
+                        sender = CMSG_TYPED_DATA(cmsg, struct ucred);
                 }
 
                 if (cmsg->cmsg_level == SOL_SOCKET &&
@@ -1098,7 +1114,7 @@ static ssize_t read_datagram(
                         }
 
                         assert(passed_fd < 0);
-                        passed_fd = *(int*) CMSG_DATA(cmsg);
+                        passed_fd = *CMSG_TYPED_DATA(cmsg, int);
                 }
         }
 
@@ -1327,7 +1343,6 @@ static int manager_watch_devices(Manager *m) {
 
 static int manager_enumerate_devices(Manager *m) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        sd_device *d;
         int r;
 
         assert(m);
@@ -1347,7 +1362,7 @@ static int manager_enumerate_devices(Manager *m) {
 }
 
 static int manager_load_key_pair(Manager *m) {
-        _cleanup_(fclosep) FILE *f = NULL;
+        _cleanup_fclose_ FILE *f = NULL;
         struct stat st;
         int r;
 
@@ -1382,8 +1397,6 @@ static int manager_load_key_pair(Manager *m) {
 
         return 1;
 }
-
-DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_PKEY_CTX*, EVP_PKEY_CTX_free, NULL);
 
 static int manager_generate_key_pair(Manager *m) {
         _cleanup_(EVP_PKEY_CTX_freep) EVP_PKEY_CTX *ctx = NULL;
@@ -1446,9 +1459,10 @@ static int manager_generate_key_pair(Manager *m) {
                 return log_error_errno(errno, "Failed to move public key file into place: %m");
         temp_public = mfree(temp_public);
 
-        if (rename(temp_private, "/var/lib/systemd/home/local.private") < 0) {
-                (void) unlink_noerrno("/var/lib/systemd/home/local.public"); /* try to remove the file we already created */
-                return log_error_errno(errno, "Failed to move private key file into place: %m");
+        r = RET_NERRNO(rename(temp_private, "/var/lib/systemd/home/local.private"));
+        if (r < 0) {
+                (void) unlink("/var/lib/systemd/home/local.public"); /* try to remove the file we already created */
+                return log_error_errno(r, "Failed to move private key file into place: %m");
         }
         temp_private = mfree(temp_private);
 
@@ -1494,7 +1508,6 @@ int manager_sign_user_record(Manager *m, UserRecord *u, UserRecord **ret, sd_bus
 }
 
 DEFINE_PRIVATE_HASH_OPS_FULL(public_key_hash_ops, char, string_hash_func, string_compare_func, free, EVP_PKEY, EVP_PKEY_free);
-DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_PKEY*, EVP_PKEY_free, NULL);
 
 static int manager_load_public_key_one(Manager *m, const char *path) {
         _cleanup_(EVP_PKEY_freep) EVP_PKEY *pkey = NULL;

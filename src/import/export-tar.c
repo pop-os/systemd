@@ -131,7 +131,7 @@ static void tar_export_report_progress(TarExport *e) {
         if (!ratelimit_below(&e->progress_ratelimit))
                 return;
 
-        sd_notifyf(false, "X_IMPORT_PROGRESS=%u", percent);
+        sd_notifyf(false, "X_IMPORT_PROGRESS=%u%%", percent);
         log_info("Exported %u%%.", percent);
 
         e->last_percent = percent;
@@ -293,7 +293,7 @@ int tar_export_start(TarExport *e, const char *path, int fd, ImportCompressType 
                         return r;
 
                 /* Let's try to make a snapshot, if we can, so that the export is atomic */
-                r = btrfs_subvol_snapshot_fd(sfd, e->temp_path, BTRFS_SNAPSHOT_READ_ONLY|BTRFS_SNAPSHOT_RECURSIVE);
+                r = btrfs_subvol_snapshot_at(sfd, NULL, AT_FDCWD, e->temp_path, BTRFS_SNAPSHOT_READ_ONLY|BTRFS_SNAPSHOT_RECURSIVE);
                 if (r < 0) {
                         log_debug_errno(r, "Couldn't create snapshot %s of %s, not exporting atomically: %m", e->temp_path, path);
                         e->temp_path = mfree(e->temp_path);

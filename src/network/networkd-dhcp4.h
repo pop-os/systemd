@@ -9,18 +9,18 @@ typedef struct Network Network;
 typedef enum DHCPClientIdentifier {
         DHCP_CLIENT_ID_MAC,
         DHCP_CLIENT_ID_DUID,
-        /* The following option may not be good for RFC regarding DHCP (3315 and 4361).
-         * But some setups require this. E.g., Sky Broadband, the second largest provider in the UK
-         * requires the client id to be set to a custom string, reported at
-         * https://github.com/systemd/systemd/issues/7828 */
-        DHCP_CLIENT_ID_DUID_ONLY,
         _DHCP_CLIENT_ID_MAX,
         _DHCP_CLIENT_ID_INVALID = -EINVAL,
 } DHCPClientIdentifier;
 
 void network_adjust_dhcp4(Network *network);
 int dhcp4_update_mac(Link *link);
-int dhcp4_start(Link *link);
+int dhcp4_update_ipv6_connectivity(Link *link);
+int dhcp4_start_full(Link *link, bool set_ipv6_connectivity);
+static inline int dhcp4_start(Link *link) {
+        return dhcp4_start_full(link, true);
+}
+int dhcp4_renew(Link *link);
 int dhcp4_lease_lost(Link *link);
 int dhcp4_check_ready(Link *link);
 

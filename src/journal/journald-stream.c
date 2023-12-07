@@ -18,7 +18,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "journal-internal.h"
 #include "journald-client.h"
 #include "journald-console.h"
@@ -502,19 +502,21 @@ static int stdout_stream_scan(
                 LineBreak force_flush,
                 size_t *ret_consumed) {
 
-        size_t consumed = 0, line_max;
+        size_t consumed = 0;
         int r;
 
         assert(s);
         assert(p);
 
-        line_max = stdout_stream_line_max(s);
 
         for (;;) {
                 LineBreak line_break;
                 size_t skip, found;
                 char *end1, *end2;
-                size_t tmp_remaining = MIN(remaining, line_max);
+                size_t tmp_remaining, line_max;
+
+                line_max = stdout_stream_line_max(s);
+                tmp_remaining = MIN(remaining, line_max);
 
                 end1 = memchr(p, '\n', tmp_remaining);
                 end2 = memchr(p, 0, end1 ? (size_t) (end1 - p) : tmp_remaining);
@@ -938,7 +940,7 @@ int server_open_stdout_socket(Server *s, const char *stdout_socket) {
 
                 (void) chmod(sa.un.sun_path, 0666);
 
-                if (listen(s->stdout_fd, SOMAXCONN) < 0)
+                if (listen(s->stdout_fd, SOMAXCONN_DELUXE) < 0)
                         return log_error_errno(errno, "listen(%s) failed: %m", sa.un.sun_path);
         } else
                 (void) fd_nonblock(s->stdout_fd, true);

@@ -11,7 +11,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "journal-internal.h"
 #include "journal-util.h"
 #include "journald-client.h"
@@ -182,8 +182,8 @@ static void client_context_reset(Server *s, ClientContext *c) {
         c->log_ratelimit_interval = s->ratelimit_interval;
         c->log_ratelimit_burst = s->ratelimit_burst;
 
-        c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
-        c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
+        c->log_filter_allowed_patterns = set_free_free(c->log_filter_allowed_patterns);
+        c->log_filter_denied_patterns = set_free_free(c->log_filter_denied_patterns);
 }
 
 static ClientContext* client_context_free(Server *s, ClientContext *c) {
@@ -210,7 +210,7 @@ static void client_context_read_uid_gid(ClientContext *c, const struct ucred *uc
         if (ucred && uid_is_valid(ucred->uid))
                 c->uid = ucred->uid;
         else
-                (void) get_process_uid(c->pid, &c->uid);
+                (void) pid_get_uid(c->pid, &c->uid);
 
         if (ucred && gid_is_valid(ucred->gid))
                 c->gid = ucred->gid;
@@ -224,13 +224,13 @@ static void client_context_read_basic(ClientContext *c) {
         assert(c);
         assert(pid_is_valid(c->pid));
 
-        if (get_process_comm(c->pid, &t) >= 0)
+        if (pid_get_comm(c->pid, &t) >= 0)
                 free_and_replace(c->comm, t);
 
         if (get_process_exe(c->pid, &t) >= 0)
                 free_and_replace(c->exe, t);
 
-        if (get_process_cmdline(c->pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE, &t) >= 0)
+        if (pid_get_cmdline(c->pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE, &t) >= 0)
                 free_and_replace(c->cmdline, t);
 
         if (get_process_capeff(c->pid, &t) >= 0)
@@ -609,7 +609,7 @@ static void client_context_try_shrink_to(Server *s, size_t limit) {
 
                         assert(c->n_ref == 0);
 
-                        if (!pid_is_unwaited(c->pid))
+                        if (pid_is_unwaited(c->pid) == 0)
                                 client_context_free(s, c);
                         else
                                 idx ++;
@@ -636,6 +636,10 @@ static void client_context_try_shrink_to(Server *s, size_t limit) {
         }
 }
 
+void client_context_flush_regular(Server *s) {
+        client_context_try_shrink_to(s, 0);
+}
+
 void client_context_flush_all(Server *s) {
         assert(s);
 
@@ -644,7 +648,7 @@ void client_context_flush_all(Server *s) {
         s->my_context = client_context_release(s, s->my_context);
         s->pid1_context = client_context_release(s, s->pid1_context);
 
-        client_context_try_shrink_to(s, 0);
+        client_context_flush_regular(s);
 
         assert(prioq_size(s->client_contexts_lru) == 0);
         assert(hashmap_size(s->client_contexts) == 0);

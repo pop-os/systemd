@@ -71,7 +71,7 @@
     a string representation of a 128-bit ID in a buffer that is valid in the current code block.</para>
 
     <para><function>sd_id128_to_uuid_string()</function> and <function>SD_ID128_TO_UUID_STRING()</function>
-    are similar to these two functions/macros, but format the 128bit values as RFC4122 UUIDs, i.e. a series
+    are similar to these two functions/macros, but format the 128-bit values as RFC4122 UUIDs, i.e. a series
     of 36 lowercase hexadeciaml digits and dashes, terminated by a <constant>NUL</constant> byte.</para>
 
     <para><function>sd_id128_from_string()</function> implements the reverse operation: it takes a 33
@@ -108,6 +108,13 @@
   </refsect1>
 
   <xi:include href="libsystemd-pkgconfig.xml" />
+
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_id128_to_string()</function> and
+    <function>sd_id128_from_string()</function> were added in version 187.</para>
+    <para><function>sd_id128_uuid_string()</function> was added in version 251.</para>
+  </refsect1>
 
   <refsect1>
     <title>See Also</title>

@@ -60,7 +60,7 @@ int home_setup_cifs(
         STRV_FOREACH(pw, h->password) {
                 _cleanup_(unlink_and_freep) char *p = NULL;
                 _cleanup_free_ char *options = NULL;
-                _cleanup_(fclosep) FILE *f = NULL;
+                _cleanup_fclose_ FILE *f = NULL;
                 pid_t mount_pid;
                 int exit_status;
 
@@ -91,7 +91,7 @@ int home_setup_cifs(
                         if (!strextend_with_separator(&options, ",", h->cifs_extra_mount_options))
                                 return log_oom();
 
-                r = safe_fork("(mount)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR, &mount_pid);
+                r = safe_fork("(mount)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_STDOUT_TO_STDERR, &mount_pid);
                 if (r < 0)
                         return r;
                 if (r == 0) {

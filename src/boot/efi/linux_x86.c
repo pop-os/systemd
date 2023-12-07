@@ -10,9 +10,6 @@
  * see https://docs.kernel.org/x86/boot.html
  */
 
-#include <efi.h>
-#include <efilib.h>
-
 #include "initrd.h"
 #include "linux.h"
 #include "macro-fundamental.h"
@@ -105,20 +102,19 @@ typedef void (*handover_f)(void *parent, EFI_SYSTEM_TABLE *table, BootParams *pa
 static void linux_efi_handover(EFI_HANDLE parent, uintptr_t kernel, BootParams *params) {
         assert(params);
 
-        kernel += (params->hdr.setup_sects + 1) * KERNEL_SECTOR_SIZE; /* 32bit entry address. */
+        kernel += (params->hdr.setup_sects + 1) * KERNEL_SECTOR_SIZE; /* 32-bit entry address. */
 
-        /* Old kernels needs this set, while newer ones seem to ignore this. Note that this gets truncated on
-         * above 4G boots, which is fine as long as we do not use the value to jump to kernel entry. */
+        /* Old kernels needs this set, while newer ones seem to ignore this. */
         params->hdr.code32_start = kernel;
 
 #ifdef __x86_64__
-        kernel += KERNEL_SECTOR_SIZE; /* 64bit entry address. */
+        kernel += KERNEL_SECTOR_SIZE; /* 64-bit entry address. */
 #endif
 
-        kernel += params->hdr.handover_offset; /* 32/64bit EFI handover address. */
+        kernel += params->hdr.handover_offset; /* 32/64-bit EFI handover address. */
 
-        /* Note in EFI mixed mode this now points to the correct 32bit handover entry point, allowing a 64bit
-         * kernel to be booted from a 32bit sd-stub. */
+        /* Note in EFI mixed mode this now points to the correct 32-bit handover entry point, allowing a 64-bit
+         * kernel to be booted from a 32-bit sd-stub. */
 
         handover_f handover = (handover_f) kernel;
         handover(parent, ST, params);
@@ -156,12 +152,25 @@ EFI_STATUS linux_exec_efi_handover(
         bool can_4g = image_params->hdr.version >= SETUP_VERSION_2_12 &&
                         FLAGS_SET(image_params->hdr.xloadflags, XLF_CAN_BE_LOADED_ABOVE_4G);
 
-        if (!can_4g && POINTER_TO_PHYSICAL_ADDRESS(linux_buffer) + linux_length > UINT32_MAX)
-                return log_error_status(
-                                EFI_UNSUPPORTED,
-                                "Unified kernel image was loaded above 4G, but kernel lacks support.");
-        if (!can_4g && POINTER_TO_PHYSICAL_ADDRESS(initrd_buffer) + initrd_length > UINT32_MAX)
-                return log_error_status(EFI_UNSUPPORTED, "Initrd is above 4G, but kernel lacks support.");
+        /* There is no way to pass the high bits of code32_start. Newer kernels seems to handle this
+         * just fine, but older kernels will fail even if they otherwise have above 4G boot support. */
+        _cleanup_pages_ Pages linux_relocated = {};
+        if (POINTER_TO_PHYSICAL_ADDRESS(linux_buffer) + linux_length > UINT32_MAX) {
+                linux_relocated = xmalloc_pages(
+                                AllocateMaxAddress, EfiLoaderCode, EFI_SIZE_TO_PAGES(linux_length), UINT32_MAX);
+                linux_buffer = memcpy(
+                                PHYSICAL_ADDRESS_TO_POINTER(linux_relocated.addr), linux_buffer, linux_length);
+        }
+
+        _cleanup_pages_ Pages initrd_relocated = {};
+        if (!can_4g && POINTER_TO_PHYSICAL_ADDRESS(initrd_buffer) + initrd_length > UINT32_MAX) {
+                initrd_relocated = xmalloc_pages(
+                                AllocateMaxAddress, EfiLoaderData, EFI_SIZE_TO_PAGES(initrd_length), UINT32_MAX);
+                initrd_buffer = memcpy(
+                                PHYSICAL_ADDRESS_TO_POINTER(initrd_relocated.addr),
+                                initrd_buffer,
+                                initrd_length);
+        }
 
         _cleanup_pages_ Pages boot_params_page = xmalloc_pages(
                         can_4g ? AllocateAnyPages : AllocateMaxAddress,

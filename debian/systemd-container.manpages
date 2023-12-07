@@ -1,3 +1,4 @@
+usr/share/man/man*/mount.ddi*
 usr/share/man/man*/*nspawn*
 usr/share/man/man*/machinectl*
 usr/share/man/man*/portablectl*

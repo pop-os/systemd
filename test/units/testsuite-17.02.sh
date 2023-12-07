@@ -7,8 +7,8 @@
 set -eux
 set -o pipefail
 
-# shellcheck source=test/units/assert.sh
-. "$(dirname "$0")"/assert.sh
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
 
 mkdir -p /run/udev/rules.d/
 
@@ -100,6 +100,7 @@ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /s
 # cleanup
 ip link del hoge
 
+# shellcheck disable=SC2317
 teardown_netif_renaming_conflict() {
     set +ex
 
@@ -171,7 +172,7 @@ EOF
     done
     test -n "$found"
 
-    timeout 30 bash -c "while ! journalctl _PID=1 _COMM=systemd --since $since | grep -q 'foobar: systemd-udevd failed to process the device, ignoring: File exists'; do sleep 1; done"
+    timeout 30 bash -c "until journalctl _PID=1 _COMM=systemd --since $since | grep -q 'foobar: systemd-udevd failed to process the device, ignoring: File exists'; do sleep 1; done"
     # check if the invalid SYSTEMD_ALIAS property for the interface foobar is ignored by PID1
     assert_eq "$(systemctl show --property=SysFSPath --value /sys/subsystem/net/devices/hoge)" "/sys/devices/virtual/net/hoge"
 }

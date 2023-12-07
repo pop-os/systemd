@@ -5,7 +5,8 @@
 #include <string.h>
 
 #include "alloc-util.h"
-#include "chase-symlinks.h"
+#include "btrfs.h"
+#include "chase.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "fs-util.h"
@@ -32,11 +33,11 @@ int mkdirat_safe_internal(
         assert(mode != MODE_INVALID);
         assert(_mkdirat && _mkdirat != mkdirat);
 
-        if (_mkdirat(dir_fd, path, mode) >= 0) {
-                r = chmod_and_chown_at(dir_fd, path, mode, uid, gid);
-                if (r < 0)
-                        return r;
-        }
+        r = _mkdirat(dir_fd, path, mode);
+        if (r >= 0)
+                return chmod_and_chown_at(dir_fd, path, mode, uid, gid);
+        if (r != -EEXIST)
+                return r;
 
         if (fstatat(dir_fd, path, &st, AT_SYMLINK_NOFOLLOW) < 0)
                 return -errno;
@@ -44,7 +45,7 @@ int mkdirat_safe_internal(
         if ((flags & MKDIR_FOLLOW_SYMLINK) && S_ISLNK(st.st_mode)) {
                 _cleanup_free_ char *p = NULL;
 
-                r = chase_symlinks_at(dir_fd, path, CHASE_NONEXISTENT, &p, NULL);
+                r = chaseat(dir_fd, path, CHASE_NONEXISTENT, &p, NULL);
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -209,7 +210,7 @@ int mkdir_p_safe(const char *prefix, const char *path, mode_t mode, uid_t uid, g
         return mkdir_p_internal(prefix, path, mode, uid, gid, flags, mkdirat_errno_wrapper);
 }
 
-int mkdir_p_root(const char *root, const char *p, uid_t uid, gid_t gid, mode_t m) {
+int mkdir_p_root(const char *root, const char *p, uid_t uid, gid_t gid, mode_t m, char **subvolumes) {
         _cleanup_free_ char *pp = NULL, *bn = NULL;
         _cleanup_close_ int dfd = -EBADF;
         int r;
@@ -227,11 +228,11 @@ int mkdir_p_root(const char *root, const char *p, uid_t uid, gid_t gid, mode_t m
                 return r;
         else {
                 /* Extracting the parent dir worked, hence we aren't top-level? Recurse up first. */
-                r = mkdir_p_root(root, pp, uid, gid, m);
+                r = mkdir_p_root(root, pp, uid, gid, m, subvolumes);
                 if (r < 0)
                         return r;
 
-                dfd = chase_symlinks_and_open(pp, root, CHASE_PREFIX_ROOT, O_RDONLY|O_CLOEXEC|O_DIRECTORY, NULL);
+                dfd = chase_and_open(pp, root, CHASE_PREFIX_ROOT, O_RDONLY|O_CLOEXEC|O_DIRECTORY, NULL);
                 if (dfd < 0)
                         return dfd;
         }
@@ -242,11 +243,15 @@ int mkdir_p_root(const char *root, const char *p, uid_t uid, gid_t gid, mode_t m
         if (r < 0)
                 return r;
 
-        if (mkdirat(dfd, bn, m) < 0) {
-                if (errno == EEXIST)
+        if (path_strv_contains(subvolumes, p))
+                r = btrfs_subvol_make_fallback(dfd, bn, m);
+        else
+                r = RET_NERRNO(mkdirat(dfd, bn, m));
+        if (r < 0) {
+                if (r == -EEXIST)
                         return 0;
 
-                return -errno;
+                return r;
         }
 
         if (uid_is_valid(uid) || gid_is_valid(gid)) {

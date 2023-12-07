@@ -15,16 +15,19 @@ libudev_sources = files(
 
 libudev_includes = [includes, include_directories('.')]
 
+libudev_dir_path = meson.current_source_dir()
+
 libudev_sym = files('libudev.sym')
-libudev_sym_path = meson.current_source_dir() / 'libudev.sym'
+libudev_sym_path = libudev_dir_path / 'libudev.sym'
 
 install_headers('libudev.h')
-libudev_h_path = meson.current_source_dir() / 'libudev.h'
+libudev_h_path = libudev_dir_path / 'libudev.h'
 
 libudev_basic = static_library(
         'udev-basic',
         libudev_sources,
         include_directories : includes,
+        dependencies : userspace,
         c_args : ['-fvisibility=default'],
         build_by_default : false)
 
@@ -39,11 +42,3 @@ libudev_pc = custom_target(
         install : pkgconfiglibdir != 'no',
         install_tag : 'devel',
         install_dir : pkgconfiglibdir)
-
-############################################################
-
-tests += [
-        [files('test-libudev.c'),
-         [libshared,
-          libudev_basic]],
-]

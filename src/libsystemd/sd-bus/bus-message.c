@@ -12,7 +12,7 @@
 #include "bus-signature.h"
 #include "bus-type.h"
 #include "fd-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "memfd-util.h"
 #include "memory-util.h"
 #include "string-util.h"
@@ -225,11 +225,11 @@ static int message_append_field_string(
 
         assert(m);
 
-        /* dbus only allows 8bit header field ids */
+        /* dbus only allows 8-bit header field ids */
         if (h > 0xFF)
                 return -EINVAL;
 
-        /* dbus doesn't allow strings over 32bit */
+        /* dbus doesn't allow strings over 32-bit */
         l = strlen(s);
         if (l > UINT32_MAX)
                 return -EINVAL;
@@ -266,11 +266,11 @@ static int message_append_field_signature(
 
         assert(m);
 
-        /* dbus only allows 8bit header field ids */
+        /* dbus only allows 8-bit header field ids */
         if (h > 0xFF)
                 return -EINVAL;
 
-        /* dbus doesn't allow signatures over 8bit */
+        /* dbus doesn't allow signatures over 8-bit */
         l = strlen(s);
         if (l > SD_BUS_MAXIMUM_SIGNATURE_LENGTH)
                 return -EINVAL;
@@ -300,7 +300,7 @@ static int message_append_field_uint32(sd_bus_message *m, uint64_t h, uint32_t x
 
         assert(m);
 
-        /* dbus only allows 8bit header field ids */
+        /* dbus only allows 8-bit header field ids */
         if (h > 0xFF)
                 return -EINVAL;
 
@@ -322,7 +322,7 @@ static int message_append_field_uint32(sd_bus_message *m, uint64_t h, uint32_t x
 static int message_append_reply_cookie(sd_bus_message *m, uint64_t cookie) {
         assert(m);
 
-        /* 64bit cookies are not supported */
+        /* 64-bit cookies are not supported */
         if (cookie > UINT32_MAX)
                 return -EOPNOTSUPP;
 
@@ -1203,7 +1203,7 @@ static void *message_extend_body(
         padding = start_body - m->body_size;
         added = padding + sz;
 
-        /* Check for 32bit overflows */
+        /* Check for 32-bit overflows */
         if (end_body < start_body || end_body > UINT32_MAX) {
                 m->poisoned = true;
                 return NULL;
@@ -1506,7 +1506,7 @@ _public_ int sd_bus_message_append_string_iovec(
         assert_return(iov || n == 0, -EINVAL);
         assert_return(!m->poisoned, -ESTALE);
 
-        size = IOVEC_TOTAL_SIZE(iov, n);
+        size = iovec_total_size(iov, n);
 
         r = sd_bus_message_append_string_space(m, size, &p);
         if (r < 0)
@@ -2027,6 +2027,8 @@ _public_ int sd_bus_message_appendv(
                         r = signature_element_length(t, &k);
                         if (r < 0)
                                 return r;
+                        if (k < 2)
+                                return -ERANGE;
 
                         {
                                 char s[k - 1];
@@ -2158,7 +2160,7 @@ _public_ int sd_bus_message_append_array_iovec(
         assert_return(iov || n == 0, -EINVAL);
         assert_return(!m->poisoned, -ESTALE);
 
-        size = IOVEC_TOTAL_SIZE(iov, n);
+        size = iovec_total_size(iov, n);
 
         r = sd_bus_message_append_array_space(m, type, size, &p);
         if (r < 0)
@@ -2488,6 +2490,8 @@ int bus_body_part_map(struct bus_body_part *part) {
 
         shift = PAGE_OFFSET(part->memfd_offset);
         psz = PAGE_ALIGN(part->size + shift);
+        if (psz >= SIZE_MAX)
+                return -EFBIG;
 
         if (part->memfd >= 0)
                 p = mmap(NULL, psz, PROT_READ, MAP_PRIVATE, part->memfd, part->memfd_offset - shift);
@@ -3470,6 +3474,8 @@ _public_ int sd_bus_message_readv(
                         r = signature_element_length(t, &k);
                         if (r < 0)
                                 return r;
+                        if (k < 2)
+                                return -ERANGE;
 
                         {
                                 char s[k - 1];
@@ -3650,6 +3656,8 @@ _public_ int sd_bus_message_skip(sd_bus_message *m, const char *types) {
                 r = signature_element_length(types, &k);
                 if (r < 0)
                         return r;
+                if (k < 2)
+                        return -ERANGE;
 
                 {
                         char s[k-1];

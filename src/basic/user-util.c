@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utmp.h>
@@ -13,11 +14,12 @@
 #include "sd-messages.h"
 
 #include "alloc-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "lock-util.h"
 #include "macro.h"
 #include "mkdir.h"
 #include "parse-util.h"
@@ -36,7 +38,7 @@ bool uid_is_valid(uid_t uid) {
         if (uid == (uid_t) UINT32_C(0xFFFFFFFF))
                 return false;
 
-        /* A long time ago UIDs where 16bit, hence explicitly avoid the 16bit -1 too */
+        /* A long time ago UIDs where 16 bit, hence explicitly avoid the 16-bit -1 too */
         if (uid == (uid_t) UINT32_C(0xFFFF))
                 return false;
 
@@ -126,7 +128,7 @@ char* getlogname_malloc(void) {
         return uid_to_name(uid);
 }
 
-char *getusername_malloc(void) {
+char* getusername_malloc(void) {
         const char *e;
 
         e = secure_getenv("USER");
@@ -154,19 +156,30 @@ bool is_nologin_shell(const char *shell) {
                            "/usr/bin/true");
 }
 
-const char* default_root_shell(const char *root) {
+const char* default_root_shell_at(int rfd) {
         /* We want to use the preferred shell, i.e. DEFAULT_USER_SHELL, which usually
          * will be /bin/bash. Fall back to /bin/sh if DEFAULT_USER_SHELL is not found,
          * or any access errors. */
 
-        int r = chase_symlinks(DEFAULT_USER_SHELL, root, CHASE_PREFIX_ROOT, NULL, NULL);
+        assert(rfd >= 0 || rfd == AT_FDCWD);
+
+        int r = chaseat(rfd, DEFAULT_USER_SHELL, CHASE_AT_RESOLVE_IN_ROOT, NULL, NULL);
         if (r < 0 && r != -ENOENT)
-                log_debug_errno(r, "Failed to look up shell '%s%s%s': %m",
-                                strempty(root), root ? "/" : "", DEFAULT_USER_SHELL);
+                log_debug_errno(r, "Failed to look up shell '%s': %m", DEFAULT_USER_SHELL);
         if (r > 0)
                 return DEFAULT_USER_SHELL;
 
         return "/bin/sh";
+}
+
+const char* default_root_shell(const char *root) {
+        _cleanup_close_ int rfd = -EBADF;
+
+        rfd = open(empty_to_root(root), O_CLOEXEC | O_DIRECTORY | O_PATH);
+        if (rfd < 0)
+                return "/bin/sh";
+
+        return default_root_shell_at(rfd);
 }
 
 static int synthesize_user_creds(
@@ -275,7 +288,9 @@ int get_user_creds(
                 p = getpwnam(*username);
         }
         if (!p) {
-                r = errno_or_else(ESRCH);
+                /* getpwnam() may fail with ENOENT if /etc/passwd is missing.
+                 * For us that is equivalent to the name not being defined. */
+                r = IN_SET(errno, 0, ENOENT) ? -ESRCH : -errno;
 
                 /* If the user requested that we only synthesize as fallback, do so now */
                 if (FLAGS_SET(flags, USER_CREDS_PREFER_NSS)) {
@@ -369,7 +384,9 @@ int get_group_creds(const char **groupname, gid_t *gid, UserCredsFlags flags) {
         }
 
         if (!g)
-                return errno_or_else(ESRCH);
+                /* getgrnam() may fail with ENOENT if /etc/group is missing.
+                 * For us that is equivalent to the name not being defined. */
+                return IN_SET(errno, 0, ENOENT) ? -ESRCH : -errno;
 
         if (gid) {
                 if (!gid_is_valid(g->gr_gid))
@@ -572,7 +589,6 @@ int getgroups_alloc(gid_t** gids) {
 int get_home_dir(char **ret) {
         struct passwd *p;
         const char *e;
-        char *h;
         uid_t u;
 
         assert(ret);
@@ -605,18 +621,12 @@ int get_home_dir(char **ret) {
                 return -EINVAL;
 
  found:
-        h = strdup(e);
-        if (!h)
-                return -ENOMEM;
-
-        *ret = path_simplify(h);
-        return 0;
+        return path_simplify_alloc(e, ret);
 }
 
 int get_shell(char **ret) {
         struct passwd *p;
         const char *e;
-        char *s;
         uid_t u;
 
         assert(ret);
@@ -648,12 +658,7 @@ int get_shell(char **ret) {
                 return -EINVAL;
 
  found:
-        s = strdup(e);
-        if (!s)
-                return -ENOMEM;
-
-        *ret = path_simplify(s);
-        return 0;
+        return path_simplify_alloc(e, ret);
 }
 
 int reset_uid_gid(void) {
@@ -670,12 +675,7 @@ int reset_uid_gid(void) {
 }
 
 int take_etc_passwd_lock(const char *root) {
-        struct flock flock = {
-                .l_type = F_WRLCK,
-                .l_whence = SEEK_SET,
-                .l_start = 0,
-                .l_len = 0,
-        };
+        int r;
 
         /* This is roughly the same as lckpwdf(), but not as awful. We don't want to use alarm() and signals,
          * hence we implement our own trivial version of this.
@@ -694,8 +694,9 @@ int take_etc_passwd_lock(const char *root) {
         if (fd < 0)
                 return log_debug_errno(errno, "Cannot open %s: %m", path);
 
-        if (fcntl(fd, F_SETLKW, &flock) < 0)
-                return log_debug_errno(errno, "Locking %s failed: %m", path);
+        r = unposix_lock(fd, LOCK_EX);
+        if (r < 0)
+                return log_debug_errno(r, "Locking %s failed: %m", path);
 
         return TAKE_FD(fd);
 }
@@ -753,14 +754,14 @@ bool valid_user_group_name(const char *u, ValidUserFlags flags) {
                 if (in_charset(u, "0123456789")) /* Don't allow fully numeric strings, they might be confused
                                                   * with UIDs (note that this test is more broad than
                                                   * the parse_uid() test above, as it will cover more than
-                                                  * the 32bit range, and it will detect 65535 (which is in
+                                                  * the 32-bit range, and it will detect 65535 (which is in
                                                   * invalid UID, even though in the unsigned 32 bit range) */
                         return false;
 
                 if (u[0] == '-' && in_charset(u + 1, "0123456789")) /* Don't allow negative fully numeric
                                                                      * strings either. After all some people
                                                                      * write 65535 as -1 (even though that's
-                                                                     * not even true on 32bit uid_t
+                                                                     * not even true on 32-bit uid_t
                                                                      * anyway) */
                         return false;
 
@@ -835,7 +836,7 @@ bool valid_gecos(const char *d) {
         return true;
 }
 
-char *mangle_gecos(const char *d) {
+char* mangle_gecos(const char *d) {
         char *mangled;
 
         /* Makes sure the provided string becomes valid as a GEGOS field, by dropping bad chars. glibc's
@@ -1047,7 +1048,7 @@ int is_this_me(const char *username) {
         return uid == getuid();
 }
 
-const char *get_home_root(void) {
+const char* get_home_root(void) {
         const char *e;
 
         /* For debug purposes allow overriding where we look for home dirs */

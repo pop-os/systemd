@@ -22,6 +22,7 @@ static const UdevBuiltin *const builtins[_UDEV_BUILTIN_MAX] = {
 #if HAVE_KMOD
         [UDEV_BUILTIN_KMOD] = &udev_builtin_kmod,
 #endif
+        [UDEV_BUILTIN_NET_DRIVER] = &udev_builtin_net_driver,
         [UDEV_BUILTIN_NET_ID] = &udev_builtin_net_id,
         [UDEV_BUILTIN_NET_LINK] = &udev_builtin_net_setup_link,
         [UDEV_BUILTIN_PATH_ID] = &udev_builtin_path_id,
@@ -98,11 +99,12 @@ UdevBuiltinCommand udev_builtin_lookup(const char *command) {
         return _UDEV_BUILTIN_INVALID;
 }
 
-int udev_builtin_run(sd_device *dev, sd_netlink **rtnl, UdevBuiltinCommand cmd, const char *command, bool test) {
+int udev_builtin_run(UdevEvent *event, UdevBuiltinCommand cmd, const char *command, bool test) {
         _cleanup_strv_free_ char **argv = NULL;
         int r;
 
-        assert(dev);
+        assert(event);
+        assert(event->dev);
         assert(cmd >= 0 && cmd < _UDEV_BUILTIN_MAX);
         assert(command);
 
@@ -115,7 +117,7 @@ int udev_builtin_run(sd_device *dev, sd_netlink **rtnl, UdevBuiltinCommand cmd, 
 
         /* we need '0' here to reset the internal state */
         optind = 0;
-        return builtins[cmd]->cmd(dev, rtnl, strv_length(argv), argv, test);
+        return builtins[cmd]->cmd(event, strv_length(argv), argv, test);
 }
 
 int udev_builtin_add_property(sd_device *dev, bool test, const char *key, const char *val) {
@@ -133,4 +135,22 @@ int udev_builtin_add_property(sd_device *dev, bool test, const char *key, const 
                 printf("%s=%s\n", key, strempty(val));
 
         return 0;
+}
+
+int udev_builtin_add_propertyf(sd_device *dev, bool test, const char *key, const char *valf, ...) {
+        _cleanup_free_ char *val = NULL;
+        va_list ap;
+        int r;
+
+        assert(dev);
+        assert(key);
+        assert(valf);
+
+        va_start(ap, valf);
+        r = vasprintf(&val, valf, ap);
+        va_end(ap);
+        if (r < 0)
+                return log_oom_debug();
+
+        return udev_builtin_add_property(dev, test, key, val);
 }

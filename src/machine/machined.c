@@ -12,6 +12,7 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "cgroup-util.h"
+#include "common-signal.h"
 #include "daemon-util.h"
 #include "dirent-util.h"
 #include "discover-image.h"
@@ -61,6 +62,15 @@ static int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
+        r = sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, NULL);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || r == -EHOSTDOWN ? LOG_DEBUG : LOG_NOTICE, r,
+                               "Unable to create memory pressure event source, ignoring: %m");
+
         (void) sd_event_set_watchdog(m->event, true);
 
         *ret = TAKE_PTR(m);
@@ -97,6 +107,7 @@ static Manager* manager_unref(Manager *m) {
 }
 
 static int manager_add_host_machine(Manager *m) {
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
         _cleanup_free_ char *rd = NULL, *unit = NULL;
         sd_id128_t mid;
         Machine *t;
@@ -117,11 +128,15 @@ static int manager_add_host_machine(Manager *m) {
         if (!unit)
                 return log_oom();
 
+        r = pidref_set_pid(&pidref, 1);
+        if (r < 0)
+                return log_error_errno(r, "Failed to open reference to PID 1: %m");
+
         r = machine_new(m, MACHINE_HOST, ".host", &t);
         if (r < 0)
                 return log_error_errno(r, "Failed to create machine: %m");
 
-        t->leader = 1;
+        t->leader = TAKE_PIDREF(pidref);
         t->id = mid;
 
         t->root_directory = TAKE_PTR(rd);
@@ -244,8 +259,7 @@ static void manager_gc(Manager *m, bool drop_not_started) {
 
         assert(m);
 
-        while ((machine = m->machine_gc_queue)) {
-                LIST_REMOVE(gc_queue, m->machine_gc_queue, machine);
+        while ((machine = LIST_POP(gc_queue, m->machine_gc_queue))) {
                 machine->in_gc_queue = false;
 
                 /* First, if we are not closing yet, initiate stopping */
@@ -339,7 +353,7 @@ static int run(int argc, char *argv[]) {
          * make sure this check stays in. */
         (void) mkdir_label("/run/systemd/machines", 0755);
 
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, SIGTERM, SIGINT, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, SIGTERM, SIGINT, SIGRTMIN+18, -1) >= 0);
 
         r = manager_new(&m);
         if (r < 0)

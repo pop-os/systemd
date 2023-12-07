@@ -147,6 +147,7 @@ static int finish_item(
         _cleanup_free_ CatalogItem *i = NULL;
         _cleanup_free_ char *combined = NULL;
         char *prev;
+        int r;
 
         assert(h);
         assert(payload);
@@ -169,9 +170,11 @@ static int finish_item(
                 if (!combined)
                         return log_oom();
 
-                if (ordered_hashmap_update(h, i, combined) < 0)
-                        return log_oom();
-                combined = NULL;
+                r = ordered_hashmap_update(h, i, combined);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to update catalog item: %m");
+
+                TAKE_PTR(combined);
                 free(prev);
         } else {
                 /* A new item */
@@ -179,10 +182,12 @@ static int finish_item(
                 if (!combined)
                         return log_oom();
 
-                if (ordered_hashmap_put(h, i, combined) < 0)
-                        return log_oom();
-                i = NULL;
-                combined = NULL;
+                r = ordered_hashmap_put(h, i, combined);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to insert catalog item: %m");
+
+                TAKE_PTR(i);
+                TAKE_PTR(combined);
         }
 
         return 0;

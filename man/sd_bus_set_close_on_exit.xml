@@ -84,7 +84,7 @@
         <varlistentry>
           <term><constant>-ECHILD</constant></term>
 
-          <listitem><para>The bus connection was created in a different process.</para>
+          <listitem><para>The bus connection was created in a different process, library or module instance.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -92,6 +92,12 @@
   </refsect1>
 
   <xi:include href="libsystemd-pkgconfig.xml" />
+
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_bus_set_close_on_exit()</function> and
+    <function>sd_bus_get_close_on_exit()</function> were added in version 240.</para>
+  </refsect1>
 
   <refsect1>
     <title>See Also</title>

@@ -6,6 +6,7 @@
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-util.h"
 #include "cgroup-util.h"
 #include "clean-ipc.h"
@@ -16,7 +17,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "hashmap.h"
-#include "label.h"
+#include "label-util.h"
 #include "limits-util.h"
 #include "logind-dbus.h"
 #include "logind-user-dbus.h"
@@ -140,7 +141,7 @@ User *user_free(User *u) {
 }
 
 static int user_save_internal(User *u) {
-        _cleanup_free_ char *temp_path = NULL;
+        _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -282,13 +283,11 @@ static int user_save_internal(User *u) {
                 goto fail;
         }
 
+        temp_path = mfree(temp_path);
         return 0;
 
 fail:
         (void) unlink(u->state_file);
-
-        if (temp_path)
-                (void) unlink(temp_path);
 
         return log_error_errno(r, "Failed to save user data %s: %m", u->state_file);
 }
@@ -390,13 +389,7 @@ static int user_update_slice(User *u) {
             u->user_record->io_weight == UINT64_MAX)
                 return 0;
 
-        r = sd_bus_message_new_method_call(
-                        u->manager->bus,
-                        &m,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "SetUnitProperties");
+        r = bus_message_new_method_call(u->manager->bus, &m, bus_systemd_mgr, "SetUnitProperties");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -467,7 +460,7 @@ int user_start(User *u) {
 
         if (!u->started) {
                 if (!dual_timestamp_is_set(&u->timestamp))
-                        dual_timestamp_get(&u->timestamp);
+                        dual_timestamp_now(&u->timestamp);
                 user_send_signal(u, true);
                 u->started = true;
         }
@@ -868,12 +861,12 @@ void user_update_last_session_timer(User *u) {
 }
 
 static const char* const user_state_table[_USER_STATE_MAX] = {
-        [USER_OFFLINE] = "offline",
-        [USER_OPENING] = "opening",
+        [USER_OFFLINE]   = "offline",
+        [USER_OPENING]   = "opening",
         [USER_LINGERING] = "lingering",
-        [USER_ONLINE] = "online",
-        [USER_ACTIVE] = "active",
-        [USER_CLOSING] = "closing"
+        [USER_ONLINE]    = "online",
+        [USER_ACTIVE]    = "active",
+        [USER_CLOSING]   = "closing"
 };
 
 DEFINE_STRING_TABLE_LOOKUP(user_state, UserState);

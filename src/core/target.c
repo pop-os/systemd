@@ -31,7 +31,7 @@ static void target_set_state(Target *t, TargetState state) {
                           target_state_to_string(old_state),
                           target_state_to_string(state));
 
-        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static int target_add_default_dependencies(Target *t) {
@@ -169,13 +169,13 @@ static int target_deserialize_item(Unit *u, const char *key, const char *value, 
         return 0;
 }
 
-_pure_ static UnitActiveState target_active_state(Unit *u) {
+static UnitActiveState target_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[TARGET(u)->state];
 }
 
-_pure_ static const char *target_sub_state_to_string(Unit *u) {
+static const char *target_sub_state_to_string(Unit *u) {
         assert(u);
 
         return target_state_to_string(TARGET(u)->state);

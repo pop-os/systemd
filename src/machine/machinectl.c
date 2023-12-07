@@ -27,6 +27,7 @@
 #include "cgroup-util.h"
 #include "constants.h"
 #include "copy.h"
+#include "edit-util.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "format-table.h"
@@ -474,7 +475,7 @@ static int print_uid_shift(sd_bus *bus, const char *name) {
         if (shift == 0) /* Don't show trivial mappings */
                 return 0;
 
-        printf("       UID Shift: %" PRIu32 "\n", shift);
+        printf("  UID Shift: %" PRIu32 "\n", shift);
         return 0;
 }
 
@@ -525,7 +526,7 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
 
                 printf("\t  Leader: %u", (unsigned) i->leader);
 
-                (void) get_process_comm(i->leader, &t);
+                (void) pid_get_comm(i->leader, &t);
                 if (t)
                         printf(" (%s)", t);
 
@@ -1410,6 +1411,161 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         return process_forward(event, &forward, master, 0, machine);
 }
 
+static int normalize_nspawn_filename(const char *name, char **ret_file) {
+        _cleanup_free_ char *file = NULL;
+
+        assert(name);
+        assert(ret_file);
+
+        if (!endswith(name, ".nspawn"))
+                file = strjoin(name, ".nspawn");
+        else
+                file = strdup(name);
+        if (!file)
+                return log_oom();
+
+        if (!filename_is_valid(file))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid settings file name '%s'.", file);
+
+        *ret_file = TAKE_PTR(file);
+        return 0;
+}
+
+static int get_settings_path(const char *name, char **ret_path) {
+        assert(name);
+        assert(ret_path);
+
+        FOREACH_STRING(i, "/etc/systemd/nspawn", "/run/systemd/nspawn", "/var/lib/machines") {
+                _cleanup_free_ char *path = NULL;
+
+                path = path_join(i, name);
+                if (!path)
+                        return -ENOMEM;
+
+                if (access(path, F_OK) >= 0) {
+                        *ret_path = TAKE_PTR(path);
+                        return 0;
+                }
+        }
+
+        return -ENOENT;
+}
+
+static int edit_settings(int argc, char *argv[], void *userdata) {
+        _cleanup_(edit_file_context_done) EditFileContext context = {};
+        int r;
+
+        if (!on_tty())
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Cannot edit machine settings if not on a tty.");
+
+        if (arg_transport != BUS_TRANSPORT_LOCAL)
+                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                       "Edit is only supported on the host machine.");
+
+        r = mac_init();
+        if (r < 0)
+                return r;
+
+        STRV_FOREACH(name, strv_skip(argv, 1)) {
+                _cleanup_free_ char *file = NULL, *path = NULL;
+
+                if (path_is_absolute(*name)) {
+                        if (!path_is_safe(*name))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid settings file path '%s'.",
+                                                       *name);
+
+                        r = edit_files_add(&context, *name, NULL, NULL);
+                        if (r < 0)
+                                return r;
+                        continue;
+                }
+
+                r = normalize_nspawn_filename(*name, &file);
+                if (r < 0)
+                        return r;
+
+                r = get_settings_path(file, &path);
+                if (r == -ENOENT) {
+                        log_debug("No existing settings file for machine '%s' found, creating a new file.", *name);
+
+                        path = path_join("/etc/systemd/nspawn", file);
+                        if (!path)
+                                return log_oom();
+
+                        r = edit_files_add(&context, path, NULL, NULL);
+                        if (r < 0)
+                                return r;
+                        continue;
+                }
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get the path of the settings file: %m");
+
+                if (path_startswith(path, "/var/lib/machines")) {
+                        _cleanup_free_ char *new_path = NULL;
+
+                        new_path = path_join("/etc/systemd/nspawn", file);
+                        if (!new_path)
+                                return log_oom();
+
+                        r = edit_files_add(&context, new_path, path, NULL);
+                } else
+                        r = edit_files_add(&context, path, NULL, NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        return do_edit_files_and_install(&context);
+}
+
+static int cat_settings(int argc, char *argv[], void *userdata) {
+        int r = 0;
+
+        if (arg_transport != BUS_TRANSPORT_LOCAL)
+                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                       "Cat is only supported on the host machine.");
+
+        pager_open(arg_pager_flags);
+
+        STRV_FOREACH(name, strv_skip(argv, 1)) {
+                _cleanup_free_ char *file = NULL, *path = NULL;
+                int q;
+
+                if (path_is_absolute(*name)) {
+                        if (!path_is_safe(*name))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid settings file path '%s'.",
+                                                       *name);
+
+                        q = cat_files(*name, /* dropins = */ NULL, /* flags = */ CAT_FORMAT_HAS_SECTIONS);
+                        if (q < 0)
+                                return r < 0 ? r : q;
+                        continue;
+                }
+
+                q = normalize_nspawn_filename(*name, &file);
+                if (q < 0)
+                        return r < 0 ? r : q;
+
+                q = get_settings_path(file, &path);
+                if (q == -ENOENT) {
+                        log_error_errno(q, "No settings file found for machine '%s'.", *name);
+                        r = r < 0 ? r : q;
+                        continue;
+                }
+                if (q < 0) {
+                        log_error_errno(q, "Failed to get the path of the settings file: %m");
+                        return r < 0 ? r : q;
+                }
+
+                q = cat_files(path, /* dropins = */ NULL, /* flags = */ CAT_FORMAT_HAS_SECTIONS);
+                if (q < 0)
+                        return r < 0 ? r : q;
+        }
+
+        return r;
+}
+
 static int remove_image(int argc, char *argv[], void *userdata) {
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
@@ -1549,7 +1705,7 @@ static int start_machine(int argc, char *argv[], void *userdata) {
 
         r = bus_wait_for_jobs_new(bus, &w);
         if (r < 0)
-                return log_oom();
+                return log_error_errno(r, "Could not watch jobs: %m");
 
         for (int i = 1; i < argc; i++) {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
@@ -1597,15 +1753,15 @@ static int start_machine(int argc, char *argv[], void *userdata) {
 static int enable_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        InstallChange *changes = NULL;
-        size_t n_changes = 0;
         const char *method;
         sd_bus *bus = ASSERT_PTR(userdata);
         int r;
+        bool enable;
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        method = streq(argv[0], "enable") ? "EnableUnitFiles" : "DisableUnitFiles";
+        enable = streq(argv[0], "enable");
+        method = enable ? "EnableUnitFiles" : "DisableUnitFiles";
 
         r = bus_message_new_method_call(bus, &m, bus_systemd_mgr, method);
         if (r < 0)
@@ -1615,7 +1771,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_create_error(r);
 
-        if (streq(argv[0], "enable")) {
+        if (enable) {
                 r = sd_bus_message_append(m, "s", "machines.target");
                 if (r < 0)
                         return bus_log_create_error(r);
@@ -1645,7 +1801,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_create_error(r);
 
-        if (streq(argv[0], "enable"))
+        if (enable)
                 r = sd_bus_message_append(m, "bb", false, false);
         else
                 r = sd_bus_message_append(m, "b", false);
@@ -1656,47 +1812,38 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to enable or disable unit: %s", bus_error_message(&error, r));
 
-        if (streq(argv[0], "enable")) {
+        if (enable) {
                 r = sd_bus_message_read(reply, "b", NULL);
                 if (r < 0)
                         return bus_log_parse_error(r);
         }
 
-        r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
+        r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet);
         if (r < 0)
-                goto finish;
+                return r;
 
-        r = bus_call_method(bus, bus_systemd_mgr, "Reload", &error, NULL, NULL);
-        if (r < 0) {
-                log_error("Failed to reload daemon: %s", bus_error_message(&error, r));
-                goto finish;
-        }
+        r = bus_service_manager_reload(bus);
+        if (r < 0)
+                return r;
 
         if (arg_now) {
                 _cleanup_strv_free_ char **new_args = NULL;
 
-                new_args = strv_new(streq(argv[0], "enable") ? "start" : "poweroff");
-                if (!new_args) {
-                        r = log_oom();
-                        goto finish;
-                }
+                new_args = strv_new(enable ? "start" : "poweroff");
+                if (!new_args)
+                        return log_oom();
 
                 r = strv_extend_strv(&new_args, argv + 1, /* filter_duplicates = */ false);
-                if (r < 0) {
-                        log_oom();
-                        goto finish;
-                }
+                if (r < 0)
+                        return log_oom();
 
-                if (streq(argv[0], "enable"))
-                        r = start_machine(strv_length(new_args), new_args, userdata);
-                else
-                        r = poweroff_machine(strv_length(new_args), new_args, userdata);
+                if (enable)
+                        return start_machine(strv_length(new_args), new_args, userdata);
+
+                return poweroff_machine(strv_length(new_args), new_args, userdata);
         }
 
-finish:
-        install_changes_free(changes, n_changes);
-
-        return r;
+        return 0;
 }
 
 static int match_log_message(sd_bus_message *m, void *userdata, sd_bus_error *error) {
@@ -2420,10 +2567,10 @@ static int help(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] COMMAND ...\n\n"
-               "%sSend control commands to or query the virtual machine and container%s\n"
-               "%sregistration manager.%s\n"
-               "\nMachine Commands:\n"
+        printf("%1$s [OPTIONS...] COMMAND ...\n\n"
+               "%5$sSend control commands to or query the virtual machine and container%6$s\n"
+               "%5$sregistration manager.%6$s\n"
+               "\n%3$sMachine Commands:%4$s\n"
                "  list                        List running VMs and containers\n"
                "  status NAME...              Show VM/container details\n"
                "  show [NAME...]              Show properties of one or more VMs/containers\n"
@@ -2441,18 +2588,20 @@ static int help(int argc, char *argv[], void *userdata) {
                "  kill NAME...                Send signal to processes of a VM/container\n"
                "  copy-to NAME PATH [PATH]    Copy files from the host to a container\n"
                "  copy-from NAME PATH [PATH]  Copy files from a container to the host\n"
-               "  bind NAME PATH [PATH]       Bind mount a path from the host into a container\n\n"
-               "Image Commands:\n"
+               "  bind NAME PATH [PATH]       Bind mount a path from the host into a container\n"
+               "\n%3$sImage Commands:%4$s\n"
                "  list-images                 Show available container and VM images\n"
                "  image-status [NAME...]      Show image details\n"
                "  show-image [NAME...]        Show properties of image\n"
+               "  edit NAME|FILE...           Edit settings of one or more VMs/containers\n"
+               "  cat NAME|FILE...            Show settings of one or more VMs/containers\n"
                "  clone NAME NAME             Clone an image\n"
                "  rename NAME NAME            Rename an image\n"
                "  read-only NAME [BOOL]       Mark or unmark image read-only\n"
                "  remove NAME...              Remove an image\n"
                "  set-limit [NAME] BYTES      Set image or pool size limit (disk quota)\n"
-               "  clean                       Remove hidden (or all) images\n\n"
-               "Image Transfer Commands:\n"
+               "  clean                       Remove hidden (or all) images\n"
+               "\n%3$sImage Transfer Commands:%4$s\n"
                "  pull-tar URL [NAME]         Download a TAR container image\n"
                "  pull-raw URL [NAME]         Download a RAW container or VM image\n"
                "  import-tar FILE [NAME]      Import a local TAR container image\n"
@@ -2462,7 +2611,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "  export-raw NAME [FILE]      Export a RAW container or VM image locally\n"
                "  list-transfers              Show list of downloads in progress\n"
                "  cancel-transfer             Cancel a download\n"
-               "\nOptions:\n"
+               "\n%3$sOptions:%4$s\n"
                "  -h --help                   Show this help\n"
                "     --version                Show package version\n"
                "     --no-pager               Do not pipe output into a pager\n"
@@ -2493,13 +2642,13 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --force                  Download image even if already exists\n"
                "     --now                    Start or power off container after enabling or\n"
                "                              disabling it\n"
-               "\nSee the %s for details.\n",
+               "\nSee the %2$s for details.\n",
                program_invocation_short_name,
-               ansi_highlight(),
+               link,
+               ansi_underline(),
                ansi_normal(),
                ansi_highlight(),
-               ansi_normal(),
-               link);
+               ansi_normal());
 
         return 0;
 }
@@ -2802,6 +2951,8 @@ static int machinectl_main(int argc, char *argv[], sd_bus *bus) {
                 { "login",           VERB_ANY, 2,        0,            login_machine     },
                 { "shell",           VERB_ANY, VERB_ANY, 0,            shell_machine     },
                 { "bind",            3,        4,        0,            bind_mount        },
+                { "edit",            2,        VERB_ANY, 0,            edit_settings     },
+                { "cat",             2,        VERB_ANY, 0,            cat_settings      },
                 { "copy-to",         3,        4,        0,            copy_files        },
                 { "copy-from",       3,        4,        0,            copy_files        },
                 { "remove",          2,        VERB_ANY, 0,            remove_image      },
@@ -2844,7 +2995,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        r = bus_connect_transport(arg_transport, arg_host, false, &bus);
+        r = bus_connect_transport(arg_transport, arg_host, RUNTIME_SCOPE_SYSTEM, &bus);
         if (r < 0)
                 return bus_log_connect_error(r, arg_transport);
 

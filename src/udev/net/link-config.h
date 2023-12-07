@@ -27,13 +27,14 @@ typedef struct Link {
         int ifindex;
         const char *ifname;
         const char *new_name;
+        char **altnames;
 
         LinkConfig *config;
         sd_device *device;
         sd_device_action_t action;
 
         char *kind;
-        char *driver;
+        const char *driver;
         uint16_t iftype;
         uint32_t flags;
         struct hw_addr_data hw_addr;

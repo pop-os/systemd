@@ -8,13 +8,10 @@
  * https://github.com/mjg59/efitools
  */
 
-#include <efi.h>
-#include <efilib.h>
-
-#include "missing_efi.h"
-#include "util.h"
+#include "device-path-util.h"
 #include "secure-boot.h"
 #include "shim.h"
+#include "util.h"
 
 #if defined(__x86_64__) || defined(__i386__)
 #define __sysv_abi__ __attribute__((sysv_abi))
@@ -99,4 +96,13 @@ EFI_STATUS shim_load_image(EFI_HANDLE parent, const EFI_DEVICE_PATH *device_path
                 uninstall_security_override();
 
         return ret;
+}
+
+void shim_retain_protocol(void) {
+        uint8_t value = 1;
+
+        /* Ask Shim to avoid uninstalling its security protocol, so that we can use it from sd-stub to
+         * validate PE addons. By default, Shim uninstalls its protocol when calling StartImage().
+         * Requires Shim 15.8. */
+        (void) efivar_set_raw(MAKE_GUID_PTR(SHIM_LOCK), u"ShimRetainProtocol", &value, sizeof(value), 0);
 }

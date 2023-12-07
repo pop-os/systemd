@@ -254,8 +254,9 @@ static int mdns_scope_process_query(DnsScope *s, DnsPacket *p) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to extract resource records from incoming packet: %m");
 
+        /* TODO: Support Known-Answers only packets gracefully. */
         if (dns_question_size(p->question) <= 0)
-                return log_debug_errno(SYNTHETIC_ERRNO(EBADMSG), "Received mDNS query without question, ignoring.");
+                return 0;
 
         unicast_reply = mdns_should_reply_using_unicast(p);
         if (unicast_reply && !sender_on_local_subnet(s, p)) {
@@ -314,7 +315,7 @@ static int mdns_scope_process_query(DnsScope *s, DnsPacket *p) {
                 }
 
                 DNS_ANSWER_FOREACH_ITEM(item, answer) {
-                        DnsAnswerFlags flags = item->flags;
+                        DnsAnswerFlags flags = item->flags | DNS_ANSWER_REFUSE_TTL_NO_MATCH;
                         /* The cache-flush bit must not be set in legacy unicast responses.
                          * See section 6.7 of RFC 6762. */
                         if (legacy_query)
@@ -445,7 +446,8 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                         _DNSSEC_RESULT_INVALID,
                         UINT32_MAX,
                         p->family,
-                        &p->sender);
+                        &p->sender,
+                        scope->manager->stale_retention_usec);
 
         } else if (dns_packet_validate_query(p) > 0)  {
                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));

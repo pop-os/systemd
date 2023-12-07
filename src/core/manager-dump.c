@@ -5,7 +5,9 @@
 #include "fileio.h"
 #include "hashmap.h"
 #include "manager-dump.h"
+#include "memstream-util.h"
 #include "unit-serialize.h"
+#include "version.h"
 
 void manager_dump_jobs(Manager *s, FILE *f, char **patterns, const char *prefix) {
         Job *j;
@@ -20,6 +22,22 @@ void manager_dump_jobs(Manager *s, FILE *f, char **patterns, const char *prefix)
 
                 job_dump(j, f, prefix);
         }
+}
+
+int manager_get_dump_jobs_string(Manager *m, char **patterns, const char *prefix, char **ret) {
+        _cleanup_(memstream_done) MemStream ms = {};
+        FILE *f;
+
+        assert(m);
+        assert(ret);
+
+        f = memstream_init(&ms);
+        if (!f)
+                return -errno;
+
+        manager_dump_jobs(m, f, patterns, prefix);
+
+        return memstream_finalize(&ms, ret, NULL);
 }
 
 void manager_dump_units(Manager *s, FILE *f, char **patterns, const char *prefix) {
@@ -75,29 +93,19 @@ void manager_dump(Manager *m, FILE *f, char **patterns, const char *prefix) {
 }
 
 int manager_get_dump_string(Manager *m, char **patterns, char **ret) {
-        _cleanup_free_ char *dump = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t size;
-        int r;
+        _cleanup_(memstream_done) MemStream ms = {};
+        FILE *f;
 
         assert(m);
         assert(ret);
 
-        f = open_memstream_unlocked(&dump, &size);
+        f = memstream_init(&ms);
         if (!f)
                 return -errno;
 
         manager_dump(m, f, patterns, NULL);
 
-        r = fflush_and_check(f);
-        if (r < 0)
-                return r;
-
-        f = safe_fclose(f);
-
-        *ret = TAKE_PTR(dump);
-
-        return 0;
+        return memstream_finalize(&ms, ret, NULL);
 }
 
 void manager_test_summary(Manager *m) {

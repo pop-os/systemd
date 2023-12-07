@@ -14,17 +14,25 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "sd-daemon.h"
+#include "sd-messages.h"
+
 #include "alloc-util.h"
 #include "async.h"
 #include "binfmt-util.h"
 #include "cgroup-setup.h"
 #include "cgroup-util.h"
-#include "coredump-util.h"
 #include "constants.h"
+#include "coredump-util.h"
+#include "detach-dm.h"
+#include "detach-loopback.h"
+#include "detach-md.h"
+#include "detach-swap.h"
 #include "errno-util.h"
 #include "exec-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "getopt-defs.h"
 #include "initrd-util.h"
 #include "killall.h"
 #include "log.h"
@@ -50,23 +58,13 @@ static usec_t arg_timeout = DEFAULT_TIMEOUT_USEC;
 
 static int parse_argv(int argc, char *argv[]) {
         enum {
-                ARG_LOG_LEVEL = 0x100,
-                ARG_LOG_TARGET,
-                ARG_LOG_COLOR,
-                ARG_LOG_LOCATION,
-                ARG_LOG_TIME,
-                ARG_EXIT_CODE,
-                ARG_TIMEOUT,
+                COMMON_GETOPT_ARGS,
+                SHUTDOWN_GETOPT_ARGS,
         };
 
         static const struct option options[] = {
-                { "log-level",     required_argument, NULL, ARG_LOG_LEVEL    },
-                { "log-target",    required_argument, NULL, ARG_LOG_TARGET   },
-                { "log-color",     optional_argument, NULL, ARG_LOG_COLOR    },
-                { "log-location",  optional_argument, NULL, ARG_LOG_LOCATION },
-                { "log-time",      optional_argument, NULL, ARG_LOG_TIME     },
-                { "exit-code",     required_argument, NULL, ARG_EXIT_CODE    },
-                { "timeout",       required_argument, NULL, ARG_TIMEOUT      },
+                COMMON_GETOPT_OPTIONS,
+                SHUTDOWN_GETOPT_OPTIONS,
                 {}
         };
 
@@ -166,17 +164,16 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int switch_root_initramfs(void) {
-        if (mount("/run/initramfs", "/run/initramfs", NULL, MS_BIND, NULL) < 0)
-                return log_error_errno(errno, "Failed to mount bind /run/initramfs on /run/initramfs: %m");
-
-        if (mount(NULL, "/run/initramfs", NULL, MS_PRIVATE, NULL) < 0)
-                return log_error_errno(errno, "Failed to make /run/initramfs private mount: %m");
-
-        /* switch_root with MS_BIND, because there might still be processes lurking around, which have open file descriptors.
-         * /run/initramfs/shutdown will take care of these.
-         * Also do not detach the old root, because /run/initramfs/shutdown needs to access it.
-         */
-        return switch_root("/run/initramfs", "/oldroot", false, MS_BIND);
+        /* Do not detach the old root, because /run/initramfs/shutdown needs to access it.
+         *
+         * Disable sync() during switch-root, we after all sync'ed here plenty, and a dumb sync (as opposed
+         * to the "smart" sync() we did here that looks at progress parameters) would defeat much of our
+         * efforts here. As the new root will be /run/initramfs/, it is not necessary to mount /run/
+         * recursively. */
+        return switch_root(
+                        /* new_root= */ "/run/initramfs",
+                        /* old_root_after= */ "/oldroot",
+                        /* flags= */ SWITCH_ROOT_DONT_SYNC);
 }
 
 /* Read the following fields from /proc/meminfo:
@@ -345,6 +342,12 @@ int main(int argc, char *argv[]) {
         char *arguments[3];
         int cmd, r;
 
+        /* Close random fds we might have get passed, just for paranoia, before we open any new fds, for
+         * example for logging. After all this tool's purpose is about detaching any pinned resources, and
+         * open file descriptors are the primary way to pin resources. Note that we don't really expect any
+         * fds to be passed here. */
+        (void) close_all_fds(NULL, 0);
+
         /* The log target defaults to console, but the original systemd process will pass its log target in through a
          * command line argument, which will override this default. Also, ensure we'll never log to the journal or
          * syslog, as these logging daemons are either already dead or will die very soon. */
@@ -449,7 +452,7 @@ int main(int argc, char *argv[]) {
                         } else if (r > 0)
                                 log_info("Not all file systems unmounted, %d left.", r);
                         else
-                                log_error_errno(r, "Failed to unmount file systems: %m");
+                                log_error_errno(r, "Unable to unmount file systems: %m");
                 }
 
                 if (need_swapoff) {
@@ -461,7 +464,7 @@ int main(int argc, char *argv[]) {
                         } else if (r > 0)
                                 log_info("Not all swaps deactivated, %d left.", r);
                         else
-                                log_error_errno(r, "Failed to deactivate swaps: %m");
+                                log_error_errno(r, "Unable to deactivate swaps: %m");
                 }
 
                 if (need_loop_detach) {
@@ -473,7 +476,7 @@ int main(int argc, char *argv[]) {
                         } else if (r > 0)
                                 log_info("Not all loop devices detached, %d left.", r);
                         else
-                                log_error_errno(r, "Failed to detach loop devices: %m");
+                                log_error_errno(r, "Unable to detach loop devices: %m");
                 }
 
                 if (need_md_detach) {
@@ -485,7 +488,7 @@ int main(int argc, char *argv[]) {
                         } else if (r > 0)
                                 log_info("Not all MD devices stopped, %d left.", r);
                         else
-                                log_error_errno(r, "Failed to stop MD devices: %m");
+                                log_error_errno(r, "Unable to stop MD devices: %m");
                 }
 
                 if (need_dm_detach) {
@@ -497,7 +500,7 @@ int main(int argc, char *argv[]) {
                         } else if (r > 0)
                                 log_info("Not all DM devices detached, %d left.", r);
                         else
-                                log_error_errno(r, "Failed to detach DM devices: %m");
+                                log_error_errno(r, "Unable to detach DM devices: %m");
                 }
 
                 if (!need_umount && !need_swapoff && !need_loop_detach && !need_dm_detach
@@ -564,7 +567,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (need_umount || need_swapoff || need_loop_detach || need_dm_detach || need_md_detach)
-                log_error("Failed to finalize%s%s%s%s%s ignoring.",
+                log_error("Unable to finalize remaining%s%s%s%s%s ignoring.",
                           need_umount ? " file systems," : "",
                           need_swapoff ? " swap devices," : "",
                           need_loop_detach ? " loop devices," : "",
@@ -578,6 +581,10 @@ int main(int argc, char *argv[]) {
          * will result. */
         if (!in_container)
                 sync_with_progress();
+
+        /* This is primarily useful when running systemd in a VM, as it provides the user running the VM with
+         * a mechanism to pick up systemd's exit status in the VM. */
+        (void) sd_notifyf(0, "EXIT_STATUS=%i", arg_exit_code);
 
         if (streq(arg_verb, "exit")) {
                 if (in_container) {
@@ -646,6 +653,8 @@ int main(int argc, char *argv[]) {
         r = log_error_errno(errno, "Failed to invoke reboot(): %m");
 
   error:
-        log_emergency_errno(r, "Critical error while doing system shutdown: %m");
+        log_struct_errno(LOG_EMERG, r,
+                         LOG_MESSAGE("Critical error while doing system shutdown: %m"),
+                         "MESSAGE_ID=" SD_MESSAGE_SHUTDOWN_ERROR_STR);
         freeze();
 }

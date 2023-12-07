@@ -36,25 +36,23 @@ CONFFLAGS = \
 	-Db_pie=true \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
-	-Drootlibdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
-	-Dsplit-usr=true \
 	-Duser-path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 	-Dversion-tag="$(DEB_VERSION)" \
-	-Dquotaon-path=/sbin/quotaon \
-	-Dquotacheck-path=/sbin/quotacheck \
-	-Dkmod-path=/bin/kmod \
-	-Dkexec-path=/sbin/kexec \
-	-Dsulogin-path=/sbin/sulogin \
-	-Dmount-path=/bin/mount \
-	-Dumount-path=/bin/umount \
-	-Dloadkeys-path=/bin/loadkeys \
-	-Dsetfont-path=/bin/setfont \
+	-Dquotaon-path=/usr/sbin/quotaon \
+	-Dquotacheck-path=/usr/sbin/quotacheck \
+	-Dkmod-path=/usr/bin/kmod \
+	-Dkexec-path=/usr/sbin/kexec \
+	-Dsulogin-path=/usr/sbin/sulogin \
+	-Dmount-path=/usr/bin/mount \
+	-Dumount-path=/usr/bin/umount \
+	-Dloadkeys-path=/usr/bin/loadkeys \
+	-Dsetfont-path=/usr/bin/setfont \
 	-Dnologin-path=/usr/sbin/nologin \
-	-Dtelinit-path=/lib/sysvinit/telinit \
+	-Dtelinit-path=/usr/sbin/telinit \
 	-Dsysvinit-path=/etc/init.d \
 	-Dsysvrcnd-path=/etc \
 	-Dlocalegen-path=/usr/sbin/locale-gen \
-	-Ddebug-shell=/bin/bash \
+	-Ddebug-shell=/usr/bin/bash \
 	-Dzshcompletiondir=/usr/share/zsh/vendor-completions \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
 	-Dsupport-url=$(SUPPORT_URL) \
@@ -64,17 +62,16 @@ CONFFLAGS = \
 	-Ddefault-llmnr=no \
 	-Ddefault-mdns=no \
 	-Dpamconfdir=no \
-	-Dpamlibdir=/lib/$(DEB_HOST_MULTIARCH)/security \
+	-Dpamlibdir=/usr/lib/$(DEB_HOST_MULTIARCH)/security \
 	-Drpmmacrosdir=no \
 	-Dvconsole=false \
 	-Dfirstboot=true \
-	-Dsysupdate=false \
-	-Dxkbcommon=false \
+	-Dxkbcommon=disabled \
 	-Dwheel-group=false \
-	-Dpwquality=false \
+	-Dpwquality=disabled \
 	-Doomd=true \
 	-Durlify=true \
-	-Dgnutls=false \
+	-Dgnutls=disabled \
 	-Dlink-udev-shared=false \
 	-Dlink-systemctl-shared=false \
 	-Dbump-proc-sys-fs-nr-open=false \
@@ -86,70 +83,70 @@ CONFFLAGS = \
 	-Dnobody-group=nogroup \
 	-Ddev-kvm-mode=0660 \
 	-Dgroup-render-mode=0660 \
-	-Drepart=true \
-	-Dfdisk=true \
+	-Drepart=enabled \
+	-Dfdisk=enabled \
 	-Dsysext=true \
 	-Dnscd=true \
-	-Dselinux=true \
+	-Dselinux=enabled \
 	-Dhwdb=true \
 	-Dsysusers=true \
 	-Dinstall-tests=$(if $(filter noinsttest,$(DEB_BUILD_PROFILES)),false,true) \
-	-Defi=true \
-	-Dman=$(if $(filter nodoc,$(DEB_BUILD_PROFILES)),false,true) \
+	-Dman=$(if $(filter nodoc,$(DEB_BUILD_PROFILES)),disabled,enabled) \
 	-Dtranslations=true \
 	-Dnss-myhostname=true \
-	-Dnss-mymachines=true \
-	-Dnss-resolve=true \
+	-Dnss-mymachines=enabled \
+	-Dnss-resolve=enabled \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
-	-Dukify=false \
+	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),false,auto) \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
-	-Daudit=true \
-	-Dlibcryptsetup=true \
-	-Dlibcryptsetup-plugins=true \
+	-Daudit=enabled \
+	-Dlibcryptsetup=enabled \
+	-Dlibcryptsetup-plugins=enabled \
 	-Dcoredump=true \
-	-Delfutils=true \
-	-Dapparmor=true \
-	-Dlibidn2=true \
-	-Dlibiptc=true \
-	-Dlibcurl=true \
-	-Dimportd=true \
-	-Dmicrohttpd=true \
-	-Dopenssl=true \
+	-Delfutils=enabled \
+	-Dapparmor=enabled \
+	-Dlibidn2=enabled \
+	-Dlibiptc=enabled \
+	-Dlibcurl=enabled \
+	-Dimportd=enabled \
+	-Dmicrohttpd=enabled \
+	-Dopenssl=enabled \
 	-Dcryptolib=openssl \
 	-Ddns-over-tls=openssl \
-	-Dlibfido2=true \
-	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),false,true) \
-	-Dp11kit=true \
-	-Dqrencode=$(if $(filter i386,$(DEB_HOST_ARCH)),false,true) \
-	-Dhomed=true \
+	-Dlibfido2=enabled \
+	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),disabled,enabled) \
+	-Dp11kit=enabled \
+	-Dqrencode=$(if $(filter i386,$(DEB_HOST_ARCH)),disabled,enabled) \
+	-Dhomed=enabled \
 	-Duserdb=true \
-	-Dpcre2=true
+	-Dpcre2=enabled \
+	-Dsysupdate=enabled
 else
 CONFFLAGS += \
-	-Daudit=false \
-	-Dlibcryptsetup=false \
-	-Dlibcryptsetup-plugins=false \
+	-Daudit=disabled \
+	-Dlibcryptsetup=disabled \
+	-Dlibcryptsetup-plugins=disabled \
 	-Dcoredump=false \
-	-Delfutils=false \
-	-Dapparmor=false \
-	-Dlibidn2=false \
-	-Dlibiptc=false \
-	-Dlibcurl=false \
-	-Dimportd=false \
-	-Dmicrohttpd=false \
-	-Dopenssl=false \
-	-Dlibfido2=false \
-	-Dtpm2=false \
-	-Dp11kit=false \
-	-Dqrencode=false \
-	-Dhomed=false \
+	-Delfutils=disabled \
+	-Dapparmor=disabled \
+	-Dlibidn2=disabled \
+	-Dlibiptc=disabled \
+	-Dlibcurl=disabled \
+	-Dimportd=disabled \
+	-Dmicrohttpd=disabled \
+	-Dopenssl=disabled \
+	-Dlibfido2=disabled \
+	-Dtpm2=disabled \
+	-Dp11kit=disabled \
+	-Dqrencode=disabled \
+	-Dhomed=disabled \
 	-Duserdb=false \
-	-Dpcre2=false
+	-Dpcre2=disabled
 endif
 
 override_dh_auto_configure:
@@ -166,14 +163,6 @@ execute_after_dh_auto_build:
 	# generate POT file for translators
 	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
-execute_after_dh_auto_install:
-	# fix paths in manpages; manually check the remaining /usr occurrences
-	# occasionally, with filtering out paths which are known to be in /usr:
-	# grep -r /usr debian/tmp/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
-	if test -d debian/tmp/usr/share/man; then \
-		find debian/tmp/usr/share/man/ -type f | xargs sed -ri 's_/usr(/lib/systemd/system|/lib/systemd/network|/lib/udev|/lib[^/]|/lib/[^a-z])_\1_g'; \
-	fi
-
 execute_before_dh_auto_clean:
 ifneq (, $(TEST_UPSTREAM))
 	debian/extra/checkout-upstream
@@ -182,6 +171,8 @@ endif
 execute_after_dh_auto_clean:
 	rm -f debian/shlibs.local
 	# remove Python byte code files
+	rm -rf src/ukify/test/__pycache__/
+	rm -rf src/ukify/__pycache__/
 	rm -rf tools/__pycache__/
 	rm -rf tools/chromiumos/__pycache__/
 	rm -f po/systemd.pot
@@ -191,20 +182,13 @@ execute_before_dh_install:
 	rm -rf debian/tmp/usr/share/doc/systemd/LICENSES/
 	rm -f debian/tmp/usr/share/doc/systemd/LICENSE.*
 	rm -f debian/tmp/etc/init.d/README
-	rm -f debian/tmp/lib/*.d/README
-	rm -f debian/tmp/lib/udev/*.d/README
 	rm -f debian/tmp/usr/lib/*.d/README
+	rm -f debian/tmp/usr/lib/udev/*.d/README
 	rm -f debian/tmp/usr/lib/sysctl.d/50-default.conf
 	rm -f debian/tmp/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
 	rmdir -p --ignore-fail-on-non-empty debian/tmp/etc/X11/xinit/xinitrc.d/
-	# those files should probably be shipped in a -dev package, remove for now
-	rm -rf debian/tmp/usr/share/dbus-1/interfaces/
-	# remove files related to factory-reset feature
-	find debian/tmp/ \( -name 'systemd-update-done*' -o \
-		-name systemd-journal-catalog-update.service -o \
-		-name systemd-hwdb-update.service -o \
-		-name ldconfig.service -o \
-		-name etc.conf \) -print -delete
+	# remove etc.conf and usr/share/factory for now, we are not using them yet
+	find debian/tmp/ -name etc.conf -print -delete
 	rm -rf debian/tmp/usr/share/factory/
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/tmp/usr/lib/sysusers.d/basic.conf
@@ -217,17 +201,17 @@ execute_before_dh_install:
 execute_after_dh_install-arch:
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/bin; \
-		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
+		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
+		mv debian/systemd/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
 	done
 	# We don't want repart and shutdown standalone binaries for now
-	rm -f debian/systemd/bin/systemd-repart.standalone
-	rm -f debian/systemd/lib/systemd/systemd-shutdown.standalone
+	rm -f debian/systemd/usr/bin/systemd-repart.standalone
+	rm -f debian/systemd/usr/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
-	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
+	mv debian/systemd/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
-	rm debian/systemd/lib/systemd/system/local-fs.target.wants/tmp.mount
+	rm debian/systemd/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -235,17 +219,17 @@ ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 endif
 
 	# files shipped by systemd
-	rm debian/udev/lib/udev/rules.d/70-uaccess.rules
-	rm debian/udev/lib/udev/rules.d/73-seat-late.rules
-	rm debian/udev/lib/udev/rules.d/71-seat.rules
-	rm debian/udev/lib/udev/rules.d/99-systemd.rules
+	rm debian/udev/usr/lib/udev/rules.d/70-uaccess.rules
+	rm debian/udev/usr/lib/udev/rules.d/73-seat-late.rules
+	rm debian/udev/usr/lib/udev/rules.d/71-seat.rules
+	rm debian/udev/usr/lib/udev/rules.d/99-systemd.rules
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py
 	install -D --mode=644 debian/extra/systemd.py debian/systemd/usr/share/apport/package-hooks/systemd.py
-	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
-	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
+	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/usr/lib/udev/rules.d/
+	cp -a debian/extra/units-ubuntu/* debian/systemd/usr/lib/systemd/system/
 endif
 
 	# Remove unneeded file that produces errors in debugedit (LP: #1950445)
@@ -263,24 +247,13 @@ execute_after_dh_installman-arch:
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
 		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
-
-	# dh_installman is affected by false positives and mangles manpages named as lib*.so.*
-	# fixed in debhelper 13.7.2 by https://salsa.debian.org/debian/debhelper/-/merge_requests/69
-	for pkg in libnss-myhostname libnss-mymachines libnss-resolve libnss-systemd; do \
-		rm -rf debian/$$pkg/usr/share/man/so; \
-	done
-	# work around some more dh_installman issues
-	# see https://salsa.debian.org/debian/debhelper/-/merge_requests/69#note_316102
-	for pkg in libnss-myhostname libnss-mymachines libnss-resolve libnss-systemd; do \
-		rm -rf debian/$$pkg/usr/share/man/man2/; \
-	done
+	# Remove empty directories from /usr/lib.
+	# Those are not strictly needed and can trigger piuparts errors due to
+	# accidential directory removal by dpkg on merged-/usr systems.
+	find debian/systemd/usr/lib -type d -empty -print -delete
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)
-
-override_dh_installinit:
-	dh_installinit --no-scripts -psystemd
-	dh_installinit --no-start -Nsystemd
 
 override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
@@ -290,8 +263,12 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
 	dh_installsystemd -psystemd-resolved
+	dh_installsystemd -pudev systemd-udevd.service
 
 override_dh_installsystemduser:
+
+execute_after_dh_installsysusers:
+	dh_installsysusers -pudev --name=debian-udev
 
 PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
 
@@ -300,7 +277,7 @@ PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(D
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
 	dh_shlibdeps -psystemd -Llibsystemd-shared -- \
-		-dPre-Depends -edebian/systemd/bin/systemctl \
+		-dPre-Depends -edebian/systemd/usr/bin/systemctl \
 		-dDepends
 	dh_shlibdeps -plibsystemd-shared -lusr/lib/$(DEB_HOST_MULTIARCH)/systemd
 	dh_shlibdeps --remaining-packages -Llibsystemd-shared

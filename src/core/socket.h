@@ -5,6 +5,7 @@ typedef struct Socket Socket;
 typedef struct SocketPeer SocketPeer;
 
 #include "mount.h"
+#include "pidref.h"
 #include "socket-util.h"
 #include "unit.h"
 
@@ -91,7 +92,6 @@ struct Socket {
         CGroupContext cgroup_context;
 
         ExecRuntime *exec_runtime;
-        DynamicCreds dynamic_creds;
 
         /* For Accept=no sockets refers to the one service we'll
          * activate. For Accept=yes sockets is either NULL, or filled
@@ -104,7 +104,7 @@ struct Socket {
 
         ExecCommand* control_command;
         SocketExecCommand control_command_id;
-        pid_t control_pid;
+        PidRef control_pid;
 
         mode_t directory_mode;
         mode_t socket_mode;
@@ -159,6 +159,8 @@ struct Socket {
         char *fdname;
 
         RateLimit trigger_limit;
+        usec_t poll_limit_interval;
+        unsigned poll_limit_burst;
 };
 
 SocketPeer *socket_peer_ref(SocketPeer *p);
@@ -173,7 +175,12 @@ int socket_collect_fds(Socket *s, int **fds);
 /* Called from the service code when a per-connection service ended */
 void socket_connection_unref(Socket *s);
 
+SocketPort *socket_port_free(SocketPort *p);
+DEFINE_TRIVIAL_CLEANUP_FUNC(SocketPort*, socket_port_free);
+
 void socket_free_ports(Socket *s);
+
+int socket_port_to_address(const SocketPort *s, char **ret);
 
 int socket_load_service_unit(Socket *s, int cfd, Unit **ret);
 

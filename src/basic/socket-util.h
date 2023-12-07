@@ -153,6 +153,28 @@ int getpeercred(int fd, struct ucred *ucred);
 int getpeersec(int fd, char **ret);
 int getpeergroups(int fd, gid_t **ret);
 
+ssize_t send_many_fds_iov_sa(
+                int transport_fd,
+                int *fds_array, size_t n_fds_array,
+                const struct iovec *iov, size_t iovlen,
+                const struct sockaddr *sa, socklen_t len,
+                int flags);
+static inline ssize_t send_many_fds_iov(
+                int transport_fd,
+                int *fds_array, size_t n_fds_array,
+                const struct iovec *iov, size_t iovlen,
+                int flags) {
+
+        return send_many_fds_iov_sa(transport_fd, fds_array, n_fds_array, iov, iovlen, NULL, 0, flags);
+}
+static inline int send_many_fds(
+                int transport_fd,
+                int *fds_array,
+                size_t n_fds_array,
+                int flags) {
+
+        return send_many_fds_iov_sa(transport_fd, fds_array, n_fds_array, NULL, 0, NULL, 0, flags);
+}
 ssize_t send_one_fd_iov_sa(
                 int transport_fd,
                 int fd,
@@ -167,6 +189,8 @@ int send_one_fd_sa(int transport_fd,
 #define send_one_fd(transport_fd, fd, flags) send_one_fd_iov_sa(transport_fd, fd, NULL, 0, NULL, 0, flags)
 ssize_t receive_one_fd_iov(int transport_fd, struct iovec *iov, size_t iovlen, int flags, int *ret_fd);
 int receive_one_fd(int transport_fd, int flags);
+ssize_t receive_many_fds_iov(int transport_fd, struct iovec *iov, size_t iovlen, int **ret_fds_array, size_t *ret_n_fds_array, int flags);
+int receive_many_fds(int transport_fd, int **ret_fds_array, size_t *ret_n_fds_array, int flags);
 
 ssize_t next_datagram_size_fd(int fd);
 
@@ -175,17 +199,29 @@ int flush_accept(int fd);
 #define CMSG_FOREACH(cmsg, mh)                                          \
         for ((cmsg) = CMSG_FIRSTHDR(mh); (cmsg); (cmsg) = CMSG_NXTHDR((mh), (cmsg)))
 
+/* Returns the cmsghdr's data pointer, but safely cast to the specified type. Does two alignment checks: one
+ * at compile time, that the requested type has a smaller or same alignment as 'struct cmsghdr', and one
+ * during runtime, that the actual pointer matches the alignment too. This is supposed to catch cases such as
+ * 'struct timeval' is embedded into 'struct cmsghdr' on architectures where the alignment of the former is 8
+ * bytes (because of a 64-bit time_t), but of the latter is 4 bytes (because size_t is 32 bits), such as
+ * riscv32. */
 #define CMSG_TYPED_DATA(cmsg, type)                                     \
         ({                                                              \
-                struct cmsghdr *_cmsg = cmsg;                           \
+                struct cmsghdr *_cmsg = (cmsg);                         \
+                assert_cc(alignof(type) <= alignof(struct cmsghdr));    \
                 _cmsg ? CAST_ALIGN_PTR(type, CMSG_DATA(_cmsg)) : (type*) NULL; \
         })
 
 struct cmsghdr* cmsg_find(struct msghdr *mh, int level, int type, socklen_t length);
+void* cmsg_find_and_copy_data(struct msghdr *mh, int level, int type, void *buf, size_t buf_len);
 
 /* Type-safe, dereferencing version of cmsg_find() */
 #define CMSG_FIND_DATA(mh, level, type, ctype)                          \
         CMSG_TYPED_DATA(cmsg_find(mh, level, type, CMSG_LEN(sizeof(ctype))), ctype)
+
+/* Type-safe version of cmsg_find_and_copy_data() */
+#define CMSG_FIND_AND_COPY_DATA(mh, level, type, ctype)             \
+        (ctype*) cmsg_find_and_copy_data(mh, level, type, &(ctype){}, sizeof(ctype))
 
 /* Resolves to a type that can carry cmsghdr structures. Make sure things are properly aligned, i.e. the type
  * itself is placed properly in memory and the size is also aligned to what's appropriate for "cmsghdr"
@@ -282,7 +318,7 @@ static inline int getsockopt_int(int fd, int level, int optname, int *ret) {
 int socket_bind_to_ifname(int fd, const char *ifname);
 int socket_bind_to_ifindex(int fd, int ifindex);
 
-/* Define a 64bit version of timeval/timespec in any case, even on 32bit userspace. */
+/* Define a 64-bit version of timeval/timespec in any case, even on 32-bit userspace. */
 struct timeval_large {
         uint64_t tvl_sec, tvl_usec;
 };
@@ -290,7 +326,7 @@ struct timespec_large {
         uint64_t tvl_sec, tvl_nsec;
 };
 
-/* glibc duplicates timespec/timeval on certain 32bit archs, once in 32bit and once in 64bit.
+/* glibc duplicates timespec/timeval on certain 32-bit arches, once in 32-bit and once in 64-bit.
  * See __convert_scm_timestamps() in glibc source code. Hence, we need additional buffer space for them
  * to prevent from recvmsg_safe() returning -EXFULL. */
 #define CMSG_SPACE_TIMEVAL                                              \
@@ -342,3 +378,10 @@ int connect_unix_path(int fd, int dir_fd, const char *path);
  * protocol mismatch. */
 int socket_address_parse_unix(SocketAddress *ret_address, const char *s);
 int socket_address_parse_vsock(SocketAddress *ret_address, const char *s);
+
+/* libc's SOMAXCONN is defined to 128 or 4096 (at least on glibc). But actually, the value can be much
+ * larger. In our codebase we want to set it to the max usually, since noawadays socket memory is properly
+ * tracked by memcg, and hence we don't need to enforce extra limits here. Moreover, the kernel caps it to
+ * /proc/sys/net/core/somaxconn anyway, thus by setting this to unbounded we just make that sysctl file
+ * authoritative. */
+#define SOMAXCONN_DELUXE INT_MAX

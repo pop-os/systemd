@@ -41,6 +41,11 @@
 #  define IDN_FLAGS 0
 #endif
 
+/* From the kernel's include/net/scm.h */
+#ifndef SCM_MAX_FD
+#  define SCM_MAX_FD 253
+#endif
+
 static const char* const socket_address_type_table[] = {
         [SOCK_STREAM] =    "Stream",
         [SOCK_DGRAM] =     "Datagram",
@@ -223,7 +228,7 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
                         return false;
 
                 if (a->sockaddr.un.sun_path[0]) {
-                        if (!path_equal_or_files_same(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, 0))
+                        if (!path_equal_or_inode_same(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, 0))
                                 return false;
                 } else {
                         if (a->size != b->size)
@@ -951,6 +956,53 @@ int getpeergroups(int fd, gid_t **ret) {
         return (int) n;
 }
 
+ssize_t send_many_fds_iov_sa(
+                int transport_fd,
+                int *fds_array, size_t n_fds_array,
+                const struct iovec *iov, size_t iovlen,
+                const struct sockaddr *sa, socklen_t len,
+                int flags) {
+
+        _cleanup_free_ struct cmsghdr *cmsg = NULL;
+        struct msghdr mh = {
+                .msg_name = (struct sockaddr*) sa,
+                .msg_namelen = len,
+                .msg_iov = (struct iovec *)iov,
+                .msg_iovlen = iovlen,
+        };
+        ssize_t k;
+
+        assert(transport_fd >= 0);
+        assert(fds_array || n_fds_array == 0);
+
+        /* The kernel will reject sending more than SCM_MAX_FD FDs at once */
+        if (n_fds_array > SCM_MAX_FD)
+                return -E2BIG;
+
+        /* We need either an FD array or data to send. If there's nothing, return an error. */
+        if (n_fds_array == 0 && !iov)
+                return -EINVAL;
+
+        if (n_fds_array > 0) {
+                mh.msg_controllen = CMSG_SPACE(sizeof(int) * n_fds_array);
+                mh.msg_control = cmsg = malloc(mh.msg_controllen);
+                if (!cmsg)
+                        return -ENOMEM;
+
+                *cmsg = (struct cmsghdr) {
+                        .cmsg_len = CMSG_LEN(sizeof(int) * n_fds_array),
+                        .cmsg_level = SOL_SOCKET,
+                        .cmsg_type = SCM_RIGHTS,
+                };
+                memcpy(CMSG_DATA(cmsg), fds_array, sizeof(int) * n_fds_array);
+        }
+        k = sendmsg(transport_fd, &mh, MSG_NOSIGNAL | flags);
+        if (k < 0)
+                return (ssize_t) -errno;
+
+        return k;
+}
+
 ssize_t send_one_fd_iov_sa(
                 int transport_fd,
                 int fd,
@@ -1006,6 +1058,78 @@ int send_one_fd_sa(
         return (int) send_one_fd_iov_sa(transport_fd, fd, NULL, 0, sa, len, flags);
 }
 
+ssize_t receive_many_fds_iov(
+                int transport_fd,
+                struct iovec *iov, size_t iovlen,
+                int **ret_fds_array, size_t *ret_n_fds_array,
+                int flags) {
+
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int) * SCM_MAX_FD)) control;
+        struct msghdr mh = {
+                .msg_control = &control,
+                .msg_controllen = sizeof(control),
+                .msg_iov = iov,
+                .msg_iovlen = iovlen,
+        };
+        _cleanup_free_ int *fds_array = NULL;
+        size_t n_fds_array = 0;
+        struct cmsghdr *cmsg;
+        ssize_t k;
+
+        assert(transport_fd >= 0);
+        assert(ret_fds_array);
+        assert(ret_n_fds_array);
+
+        /*
+         * Receive many FDs via @transport_fd. We don't care for the transport-type. We retrieve all the FDs
+         * at once. This is best used in combination with send_many_fds().
+         */
+
+        k = recvmsg_safe(transport_fd, &mh, MSG_CMSG_CLOEXEC | flags);
+        if (k < 0)
+                return k;
+
+        CMSG_FOREACH(cmsg, &mh)
+                if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+                        size_t n = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+
+                        fds_array = GREEDY_REALLOC(fds_array, n_fds_array + n);
+                        if (!fds_array) {
+                                cmsg_close_all(&mh);
+                                return -ENOMEM;
+                        }
+
+                        memcpy(fds_array + n_fds_array, CMSG_TYPED_DATA(cmsg, int), sizeof(int) * n);
+                        n_fds_array += n;
+                }
+
+        if (n_fds_array == 0) {
+                cmsg_close_all(&mh);
+
+                /* If didn't receive an FD or any data, return an error. */
+                if (k == 0)
+                        return -EIO;
+        }
+
+        *ret_fds_array = TAKE_PTR(fds_array);
+        *ret_n_fds_array = n_fds_array;
+
+        return k;
+}
+
+int receive_many_fds(int transport_fd, int **ret_fds_array, size_t *ret_n_fds_array, int flags) {
+        ssize_t k;
+
+        k = receive_many_fds_iov(transport_fd, NULL, 0, ret_fds_array, ret_n_fds_array, flags);
+        if (k == 0)
+                return 0;
+
+        /* k must be negative, since receive_many_fds_iov() only returns a positive value if data was received
+         * through the iov. */
+        assert(k < 0);
+        return (int) k;
+}
+
 ssize_t receive_one_fd_iov(
                 int transport_fd,
                 struct iovec *iov, size_t iovlen,
@@ -1047,7 +1171,7 @@ ssize_t receive_one_fd_iov(
         }
 
         if (found)
-                *ret_fd = *(int*) CMSG_DATA(found);
+                *ret_fd = *CMSG_TYPED_DATA(found, int);
         else
                 *ret_fd = -EBADF;
 
@@ -1169,6 +1293,24 @@ struct cmsghdr* cmsg_find(struct msghdr *mh, int level, int type, socklen_t leng
                         return cmsg;
 
         return NULL;
+}
+
+void* cmsg_find_and_copy_data(struct msghdr *mh, int level, int type, void *buf, size_t buf_len) {
+        struct cmsghdr *cmsg;
+
+        assert(mh);
+        assert(buf);
+        assert(buf_len > 0);
+
+        /* This is similar to cmsg_find_data(), but copy the found data to buf. This should be typically used
+         * when reading possibly unaligned data such as timestamp, as time_t is 64-bit and size_t is 32-bit on
+         * RISCV32. See issue #27241. */
+
+        cmsg = cmsg_find(mh, level, type, CMSG_LEN(buf_len));
+        if (!cmsg)
+                return NULL;
+
+        return memcpy_safe(buf, CMSG_DATA(cmsg), buf_len);
 }
 
 int socket_ioctl_fd(void) {
@@ -1421,52 +1563,60 @@ int socket_get_mtu(int fd, int af, size_t *ret) {
         return 0;
 }
 
-int connect_unix_path(int fd, int dir_fd, const char *path) {
-        _cleanup_close_ int inode_fd = -EBADF;
+static int connect_unix_path_simple(int fd, const char *path) {
         union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
         };
-        size_t path_len;
-        socklen_t salen;
+        size_t l;
+
+        assert(fd >= 0);
+        assert(path);
+
+        l = strlen(path);
+        assert(l > 0);
+        assert(l < sizeof(sa.un.sun_path));
+
+        memcpy(sa.un.sun_path, path, l + 1);
+        return RET_NERRNO(connect(fd, &sa.sa, offsetof(struct sockaddr_un, sun_path) + l + 1));
+}
+
+static int connect_unix_inode(int fd, int inode_fd) {
+        assert(fd >= 0);
+        assert(inode_fd >= 0);
+
+        return connect_unix_path_simple(fd, FORMAT_PROC_FD_PATH(inode_fd));
+}
+
+int connect_unix_path(int fd, int dir_fd, const char *path) {
+        _cleanup_close_ int inode_fd = -EBADF;
 
         assert(fd >= 0);
         assert(dir_fd == AT_FDCWD || dir_fd >= 0);
-        assert(path);
 
         /* Connects to the specified AF_UNIX socket in the file system. Works around the 108 byte size limit
          * in sockaddr_un, by going via O_PATH if needed. This hence works for any kind of path. */
 
-        path_len = strlen(path);
+        if (!path)
+                return connect_unix_inode(fd, dir_fd); /* If no path is specified, then dir_fd refers to the socket inode to connect to. */
 
         /* Refuse zero length path early, to make sure AF_UNIX stack won't mistake this for an abstract
          * namespace path, since first char is NUL */
-        if (path_len <= 0)
+        if (isempty(path))
                 return -EINVAL;
 
-        if (dir_fd == AT_FDCWD && path_len < sizeof(sa.un.sun_path)) {
-                memcpy(sa.un.sun_path, path, path_len + 1);
-                salen = offsetof(struct sockaddr_un, sun_path) + path_len + 1;
-        } else {
-                const char *proc;
-                size_t proc_len;
+        /* Shortcut for the simple case */
+        if (dir_fd == AT_FDCWD && strlen(path) < sizeof_field(struct sockaddr_un, sun_path))
+                return connect_unix_path_simple(fd, path);
 
-                /* If dir_fd is specified, then we need to go the indirect O_PATH route, because connectat()
-                 * does not exist. If the path is too long, we also need to take the indirect route, since we
-                 * can't fit this into a sockaddr_un directly. */
+        /* If dir_fd is specified, then we need to go the indirect O_PATH route, because connectat() does not
+         * exist. If the path is too long, we also need to take the indirect route, since we can't fit this
+         * into a sockaddr_un directly. */
 
-                inode_fd = openat(dir_fd, path, O_PATH|O_CLOEXEC);
-                if (inode_fd < 0)
-                        return -errno;
+        inode_fd = openat(dir_fd, path, O_PATH|O_CLOEXEC);
+        if (inode_fd < 0)
+                return -errno;
 
-                proc = FORMAT_PROC_FD_PATH(inode_fd);
-                proc_len = strlen(proc);
-
-                assert(proc_len < sizeof(sa.un.sun_path));
-                memcpy(sa.un.sun_path, proc, proc_len + 1);
-                salen = offsetof(struct sockaddr_un, sun_path) + proc_len + 1;
-        }
-
-        return RET_NERRNO(connect(fd, &sa.sa, salen));
+        return connect_unix_inode(fd, inode_fd);
 }
 
 int socket_address_parse_unix(SocketAddress *ret_address, const char *s) {
@@ -1496,13 +1646,20 @@ int socket_address_parse_vsock(SocketAddress *ret_address, const char *s) {
         _cleanup_free_ char *n = NULL;
         char *e, *cid_start;
         unsigned port, cid;
-        int r;
+        int type, r;
 
         assert(ret_address);
         assert(s);
 
-        cid_start = startswith(s, "vsock:");
-        if (!cid_start)
+        if ((cid_start = startswith(s, "vsock:")))
+                type = 0;
+        else if ((cid_start = startswith(s, "vsock-dgram:")))
+                type = SOCK_DGRAM;
+        else if ((cid_start = startswith(s, "vsock-seqpacket:")))
+                type = SOCK_SEQPACKET;
+        else if ((cid_start = startswith(s, "vsock-stream:")))
+                type = SOCK_STREAM;
+        else
                 return -EPROTO;
 
         e = strchr(cid_start, ':');
@@ -1531,6 +1688,7 @@ int socket_address_parse_vsock(SocketAddress *ret_address, const char *s) {
                         .svm_family = AF_VSOCK,
                         .svm_port = port,
                 },
+                .type = type,
                 .size = sizeof(struct sockaddr_vm),
         };
 

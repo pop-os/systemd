@@ -6,7 +6,7 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "dhcp-identifier.h"
-#include "dhcp-internal.h"
+#include "dhcp-option.h"
 #include "dhcp6-internal.h"
 #include "escape.h"
 #include "hexdecoct.h"
@@ -259,6 +259,74 @@ bool address_is_filtered(int family, const union in_addr_union *address, uint8_t
         return false;
 }
 
+int link_get_captive_portal(Link *link, const char **ret) {
+        const char *dhcp4_cp = NULL, *dhcp6_cp = NULL, *ndisc_cp = NULL;
+        int r;
+
+        assert(link);
+
+        if (!link->network) {
+                *ret = NULL;
+                return 0;
+        }
+
+        if (link->network->dhcp_use_captive_portal && link->dhcp_lease) {
+                r = sd_dhcp_lease_get_captive_portal(link->dhcp_lease, &dhcp4_cp);
+                if (r < 0 && r != -ENODATA)
+                        return r;
+        }
+
+        if (link->network->dhcp6_use_captive_portal && link->dhcp6_lease) {
+                r = sd_dhcp6_lease_get_captive_portal(link->dhcp6_lease, &dhcp6_cp);
+                if (r < 0 && r != -ENODATA)
+                        return r;
+        }
+
+        if (link->network->ipv6_accept_ra_use_captive_portal) {
+                NDiscCaptivePortal *cp;
+                usec_t usec = 0;
+
+                /* Use the captive portal with the longest lifetime. */
+
+                SET_FOREACH(cp, link->ndisc_captive_portals) {
+                        if (cp->lifetime_usec < usec)
+                                continue;
+
+                        ndisc_cp = cp->captive_portal;
+                        usec = cp->lifetime_usec;
+                }
+
+                if (set_size(link->ndisc_captive_portals) > 1)
+                        log_link_debug(link, "Multiple captive portals obtained by IPv6RA, using \"%s\" and ignoring others.",
+                                       ndisc_cp);
+        }
+
+        if (dhcp4_cp) {
+                if (dhcp6_cp && !streq(dhcp4_cp, dhcp6_cp))
+                        log_link_debug(link, "DHCPv6 captive portal (%s) does not match DHCPv4 (%s), ignoring DHCPv6 captive portal.",
+                                       dhcp6_cp, dhcp4_cp);
+
+                if (ndisc_cp && !streq(dhcp4_cp, ndisc_cp))
+                        log_link_debug(link, "IPv6RA captive portal (%s) does not match DHCPv4 (%s), ignoring IPv6RA captive portal.",
+                                       ndisc_cp, dhcp4_cp);
+
+                *ret = dhcp4_cp;
+                return 1;
+        }
+
+        if (dhcp6_cp) {
+                if (ndisc_cp && !streq(dhcp6_cp, ndisc_cp))
+                        log_link_debug(link, "IPv6RA captive portal (%s) does not match DHCPv6 (%s), ignoring IPv6RA captive portal.",
+                                       ndisc_cp, dhcp6_cp);
+
+                *ret = dhcp6_cp;
+                return 1;
+        }
+
+        *ret = ndisc_cp;
+        return !!ndisc_cp;
+}
+
 int config_parse_dhcp(
                 const char* unit,
                 const char *filename,
@@ -413,6 +481,56 @@ int config_parse_ipv6_accept_ra_route_metric(
         return 0;
 }
 
+int config_parse_dhcp_send_hostname(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Network *network = userdata;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(IN_SET(ltype, AF_UNSPEC, AF_INET, AF_INET6));
+        assert(rvalue);
+        assert(data);
+
+        r = parse_boolean(rvalue);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse SendHostname=%s, ignoring assignment: %m", rvalue);
+                return 0;
+        }
+
+        switch (ltype) {
+        case AF_INET:
+                network->dhcp_send_hostname = r;
+                network->dhcp_send_hostname_set = true;
+                break;
+        case AF_INET6:
+                network->dhcp6_send_hostname = r;
+                network->dhcp6_send_hostname_set = true;
+                break;
+        case AF_UNSPEC:
+                /* For backward compatibility. */
+                if (!network->dhcp_send_hostname_set)
+                        network->dhcp_send_hostname = r;
+                if (!network->dhcp6_send_hostname_set)
+                        network->dhcp6_send_hostname = r;
+                break;
+        default:
+                assert_not_reached();
+        }
+
+        return 0;
+}
 int config_parse_dhcp_use_dns(
                 const char* unit,
                 const char *filename,
@@ -896,9 +1014,11 @@ int config_parse_dhcp_send_option(
         }
         case DHCP_OPTION_DATA_STRING:
                 sz = cunescape(p, UNESCAPE_ACCEPT_NUL, &q);
-                if (sz < 0)
+                if (sz < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, sz,
                                    "Failed to decode DHCP option data, ignoring assignment: %s", p);
+                        return 0;
+                }
 
                 udata = q;
                 break;
@@ -1086,9 +1206,17 @@ int config_parse_duid_type(
 
         type = duid_type_from_string(type_string);
         if (type < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, type,
-                           "Failed to parse DUID type '%s', ignoring.", type_string);
-                return 0;
+                uint16_t t;
+
+                r = safe_atou16(type_string, &t);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to parse DUID type '%s', ignoring.", type_string);
+                        return 0;
+                }
+
+                type = t;
+                assert(type == t); /* Check if type can store uint16_t. */
         }
 
         if (!isempty(p)) {
@@ -1175,7 +1303,7 @@ int config_parse_duid_rawdata(
                 void *data,
                 void *userdata) {
 
-        uint8_t raw_data[MAX_DUID_LEN];
+        uint8_t raw_data[MAX_DUID_DATA_LEN];
         unsigned count = 0;
         bool force = ltype;
         DUID *duid = ASSERT_PTR(data);
@@ -1203,7 +1331,7 @@ int config_parse_duid_rawdata(
                 if (r == 0)
                         break;
 
-                if (count >= MAX_DUID_LEN) {
+                if (count >= MAX_DUID_DATA_LEN) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0, "Max DUID length exceeded, ignoring assignment: %s.", rvalue);
                         return 0;
                 }

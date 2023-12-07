@@ -15,6 +15,7 @@
 
 #include "alloc-util.h"
 #include "build.h"
+#include "daemon-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "log.h"
@@ -487,8 +488,8 @@ static int add_connection_socket(Context *context, int fd) {
                .context = context,
                .server_fd = fd,
                .client_fd = -EBADF,
-               .server_to_client_buffer = PIPE_EBADF,
-               .client_to_server_buffer = PIPE_EBADF,
+               .server_to_client_buffer = EBADF_PAIR,
+               .client_to_server_buffer = EBADF_PAIR,
         };
 
         r = set_ensure_put(&context->connections, NULL, c);
@@ -672,6 +673,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(context_clear) Context context = {};
+        _unused_ _cleanup_(notify_on_cleanup) const char *notify_stop = NULL;
         int r, n, fd;
 
         log_parse_environment();
@@ -709,6 +711,7 @@ static int run(int argc, char *argv[]) {
                         return r;
         }
 
+        notify_stop = notify_start(NOTIFY_READY, NOTIFY_STOPPING);
         r = sd_event_loop(context.event);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");

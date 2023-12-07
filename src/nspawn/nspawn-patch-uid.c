@@ -241,7 +241,7 @@ static int patch_fd(int fd, const char *name, const struct stat *st, uid_t shift
                 if (name) {
                         if (!S_ISLNK(st->st_mode))
                                 r = fchmodat(fd, name, st->st_mode, 0);
-                        else /* AT_SYMLINK_NOFOLLOW is not available for fchmodat() */
+                        else /* Changing the mode of a symlink is not supported by Linux kernel. Don't bother. */
                                 r = 0;
                 } else
                         r = fchmod(fd, st->st_mode);
@@ -408,7 +408,7 @@ static int fd_patch_uid_internal(int fd, bool donate_fd, uid_t shift, uid_t rang
 
         /* Recursively adjusts the UID/GIDs of all files of a directory tree. This is used to automatically fix up an
          * OS tree to the used user namespace UID range. Note that this automatic adjustment only works for UID ranges
-         * following the concept that the upper 16bit of a UID identify the container, and the lower 16bit are the actual
+         * following the concept that the upper 16-bit of a UID identify the container, and the lower 16-bit are the actual
          * UID within the container. */
 
         if ((shift & 0xFFFF) != 0) {
@@ -423,7 +423,7 @@ static int fd_patch_uid_internal(int fd, bool donate_fd, uid_t shift, uid_t rang
         }
 
         if (range != 0x10000) {
-                /* We only support containers with 16bit UID ranges for the patching logic */
+                /* We only support containers with 16-bit UID ranges for the patching logic */
                 r = -EOPNOTSUPP;
                 goto finish;
         }
@@ -440,7 +440,7 @@ static int fd_patch_uid_internal(int fd, bool donate_fd, uid_t shift, uid_t rang
         }
 
         /* Try to detect if the range is already right. Of course, this a pretty drastic optimization, as we assume
-         * that if the top-level dir has the right upper 16bit assigned, then everything below will have too... */
+         * that if the top-level dir has the right upper 16-bit assigned, then everything below will have too... */
         if (((uint32_t) (st.st_uid ^ shift) >> 16) == 0)
                 return 0;
 

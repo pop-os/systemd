@@ -1,17 +1,19 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "bitmap.h"
+#include "tests.h"
 
 int main(int argc, const char *argv[]) {
         _cleanup_bitmap_free_ Bitmap *b = NULL, *b2 = NULL;
         unsigned n = UINT_MAX, i = 0;
 
+        test_setup_logging(LOG_DEBUG);
+
         b = bitmap_new();
         assert_se(b);
 
         assert_se(bitmap_ensure_allocated(&b) == 0);
-        bitmap_free(b);
-        b = NULL;
+        b = bitmap_free(b);
         assert_se(bitmap_ensure_allocated(&b) == 0);
 
         assert_se(bitmap_isset(b, 0) == false);
@@ -89,13 +91,11 @@ int main(int argc, const char *argv[]) {
         bitmap_clear(b);
         assert_se(bitmap_isclear(b) == true);
         assert_se(bitmap_equal(b, b2) == false);
-        bitmap_free(b2);
-        b2 = NULL;
+        b2 = bitmap_free(b2);
 
         assert_se(bitmap_set(b, UINT_MAX) == -ERANGE);
 
-        bitmap_free(b);
-        b = NULL;
+        b = bitmap_free(b);
         assert_se(bitmap_ensure_allocated(&b) == 0);
         assert_se(bitmap_ensure_allocated(&b2) == 0);
 

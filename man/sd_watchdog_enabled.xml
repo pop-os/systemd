@@ -65,7 +65,7 @@
 
     <para>If the <parameter>usec</parameter> parameter is non-<constant>NULL</constant>,
     <function>sd_watchdog_enabled()</function> will write the timeout
-    in µs for the watchdog logic to it.</para>
+    in μs for the watchdog logic to it.</para>
 
     <para>To enable service supervision with the watchdog logic, use
     <varname>WatchdogSec=</varname> in service files. See
@@ -93,6 +93,7 @@
     <title>Notes</title>
 
     <xi:include href="libsystemd-pkgconfig.xml" xpointer="pkgconfig-text"/>
+    <xi:include href="threads-aware.xml" xpointer="getenv"/>
 
     <para>Internally, this function parses the
     <varname>$WATCHDOG_PID</varname> and
@@ -113,7 +114,9 @@
         <listitem><para>Set by the system manager for supervised
         process for which watchdog support is enabled, and contains
         the PID of that process. See above for
-        details.</para></listitem>
+        details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v209"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -121,10 +124,17 @@
 
         <listitem><para>Set by the system manager for supervised
         process for which watchdog support is enabled, and contains
-        the watchdog timeout in µs. See above for
-        details.</para></listitem>
+        the watchdog timeout in μs. See above for
+        details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v209"/></listitem>
       </varlistentry>
     </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_watchdog_enabled()</function> was added in version 209.</para>
   </refsect1>
 
   <refsect1>

@@ -10,10 +10,12 @@
 #include "fileio.h"
 #include "format-util.h"
 #include "memory-util.h"
+#include "memstream-util.h"
 #include "oomd-manager-bus.h"
 #include "oomd-manager.h"
 #include "path-util.h"
 #include "percent-util.h"
+#include "varlink-io.systemd.oom.h"
 
 typedef struct ManagedOOMMessage {
         ManagedOOMMode mode;
@@ -48,10 +50,10 @@ static int process_managed_oom_message(Manager *m, uid_t uid, JsonVariant *param
         int r;
 
         static const JsonDispatch dispatch_table[] = {
-                { "mode",     JSON_VARIANT_STRING,   managed_oom_mode,     offsetof(ManagedOOMMessage, mode),     JSON_MANDATORY },
-                { "path",     JSON_VARIANT_STRING,   json_dispatch_string, offsetof(ManagedOOMMessage, path),     JSON_MANDATORY },
-                { "property", JSON_VARIANT_STRING,   json_dispatch_string, offsetof(ManagedOOMMessage, property), JSON_MANDATORY },
-                { "limit",    JSON_VARIANT_UNSIGNED, json_dispatch_uint32, offsetof(ManagedOOMMessage, limit),    0 },
+                { "mode",     JSON_VARIANT_STRING,        managed_oom_mode,     offsetof(ManagedOOMMessage, mode),     JSON_MANDATORY },
+                { "path",     JSON_VARIANT_STRING,        json_dispatch_string, offsetof(ManagedOOMMessage, path),     JSON_MANDATORY },
+                { "property", JSON_VARIANT_STRING,        json_dispatch_string, offsetof(ManagedOOMMessage, property), JSON_MANDATORY },
+                { "limit",    _JSON_VARIANT_TYPE_INVALID, json_dispatch_uint32, offsetof(ManagedOOMMessage, limit),    0              },
                 {},
         };
 
@@ -72,7 +74,7 @@ static int process_managed_oom_message(Manager *m, uid_t uid, JsonVariant *param
                 if (!json_variant_is_object(c))
                         continue;
 
-                r = json_dispatch(c, dispatch_table, NULL, 0, &message);
+                r = json_dispatch(c, dispatch_table, 0, &message);
                 if (r == -ENOMEM)
                         return r;
                 if (r < 0)
@@ -125,6 +127,12 @@ static int process_managed_oom_message(Manager *m, uid_t uid, JsonVariant *param
                 if (ctx)
                         ctx->mem_pressure_limit = limit;
         }
+
+        /* Toggle wake-ups for "ManagedOOMSwap" if entries are present. */
+        r = sd_event_source_set_enabled(m->swap_context_event_source,
+                                        hashmap_isempty(m->monitored_swap_cgroup_contexts) ? SD_EVENT_OFF : SD_EVENT_ON);
+        if (r < 0)
+                return log_error_errno(r, "Failed to toggle enabled state of swap context source: %m");
 
         return 0;
 }
@@ -347,6 +355,7 @@ static int monitor_swap_contexts_handler(sd_event_source *s, uint64_t usec, void
         int r;
 
         assert(s);
+        assert(!hashmap_isempty(m->monitored_swap_cgroup_contexts));
 
         /* Reset timer */
         r = sd_event_now(sd_event_source_get_event(s), CLOCK_MONOTONIC, &usec_now);
@@ -367,12 +376,8 @@ static int monitor_swap_contexts_handler(sd_event_source *s, uint64_t usec, void
         /* We still try to acquire system information for oomctl even if no units want swap monitoring */
         r = oomd_system_context_acquire("/proc/meminfo", &m->system_context);
         /* If there are no units depending on swap actions, the only error we exit on is ENOMEM. */
-        if (r == -ENOMEM || (r < 0 && !hashmap_isempty(m->monitored_swap_cgroup_contexts)))
+        if (r < 0)
                 return log_error_errno(r, "Failed to acquire system context: %m");
-
-        /* Return early if nothing is requesting swap monitoring */
-        if (hashmap_isempty(m->monitored_swap_cgroup_contexts))
-                return 0;
 
         /* Note that m->monitored_swap_cgroup_contexts does not need to be updated every interval because only the
          * system context is used for deciding whether the swap threshold is hit. m->monitored_swap_cgroup_contexts
@@ -593,7 +598,7 @@ static int monitor_swap_contexts(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = sd_event_source_set_enabled(s, SD_EVENT_ON);
+        r = sd_event_source_set_enabled(s, SD_EVENT_OFF);
         if (r < 0)
                 return r;
 
@@ -729,6 +734,10 @@ static int manager_varlink_init(Manager *m, int fd) {
 
         varlink_server_set_userdata(s, m);
 
+        r = varlink_server_add_interface(s, &vl_interface_io_systemd_oom);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add oom interface to varlink server: %m");
+
         r = varlink_server_bind_method(s, "io.systemd.oom.ReportManagedOOMCGroups", process_managed_oom_request);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink method: %m");
@@ -807,19 +816,16 @@ int manager_start(
 }
 
 int manager_get_dump_string(Manager *m, char **ret) {
-        _cleanup_free_ char *dump = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
+        _cleanup_(memstream_done) MemStream ms = {};
         OomdCGroupContext *c;
-        size_t size;
-        char *key;
-        int r;
+        FILE *f;
 
         assert(m);
         assert(ret);
 
-        f = open_memstream_unlocked(&dump, &size);
+        f = memstream_init(&ms);
         if (!f)
-                return -errno;
+                return -ENOMEM;
 
         fprintf(f,
                 "Dry Run: %s\n"
@@ -834,19 +840,12 @@ int manager_get_dump_string(Manager *m, char **ret) {
         oomd_dump_system_context(&m->system_context, f, "\t");
 
         fprintf(f, "Swap Monitored CGroups:\n");
-        HASHMAP_FOREACH_KEY(c, key, m->monitored_swap_cgroup_contexts)
+        HASHMAP_FOREACH(c, m->monitored_swap_cgroup_contexts)
                 oomd_dump_swap_cgroup_context(c, f, "\t");
 
         fprintf(f, "Memory Pressure Monitored CGroups:\n");
-        HASHMAP_FOREACH_KEY(c, key, m->monitored_mem_pressure_cgroup_contexts)
+        HASHMAP_FOREACH(c, m->monitored_mem_pressure_cgroup_contexts)
                 oomd_dump_memory_pressure_cgroup_context(c, f, "\t");
 
-        r = fflush_and_check(f);
-        if (r < 0)
-                return r;
-
-        f = safe_fclose(f);
-
-        *ret = TAKE_PTR(dump);
-        return 0;
+        return memstream_finalize(&ms, ret, NULL);
 }

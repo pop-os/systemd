@@ -12,7 +12,8 @@
 
 static LinkConfigContext *ctx = NULL;
 
-static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, char **argv, bool test) {
+static int builtin_net_setup_link(UdevEvent *event, int argc, char **argv, bool test) {
+        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
         _cleanup_(link_freep) Link *link = NULL;
         _cleanup_free_ char *joined = NULL;
         int r;
@@ -20,16 +21,13 @@ static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, c
         if (argc > 1)
                 return log_device_error_errno(dev, SYNTHETIC_ERRNO(EINVAL), "This program takes no arguments.");
 
-        r = link_new(ctx, rtnl, dev, &link);
+        r = link_new(ctx, &event->rtnl, dev, &link);
         if (r == -ENODEV) {
                 log_device_debug_errno(dev, r, "Link vanished while getting information, ignoring.");
                 return 0;
         }
         if (r < 0)
                 return log_device_warning_errno(dev, r, "Failed to get link information: %m");
-
-        if (link->driver)
-                udev_builtin_add_property(dev, test, "ID_NET_DRIVER", link->driver);
 
         r = link_get_config(ctx, link);
         if (r < 0) {
@@ -41,7 +39,7 @@ static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, c
                 return log_device_error_errno(dev, r, "Failed to get link config: %m");
         }
 
-        r = link_apply_config(ctx, rtnl, link);
+        r = link_apply_config(ctx, &event->rtnl, link);
         if (r == -ENODEV)
                 log_device_debug_errno(dev, r, "Link vanished while applying configuration, ignoring.");
         else if (r < 0)
@@ -50,6 +48,8 @@ static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, c
         udev_builtin_add_property(dev, test, "ID_NET_LINK_FILE", link->config->filename);
         if (link->new_name)
                 udev_builtin_add_property(dev, test, "ID_NET_NAME", link->new_name);
+
+        event->altnames = TAKE_PTR(link->altnames);
 
         STRV_FOREACH(d, link->config->dropins) {
                 _cleanup_free_ char *escaped = NULL;

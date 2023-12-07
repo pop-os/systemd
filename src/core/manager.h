@@ -8,6 +8,7 @@
 #include "sd-device.h"
 #include "sd-event.h"
 
+#include "common-signal.h"
 #include "cgroup-util.h"
 #include "cgroup.h"
 #include "fdset.h"
@@ -22,6 +23,14 @@ typedef struct Unit Unit;
 
 /* Enforce upper limit how many names we allow */
 #define MANAGER_MAX_NAMES 131072 /* 128K */
+
+/* On sigrtmin+18, private commands */
+enum {
+        MANAGER_SIGNAL_COMMAND_DUMP_JOBS = _COMMON_SIGNAL_COMMAND_PRIVATE_BASE + 0,
+        _MANAGER_SIGNAL_COMMAND_MAX,
+};
+
+assert_cc((int) _MANAGER_SIGNAL_COMMAND_MAX <= (int) _COMMON_SIGNAL_COMMAND_PRIVATE_END);
 
 typedef struct Manager Manager;
 
@@ -44,6 +53,7 @@ typedef enum ManagerObjective {
         MANAGER_RELOAD,
         MANAGER_REEXECUTE,
         MANAGER_REBOOT,
+        MANAGER_SOFT_REBOOT,
         MANAGER_POWEROFF,
         MANAGER_HALT,
         MANAGER_KEXEC,
@@ -135,10 +145,43 @@ typedef enum ManagerTestRunFlags {
         MANAGER_TEST_RUN_ENV_GENERATORS      = 1 << 2,  /* also run env generators  */
         MANAGER_TEST_RUN_GENERATORS          = 1 << 3,  /* also run unit generators */
         MANAGER_TEST_RUN_IGNORE_DEPENDENCIES = 1 << 4,  /* run while ignoring dependencies */
+        MANAGER_TEST_DONT_OPEN_EXECUTOR      = 1 << 5,  /* avoid trying to load sd-executor */
         MANAGER_TEST_FULL = MANAGER_TEST_RUN_BASIC | MANAGER_TEST_RUN_ENV_GENERATORS | MANAGER_TEST_RUN_GENERATORS,
 } ManagerTestRunFlags;
 
 assert_cc((MANAGER_TEST_FULL & UINT8_MAX) == MANAGER_TEST_FULL);
+
+/* Various defaults for unit file settings. */
+typedef struct UnitDefaults {
+        ExecOutput std_output, std_error;
+
+        usec_t restart_usec, timeout_start_usec, timeout_stop_usec, timeout_abort_usec, device_timeout_usec;
+        bool timeout_abort_set;
+
+        usec_t start_limit_interval;
+        unsigned start_limit_burst;
+
+        bool cpu_accounting;
+        bool memory_accounting;
+        bool io_accounting;
+        bool blockio_accounting;
+        bool tasks_accounting;
+        bool ip_accounting;
+
+        CGroupTasksMax tasks_max;
+        usec_t timer_accuracy_usec;
+
+        OOMPolicy oom_policy;
+        int oom_score_adjust;
+        bool oom_score_adjust_set;
+
+        CGroupPressureWatch memory_pressure_watch;
+        usec_t memory_pressure_threshold_usec;
+
+        char *smack_process_label;
+
+        struct rlimit *rlimit[_RLIMIT_MAX];
+} UnitDefaults;
 
 struct Manager {
         /* Note that the set of units we know of is allowed to be
@@ -195,16 +238,20 @@ struct Manager {
         /* Units that have BindsTo= another unit, and might need to be shutdown because the bound unit is not active. */
         LIST_HEAD(Unit, stop_when_bound_queue);
 
+        /* Units that have resources open, and where it might be good to check if they can be released now */
+        LIST_HEAD(Unit, release_resources_queue);
+
         sd_event *event;
 
-        /* This maps PIDs we care about to units that are interested in. We allow multiple units to be interested in
-         * the same PID and multiple PIDs to be relevant to the same unit. Since in most cases only a single unit will
-         * be interested in the same PID we use a somewhat special encoding here: the first unit interested in a PID is
-         * stored directly in the hashmap, keyed by the PID unmodified. If there are other units interested too they'll
-         * be stored in a NULL-terminated array, and keyed by the negative PID. This is safe as pid_t is signed and
-         * negative PIDs are not used for regular processes but process groups, which we don't care about in this
-         * context, but this allows us to use the negative range for our own purposes. */
-        Hashmap *watch_pids;  /* pid => unit as well as -pid => array of units */
+        /* This maps PIDs we care about to units that are interested in them. We allow multiple units to be
+         * interested in the same PID and multiple PIDs to be relevant to the same unit. Since in most cases
+         * only a single unit will be interested in the same PID though, we use a somewhat special structure
+         * here: the first unit interested in a PID is stored in the hashmap 'watch_pids', keyed by the
+         * PID. If there are other units interested too they'll be stored in a NULL-terminated array, stored
+         * in the hashmap 'watch_pids_more', keyed by the PID. Thus to go through the full list of units
+         * interested in a PID we must look into both hashmaps. */
+        Hashmap *watch_pids;            /* PidRef* → Unit* */
+        Hashmap *watch_pids_more;       /* PidRef* → NUL terminated array of Unit* */
 
         /* A set contains all units which cgroup should be refreshed after startup */
         Set *startup_units;
@@ -235,12 +282,19 @@ struct Manager {
         int user_lookup_fds[2];
         sd_event_source *user_lookup_event_source;
 
-        LookupScope unit_file_scope;
+        RuntimeScope runtime_scope;
+
         LookupPaths lookup_paths;
         Hashmap *unit_id_map;
         Hashmap *unit_name_map;
         Set *unit_path_cache;
         uint64_t unit_cache_timestamp_hash;
+
+        /* We don't have support for atomically enabling/disabling units, and unit_file_state might become
+         * outdated if such operations failed half-way. Therefore, we set this flag if changes to unit files
+         * are made, and reset it after daemon-reload. If set, we report that daemon-reload is needed through
+         * unit's NeedDaemonReload property. */
+        bool unit_file_state_outdated;
 
         char **transient_environment;  /* The environment, as determined from config files, kernel cmdline and environment generators */
         char **client_environment;     /* Environment variables created by clients through the bus API */
@@ -325,8 +379,6 @@ struct Manager {
         /* Flags */
         bool dispatching_load_queue;
 
-        bool taint_usr;
-
         /* Have we already sent out the READY=1 notification? */
         bool ready_sent;
 
@@ -353,36 +405,12 @@ struct Manager {
         bool no_console_output;
         bool service_watchdogs;
 
-        ExecOutput default_std_output, default_std_error;
-
-        usec_t default_restart_usec, default_timeout_start_usec, default_timeout_stop_usec;
-        usec_t default_device_timeout_usec;
-        usec_t default_timeout_abort_usec;
-        bool default_timeout_abort_set;
-
-        usec_t default_start_limit_interval;
-        unsigned default_start_limit_burst;
-
-        bool default_cpu_accounting;
-        bool default_memory_accounting;
-        bool default_io_accounting;
-        bool default_blockio_accounting;
-        bool default_tasks_accounting;
-        bool default_ip_accounting;
-
-        TasksMax default_tasks_max;
-        usec_t default_timer_accuracy_usec;
-
-        OOMPolicy default_oom_policy;
-        int default_oom_score_adjust;
-        bool default_oom_score_adjust_set;
+        UnitDefaults defaults;
 
         int original_log_level;
         LogTarget original_log_target;
         bool log_level_overridden;
         bool log_target_overridden;
-
-        struct rlimit *rlimit[_RLIMIT_MAX];
 
         /* non-zero if we are reloading or reexecuting, */
         int n_reloading;
@@ -425,8 +453,8 @@ struct Manager {
         Hashmap *uid_refs;
         Hashmap *gid_refs;
 
-        /* ExecRuntime, indexed by their owner unit id */
-        Hashmap *exec_runtime_by_id;
+        /* ExecSharedRuntime, indexed by their owner unit id */
+        Hashmap *exec_shared_runtime_by_id;
 
         /* When the user hits C-A-D more than 7 times per 2s, do something immediately... */
         RateLimit ctrl_alt_del_ratelimit;
@@ -460,22 +488,28 @@ struct Manager {
         /* Reference to RestrictFileSystems= BPF program */
         struct restrict_fs_bpf *restrict_fs;
 
-        char *default_smack_process_label;
-
         /* Allow users to configure a rate limit for Reload() operations */
         RateLimit reload_ratelimit;
-
         /* Dump*() are slow, so always rate limit them to 10 per 10 minutes */
         RateLimit dump_ratelimit;
+
+        sd_event_source *memory_pressure_event_source;
+
+        /* For NFTSet= */
+        FirewallContext *fw_ctx;
+
+        /* Pin the systemd-executor binary, so that it never changes until re-exec, ensuring we don't have
+         * serialization/deserialization compatibility issues during upgrades. */
+        int executor_fd;
 };
 
 static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
         assert(m);
-        return m->default_timeout_abort_set ? m->default_timeout_abort_usec : m->default_timeout_stop_usec;
+        return m->defaults.timeout_abort_set ? m->defaults.timeout_abort_usec : m->defaults.timeout_stop_usec;
 }
 
-#define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == LOOKUP_SCOPE_SYSTEM)
-#define MANAGER_IS_USER(m) ((m)->unit_file_scope != LOOKUP_SCOPE_SYSTEM)
+#define MANAGER_IS_SYSTEM(m) ((m)->runtime_scope == RUNTIME_SCOPE_SYSTEM)
+#define MANAGER_IS_USER(m) ((m)->runtime_scope == RUNTIME_SCOPE_USER)
 
 #define MANAGER_IS_RELOADING(m) ((m)->n_reloading > 0)
 
@@ -488,11 +522,11 @@ static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
 
 #define MANAGER_IS_TEST_RUN(m) ((m)->test_run_flags != 0)
 
-static inline usec_t manager_default_timeout(bool is_system) {
-        return is_system ? DEFAULT_TIMEOUT_USEC : DEFAULT_USER_TIMEOUT_USEC;
+static inline usec_t manager_default_timeout(RuntimeScope scope) {
+        return scope == RUNTIME_SCOPE_SYSTEM ? DEFAULT_TIMEOUT_USEC : DEFAULT_USER_TIMEOUT_USEC;
 }
 
-int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
+int manager_new(RuntimeScope scope, ManagerTestRunFlags test_run_flags, Manager **m);
 Manager* manager_free(Manager *m);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
 
@@ -516,18 +550,18 @@ int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error 
 
 void manager_clear_jobs(Manager *m);
 
-void manager_unwatch_pid(Manager *m, pid_t pid);
+void manager_unwatch_pidref(Manager *m, PidRef *pid);
 
 unsigned manager_dispatch_load_queue(Manager *m);
+
+int manager_setup_memory_pressure_event_source(Manager *m);
 
 int manager_default_environment(Manager *m);
 int manager_transient_environment_add(Manager *m, char **plus);
 int manager_client_environment_modify(Manager *m, char **minus, char **plus);
 int manager_get_effective_environment(Manager *m, char ***ret);
 
-int manager_set_default_smack_process_label(Manager *m, const char *label);
-
-int manager_set_default_rlimits(Manager *m, struct rlimit **default_rlimit);
+int manager_set_unit_defaults(Manager *m, const UnitDefaults *defaults);
 
 void manager_trigger_run_queue(Manager *m);
 
@@ -558,6 +592,8 @@ void manager_override_show_status(Manager *m, ShowStatus mode, const char *reaso
 void manager_set_first_boot(Manager *m, bool b);
 void manager_set_switching_root(Manager *m, bool switching_root);
 
+double manager_get_progress(Manager *m);
+
 void manager_status_printf(Manager *m, StatusType type, const char *status, const char *format, ...) _printf_(4,5);
 
 Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
@@ -587,7 +623,6 @@ const char *manager_state_to_string(ManagerState m) _const_;
 ManagerState manager_state_from_string(const char *s) _pure_;
 
 const char *manager_get_confirm_spawn(Manager *m);
-bool manager_is_confirm_spawn_disabled(Manager *m);
 void manager_disable_confirm_spawn(void);
 
 const char *manager_timestamp_to_string(ManagerTimestamp m) _const_;
@@ -600,5 +635,12 @@ void manager_override_watchdog(Manager *m, WatchdogType t, usec_t timeout);
 int manager_set_watchdog_pretimeout_governor(Manager *m, const char *governor);
 int manager_override_watchdog_pretimeout_governor(Manager *m, const char *governor);
 
+LogTarget manager_get_executor_log_target(Manager *m);
+
+int manager_allocate_idle_pipe(Manager *m);
+
 const char* oom_policy_to_string(OOMPolicy i) _const_;
 OOMPolicy oom_policy_from_string(const char *s) _pure_;
+
+void unit_defaults_init(UnitDefaults *defaults, RuntimeScope scope);
+void unit_defaults_done(UnitDefaults *defaults);

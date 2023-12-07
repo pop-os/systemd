@@ -6,6 +6,7 @@
 #include "cgroup-util.h"
 #include "compress.h"
 #include "condition.h"
+#include "confidential-virt.h"
 #include "device-private.h"
 #include "device.h"
 #include "discover-image.h"
@@ -13,13 +14,12 @@
 #include "import-util.h"
 #include "install.h"
 #include "job.h"
-#include "journald-server.h"
 #include "kill.h"
-#include "link-config.h"
 #include "locale-util.h"
 #include "log.h"
 #include "logs-show.h"
 #include "mount.h"
+#include "netif-naming-scheme.h"
 #include "path.h"
 #include "process-util.h"
 #include "resolve-util.h"
@@ -33,12 +33,15 @@
 #include "swap.h"
 #include "target.h"
 #include "test-tables.h"
+#include "tests.h"
 #include "timer.h"
 #include "unit-name.h"
 #include "unit.h"
 #include "virt.h"
 
 int main(int argc, char **argv) {
+        test_setup_logging(LOG_DEBUG);
+
         test_table(architecture, ARCHITECTURE);
         test_table(assert_type, CONDITION_TYPE);
         test_table(automount_result, AUTOMOUNT_RESULT);
@@ -49,6 +52,7 @@ int main(int argc, char **argv) {
         test_table(collect_mode, COLLECT_MODE);
         test_table(condition_result, CONDITION_RESULT);
         test_table(condition_type, CONDITION_TYPE);
+        test_table(confidential_virtualization, CONFIDENTIAL_VIRTUALIZATION);
         test_table(device_action, SD_DEVICE_ACTION);
         test_table(device_state, DEVICE_STATE);
         test_table(dns_over_tls_mode, DNS_OVER_TLS_MODE);
@@ -70,7 +74,6 @@ int main(int argc, char **argv) {
         test_table(kill_who, KILL_WHO);
         test_table(locale_variable, VARIABLE_LC);
         test_table(log_target, LOG_TARGET);
-        test_table(mac_address_policy, MAC_ADDRESS_POLICY);
         test_table(managed_oom_mode, MANAGED_OOM_MODE);
         test_table(managed_oom_preference, MANAGED_OOM_PREFERENCE);
         test_table(manager_state, MANAGER_STATE);
@@ -95,6 +98,7 @@ int main(int argc, char **argv) {
         test_table(scope_state, SCOPE_STATE);
         test_table(service_exec_command, SERVICE_EXEC_COMMAND);
         test_table(service_restart, SERVICE_RESTART);
+        test_table(service_restart_mode, SERVICE_RESTART_MODE);
         test_table(service_result, SERVICE_RESULT);
         test_table(service_state, SERVICE_STATE);
         test_table(service_type, SERVICE_TYPE);
@@ -104,8 +108,6 @@ int main(int argc, char **argv) {
         test_table(socket_exec_command, SOCKET_EXEC_COMMAND);
         test_table(socket_result, SOCKET_RESULT);
         test_table(socket_state, SOCKET_STATE);
-        test_table(split_mode, SPLIT);
-        test_table(storage, STORAGE);
         test_table(swap_exec_command, SWAP_EXEC_COMMAND);
         test_table(swap_result, SWAP_RESULT);
         test_table(swap_state, SWAP_STATE);

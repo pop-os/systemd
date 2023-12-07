@@ -39,7 +39,16 @@ unsigned routes_max(void) {
         return cached;
 }
 
-static Route *link_find_default_gateway(Link *link, int family, Route *gw) {
+static bool route_lifetime_is_valid(const Route *route) {
+        assert(route);
+
+        return
+                route->lifetime_usec == USEC_INFINITY ||
+                route->lifetime_usec > now(CLOCK_BOOTTIME);
+}
+
+bool link_find_default_gateway(Link *link, int family, Route **gw) {
+        bool found = false;
         Route *route;
 
         assert(link);
@@ -61,16 +70,24 @@ static Route *link_find_default_gateway(Link *link, int family, Route *gw) {
                         continue;
                 if (!in_addr_is_set(route->gw_family, &route->gw))
                         continue;
-                if (gw) {
-                        if (route->gw_weight > gw->gw_weight)
+
+                /* Found a default gateway. */
+                if (!gw)
+                        return true;
+
+                /* If we have already found another gw, then let's compare their weight and priority. */
+                if (*gw) {
+                        if (route->gw_weight > (*gw)->gw_weight)
                                 continue;
-                        if (route->priority >= gw->priority)
+                        if (route->priority >= (*gw)->priority)
                                 continue;
                 }
-                gw = route;
+
+                *gw = route;
+                found = true;
         }
 
-        return gw;
+        return found;
 }
 
 int manager_find_uplink(Manager *m, int family, Link *exclude, Link **ret) {
@@ -90,7 +107,7 @@ int manager_find_uplink(Manager *m, int family, Link *exclude, Link **ret) {
                 if (link->state != LINK_STATE_CONFIGURED)
                         continue;
 
-                gw = link_find_default_gateway(link, family, gw);
+                link_find_default_gateway(link, family, &gw);
         }
 
         if (!gw)
@@ -122,6 +139,8 @@ bool gateway_is_ready(Link *link, bool onlink, int family, const union in_addr_u
 
         SET_FOREACH(route, link->routes) {
                 if (!route_exists(route))
+                        continue;
+                if (!route_lifetime_is_valid(route))
                         continue;
                 if (route->family != family)
                         continue;
@@ -167,6 +186,9 @@ static int link_address_is_reachable_internal(
 
         SET_FOREACH(route, link->routes) {
                 if (!route_exists(route))
+                        continue;
+
+                if (!route_lifetime_is_valid(route))
                         continue;
 
                 if (route->type != RTN_UNICAST)
@@ -411,10 +433,9 @@ int manager_get_route_table_from_string(const Manager *m, const char *s, uint32_
         return 0;
 }
 
-int manager_get_route_table_to_string(const Manager *m, uint32_t table, char **ret) {
+int manager_get_route_table_to_string(const Manager *m, uint32_t table, bool append_num, char **ret) {
         _cleanup_free_ char *str = NULL;
         const char *s;
-        int r;
 
         assert(m);
         assert(ret);
@@ -426,13 +447,16 @@ int manager_get_route_table_to_string(const Manager *m, uint32_t table, char **r
         if (!s)
                 s = hashmap_get(m->route_table_names_by_number, UINT32_TO_PTR(table));
 
-        if (s)
-                /* Currently, this is only used in debugging logs. To not confuse any bug
-                 * reports, let's include the table number. */
-                r = asprintf(&str, "%s(%" PRIu32 ")", s, table);
-        else
-                r = asprintf(&str, "%" PRIu32, table);
-        if (r < 0)
+        if (s && !append_num) {
+                str = strdup(s);
+                if (!str)
+                        return -ENOMEM;
+
+        } else if (asprintf(&str, "%s%s%" PRIu32 "%s",
+                            strempty(s),
+                            s ? "(" : "",
+                            table,
+                            s ? ")" : "") < 0)
                 return -ENOMEM;
 
         *ret = TAKE_PTR(str);
@@ -499,9 +523,10 @@ int config_parse_route_table_names(
                                    "Route table name cannot be numeric. Ignoring assignment: %s:%s", name, num);
                         continue;
                 }
-                if (STR_IN_SET(name, "default", "main", "local")) {
+                if (route_table_from_string(name) >= 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0,
-                                   "Route table name %s is already predefined. Ignoring assignment: %s:%s", name, name, num);
+                                   "Route table name %s is predefined for %i. Ignoring assignment: %s:%s",
+                                   name, route_table_from_string(name), name, num);
                         continue;
                 }
 
@@ -514,6 +539,12 @@ int config_parse_route_table_names(
                 if (table == 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0,
                                    "Invalid route table number, ignoring assignment: %s:%s", name, num);
+                        continue;
+                }
+                if (route_table_to_string(table)) {
+                        log_syntax(unit, LOG_WARNING, filename, line, 0,
+                                   "Route table name for %s is predefined (%s). Ignoring assignment: %s:%s",
+                                   num, route_table_to_string(table), name, num);
                         continue;
                 }
 

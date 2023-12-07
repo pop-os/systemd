@@ -79,32 +79,24 @@ int read_etc_hostname_stream(FILE *f, char **ret) {
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
-                char *p;
 
-                r = read_line(f, LONG_LINE_MAX, &line);
+                r = read_stripped_line(f, LONG_LINE_MAX, &line);
                 if (r < 0)
                         return r;
                 if (r == 0) /* EOF without any hostname? the file is empty, let's treat that exactly like no file at all: ENOENT */
                         return -ENOENT;
 
-                p = strstrip(line);
-
                 /* File may have empty lines or comments, ignore them */
-                if (!IN_SET(*p, '\0', '#')) {
-                        char *copy;
+                if (IN_SET(line[0], '\0', '#'))
+                        continue;
 
-                        hostname_cleanup(p); /* normalize the hostname */
+                hostname_cleanup(line); /* normalize the hostname */
 
-                        if (!hostname_is_valid(p, VALID_HOSTNAME_TRAILING_DOT)) /* check that the hostname we return is valid */
-                                return -EBADMSG;
+                if (!hostname_is_valid(line, VALID_HOSTNAME_TRAILING_DOT)) /* check that the hostname we return is valid */
+                        return -EBADMSG;
 
-                        copy = strdup(p);
-                        if (!copy)
-                                return -ENOMEM;
-
-                        *ret = copy;
-                        return 0;
-                }
+                *ret = TAKE_PTR(line);
+                return 0;
         }
 }
 
@@ -150,7 +142,7 @@ int hostname_setup(bool really) {
         if (r < 0)
                 log_warning_errno(r, "Failed to retrieve system hostname from kernel command line, ignoring: %m");
         else if (r > 0) {
-                if (hostname_is_valid(b, true)) {
+                if (hostname_is_valid(b, VALID_HOSTNAME_TRAILING_DOT)) {
                         hn = b;
                         source = HOSTNAME_TRANSIENT;
                 } else  {

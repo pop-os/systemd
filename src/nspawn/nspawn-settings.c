@@ -97,29 +97,25 @@ int settings_load(FILE *f, const char *path, Settings **ret) {
         return 0;
 }
 
-static void free_oci_hooks(OciHook *h, size_t n) {
-        size_t i;
+static void free_oci_hooks(OciHook *hooks, size_t n) {
+        assert(hooks || n == 0);
 
-        assert(h || n == 0);
-
-        for (i = 0; i < n; i++) {
-                free(h[i].path);
-                strv_free(h[i].args);
-                strv_free(h[i].env);
+        FOREACH_ARRAY(hook, hooks, n) {
+                free(hook->path);
+                strv_free(hook->args);
+                strv_free(hook->env);
         }
 
-        free(h);
+        free(hooks);
 }
 
-void device_node_array_free(DeviceNode *node, size_t n) {
-        size_t i;
+void device_node_array_free(DeviceNode *nodes, size_t n) {
+        assert(nodes || n == 0);
 
-        assert(node || n == 0);
+        FOREACH_ARRAY(node, nodes, n)
+                free(node->path);
 
-        for (i = 0; i < n; i++)
-                free(node[i].path);
-
-        free(node);
+        free(nodes);
 }
 
 Settings* settings_free(Settings *s) {
@@ -469,6 +465,69 @@ int config_parse_veth_extra(
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Invalid extra virtual Ethernet link specification %s: %m", rvalue);
 
         return 0;
+}
+
+int config_parse_network_iface_pair(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char*** l = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        return interface_pair_parse(l, rvalue);
+}
+
+int config_parse_macvlan_iface_pair(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char*** l = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        return macvlan_pair_parse(l, rvalue);
+}
+
+int config_parse_ipvlan_iface_pair(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char*** l = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        return ipvlan_pair_parse(l, rvalue);
 }
 
 int config_parse_network_zone(

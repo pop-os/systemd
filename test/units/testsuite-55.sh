@@ -3,6 +3,9 @@
 set -eux
 set -o pipefail
 
+# shellcheck source=test/units/util.sh
+ . "$(dirname "$0")"/util.sh
+
 systemd-analyze log-level debug
 
 # Ensure that the init.scope.d drop-in is applied on boot
@@ -22,18 +25,40 @@ if [[ -e /skipped ]]; then
     exit 0
 fi
 
-rm -rf /etc/systemd/system/testsuite-55-testbloat.service.d
+rm -rf /run/systemd/system/testsuite-55-testbloat.service.d
+
+# Activate swap file if we are in a VM
+if systemd-detect-virt --vm --quiet; then
+    mkswap /swapfile
+    swapon /swapfile
+    swapon --show
+fi
 
 # Configure oomd explicitly to avoid conflicts with distro dropins
-mkdir -p /etc/systemd/oomd.conf.d/
-echo -e "[OOM]\nDefaultMemoryPressureDurationSec=2s" >/etc/systemd/oomd.conf.d/99-oomd-test.conf
-mkdir -p /etc/systemd/system/-.slice.d/
-echo -e "[Slice]\nManagedOOMSwap=auto" >/etc/systemd/system/-.slice.d/99-oomd-test.conf
-mkdir -p /etc/systemd/system/user@.service.d/
-echo -e "[Service]\nManagedOOMMemoryPressure=auto\nManagedOOMMemoryPressureLimit=0%" >/etc/systemd/system/user@.service.d/99-oomd-test.conf
+mkdir -p /run/systemd/oomd.conf.d/
+cat >/run/systemd/oomd.conf.d/99-oomd-test.conf <<EOF
+[OOM]
+DefaultMemoryPressureDurationSec=2s
+EOF
 
-mkdir -p /etc/systemd/system/systemd-oomd.service.d/
-echo -e "[Service]\nEnvironment=SYSTEMD_LOG_LEVEL=debug" >/etc/systemd/system/systemd-oomd.service.d/debug.conf
+mkdir -p /run/systemd/system/-.slice.d/
+cat >/run/systemd/system/-.slice.d/99-oomd-test.conf <<EOF
+[Slice]
+ManagedOOMSwap=auto
+EOF
+
+mkdir -p /run/systemd/system/user@.service.d/
+cat >/run/systemd/system/user@.service.d/99-oomd-test.conf <<EOF
+[Service]
+ManagedOOMMemoryPressure=auto
+ManagedOOMMemoryPressureLimit=0%
+EOF
+
+mkdir -p /run/systemd/system/systemd-oomd.service.d/
+cat >/run/systemd/system/systemd-oomd.service.d/debug.conf <<EOF
+[Service]
+Environment=SYSTEMD_LOG_LEVEL=debug
+EOF
 
 systemctl daemon-reload
 
@@ -44,6 +69,12 @@ systemctl enable systemd-oomd.service
 # if oomd is already running for some reasons, then restart it to make sure the above settings to be applied
 if systemctl is-active systemd-oomd.service; then
     systemctl restart systemd-oomd.service
+fi
+
+# Ensure that we can start services even with a very low hard memory cap without oom-kills, but skip under
+# sanitizers as they balloon memory usage.
+if ! [[ -v ASAN_OPTIONS || -v UBSAN_OPTIONS ]]; then
+    systemd-run -t -p MemoryMax=10M -p MemorySwapMax=0 -p MemoryZSwapMax=0 /bin/true
 fi
 
 systemctl start testsuite-55-testchill.service
@@ -74,6 +105,7 @@ while [[ $(date -u +%s) -le $timeout ]]; do
     if ! systemctl status testsuite-55-testbloat.service; then
         break
     fi
+    oomctl
     sleep 2
 done
 
@@ -111,6 +143,7 @@ while [[ $(date -u +%s) -le $timeout ]]; do
     if ! systemctl --machine "testuser@.host" --user status testsuite-55-testbloat.service; then
         break
     fi
+    oomctl
     sleep 2
 done
 
@@ -119,12 +152,14 @@ if systemctl --machine "testuser@.host" --user status testsuite-55-testbloat.ser
 if ! systemctl --machine "testuser@.host" --user status testsuite-55-testchill.service; then exit 24; fi
 
 # only run this portion of the test if we can set xattrs
-if setfattr -n user.xattr_test -v 1 /sys/fs/cgroup/; then
+if cgroupfs_supports_user_xattrs; then
     sleep 120 # wait for systemd-oomd kill cool down and elevated memory pressure to come down
 
-    mkdir -p /etc/systemd/system/testsuite-55-testbloat.service.d/
-    echo "[Service]" >/etc/systemd/system/testsuite-55-testbloat.service.d/override.conf
-    echo "ManagedOOMPreference=avoid" >>/etc/systemd/system/testsuite-55-testbloat.service.d/override.conf
+    mkdir -p /run/systemd/system/testsuite-55-testbloat.service.d/
+    cat >/run/systemd/system/testsuite-55-testbloat.service.d/override.conf <<EOF
+[Service]
+ManagedOOMPreference=avoid
+EOF
 
     systemctl daemon-reload
     systemctl start testsuite-55-testchill.service
@@ -136,6 +171,7 @@ if setfattr -n user.xattr_test -v 1 /sys/fs/cgroup/; then
         if ! systemctl status testsuite-55-testmunch.service; then
             break
         fi
+        oomctl
         sleep 2
     done
 
@@ -147,6 +183,4 @@ fi
 
 systemd-analyze log-level info
 
-echo OK >/testok
-
-exit 0
+touch /testok

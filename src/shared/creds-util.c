@@ -22,6 +22,7 @@
 #include "memory-util.h"
 #include "mkdir.h"
 #include "openssl-util.h"
+#include "parse-util.h"
 #include "path-util.h"
 #include "random-util.h"
 #include "sparse-endian.h"
@@ -35,6 +36,44 @@ bool credential_name_valid(const char *s) {
         /* We want that credential names are both valid in filenames (since that's our primary way to pass
          * them around) and as fdnames (which is how we might want to pass them around eventually) */
         return filename_is_valid(s) && fdname_is_valid(s);
+}
+
+bool credential_glob_valid(const char *s) {
+        const char *e, *a;
+        size_t n;
+
+        /* Checks if a credential glob expression is valid. Note that this is more restrictive than
+         * fnmatch()! We only allow trailing asterisk matches for now (simply because we want some freedom
+         * with automatically extending the pattern in a systematic way to cover for unit instances getting
+         * per-instance credentials or similar. Moreover, credential globbing expressions are also more
+         * restrictive then credential names: we don't allow *, ?, [, ] in them (except for the asterisk
+         * match at the end of the string), simply to not allow ambiguity. After all, we want the flexibility
+         * to one day add full globbing should the need arise.  */
+
+        if (isempty(s))
+                return false;
+
+        /* Find first glob (or NUL byte) */
+        n = strcspn(s, "*?[]");
+        e = s + n;
+
+        /* For now, only allow asterisk wildcards, and only at the end of the string. If it's anything else, refuse. */
+        if (isempty(e))
+                return credential_name_valid(s);
+
+        if (!streq(e, "*")) /* only allow trailing "*", no other globs */
+                return false;
+
+        if (n == 0) /* Explicitly allow the complete wildcard. */
+                return true;
+
+        if (n > NAME_MAX + strlen(e)) /* before we make a copy on the stack, let's check this is not overly large */
+                return false;
+
+        /* Make a copy of the string without the '*' suffix */
+        a = strndupa_safe(s, n);
+
+        return credential_name_valid(a);
 }
 
 static int get_credentials_dir_internal(const char *envvar, const char **ret) {
@@ -87,6 +126,80 @@ int read_credential(const char *name, void **ret, size_t *ret_size) {
                         (char**) ret, ret_size);
 }
 
+int read_credential_with_decryption(const char *name, void **ret, size_t *ret_size) {
+        _cleanup_(erase_and_freep) void *data = NULL;
+        _cleanup_free_ char *fn = NULL;
+        size_t sz = 0;
+        const char *d;
+        int r;
+
+        assert(ret);
+
+        /* Just like read_credential() but will also look for encrypted credentials. Note that services only
+         * receive decrypted credentials, hence use read_credential() for those. This helper here is for
+         * generators, i.e. code that runs outside of service context, and thus has no decrypted credentials
+         * yet.
+         *
+         * Note that read_credential_harder_and_warn() logs on its own, while read_credential() does not!
+         * (It's a lot more complex and error prone given its TPM2 connectivity, and is generally called from
+         * generators only where logging is OK).
+         *
+         * Error handling is also a bit different: if we can't find a credential we'll return 0 and NULL
+         * pointers/zero size, rather than -ENXIO/-ENOENT. */
+
+        if (!credential_name_valid(name))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid credential name: %s", name);
+
+        r = read_credential(name, ret, ret_size);
+        if (r >= 0)
+                return 1; /* found */
+        if (!IN_SET(r, -ENXIO, -ENOENT))
+                return log_error_errno(r, "Failed read unencrypted credential '%s': %m", name);
+
+        r = get_encrypted_credentials_dir(&d);
+        if (r == -ENXIO)
+                goto not_found;
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine encrypted credentials directory: %m");
+
+        fn = path_join(d, name);
+        if (!fn)
+                return log_oom();
+
+        r = read_full_file_full(
+                        AT_FDCWD, fn,
+                        UINT64_MAX, SIZE_MAX,
+                        READ_FULL_FILE_SECURE,
+                        NULL,
+                        (char**) &data, &sz);
+        if (r == -ENOENT)
+                goto not_found;
+        if (r < 0)
+                return log_error_errno(r, "Failed to read encrypted credential data: %m");
+
+        r = decrypt_credential_and_warn(
+                        name,
+                        now(CLOCK_REALTIME),
+                        /* tpm2_device = */ NULL,
+                        /* tpm2_signature_path = */ NULL,
+                        data,
+                        sz,
+                        ret,
+                        ret_size);
+        if (r < 0)
+                return r;
+
+        return 1; /* found */
+
+not_found:
+        *ret = NULL;
+
+        if (ret_size)
+                *ret_size = 0;
+
+        return 0; /* not found */
+}
+
 int read_credential_strings_many_internal(
                 const char *first_name, char **first_value,
                 ...) {
@@ -96,17 +209,21 @@ int read_credential_strings_many_internal(
 
         /* Reads a bunch of credentials into the specified buffers. If the specified buffers are already
          * non-NULL frees them if a credential is found. Only supports string-based credentials
-         * (i.e. refuses embedded NUL bytes) */
+         * (i.e. refuses embedded NUL bytes).
+         *
+         * 0 is returned when some or all credentials are missing.
+         */
 
         if (!first_name)
                 return 0;
 
         r = read_credential(first_name, &b, NULL);
-        if (r == -ENXIO) /* no creds passed at all? propagate this */
-                return r;
-        if (r < 0)
-                ret = r;
-        else
+        if (r == -ENXIO) /* No creds passed at all? Bail immediately. */
+                return 0;
+        if (r < 0) {
+                if (r != -ENOENT)
+                        ret = r;
+        } else
                 free_and_replace(*first_value, b);
 
         va_list ap;
@@ -127,7 +244,7 @@ int read_credential_strings_many_internal(
 
                 r = read_credential(name, &bb, NULL);
                 if (r < 0) {
-                        if (ret >= 0)
+                        if (ret >= 0 && r != -ENOENT)
                                 ret = r;
                 } else
                         free_and_replace(*value, bb);
@@ -135,6 +252,17 @@ int read_credential_strings_many_internal(
 
         va_end(ap);
         return ret;
+}
+
+int read_credential_bool(const char *name) {
+        _cleanup_free_ void *data = NULL;
+        int r;
+
+        r = read_credential(name, &data, NULL);
+        if (r < 0)
+                return IN_SET(r, -ENXIO, -ENOENT) ? 0 : r;
+
+        return parse_boolean(data);
 }
 
 int get_credential_user_password(const char *username, char **ret_password, bool *ret_is_hashed) {
@@ -254,7 +382,7 @@ static int make_credential_host_secret(
         if (r < 0)
                 goto fail;
 
-        r = loop_write(fd, &buf, sizeof(buf), false);
+        r = loop_write(fd, &buf, sizeof(buf));
         if (r < 0)
                 goto fail;
 
@@ -337,6 +465,9 @@ int get_credential_host_secret(CredentialSecretFlags flags, void **ret, size_t *
                 dirname = "/var/lib/systemd";
                 filename = "credential.secret";
         }
+
+        assert(dirname);
+        assert(filename);
 
         mkdir_parents(dirname, 0755);
         dfd = open_mkdir_at(AT_FDCWD, dirname, O_CLOEXEC, 0755);
@@ -694,24 +825,65 @@ int encrypt_credential_and_warn(
                 if (!pubkey)
                         tpm2_pubkey_pcr_mask = 0;
 
-                r = tpm2_seal(tpm2_device,
-                              tpm2_hash_pcr_mask,
-                              pubkey, pubkey_size,
-                              tpm2_pubkey_pcr_mask,
+                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+                r = tpm2_context_new(tpm2_device, &tpm2_context);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to create TPM2 context: %m");
+
+                r = tpm2_get_best_pcr_bank(tpm2_context, tpm2_hash_pcr_mask | tpm2_pubkey_pcr_mask, &tpm2_pcr_bank);
+                if (r < 0)
+                        return log_error_errno(r, "Could not find best pcr bank: %m");
+
+                TPML_PCR_SELECTION tpm2_hash_pcr_selection;
+                tpm2_tpml_pcr_selection_from_mask(tpm2_hash_pcr_mask, tpm2_pcr_bank, &tpm2_hash_pcr_selection);
+
+                _cleanup_free_ Tpm2PCRValue *tpm2_hash_pcr_values = NULL;
+                size_t tpm2_n_hash_pcr_values;
+                r = tpm2_pcr_read(tpm2_context, &tpm2_hash_pcr_selection, &tpm2_hash_pcr_values, &tpm2_n_hash_pcr_values);
+                if (r < 0)
+                        return log_error_errno(r, "Could not read PCR values: %m");
+
+                TPM2B_PUBLIC public;
+                if (pubkey) {
+                        r = tpm2_tpm2b_public_from_pem(pubkey, pubkey_size, &public);
+                        if (r < 0)
+                                return log_error_errno(r, "Could not convert public key to TPM2B_PUBLIC: %m");
+                }
+
+                TPM2B_DIGEST tpm2_policy = TPM2B_DIGEST_MAKE(NULL, TPM2_SHA256_DIGEST_SIZE);
+                r = tpm2_calculate_sealing_policy(
+                                tpm2_hash_pcr_values,
+                                tpm2_n_hash_pcr_values,
+                                pubkey ? &public : NULL,
+                                /* use_pin= */ false,
+                                /* pcrlock_policy= */ NULL,
+                                &tpm2_policy);
+                if (r < 0)
+                        return log_error_errno(r, "Could not calculate sealing policy digest: %m");
+
+                r = tpm2_seal(tpm2_context,
+                              /* seal_key_handle= */ 0,
+                              &tpm2_policy,
                               /* pin= */ NULL,
                               &tpm2_key, &tpm2_key_size,
                               &tpm2_blob, &tpm2_blob_size,
-                              &tpm2_policy_hash, &tpm2_policy_hash_size,
-                              &tpm2_pcr_bank,
-                              &tpm2_primary_alg);
+                              &tpm2_primary_alg,
+                              /* ret_srk_buf= */ NULL,
+                              /* ret_srk_buf_size= */ NULL);
                 if (r < 0) {
                         if (sd_id128_equal(with_key, _CRED_AUTO_INITRD))
                                 log_warning("TPM2 present and used, but we didn't manage to talk to it. Credential will be refused if SecureBoot is enabled.");
                         else if (!sd_id128_equal(with_key, _CRED_AUTO))
-                                return r;
+                                return log_error_errno(r, "Failed to seal to TPM2: %m");
 
                         log_notice_errno(r, "TPM2 sealing didn't work, continuing without TPM2: %m");
                 }
+
+                tpm2_policy_hash_size = tpm2_policy.size;
+                tpm2_policy_hash = malloc(tpm2_policy_hash_size);
+                if (!tpm2_policy_hash)
+                        return log_oom();
+                memcpy(tpm2_policy_hash, tpm2_policy.buffer, tpm2_policy_hash_size);
 
                 assert(tpm2_blob_size <= CREDENTIAL_FIELD_SIZE_MAX);
                 assert(tpm2_policy_hash_size <= CREDENTIAL_FIELD_SIZE_MAX);
@@ -934,7 +1106,7 @@ int decrypt_credential_and_warn(
         if (with_tpm2_pk) {
                 r = tpm2_load_pcr_signature(tpm2_signature_path, &signature_json);
                 if (r < 0)
-                        return r;
+                        return log_error_errno(r, "Failed to load pcr signature: %m");
         }
 
         if (is_tpm2_absent) {
@@ -1033,7 +1205,14 @@ int decrypt_credential_and_warn(
                                     le32toh(z->size));
                 }
 
-                r = tpm2_unseal(tpm2_device,
+                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+                r = tpm2_context_new(tpm2_device, &tpm2_context);
+                if (r < 0)
+                        return r;
+
+                 // TODO: Add the SRK data to the credential structure so it can be plumbed
+                 // through and used to verify the TPM session.
+                r = tpm2_unseal(tpm2_context,
                                 le64toh(t->pcr_mask),
                                 le16toh(t->pcr_bank),
                                 z ? z->data : NULL,
@@ -1041,16 +1220,18 @@ int decrypt_credential_and_warn(
                                 z ? le64toh(z->pcr_mask) : 0,
                                 signature_json,
                                 /* pin= */ NULL,
+                                /* pcrlock_policy= */ NULL,
                                 le16toh(t->primary_alg),
                                 t->policy_hash_and_blob,
                                 le32toh(t->blob_size),
                                 t->policy_hash_and_blob + le32toh(t->blob_size),
                                 le32toh(t->policy_hash_size),
+                                /* srk_buf= */ NULL,
+                                /* srk_buf_size= */ 0,
                                 &tpm2_key,
                                 &tpm2_key_size);
                 if (r < 0)
-                        return r;
-
+                        return log_error_errno(r, "Failed to unseal secret using TPM2: %m");
 #else
                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Credential requires TPM2 support, but TPM2 support not available.");
 #endif

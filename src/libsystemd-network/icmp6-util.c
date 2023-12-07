@@ -17,7 +17,8 @@
 #include "fd-util.h"
 #include "icmp6-util.h"
 #include "in-addr-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
+#include "network-common.h"
 #include "socket-util.h"
 
 #define IN6ADDR_ALL_ROUTERS_MULTICAST_INIT \
@@ -144,8 +145,12 @@ int icmp6_send_router_solicitation(int s, const struct ether_addr *ether_addr) {
         return 0;
 }
 
-int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
-                  triple_timestamp *ret_timestamp) {
+int icmp6_receive(
+                int fd,
+                void *buffer,
+                size_t size,
+                struct in6_addr *ret_sender,
+                triple_timestamp *ret_timestamp) {
 
         /* This needs to be initialized with zero. See #20741. */
         CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int)) + /* ttl */
@@ -160,9 +165,7 @@ int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
                 .msg_control = &control,
                 .msg_controllen = sizeof(control),
         };
-        struct cmsghdr *cmsg;
         struct in6_addr addr = {};
-        triple_timestamp t = {};
         ssize_t len;
 
         iov = IOVEC_MAKE(buffer, size);
@@ -178,7 +181,7 @@ int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
             sa.in6.sin6_family == AF_INET6)  {
 
                 addr = sa.in6.sin6_addr;
-                if (!in6_addr_is_link_local(&addr))
+                if (!in6_addr_is_link_local(&addr) && !in6_addr_is_null(&addr))
                         return -EADDRNOTAVAIL;
 
         } else if (msg.msg_namelen > 0)
@@ -188,26 +191,13 @@ int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
 
         assert(!(msg.msg_flags & MSG_TRUNC));
 
-        CMSG_FOREACH(cmsg, &msg) {
-                if (cmsg->cmsg_level == SOL_IPV6 &&
-                    cmsg->cmsg_type == IPV6_HOPLIMIT &&
-                    cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
-                        int hops = *(int*) CMSG_DATA(cmsg);
+        int *hops = CMSG_FIND_DATA(&msg, SOL_IPV6, IPV6_HOPLIMIT, int);
+        if (hops && *hops != 255)
+                return -EMULTIHOP;
 
-                        if (hops != 255)
-                                return -EMULTIHOP;
-                }
-
-                if (cmsg->cmsg_level == SOL_SOCKET &&
-                    cmsg->cmsg_type == SO_TIMESTAMP &&
-                    cmsg->cmsg_len == CMSG_LEN(sizeof(struct timeval)))
-                        triple_timestamp_from_realtime(&t, timeval_load((struct timeval*) CMSG_DATA(cmsg)));
-        }
-
-        if (!triple_timestamp_is_set(&t))
-                triple_timestamp_get(&t);
-
-        *ret_dst = addr;
-        *ret_timestamp = t;
+        if (ret_timestamp)
+                triple_timestamp_from_cmsg(ret_timestamp, &msg);
+        if (ret_sender)
+                *ret_sender = addr;
         return 0;
 }

@@ -8,7 +8,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "journald-console.h"
 #include "journald-server.h"
 #include "parse-util.h"
@@ -38,13 +38,13 @@ void server_forward_console(
                 const char *message,
                 const struct ucred *ucred) {
 
-        struct iovec iovec[5];
+        struct iovec iovec[7];
         struct timespec ts;
         char tbuf[STRLEN("[] ") + DECIMAL_STR_MAX(ts.tv_sec) + DECIMAL_STR_MAX(ts.tv_nsec)-3 + 1];
         char header_pid[STRLEN("[]: ") + DECIMAL_STR_MAX(pid_t)];
         _cleanup_free_ char *ident_buf = NULL;
         _cleanup_close_ int fd = -EBADF;
-        const char *tty;
+        const char *tty, *color_on = "", *color_off = "";
         int n = 0;
 
         assert(s);
@@ -66,7 +66,7 @@ void server_forward_console(
         /* Second: identifier and PID */
         if (ucred) {
                 if (!identifier) {
-                        (void) get_process_comm(ucred->pid, &ident_buf);
+                        (void) pid_get_comm(ucred->pid, &ident_buf);
                         identifier = ident_buf;
                 }
 
@@ -81,8 +81,12 @@ void server_forward_console(
                 iovec[n++] = IOVEC_MAKE_STRING(": ");
         }
 
+        get_log_colors(LOG_PRI(priority), &color_on, &color_off, NULL);
+
         /* Fourth: message */
+        iovec[n++] = IOVEC_MAKE_STRING(color_on);
         iovec[n++] = IOVEC_MAKE_STRING(message);
+        iovec[n++] = IOVEC_MAKE_STRING(color_off);
         iovec[n++] = IOVEC_MAKE_STRING("\n");
 
         tty = s->tty_path ?: "/dev/console";

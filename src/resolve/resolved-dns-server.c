@@ -542,7 +542,7 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
                            DNS_SERVER_FEATURE_LEVEL_IS_UDP(s->possible_feature_level) &&
                            ((s->possible_feature_level != DNS_SERVER_FEATURE_LEVEL_DO) || dns_server_get_dnssec_mode(s) != DNSSEC_YES)) {
 
-                        /* We lost too many UDP packets in a row, and are on an UDP feature level. If the
+                        /* We lost too many UDP packets in a row, and are on a UDP feature level. If the
                          * packets are lost, maybe the server cannot parse them, hence downgrading sounds
                          * like a good idea. We might downgrade all the way down to TCP this way.
                          *
@@ -1095,3 +1095,28 @@ static const char* const dns_server_feature_level_table[_DNS_SERVER_FEATURE_LEVE
         [DNS_SERVER_FEATURE_LEVEL_TLS_DO]    = "TLS+EDNS0+DO",
 };
 DEFINE_STRING_TABLE_LOOKUP(dns_server_feature_level, DnsServerFeatureLevel);
+
+int dns_server_dump_state_to_json(DnsServer *server, JsonVariant **ret) {
+
+        assert(server);
+        assert(ret);
+
+        return json_build(ret,
+                          JSON_BUILD_OBJECT(
+                                        JSON_BUILD_PAIR_STRING("Server", strna(dns_server_string_full(server))),
+                                        JSON_BUILD_PAIR_STRING("Type", strna(dns_server_type_to_string(server->type))),
+                                        JSON_BUILD_PAIR_CONDITION(server->type == DNS_SERVER_LINK, "Interface", JSON_BUILD_STRING(server->link ? server->link->ifname : NULL)),
+                                        JSON_BUILD_PAIR_CONDITION(server->type == DNS_SERVER_LINK, "InterfaceIndex", JSON_BUILD_UNSIGNED(server->link ? server->link->ifindex : 0)),
+                                        JSON_BUILD_PAIR_STRING("VerifiedFeatureLevel", strna(dns_server_feature_level_to_string(server->verified_feature_level))),
+                                        JSON_BUILD_PAIR_STRING("PossibleFeatureLevel", strna(dns_server_feature_level_to_string(server->possible_feature_level))),
+                                        JSON_BUILD_PAIR_STRING("DNSSECMode", strna(dnssec_mode_to_string(dns_server_get_dnssec_mode(server)))),
+                                        JSON_BUILD_PAIR_BOOLEAN("DNSSECSupported", dns_server_dnssec_supported(server)),
+                                        JSON_BUILD_PAIR_UNSIGNED("ReceivedUDPFragmentMax", server->received_udp_fragment_max),
+                                        JSON_BUILD_PAIR_UNSIGNED("FailedUDPAttempts", server->n_failed_udp),
+                                        JSON_BUILD_PAIR_UNSIGNED("FailedTCPAttempts", server->n_failed_tcp),
+                                        JSON_BUILD_PAIR_BOOLEAN("PacketTruncated", server->packet_truncated),
+                                        JSON_BUILD_PAIR_BOOLEAN("PacketBadOpt", server->packet_bad_opt),
+                                        JSON_BUILD_PAIR_BOOLEAN("PacketRRSIGMissing", server->packet_rrsig_missing),
+                                        JSON_BUILD_PAIR_BOOLEAN("PacketInvalid", server->packet_invalid),
+                                        JSON_BUILD_PAIR_BOOLEAN("PacketDoOff", server->packet_do_off)));
+}

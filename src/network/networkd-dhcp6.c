@@ -3,18 +3,20 @@
   Copyright © 2014 Intel Corporation. All rights reserved.
 ***/
 
-#include "sd-dhcp6-client.h"
-
+#include "dhcp6-client-internal.h"
+#include "dhcp6-lease-internal.h"
 #include "hashmap.h"
 #include "hostname-setup.h"
 #include "hostname-util.h"
 #include "networkd-address.h"
 #include "networkd-dhcp-prefix-delegation.h"
+#include "networkd-dhcp6-bus.h"
 #include "networkd-dhcp6.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-queue.h"
 #include "networkd-route.h"
+#include "networkd-state-file.h"
 #include "string-table.h"
 #include "string-util.h"
 
@@ -72,11 +74,9 @@ static int dhcp6_remove(Link *link, bool only_marked) {
                 if (only_marked && !address_is_marked(address))
                         continue;
 
-                k = address_remove(address);
+                k = address_remove_and_drop(address);
                 if (k < 0)
                         r = k;
-
-                address_cancel_request(address);
         }
 
         return r;
@@ -96,27 +96,20 @@ static int dhcp6_address_ready_callback(Address *address) {
 }
 
 int dhcp6_check_ready(Link *link) {
-        bool has_ready = false;
-        Address *address;
         int r;
 
         assert(link);
+        assert(link->network);
 
         if (link->dhcp6_messages > 0) {
                 log_link_debug(link, "%s(): DHCPv6 addresses and routes are not set.", __func__);
                 return 0;
         }
 
-        SET_FOREACH(address, link->addresses) {
-                if (address->source != NETWORK_CONFIG_SOURCE_DHCP6)
-                        continue;
-                if (address_is_ready(address)) {
-                        has_ready = true;
-                        break;
-                }
-        }
+        if (link->network->dhcp6_use_address &&
+            !link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_DHCP6)) {
+                Address *address;
 
-        if (!has_ready) {
                 SET_FOREACH(address, link->addresses)
                         if (address->source == NETWORK_CONFIG_SOURCE_DHCP6)
                                 address->callback = dhcp6_address_ready_callback;
@@ -163,7 +156,7 @@ static int verify_dhcp6_address(Link *link, const Address *address) {
 
         const char *pretty = IN6_ADDR_TO_STRING(&address->in_addr.in6);
 
-        if (address_get(link, address, &existing) < 0) {
+        if (address_get_harder(link, address, &existing) < 0) {
                 /* New address. */
                 log_level = LOG_INFO;
                 goto simple_log;
@@ -232,7 +225,7 @@ static int dhcp6_request_address(
         else
                 address_unmark(existing);
 
-        r = link_request_address(link, TAKE_PTR(addr), true, &link->dhcp6_messages,
+        r = link_request_address(link, addr, &link->dhcp6_messages,
                                  dhcp6_address_handler, NULL);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to request DHCPv6 address %s/128: %m",
@@ -242,7 +235,6 @@ static int dhcp6_request_address(
 
 static int dhcp6_address_acquired(Link *link) {
         struct in6_addr server_address;
-        usec_t timestamp_usec;
         int r;
 
         assert(link);
@@ -256,21 +248,22 @@ static int dhcp6_address_acquired(Link *link) {
         if (r < 0)
                 return log_link_warning_errno(link, r, "Failed to get server address of DHCPv6 lease: %m");
 
-        r = sd_dhcp6_lease_get_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME, &timestamp_usec);
-        if (r < 0)
-                return log_link_warning_errno(link, r, "Failed to get timestamp of DHCPv6 lease: %m");
-
-        for (sd_dhcp6_lease_reset_address_iter(link->dhcp6_lease);;) {
-                uint32_t lifetime_preferred_sec, lifetime_valid_sec;
+        FOREACH_DHCP6_ADDRESS(link->dhcp6_lease) {
+                usec_t lifetime_preferred_usec, lifetime_valid_usec;
                 struct in6_addr ip6_addr;
 
-                r = sd_dhcp6_lease_get_address(link->dhcp6_lease, &ip6_addr, &lifetime_preferred_sec, &lifetime_valid_sec);
+                r = sd_dhcp6_lease_get_address(link->dhcp6_lease, &ip6_addr);
                 if (r < 0)
-                        break;
+                        return r;
+
+                r = sd_dhcp6_lease_get_address_lifetime_timestamp(link->dhcp6_lease, CLOCK_BOOTTIME,
+                                                                  &lifetime_preferred_usec, &lifetime_valid_usec);
+                if (r < 0)
+                        return r;
 
                 r = dhcp6_request_address(link, &server_address, &ip6_addr,
-                                          sec_to_usec(lifetime_preferred_sec, timestamp_usec),
-                                          sec_to_usec(lifetime_valid_sec, timestamp_usec));
+                                          lifetime_preferred_usec,
+                                          lifetime_valid_usec);
                 if (r < 0)
                         return r;
         }
@@ -317,11 +310,11 @@ static int dhcp6_lease_ip_acquired(sd_dhcp6_client *client, Link *link) {
         if (r < 0)
                 return r;
 
-        if (dhcp6_lease_has_pd_prefix(lease)) {
+        if (sd_dhcp6_lease_has_pd_prefix(lease)) {
                 r = dhcp6_pd_prefix_acquired(link);
                 if (r < 0)
                         return r;
-        } else if (dhcp6_lease_has_pd_prefix(lease_old))
+        } else if (sd_dhcp6_lease_has_pd_prefix(lease_old))
                 /* When we had PD prefixes but not now, we need to remove them. */
                 dhcp_pd_prefix_lost(link);
 
@@ -342,6 +335,19 @@ static int dhcp6_lease_ip_acquired(sd_dhcp6_client *client, Link *link) {
 }
 
 static int dhcp6_lease_information_acquired(sd_dhcp6_client *client, Link *link) {
+        sd_dhcp6_lease *lease;
+        int r;
+
+        assert(client);
+        assert(link);
+
+        r = sd_dhcp6_client_get_lease(client, &lease);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Failed to get DHCPv6 lease: %m");
+
+        unref_and_replace_full(link->dhcp6_lease, lease, sd_dhcp6_lease_ref, sd_dhcp6_lease_unref);
+
+        link_dirty(link);
         return 0;
 }
 
@@ -353,7 +359,7 @@ static int dhcp6_lease_lost(Link *link) {
 
         log_link_info(link, "DHCPv6 lease lost");
 
-        if (dhcp6_lease_has_pd_prefix(link->dhcp6_lease))
+        if (sd_dhcp6_lease_has_pd_prefix(link->dhcp6_lease))
                 dhcp_pd_prefix_lost(link);
 
         link->dhcp6_lease = sd_dhcp6_lease_unref(link->dhcp6_lease);
@@ -367,7 +373,7 @@ static int dhcp6_lease_lost(Link *link) {
 
 static void dhcp6_handler(sd_dhcp6_client *client, int event, void *userdata) {
         Link *link = ASSERT_PTR(userdata);
-        int r;
+        int r = 0;
 
         assert(link->network);
 
@@ -379,31 +385,24 @@ static void dhcp6_handler(sd_dhcp6_client *client, int event, void *userdata) {
         case SD_DHCP6_CLIENT_EVENT_RESEND_EXPIRE:
         case SD_DHCP6_CLIENT_EVENT_RETRANS_MAX:
                 r = dhcp6_lease_lost(link);
-                if (r < 0)
-                        link_enter_failed(link);
                 break;
 
         case SD_DHCP6_CLIENT_EVENT_IP_ACQUIRE:
                 r = dhcp6_lease_ip_acquired(client, link);
-                if (r < 0) {
-                        link_enter_failed(link);
-                        return;
-                }
+                break;
 
-                _fallthrough_;
         case SD_DHCP6_CLIENT_EVENT_INFORMATION_REQUEST:
                 r = dhcp6_lease_information_acquired(client, link);
-                if (r < 0)
-                        link_enter_failed(link);
                 break;
 
         default:
                 if (event < 0)
-                        log_link_warning_errno(link, event, "DHCPv6 error: %m");
+                        log_link_warning_errno(link, event, "DHCPv6 error, ignoring: %m");
                 else
                         log_link_warning(link, "DHCPv6 unknown event: %d", event);
-                return;
         }
+        if (r < 0)
+                link_enter_failed(link);
 }
 
 int dhcp6_start_on_ra(Link *link, bool information_request) {
@@ -516,10 +515,10 @@ static int dhcp6_set_hostname(sd_dhcp6_client *client, Link *link) {
 
         assert(link);
 
-        if (!link->network->dhcp_send_hostname)
+        if (!link->network->dhcp6_send_hostname)
                 hn = NULL;
-        else if (link->network->dhcp_hostname)
-                hn = link->network->dhcp_hostname;
+        else if (link->network->dhcp6_hostname)
+                hn = link->network->dhcp6_hostname;
         else {
                 r = gethostname_strict(&hostname);
                 if (r < 0 && r != -ENXIO) /* ENXIO: no hostname set or hostname is "localhost" */
@@ -557,13 +556,26 @@ static int dhcp6_set_identifier(Link *link, sd_dhcp6_client *client) {
         }
 
         duid = link_get_dhcp6_duid(link);
-        if (duid->type == DUID_TYPE_LLT && duid->raw_data_len == 0)
-                r = sd_dhcp6_client_set_duid_llt(client, duid->llt_time);
+
+        if (duid->raw_data_len == 0)
+                switch (duid->type) {
+                case DUID_TYPE_LLT:
+                        r = sd_dhcp6_client_set_duid_llt(client, duid->llt_time);
+                        break;
+                case DUID_TYPE_LL:
+                        r = sd_dhcp6_client_set_duid_ll(client);
+                        break;
+                case DUID_TYPE_EN:
+                        r = sd_dhcp6_client_set_duid_en(client);
+                        break;
+                case DUID_TYPE_UUID:
+                        r = sd_dhcp6_client_set_duid_uuid(client);
+                        break;
+                default:
+                        r = sd_dhcp6_client_set_duid_raw(client, duid->type, NULL, 0);
+                }
         else
-                r = sd_dhcp6_client_set_duid(client,
-                                             duid->type,
-                                             duid->raw_data_len > 0 ? duid->raw_data : NULL,
-                                             duid->raw_data_len);
+                r = sd_dhcp6_client_set_duid_raw(client, duid->type, duid->raw_data, duid->raw_data_len);
         if (r < 0)
                 return r;
 
@@ -635,6 +647,12 @@ static int dhcp6_configure(Link *link) {
                         return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to request domains: %m");
         }
 
+        if (link->network->dhcp6_use_captive_portal > 0) {
+                r = sd_dhcp6_client_set_request_option(client, SD_DHCP6_OPTION_CAPTIVE_PORTAL);
+                if (r < 0)
+                        return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to request captive portal: %m");
+        }
+
         if (link->network->dhcp6_use_ntp) {
                 r = sd_dhcp6_client_set_request_option(client, SD_DHCP6_OPTION_NTP_SERVER);
                 if (r < 0)
@@ -681,6 +699,10 @@ static int dhcp6_configure(Link *link) {
         r = sd_dhcp6_client_set_callback(client, dhcp6_handler, link);
         if (r < 0)
                 return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to set callback: %m");
+
+        r = dhcp6_client_set_state_callback(client, dhcp6_client_callback_bus, link);
+        if (r < 0)
+                return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to set state change callback: %m");
 
         r = sd_dhcp6_client_set_prefix_delegation(client, link->network->dhcp6_use_pd_prefix);
         if (r < 0)

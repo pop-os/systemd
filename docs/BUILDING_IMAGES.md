@@ -5,7 +5,7 @@ layout: default
 SPDX-License-Identifier: LGPL-2.1-or-later
 ---
 
-# Safely Building Images
+# Building Images Safely
 
 In many scenarios OS installations are shipped as pre-built images, that
 require no further installation process beyond simple `dd`-ing the image to
@@ -27,7 +27,7 @@ boot. For that it's essential to:
 1. Remove the
    [`/etc/machine-id`](https://www.freedesktop.org/software/systemd/man/machine-id.html)
    file or write the string `uninitialized\n` into it. This file is supposed to
-   carry a 128bit identifier unique to the system. Only when it is reset it
+   carry a 128-bit identifier unique to the system. Only when it is reset it
    will be auto-generated on first boot and thus be truly unique. If this file
    is not reset, and carries a valid ID every instance of the system will come
    up with the same ID and that will likely lead to problems sooner or later,

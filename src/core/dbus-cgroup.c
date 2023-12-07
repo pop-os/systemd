@@ -7,23 +7,28 @@
 #include "bpf-firewall.h"
 #include "bpf-foreign.h"
 #include "bus-get-properties.h"
+#include "bus-util.h"
 #include "cgroup-util.h"
 #include "cgroup.h"
 #include "core-varlink.h"
 #include "dbus-cgroup.h"
 #include "dbus-util.h"
 #include "errno-util.h"
+#include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "firewall-util.h"
 #include "in-addr-prefix-util.h"
 #include "ip-protocol-list.h"
 #include "limits-util.h"
+#include "memstream-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "percent-util.h"
 #include "socket-util.h"
 
-BUS_DEFINE_PROPERTY_GET(bus_property_get_tasks_max, "t", TasksMax, tasks_max_resolve);
+BUS_DEFINE_PROPERTY_GET(bus_property_get_tasks_max, "t", CGroupTasksMax, cgroup_tasks_max_resolve);
+BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_cgroup_pressure_watch, cgroup_pressure_watch, CGroupPressureWatch);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_cgroup_device_policy, cgroup_device_policy, CGroupDevicePolicy);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_managed_oom_mode, managed_oom_mode, ManagedOOMMode);
@@ -276,19 +281,7 @@ static int property_get_device_allow(
                 return r;
 
         LIST_FOREACH(device_allow, a, c->device_allow) {
-                unsigned k = 0;
-                char rwm[4];
-
-                if (a->r)
-                        rwm[k++] = 'r';
-                if (a->w)
-                        rwm[k++] = 'w';
-                if (a->m)
-                        rwm[k++] = 'm';
-
-                rwm[k] = 0;
-
-                r = sd_bus_message_append(reply, "(ss)", a->path, rwm);
+                r = sd_bus_message_append(reply, "(ss)", a->path, cgroup_device_permissions_to_string(a->permissions));
                 if (r < 0)
                         return r;
         }
@@ -398,9 +391,9 @@ static int property_get_restrict_network_interfaces(
                 sd_bus_message *reply,
                 void *userdata,
                 sd_bus_error *error) {
-        int r;
+
         CGroupContext *c = ASSERT_PTR(userdata);
-        char *iface;
+        int r;
 
         assert(bus);
         assert(reply);
@@ -413,19 +406,37 @@ static int property_get_restrict_network_interfaces(
         if (r < 0)
                 return r;
 
-        r = sd_bus_message_open_container(reply, 'a', "s");
+        r = bus_message_append_string_set(reply, c->restrict_network_interfaces);
         if (r < 0)
                 return r;
 
-        SET_FOREACH(iface, c->restrict_network_interfaces) {
-                r = sd_bus_message_append(reply, "s", iface);
+        return sd_bus_message_close_container(reply);
+}
+
+static int property_get_cgroup_nft_set(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+        int r;
+        CGroupContext *c = userdata;
+
+        assert(bus);
+        assert(reply);
+        assert(c);
+
+        r = sd_bus_message_open_container(reply, 'a', "(iiss)");
+        if (r < 0)
+                return r;
+
+        FOREACH_ARRAY(nft_set, c->nft_set_context.sets, c->nft_set_context.n_sets) {
+                r = sd_bus_message_append(reply, "(iiss)", nft_set->source, nft_set->nfproto, nft_set->table, nft_set->set);
                 if (r < 0)
                         return r;
         }
-
-        r = sd_bus_message_close_container(reply);
-        if (r < 0)
-                return r;
 
         return sd_bus_message_close_container(reply);
 }
@@ -434,6 +445,7 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_VTABLE_START(0),
         SD_BUS_PROPERTY("Delegate", "b", bus_property_get_bool, offsetof(CGroupContext, delegate), 0),
         SD_BUS_PROPERTY("DelegateControllers", "as", property_get_delegate_controllers, 0, 0),
+        SD_BUS_PROPERTY("DelegateSubgroup", "s", NULL, offsetof(CGroupContext, delegate_subgroup), 0),
         SD_BUS_PROPERTY("CPUAccounting", "b", bus_property_get_bool, offsetof(CGroupContext, cpu_accounting), 0),
         SD_BUS_PROPERTY("CPUWeight", "t", NULL, offsetof(CGroupContext, cpu_weight), 0),
         SD_BUS_PROPERTY("StartupCPUWeight", "t", NULL, offsetof(CGroupContext, startup_cpu_weight), 0),
@@ -462,13 +474,19 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("BlockIOWriteBandwidth", "a(st)", property_get_blockio_device_bandwidths, 0, 0),
         SD_BUS_PROPERTY("MemoryAccounting", "b", bus_property_get_bool, offsetof(CGroupContext, memory_accounting), 0),
         SD_BUS_PROPERTY("DefaultMemoryLow", "t", NULL, offsetof(CGroupContext, default_memory_low), 0),
+        SD_BUS_PROPERTY("DefaultStartupMemoryLow", "t", NULL, offsetof(CGroupContext, default_startup_memory_low), 0),
         SD_BUS_PROPERTY("DefaultMemoryMin", "t", NULL, offsetof(CGroupContext, default_memory_min), 0),
         SD_BUS_PROPERTY("MemoryMin", "t", NULL, offsetof(CGroupContext, memory_min), 0),
         SD_BUS_PROPERTY("MemoryLow", "t", NULL, offsetof(CGroupContext, memory_low), 0),
+        SD_BUS_PROPERTY("StartupMemoryLow", "t", NULL, offsetof(CGroupContext, startup_memory_low), 0),
         SD_BUS_PROPERTY("MemoryHigh", "t", NULL, offsetof(CGroupContext, memory_high), 0),
+        SD_BUS_PROPERTY("StartupMemoryHigh", "t", NULL, offsetof(CGroupContext, startup_memory_high), 0),
         SD_BUS_PROPERTY("MemoryMax", "t", NULL, offsetof(CGroupContext, memory_max), 0),
+        SD_BUS_PROPERTY("StartupMemoryMax", "t", NULL, offsetof(CGroupContext, startup_memory_max), 0),
         SD_BUS_PROPERTY("MemorySwapMax", "t", NULL, offsetof(CGroupContext, memory_swap_max), 0),
+        SD_BUS_PROPERTY("StartupMemorySwapMax", "t", NULL, offsetof(CGroupContext, startup_memory_swap_max), 0),
         SD_BUS_PROPERTY("MemoryZSwapMax", "t", NULL, offsetof(CGroupContext, memory_zswap_max), 0),
+        SD_BUS_PROPERTY("StartupMemoryZSwapMax", "t", NULL, offsetof(CGroupContext, startup_memory_zswap_max), 0),
         SD_BUS_PROPERTY("MemoryLimit", "t", NULL, offsetof(CGroupContext, memory_limit), 0),
         SD_BUS_PROPERTY("DevicePolicy", "s", property_get_cgroup_device_policy, offsetof(CGroupContext, device_policy), 0),
         SD_BUS_PROPERTY("DeviceAllow", "a(ss)", property_get_device_allow, 0, 0),
@@ -488,6 +506,10 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("SocketBindAllow", "a(iiqq)", property_get_socket_bind, offsetof(CGroupContext, socket_bind_allow), 0),
         SD_BUS_PROPERTY("SocketBindDeny", "a(iiqq)", property_get_socket_bind, offsetof(CGroupContext, socket_bind_deny), 0),
         SD_BUS_PROPERTY("RestrictNetworkInterfaces", "(bas)", property_get_restrict_network_interfaces, 0, 0),
+        SD_BUS_PROPERTY("MemoryPressureWatch", "s", bus_property_get_cgroup_pressure_watch, offsetof(CGroupContext, memory_pressure_watch), 0),
+        SD_BUS_PROPERTY("MemoryPressureThresholdUSec", "t", bus_property_get_usec, offsetof(CGroupContext, memory_pressure_threshold_usec), 0),
+        SD_BUS_PROPERTY("NFTSet", "a(iiss)", property_get_cgroup_nft_set, 0, 0),
+        SD_BUS_PROPERTY("CoredumpReceive", "b", bus_property_get_bool, offsetof(CGroupContext, coredump_receive), 0),
         SD_BUS_VTABLE_END
 };
 
@@ -523,6 +545,33 @@ static int bus_cgroup_set_transient_property(
                         c->delegate_controllers = b ? _CGROUP_MASK_ALL : 0;
 
                         unit_write_settingf(u, flags, name, "Delegate=%s", yes_no(b));
+                }
+
+                return 1;
+
+        } else if (streq(name, "DelegateSubgroup")) {
+                const char *s;
+
+                if (!UNIT_VTABLE(u)->can_delegate)
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Delegation not available for unit type");
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                if (!isempty(s) && cg_needs_escape(s))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid control group name: %s", s);
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        if (isempty(s))
+                                c->delegate_subgroup = mfree(c->delegate_subgroup);
+                        else {
+                                r = free_and_strdup_warn(&c->delegate_subgroup, s);
+                                if (r < 0)
+                                        return r;
+                        }
+
+                        unit_write_settingf(u, flags, name, "DelegateSubgroup=%s", s);
                 }
 
                 return 1;
@@ -620,15 +669,16 @@ static int bus_cgroup_set_transient_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 *filters = strv_free(*filters);
 
                         unit_invalidate_cgroup_bpf(u);
-                        f = open_memstream_unlocked(&buf, &size);
+
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -638,7 +688,7 @@ static int bus_cgroup_set_transient_property(
                         STRV_FOREACH(entry, *filters)
                                 fprintf(f, "%s=%s\n", name, *entry);
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -685,7 +735,7 @@ static int bus_cgroup_set_transient_property(
                                                 name);
 
                         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                                r = cgroup_add_bpf_foreign_program(c, attach_type, p);
+                                r = cgroup_context_add_bpf_foreign_program(c, attach_type, p);
                                 if (r < 0)
                                         return r;
                         }
@@ -699,15 +749,15 @@ static int bus_cgroup_set_transient_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 while (c->bpf_foreign_programs)
                                         cgroup_context_remove_bpf_foreign_program(c, c->bpf_foreign_programs);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -719,7 +769,7 @@ static int bus_cgroup_set_transient_property(
                                                 bpf_cgroup_attach_type_to_string(fp->attach_type),
                                                 fp->bpffs_path);
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -735,6 +785,64 @@ static int bus_cgroup_set_transient_property(
                                                  "filesystem, but the local system does not support that.\n"
                                                  "Starting this unit will fail!", u->id);
                         }
+                }
+
+                return 1;
+
+        } else if (streq(name, "MemoryPressureWatch")) {
+                CGroupPressureWatch p;
+                const char *t;
+
+                r = sd_bus_message_read(message, "s", &t);
+                if (r < 0)
+                        return r;
+
+                if (isempty(t))
+                        p = _CGROUP_PRESSURE_WATCH_INVALID;
+                else {
+                        p = cgroup_pressure_watch_from_string(t);
+                        if (p < 0)
+                                return p;
+                }
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        c->memory_pressure_watch = p;
+                        unit_write_settingf(u, flags, name, "MemoryPressureWatch=%s", strempty(cgroup_pressure_watch_to_string(p)));
+                }
+
+                return 1;
+
+        } else if (streq(name, "MemoryPressureThresholdUSec")) {
+                uint64_t t;
+
+                r = sd_bus_message_read(message, "t", &t);
+                if (r < 0)
+                        return r;
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        c->memory_pressure_threshold_usec = t;
+
+                        if (t == UINT64_MAX)
+                                unit_write_setting(u, flags, name, "MemoryPressureThresholdUSec=");
+                        else
+                                unit_write_settingf(u, flags, name, "MemoryPressureThresholdUSec=%" PRIu64, t);
+                }
+
+                return 1;
+        } else if (streq(name, "CoredumpReceive")) {
+                int b;
+
+                if (!UNIT_VTABLE(u)->can_delegate)
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Delegation not available for unit type");
+
+                r = sd_bus_message_read(message, "b", &b);
+                if (r < 0)
+                        return r;
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        c->coredump_receive = b;
+
+                        unit_write_settingf(u, flags, name, "CoredumpReceive=%s", yes_no(b));
                 }
 
                 return 1;
@@ -923,7 +1031,7 @@ static int bus_cgroup_set_cpu_weight(
 static int bus_cgroup_set_tasks_max(
                 Unit *u,
                 const char *name,
-                TasksMax *p,
+                CGroupTasksMax *p,
                 sd_bus_message *message,
                 UnitWriteFlags flags,
                 sd_bus_error *error) {
@@ -942,7 +1050,7 @@ static int bus_cgroup_set_tasks_max(
                                          "Value specified in %s is out of range", name);
 
         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                *p = (TasksMax) { .value = v, .scale = 0 }; /* When .scale==0, .value is the absolute value */
+                *p = (CGroupTasksMax) { .value = v, .scale = 0 }; /* When .scale==0, .value is the absolute value */
                 unit_invalidate_cgroup(u, CGROUP_MASK_PIDS);
 
                 if (v == CGROUP_LIMIT_MAX)
@@ -959,7 +1067,7 @@ static int bus_cgroup_set_tasks_max(
 static int bus_cgroup_set_tasks_max_scale(
                 Unit *u,
                 const char *name,
-                TasksMax *p,
+                CGroupTasksMax *p,
                 sd_bus_message *message,
                 UnitWriteFlags flags,
                 sd_bus_error *error) {
@@ -978,7 +1086,7 @@ static int bus_cgroup_set_tasks_max_scale(
                                          "Value specified in %s is out of range", name);
 
         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                *p = (TasksMax) { v, UINT32_MAX }; /* .scale is not 0, so this is interpreted as v/UINT32_MAX. */
+                *p = (CGroupTasksMax) { v, UINT32_MAX }; /* .scale is not 0, so this is interpreted as v/UINT32_MAX. */
                 unit_invalidate_cgroup(u, CGROUP_MASK_PIDS);
 
                 uint32_t scaled = DIV_ROUND_UP((uint64_t) v * 100U, (uint64_t) UINT32_MAX);
@@ -1057,6 +1165,13 @@ int bus_cgroup_set_property(
                 return r;
         }
 
+        if (streq(name, "StartupMemoryLow")) {
+                r = bus_cgroup_set_memory_protection(u, name, &c->startup_memory_low, message, flags, error);
+                if (r > 0)
+                        c->startup_memory_low_set = true;
+                return r;
+        }
+
         if (streq(name, "DefaultMemoryMin")) {
                 r = bus_cgroup_set_memory_protection(u, name, &c->default_memory_min, message, flags, error);
                 if (r > 0)
@@ -1071,17 +1186,52 @@ int bus_cgroup_set_property(
                 return r;
         }
 
+        if (streq(name, "DefaultStartupMemoryLow")) {
+                r = bus_cgroup_set_memory_protection(u, name, &c->default_startup_memory_low, message, flags, error);
+                if (r > 0)
+                        c->default_startup_memory_low_set = true;
+                return r;
+        }
+
         if (streq(name, "MemoryHigh"))
                 return bus_cgroup_set_memory(u, name, &c->memory_high, message, flags, error);
+
+        if (streq(name, "StartupMemoryHigh")) {
+                r = bus_cgroup_set_memory(u, name, &c->startup_memory_high, message, flags, error);
+                if (r > 0)
+                        c->startup_memory_high_set = true;
+                return r;
+        }
 
         if (streq(name, "MemorySwapMax"))
                 return bus_cgroup_set_swap(u, name, &c->memory_swap_max, message, flags, error);
 
+        if (streq(name, "StartupMemorySwapMax")) {
+                r = bus_cgroup_set_swap(u, name, &c->startup_memory_swap_max, message, flags, error);
+                if (r > 0)
+                        c->startup_memory_swap_max_set = true;
+                return r;
+        }
+
         if (streq(name, "MemoryZSwapMax"))
                 return bus_cgroup_set_zswap(u, name, &c->memory_zswap_max, message, flags, error);
 
+        if (streq(name, "StartupMemoryZSwapMax")) {
+                r = bus_cgroup_set_zswap(u, name, &c->startup_memory_zswap_max, message, flags, error);
+                if (r > 0)
+                        c->startup_memory_zswap_max_set = true;
+                return r;
+        }
+
         if (streq(name, "MemoryMax"))
                 return bus_cgroup_set_memory(u, name, &c->memory_max, message, flags, error);
+
+        if (streq(name, "StartupMemoryMax")) {
+                r = bus_cgroup_set_memory(u, name, &c->startup_memory_max, message, flags, error);
+                if (r > 0)
+                        c->startup_memory_max_set = true;
+                return r;
+        }
 
         if (streq(name, "MemoryLimit"))
                 return bus_cgroup_set_memory(u, name, &c->memory_limit, message, flags, error);
@@ -1223,7 +1373,7 @@ int bus_cgroup_set_property(
                         new_set = (CPUSet) {};
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_CPUSET);
-                        unit_write_settingf(u, flags, name, "%s=%s", name, setstr);
+                        unit_write_settingf(u, flags, name, "%s=\n%s=%s", name, name, setstr);
                 }
 
                 return 1;
@@ -1283,9 +1433,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 LIST_FOREACH(device_limits, a, c->io_device_limits)
@@ -1293,7 +1443,7 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_IO);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1302,9 +1452,10 @@ int bus_cgroup_set_property(
                                 if (a->limits[iol_type] != cgroup_io_limit_defaults[iol_type])
                                         fprintf(f, "%s=%s %" PRIu64 "\n", name, a->path, a->limits[iol_type]);
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
+
                         unit_write_setting(u, flags, name, buf);
                 }
 
@@ -1360,9 +1511,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 while (c->io_device_weights)
@@ -1370,7 +1521,7 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_IO);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1378,9 +1529,10 @@ int bus_cgroup_set_property(
                         LIST_FOREACH(device_weights, a, c->io_device_weights)
                                 fprintf(f, "IODeviceWeight=%s %" PRIu64 "\n", a->path, a->weight);
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
+
                         unit_write_setting(u, flags, name, buf);
                 }
 
@@ -1433,9 +1585,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 while (c->io_device_latencies)
@@ -1443,7 +1595,7 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_IO);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1452,9 +1604,10 @@ int bus_cgroup_set_property(
                                 fprintf(f, "IODeviceLatencyTargetSec=%s %s\n",
                                         a->path, FORMAT_TIMESPAN(a->target_usec, 1));
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
+
                         unit_write_setting(u, flags, name, buf);
                 }
 
@@ -1518,9 +1671,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 LIST_FOREACH(device_bandwidths, a, c->blockio_device_bandwidths) {
@@ -1532,7 +1685,7 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_BLKIO);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1548,7 +1701,7 @@ int bus_cgroup_set_property(
                                                 fprintf(f, "BlockIOWriteBandwidth=%s %" PRIu64 "\n", a->path, a->wbps);
                         }
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -1607,9 +1760,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 while (c->blockio_device_weights)
@@ -1617,7 +1770,7 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_BLKIO);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1625,7 +1778,7 @@ int bus_cgroup_set_property(
                         LIST_FOREACH(device_weights, a, c->blockio_device_weights)
                                 fprintf(f, "BlockIODeviceWeight=%s %" PRIu64 "\n", a->path, a->weight);
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -1663,41 +1816,23 @@ int bus_cgroup_set_property(
                         return r;
 
                 while ((r = sd_bus_message_read(message, "(ss)", &path, &rwm)) > 0) {
+                        CGroupDevicePermissions p;
 
                         if (!valid_device_allow_pattern(path) || strpbrk(path, WHITESPACE))
                                 return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "DeviceAllow= requires device node or pattern");
 
                         if (isempty(rwm))
-                                rwm = "rwm";
-                        else if (!in_charset(rwm, "rwm"))
-                                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "DeviceAllow= requires combination of rwm flags");
+                                p = _CGROUP_DEVICE_PERMISSIONS_ALL;
+                        else {
+                                p = cgroup_device_permissions_from_string(rwm);
+                                if (p < 0)
+                                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "DeviceAllow= requires combination of rwm flags");
+                        }
 
                         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                                CGroupDeviceAllow *a = NULL;
-
-                                LIST_FOREACH(device_allow, b, c->device_allow)
-                                        if (path_equal(b->path, path)) {
-                                                a = b;
-                                                break;
-                                        }
-
-                                if (!a) {
-                                        a = new0(CGroupDeviceAllow, 1);
-                                        if (!a)
-                                                return -ENOMEM;
-
-                                        a->path = strdup(path);
-                                        if (!a->path) {
-                                                free(a);
-                                                return -ENOMEM;
-                                        }
-
-                                        LIST_PREPEND(device_allow, c->device_allow, a);
-                                }
-
-                                a->r = strchr(rwm, 'r');
-                                a->w = strchr(rwm, 'w');
-                                a->m = strchr(rwm, 'm');
+                                r = cgroup_context_add_or_update_device_allow(c, path, p);
+                                if (r < 0)
+                                        return r;
                         }
 
                         n++;
@@ -1710,9 +1845,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 while (c->device_allow)
@@ -1720,17 +1855,18 @@ int bus_cgroup_set_property(
 
                         unit_invalidate_cgroup(u, CGROUP_MASK_DEVICES);
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
                         fputs("DeviceAllow=\n", f);
                         LIST_FOREACH(device_allow, a, c->device_allow)
-                                fprintf(f, "DeviceAllow=%s %s%s%s\n", a->path, a->r ? "r" : "", a->w ? "w" : "", a->m ? "m" : "");
+                                fprintf(f, "DeviceAllow=%s %s\n", a->path, cgroup_device_permissions_to_string(a->permissions));
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
+
                         unit_write_setting(u, flags, name, buf);
                 }
 
@@ -1819,14 +1955,15 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
                         Set **prefixes;
                         bool *reduced;
+                        FILE *f;
 
                         unit_invalidate_cgroup_bpf(u);
-                        f = open_memstream_unlocked(&buf, &size);
+
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
@@ -1851,7 +1988,7 @@ int bus_cgroup_set_property(
                                                 IN_ADDR_PREFIX_TO_STRING(p->family, &p->address, p->prefixlen));
                         }
 
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -1980,9 +2117,9 @@ int bus_cgroup_set_property(
                         return r;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        _cleanup_(memstream_done) MemStream m = {};
                         _cleanup_free_ char *buf = NULL;
-                        _cleanup_fclose_ FILE *f = NULL;
-                        size_t size = 0;
+                        FILE *f;
 
                         if (n == 0)
                                 cgroup_context_remove_socket_bind(list);
@@ -1994,18 +2131,20 @@ int bus_cgroup_set_property(
                                                  "Starting this unit will fail!", u->id);
                         }
 
-                        f = open_memstream_unlocked(&buf, &size);
+                        f = memstream_init(&m);
                         if (!f)
                                 return -ENOMEM;
 
-                        fprintf(f, "%s:", name);
+                        if (n == 0)
+                                fprintf(f, "%s=\n", name);
+                        else
+                                LIST_FOREACH(socket_bind_items, item, *list) {
+                                        fprintf(f, "%s=", name);
+                                        cgroup_context_dump_socket_bind_item(item, f);
+                                        fputc('\n', f);
+                                }
 
-                        LIST_FOREACH(socket_bind_items, item, *list)
-                                cgroup_context_dump_socket_bind_item(item, f);
-
-                        fputc('\n', f);
-
-                        r = fflush_and_check(f);
+                        r = memstream_finalize(&m, &buf, NULL);
                         if (r < 0)
                                 return r;
 
@@ -2039,7 +2178,7 @@ int bus_cgroup_set_property(
 
                         if (strv_isempty(l)) {
                                 c->restrict_network_interfaces_is_allow_list = false;
-                                c->restrict_network_interfaces = set_free(c->restrict_network_interfaces);
+                                c->restrict_network_interfaces = set_free_free(c->restrict_network_interfaces);
 
                                 unit_write_settingf(u, flags, name, "%s=", name);
                                 return 1;
@@ -2072,6 +2211,75 @@ int bus_cgroup_set_property(
                 return 1;
         }
 
+        if (streq(name, "NFTSet")) {
+                int source, nfproto;
+                const char *table, *set;
+                bool empty = true;
+
+                r = sd_bus_message_enter_container(message, 'a', "(iiss)");
+                if (r < 0)
+                        return r;
+
+                while ((r = sd_bus_message_read(message, "(iiss)", &source, &nfproto, &table, &set)) > 0) {
+                        const char *source_name, *nfproto_name;
+
+                        if (!IN_SET(source, NFT_SET_SOURCE_CGROUP, NFT_SET_SOURCE_USER, NFT_SET_SOURCE_GROUP))
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid source %d.", source);
+
+                        source_name = nft_set_source_to_string(source);
+                        assert(source_name);
+
+                        nfproto_name = nfproto_to_string(nfproto);
+                        if (!nfproto_name)
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid protocol %d.", nfproto);
+
+                        if (!nft_identifier_valid(table)) {
+                                _cleanup_free_ char *esc = NULL;
+
+                                esc = cescape(table);
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid NFT table name %s.", strna(esc));
+                        }
+
+                        if (!nft_identifier_valid(set)) {
+                                _cleanup_free_ char *esc = NULL;
+
+                                esc = cescape(set);
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid NFT set name %s.", strna(esc));
+                        }
+
+                        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                                r = nft_set_add(&c->nft_set_context, source, nfproto, table, set);
+                                if (r < 0)
+                                        return r;
+
+                                unit_write_settingf(
+                                                u, flags|UNIT_ESCAPE_SPECIFIERS, name,
+                                                "%s=%s:%s:%s:%s",
+                                                name,
+                                                source_name,
+                                                nfproto_name,
+                                                table,
+                                                set);
+                        }
+
+                        empty = false;
+                }
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_exit_container(message);
+                if (r < 0)
+                        return r;
+
+                if (empty && !UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        nft_set_context_clear(&c->nft_set_context);
+                        unit_write_settingf(u, flags, name, "%s=", name);
+                }
+
+                return 1;
+        }
+
+        /* must be last */
         if (streq(name, "DisableControllers") || (u->transient && u->load_state == UNIT_STUB))
                 return bus_cgroup_set_transient_property(u, c, name, message, flags, error);
 

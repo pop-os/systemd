@@ -142,8 +142,18 @@ struct user_group_data {
         bool incomplete;
 };
 
-static void user_group_data_release(struct user_group_data *d) {
+static void user_group_data_done(struct user_group_data *d) {
         json_variant_unref(d->record);
+}
+
+struct membership_data {
+        char *user_name;
+        char *group_name;
+};
+
+static void membership_data_done(struct membership_data *d) {
+        free(d->user_name);
+        free(d->group_name);
 }
 
 static int userdb_on_query_reply(
@@ -178,7 +188,7 @@ static int userdb_on_query_reply(
         switch (iterator->what) {
 
         case LOOKUP_USER: {
-                _cleanup_(user_group_data_release) struct user_group_data user_data = {};
+                _cleanup_(user_group_data_done) struct user_group_data user_data = {};
 
                 static const JsonDispatch dispatch_table[] = {
                         { "record",     _JSON_VARIANT_TYPE_INVALID, json_dispatch_variant, offsetof(struct user_group_data, record),     0 },
@@ -189,7 +199,7 @@ static int userdb_on_query_reply(
 
                 assert_se(!iterator->found_user);
 
-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &user_data);
+                r = json_dispatch(parameters, dispatch_table, 0, &user_data);
                 if (r < 0)
                         goto finish;
 
@@ -235,7 +245,7 @@ static int userdb_on_query_reply(
         }
 
         case LOOKUP_GROUP: {
-                _cleanup_(user_group_data_release) struct user_group_data group_data = {};
+                _cleanup_(user_group_data_done) struct user_group_data group_data = {};
 
                 static const JsonDispatch dispatch_table[] = {
                         { "record",     _JSON_VARIANT_TYPE_INVALID, json_dispatch_variant, offsetof(struct user_group_data, record),     0 },
@@ -246,7 +256,7 @@ static int userdb_on_query_reply(
 
                 assert_se(!iterator->found_group);
 
-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &group_data);
+                r = json_dispatch(parameters, dispatch_table, 0, &group_data);
                 if (r < 0)
                         goto finish;
 
@@ -288,10 +298,7 @@ static int userdb_on_query_reply(
         }
 
         case LOOKUP_MEMBERSHIP: {
-                struct membership_data {
-                        const char *user_name;
-                        const char *group_name;
-                } membership_data = {};
+                _cleanup_(membership_data_done) struct membership_data membership_data = {};
 
                 static const JsonDispatch dispatch_table[] = {
                         { "userName",  JSON_VARIANT_STRING, json_dispatch_user_group_name, offsetof(struct membership_data, user_name),  JSON_RELAX },
@@ -302,25 +309,12 @@ static int userdb_on_query_reply(
                 assert(!iterator->found_user_name);
                 assert(!iterator->found_group_name);
 
-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &membership_data);
+                r = json_dispatch(parameters, dispatch_table, 0, &membership_data);
                 if (r < 0)
                         goto finish;
 
-                iterator->found_user_name = mfree(iterator->found_user_name);
-                iterator->found_group_name = mfree(iterator->found_group_name);
-
-                iterator->found_user_name = strdup(membership_data.user_name);
-                if (!iterator->found_user_name) {
-                        r = -ENOMEM;
-                        goto finish;
-                }
-
-                iterator->found_group_name = strdup(membership_data.group_name);
-                if (!iterator->found_group_name) {
-                        r = -ENOMEM;
-                        goto finish;
-                }
-
+                iterator->found_user_name = TAKE_PTR(membership_data.user_name);
+                iterator->found_group_name = TAKE_PTR(membership_data.group_name);
                 iterator->n_found++;
 
                 if (FLAGS_SET(flags, VARLINK_REPLY_CONTINUES))
@@ -401,8 +395,8 @@ static int userdb_start_query(
                 JsonVariant *query,
                 UserDBFlags flags) {
 
-        _cleanup_(strv_freep) char **except = NULL, **only = NULL;
-        _cleanup_(closedirp) DIR *d = NULL;
+        _cleanup_strv_free_ char **except = NULL, **only = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
         const char *e;
         int r, ret = 0;
 
@@ -1454,7 +1448,7 @@ int userdb_block_nss_systemd(int b) {
 
         /* Note that we might be called from libnss_systemd.so.2 itself, but that should be fine, really. */
 
-        dl = dlopen(ROOTLIBDIR "/libnss_systemd.so.2", RTLD_LAZY|RTLD_NODELETE);
+        dl = dlopen(LIBDIR "/libnss_systemd.so.2", RTLD_LAZY|RTLD_NODELETE);
         if (!dl) {
                 /* If the file isn't installed, don't complain loudly */
                 log_debug("Failed to dlopen(libnss_systemd.so.2), ignoring: %s", dlerror());

@@ -6,6 +6,7 @@
 
 #include "sd-netlink.h"
 
+#include "firewall-util.h"
 #include "in-addr-util.h"
 
 typedef enum FirewallBackend {
@@ -26,6 +27,7 @@ struct FirewallContext {
 const char *firewall_backend_to_string(FirewallBackend b) _const_;
 
 int fw_nftables_init(FirewallContext *ctx);
+int fw_nftables_init_full(FirewallContext *ctx, bool init_tables);
 void fw_nftables_exit(FirewallContext *ctx);
 
 int fw_nftables_add_masquerade(

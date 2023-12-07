@@ -18,7 +18,7 @@ uint64_t physical_memory(void) {
         long sc;
         int r;
 
-        /* We return this as uint64_t in case we are running as 32bit process on a 64bit kernel with huge amounts of
+        /* We return this as uint64_t in case we are running as 32-bit process on a 64-bit kernel with huge amounts of
          * memory.
          *
          * In order to support containers nicely that have a configured memory limit we'll take the minimum of the
@@ -126,7 +126,7 @@ uint64_t system_tasks_max(void) {
          *
          *    This limits the numeric range PIDs can take, and thus indirectly also limits the number of
          *    concurrent threads. It's primarily a compatibility concept: some crappy old code used a signed
-         *    16bit type for PIDs, hence the kernel provides a way to ensure the PIDs never go beyond
+         *    16-bit type for PIDs, hence the kernel provides a way to ensure the PIDs never go beyond
          *    INT16_MAX by default.
          *
          *    Also note the weird definition: PIDs assigned will be kept below this value, which means
@@ -156,8 +156,11 @@ uint64_t system_tasks_max(void) {
         if (r < 0)
                 log_debug_errno(r, "Failed to determine cgroup root path, ignoring: %m");
         else {
+                /* We'll have the "pids.max" attribute on the our root cgroup only if we are in a
+                 * CLONE_NEWCGROUP namespace. On the top-level namespace this attribute is missing, hence
+                 * suppress any message about that */
                 r = cg_get_attribute_as_uint64("pids", root, "pids.max", &c);
-                if (r < 0)
+                if (r < 0 && r != -ENODATA)
                         log_debug_errno(r, "Failed to read pids.max attribute of root cgroup, ignoring: %m");
         }
 

@@ -4,7 +4,7 @@
 #include "bootctl-install.h"
 #include "bootctl-random-seed.h"
 #include "bootctl-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "copy.h"
 #include "dirent-util.h"
 #include "efi-api.h"
@@ -27,12 +27,10 @@ static int load_etc_machine_id(void) {
         int r;
 
         r = sd_id128_get_machine(&arg_machine_id);
-        if (r < 0) {
-                if (ERRNO_IS_MACHINE_ID_UNSET(r)) /* Not set or empty */
-                        return 0;
-
+        if (ERRNO_IS_NEG_MACHINE_ID_UNSET(r)) /* Not set or empty */
+                return 0;
+        if (r < 0)
                 return log_error_errno(r, "Failed to get machine-id: %m");
-        }
 
         log_debug("Loaded machine ID %s from /etc/machine-id.", SD_ID128_TO_STRING(arg_machine_id));
         return 0;
@@ -133,7 +131,7 @@ static int settle_make_entry_directory(void) {
         bool layout_type1 = use_boot_loader_spec_type1();
         if (arg_make_entry_directory < 0) { /* Automatic mode */
                 if (layout_type1) {
-                        if (arg_entry_token_type == ARG_ENTRY_TOKEN_MACHINE_ID) {
+                        if (arg_entry_token_type == BOOT_ENTRY_TOKEN_MACHINE_ID) {
                                 r = path_is_temporary_fs("/etc/machine-id");
                                 if (r < 0)
                                         return log_debug_errno(r, "Couldn't determine whether /etc/machine-id is on a temporary file system: %m");
@@ -235,7 +233,7 @@ static int copy_file_with_version_check(const char *from, const char *to, bool f
                         if (r < 0)
                                 return r;
 
-                        if (lseek(fd_from, 0, SEEK_SET) == (off_t) -1)
+                        if (lseek(fd_from, 0, SEEK_SET) < 0)
                                 return log_error_errno(errno, "Failed to seek in \"%s\": %m", from);
 
                         fd_to = safe_close(fd_to);
@@ -262,13 +260,14 @@ static int copy_file_with_version_check(const char *from, const char *to, bool f
 
         r = fsync_full(fd_to);
         if (r < 0) {
-                (void) unlink_noerrno(t);
+                (void) unlink(t);
                 return log_error_errno(r, "Failed to copy data from \"%s\" to \"%s\": %m", from, t);
         }
 
-        if (renameat(AT_FDCWD, t, AT_FDCWD, to) < 0) {
-                (void) unlink_noerrno(t);
-                return log_error_errno(errno, "Failed to rename \"%s\" to \"%s\": %m", t, to);
+        r = RET_NERRNO(renameat(AT_FDCWD, t, AT_FDCWD, to));
+        if (r < 0) {
+                (void) unlink(t);
+                return log_error_errno(r, "Failed to rename \"%s\" to \"%s\": %m", t, to);
         }
 
         log_info("Copied \"%s\" to \"%s\".", from, to);
@@ -336,10 +335,10 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!p)
                 return log_oom();
 
-        r = chase_symlinks(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+        r = chase(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase_symlinks(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+                r = chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
         if (r < 0)
                 return log_error_errno(r,
                                        "Failed to resolve path %s%s%s: %m",
@@ -351,7 +350,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!q)
                 return log_oom();
 
-        r = chase_symlinks(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &dest_path, NULL);
+        r = chase(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &dest_path, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", q, esp_path);
 
@@ -368,7 +367,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
                 v = strjoina("/EFI/BOOT/BOOT", e);
                 ascii_strupper(strrchr(v, '/') + 1);
 
-                r = chase_symlinks(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &default_dest_path, NULL);
+                r = chase(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &default_dest_path, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", v, esp_path);
 
@@ -386,10 +385,14 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
         _cleanup_free_ char *path = NULL;
         int r;
 
-        r = chase_symlinks_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+        r = chase_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase_symlinks_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+                r = chase_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+        if (r == -ENOENT && arg_graceful) {
+                log_debug("Source directory does not exist, ignoring.");
+                return 0;
+        }
         if (r < 0)
                 return log_error_errno(r, "Failed to open boot loader directory %s%s: %m", strempty(root), BOOTLIBDIR);
 
@@ -416,8 +419,7 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
                  * newer version, or other boot loader in place. */
                 if (arg_graceful && IN_SET(k, -ESTALE, -ESRCH))
                         continue;
-                if (k < 0 && r == 0)
-                        r = k;
+                RET_GATHER(r, k);
         }
 
         return r;
@@ -426,12 +428,14 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
 static int install_loader_config(const char *esp_path) {
         _cleanup_(unlink_and_freep) char *t = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        const char *p;
+        _cleanup_free_ char *p = NULL;
         int r;
 
         assert(arg_make_entry_directory >= 0);
 
-        p = prefix_roota(esp_path, "/loader/loader.conf");
+        p = path_join(esp_path, "/loader/loader.conf");
+        if (!p)
+                return log_oom();
         if (access(p, F_OK) >= 0) /* Silently skip creation if the file already exists (early check) */
                 return 0;
 
@@ -447,7 +451,7 @@ static int install_loader_config(const char *esp_path) {
                 fprintf(f, "default %s-*\n", arg_entry_token);
         }
 
-        r = flink_tmpfile(f, t, p);
+        r = flink_tmpfile(f, t, p, LINK_TMPFILE_SYNC);
         if (r == -EEXIST)
                 return 0; /* Silently skip creation if the file exists now (recheck) */
         if (r < 0)
@@ -476,7 +480,7 @@ static int install_loader_specification(const char *root) {
 
         fprintf(f, "type1\n");
 
-        r = flink_tmpfile(f, t, p);
+        r = flink_tmpfile(f, t, p, LINK_TMPFILE_SYNC);
         if (r == -EEXIST)
                 return 0; /* Silently skip creation if the file exists now (recheck) */
         if (r < 0)
@@ -507,7 +511,7 @@ static int install_entry_token(void) {
         /* Let's save the used entry token in /etc/kernel/entry-token if we used it to create the entry
          * directory, or if anything else but the machine ID */
 
-        if (!arg_make_entry_directory && arg_entry_token_type == ARG_ENTRY_TOKEN_MACHINE_ID)
+        if (!arg_make_entry_directory && arg_entry_token_type == BOOT_ENTRY_TOKEN_MACHINE_ID)
                 return 0;
 
         p = path_join(arg_root, etc_kernel(), "entry-token");
@@ -662,7 +666,7 @@ static int install_variables(
                 return 0;
         }
 
-        r = chase_symlinks_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL, NULL);
+        r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -828,7 +832,7 @@ static int remove_boot_efi(const char *esp_path) {
         _cleanup_free_ char *p = NULL;
         int r, c = 0;
 
-        r = chase_symlinks_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -968,9 +972,11 @@ static int remove_loader_variables(void) {
         /* Remove all persistent loader variables we define */
 
         FOREACH_STRING(var,
+                       EFI_LOADER_VARIABLE(LoaderConfigConsoleMode),
                        EFI_LOADER_VARIABLE(LoaderConfigTimeout),
                        EFI_LOADER_VARIABLE(LoaderConfigTimeoutOneShot),
                        EFI_LOADER_VARIABLE(LoaderEntryDefault),
+                       EFI_LOADER_VARIABLE(LoaderEntryLastBooted),
                        EFI_LOADER_VARIABLE(LoaderEntryOneShot),
                        EFI_LOADER_VARIABLE(LoaderSystemToken)){
 
@@ -1073,7 +1079,7 @@ int verb_remove(int argc, char *argv[], void *userdata) {
 int verb_is_installed(int argc, char *argv[], void *userdata) {
         int r;
 
-        r = acquire_esp(/* privileged_mode= */ false,
+        r = acquire_esp(/* unprivileged_mode= */ false,
                         /* graceful= */ arg_graceful,
                         NULL, NULL, NULL, NULL, NULL);
         if (r < 0)

@@ -112,7 +112,7 @@ CPUWeight=20   DisableControllers=cpu              /          \
         configuration for <filename>system.slice</filename> and <filename>user.slice</filename>, CPU
         resources will be split equally between them. Similarly, resources are allocated equally between
         children of <filename>user.slice</filename> and between the child slices beneath
-        <filename>user@1000.service</filename>. Assuming that there is no futher configuration of resources
+        <filename>user@1000.service</filename>. Assuming that there is no further configuration of resources
         or delegation below slices <filename>app.slice</filename> or <filename>session.slice</filename>, the
         <option>cpu</option> controller would not be enabled for units in those slices and CPU resources
         would be further allocated using other mechanisms, e.g. based on nice levels. The manager for user
@@ -174,8 +174,9 @@ CPUWeight=20   DisableControllers=cpu              /          \
   <refsect1>
     <title>Options</title>
 
-    <para>Units of the types listed above can have settings
-    for resource control configuration:</para>
+    <para>Units of the types listed above can have settings for resource control configuration:</para>
+
+    <refsect2><title>CPU Accounting and Control</title>
 
     <variablelist class='unit-directives'>
 
@@ -194,6 +195,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
 
           <para>Under the unified cgroup hierarchy, CPU accounting is available for all units and this
           setting has no effect.</para>
+
+          <xi:include href="version-info.xml" xpointer="v208"/>
         </listitem>
       </varlistentry>
 
@@ -237,6 +240,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           project='man-pages'><refentrytitle>sched</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
           The effect of this feature is similar to the <option>cpu</option> controller with no explicit
           configuration, so users should be careful to not mistake one for the other.</para>
+
+          <xi:include href="version-info.xml" xpointer="v232"/>
         </listitem>
       </varlistentry>
 
@@ -257,6 +262,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
 
           <para>Example: <varname>CPUQuota=20%</varname> ensures that the executed processes will never get more than
           20% CPU time on one CPU.</para>
+
+          <xi:include href="version-info.xml" xpointer="v213"/>
 
         </listitem>
       </varlistentry>
@@ -279,6 +286,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           <ulink url="https://docs.kernel.org/scheduler/sched-design-CFS.html">CFS Scheduler</ulink>.</para>
 
           <para>Example: <varname>CPUQuotaPeriodSec=10ms</varname> to request that the CPU quota is measured in periods of 10ms.</para>
+
+          <xi:include href="version-info.xml" xpointer="v242"/>
         </listitem>
       </varlistentry>
 
@@ -302,32 +311,16 @@ CPUWeight=20   DisableControllers=cpu              /          \
           boot-up and shutdown differently than during normal runtime.</para>
 
           <para>This setting is supported only with the unified control group hierarchy.</para>
+
+          <xi:include href="version-info.xml" xpointer="v244"/>
         </listitem>
       </varlistentry>
 
-      <varlistentry>
-        <term><varname>AllowedMemoryNodes=</varname></term>
-        <term><varname>StartupAllowedMemoryNodes=</varname></term>
+    </variablelist>
 
-        <listitem>
-          <para>These settings control the <option>cpuset</option> controller in the unified hierarchy.</para>
+    </refsect2><refsect2><title>Memory Accounting and Control</title>
 
-          <para>Restrict processes to be executed on specific memory NUMA nodes. Takes a list of memory NUMA nodes indices
-          or ranges separated by either whitespace or commas. Memory NUMA nodes ranges are specified by the lower and upper
-          NUMA nodes indices separated by a dash.</para>
-
-          <para>Setting <varname>AllowedMemoryNodes=</varname> or <varname>StartupAllowedMemoryNodes=</varname> doesn't
-          guarantee that all of the memory NUMA nodes will be used by the processes as it may be limited by parent units.
-          The effective configuration is reported as <varname>EffectiveMemoryNodes=</varname>.</para>
-
-          <para>While <varname>StartupAllowedMemoryNodes=</varname> applies to the startup and shutdown phases of the system,
-          <varname>AllowedMemoryNodes=</varname> applies to normal runtime of the system, and if the former is not set also to
-          the startup and shutdown phases. Using <varname>StartupAllowedMemoryNodes=</varname> allows prioritizing specific services at
-          boot-up and shutdown differently than during normal runtime.</para>
-
-          <para>This setting is supported only with the unified control group hierarchy.</para>
-        </listitem>
-      </varlistentry>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>MemoryAccounting=</varname></term>
@@ -343,11 +336,14 @@ CPUWeight=20   DisableControllers=cpu              /          \
           for this setting may be controlled with
           <varname>DefaultMemoryAccounting=</varname> in
           <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v208"/>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>MemoryMin=<replaceable>bytes</replaceable></varname>, <varname>MemoryLow=<replaceable>bytes</replaceable></varname></term>
+        <term><varname>StartupMemoryLow=<replaceable>bytes</replaceable></varname>, <varname>DefaultStartupMemoryLow=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
           <para>These settings control the <option>memory</option> controller in the unified hierarchy.</para>
@@ -377,16 +373,25 @@ CPUWeight=20   DisableControllers=cpu              /          \
           <para>Units may have their children use a default <literal>memory.min</literal> or
           <literal>memory.low</literal> value by specifying <varname>DefaultMemoryMin=</varname> or
           <varname>DefaultMemoryLow=</varname>, which has the same semantics as
-          <varname>MemoryMin=</varname> and <varname>MemoryLow=</varname>.
+          <varname>MemoryMin=</varname> and <varname>MemoryLow=</varname>, or <varname>DefaultStartupMemoryLow=</varname>
+          which has the same semantics as <varname>StartupMemoryLow=</varname>.
           This setting does not affect <literal>memory.min</literal> or <literal>memory.low</literal>
           in the unit itself.
           Using it to set a default child allocation is only useful on kernels older than 5.7,
           which do not support the <literal>memory_recursiveprot</literal> cgroup2 mount option.</para>
+
+          <para>While <varname>StartupMemoryLow=</varname> applies to the startup and shutdown phases of the system,
+          <varname>MemoryMin=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupMemoryLow=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v240"/>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>MemoryHigh=<replaceable>bytes</replaceable></varname></term>
+        <term><varname>StartupMemoryHigh=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
           <para>These settings control the <option>memory</option> controller in the unified hierarchy.</para>
@@ -402,11 +407,19 @@ CPUWeight=20   DisableControllers=cpu              /          \
           special value <literal>infinity</literal>, no memory throttling is applied. This controls the
           <literal>memory.high</literal> control group attribute. For details about this control group attribute, see
           <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
+
+          <para>While <varname>StartupMemoryHigh=</varname> applies to the startup and shutdown phases of the system,
+          <varname>MemoryHigh=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupMemoryHigh=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v231"/>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>MemoryMax=<replaceable>bytes</replaceable></varname></term>
+        <term><varname>StartupMemoryMax=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
           <para>These settings control the <option>memory</option> controller in the unified hierarchy.</para>
@@ -422,11 +435,19 @@ CPUWeight=20   DisableControllers=cpu              /          \
           assigned the special value <literal>infinity</literal>, no memory limit is applied. This controls the
           <literal>memory.max</literal> control group attribute. For details about this control group attribute, see
           <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
+
+          <para>While <varname>StartupMemoryMax=</varname> applies to the startup and shutdown phases of the system,
+          <varname>MemoryMax=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupMemoryMax=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v231"/>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>MemorySwapMax=<replaceable>bytes</replaceable></varname></term>
+        <term><varname>StartupMemorySwapMax=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
           <para>These settings control the <option>memory</option> controller in the unified hierarchy.</para>
@@ -438,11 +459,19 @@ CPUWeight=20   DisableControllers=cpu              /          \
           special value <literal>infinity</literal>, no swap limit is applied. These settings control the
           <literal>memory.swap.max</literal> control group attribute. For details about this control group attribute,
           see <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
+
+          <para>While <varname>StartupMemorySwapMax=</varname> applies to the startup and shutdown phases of the system,
+          <varname>MemorySwapMax=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupMemorySwapMax=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v232"/>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>MemoryZSwapMax=<replaceable>bytes</replaceable></varname></term>
+        <term><varname>StartupMemoryZSwapMax=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
           <para>These settings control the <option>memory</option> controller in the unified hierarchy.</para>
@@ -458,8 +487,47 @@ CPUWeight=20   DisableControllers=cpu              /          \
           special value <literal>infinity</literal>, no limit is applied. These settings control the
           <literal>memory.zswap.max</literal> control group attribute. For details about this control group attribute,
           see <ulink url="https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files">Memory Interface Files</ulink>.</para>
+
+          <para>While <varname>StartupMemoryZSwapMax=</varname> applies to the startup and shutdown phases of the system,
+          <varname>MemoryZSwapMax=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupMemoryZSwapMax=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v253"/>
         </listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>AllowedMemoryNodes=</varname></term>
+        <term><varname>StartupAllowedMemoryNodes=</varname></term>
+
+        <listitem>
+          <para>These settings control the <option>cpuset</option> controller in the unified hierarchy.</para>
+
+          <para>Restrict processes to be executed on specific memory NUMA nodes. Takes a list of memory NUMA nodes indices
+          or ranges separated by either whitespace or commas. Memory NUMA nodes ranges are specified by the lower and upper
+          NUMA nodes indices separated by a dash.</para>
+
+          <para>Setting <varname>AllowedMemoryNodes=</varname> or <varname>StartupAllowedMemoryNodes=</varname> doesn't
+          guarantee that all of the memory NUMA nodes will be used by the processes as it may be limited by parent units.
+          The effective configuration is reported as <varname>EffectiveMemoryNodes=</varname>.</para>
+
+          <para>While <varname>StartupAllowedMemoryNodes=</varname> applies to the startup and shutdown phases of the system,
+          <varname>AllowedMemoryNodes=</varname> applies to normal runtime of the system, and if the former is not set also to
+          the startup and shutdown phases. Using <varname>StartupAllowedMemoryNodes=</varname> allows prioritizing specific services at
+          boot-up and shutdown differently than during normal runtime.</para>
+
+          <para>This setting is supported only with the unified control group hierarchy.</para>
+
+          <xi:include href="version-info.xml" xpointer="v244"/>
+        </listitem>
+      </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>Process Accounting and Control</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>TasksAccounting=</varname></term>
@@ -474,6 +542,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           slice and for all its parent slices and the units contained therein. The system default for this
           setting may be controlled with <varname>DefaultTasksAccounting=</varname> in
           <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v227"/>
         </listitem>
       </varlistentry>
 
@@ -495,8 +565,16 @@ CPUWeight=20   DisableControllers=cpu              /          \
           <para>The system default for this setting may be controlled with
           <varname>DefaultTasksMax=</varname> in
           <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v227"/>
         </listitem>
       </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>IO Accounting and Control</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>IOAccounting=</varname></term>
@@ -510,6 +588,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           therein. The system default for this setting may be controlled with <varname>DefaultIOAccounting=</varname>
           in
           <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
 
@@ -535,6 +615,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           the system, and if the former is not set also to the startup
           and shutdown phases. This allows prioritizing specific services at boot-up
           and shutdown differently than during runtime.</para>
+
+          <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
 
@@ -560,6 +642,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           correctly only for simpler cases, where the file system is directly placed on a partition or
           physical block device, or where simple 1:1 encryption using dm-crypt/LUKS is used. This discovery
           does not cover complex storage and in particular RAID and volume management storage devices.</para>
+
+          <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
 
@@ -584,6 +668,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           </para>
 
           <para>Similar restrictions on block device discovery as for <varname>IODeviceWeight=</varname> apply, see above.</para>
+
+          <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
 
@@ -608,6 +694,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           </para>
 
           <para>Similar restrictions on block device discovery as for <varname>IODeviceWeight=</varname> apply, see above.</para>
+
+          <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
 
@@ -631,8 +719,16 @@ CPUWeight=20   DisableControllers=cpu              /          \
           <para>These settings are supported only if the unified control group hierarchy is used.</para>
 
           <para>Similar restrictions on block device discovery as for <varname>IODeviceWeight=</varname> apply, see above.</para>
+
+          <xi:include href="version-info.xml" xpointer="v240"/>
         </listitem>
       </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>Network Accounting and Control</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>IPAccounting=</varname></term>
@@ -652,6 +748,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
 
           <para>The system default for this setting may be controlled with <varname>DefaultIPAccounting=</varname> in
           <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v235"/>
         </listitem>
       </varlistentry>
 
@@ -699,7 +797,7 @@ CPUWeight=20   DisableControllers=cpu              /          \
           not applied to any sockets passed into the service via socket activation. Thus, it is usually a
           good idea to replicate the IP access lists on both the socket and the service unit. Nevertheless,
           it may make sense to maintain one list more open and the other one more restricted, depending on
-          the usecase.</para>
+          the use case.</para>
 
           <para>If these settings are used multiple times in the same unit the specified lists are combined. If an
           empty string is assigned to these settings the specific access list is reset and all previous settings undone.</para>
@@ -757,91 +855,8 @@ CPUWeight=20   DisableControllers=cpu              /          \
           them for IP security.</para>
 
           <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
-        </listitem>
-      </varlistentry>
 
-      <varlistentry>
-        <term><varname>IPIngressFilterPath=<replaceable>BPF_FS_PROGRAM_PATH</replaceable></varname></term>
-        <term><varname>IPEgressFilterPath=<replaceable>BPF_FS_PROGRAM_PATH</replaceable></varname></term>
-
-        <listitem>
-          <para>Add custom network traffic filters implemented as BPF programs, applying to all IP packets
-          sent and received over <constant>AF_INET</constant> and <constant>AF_INET6</constant> sockets.
-          Takes an absolute path to a pinned BPF program in the BPF virtual filesystem (<filename>/sys/fs/bpf/</filename>).
-          </para>
-
-          <para>The filters configured with this option are applied to all sockets created by processes
-          of this unit (or in the case of socket units, associated with it). The filters are loaded in addition
-          to filters any of the parent slice units this unit might be a member of as well as any
-          <varname>IPAddressAllow=</varname> and <varname>IPAddressDeny=</varname> filters in any of these units.
-          By default there are no filters specified.</para>
-
-          <para>If these settings are used multiple times in the same unit all the specified programs are attached. If an
-          empty string is assigned to these settings the program list is reset and all previous specified programs ignored.</para>
-
-          <para>If the path <replaceable>BPF_FS_PROGRAM_PATH</replaceable> in <varname>IPIngressFilterPath=</varname> assignment
-          is already being handled by <varname>BPFProgram=</varname> ingress hook, e.g.
-          <varname>BPFProgram=</varname><constant>ingress</constant>:<replaceable>BPF_FS_PROGRAM_PATH</replaceable>,
-          the assignment will be still considered valid and the program will be attached to a cgroup. Same for
-          <varname>IPEgressFilterPath=</varname> path and <constant>egress</constant> hook.</para>
-
-          <para>Note that for socket-activated services, the IP filter programs configured on the socket unit apply to
-          all sockets associated with it directly, but not to any sockets created by the ultimately activated services
-          for it. Conversely, the IP filter programs configured for the service are not applied to any sockets passed into
-          the service via socket activation. Thus, it is usually a good idea, to replicate the IP filter programs on both
-          the socket and the service unit, however it often makes sense to maintain one configuration more open and the other
-          one more restricted, depending on the usecase.</para>
-
-          <para>Note that these settings might not be supported on some systems (for example if eBPF control group
-          support is not enabled in the underlying kernel or container manager). These settings will fail the service in
-          that case. If compatibility with such systems is desired it is hence recommended to attach your filter manually
-          (requires <varname>Delegate=</varname><constant>yes</constant>) instead of using this setting.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>BPFProgram=<replaceable>type</replaceable><constant>:</constant><replaceable>program-path</replaceable></varname></term>
-        <listitem>
-          <para>Add a custom cgroup BPF program.</para>
-
-          <para><varname>BPFProgram=</varname> allows attaching BPF hooks to the cgroup of a systemd unit.
-          (This generalizes the functionality exposed via <varname>IPEgressFilterPath=</varname> for egress and
-          <varname>IPIngressFilterPath=</varname> for ingress.)
-          Cgroup-bpf hooks in the form of BPF programs loaded to the BPF filesystem are attached with cgroup-bpf attach
-          flags determined by the unit. For details about attachment types and flags see <ulink
-          url="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/include/uapi/linux/bpf.h"/>.
-          For general BPF documentation please refer to <ulink url="https://docs.kernel.org/bpf/index.html"/>.</para>
-
-          <para>The specification of BPF program consists of a <replaceable>type</replaceable> followed by a
-          <replaceable>program-path</replaceable> with <literal>:</literal> as the separator:
-          <replaceable>type</replaceable><constant>:</constant><replaceable>program-path</replaceable>.</para>
-
-          <para><replaceable>type</replaceable> is the string name of BPF attach type also used in
-          <command>bpftool</command>. <replaceable>type</replaceable> can be one of <constant>egress</constant>,
-          <constant>ingress</constant>, <constant>sock_create</constant>, <constant>sock_ops</constant>,
-          <constant>device</constant>, <constant>bind4</constant>, <constant>bind6</constant>,
-          <constant>connect4</constant>, <constant>connect6</constant>, <constant>post_bind4</constant>,
-          <constant>post_bind6</constant>, <constant>sendmsg4</constant>, <constant>sendmsg6</constant>,
-          <constant>sysctl</constant>, <constant>recvmsg4</constant>, <constant>recvmsg6</constant>,
-          <constant>getsockopt</constant>, <constant>setsockopt</constant>.</para>
-
-          <para>Setting <varname>BPFProgram=</varname> to an empty value makes previous assignments ineffective.</para>
-          <para>Multiple assignments of the same <replaceable>type</replaceable>:<replaceable>program-path</replaceable>
-          value have the same effect as a single assignment: the program with the path <replaceable>program-path</replaceable>
-          will be attached to cgroup hook <replaceable>type</replaceable> just once.</para>
-          <para>If BPF <constant>egress</constant> pinned to <replaceable>program-path</replaceable> path is already being
-          handled by <varname>IPEgressFilterPath=</varname>, <varname>BPFProgram=</varname>
-          assignment will be considered valid and <varname>BPFProgram=</varname> will be attached to a cgroup.
-          Similarly for <constant>ingress</constant> hook and <varname>IPIngressFilterPath=</varname> assignment.</para>
-
-          <para>BPF programs passed with <varname>BPFProgram=</varname> are attached to the cgroup of a unit with BPF
-          attach flag <constant>multi</constant>, that allows further attachments of the same
-          <replaceable>type</replaceable> within cgroup hierarchy topped by the unit cgroup.</para>
-
-          <para>Examples:<programlisting>
-BPFProgram=egress:/sys/fs/bpf/egress-hook
-BPFProgram=bind6:/sys/fs/bpf/sock-addr-hook
-</programlisting></para>
+          <xi:include href="version-info.xml" xpointer="v235"/>
         </listitem>
       </varlistentry>
 
@@ -935,6 +950,8 @@ SocketBindDeny=any
 …</programlisting></para>
 
           <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
+
+          <xi:include href="version-info.xml" xpointer="v249"/>
         </listitem>
       </varlistentry>
 
@@ -983,8 +1000,216 @@ RestrictNetworkInterfaces=~eth1</programlisting>
           </para>
 
           <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
+
+          <xi:include href="version-info.xml" xpointer="v250"/>
         </listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>NFTSet=</varname><replaceable>family</replaceable>:<replaceable>table</replaceable>:<replaceable>set</replaceable></term>
+        <listitem>
+          <para>This setting provides a method for integrating dynamic cgroup, user and group IDs into
+          firewall rules with <ulink url="https://netfilter.org/projects/nftables/index.html">NFT</ulink>
+          sets. The benefit of using this setting is to be able to use the IDs as selectors in firewall rules
+          easily and this in turn allows more fine grained filtering. NFT rules for cgroup matching use
+          numeric cgroup IDs, which change every time a service is restarted, making them hard to use in
+          systemd environment otherwise. Dynamic and random IDs used by <varname>DynamicUser=</varname> can
+          be also integrated with this setting.</para>
+
+          <para>This option expects a whitespace separated list of NFT set definitions. Each definition
+          consists of a colon-separated tuple of source type (one of <literal>cgroup</literal>,
+          <literal>user</literal> or <literal>group</literal>), NFT address family (one of
+          <literal>arp</literal>, <literal>bridge</literal>, <literal>inet</literal>, <literal>ip</literal>,
+          <literal>ip6</literal>, or <literal>netdev</literal>), table name and set name. The names of tables
+          and sets must conform to lexical restrictions of NFT table names. The type of the element used in
+          the NFT filter must match the type implied by the directive (<literal>cgroup</literal>,
+          <literal>user</literal> or <literal>group</literal>) as shown in the table below. When a control
+          group or a unit is realized, the corresponding ID will be appended to the NFT sets and it will be
+          be removed when the control group or unit is removed. <command>systemd</command> only inserts
+          elements to (or removes from) the sets, so the related NFT rules, tables and sets must be prepared
+          elsewhere in advance. Failures to manage the sets will be ignored.</para>
+
+          <table>
+            <title>Defined <varname>source type</varname> values</title>
+            <tgroup cols='3'>
+              <colspec colname='source type'/>
+              <colspec colname='description'/>
+              <colspec colname='NFT type name'/>
+              <thead>
+                <row>
+                  <entry>Source type</entry>
+                  <entry>Description</entry>
+                  <entry>Corresponding NFT type name</entry>
+                </row>
+              </thead>
+
+              <tbody>
+                <row>
+                  <entry><literal>cgroup</literal></entry>
+                  <entry>control group ID</entry>
+                  <entry><literal>cgroupsv2</literal></entry>
+                </row>
+                <row>
+                  <entry><literal>user</literal></entry>
+                  <entry>user ID</entry>
+                  <entry><literal>meta skuid</literal></entry>
+                </row>
+                <row>
+                  <entry><literal>group</literal></entry>
+                  <entry>group ID</entry>
+                  <entry><literal>meta skgid</literal></entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </table>
+
+          <para>If the firewall rules are reinstalled so that the contents of NFT sets are destroyed, command
+          <command>systemctl daemon-reload</command> can be used to refill the sets.</para>
+
+          <para>Example:
+          <programlisting>[Unit]
+NFTSet=cgroup:inet:filter:my_service user:inet:filter:serviceuser
+</programlisting>
+          Corresponding NFT rules:
+          <programlisting>table inet filter {
+        set my_service {
+                type cgroupsv2
+        }
+        set serviceuser {
+                typeof meta skuid
+        }
+        chain x {
+                socket cgroupv2 level 2 @my_service accept
+                drop
+        }
+        chain y {
+                meta skuid @serviceuser accept
+                drop
+        }
+}</programlisting>
+          </para>
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
+      </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>BPF Programs</title>
+
+    <variablelist class='unit-directives'>
+
+      <varlistentry>
+        <term><varname>IPIngressFilterPath=<replaceable>BPF_FS_PROGRAM_PATH</replaceable></varname></term>
+        <term><varname>IPEgressFilterPath=<replaceable>BPF_FS_PROGRAM_PATH</replaceable></varname></term>
+
+        <listitem>
+          <para>Add custom network traffic filters implemented as BPF programs, applying to all IP packets
+          sent and received over <constant>AF_INET</constant> and <constant>AF_INET6</constant> sockets.
+          Takes an absolute path to a pinned BPF program in the BPF virtual filesystem (<filename>/sys/fs/bpf/</filename>).
+          </para>
+
+          <para>The filters configured with this option are applied to all sockets created by processes
+          of this unit (or in the case of socket units, associated with it). The filters are loaded in addition
+          to filters any of the parent slice units this unit might be a member of as well as any
+          <varname>IPAddressAllow=</varname> and <varname>IPAddressDeny=</varname> filters in any of these units.
+          By default there are no filters specified.</para>
+
+          <para>If these settings are used multiple times in the same unit all the specified programs are attached. If an
+          empty string is assigned to these settings the program list is reset and all previous specified programs ignored.</para>
+
+          <para>If the path <replaceable>BPF_FS_PROGRAM_PATH</replaceable> in <varname>IPIngressFilterPath=</varname> assignment
+          is already being handled by <varname>BPFProgram=</varname> ingress hook, e.g.
+          <varname>BPFProgram=</varname><constant>ingress</constant>:<replaceable>BPF_FS_PROGRAM_PATH</replaceable>,
+          the assignment will be still considered valid and the program will be attached to a cgroup. Same for
+          <varname>IPEgressFilterPath=</varname> path and <constant>egress</constant> hook.</para>
+
+          <para>Note that for socket-activated services, the IP filter programs configured on the socket unit apply to
+          all sockets associated with it directly, but not to any sockets created by the ultimately activated services
+          for it. Conversely, the IP filter programs configured for the service are not applied to any sockets passed into
+          the service via socket activation. Thus, it is usually a good idea, to replicate the IP filter programs on both
+          the socket and the service unit, however it often makes sense to maintain one configuration more open and the other
+          one more restricted, depending on the use case.</para>
+
+          <para>Note that these settings might not be supported on some systems (for example if eBPF control group
+          support is not enabled in the underlying kernel or container manager). These settings will fail the service in
+          that case. If compatibility with such systems is desired it is hence recommended to attach your filter manually
+          (requires <varname>Delegate=</varname><constant>yes</constant>) instead of using this setting.</para>
+
+          <xi:include href="version-info.xml" xpointer="v243"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>BPFProgram=<replaceable>type</replaceable>:<replaceable>program-path</replaceable></varname></term>
+        <listitem>
+          <para><varname>BPFProgram=</varname> allows attaching custom BPF programs to the cgroup of a
+          unit. (This generalizes the functionality exposed via <varname>IPEgressFilterPath=</varname> and
+          <varname>IPIngressFilterPath=</varname> for other hooks.)  Cgroup-bpf hooks in the form of BPF
+          programs loaded to the BPF filesystem are attached with cgroup-bpf attach flags determined by the
+          unit. For details about attachment types and flags see <ulink
+          url="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/include/uapi/linux/bpf.h"><filename>bpf.h</filename></ulink>. Also
+          refer to the general <ulink url="https://docs.kernel.org/bpf/">BPF documentation</ulink>.</para>
+
+          <para>The specification of BPF program consists of a pair of BPF program type and program path in
+          the file system, with <literal>:</literal> as the separator:
+          <replaceable>type</replaceable>:<replaceable>program-path</replaceable>.</para>
+
+          <para>The BPF program type is equivalent to the BPF attach type used in
+          <citerefentry project='mankier'><refentrytitle>bpftool</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          It may be one of
+          <constant>egress</constant>,
+          <constant>ingress</constant>,
+          <constant>sock_create</constant>,
+          <constant>sock_ops</constant>,
+          <constant>device</constant>,
+          <constant>bind4</constant>,
+          <constant>bind6</constant>,
+          <constant>connect4</constant>,
+          <constant>connect6</constant>,
+          <constant>post_bind4</constant>,
+          <constant>post_bind6</constant>,
+          <constant>sendmsg4</constant>,
+          <constant>sendmsg6</constant>,
+          <constant>sysctl</constant>,
+          <constant>recvmsg4</constant>,
+          <constant>recvmsg6</constant>,
+          <constant>getsockopt</constant>,
+          or <constant>setsockopt</constant>.
+          </para>
+
+          <para>The specified program path must be an absolute path referencing a BPF program inode in the
+          bpffs file system (which generally means it must begin with <filename>/sys/fs/bpf/</filename>). If
+          a specified program does not exist (i.e. has not been uploaded to the BPF subsystem of the kernel
+          yet), it will not be installed but unit activation will continue (a warning will be printed to the
+          logs).</para>
+
+          <para>Setting <varname>BPFProgram=</varname> to an empty value makes previous assignments
+          ineffective.</para>
+
+          <para>Multiple assignments of the same program type/path pair have the same effect as a single
+          assignment: the program will be attached just once.</para>
+
+          <para>If BPF <constant>egress</constant> pinned to <replaceable>program-path</replaceable> path is already being
+          handled by <varname>IPEgressFilterPath=</varname>, <varname>BPFProgram=</varname>
+          assignment will be considered valid and <varname>BPFProgram=</varname> will be attached to a cgroup.
+          Similarly for <constant>ingress</constant> hook and <varname>IPIngressFilterPath=</varname> assignment.</para>
+
+          <para>BPF programs passed with <varname>BPFProgram=</varname> are attached to the cgroup of a unit
+          with BPF attach flag <constant>multi</constant>, that allows further attachments of the same
+          <replaceable>type</replaceable> within cgroup hierarchy topped by the unit cgroup.</para>
+
+          <para>Examples:<programlisting>BPFProgram=egress:/sys/fs/bpf/egress-hook
+BPFProgram=bind6:/sys/fs/bpf/sock-addr-hook
+</programlisting></para>
+
+          <xi:include href="version-info.xml" xpointer="v249"/>
+        </listitem>
+      </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>Device Access</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>DeviceAllow=</varname></term>
@@ -1036,6 +1261,8 @@ DeviceAllow=/dev/loop-control
 …</programlisting></para>
 
           <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
+
+          <xi:include href="version-info.xml" xpointer="v208"/>
         </listitem>
       </varlistentry>
 
@@ -1052,6 +1279,8 @@ DeviceAllow=/dev/loop-control
               <listitem>
                 <para>means to only allow types of access that are
                 explicitly specified.</para>
+
+                <xi:include href="version-info.xml" xpointer="v208"/>
               </listitem>
             </varlistentry>
 
@@ -1066,6 +1295,8 @@ DeviceAllow=/dev/loop-control
                 <filename>/dev/random</filename>, and
                 <filename>/dev/urandom</filename>.
                 </para>
+
+                <xi:include href="version-info.xml" xpointer="v208"/>
               </listitem>
             </varlistentry>
 
@@ -1077,13 +1308,23 @@ DeviceAllow=/dev/loop-control
                   explicit <varname>DeviceAllow=</varname> is present.
                   This is the default.
                 </para>
+
+                  <xi:include href="version-info.xml" xpointer="v208"/>
               </listitem>
             </varlistentry>
           </variablelist>
 
           <xi:include href="cgroup-sandboxing.xml" xpointer="singular"/>
+
+          <xi:include href="version-info.xml" xpointer="v208"/>
         </listitem>
       </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>Control Group Management</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>Slice=</varname></term>
@@ -1110,6 +1351,8 @@ DeviceAllow=/dev/loop-control
           <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>, section
           "Default Dependencies" for details.</para>
 
+          <xi:include href="version-info.xml" xpointer="v208"/>
+
         </listitem>
       </varlistentry>
 
@@ -1117,10 +1360,11 @@ DeviceAllow=/dev/loop-control
         <term><varname>Delegate=</varname></term>
 
         <listitem>
-          <para>Turns on delegation of further resource control partitioning to processes of the unit. Units where this
-          is enabled may create and manage their own private subhierarchy of control groups below the control group of
-          the unit itself. For unprivileged services (i.e. those using the <varname>User=</varname> setting) the unit's
-          control group will be made accessible to the relevant user.</para>
+          <para>Turns on delegation of further resource control partitioning to processes of the unit. Units
+          where this is enabled may create and manage their own private subhierarchy of control groups below
+          the control group of the unit itself. For unprivileged services (i.e. those using the
+          <varname>User=</varname> setting) the unit's control group will be made accessible to the relevant
+          user.</para>
 
           <para>When enabled the service manager will refrain from manipulating control groups or moving
           processes below the unit's control group, so that a clear concept of ownership is established: the
@@ -1154,6 +1398,33 @@ DeviceAllow=/dev/loop-control
 
           <para>For further details on the delegation model consult <ulink
           url="https://systemd.io/CGROUP_DELEGATION">Control Group APIs and Delegation</ulink>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v218"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DelegateSubgroup=</varname></term>
+
+        <listitem>
+          <para>Place unit processes in the specified subgroup of the unit's control group. Takes a valid
+          control group name (not a path!) as parameter, or an empty string to turn this feature
+          off. Defaults to off. The control group name must be usable as filename and avoid conflicts with
+          the kernel's control group attribute files (i.e. <filename>cgroup.procs</filename> is not an
+          acceptable name, since the kernel exposes a native control group attribute file by that name). This
+          option has no effect unless control group delegation is turned on via <varname>Delegate=</varname>,
+          see above. Note that this setting only applies to "main" processes of a unit, i.e. for services to
+          <varname>ExecStart=</varname>, but not for <varname>ExecReload=</varname> and similar. If
+          delegation is enabled, the latter are always placed inside a subgroup named
+          <filename>.control</filename>. The specified subgroup is automatically created (and potentially
+          ownership is passed to the unit's configured user/group) when a process is started in it.</para>
+
+          <para>This option is useful to avoid manually moving the invoked process into a subgroup after it
+          has been started. Since no processes should live in inner nodes of the control group tree it's
+          almost always necessary to run the main ("supervising") process of a unit that has delegation
+          turned on in a subgroup.</para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/>
         </listitem>
       </varlistentry>
 
@@ -1176,8 +1447,16 @@ DeviceAllow=/dev/loop-control
           of the cgroup hierarchy is unmanaged by systemd.</para>
 
           <xi:include href="supported-controllers.xml"  xpointer="controllers-text" />
+
+          <xi:include href="version-info.xml" xpointer="v240"/>
         </listitem>
       </varlistentry>
+
+    </variablelist>
+
+    </refsect2><refsect2><title>Memory Pressure Control</title>
+
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>ManagedOOMSwap=auto|kill</varname></term>
@@ -1206,6 +1485,8 @@ DeviceAllow=/dev/loop-control
           cgroup's data for monitoring and detection. However, if an ancestor cgroup has one of these
           properties set to <option>kill</option>, a unit with <option>auto</option> can still be a candidate
           for <command>systemd-oomd</command> to terminate.</para>
+
+          <xi:include href="version-info.xml" xpointer="v247"/>
         </listitem>
       </varlistentry>
 
@@ -1220,6 +1501,8 @@ DeviceAllow=/dev/loop-control
           which means to use the default set by
           <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
           </para>
+
+          <xi:include href="version-info.xml" xpointer="v247"/>
         </listitem>
       </varlistentry>
 
@@ -1262,9 +1545,84 @@ DeviceAllow=/dev/loop-control
           <citerefentry><refentrytitle>systemd-oomd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
           and <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
           </para>
+
+          <xi:include href="version-info.xml" xpointer="v248"/>
         </listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryPressureWatch=</varname></term>
+
+        <listitem><para>Controls memory pressure monitoring for invoked processes. Takes one of
+        <literal>off</literal>, <literal>on</literal>, <literal>auto</literal> or <literal>skip</literal>. If
+        <literal>off</literal> tells the service not to watch for memory pressure events, by setting the
+        <varname>$MEMORY_PRESSURE_WATCH</varname> environment variable to the literal string
+        <filename>/dev/null</filename>. If <literal>on</literal> tells the service to watch for memory
+        pressure events. This enables memory accounting for the service, and ensures the
+        <filename>memory.pressure</filename> cgroup attribute file is accessible for reading and writing by the
+        service's user. It then sets the <varname>$MEMORY_PRESSURE_WATCH</varname> environment variable for
+        processes invoked by the unit to the file system path to this file. The threshold information
+        configured with <varname>MemoryPressureThresholdSec=</varname> is encoded in the
+        <varname>$MEMORY_PRESSURE_WRITE</varname> environment variable. If the <literal>auto</literal> value
+        is set the protocol is enabled if memory accounting is anyway enabled for the unit, and disabled
+        otherwise. If set to <literal>skip</literal> the logic is neither enabled, nor disabled and the two
+        environment variables are not set.</para>
+
+        <para>Note that services are free to use the two environment variables, but it's unproblematic if
+        they ignore them. Memory pressure handling must be implemented individually in each service, and
+        usually means different things for different software. For further details on memory pressure
+        handling see <ulink url="https://systemd.io/MEMORY_PRESSURE">Memory Pressure Handling in
+        systemd</ulink>.</para>
+
+        <para>Services implemented using
+        <citerefentry><refentrytitle>sd-event</refentrytitle><manvolnum>3</manvolnum></citerefentry> may use
+        <citerefentry><refentrytitle>sd_event_add_memory_pressure</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+        to watch for and handle memory pressure events.</para>
+
+        <para>If not explicit set, defaults to the <varname>DefaultMemoryPressureWatch=</varname> setting in
+        <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryPressureThresholdSec=</varname></term>
+
+        <listitem><para>Sets the memory pressure threshold time for memory pressure monitor as configured via
+        <varname>MemoryPressureWatch=</varname>. Specifies the maximum allocation latency before a memory
+        pressure event is signalled to the service, per 2s window. If not specified defaults to the
+        <varname>DefaultMemoryPressureThresholdSec=</varname> setting in
+        <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        (which in turn defaults to 200ms). The specified value expects a time unit such as
+        <literal>ms</literal> or <literal>μs</literal>, see
+        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details on the permitted syntax.</para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+      </varlistentry>
     </variablelist>
+
+    </refsect2><refsect2><title>Coredump Control</title>
+
+    <variablelist class='unit-directives'>
+
+      <varlistentry>
+        <term><varname>CoredumpReceive=</varname></term>
+
+        <listitem><para>Takes a boolean argument. This setting is used to enable coredump forwarding for containers
+        that belong to this unit's cgroup. Units with <varname>CoredumpReceive=yes</varname> must also be configured
+        with <varname>Delegate=yes</varname>. Defaults to false.</para>
+
+        <para>When <command>systemd-coredump</command> is handling a coredump for a process from a container,
+        if the container's leader process is a descendant of a cgroup with <varname>CoredumpReceive=yes</varname>
+        and <varname>Delegate=yes</varname>, then <command>systemd-coredump</command> will attempt to forward
+        the coredump to <command>systemd-coredump</command> within the container.</para>
+
+        <xi:include href="version-info.xml" xpointer="v255"/></listitem>
+      </varlistentry>
+
+    </variablelist>
+    </refsect2>
   </refsect1>
 
   <refsect1>
@@ -1287,7 +1645,9 @@ DeviceAllow=/dev/loop-control
           <varname>BlockIOReadBandwidth=<replaceable>device</replaceable>
           <replaceable>bytes</replaceable></varname>,
           <varname>BlockIOWriteBandwidth=<replaceable>device</replaceable> <replaceable>bytes</replaceable></varname>.
-          Please switch to the unified cgroup hierarchy.</para></listitem>
+          Please switch to the unified cgroup hierarchy.</para>
+
+ <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
       </variablelist>
   </refsect1>

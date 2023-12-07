@@ -1,7 +1,8 @@
 etc/systemd/timesyncd.conf
-lib/systemd/ntp-units.d/80-systemd-timesync.list
-lib/systemd/systemd-timesyncd
-lib/systemd/system/systemd-timesyncd.service
+usr/lib/systemd/ntp-units.d/80-systemd-timesync.list
+usr/lib/systemd/systemd-timesyncd
+usr/lib/systemd/system/systemd-timesyncd.service
 usr/lib/sysusers.d/systemd-timesync.conf
-usr/share/dbus-1/*/*timesync*
+usr/share/dbus-1/system.d/org.freedesktop.timesync1.conf
+usr/share/dbus-1/system-services/org.freedesktop.timesync1.service
 ../extra/dhclient-exit-hooks.d/ etc/dhcp/

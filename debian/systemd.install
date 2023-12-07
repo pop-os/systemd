@@ -1,16 +1,16 @@
 #!/usr/bin/dh-exec
 etc/
-bin/
-lib/modprobe.d/
-lib/systemd/
-lib/udev/rules.d/70-uaccess.rules
-lib/udev/rules.d/73-seat-late.rules
-lib/udev/rules.d/71-seat.rules
-lib/udev/rules.d/99-systemd.rules
 usr/bin/
+usr/lib/modprobe.d/
+usr/lib/systemd/
+usr/lib/udev/rules.d/70-uaccess.rules
+usr/lib/udev/rules.d/73-seat-late.rules
+usr/lib/udev/rules.d/71-seat.rules
+usr/lib/udev/rules.d/99-systemd.rules
 usr/lib/binfmt.d/
 usr/lib/environment.d/
 usr/lib/modules-load.d/
+<!stage1> usr/lib/pcrlock.d/
 usr/lib/sysctl.d/
 usr/lib/sysusers.d/basic.conf
 usr/lib/sysusers.d/systemd-journal.conf
@@ -19,19 +19,22 @@ usr/lib/systemd/
 usr/lib/tmpfiles.d/
 usr/lib/kernel
 <!stage1> usr/lib/*/cryptsetup/
+usr/sbin/
 usr/share/bash-completion/
 usr/share/zsh/vendor-completions/
-usr/share/dbus-1/
+usr/share/dbus-1/services/
+usr/share/dbus-1/system-services/
+usr/share/dbus-1/system.d/
 usr/share/doc/
 usr/share/polkit-1/
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
 usr/share/locale/
 var/lib
-../extra/init-functions.d lib/lsb/
+../extra/init-functions.d usr/lib/lsb/
 ../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
-../extra/systemd-sysv-install lib/systemd/
-../extra/units/* lib/systemd/system/
+../extra/systemd-sysv-install usr/lib/systemd/
+../extra/units/* usr/lib/systemd/system/
 ../extra/kernel-install.d/* usr/lib/kernel/install.d
 ../extra/pam.d/* usr/lib/pam.d/
-../extra/journald.conf.d lib/systemd/
+../extra/journald.conf.d usr/lib/systemd/

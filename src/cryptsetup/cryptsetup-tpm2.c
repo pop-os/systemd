@@ -13,7 +13,7 @@
 #include "tpm2-util.h"
 
 static int get_pin(usec_t until, AskPasswordFlags ask_password_flags, bool headless, char **ret_pin_str) {
-        _cleanup_free_ char *pin_str = NULL;
+        _cleanup_(erase_and_freep) char *pin_str = NULL;
         _cleanup_strv_free_erase_ char **pin = NULL;
         int r;
 
@@ -62,6 +62,7 @@ int acquire_tpm2_key(
                 size_t pubkey_size,
                 uint32_t pubkey_pcr_mask,
                 const char *signature_path,
+                const char *pcrlock_path,
                 uint16_t primary_alg,
                 const char *key_file,
                 size_t key_file_size,
@@ -72,6 +73,8 @@ int acquire_tpm2_key(
                 size_t policy_hash_size,
                 const void *salt,
                 size_t salt_size,
+                const void *srk_buf,
+                size_t srk_buf_size,
                 TPM2Flags flags,
                 usec_t until,
                 bool headless,
@@ -89,11 +92,11 @@ int acquire_tpm2_key(
         assert(salt || salt_size == 0);
 
         if (!device) {
-                r = tpm2_find_device_auto(LOG_DEBUG, &auto_device);
+                r = tpm2_find_device_auto(&auto_device);
                 if (r == -ENODEV)
                         return -EAGAIN; /* Tell the caller to wait for a TPM2 device to show up */
                 if (r < 0)
-                        return r;
+                        return log_error_errno(r, "Could not find TPM2 device: %m");
 
                 device = auto_device;
         }
@@ -124,25 +127,45 @@ int acquire_tpm2_key(
         if (pubkey_pcr_mask != 0) {
                 r = tpm2_load_pcr_signature(signature_path, &signature_json);
                 if (r < 0)
+                        return log_error_errno(r, "Failed to load pcr signature: %m");
+        }
+
+        _cleanup_(tpm2_pcrlock_policy_done) Tpm2PCRLockPolicy pcrlock_policy = {};
+
+        if (FLAGS_SET(flags, TPM2_FLAGS_USE_PCRLOCK)) {
+                r = tpm2_pcrlock_policy_load(pcrlock_path, &pcrlock_policy);
+                if (r < 0)
                         return r;
         }
 
-        if (!(flags & TPM2_FLAGS_USE_PIN))
-                return tpm2_unseal(
-                                device,
+        _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
+        r = tpm2_context_new(device, &tpm2_context);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create TPM2 context: %m");
+
+        if (!(flags & TPM2_FLAGS_USE_PIN)) {
+                r = tpm2_unseal(tpm2_context,
                                 hash_pcr_mask,
                                 pcr_bank,
                                 pubkey, pubkey_size,
                                 pubkey_pcr_mask,
                                 signature_json,
                                 /* pin= */ NULL,
+                                FLAGS_SET(flags, TPM2_FLAGS_USE_PCRLOCK) ? &pcrlock_policy : NULL,
                                 primary_alg,
                                 blob,
                                 blob_size,
                                 policy_hash,
                                 policy_hash_size,
+                                srk_buf,
+                                srk_buf_size,
                                 ret_decrypted_key,
                                 ret_decrypted_key_size);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to unseal secret using TPM2: %m");
+
+                return r;
+        }
 
         for (int i = 5;; i--) {
                 _cleanup_(erase_and_freep) char *pin_str = NULL, *b64_salted_pin = NULL;
@@ -169,26 +192,31 @@ int acquire_tpm2_key(
                         /* no salting needed, backwards compat with non-salted pins */
                         b64_salted_pin = TAKE_PTR(pin_str);
 
-                r = tpm2_unseal(device,
+                r = tpm2_unseal(tpm2_context,
                                 hash_pcr_mask,
                                 pcr_bank,
                                 pubkey, pubkey_size,
                                 pubkey_pcr_mask,
                                 signature_json,
                                 b64_salted_pin,
+                                pcrlock_path ? &pcrlock_policy : NULL,
                                 primary_alg,
                                 blob,
                                 blob_size,
                                 policy_hash,
                                 policy_hash_size,
+                                srk_buf,
+                                srk_buf_size,
                                 ret_decrypted_key,
                                 ret_decrypted_key_size);
-                /* We get this error in case there is an authentication policy mismatch. This should
-                 * not happen, but this avoids confusing behavior, just in case. */
-                if (IN_SET(r, -EPERM, -ENOLCK))
-                        return r;
-                if (r < 0)
-                        continue;
+                if (r < 0) {
+                        log_error_errno(r, "Failed to unseal secret using TPM2: %m");
+
+                        /* We get this error in case there is an authentication policy mismatch. This should
+                         * not happen, but this avoids confusing behavior, just in case. */
+                        if (!IN_SET(r, -EPERM, -ENOLCK))
+                                continue;
+                }
 
                 return r;
         }
@@ -210,6 +238,8 @@ int find_tpm2_auto_data(
                 size_t *ret_policy_hash_size,
                 void **ret_salt,
                 size_t *ret_salt_size,
+                void **ret_srk_buf,
+                size_t *ret_srk_buf_size,
                 TPM2Flags *ret_flags,
                 int *ret_keyslot,
                 int *ret_token) {
@@ -219,9 +249,9 @@ int find_tpm2_auto_data(
         assert(cd);
 
         for (token = start_token; token < sym_crypt_token_max(CRYPT_LUKS2); token++) {
-                _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL, *salt = NULL;
+                _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL, *salt = NULL, *srk_buf = NULL;
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
-                size_t blob_size, policy_hash_size, pubkey_size, salt_size = 0;
+                size_t blob_size, policy_hash_size, pubkey_size, salt_size = 0, srk_buf_size = 0;
                 uint32_t hash_pcr_mask, pubkey_pcr_mask;
                 uint16_t pcr_bank, primary_alg;
                 TPM2Flags flags;
@@ -244,6 +274,7 @@ int find_tpm2_auto_data(
                                 &blob, &blob_size,
                                 &policy_hash, &policy_hash_size,
                                 &salt, &salt_size,
+                                &srk_buf, &srk_buf_size,
                                 &flags);
                 if (r == -EUCLEAN) /* Gracefully handle issues in JSON fields not owned by us */
                         continue;
@@ -270,6 +301,8 @@ int find_tpm2_auto_data(
                         *ret_salt_size = salt_size;
                         *ret_keyslot = keyslot;
                         *ret_token = token;
+                        *ret_srk_buf = TAKE_PTR(srk_buf);
+                        *ret_srk_buf_size = srk_buf_size;
                         *ret_flags = flags;
                         return 0;
                 }

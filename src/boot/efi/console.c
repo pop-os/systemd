@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <efi.h>
-#include <efilib.h>
-
 #include "console.h"
+#include "proto/graphics-output.h"
 #include "util.h"
 
 #define SYSTEM_FONT_WIDTH 8
@@ -12,7 +10,7 @@
 #define VERTICAL_MAX_OK 1080
 #define VIEWPORT_RATIO 10
 
-static inline void event_closep(EFI_EVENT *event) {
+static void event_closep(EFI_EVENT *event) {
         if (!*event)
                 return;
 

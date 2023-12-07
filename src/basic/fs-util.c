@@ -3,16 +3,20 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <sys/file.h>
 #include <linux/falloc.h>
 #include <linux/magic.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "btrfs.h"
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "hostname-util.h"
+#include "label.h"
+#include "lock-util.h"
 #include "log.h"
 #include "macro.h"
 #include "missing_fcntl.h"
@@ -32,11 +36,6 @@
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "user-util.h"
-
-int unlink_noerrno(const char *path) {
-        PROTECT_ERRNO;
-        return RET_NERRNO(unlink(path));
-}
 
 int rmdir_parents(const char *path, const char *stop) {
         char *p;
@@ -289,8 +288,22 @@ int fchmod_umask(int fd, mode_t m) {
 
 int fchmod_opath(int fd, mode_t m) {
         /* This function operates also on fd that might have been opened with
-         * O_PATH. Indeed fchmodat() doesn't have the AT_EMPTY_PATH flag like
-         * fchownat() does. */
+         * O_PATH. The tool set we have is non-intuitive:
+         * - fchmod(2) only operates on open files (i. e., fds with an open file description);
+         * - fchmodat(2) does not have a flag arg like fchownat(2) does, so no way to pass AT_EMPTY_PATH;
+         *   + it should not be confused with the libc fchmodat(3) interface, which adds 4th flag argument,
+         *     but does not support AT_EMPTY_PATH (only supports AT_SYMLINK_NOFOLLOW);
+         * - fchmodat2(2) supports all the AT_* flags, but is still very recent.
+         *
+         * We try to use fchmodat2(), and, if it is not supported, resort
+         * to the /proc/self/fd dance. */
+
+        assert(fd >= 0);
+
+        if (fchmodat2(fd, "", m, AT_EMPTY_PATH) >= 0)
+                return 0;
+        if (!IN_SET(errno, ENOSYS, EPERM)) /* Some container managers block unknown syscalls with EPERM */
+                return -errno;
 
         if (chmod(FORMAT_PROC_FD_PATH(fd), m) < 0) {
                 if (errno != ENOENT)
@@ -306,7 +319,7 @@ int fchmod_opath(int fd, mode_t m) {
 }
 
 int futimens_opath(int fd, const struct timespec ts[2]) {
-        /* Similar to fchmod_path() but for futimens() */
+        /* Similar to fchmod_opath() but for futimens() */
 
         if (utimensat(AT_FDCWD, FORMAT_PROC_FD_PATH(fd), ts, 0) < 0) {
                 if (errno != ENOENT)
@@ -674,7 +687,7 @@ void unlink_tempfilep(char (*p)[]) {
          * successfully created. We ignore both the rare case where the
          * original suffix is used and unlink failures. */
         if (!endswith(*p, ".XXXXXX"))
-                (void) unlink_noerrno(*p);
+                (void) unlink(*p);
 }
 
 int unlinkat_deallocate(int fd, const char *name, UnlinkDeallocateFlags flags) {
@@ -772,7 +785,7 @@ int unlinkat_deallocate(int fd, const char *name, UnlinkDeallocateFlags flags) {
          * punch-hole/truncate this to release the disk space. */
 
         bs = MAX(st.st_blksize, 512);
-        l = DIV_ROUND_UP(st.st_size, bs) * bs; /* Round up to next block size */
+        l = ROUND_UP(st.st_size, bs); /* Round up to next block size */
 
         if (fallocate(truncate_fd, FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE, 0, l) >= 0)
                 return 0; /* Successfully punched a hole! 😊 */
@@ -786,12 +799,23 @@ int unlinkat_deallocate(int fd, const char *name, UnlinkDeallocateFlags flags) {
         return 0;
 }
 
-int open_parent(const char *path, int flags, mode_t mode) {
+int open_parent_at(int dir_fd, const char *path, int flags, mode_t mode) {
         _cleanup_free_ char *parent = NULL;
         int r;
 
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+        assert(path);
+
         r = path_extract_directory(path, &parent);
-        if (r < 0)
+        if (r == -EDESTADDRREQ) {
+                parent = strdup(".");
+                if (!parent)
+                        return -ENOMEM;
+        } else if (r == -EADDRNOTAVAIL) {
+                parent = strdup(path);
+                if (!parent)
+                        return -ENOMEM;
+        } else if (r < 0)
                 return r;
 
         /* Let's insist on O_DIRECTORY since the parent of a file or directory is a directory. Except if we open an
@@ -802,7 +826,7 @@ int open_parent(const char *path, int flags, mode_t mode) {
         else if (!FLAGS_SET(flags, O_TMPFILE))
                 flags |= O_DIRECTORY|O_RDONLY;
 
-        return RET_NERRNO(open(parent, flags, mode));
+        return RET_NERRNO(openat(dir_fd, parent, flags, mode));
 }
 
 int conservative_renameat(
@@ -812,11 +836,11 @@ int conservative_renameat(
         _cleanup_close_ int old_fd = -EBADF, new_fd = -EBADF;
         struct stat old_stat, new_stat;
 
-        /* Renames the old path to thew new path, much like renameat() — except if both are regular files and
+        /* Renames the old path to the new path, much like renameat() — except if both are regular files and
          * have the exact same contents and basic file attributes already. In that case remove the new file
          * instead. This call is useful for reducing inotify wakeups on files that are updated but don't
          * actually change. This function is written in a style that we rather rename too often than suppress
-         * too much. i.e. whenever we are in doubt we rather rename than fail. After all reducing inotify
+         * too much. I.e. whenever we are in doubt, we rather rename than fail. After all reducing inotify
          * events is an optimization only, not more. */
 
         old_fd = openat(olddirfd, oldpath, O_CLOEXEC|O_RDONLY|O_NOCTTY|O_NOFOLLOW);
@@ -992,8 +1016,7 @@ int parse_cifs_service(
 
 int open_mkdir_at(int dirfd, const char *path, int flags, mode_t mode) {
         _cleanup_close_ int fd = -EBADF, parent_fd = -EBADF;
-        _cleanup_free_ char *fname = NULL;
-        bool made;
+        _cleanup_free_ char *fname = NULL, *parent = NULL;
         int r;
 
         /* Creates a directory with mkdirat() and then opens it, in the "most atomic" fashion we can
@@ -1008,19 +1031,13 @@ int open_mkdir_at(int dirfd, const char *path, int flags, mode_t mode) {
         /* Note that O_DIRECTORY|O_NOFOLLOW is implied, but we allow specifying it anyway. The following
          * flags actually make sense to specify: O_CLOEXEC, O_EXCL, O_NOATIME, O_PATH */
 
-        if (isempty(path))
-                return -EINVAL;
-
-        if (!filename_is_valid(path)) {
-                _cleanup_free_ char *parent = NULL;
-
-                /* If this is not a valid filename, it's a path. Let's open the parent directory then, so
-                 * that we can pin it, and operate below it. */
-
-                r = path_extract_directory(path, &parent);
-                if (r < 0)
+        /* If this is not a valid filename, it's a path. Let's open the parent directory then, so
+         * that we can pin it, and operate below it. */
+        r = path_extract_directory(path, &parent);
+        if (r < 0) {
+                if (!IN_SET(r, -EDESTADDRREQ, -EADDRNOTAVAIL))
                         return r;
-
+        } else {
                 r = path_extract_filename(path, &fname);
                 if (r < 0)
                         return r;
@@ -1033,33 +1050,11 @@ int open_mkdir_at(int dirfd, const char *path, int flags, mode_t mode) {
                 path = fname;
         }
 
-        r = RET_NERRNO(mkdirat(dirfd, path, mode));
-        if (r == -EEXIST) {
-                if (FLAGS_SET(flags, O_EXCL))
-                        return -EEXIST;
-
-                made = false;
-        } else if (r < 0)
-                return r;
-        else
-                made = true;
-
-        fd = RET_NERRNO(openat(dirfd, path, (flags & ~O_EXCL)|O_DIRECTORY|O_NOFOLLOW));
-        if (fd < 0) {
-                if (fd == -ENOENT)  /* We got ENOENT? then someone else immediately removed it after we
-                                     * created it. In that case let's return immediately without unlinking
-                                     * anything, because there simply isn't anything to unlink anymore. */
-                        return -ENOENT;
-                if (fd == -ELOOP)   /* is a symlink? exists already → created by someone else, don't unlink */
-                        return -EEXIST;
-                if (fd == -ENOTDIR) /* not a directory? exists already → created by someone else, don't unlink */
-                        return -EEXIST;
-
-                if (made)
-                        (void) unlinkat(dirfd, path, AT_REMOVEDIR);
-
+        fd = xopenat(dirfd, path, flags|O_CREAT|O_DIRECTORY|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
+        if (IN_SET(fd, -ELOOP, -ENOTDIR))
+                return -EEXIST;
+        if (fd < 0)
                 return fd;
-        }
 
         return TAKE_FD(fd);
 }
@@ -1109,4 +1104,131 @@ int openat_report_new(int dirfd, const char *pathname, int flags, mode_t mode, b
                 if (--attempts == 0) /* Give up eventually, somebody is playing with us */
                         return -EEXIST;
         }
+}
+
+int xopenat(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode) {
+        _cleanup_close_ int fd = -EBADF;
+        bool made = false;
+        int r;
+
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+
+        /* This is like openat(), but has a few tricks up its sleeves, extending behaviour:
+         *
+         *   • O_DIRECTORY|O_CREAT is supported, which causes a directory to be created, and immediately
+         *     opened. When used with the XO_SUBVOLUME flag this will even create a btrfs subvolume.
+         *
+         *   • If O_CREAT is used with XO_LABEL, any created file will be immediately relabelled.
+         *
+         *   • If the path is specified NULL or empty, behaves like fd_reopen().
+         */
+
+        if (isempty(path)) {
+                assert(!FLAGS_SET(open_flags, O_CREAT|O_EXCL));
+                return fd_reopen(dir_fd, open_flags & ~O_NOFOLLOW);
+        }
+
+        if (FLAGS_SET(open_flags, O_CREAT) && FLAGS_SET(xopen_flags, XO_LABEL)) {
+                r = label_ops_pre(dir_fd, path, FLAGS_SET(open_flags, O_DIRECTORY) ? S_IFDIR : S_IFREG);
+                if (r < 0)
+                        return r;
+        }
+
+        if (FLAGS_SET(open_flags, O_DIRECTORY|O_CREAT)) {
+                if (FLAGS_SET(xopen_flags, XO_SUBVOLUME))
+                        r = btrfs_subvol_make_fallback(dir_fd, path, mode);
+                else
+                        r = RET_NERRNO(mkdirat(dir_fd, path, mode));
+                if (r == -EEXIST) {
+                        if (FLAGS_SET(open_flags, O_EXCL))
+                                return -EEXIST;
+
+                        made = false;
+                } else if (r < 0)
+                        return r;
+                else
+                        made = true;
+
+                if (FLAGS_SET(xopen_flags, XO_LABEL)) {
+                        r = label_ops_post(dir_fd, path);
+                        if (r < 0)
+                                return r;
+                }
+
+                open_flags &= ~(O_EXCL|O_CREAT);
+                xopen_flags &= ~XO_LABEL;
+        }
+
+        fd = RET_NERRNO(openat(dir_fd, path, open_flags, mode));
+        if (fd < 0) {
+                if (IN_SET(fd,
+                           /* We got ENOENT? then someone else immediately removed it after we
+                           * created it. In that case let's return immediately without unlinking
+                           * anything, because there simply isn't anything to unlink anymore. */
+                           -ENOENT,
+                           /* is a symlink? exists already → created by someone else, don't unlink */
+                           -ELOOP,
+                           /* not a directory? exists already → created by someone else, don't unlink */
+                           -ENOTDIR))
+                        return fd;
+
+                if (made)
+                        (void) unlinkat(dir_fd, path, AT_REMOVEDIR);
+
+                return fd;
+        }
+
+        if (FLAGS_SET(open_flags, O_CREAT) && FLAGS_SET(xopen_flags, XO_LABEL)) {
+                r = label_ops_post(dir_fd, path);
+                if (r < 0)
+                        return r;
+        }
+
+        return TAKE_FD(fd);
+}
+
+int xopenat_lock(
+                int dir_fd,
+                const char *path,
+                int open_flags,
+                XOpenFlags xopen_flags,
+                mode_t mode,
+                LockType locktype,
+                int operation) {
+
+        _cleanup_close_ int fd = -EBADF;
+        int r;
+
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+        assert(IN_SET(operation & ~LOCK_NB, LOCK_EX, LOCK_SH));
+
+        /* POSIX/UNPOSIX locks don't work on directories (errno is set to -EBADF so let's return early with
+         * the same error here). */
+        if (FLAGS_SET(open_flags, O_DIRECTORY) && !IN_SET(locktype, LOCK_BSD, LOCK_NONE))
+                return -EBADF;
+
+        for (;;) {
+                struct stat st;
+
+                fd = xopenat(dir_fd, path, open_flags, xopen_flags, mode);
+                if (fd < 0)
+                        return fd;
+
+                r = lock_generic(fd, locktype, operation);
+                if (r < 0)
+                        return r;
+
+                /* If we acquired the lock, let's check if the file/directory still exists in the file
+                 * system. If not, then the previous exclusive owner removed it and then closed it. In such a
+                 * case our acquired lock is worthless, hence try again. */
+
+                if (fstat(fd, &st) < 0)
+                        return -errno;
+                if (st.st_nlink > 0)
+                        break;
+
+                fd = safe_close(fd);
+        }
+
+        return TAKE_FD(fd);
 }

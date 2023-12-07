@@ -4,7 +4,7 @@
 
 #include "bootspec-fundamental.h"
 #include "bootspec.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "conf-files.h"
 #include "devnum-util.h"
 #include "dirent-util.h"
@@ -15,7 +15,7 @@
 #include "fileio.h"
 #include "find-esp.h"
 #include "path-util.h"
-#include "pe-header.h"
+#include "pe-binary.h"
 #include "pretty-print.h"
 #include "recurse-dir.h"
 #include "sort-util.h"
@@ -33,6 +33,15 @@ static const char* const boot_entry_type_table[_BOOT_ENTRY_TYPE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_TO_STRING(boot_entry_type, BootEntryType);
+
+static const char* const boot_entry_type_json_table[_BOOT_ENTRY_TYPE_MAX] = {
+        [BOOT_ENTRY_CONF]        = "type1",
+        [BOOT_ENTRY_UNIFIED]     = "type2",
+        [BOOT_ENTRY_LOADER]      = "loader",
+        [BOOT_ENTRY_LOADER_AUTO] = "auto",
+};
+
+DEFINE_STRING_TABLE_LOOKUP_TO_STRING(boot_entry_type_json, BootEntryType);
 
 static void boot_entry_free(BootEntry *entry) {
         assert(entry);
@@ -316,9 +325,8 @@ static int boot_entry_load_type1(
 
         for (;;) {
                 _cleanup_free_ char *buf = NULL, *field = NULL;
-                const char *p;
 
-                r = read_line(f, LONG_LINE_MAX, &buf);
+                r = read_stripped_line(f, LONG_LINE_MAX, &buf);
                 if (r == 0)
                         break;
                 if (r == -ENOBUFS)
@@ -328,10 +336,10 @@ static int boot_entry_load_type1(
 
                 line++;
 
-                p = strstrip(buf);
-                if (IN_SET(p[0], '#', '\0'))
+                if (IN_SET(buf[0], '#', '\0'))
                         continue;
 
+                const char *p = buf;
                 r = extract_first_word(&p, &field, NULL, 0);
                 if (r < 0) {
                         log_syntax(NULL, LOG_WARNING, tmp.path, line, r, "Failed to parse, ignoring line: %m");
@@ -380,8 +388,7 @@ static int boot_entry_load_type1(
                         return log_syntax(NULL, LOG_ERR, tmp.path, line, r, "Error while parsing: %m");
         }
 
-        *entry = tmp;
-        tmp = (BootEntry) {};
+        *entry = TAKE_STRUCT(tmp);
         return 0;
 }
 
@@ -442,9 +449,8 @@ int boot_loader_read_conf(BootConfig *config, FILE *file, const char *path) {
 
         for (;;) {
                 _cleanup_free_ char *buf = NULL, *field = NULL;
-                const char *p;
 
-                r = read_line(file, LONG_LINE_MAX, &buf);
+                r = read_stripped_line(file, LONG_LINE_MAX, &buf);
                 if (r == 0)
                         break;
                 if (r == -ENOBUFS)
@@ -454,10 +460,10 @@ int boot_loader_read_conf(BootConfig *config, FILE *file, const char *path) {
 
                 line++;
 
-                p = strstrip(buf);
-                if (IN_SET(p[0], '#', '\0'))
+                if (IN_SET(buf[0], '#', '\0'))
                         continue;
 
+                const char *p = buf;
                 r = extract_first_word(&p, &field, NULL, 0);
                 if (r < 0) {
                         log_syntax(NULL, LOG_WARNING, path, line, r, "Failed to parse, ignoring line: %m");
@@ -507,7 +513,7 @@ static int boot_loader_read_conf_path(BootConfig *config, const char *root, cons
         assert(config);
         assert(path);
 
-        r = chase_symlinks_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, "re", &full, &f);
+        r = chase_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, "re", &full, &f);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -560,7 +566,7 @@ static int config_check_inode_relevant_and_unseen(BootConfig *config, int fd, co
         if (fstat(fd, &st) < 0)
                 return log_error_errno(errno, "Failed to stat('%s'): %m", fname);
         if (!S_ISREG(st.st_mode)) {
-                log_debug("File '%s' is not a reguar file, ignoring.", fname);
+                log_debug("File '%s' is not a regular file, ignoring.", fname);
                 return false;
         }
 
@@ -568,13 +574,14 @@ static int config_check_inode_relevant_and_unseen(BootConfig *config, int fd, co
                 log_debug("Inode '%s' already seen before, ignoring.", fname);
                 return false;
         }
+
         d = memdup(&st, sizeof(st));
         if (!d)
                 return log_oom();
-        if (set_ensure_put(&config->inodes_seen, &inode_hash_ops, d) < 0)
+
+        if (set_ensure_consume(&config->inodes_seen, &inode_hash_ops, TAKE_PTR(d)) < 0)
                 return log_oom();
 
-        TAKE_PTR(d);
         return true;
 }
 
@@ -592,7 +599,7 @@ static int boot_entries_find_type1(
         assert(root);
         assert(dir);
 
-        dir_fd = chase_symlinks_and_open(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY|O_CLOEXEC, &full);
+        dir_fd = chase_and_open(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY|O_CLOEXEC, &full);
         if (dir_fd == -ENOENT)
                 return 0;
         if (dir_fd < 0)
@@ -735,8 +742,7 @@ static int boot_entry_load_unified(
                         return log_oom();
         }
 
-        *ret = tmp;
-        tmp = (BootEntry) {};
+        *ret = TAKE_STRUCT(tmp);
         return 0;
 }
 
@@ -750,92 +756,36 @@ static int find_sections(
                 char **ret_osrelease,
                 char **ret_cmdline) {
 
-        _cleanup_free_ struct PeSectionHeader *sections = NULL;
-        _cleanup_free_ char *osrelease = NULL, *cmdline = NULL;
-        ssize_t n;
+        _cleanup_free_ IMAGE_SECTION_HEADER *sections = NULL;
+        _cleanup_free_ IMAGE_DOS_HEADER *dos_header = NULL;
+        _cleanup_free_ char *osrel = NULL, *cmdline = NULL;
+        _cleanup_free_ PeHeader *pe_header = NULL;
+        int r;
 
-        struct DosFileHeader dos;
-        n = pread(fd, &dos, sizeof(dos), 0);
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read DOS header, ignoring: %m", path);
-        if (n != sizeof(dos))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading DOS header, ignoring.", path);
+        assert(fd >= 0);
+        assert(path);
 
-        if (dos.Magic[0] != 'M' || dos.Magic[1] != 'Z')
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: DOS executable magic missing, ignoring.", path);
+        r = pe_load_headers(fd, &dos_header, &pe_header);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse PE file '%s': %m", path);
 
-        uint64_t start = unaligned_read_le32(&dos.ExeHeader);
+        r = pe_load_sections(fd, dos_header, pe_header, &sections);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to parse PE sections of '%s': %m", path);
 
-        struct PeHeader pe;
-        n = pread(fd, &pe, sizeof(pe), start);
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read PE header, ignoring: %m", path);
-        if (n != sizeof(pe))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading PE header, ignoring.", path);
+        if (!pe_is_uki(pe_header, sections))
+                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "Parsed PE file '%s' is not a UKI.", path);
 
-        if (pe.Magic[0] != 'P' || pe.Magic[1] != 'E' || pe.Magic[2] != 0 || pe.Magic[3] != 0)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: PE executable magic missing, ignoring.", path);
+        r = pe_read_section_data(fd, pe_header, sections, ".osrel", PE_SECTION_SIZE_MAX, (void**) &osrel, NULL);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to read .osrel section of '%s': %m", path);
 
-        size_t n_sections = unaligned_read_le16(&pe.FileHeader.NumberOfSections);
-        if (n_sections > 96)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: PE header has too many sections, ignoring.", path);
-
-        sections = new(struct PeSectionHeader, n_sections);
-        if (!sections)
-                return log_oom();
-
-        n = pread(fd, sections,
-                  n_sections * sizeof(struct PeSectionHeader),
-                  start + sizeof(pe) + unaligned_read_le16(&pe.FileHeader.SizeOfOptionalHeader));
-        if (n < 0)
-                return log_warning_errno(errno, "%s: Failed to read section data, ignoring: %m", path);
-        if ((size_t) n != n_sections * sizeof(struct PeSectionHeader))
-                return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading sections, ignoring.", path);
-
-        for (size_t i = 0; i < n_sections; i++) {
-                _cleanup_free_ char *k = NULL;
-                uint32_t offset, size;
-                char **b;
-
-                if (strneq((char*) sections[i].Name, ".osrel", sizeof(sections[i].Name)))
-                        b = &osrelease;
-                else if (strneq((char*) sections[i].Name, ".cmdline", sizeof(sections[i].Name)))
-                        b = &cmdline;
-                else
-                        continue;
-
-                if (*b)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Duplicate section %s, ignoring.", path, sections[i].Name);
-
-                offset = unaligned_read_le32(&sections[i].PointerToRawData);
-                size = unaligned_read_le32(&sections[i].VirtualSize);
-
-                if (size > PE_SECTION_SIZE_MAX)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Section %s too large, ignoring.", path, sections[i].Name);
-
-                k = new(char, size+1);
-                if (!k)
-                        return log_oom();
-
-                n = pread(fd, k, size, offset);
-                if (n < 0)
-                        return log_warning_errno(errno, "%s: Failed to read section payload, ignoring: %m", path);
-                if ((size_t) n != size)
-                        return log_warning_errno(SYNTHETIC_ERRNO(EIO), "%s: Short read while reading section payload, ignoring:", path);
-
-                /* Allow one trailing NUL byte, but nothing more. */
-                if (size > 0 && memchr(k, 0, size - 1))
-                        return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Section contains embedded NUL byte, ignoring.", path);
-
-                k[size] = 0;
-                *b = TAKE_PTR(k);
-        }
-
-        if (!osrelease)
-                return log_warning_errno(SYNTHETIC_ERRNO(EBADMSG), "%s: Image lacks .osrel section, ignoring.", path);
+        r = pe_read_section_data(fd, pe_header, sections, ".cmdline", PE_SECTION_SIZE_MAX, (void**) &cmdline, NULL);
+        if (r < 0 && r != -ENXIO) /* cmdline is optional */
+                return log_warning_errno(r, "Failed to read .cmdline section of '%s': %m", path);
 
         if (ret_osrelease)
-                *ret_osrelease = TAKE_PTR(osrelease);
+                *ret_osrelease = TAKE_PTR(osrel);
         if (ret_cmdline)
                 *ret_cmdline = TAKE_PTR(cmdline);
 
@@ -847,14 +797,14 @@ static int boot_entries_find_unified(
                 const char *root,
                 const char *dir) {
 
-        _cleanup_(closedirp) DIR *d = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
         _cleanup_free_ char *full = NULL;
         int r;
 
         assert(config);
         assert(dir);
 
-        r = chase_symlinks_and_opendir(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &full, &d);
+        r = chase_and_opendir(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &full, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -1193,6 +1143,8 @@ int boot_config_augment_from_loader(
                 "auto-windows",                  "Windows Boot Manager",
                 "auto-efi-shell",                "EFI Shell",
                 "auto-efi-default",              "EFI Default Loader",
+                "auto-poweroff",                 "Power Off The System",
+                "auto-reboot",                   "Reboot The System",
                 "auto-reboot-to-firmware-setup", "Reboot Into Firmware Interface",
                 NULL,
         };
@@ -1269,7 +1221,7 @@ static void boot_entry_file_list(
         assert(p);
         assert(ret_status);
 
-        int status = chase_symlinks_and_access(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL, NULL);
+        int status = chase_and_access(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
 
         /* Note that this shows two '/' between the root and the file. This is intentional to highlight (in
          * the absence of color support) to the user that the boot loader is only interested in the second
@@ -1421,7 +1373,9 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                                         return log_oom();
                         }
 
-                        r = json_append(&v, JSON_BUILD_OBJECT(
+                        r = json_variant_merge_objectb(
+                                        &v, JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR("type", JSON_BUILD_STRING(boot_entry_type_json_to_string(e->type))),
                                                        JSON_BUILD_PAIR_CONDITION(e->id, "id", JSON_BUILD_STRING(e->id)),
                                                        JSON_BUILD_PAIR_CONDITION(e->path, "path", JSON_BUILD_STRING(e->path)),
                                                        JSON_BUILD_PAIR_CONDITION(e->root, "root", JSON_BUILD_STRING(e->root)),
@@ -1443,7 +1397,9 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
                         /* Sanitizers (only memory sanitizer?) do not like function call with too many
                          * arguments and trigger false positive warnings. Let's not add too many json objects
                          * at once. */
-                        r = json_append(&v, JSON_BUILD_OBJECT(
+                        r = json_variant_merge_objectb(
+                                        &v, JSON_BUILD_OBJECT(
+                                                       JSON_BUILD_PAIR("isReported", JSON_BUILD_BOOLEAN(e->reported_by_loader)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_left != UINT_MAX, "triesLeft", JSON_BUILD_UNSIGNED(e->tries_left)),
                                                        JSON_BUILD_PAIR_CONDITION(e->tries_done != UINT_MAX, "triesDone", JSON_BUILD_UNSIGNED(e->tries_done)),
                                                        JSON_BUILD_PAIR_CONDITION(config->default_entry >= 0, "isDefault", JSON_BUILD_BOOLEAN(i == (size_t) config->default_entry)),

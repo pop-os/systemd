@@ -12,6 +12,7 @@
 #include "sd-dhcp6-client.h"
 
 #include "dhcp-identifier.h"
+#include "dhcp6-client-internal.h"
 #include "dhcp6-option.h"
 #include "dhcp6-protocol.h"
 #include "ether-addr-util.h"
@@ -79,10 +80,9 @@ struct sd_dhcp6_client {
 
         sd_dhcp6_client_callback_t callback;
         void *userdata;
+        sd_dhcp6_client_callback_t state_callback;
+        void *state_userdata;
         bool send_release;
-
-        /* Ignore machine-ID when generating DUID. See dhcp_identifier_set_duid_en(). */
-        bool test_mode;
 };
 
 int dhcp6_network_bind_udp_socket(int ifindex, struct in6_addr *address);
@@ -90,7 +90,6 @@ int dhcp6_network_send_udp_socket(int s, struct in6_addr *address,
                                   const void *packet, size_t len);
 
 int dhcp6_client_send_message(sd_dhcp6_client *client);
-void dhcp6_client_set_test_mode(sd_dhcp6_client *client, bool test_mode);
 int dhcp6_client_set_transaction_id(sd_dhcp6_client *client, uint32_t transaction_id);
 
 #define log_dhcp6_client_errno(client, error, fmt, ...)         \

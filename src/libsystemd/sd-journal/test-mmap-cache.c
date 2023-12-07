@@ -8,6 +8,7 @@
 #include "fd-util.h"
 #include "macro.h"
 #include "mmap-cache.h"
+#include "tests.h"
 #include "tmpfile-util.h"
 
 int main(int argc, char *argv[]) {
@@ -17,21 +18,23 @@ int main(int argc, char *argv[]) {
         MMapCache *m;
         void *p, *q;
 
+        test_setup_logging(LOG_DEBUG);
+
         assert_se(m = mmap_cache_new());
 
         x = mkostemp_safe(px);
         assert_se(x >= 0);
-        unlink(px);
+        (void) unlink(px);
 
-        assert_se(fx = mmap_cache_add_fd(m, x, PROT_READ));
+        assert_se(mmap_cache_add_fd(m, x, PROT_READ, &fx) > 0);
 
         y = mkostemp_safe(py);
         assert_se(y >= 0);
-        unlink(py);
+        (void) unlink(py);
 
         z = mkostemp_safe(pz);
         assert_se(z >= 0);
-        unlink(pz);
+        (void) unlink(pz);
 
         r = mmap_cache_fd_get(fx, 0, false, 1, 2, NULL, &p);
         assert_se(r >= 0);

@@ -12,7 +12,7 @@
 #include "alloc-util.h"
 #include "ether-addr-util.h"
 #include "hexdecoct.h"
-#include "lockfile-util.h"
+#include "lock-util.h"
 #include "missing_network.h"
 #include "netif-naming-scheme.h"
 #include "netlink-util.h"
@@ -211,10 +211,10 @@ static int shorten_ifname(char *ifname) {
         if (naming_scheme_has(NAMING_NSPAWN_LONG_HASH)) {
                 uint64_t h;
 
-                /* Calculate 64bit hash value */
+                /* Calculate 64-bit hash value */
                 h = siphash24(ifname, strlen(ifname), SHORTEN_IFNAME_HASH_KEY.bytes);
 
-                /* Set the final four bytes (i.e. 32bit) to the lower 24bit of the hash, encoded in url-safe base64 */
+                /* Set the final four bytes (i.e. 32-bit) to the lower 24bit of the hash, encoded in url-safe base64 */
                 memcpy(new_ifname, ifname, IFNAMSIZ - 5);
                 new_ifname[IFNAMSIZ - 5] = urlsafe_base64char(h >> 18);
                 new_ifname[IFNAMSIZ - 4] = urlsafe_base64char(h >> 12);
@@ -236,7 +236,8 @@ static int shorten_ifname(char *ifname) {
 int setup_veth(const char *machine_name,
                pid_t pid,
                char iface_name[IFNAMSIZ],
-               bool bridge) {
+               bool bridge,
+               const struct ether_addr *provided_mac) {
 
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         struct ether_addr mac_host, mac_container;
@@ -255,9 +256,12 @@ int setup_veth(const char *machine_name,
         if (r > 0)
                 a = strjoina(bridge ? "vb-" : "ve-", machine_name);
 
-        r = generate_mac(machine_name, &mac_container, CONTAINER_HASH_KEY, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate predictable MAC address for container side: %m");
+        if (ether_addr_is_null(provided_mac)){
+                r = generate_mac(machine_name, &mac_container, CONTAINER_HASH_KEY, 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to generate predictable MAC address for container side: %m");
+        } else
+                mac_container = *provided_mac;
 
         r = generate_mac(machine_name, &mac_host, HOST_HASH_KEY, 0);
         if (r < 0)
@@ -463,7 +467,7 @@ int remove_bridge(const char *bridge_name) {
         return remove_one_link(rtnl, bridge_name);
 }
 
-int test_network_interface_initialized(const char *name) {
+static int test_network_interface_initialized(const char *name) {
         _cleanup_(sd_device_unrefp) sd_device *d = NULL;
         int r;
 
@@ -491,18 +495,28 @@ int test_network_interface_initialized(const char *name) {
         return 0;
 }
 
-int move_network_interfaces(int netns_fd, char **ifaces) {
+int test_network_interfaces_initialized(char **iface_pairs) {
+        int r;
+        STRV_FOREACH_PAIR(a, b, iface_pairs) {
+                r = test_network_interface_initialized(*a);
+                if (r < 0)
+                        return r;
+        }
+        return 0;
+}
+
+int move_network_interfaces(int netns_fd, char **iface_pairs) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         int r;
 
-        if (strv_isempty(ifaces))
+        if (strv_isempty(iface_pairs))
                 return 0;
 
         r = sd_netlink_open(&rtnl);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect to netlink: %m");
 
-        STRV_FOREACH(i, ifaces) {
+        STRV_FOREACH_PAIR(i, b, iface_pairs) {
                 _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
                 int ifi;
 
@@ -518,6 +532,12 @@ int move_network_interfaces(int netns_fd, char **ifaces) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to append namespace fd to netlink message: %m");
 
+                if (!streq(*b, *i)) {
+                        r = sd_netlink_message_append_string(m, IFLA_IFNAME, *b);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to add netlink interface name: %m");
+                }
+
                 r = sd_netlink_call(rtnl, m, 0, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to move interface %s to namespace: %m", *i);
@@ -526,23 +546,23 @@ int move_network_interfaces(int netns_fd, char **ifaces) {
         return 0;
 }
 
-int setup_macvlan(const char *machine_name, pid_t pid, char **ifaces) {
+int setup_macvlan(const char *machine_name, pid_t pid, char **iface_pairs) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         unsigned idx = 0;
         int r;
 
-        if (strv_isempty(ifaces))
+        if (strv_isempty(iface_pairs))
                 return 0;
 
         r = sd_netlink_open(&rtnl);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect to netlink: %m");
 
-        STRV_FOREACH(i, ifaces) {
+        STRV_FOREACH_PAIR(i, b, iface_pairs) {
                 _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
-                _cleanup_free_ char *n = NULL, *a = NULL;
+                _cleanup_free_ char *n = NULL;
+                int shortened, ifi;
                 struct ether_addr mac;
-                int ifi;
 
                 ifi = rtnl_resolve_interface_or_warn(&rtnl, *i);
                 if (ifi < 0)
@@ -560,16 +580,11 @@ int setup_macvlan(const char *machine_name, pid_t pid, char **ifaces) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to add netlink interface index: %m");
 
-                n = strjoin("mv-", *i);
+                n = strdup(*b);
                 if (!n)
                         return log_oom();
 
-                r = shorten_ifname(n);
-                if (r > 0) {
-                        a = strjoin("mv-", *i);
-                        if (!a)
-                                return log_oom();
-                }
+                shortened = shorten_ifname(n);
 
                 r = sd_netlink_message_append_string(m, IFLA_IFNAME, n);
                 if (r < 0)
@@ -607,27 +622,28 @@ int setup_macvlan(const char *machine_name, pid_t pid, char **ifaces) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to add new macvlan interfaces: %m");
 
-                (void) set_alternative_ifname(rtnl, n, a);
+                if (shortened > 0)
+                        (void) set_alternative_ifname(rtnl, n, *b);
         }
 
         return 0;
 }
 
-int setup_ipvlan(const char *machine_name, pid_t pid, char **ifaces) {
+int setup_ipvlan(const char *machine_name, pid_t pid, char **iface_pairs) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         int r;
 
-        if (strv_isempty(ifaces))
+        if (strv_isempty(iface_pairs))
                 return 0;
 
         r = sd_netlink_open(&rtnl);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect to netlink: %m");
 
-        STRV_FOREACH(i, ifaces) {
+        STRV_FOREACH_PAIR(i, b, iface_pairs) {
                 _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
-                _cleanup_free_ char *n = NULL, *a = NULL;
-                int ifi;
+                _cleanup_free_ char *n = NULL;
+                int shortened, ifi ;
 
                 ifi = rtnl_resolve_interface_or_warn(&rtnl, *i);
                 if (ifi < 0)
@@ -641,16 +657,11 @@ int setup_ipvlan(const char *machine_name, pid_t pid, char **ifaces) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to add netlink interface index: %m");
 
-                n = strjoin("iv-", *i);
+                n = strdup(*b);
                 if (!n)
                         return log_oom();
 
-                r = shorten_ifname(n);
-                if (r > 0) {
-                        a = strjoin("iv-", *i);
-                        if (!a)
-                                return log_oom();
-                }
+                shortened = shorten_ifname(n);
 
                 r = sd_netlink_message_append_string(m, IFLA_IFNAME, n);
                 if (r < 0)
@@ -684,7 +695,8 @@ int setup_ipvlan(const char *machine_name, pid_t pid, char **ifaces) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to add new ipvlan interfaces: %m");
 
-                (void) set_alternative_ifname(rtnl, n, a);
+                if (shortened > 0)
+                        (void) set_alternative_ifname(rtnl, n, *b);
         }
 
         return 0;
@@ -704,10 +716,9 @@ int veth_extra_parse(char ***l, const char *p) {
         if (r < 0)
                 return r;
         if (r == 0 || !ifname_valid(b)) {
-                free(b);
-                b = strdup(a);
-                if (!b)
-                        return -ENOMEM;
+                r = free_and_strdup(&b, a);
+                if (r < 0)
+                        return r;
         }
 
         if (p)
@@ -741,4 +752,64 @@ int remove_veth_links(const char *primary, char **pairs) {
                 remove_one_link(rtnl, *a);
 
         return 0;
+}
+
+static int network_iface_pair_parse(const char* iftype, char ***l, const char *p, const char* ifprefix) {
+        int r;
+
+        for (;;) {
+                _cleanup_free_ char *word = NULL, *a = NULL, *b = NULL;
+                const char *interface;
+
+                r = extract_first_word(&p, &word, NULL, 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse interface name: %m");
+                if (r == 0)
+                        break;
+
+                interface = word;
+                r = extract_first_word(&interface, &a, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to extract first word in %s parameter: %m", iftype);
+                if (r == 0)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "Short read while reading %s parameter: %m", iftype);
+                if (!ifname_valid(a))
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "%s, interface name not valid: %s", iftype, a);
+
+                /* Here, we only check the validity of the specified second name. If it is not specified,
+                 * the copied or prefixed name should be already valid, except for its length. If it is too
+                 * long, then it will be shortened later. */
+                if (!isempty(interface)) {
+                        if (!ifname_valid(interface))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "%s, interface name not valid: %s", iftype, interface);
+
+                        b = strdup(interface);
+                } else if (ifprefix)
+                        b = strjoin(ifprefix, a);
+                else
+                        b = strdup(a);
+                if (!b)
+                        return log_oom();
+
+                r = strv_consume_pair(l, TAKE_PTR(a), TAKE_PTR(b));
+                if (r < 0)
+                        return log_oom();
+        }
+
+        return 0;
+}
+
+int interface_pair_parse(char ***l, const char *p) {
+        return network_iface_pair_parse("Network interface", l, p, NULL);
+}
+
+int macvlan_pair_parse(char ***l, const char *p) {
+        return network_iface_pair_parse("MACVLAN network interface", l, p, "mv-");
+}
+
+int ipvlan_pair_parse(char ***l, const char *p) {
+        return network_iface_pair_parse("IPVLAN network interface", l, p, "iv-");
 }

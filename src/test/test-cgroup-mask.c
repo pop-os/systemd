@@ -21,9 +21,9 @@ static void log_cgroup_mask(CGroupMask got, CGroupMask expected) {
         _cleanup_free_ char *e_store = NULL, *g_store = NULL;
 
         assert_se(cg_mask_to_string(expected, &e_store) >= 0);
-        log_info("Expected mask: %s\n", e_store);
+        log_info("Expected mask: %s", e_store);
         assert_se(cg_mask_to_string(got, &g_store) >= 0);
-        log_info("Got mask: %s\n", g_store);
+        log_info("Got mask: %s", g_store);
 }
 
 TEST_RET(cgroup_mask, .sd_booted = true) {
@@ -42,7 +42,7 @@ TEST_RET(cgroup_mask, .sd_booted = true) {
         assert_se(get_testdata_dir("units", &unit_dir) >= 0);
         assert_se(set_unit_path(unit_dir) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
-        r = manager_new(LOOKUP_SCOPE_USER, MANAGER_TEST_RUN_BASIC, &m);
+        r = manager_new(RUNTIME_SCOPE_USER, MANAGER_TEST_RUN_BASIC, &m);
         if (IN_SET(r, -EPERM, -EACCES)) {
                 log_error_errno(r, "manager_new: %m");
                 return log_tests_skipped("cannot create manager");
@@ -50,15 +50,15 @@ TEST_RET(cgroup_mask, .sd_booted = true) {
 
         assert_se(r >= 0);
 
-        /* Turn off all kinds of default accouning, so that we can
+        /* Turn off all kinds of default accounting, so that we can
          * verify the masks resulting of our configuration and nothing
          * else. */
-        m->default_cpu_accounting =
-                m->default_memory_accounting =
-                m->default_blockio_accounting =
-                m->default_io_accounting =
-                m->default_tasks_accounting = false;
-        m->default_tasks_max = TASKS_MAX_UNSET;
+        m->defaults.cpu_accounting =
+                m->defaults.memory_accounting =
+                m->defaults.blockio_accounting =
+                m->defaults.io_accounting =
+                m->defaults.tasks_accounting = false;
+        m->defaults.tasks_max = CGROUP_TASKS_MAX_UNSET;
 
         assert_se(manager_startup(m, NULL, NULL, NULL) >= 0);
 
@@ -154,6 +154,31 @@ TEST(cg_mask_to_string) {
         test_cg_mask_to_string_one(CGROUP_MASK_CPUACCT|CGROUP_MASK_PIDS, "cpuacct pids");
         test_cg_mask_to_string_one(CGROUP_MASK_DEVICES|CGROUP_MASK_PIDS, "devices pids");
         test_cg_mask_to_string_one(CGROUP_MASK_IO|CGROUP_MASK_BLKIO, "io blkio");
+}
+
+static void cgroup_device_permissions_test_normalize(const char *a, const char *b) {
+        assert_se(streq_ptr(cgroup_device_permissions_to_string(cgroup_device_permissions_from_string(a)), b));
+}
+
+TEST(cgroup_device_permissions) {
+        for (CGroupDevicePermissions p = 0; p < _CGROUP_DEVICE_PERMISSIONS_MAX; p++) {
+                const char *s;
+
+                assert_se(s = cgroup_device_permissions_to_string(p));
+                assert_se(cgroup_device_permissions_from_string(s) == p);
+        }
+
+        cgroup_device_permissions_test_normalize("", "");
+        cgroup_device_permissions_test_normalize("rw", "rw");
+        cgroup_device_permissions_test_normalize("wr", "rw");
+        cgroup_device_permissions_test_normalize("wwrr", "rw");
+        cgroup_device_permissions_test_normalize("mmmmmmmmmmmmmm", "m");
+        cgroup_device_permissions_test_normalize("mmmmrrrrmmmwwmwmwmwmwmrmrmr", "rwm");
+
+        assert_se(cgroup_device_permissions_from_string(NULL) == -EINVAL);
+        assert_se(cgroup_device_permissions_from_string("rwq") == -EINVAL);
+        assert_se(cgroup_device_permissions_from_string("RW") == -EINVAL);
+        assert_se(cgroup_device_permissions_from_string("") == 0);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

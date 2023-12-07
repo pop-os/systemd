@@ -3,6 +3,9 @@
 
 name: Differential ShellCheck
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -17,15 +20,16 @@ jobs:
 
     permissions:
       security-events: write
-      pull-requests: write
 
     steps:
       - name: Repository checkout
-        uses: actions/checkout@755da8c3cf115ac066823e79a1e1788f8940201b
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
           fetch-depth: 0
 
       - name: Differential ShellCheck
-        uses: redhat-plumbers-in-action/differential-shellcheck@f3cd08fcf12680861615270b29494d2b87c3e1cc
+        uses: redhat-plumbers-in-action/differential-shellcheck@91e2582e40236f831458392d905578d680baa138
         with:
+          # exclude all `.in` files because they may contain unsupported syntax, and they have to be preprocessed first
+          exclude-path: '**/*.in'
           token: ${{ secrets.GITHUB_TOKEN }}

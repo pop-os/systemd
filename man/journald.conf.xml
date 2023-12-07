@@ -95,6 +95,11 @@
         <filename>/var/log/journal/</filename>, as the <filename>systemd-journald@.service</filename> service
         file by default carries <varname>LogsDirectory=</varname>. To turn that off, add a unit file drop-in
         file that sets <varname>LogsDirectory=</varname> to an empty string.</para>
+
+        <para>Note that per-user journal files are not supported unless persistent storage is enabled, thus
+        making <command>journalctl --user</command> unavailable.</para>
+
+        <xi:include href="version-info.xml" xpointer="v186"/>
         </listitem>
       </varlistentry>
 
@@ -122,7 +127,9 @@
         url="https://eprint.iacr.org/2013/397">Seekable Sequential Key
         Generators</ulink> by G. A. Marson and B. Poettering
         (doi:10.1007/978-3-642-40203-6_7) and may be used to protect
-        journal files from unnoticed alteration.</para></listitem>
+        journal files from unnoticed alteration.</para>
+
+        <xi:include href="version-info.xml" xpointer="v189"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -139,7 +146,9 @@
         instead stored in the single system journal. In this mode unprivileged users generally do not have access to
         their own log data. Note that splitting up journal files by user is only available for journals stored
         persistently. If journals are stored on volatile storage (see <varname>Storage=</varname> above), only a single
-        journal file is used. Defaults to <literal>uid</literal>.</para></listitem>
+        journal file is used. Defaults to <literal>uid</literal>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v190"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -276,9 +285,9 @@
         <para><varname>SystemMaxFileSize=</varname> and <varname>RuntimeMaxFileSize=</varname> control how
         large individual journal files may grow at most. This influences the granularity in which disk space
         is made available through rotation, i.e. deletion of historic data. Defaults to one eighth of the
-        values configured with <varname>SystemMaxUse=</varname> and <varname>RuntimeMaxUse=</varname>, so
-        that usually seven rotated journal files are kept as history. If the journal compact mode is enabled
-        (enabled by default), the maximum file size is capped to 4G.</para>
+        values configured with <varname>SystemMaxUse=</varname> and <varname>RuntimeMaxUse=</varname> capped
+        to 128M, so that usually seven rotated journal files are kept as history. If the journal compact 
+        mode is enabled (enabled by default), the maximum file size is capped to 4G.</para>
 
         <para>Specify values in bytes or use K, M, G, T, P, E as units for the specified sizes (equal to
         1024, 1024², … bytes). Note that size limits are enforced synchronously when journal files are
@@ -311,7 +320,9 @@
         <literal>month</literal>, <literal>week</literal>,
         <literal>day</literal>, <literal>h</literal> or
         <literal>m</literal> to override the default time unit of
-        seconds.</para></listitem>
+        seconds.</para>
+
+        <xi:include href="version-info.xml" xpointer="v195"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -331,7 +342,9 @@
         <literal>month</literal>, <literal>week</literal>,
         <literal>day</literal>, <literal>h</literal> or <literal>
         m</literal> to override the default time unit of
-        seconds.</para></listitem>
+        seconds.</para>
+
+        <xi:include href="version-info.xml" xpointer="v195"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -343,7 +356,9 @@
         immediately after a log message of priority CRIT, ALERT or
         EMERG has been logged. This setting hence applies only to
         messages of the levels ERR, WARNING, NOTICE, INFO, DEBUG. The
-        default timeout is 5 minutes. </para></listitem>
+        default timeout is 5 minutes. </para>
+
+        <xi:include href="version-info.xml" xpointer="v199"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -371,6 +386,15 @@
         the log buffer, for example by adding <literal>log_buf_len=8M</literal> to the kernel command line.
         <command>systemd</command> will automatically disable kernel's rate-limiting applied to userspace
         processes (equivalent to setting <literal>printk.devkmsg=on</literal>).</para></listitem>
+
+        <para>Note: Forwarding is performed synchronously within journald, and may significantly affect its
+        performance.  This is particularly relevant when using ForwardToConsole=yes in cloud environments,
+        where the console is often a slow, virtual serial port.  Since journald is implemented as a
+        conventional single-process daemon, forwarding to a completely hung console will block journald.
+        This can have a cascading effect resulting in any services synchronously logging to the blocked
+        journal also becoming blocked.  Unless actively debugging/developing something, it's generally
+        preferable to setup a <command>journalctl --follow</command> style service redirected to the
+        console, instead of ForwardToConsole=yes, for production use.</para>
       </varlistentry>
 
       <varlistentry>
@@ -409,6 +433,8 @@
         <literal>systemd.journald.max_level_kmsg=</literal>,
         <literal>systemd.journald.max_level_console=</literal>,
         <literal>systemd.journald.max_level_wall=</literal>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v185"/>
         </listitem>
       </varlistentry>
 
@@ -417,7 +443,9 @@
 
         <listitem><para>Takes a boolean value. If enabled <command>systemd-journal</command> processes
         <filename>/dev/kmsg</filename> messages generated by the kernel. In the default journal namespace
-        this option is enabled by default, it is disabled in all others.</para></listitem>
+        this option is enabled by default, it is disabled in all others.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -434,6 +462,8 @@
         to prevent <command>systemd-journald</command> from collecting the generated messages, the socket
         unit <literal>systemd-journald-audit.socket</literal> can be disabled and in this case this setting
         is without effect.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/>
         </listitem>
       </varlistentry>
 
@@ -442,7 +472,9 @@
 
         <listitem><para>Change the console TTY to use if
         <varname>ForwardToConsole=yes</varname> is used. Defaults to
-        <filename>/dev/console</filename>.</para></listitem>
+        <filename>/dev/console</filename>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v185"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -460,7 +492,9 @@
         bytes. If the value is suffixed with K, M, G or T, the specified size is parsed as Kilobytes, Megabytes,
         Gigabytes, or Terabytes (with the base 1024), respectively. Defaults to 48K, which is relatively large but
         still small enough so that log records likely fit into network datagrams along with extra room for
-        metadata. Note that values below 79 are not accepted and will be bumped to 79.</para></listitem>
+        metadata. Note that values below 79 are not accepted and will be bumped to 79.</para>
+
+        <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
 
     </variablelist>

@@ -72,6 +72,7 @@ const ExitStatusMapping exit_status_mappings[256] = {
         [EXIT_NUMA_POLICY] =             { "NUMA_POLICY",             EXIT_STATUS_SYSTEMD },
         [EXIT_CREDENTIALS] =             { "CREDENTIALS",             EXIT_STATUS_SYSTEMD },
         [EXIT_BPF] =                     { "BPF",                     EXIT_STATUS_SYSTEMD },
+        [EXIT_KSM] =                     { "KSM",                     EXIT_STATUS_SYSTEMD },
 
         [EXIT_EXCEPTION] =               { "EXCEPTION",               EXIT_STATUS_SYSTEMD },
 
@@ -144,12 +145,11 @@ bool is_clean_exit(int code, int status, ExitClean clean, const ExitStatusSet *s
                         bitmap_isset(&success_status->status, status));
 
         /* If a daemon does not implement handlers for some of the signals, we do not consider this an
-           unclean shutdown */
+         * unclean shutdown */
         if (code == CLD_KILLED)
-                return
-                        (clean == EXIT_CLEAN_DAEMON && IN_SET(status, SIGHUP, SIGINT, SIGTERM, SIGPIPE)) ||
-                        (success_status &&
-                         bitmap_isset(&success_status->signal, status));
+                return (clean == EXIT_CLEAN_DAEMON && IN_SET(status, SIGHUP, SIGINT, SIGTERM, SIGPIPE)) ||
+                       (success_status &&
+                        bitmap_isset(&success_status->signal, status));
 
         return false;
 }

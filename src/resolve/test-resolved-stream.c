@@ -19,6 +19,7 @@
 #include "macro.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "random-util.h"
 #include "resolved-dns-packet.h"
 #include "resolved-dns-question.h"
 #include "resolved-dns-rr.h"
@@ -147,16 +148,14 @@ static void *tls_dns_server(void *p) {
                 fd_tls = fd[1];
         }
 
-        r = safe_fork_full("(test-resolved-stream-tls-openssl)", (int[]) { fd_server, fd_tls }, 2,
-                FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_REOPEN_LOG, &openssl_pid);
+        r = safe_fork_full("(test-resolved-stream-tls-openssl)",
+                           (int[]) { fd_tls, fd_tls, STDOUT_FILENO },
+                           NULL, 0,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REARRANGE_STDIO|FORK_LOG|FORK_REOPEN_LOG,
+                           &openssl_pid);
         assert_se(r >= 0);
         if (r == 0) {
                 /* Child */
-                assert_se(dup2(fd_tls, STDIN_FILENO) >= 0);
-                assert_se(dup2(fd_tls, STDOUT_FILENO) >= 0);
-                close(TAKE_FD(fd_server));
-                close(TAKE_FD(fd_tls));
-
                 execlp("openssl", "openssl", "s_server", "-accept", bind_str,
                        "-key", key_path, "-cert", cert_path,
                        "-quiet", "-naccept", "1", NULL);
@@ -251,7 +250,7 @@ static void test_dns_stream(bool tls) {
                 r = connect(clientfd, &server_address.sa, SOCKADDR_LEN(server_address));
                 if (r >= 0)
                         break;
-                usleep(EVENT_TIMEOUT_USEC / 100);
+                usleep_safe(EVENT_TIMEOUT_USEC / 100);
         }
         assert_se(r >= 0);
 
@@ -337,7 +336,7 @@ static void try_isolate_network(void) {
         /* First test if CLONE_NEWUSER/CLONE_NEWNET can actually work for us, i.e. we can open the namespaces
          * and then still access the build dir we are run from. We do that in a child process since it's
          * nasty if we have to go back from the namespace once we entered it and realized it cannot work. */
-        r = safe_fork("(usernstest)", FORK_DEATHSIG|FORK_LOG|FORK_WAIT, NULL);
+        r = safe_fork("(usernstest)", FORK_DEATHSIG_SIGKILL|FORK_LOG|FORK_WAIT, NULL);
         if (r == 0) { /* child */
                 _cleanup_free_ char *rt = NULL, *d = NULL;
 
@@ -376,7 +375,7 @@ static void try_isolate_network(void) {
 int main(int argc, char **argv) {
         server_address = (union sockaddr_union) {
                 .in.sin_family = AF_INET,
-                .in.sin_port = htobe16(12345),
+                .in.sin_port = htobe16(random_u64_range(UINT16_MAX - 1024) + 1024),
                 .in.sin_addr.s_addr = htobe32(INADDR_LOOPBACK)
         };
 

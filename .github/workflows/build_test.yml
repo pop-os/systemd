@@ -26,13 +26,13 @@ jobs:
       matrix:
         env:
           - { COMPILER: "gcc",   COMPILER_VERSION: "11", LINKER: "bfd",  CRYPTOLIB: "gcrypt"  }
-          - { COMPILER: "gcc",   COMPILER_VERSION: "12", LINKER: "gold", CRYPTOLIB: "openssl" }
-          - { COMPILER: "clang", COMPILER_VERSION: "13", LINKER: "mold", CRYPTOLIB: "gcrypt"  }
-          - { COMPILER: "clang", COMPILER_VERSION: "14", LINKER: "lld",  CRYPTOLIB: "openssl" }
-          - { COMPILER: "clang", COMPILER_VERSION: "15", LINKER: "bfd",  CRYPTOLIB: "auto"    }
+          - { COMPILER: "gcc",   COMPILER_VERSION: "13", LINKER: "mold", CRYPTOLIB: "openssl" }
+          - { COMPILER: "clang", COMPILER_VERSION: "14", LINKER: "mold", CRYPTOLIB: "gcrypt"  }
+          - { COMPILER: "clang", COMPILER_VERSION: "15", LINKER: "bfd",  CRYPTOLIB: "openssl" }
+          - { COMPILER: "clang", COMPILER_VERSION: "17", LINKER: "lld",  CRYPTOLIB: "auto"    }
     env: ${{ matrix.env }}
     steps:
       - name: Repository checkout
-        uses: actions/checkout@755da8c3cf115ac066823e79a1e1788f8940201b
-      - name: ${{ format('Build check ({0}-{1}-{2}-{3})', env.COMPILER, env.COMPILER_VERSION, env.LINKER, env.CRYPTOLIB) }}
-        run: sudo -E .github/workflows/build_test.sh
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Build check
+        run: .github/workflows/build_test.sh

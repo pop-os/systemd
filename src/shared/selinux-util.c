@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <malloc.h>
 #include <stddef.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -21,8 +20,10 @@
 #include "alloc-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
+#include "label.h"
 #include "log.h"
 #include "macro.h"
+#include "mallinfo-util.h"
 #include "path-util.h"
 #include "selinux-util.h"
 #include "stdio-util.h"
@@ -32,10 +33,16 @@
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(context_t, context_free, NULL);
 #define _cleanup_context_free_ _cleanup_(context_freep)
 
+typedef enum Initialized {
+        UNINITIALIZED,
+        INITIALIZED,
+        LAZY_INITIALIZED,
+} Initialized;
+
 static int mac_selinux_reload(int seqno);
 
 static int cached_use = -1;
-static bool initialized = false;
+static Initialized initialized = UNINITIALIZED;
 static int last_policyload = 0;
 static struct selabel_handle *label_hnd = NULL;
 static bool have_status_page = false;
@@ -54,13 +61,22 @@ static bool have_status_page = false;
                         : -ERRNO_VALUE(_e);                             \
                 _enforcing ? _r : 0;                                    \
         })
+
+static int mac_selinux_label_pre(int dir_fd, const char *path, mode_t mode) {
+        return mac_selinux_create_file_prepare_at(dir_fd, path, mode);
+}
+
+static int mac_selinux_label_post(int dir_fd, const char *path) {
+        mac_selinux_create_file_clear();
+        return 0;
+}
 #endif
 
 bool mac_selinux_use(void) {
 #if HAVE_SELINUX
         if (_unlikely_(cached_use < 0)) {
                 cached_use = is_selinux_enabled() > 0;
-                log_debug("SELinux enabled state cached to: %s", cached_use ? "enabled" : "disabled");
+                log_trace("SELinux enabled state cached to: %s", enabled_disabled(cached_use));
         }
 
         return cached_use;
@@ -92,50 +108,38 @@ void mac_selinux_retest(void) {
 }
 
 #if HAVE_SELINUX
-#  if HAVE_MALLINFO2
-#    define HAVE_GENERIC_MALLINFO 1
-typedef struct mallinfo2 generic_mallinfo;
-static generic_mallinfo generic_mallinfo_get(void) {
-        return mallinfo2();
-}
-#  elif HAVE_MALLINFO
-#    define HAVE_GENERIC_MALLINFO 1
-typedef struct mallinfo generic_mallinfo;
-static generic_mallinfo generic_mallinfo_get(void) {
-        /* glibc has deprecated mallinfo(), let's suppress the deprecation warning if mallinfo2() doesn't
-         * exist yet. */
-DISABLE_WARNING_DEPRECATED_DECLARATIONS
-        return mallinfo();
-REENABLE_WARNING
-}
-#  else
-#    define HAVE_GENERIC_MALLINFO 0
-#  endif
-
 static int open_label_db(void) {
         struct selabel_handle *hnd;
-        usec_t before_timestamp, after_timestamp;
-
+        /* Avoid maybe-uninitialized false positives */
+        usec_t before_timestamp = USEC_INFINITY, after_timestamp = USEC_INFINITY;
 #  if HAVE_GENERIC_MALLINFO
-        generic_mallinfo before_mallinfo = generic_mallinfo_get();
+        generic_mallinfo before_mallinfo = {};
 #  endif
-        before_timestamp = now(CLOCK_MONOTONIC);
+
+        if (DEBUG_LOGGING) {
+#  if HAVE_GENERIC_MALLINFO
+                before_mallinfo = generic_mallinfo_get();
+#  endif
+                before_timestamp = now(CLOCK_MONOTONIC);
+        }
 
         hnd = selabel_open(SELABEL_CTX_FILE, NULL, 0);
         if (!hnd)
                 return log_enforcing_errno(errno, "Failed to initialize SELinux labeling handle: %m");
 
-        after_timestamp = now(CLOCK_MONOTONIC);
+        if (DEBUG_LOGGING) {
+                after_timestamp = now(CLOCK_MONOTONIC);
 #  if HAVE_GENERIC_MALLINFO
-        generic_mallinfo after_mallinfo = generic_mallinfo_get();
-        size_t l = LESS_BY((size_t) after_mallinfo.uordblks, (size_t) before_mallinfo.uordblks);
-        log_debug("Successfully loaded SELinux database in %s, size on heap is %zuK.",
-                  FORMAT_TIMESPAN(after_timestamp - before_timestamp, 0),
-                  DIV_ROUND_UP(l, 1024));
+                generic_mallinfo after_mallinfo = generic_mallinfo_get();
+                size_t l = LESS_BY((size_t) after_mallinfo.uordblks, (size_t) before_mallinfo.uordblks);
+                log_debug("Successfully loaded SELinux database in %s, size on heap is %zuK.",
+                          FORMAT_TIMESPAN(after_timestamp - before_timestamp, 0),
+                          DIV_ROUND_UP(l, 1024));
 #  else
-        log_debug("Successfully loaded SELinux database in %s.",
-                  FORMAT_TIMESPAN(after_timestamp - before_timestamp, 0));
+                log_debug("Successfully loaded SELinux database in %s.",
+                          FORMAT_TIMESPAN(after_timestamp - before_timestamp, 0));
 #  endif
+        }
 
         /* release memory after measurement */
         if (label_hnd)
@@ -146,15 +150,25 @@ static int open_label_db(void) {
 }
 #endif
 
-int mac_selinux_init(void) {
+static int selinux_init(bool force) {
 #if HAVE_SELINUX
+        static const LabelOps label_ops = {
+                .pre = mac_selinux_label_pre,
+                .post = mac_selinux_label_post,
+        };
         int r;
-
-        if (initialized)
-                return 0;
 
         if (!mac_selinux_use())
                 return 0;
+
+        if (initialized == INITIALIZED)
+                return 1;
+
+        /* Internal call from this module? Unless we were explicitly configured to allow lazy initialization
+         * bail out immediately. Pretend all is good, we do not want callers to abort here, for example at
+         * early boot when the policy is being initialised. */
+        if (!force && initialized != LAZY_INITIALIZED)
+                return 1;
 
         r = selinux_status_open(/* netlink fallback */ 1);
         if (r < 0) {
@@ -172,12 +186,31 @@ int mac_selinux_init(void) {
                 return r;
         }
 
+        r = label_ops_set(&label_ops);
+        if (r < 0)
+                return r;
+
         /* Save the current policyload sequence number, so mac_selinux_maybe_reload() does not trigger on
          * first call without any actual change. */
         last_policyload = selinux_status_policyload();
 
-        initialized = true;
+        initialized = INITIALIZED;
+        return 1;
+#else
+        return 0;
 #endif
+}
+
+int mac_selinux_init(void) {
+        return selinux_init(/* force= */ true);
+}
+
+int mac_selinux_init_lazy(void) {
+#if HAVE_SELINUX
+        if (initialized == UNINITIALIZED)
+                initialized = LAZY_INITIALIZED; /* We'll be back later */
+#endif
+
         return 0;
 }
 
@@ -301,7 +334,10 @@ int mac_selinux_fix_full(
         _cleanup_free_ char *p = NULL;
         int inode_fd, r;
 
-        /* if mac_selinux_init() wasn't called before we are a NOOP */
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
+
         if (!label_hnd)
                 return 0;
 
@@ -341,8 +377,11 @@ int mac_selinux_apply(const char *path, const char *label) {
         assert(path);
 
 #if HAVE_SELINUX
-        if (!mac_selinux_use())
-                return 0;
+        int r;
+
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
 
         assert(label);
 
@@ -357,8 +396,11 @@ int mac_selinux_apply_fd(int fd, const char *path, const char *label) {
         assert(fd >= 0);
 
 #if HAVE_SELINUX
-        if (!mac_selinux_use())
-                return 0;
+        int r;
+
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
 
         assert(label);
 
@@ -372,11 +414,15 @@ int mac_selinux_get_create_label_from_exe(const char *exe, char **label) {
 #if HAVE_SELINUX
         _cleanup_freecon_ char *mycon = NULL, *fcon = NULL;
         security_class_t sclass;
+        int r;
 
         assert(exe);
         assert(label);
 
-        if (!mac_selinux_use())
+        r = selinux_init(/* force= */ false);
+        if (r < 0)
+                return r;
+        if (r == 0)
                 return -EOPNOTSUPP;
 
         if (getcon_raw(&mycon) < 0)
@@ -403,7 +449,12 @@ int mac_selinux_get_our_label(char **ret) {
         assert(ret);
 
 #if HAVE_SELINUX
-        if (!mac_selinux_use())
+        int r;
+
+        r = selinux_init(/* force= */ false);
+        if (r < 0)
+                return r;
+        if (r == 0)
                 return -EOPNOTSUPP;
 
         _cleanup_freecon_ char *con = NULL;
@@ -425,12 +476,16 @@ int mac_selinux_get_child_mls_label(int socket_fd, const char *exe, const char *
         _cleanup_context_free_ context_t pcon = NULL, bcon = NULL;
         const char *range = NULL, *bcon_str = NULL;
         security_class_t sclass;
+        int r;
 
         assert(socket_fd >= 0);
         assert(exe);
         assert(ret_label);
 
-        if (!mac_selinux_use())
+        r = selinux_init(/* force= */ false);
+        if (r < 0)
+                return r;
+        if (r == 0)
                 return -EOPNOTSUPP;
 
         if (getcon_raw(&mycon) < 0)
@@ -498,6 +553,10 @@ static int selinux_create_file_prepare_abspath(const char *abspath, mode_t mode)
         assert(abspath);
         assert(path_is_absolute(abspath));
 
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
+
         /* Check for policy reload so 'label_hnd' is kept up-to-date by callbacks */
         mac_selinux_maybe_reload();
         if (!label_hnd)
@@ -528,8 +587,11 @@ int mac_selinux_create_file_prepare_at(
         _cleanup_free_ char *abspath = NULL;
         int r;
 
-        if (dir_fd < 0 && dir_fd != AT_FDCWD)
-                return -EBADF;
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
 
         if (!label_hnd)
                 return 0;
@@ -556,12 +618,14 @@ int mac_selinux_create_file_prepare_at(
 
 int mac_selinux_create_file_prepare_label(const char *path, const char *label) {
 #if HAVE_SELINUX
+        int r;
 
         if (!label)
                 return 0;
 
-        if (!mac_selinux_use())
-                return 0;
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
 
         if (setfscreatecon_raw(label) < 0)
                 return log_enforcing_errno(errno, "Failed to set specified SELinux security context '%s' for '%s': %m", label, strna(path));
@@ -574,7 +638,7 @@ void mac_selinux_create_file_clear(void) {
 #if HAVE_SELINUX
         PROTECT_ERRNO;
 
-        if (!mac_selinux_use())
+        if (selinux_init(/* force= */ false) <= 0)
                 return;
 
         setfscreatecon_raw(NULL);
@@ -584,10 +648,13 @@ void mac_selinux_create_file_clear(void) {
 int mac_selinux_create_socket_prepare(const char *label) {
 
 #if HAVE_SELINUX
+        int r;
+
         assert(label);
 
-        if (!mac_selinux_use())
-                return 0;
+        r = selinux_init(/* force= */ false);
+        if (r <= 0)
+                return r;
 
         if (setsockcreatecon(label) < 0)
                 return log_enforcing_errno(errno, "Failed to set SELinux security context %s for sockets: %m", label);
@@ -601,7 +668,7 @@ void mac_selinux_create_socket_clear(void) {
 #if HAVE_SELINUX
         PROTECT_ERRNO;
 
-        if (!mac_selinux_use())
+        if (selinux_init(/* force= */ false) <= 0)
                 return;
 
         setsockcreatecon_raw(NULL);
@@ -623,6 +690,9 @@ int mac_selinux_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         assert(fd >= 0);
         assert(addr);
         assert(addrlen >= sizeof(sa_family_t));
+
+        if (selinux_init(/* force= */ false) <= 0)
+                goto skipped;
 
         if (!label_hnd)
                 goto skipped;

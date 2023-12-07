@@ -17,13 +17,12 @@
 #include "io-util.h"
 #include "log.h"
 #include "main-func.h"
-#include "version.h"
 
 #define DEFAULT_BUS_PATH "unix:path=/run/dbus/system_bus_socket"
 
 static const char *arg_bus_path = DEFAULT_BUS_PATH;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
-static bool arg_user = false;
+static RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 
 static int help(void) {
         printf("%s [OPTIONS...]\n\n"
@@ -73,11 +72,11 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case ARG_USER:
-                        arg_user = true;
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
                         break;
 
                 case ARG_SYSTEM:
-                        arg_user = false;
+                        arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
                         break;
 
                 case 'p':
@@ -133,7 +132,7 @@ static int run(int argc, char *argv[]) {
                 return log_error_errno(r, "Failed to allocate bus: %m");
 
         if (arg_transport == BUS_TRANSPORT_MACHINE)
-                r = bus_set_address_machine(a, arg_user, arg_bus_path);
+                r = bus_set_address_machine(a, arg_runtime_scope, arg_bus_path);
         else
                 r = sd_bus_set_address(a, arg_bus_path);
         if (r < 0)
@@ -183,10 +182,14 @@ static int run(int argc, char *argv[]) {
                 assert_cc(sizeof(usec_t) == sizeof(uint64_t));
 
                 r = sd_bus_process(a, &m);
+                if (ERRNO_IS_NEG_DISCONNECT(r)) /* Treat 'connection reset by peer' as clean exit condition */
+                        return 0;
                 if (r < 0)
                         return log_error_errno(r, "Failed to process bus a: %m");
-
                 if (m) {
+                        if (sd_bus_message_is_signal(m, "org.freedesktop.DBus.Local", "Disconnected"))
+                                return 0;
+
                         r = sd_bus_send(b, m, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to send message: %m");
@@ -196,15 +199,14 @@ static int run(int argc, char *argv[]) {
                         continue;
 
                 r = sd_bus_process(b, &m);
-                if (r < 0) {
-                        /* treat 'connection reset by peer' as clean exit condition */
-                        if (ERRNO_IS_DISCONNECT(r))
+                if (ERRNO_IS_NEG_DISCONNECT(r)) /* Treat 'connection reset by peer' as clean exit condition */
+                        return 0;
+                if (r < 0)
+                        return log_error_errno(r, "Failed to process bus: %m");
+                if (m) {
+                        if (sd_bus_message_is_signal(m, "org.freedesktop.DBus.Local", "Disconnected"))
                                 return 0;
 
-                        return log_error_errno(r, "Failed to process bus: %m");
-                }
-
-                if (m) {
                         r = sd_bus_send(a, m, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to send message: %m");
@@ -242,14 +244,9 @@ static int run(int argc, char *argv[]) {
                 };
 
                 r = ppoll_usec(p, ELEMENTSOF(p), t);
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r)) /* don't be bothered by signals, i.e. EINTR */
-                                continue;
+                if (r < 0 && !ERRNO_IS_TRANSIENT(r))  /* don't be bothered by signals, i.e. EINTR */
                         return log_error_errno(r, "ppoll() failed: %m");
-                }
         }
-
-        return 0;
 }
 
 DEFINE_MAIN_FUNCTION(run);

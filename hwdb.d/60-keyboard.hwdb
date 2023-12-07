@@ -173,6 +173,10 @@ evdev:atkbd:dmi:*:svnPackardBell:pndots:*:rvnPackardBell:rnSJE01_CT:*
  KEYBOARD_KEY_ce=unknown  # Brightness Up, also emitted by acpi-video, ignore
  KEYBOARD_KEY_ef=unknown  # Brightness Down, also emitted by acpi-video, ignore
 
+# Predator PT314-52s
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnPredator*PT314-52s:pvr*
+ KEYBOARD_KEY_66=micmute                                # Microphone mute button
+
 # Predator PH 315-52
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnPredator*PH*315-52:*
  KEYBOARD_KEY_ef=kbdillumup                             # Fn+F10
@@ -216,6 +220,16 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnAOA*:*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGateway*:pn*:*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnPackard*Bell*:pn*:*
  KEYBOARD_KEY_86=wlan                                   # Fn+F3 or Fn+Q for communication key
+
+# Swift SF314-511
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnSwiftSF314-511:pvr*
+ KEYBOARD_KEY_8a=f20					# Fn+F12, microphone mute
+
+# Predator PHN16-71
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnPredatorPHN16-71:*
+ KEYBOARD_KEY_ef=unknown                                # Keyboard backlight up
+ KEYBOARD_KEY_f5=prog1                                  # "predator sense" button
+ KEYBOARD_KEY_66=micmute                                # Microphone mute button
 
 ###########################################################
 # Alienware
@@ -605,6 +619,11 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHewlett-Packard*:pn*[pP][aA][vV][iI][lL][iI][oO
  KEYBOARD_KEY_d9=unknown
  KEYBOARD_KEY_d2=sysrq                                  # Fn+Print = SYSRQ
 
+# Pavilion gaming 15-dk1* (lid keys)
+evdev:atkbd:dmi:bvn*:bvr*:bd*:br*:efr*:svnHP:pnHPPavilionGamingLaptop15-dk1*:*
+ KEYBOARD_KEY_d7=unknown
+ KEYBOARD_KEY_d8=unknown
+
 # Spectre x360 13 (Prevents random airplane mode activation)
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHewlett-Packard*:pn*[sS][pP][eE][cC][tT][rR][eE]*x360*13*:*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*[sS][pP][eE][cC][tT][rR][eE]*x360Convertible*:*
@@ -827,6 +846,13 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pnHPEliteDragonflyG2*:pvr*
 evdev:name:Intel HID events:dmi:bvn*:bvr*:bd*:svnHP*:pnHPEliteDragonflyG2*:pvr*
  KEYBOARD_KEY_08=unknown                                # rfkill is also reported by HP Wireless hotkeys
 
+# HP Elite Dragonfly G3
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP:pnHPEliteDragonfly13.5inchG3NotebookPC:pvr*
+ KEYBOARD_KEY_c9=up
+ KEYBOARD_KEY_d1=down
+ KEYBOARD_KEY_c8=pageup
+ KEYBOARD_KEY_d0=pagedown
+
 ##########################################################
 # Huawei
 ##########################################################
@@ -1003,11 +1029,10 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnLENOVO*:pn*IdeaPad*U300s*:pvr*
  KEYBOARD_KEY_ce=f20                                    # micmute
 
 evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO*:pn*IdeaPad*Z370*:pvr*
- KEYBOARD_KEY_a0=!mute
- KEYBOARD_KEY_ae=!volumedown
- KEYBOARD_KEY_b0=!volumeup
-
-evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO:*:pvrIdeaPadFlex514IIL05:*
+# Lenovo IdeaPad Flex 5
+evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO:*:pvrIdeaPadFlex5*
+# Lenovo Yoga S940 (9th gen)
+evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO:pn81Q7*:pvrLenovoYogaS940:*
  KEYBOARD_KEY_a0=!mute
  KEYBOARD_KEY_ae=!volumedown
  KEYBOARD_KEY_b0=!volumeup
@@ -1015,15 +1040,6 @@ evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO:*:pvrIdeaPadFlex514IIL05:*
 evdev:atkbd:dmi:*:svnLENOVO:*:pvrLenovoYoga300-11IBR:*
  KEYBOARD_KEY_62=unknown  # Touchpad on, also emitted by "Ideapad extra buttons", ignore
  KEYBOARD_KEY_63=unknown  # Touchpad off, also emitted by "Ideapad extra buttons", ignore
-
-# Fix for volume keys on Lenovo Yoga S940
-# For 10th gen it should be pn81Q8 instead of pn81Q7 but
-# I don't have a device to test
-# perhaps pn81Q* would work for both generations
-evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO:pn81Q7*:pvrLenovoYogaS940:*
- KEYBOARD_KEY_a0=!mute
- KEYBOARD_KEY_ae=!volumedown
- KEYBOARD_KEY_b0=!volumeup
 
 # Lenovo Y50-70
 evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO*:pn*20378*:pvr*
@@ -1052,6 +1068,9 @@ evdev:input:b0003v04B3p301B*
 # Lenovo Ideapad D330-10IGM
 evdev:name:SIPODEV Lenovo HID Device:dmi:*:svnLENOVO:*:pvrLenovoideapadD330-10IGM:*
  KEYBOARD_KEY_70073=f21                                 # Fn+Supr (Touchpad toggle)
+
+evdev:name:SIPODEV Lenovo HID Device Consumer Control:dmi:*:svnLENOVO:*:pvrLenovoideapadD330-10IGM:*
+ KEYBOARD_KEY_c00ff=fn_esc                              # Fn+Tab (FnLk toggle)
 
 ###########################################################
 # LG
@@ -1441,9 +1460,13 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pn*PR200*:*
  KEYBOARD_KEY_f7=reserved
  KEYBOARD_KEY_f8=reserved
 
-# MSI Wind U90/U100 generates separate touchpad on/off keycodes so ignore touchpad toggle keycode
+# MSI Wind U90/U100 generates separate touchpad on/off keycodes so ignore touchpad toggle keycode.
+# Also ignore Wi-Fi and Bluetooth keycodes, because they are generated when the HW rfkill state
+# changes, but the userspace also toggles the SW rfkill upon receiving these keycodes.
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMICRO-STAR*:pnU90/U100:*
- KEYBOARD_KEY_e4=reserved
+ KEYBOARD_KEY_e4=unknown
+ KEYBOARD_KEY_e2=unknown
+ KEYBOARD_KEY_f6=unknown
 
 # Keymaps MSI Prestige And MSI Modern FnKeys and Special keys
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pn*Prestige*:*
@@ -2069,6 +2092,8 @@ evdev:name:AT Translated Set 2 keyboard:dmi:bvn*:bvr*:svnPositivoTecnologiaSA:pn
 evdev:name:SIPODEV USB Composite Device:dmi:bvn*:bvr*:svnPositivoTecnologiaSA:pn*:pvr*:rvn*:rnK142*
 # Positivo Motion (N14ZP6, N14ZP7)
 evdev:name:SIPODEV USB Composite Device:dmi:bvn*:bvr*:svnPositivoTecnologiaSA:pn*:pvr*:rvn*:rnN14ZP[67]*
+# Positivo Motion (N14EP6)
+evdev:name:SIPODEV USB Composite Device:dmi:bvn*:bvr*:br*:svnPositivoTecnologiaSA:pn*:pvr*:rvn*:rnN14EP6*
 # Positivo Motion (CW14Q01P) (CW14Q01P-V2)
 evdev:name:SIPODEV USB Composite Device:dmi:bvn*:bvr*:svnPositivoTecnologiaSA:pn*:pvr*:rvn*:rnCW14Q01P*
  KEYBOARD_KEY_70073=f21                                 # Fn+f2 toggle touchpad

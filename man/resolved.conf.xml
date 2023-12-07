@@ -60,7 +60,9 @@
         <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry> or
         set at runtime by external applications.  For compatibility reasons, if this setting is not specified, the DNS
         servers listed in <filename>/etc/resolv.conf</filename> are used instead, if that file exists and any servers
-        are configured in it. This setting defaults to the empty list.</para></listitem>
+        are configured in it. This setting defaults to the empty list.</para>
+
+        <xi:include href="version-info.xml" xpointer="v213"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -70,7 +72,9 @@
         <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         take precedence over this setting, as do any servers set via <varname>DNS=</varname> above or
         <filename>/etc/resolv.conf</filename>. This setting is hence only used if no other DNS server information is
-        known. If this option is not given, a compiled-in list of DNS servers is used instead.</para></listitem>
+        known. If this option is not given, a compiled-in list of DNS servers is used instead.</para>
+
+        <xi:include href="version-info.xml" xpointer="v216"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -102,6 +106,15 @@
         <para>See "Protocols and Routing" in
         <citerefentry><refentrytitle>systemd-resolved.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         for details of how search and route-only domains are used.</para>
+
+        <para>Note that configuring the MulticastDNS domain <literal>local</literal> as search or routing
+        domain has the effect of routing lookups for this domain to classic unicast DNS. This may be used to
+        provide compatibility with legacy installations that use this domain in a unicast DNS context,
+        against the IANA assignment of this domain to pure MulticastDNS purposes. Search and routing domains
+        are a unicast DNS concept, they <emphasis>cannot</emphasis> be used to resolve single-label lookups
+        via MulticastDNS.</para>
+
+        <xi:include href="version-info.xml" xpointer="v229"/>
         </listitem>
       </varlistentry>
 
@@ -118,7 +131,9 @@
         <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         also maintains per-link LLMNR settings. LLMNR will be
         enabled on a link only if the per-link and the
-        global setting is on.</para></listitem>
+        global setting is on.</para>
+
+        <xi:include href="version-info.xml" xpointer="v216"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -133,30 +148,32 @@
         <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         also maintains per-link Multicast DNS settings. Multicast DNS will be
         enabled on a link only if the per-link and the
-        global setting is on.</para></listitem>
+        global setting is on.</para>
+
+        <xi:include href="version-info.xml" xpointer="v234"/></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>DNSSEC=</varname></term>
-        <listitem><para>Takes a boolean argument or
-        <literal>allow-downgrade</literal>. If true all DNS lookups are
-        DNSSEC-validated locally (excluding LLMNR and Multicast
-        DNS). If the response to a lookup request is detected to be invalid
-        a lookup failure is returned to applications. Note that
-        this mode requires a DNS server that supports DNSSEC. If the
-        DNS server does not properly support DNSSEC all validations
-        will fail. If set to <literal>allow-downgrade</literal> DNSSEC
-        validation is attempted, but if the server does not support
-        DNSSEC properly, DNSSEC mode is automatically disabled. Note
-        that this mode makes DNSSEC validation vulnerable to
-        "downgrade" attacks, where an attacker might be able to
-        trigger a downgrade to non-DNSSEC mode by synthesizing a DNS
-        response that suggests DNSSEC was not supported. If set to
-        false, DNS lookups are not DNSSEC validated.</para>
+        <listitem><para>Takes a boolean argument or <literal>allow-downgrade</literal>.</para>
 
-        <para>Note that DNSSEC validation requires retrieval of
-        additional DNS data, and thus results in a small DNS look-up
-        time penalty.</para>
+        <para>If set to true, all DNS lookups are DNSSEC-validated locally (excluding LLMNR and Multicast
+        DNS). If the response to a lookup request is detected to be invalid a lookup failure is returned to
+        applications. Note that this mode requires a DNS server that supports DNSSEC. If the DNS server does
+        not properly support DNSSEC all validations will fail.</para>
+
+        <para>If set to <literal>allow-downgrade</literal>, DNSSEC validation is attempted, but if the server
+        does not support DNSSEC properly, DNSSEC mode is automatically disabled. Note that this mode makes
+        DNSSEC validation vulnerable to "downgrade" attacks, where an attacker might be able to trigger a
+        downgrade to non-DNSSEC mode by synthesizing a DNS response that suggests DNSSEC was not
+        supported.</para>
+
+        <para>If set to false, DNS lookups are not DNSSEC validated. In this mode, or when set to
+        <literal>allow-downgrade</literal> and the downgrade has happened, the resolver becomes
+        security-unaware and all forwarded queries have DNSSEC OK (DO) bit unset.</para>
+
+        <para>Note that DNSSEC validation requires retrieval of additional DNS data, and thus results in a
+        small DNS lookup time penalty.</para>
 
         <para>DNSSEC requires knowledge of "trust anchors" to prove
         data integrity. The trust anchor for the Internet root domain
@@ -209,6 +226,8 @@
         logic does not work in all private zone setups.</para>
 
         <para>Defaults to <literal>&DEFAULT_DNSSEC_MODE;</literal>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v229"/>
         </listitem>
       </varlistentry>
 
@@ -249,6 +268,8 @@
         it is unset in which case the global setting is used instead.</para>
 
         <para>Defaults to <literal>&DEFAULT_DNS_OVER_TLS_MODE;</literal>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v239"/>
         </listitem>
       </varlistentry>
 
@@ -261,7 +282,9 @@
         when DNSSEC is used. If <literal>no-negative</literal>, only positive answers are cached.</para>
 
         <para>Note that caching is turned off by default for host-local DNS servers.
-        See <varname>CacheFromLocalhost=</varname> for details.</para></listitem>
+        See <varname>CacheFromLocalhost=</varname> for details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v231"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -269,6 +292,8 @@
         <listitem><para>Takes a boolean as argument. If <literal>no</literal> (the default), and response cames from
         host-local IP address (such as 127.0.0.1 or ::1), the result wouldn't be cached in order to avoid
         potential duplicate local caching.</para>
+
+        <xi:include href="version-info.xml" xpointer="v248"/>
         </listitem>
       </varlistentry>
 
@@ -283,7 +308,9 @@
         <xi:include href="systemd-resolved.service.xml" xpointer="proxy-stub" />
 
         <para>Note that the DNS stub listener is turned off implicitly when its listening address and port are already
-        in use.</para></listitem>
+        in use.</para>
+
+        <xi:include href="version-info.xml" xpointer="v232"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -308,7 +335,9 @@ DNSStubListenerExtra=tcp:192.168.10.12
 DNSStubListenerExtra=udp:2001:db8:0:f102::12
 DNSStubListenerExtra=tcp:192.168.10.13:9953
 DNSStubListenerExtra=udp:[2001:db8:0:f102::13]:9953</programlisting>
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v247"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -316,7 +345,9 @@ DNSStubListenerExtra=udp:[2001:db8:0:f102::13]:9953</programlisting>
         <listitem><para>Takes a boolean argument. If <literal>yes</literal> (the default),
         <command>systemd-resolved</command> will read <filename>/etc/hosts</filename>, and try to resolve
         hosts or address by using the entries in the file before sending query to DNS servers.
-        </para></listitem>
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v240"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -333,7 +364,30 @@ DNSStubListenerExtra=udp:[2001:db8:0:f102::13]:9953</programlisting>
         servers are not used</emphasis>. Forwarding single-label names to servers not under your control is
         not standard-conformant, see <ulink
         url="https://www.iab.org/documents/correspondence-reports-documents/2013-2/iab-statement-dotless-domains-considered-harmful/">IAB
-        Statement</ulink>, and may create a privacy and security risk.</para></listitem>
+        Statement</ulink>, and may create a privacy and security risk.</para>
+
+        <xi:include href="version-info.xml" xpointer="v246"/></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>StaleRetentionSec=<replaceable>SECONDS</replaceable></term>
+        <listitem><para>Takes a duration value, which determines the length of time DNS resource records can
+        be retained in the cache beyond their Time To Live (TTL). This allows these records to be returned as
+        stale records. By default, this value is set to zero, meaning that DNS resource records are not
+        stored in the cache after their TTL expires.</para>
+
+        <para>This is useful when a DNS server failure occurs or becomes unreachable. In such cases,
+        <citerefentry><refentrytitle>systemd-resolved</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        continues to use the stale records to answer DNS queries, particularly when no valid response can be
+        obtained from the upstream DNS servers. However, this doesn't apply to NXDOMAIN responses, as those
+        are still perfectly valid responses. This feature enhances resilience against DNS infrastructure
+        failures and outages.</para>
+
+        <para><command>systemd-resolved</command> always attempts to reach the upstream DNS servers first,
+        before providing the client application with any stale data. If this feature is enabled, cache will
+        not be flushed when changing servers.</para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/>
+        </listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

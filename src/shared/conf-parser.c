@@ -18,7 +18,9 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "hash-funcs.h"
 #include "hostname-util.h"
+#include "id128-util.h"
 #include "in-addr-util.h"
 #include "log.h"
 #include "macro.h"
@@ -41,6 +43,10 @@
 #include "time-util.h"
 #include "utf8.h"
 
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(config_file_hash_ops_fclose,
+                                              char, path_hash_func, path_compare,
+                                              FILE, safe_fclose);
+
 int config_item_table_lookup(
                 const void *table,
                 const char *section,
@@ -50,15 +56,13 @@ int config_item_table_lookup(
                 void **ret_data,
                 void *userdata) {
 
-        const ConfigTableItem *t;
-
         assert(table);
         assert(lvalue);
         assert(ret_func);
         assert(ret_ltype);
         assert(ret_data);
 
-        for (t = table; t->lvalue; t++) {
+        for (const ConfigTableItem *t = table; t->lvalue; t++) {
 
                 if (!streq(lvalue, t->lvalue))
                         continue;
@@ -486,6 +490,8 @@ static int config_parse_many_files(
                 Hashmap **ret_stats_by_path) {
 
         _cleanup_hashmap_free_ Hashmap *stats_by_path = NULL;
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *dropins = NULL;
+        _cleanup_set_free_ Set *inodes = NULL;
         struct stat st;
         int r;
 
@@ -495,13 +501,70 @@ static int config_parse_many_files(
                         return -ENOMEM;
         }
 
-        /* First read the first found main config file. */
-        STRV_FOREACH(fn, conf_files) {
-                r = config_parse(NULL, *fn, NULL, sections, lookup, table, flags, userdata, &st);
+        STRV_FOREACH(fn, files) {
+                _cleanup_free_ struct stat *st_dropin = NULL;
+                _cleanup_fclose_ FILE *f = NULL;
+                int fd;
+
+                f = fopen(*fn, "re");
+                if (!f) {
+                        if (errno == ENOENT)
+                                continue;
+
+                        return -errno;
+                }
+
+                fd = fileno(f);
+
+                r = ordered_hashmap_ensure_put(&dropins, &config_file_hash_ops_fclose, *fn, f);
+                if (r < 0) {
+                        assert(r != -EEXIST);
+                        return r;
+                }
+                assert(r > 0);
+                TAKE_PTR(f);
+
+                /* Get inodes for all drop-ins. Later we'll verify if main config is a symlink to or is
+                 * symlinked as one of them. If so, we skip reading main config file directly. */
+
+                st_dropin = new(struct stat, 1);
+                if (!st_dropin)
+                        return -ENOMEM;
+
+                if (fstat(fd, st_dropin) < 0)
+                        return -errno;
+
+                r = set_ensure_consume(&inodes, &inode_hash_ops, TAKE_PTR(st_dropin));
                 if (r < 0)
                         return r;
-                if (r == 0)
-                        continue;
+        }
+
+        /* First read the first found main config file. */
+        STRV_FOREACH(fn, conf_files) {
+                _cleanup_fclose_ FILE *f = NULL;
+
+                f = fopen(*fn, "re");
+                if (!f) {
+                        if (errno == ENOENT)
+                                continue;
+
+                        return -errno;
+                }
+
+                if (inodes) {
+                        if (fstat(fileno(f), &st) < 0)
+                                return -errno;
+
+                        if (set_contains(inodes, &st)) {
+                                log_debug("%s: symlink to/symlinked as drop-in, will be read later.", *fn);
+                                break;
+                        }
+                }
+
+                r = config_parse(NULL, *fn, f, sections, lookup, table, flags, userdata, &st);
+                if (r < 0)
+                        return r;
+                assert(r > 0);
 
                 if (ret_stats_by_path) {
                         r = hashmap_put_stats_by_path(&stats_by_path, *fn, &st);
@@ -513,15 +576,17 @@ static int config_parse_many_files(
         }
 
         /* Then read all the drop-ins. */
-        STRV_FOREACH(fn, files) {
-                r = config_parse(NULL, *fn, NULL, sections, lookup, table, flags, userdata, &st);
+
+        const char *path_dropin;
+        FILE *f_dropin;
+        ORDERED_HASHMAP_FOREACH_KEY(f_dropin, path_dropin, dropins) {
+                r = config_parse(NULL, path_dropin, f_dropin, sections, lookup, table, flags, userdata, &st);
                 if (r < 0)
                         return r;
-                if (r == 0)
-                        continue;
+                assert(r > 0);
 
                 if (ret_stats_by_path) {
-                        r = hashmap_put_stats_by_path(&stats_by_path, *fn, &st);
+                        r = hashmap_put_stats_by_path(&stats_by_path, path_dropin, &st);
                         if (r < 0)
                                 return r;
                 }
@@ -533,48 +598,52 @@ static int config_parse_many_files(
         return 0;
 }
 
-/* Parse each config file in the directories specified as nulstr. */
-int config_parse_many_nulstr(
+/* Parse one main config file located in /etc/systemd and its drop-ins, which is what all systemd daemons
+ * do. */
+int config_parse_config_file(
                 const char *conf_file,
-                const char *conf_file_dirs,
                 const char *sections,
                 ConfigItemLookup lookup,
                 const void *table,
                 ConfigParseFlags flags,
-                void *userdata,
-                Hashmap **ret_stats_by_path) {
+                void *userdata) {
 
-        _cleanup_strv_free_ char **files = NULL;
+        _cleanup_strv_free_ char **dropins = NULL, **dropin_dirs = NULL;
+        char **conf_paths = CONF_PATHS_STRV("");
         int r;
 
-        r = conf_files_list_nulstr(&files, ".conf", NULL, 0, conf_file_dirs);
+        assert(conf_file);
+
+        /* build the dropin dir list */
+        dropin_dirs = new0(char*, strv_length(conf_paths) + 1);
+        if (!dropin_dirs) {
+                if (flags & CONFIG_PARSE_WARN)
+                        return log_oom();
+                return -ENOMEM;
+        }
+
+        size_t i = 0;
+        STRV_FOREACH(p, conf_paths) {
+                char *d;
+
+                d = strjoin(*p, "systemd/", conf_file, ".d");
+                if (!d) {
+                        if (flags & CONFIG_PARSE_WARN)
+                                return log_oom();
+                        return -ENOMEM;
+                }
+
+                dropin_dirs[i++] = d;
+        }
+
+        r = conf_files_list_strv(&dropins, ".conf", NULL, 0, (const char**) dropin_dirs);
         if (r < 0)
                 return r;
 
-        return config_parse_many_files(STRV_MAKE_CONST(conf_file),
-                                       files, sections, lookup, table, flags, userdata,
-                                       ret_stats_by_path);
-}
+        const char *sysconf_file = strjoina(PKGSYSCONFDIR, "/", conf_file);
 
-static int config_get_dropin_files(
-                const char* const* conf_file_dirs,
-                const char *dropin_dirname,
-                char ***ret) {
-
-        _cleanup_strv_free_ char **dropin_dirs = NULL;
-        const char *suffix;
-        int r;
-
-        assert(conf_file_dirs);
-        assert(dropin_dirname);
-        assert(ret);
-
-        suffix = strjoina("/", dropin_dirname);
-        r = strv_extend_strv_concat(&dropin_dirs, (char**) conf_file_dirs, suffix);
-        if (r < 0)
-                return r;
-
-        return conf_files_list_strv(ret, ".conf", NULL, 0, (const char* const*) dropin_dirs);
+        return config_parse_many_files(STRV_MAKE_CONST(sysconf_file), dropins,
+                                       sections, lookup, table, flags, userdata, NULL);
 }
 
 /* Parse each config file in the directories specified as strv. */
@@ -582,6 +651,7 @@ int config_parse_many(
                 const char* const* conf_files,
                 const char* const* conf_file_dirs,
                 const char *dropin_dirname,
+                const char *root,
                 const char *sections,
                 ConfigItemLookup lookup,
                 const void *table,
@@ -598,7 +668,7 @@ int config_parse_many(
         assert(sections);
         assert(table);
 
-        r = config_get_dropin_files(conf_file_dirs, dropin_dirname, &files);
+        r = conf_files_list_dropins(&files, dropin_dirname, root, conf_file_dirs);
         if (r < 0)
                 return r;
 
@@ -634,7 +704,7 @@ static int dropins_get_stats_by_path(
         if (!strextend(&dropin_dirname, ".d"))
                 return -ENOMEM;
 
-        r = config_get_dropin_files(conf_file_dirs, dropin_dirname, &files);
+        r = conf_files_list_dropins(&files, dropin_dirname, /* root = */ NULL, conf_file_dirs);
         if (r < 0)
                 return r;
 
@@ -742,8 +812,12 @@ static int config_section_compare_func(const ConfigSection *x, const ConfigSecti
 
 DEFINE_HASH_OPS(config_section_hash_ops, ConfigSection, config_section_hash_func, config_section_compare_func);
 
-int config_section_new(const char *filename, unsigned line, ConfigSection **s) {
+int config_section_new(const char *filename, unsigned line, ConfigSection **ret) {
         ConfigSection *cs;
+
+        assert(filename);
+        assert(line > 0);
+        assert(ret);
 
         cs = malloc0(offsetof(ConfigSection, filename) + strlen(filename) + 1);
         if (!cs)
@@ -752,21 +826,31 @@ int config_section_new(const char *filename, unsigned line, ConfigSection **s) {
         strcpy(cs->filename, filename);
         cs->line = line;
 
-        *s = TAKE_PTR(cs);
-
+        *ret = TAKE_PTR(cs);
         return 0;
 }
 
-unsigned hashmap_find_free_section_line(Hashmap *hashmap) {
+int _hashmap_by_section_find_unused_line(
+                HashmapBase *entries_by_section,
+                const char *filename,
+                unsigned *ret) {
+
         ConfigSection *cs;
         unsigned n = 0;
         void *entry;
 
-        HASHMAP_FOREACH_KEY(entry, cs, hashmap)
-                if (n < cs->line)
-                        n = cs->line;
+        HASHMAP_BASE_FOREACH_KEY(entry, cs, entries_by_section) {
+                if (filename && !streq(cs->filename, filename))
+                        continue;
+                n = MAX(n, cs->line);
+        }
 
-        return n + 1;
+        /* overflow? */
+        if (n >= UINT_MAX)
+                return -EFBIG;
+
+        *ret = n + 1;
+        return 0;
 }
 
 #define DEFINE_PARSER(type, vartype, conv_func)                         \
@@ -939,25 +1023,19 @@ int config_parse_id128(
                 void *data,
                 void *userdata) {
 
-        sd_id128_t t, *result = data;
+        sd_id128_t *result = data;
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
 
-        r = sd_id128_from_string(rvalue, &t);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse 128bit ID/UUID, ignoring: %s", rvalue);
-                return 0;
-        }
+        r = id128_from_string_nonzero(rvalue, result);
+        if (r == -ENXIO)
+                log_syntax(unit, LOG_WARNING, filename, line, r, "128-bit ID/UUID is all 0, ignoring: %s", rvalue);
+        else if (r < 0)
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse 128-bit ID/UUID, ignoring: %s", rvalue);
 
-        if (sd_id128_is_null(t)) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0, "128bit ID/UUID is all 0, ignoring: %s", rvalue);
-                return 0;
-        }
-
-        *result = t;
         return 0;
 }
 
@@ -973,7 +1051,7 @@ int config_parse_tristate(
                 void *data,
                 void *userdata) {
 
-        int k, *t = ASSERT_PTR(data);
+        int r, *t = ASSERT_PTR(data);
 
         assert(filename);
         assert(lvalue);
@@ -987,14 +1065,13 @@ int config_parse_tristate(
                 return 0;
         }
 
-        k = parse_boolean(rvalue);
-        if (k < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, k,
+        r = parse_tristate(rvalue, t);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to parse boolean value for %s=, ignoring: %s", lvalue, rvalue);
                 return 0;
         }
 
-        *t = k;
         return 0;
 }
 
@@ -1862,6 +1939,44 @@ int config_parse_in_addr_non_null(
         else
                 *ipv6 = a.in6;
         return 0;
+}
+
+int config_parse_unsigned_bounded(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *name,
+                const char *value,
+                unsigned min,
+                unsigned max,
+                bool ignoring,
+                unsigned *ret) {
+
+        int r;
+
+        assert(filename);
+        assert(name);
+        assert(value);
+        assert(ret);
+
+        r = safe_atou_bounded(value, min, max, ret);
+        if (r == -ERANGE)
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Invalid '%s=%s', allowed range is %u..%u%s.",
+                           name, value, min, max, ignoring ? ", ignoring" : "");
+        else if (r < 0)
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse '%s=%s'%s: %m",
+                           name, value, ignoring ? ", ignoring" : "");
+
+        if (r >= 0)
+                return 1;  /* Return 1 if something was set */
+        else if (ignoring)
+                return 0;
+        else
+                return r;
 }
 
 DEFINE_CONFIG_PARSE(config_parse_percent, parse_percent, "Failed to parse percent value");

@@ -21,11 +21,11 @@ setup() {
     done
 }
 
+# shellcheck disable=SC2317
 teardown() {
     set +e
 
-    for i in {0..3};
-    do
+    for i in {0..3}; do
         ip netns del "ns${i}"
         ip link del "veth${i}"
     done
@@ -60,6 +60,4 @@ systemctl start --wait testsuite-62-3.service
 systemctl start --wait testsuite-62-4.service
 systemctl start --wait testsuite-62-5.service
 
-echo OK >/testok
-
-exit 0
+touch /testok

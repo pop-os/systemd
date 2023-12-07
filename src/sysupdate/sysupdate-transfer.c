@@ -4,7 +4,7 @@
 
 #include "alloc-util.h"
 #include "blockdev-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "conf-parser.h"
 #include "dirent-util.h"
 #include "fd-util.h"
@@ -12,6 +12,7 @@
 #include "gpt.h"
 #include "hexdecoct.h"
 #include "install-file.h"
+#include "mkdir.h"
 #include "parse-helpers.h"
 #include "parse-util.h"
 #include "process-util.h"
@@ -24,7 +25,6 @@
 #include "sysupdate-pattern.h"
 #include "sysupdate-resource.h"
 #include "sysupdate-transfer.h"
-#include "sysupdate-util.h"
 #include "sysupdate.h"
 #include "tmpfile-util.h"
 #include "web-util.h"
@@ -297,7 +297,6 @@ static int config_parse_resource_path(
                 const char *rvalue,
                 void *data,
                 void *userdata) {
-
         _cleanup_free_ char *resolved = NULL;
         Resource *rr = ASSERT_PTR(data);
         int r;
@@ -318,7 +317,7 @@ static int config_parse_resource_path(
         }
 
         /* Note that we don't validate the path as being absolute or normalized. We'll do that in
-         * transfer_read_definition() as we might not know yet whether Path refers to an URL or a file system
+         * transfer_read_definition() as we might not know yet whether Path refers to a URL or a file system
          * path. */
 
         rr->path_auto = false;
@@ -326,6 +325,9 @@ static int config_parse_resource_path(
 }
 
 static DEFINE_CONFIG_PARSE_ENUM(config_parse_resource_type, resource_type, ResourceType, "Invalid resource type");
+
+static DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_resource_path_relto, path_relative_to, PathRelativeTo,
+                                             PATH_RELATIVE_TO_ROOT, "Invalid PathRelativeTo= value");
 
 static int config_parse_resource_ptype(
                 const char *unit,
@@ -418,27 +420,29 @@ int transfer_read_definition(Transfer *t, const char *path) {
         assert(path);
 
         ConfigTableItem table[] = {
-                { "Transfer",    "MinVersion",              config_parse_min_version,          0, &t->min_version        },
-                { "Transfer",    "ProtectVersion",          config_parse_protect_version,      0, &t->protected_versions },
-                { "Transfer",    "Verify",                  config_parse_bool,                 0, &t->verify             },
-                { "Source",      "Type",                    config_parse_resource_type,        0, &t->source.type        },
-                { "Source",      "Path",                    config_parse_resource_path,        0, &t->source             },
-                { "Source",      "MatchPattern",            config_parse_resource_pattern,     0, &t->source.patterns    },
-                { "Target",      "Type",                    config_parse_resource_type,        0, &t->target.type        },
-                { "Target",      "Path",                    config_parse_resource_path,        0, &t->target             },
-                { "Target",      "MatchPattern",            config_parse_resource_pattern,     0, &t->target.patterns    },
-                { "Target",      "MatchPartitionType",      config_parse_resource_ptype,       0, &t->target             },
-                { "Target",      "PartitionUUID",           config_parse_partition_uuid,       0, t                      },
-                { "Target",      "PartitionFlags",          config_parse_partition_flags,      0, t                      },
-                { "Target",      "PartitionNoAuto",         config_parse_tristate,             0, &t->no_auto            },
-                { "Target",      "PartitionGrowFileSystem", config_parse_tristate,             0, &t->growfs             },
-                { "Target",      "ReadOnly",                config_parse_tristate,             0, &t->read_only          },
-                { "Target",      "Mode",                    config_parse_mode,                 0, &t->mode               },
-                { "Target",      "TriesLeft",               config_parse_uint64,               0, &t->tries_left         },
-                { "Target",      "TriesDone",               config_parse_uint64,               0, &t->tries_done         },
-                { "Target",      "InstancesMax",            config_parse_instances_max,        0, &t->instances_max      },
-                { "Target",      "RemoveTemporary",         config_parse_bool,                 0, &t->remove_temporary   },
-                { "Target",      "CurrentSymlink",          config_parse_current_symlink,      0, &t->current_symlink    },
+                { "Transfer",    "MinVersion",              config_parse_min_version,          0, &t->min_version             },
+                { "Transfer",    "ProtectVersion",          config_parse_protect_version,      0, &t->protected_versions      },
+                { "Transfer",    "Verify",                  config_parse_bool,                 0, &t->verify                  },
+                { "Source",      "Type",                    config_parse_resource_type,        0, &t->source.type             },
+                { "Source",      "Path",                    config_parse_resource_path,        0, &t->source                  },
+                { "Source",      "PathRelativeTo",          config_parse_resource_path_relto,  0, &t->source.path_relative_to },
+                { "Source",      "MatchPattern",            config_parse_resource_pattern,     0, &t->source.patterns         },
+                { "Target",      "Type",                    config_parse_resource_type,        0, &t->target.type             },
+                { "Target",      "Path",                    config_parse_resource_path,        0, &t->target                  },
+                { "Target",      "PathRelativeTo",          config_parse_resource_path_relto,  0, &t->target.path_relative_to },
+                { "Target",      "MatchPattern",            config_parse_resource_pattern,     0, &t->target.patterns         },
+                { "Target",      "MatchPartitionType",      config_parse_resource_ptype,       0, &t->target                  },
+                { "Target",      "PartitionUUID",           config_parse_partition_uuid,       0, t                           },
+                { "Target",      "PartitionFlags",          config_parse_partition_flags,      0, t                           },
+                { "Target",      "PartitionNoAuto",         config_parse_tristate,             0, &t->no_auto                 },
+                { "Target",      "PartitionGrowFileSystem", config_parse_tristate,             0, &t->growfs                  },
+                { "Target",      "ReadOnly",                config_parse_tristate,             0, &t->read_only               },
+                { "Target",      "Mode",                    config_parse_mode,                 0, &t->mode                    },
+                { "Target",      "TriesLeft",               config_parse_uint64,               0, &t->tries_left              },
+                { "Target",      "TriesDone",               config_parse_uint64,               0, &t->tries_done              },
+                { "Target",      "InstancesMax",            config_parse_instances_max,        0, &t->instances_max           },
+                { "Target",      "RemoveTemporary",         config_parse_bool,                 0, &t->remove_temporary        },
+                { "Target",      "CurrentSymlink",          config_parse_current_symlink,      0, &t->current_symlink         },
                 {}
         };
 
@@ -570,7 +574,7 @@ int transfer_resolve_paths(
 }
 
 static void transfer_remove_temporary(Transfer *t) {
-        _cleanup_(closedirp) DIR *d = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
         int r;
 
         assert(t);
@@ -710,6 +714,8 @@ int transfer_vacuum(
                         if (r < 0 && r != -ENOENT)
                                 return log_error_errno(r, "Failed to make room, deleting '%s' failed: %m", oldest->path);
 
+                        (void) rmdir_parents(oldest->path, t->target.path);
+
                         break;
 
                 case RESOURCE_PARTITION: {
@@ -787,13 +793,12 @@ static int run_helper(
         assert(path);
         assert(cmdline);
 
-        r = safe_fork(name, FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG|FORK_WAIT, NULL);
+        r = safe_fork(name, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT, NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
 
-                (void) unsetenv("NOTIFY_SOCKET");
                 execv(path, (char *const*) cmdline);
                 log_error_errno(errno, "Failed to execute %s tool: %m", path);
                 _exit(EXIT_FAILURE);
@@ -834,12 +839,16 @@ int transfer_acquire_instance(Transfer *t, Instance *i) {
 
         if (RESOURCE_IS_FILESYSTEM(t->target.type)) {
 
-                if (!filename_is_valid(formatted_pattern))
+                if (!path_is_valid_full(formatted_pattern, /* accept_dot_dot = */ false))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Formatted pattern is not suitable as file name, refusing: %s", formatted_pattern);
 
                 t->final_path = path_join(t->target.path, formatted_pattern);
                 if (!t->final_path)
                         return log_oom();
+
+                r = mkdir_parents(t->final_path, 0755);
+                if (r < 0)
+                        return log_error_errno(r, "Cannot create target directory: %m");
 
                 r = tempfn_random(t->final_path, "sysupdate", &t->temporary_path);
                 if (r < 0)
@@ -1211,7 +1220,7 @@ int transfer_install_instance(
                         assert_not_reached();
 
                 if (resolve_link_path && root) {
-                        r = chase_symlinks(link_path, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
+                        r = chase(link_path, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to resolve current symlink path '%s': %m", link_path);
 

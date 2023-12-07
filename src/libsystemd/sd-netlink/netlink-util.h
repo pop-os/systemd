@@ -28,7 +28,10 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(MultipathRoute*, multipath_route_free);
 
 int multipath_route_dup(const MultipathRoute *m, MultipathRoute **ret);
 
-int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name);
+int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name, char* const* alternative_names);
+static inline int rtnl_append_link_alternative_names(sd_netlink **rtnl, int ifindex, char* const *alternative_names) {
+        return rtnl_set_link_name(rtnl, ifindex, NULL, alternative_names);
+}
 int rtnl_set_link_properties(
                 sd_netlink **rtnl,
                 int ifindex,
@@ -103,6 +106,8 @@ int rtattr_append_attribute(struct rtattr **rta, unsigned short type, const void
 int rtattr_read_nexthop(const struct rtnexthop *rtnh, size_t size, int family, OrderedSet **ret);
 
 void netlink_seal_message(sd_netlink *nl, sd_netlink_message *m);
+
+size_t netlink_get_reply_callback_count(sd_netlink *nl);
 
 /* TODO: to be exported later */
 int sd_netlink_sendv(sd_netlink *nl, sd_netlink_message **messages, size_t msgcnt, uint32_t **ret_serial);

@@ -18,8 +18,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if (outside_size_range(size, 0, 65536))
                 return 0;
 
-        if (!getenv("SYSTEMD_LOG_LEVEL"))
-                log_set_max_level(LOG_CRIT);
+        fuzz_setup_logging();
 
         assert_se(fmkostemp_safe(filename, "r+", &f) == 0);
         if (size != 0)
@@ -27,11 +26,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         fflush(f);
 
         assert_se(rules = udev_rules_new(RESOLVE_NAME_EARLY));
-        r = udev_rules_parse_file(rules, filename);
+        r = udev_rules_parse_file(rules, filename, /* extra_checks = */ false, NULL);
         log_info_errno(r, "Parsing %s: %m", filename);
-        assert_se(IN_SET(r,
-                         0,       /* OK */
-                         -ENOBUFS /* line length exceeded */));
+        assert_se(r >= 0 ||             /* OK */
+                  r == -ENOBUFS);       /* line length exceeded */
 
         return 0;
 }

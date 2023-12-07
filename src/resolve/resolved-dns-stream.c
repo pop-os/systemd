@@ -5,7 +5,7 @@
 
 #include "alloc-util.h"
 #include "fd-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "macro.h"
 #include "missing_network.h"
 #include "resolved-dns-stream.h"
@@ -147,7 +147,7 @@ static int dns_stream_identify(DnsStream *s) {
                         switch (cmsg->cmsg_type) {
 
                         case IPV6_PKTINFO: {
-                                struct in6_pktinfo *i = (struct in6_pktinfo*) CMSG_DATA(cmsg);
+                                struct in6_pktinfo *i = CMSG_TYPED_DATA(cmsg, struct in6_pktinfo);
 
                                 if (s->ifindex <= 0)
                                         s->ifindex = i->ipi6_ifindex;
@@ -155,7 +155,7 @@ static int dns_stream_identify(DnsStream *s) {
                         }
 
                         case IPV6_HOPLIMIT:
-                                s->ttl = *(int *) CMSG_DATA(cmsg);
+                                s->ttl = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
                         }
 
@@ -165,7 +165,7 @@ static int dns_stream_identify(DnsStream *s) {
                         switch (cmsg->cmsg_type) {
 
                         case IP_PKTINFO: {
-                                struct in_pktinfo *i = (struct in_pktinfo*) CMSG_DATA(cmsg);
+                                struct in_pktinfo *i = CMSG_TYPED_DATA(cmsg, struct in_pktinfo);
 
                                 if (s->ifindex <= 0)
                                         s->ifindex = i->ipi_ifindex;
@@ -173,7 +173,7 @@ static int dns_stream_identify(DnsStream *s) {
                         }
 
                         case IP_TTL:
-                                s->ttl = *(int *) CMSG_DATA(cmsg);
+                                s->ttl = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
                         }
                 }
@@ -331,7 +331,7 @@ static int on_stream_io(sd_event_source *es, int fd, uint32_t revents, void *use
                         IOVEC_MAKE(DNS_PACKET_DATA(s->write_packet), s->write_packet->size),
                 };
 
-                IOVEC_INCREMENT(iov, ELEMENTSOF(iov), s->n_written);
+                iovec_increment(iov, ELEMENTSOF(iov), s->n_written);
 
                 ssize_t ss = dns_stream_writev(s, iov, ELEMENTSOF(iov), 0);
                 if (ss < 0) {

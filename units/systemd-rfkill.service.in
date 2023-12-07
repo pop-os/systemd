@@ -10,6 +10,8 @@
 [Unit]
 Description=Load/Save RF Kill Switch Status
 Documentation=man:systemd-rfkill.service(8)
+ConditionPathExists=!/etc/initrd-release
+
 DefaultDependencies=no
 BindsTo=sys-devices-virtual-misc-rfkill.device
 Conflicts=shutdown.target
@@ -17,7 +19,7 @@ After=sys-devices-virtual-misc-rfkill.device
 Before=shutdown.target
 
 [Service]
-ExecStart={{ROOTLIBEXECDIR}}/systemd-rfkill
+ExecStart={{LIBEXECDIR}}/systemd-rfkill
 NoNewPrivileges=yes
 StateDirectory=systemd/rfkill
 TimeoutSec=30s

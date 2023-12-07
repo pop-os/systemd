@@ -12,7 +12,7 @@
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "hexdecoct.h"
-#include "icmp6-util.h"
+#include "icmp6-util-unix.h"
 #include "socket-util.h"
 #include "strv.h"
 #include "ndisc-internal.h"
@@ -23,25 +23,22 @@ static struct ether_addr mac_addr = {
 };
 
 static bool verbose = false;
-static int test_fd[2];
 static sd_ndisc *test_timeout_nd;
-
-typedef int (*send_ra_t)(uint8_t flags);
-static send_ra_t send_ra_function;
 
 static void router_dump(sd_ndisc_router *rt) {
         struct in6_addr addr;
         uint8_t hop_limit;
-        uint64_t t, flags;
+        usec_t t, lifetime;
+        uint64_t flags;
         uint32_t mtu;
-        uint16_t lifetime;
         unsigned preference;
         int r;
 
         assert_se(rt);
 
         log_info("--");
-        assert_se(sd_ndisc_router_get_address(rt, &addr) == -ENODATA);
+        assert_se(sd_ndisc_router_get_address(rt, &addr) >= 0);
+        log_info("Sender: %s", IN6_ADDR_TO_STRING(&addr));
 
         assert_se(sd_ndisc_router_get_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
         log_info("Timestamp: %s", FORMAT_TIMESTAMP(t));
@@ -65,7 +62,8 @@ static void router_dump(sd_ndisc_router *rt) {
                  preference == SD_NDISC_PREFERENCE_HIGH ? "high" : "medium");
 
         assert_se(sd_ndisc_router_get_lifetime(rt, &lifetime) >= 0);
-        log_info("Lifetime: %" PRIu16, lifetime);
+        assert_se(sd_ndisc_router_get_lifetime_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
+        log_info("Lifetime: %s (%s)", FORMAT_TIMESPAN(lifetime, USEC_PER_SEC), FORMAT_TIMESTAMP(t));
 
         if (sd_ndisc_router_get_mtu(rt, &mtu) < 0)
                 log_info("No MTU set");
@@ -102,16 +100,17 @@ static void router_dump(sd_ndisc_router *rt) {
                 }
 
                 case SD_NDISC_OPTION_PREFIX_INFORMATION: {
-                        uint32_t lifetime_valid, lifetime_preferred;
                         unsigned prefix_len;
                         uint8_t pfl;
                         struct in6_addr a;
 
-                        assert_se(sd_ndisc_router_prefix_get_valid_lifetime(rt, &lifetime_valid) >= 0);
-                        log_info("Valid Lifetime: %" PRIu32, lifetime_valid);
+                        assert_se(sd_ndisc_router_prefix_get_valid_lifetime(rt, &lifetime) >= 0);
+                        assert_se(sd_ndisc_router_prefix_get_valid_lifetime_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
+                        log_info("Valid Lifetime: %s (%s)", FORMAT_TIMESPAN(lifetime, USEC_PER_SEC), FORMAT_TIMESTAMP(t));
 
-                        assert_se(sd_ndisc_router_prefix_get_preferred_lifetime(rt, &lifetime_preferred) >= 0);
-                        log_info("Preferred Lifetime: %" PRIu32, lifetime_preferred);
+                        assert_se(sd_ndisc_router_prefix_get_preferred_lifetime(rt, &lifetime) >= 0);
+                        assert_se(sd_ndisc_router_prefix_get_preferred_lifetime_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
+                        log_info("Preferred Lifetime: %s (%s)", FORMAT_TIMESPAN(lifetime, USEC_PER_SEC), FORMAT_TIMESTAMP(t));
 
                         assert_se(sd_ndisc_router_prefix_get_flags(rt, &pfl) >= 0);
                         log_info("Flags: <%s|%s>",
@@ -129,7 +128,6 @@ static void router_dump(sd_ndisc_router *rt) {
 
                 case SD_NDISC_OPTION_RDNSS: {
                         const struct in6_addr *a;
-                        uint32_t lt;
                         int n, i;
 
                         n = sd_ndisc_router_rdnss_get_addresses(rt, &a);
@@ -138,14 +136,14 @@ static void router_dump(sd_ndisc_router *rt) {
                         for (i = 0; i < n; i++)
                                 log_info("DNS: %s", IN6_ADDR_TO_STRING(a + i));
 
-                        assert_se(sd_ndisc_router_rdnss_get_lifetime(rt, &lt) >= 0);
-                        log_info("Lifetime: %" PRIu32, lt);
+                        assert_se(sd_ndisc_router_rdnss_get_lifetime(rt, &lifetime) >= 0);
+                        assert_se(sd_ndisc_router_rdnss_get_lifetime_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
+                        log_info("Lifetime: %s (%s)", FORMAT_TIMESPAN(lifetime, USEC_PER_SEC), FORMAT_TIMESTAMP(t));
                         break;
                 }
 
                 case SD_NDISC_OPTION_DNSSL: {
                         _cleanup_strv_free_ char **l = NULL;
-                        uint32_t lt;
                         int n, i;
 
                         n = sd_ndisc_router_dnssl_get_domains(rt, &l);
@@ -154,36 +152,14 @@ static void router_dump(sd_ndisc_router *rt) {
                         for (i = 0; i < n; i++)
                                 log_info("Domain: %s", l[i]);
 
-                        assert_se(sd_ndisc_router_dnssl_get_lifetime(rt, &lt) >= 0);
-                        log_info("Lifetime: %" PRIu32, lt);
+                        assert_se(sd_ndisc_router_dnssl_get_lifetime(rt, &lifetime) >= 0);
+                        assert_se(sd_ndisc_router_dnssl_get_lifetime_timestamp(rt, CLOCK_REALTIME, &t) >= 0);
+                        log_info("Lifetime: %s (%s)", FORMAT_TIMESPAN(lifetime, USEC_PER_SEC), FORMAT_TIMESTAMP(t));
                         break;
                 }}
 
                 r = sd_ndisc_router_option_next(rt);
         }
-}
-
-int icmp6_bind_router_solicitation(int ifindex) {
-        assert_se(ifindex == 42);
-
-        if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, test_fd) < 0)
-                return -errno;
-
-        return test_fd[0];
-}
-
-int icmp6_bind_router_advertisement(int ifindex) {
-        return -ENOSYS;
-}
-
-int icmp6_receive(int fd, void *iov_base, size_t iov_len,
-                  struct in6_addr *dst, triple_timestamp *timestamp) {
-        assert_se(read (fd, iov_base, iov_len) == (ssize_t)iov_len);
-
-        if (timestamp)
-                triple_timestamp_get(timestamp);
-
-        return 0;
 }
 
 static int send_ra(uint8_t flags) {
@@ -212,13 +188,6 @@ static int send_ra(uint8_t flags) {
                 printf("  sent RA with flag 0x%02x\n", flags);
 
         return 0;
-}
-
-int icmp6_send_router_solicitation(int s, const struct ether_addr *ether_addr) {
-        if (!send_ra_function)
-                return 0;
-
-        return send_ra_function(0);
 }
 
 static void test_callback(sd_ndisc *nd, sd_ndisc_event_t event, sd_ndisc_router *rt, void *userdata) {

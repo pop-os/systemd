@@ -21,6 +21,7 @@
 #include "strxcpyx.h"
 #include "udev-builtin.h"
 #include "udev-event.h"
+#include "udev-format.h"
 #include "udevadm-util.h"
 #include "udevadm.h"
 
@@ -88,7 +89,7 @@ int test_main(int argc, char *argv[], void *userdata) {
         _cleanup_(udev_rules_freep) UdevRules *rules = NULL;
         _cleanup_(udev_event_freep) UdevEvent *event = NULL;
         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
-        const char *cmd, *key, *value;
+        const char *cmd;
         sigset_t mask, sigmask_orig;
         void *val;
         int r;
@@ -137,7 +138,7 @@ int test_main(int argc, char *argv[], void *userdata) {
                 char program[UDEV_PATH_SIZE];
                 bool truncated;
 
-                (void) udev_event_apply_format(event, cmd, program, sizeof(program), false, &truncated);
+                (void) udev_event_apply_format(event, cmd, program, sizeof(program), false, NULL, &truncated);
                 if (truncated)
                         log_warning("The command '%s' is truncated while substituting into '%s'.", program, cmd);
                 printf("run: '%s'\n", program);

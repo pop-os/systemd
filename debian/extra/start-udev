@@ -19,7 +19,7 @@ if [ -f /sys/module/scsi_mod/parameters/scan ]; then
     echo sync > /sys/module/scsi_mod/parameters/scan
 fi
 
-SYSTEMD_LOG_LEVEL=notice /lib/systemd/systemd-udevd --daemon --resolve-names=never
+SYSTEMD_LOG_LEVEL=notice /usr/lib/systemd/systemd-udevd --daemon --resolve-names=never
 
 udevadm trigger --action=add
 

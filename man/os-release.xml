@@ -81,7 +81,7 @@
 
     <para>For a longer rationale for <filename>os-release</filename>
     please refer to the <ulink
-    url="http://0pointer.de/blog/projects/os-release">Announcement of <filename>/etc/os-release</filename></ulink>.</para>
+    url="https://0pointer.de/blog/projects/os-release">Announcement of <filename>/etc/os-release</filename></ulink>.</para>
 
     <refsect2>
       <title><filename>/etc/initrd-release</filename></title>
@@ -104,12 +104,17 @@
       <para><filename>/usr/lib/extension-release.d/extension-release.<replaceable>IMAGE</replaceable></filename>
       plays the same role for extension images as <filename>os-release</filename> for the main system, and
       follows the syntax and rules as described in the <ulink
-      url="https://systemd.io/PORTABLE_SERVICES">Portable Services Documentation</ulink>. The purpose of this
+      url="https://systemd.io/PORTABLE_SERVICES">Portable Services</ulink> page. The purpose of this
       file is to identify the extension and to allow the operating system to verify that the extension image
       matches the base OS. This is typically implemented by checking that the <varname>ID=</varname> options
       match, and either <varname>SYSEXT_LEVEL=</varname> exists and matches too, or if it is not present,
       <varname>VERSION_ID=</varname> exists and matches. This ensures ABI/API compatibility between the
       layers and prevents merging of an incompatible image in an overlay.</para>
+
+      <para>In order to identify the extension image itself, the same fields defined below can be added to the
+      <filename>extension-release</filename> file with a <varname>SYSEXT_</varname> prefix (to disambiguate
+      from fields used to match on the base image). E.g.: <varname>SYSEXT_ID=myext</varname>,
+      <varname>SYSEXT_VERSION_ID=1.2.3</varname>.</para>
 
       <para>In the <filename>extension-release.<replaceable>IMAGE</replaceable></filename> filename, the
       <replaceable>IMAGE</replaceable> part must exactly match the file name of the containing image with the
@@ -210,7 +215,9 @@
           Edition"</literal>.</para>
 
           <para>Note: this field is for display purposes only. The <varname>VARIANT_ID</varname> field should
-          be used for making programmatic decisions.</para></listitem>
+          be used for making programmatic decisions.</para>
+
+          <xi:include href="version-info.xml" xpointer="v220"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -222,7 +229,9 @@
           may not be implemented on all systems.</para>
 
           <para>Examples: <literal>VARIANT_ID=server</literal>, <literal>VARIANT_ID=embedded</literal>.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v220"/></listitem>
         </varlistentry>
       </variablelist>
     </refsect2>
@@ -263,7 +272,9 @@
           is optional and may not be implemented on all systems.</para>
 
           <para>Examples: <literal>VERSION_CODENAME=buster</literal>,
-          <literal>VERSION_CODENAME=xenial</literal>.</para></listitem>
+          <literal>VERSION_CODENAME=xenial</literal>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v231"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -278,7 +289,9 @@
           optional.</para>
 
           <para>Examples: <literal>BUILD_ID="2013-03-20.3"</literal>, <literal>BUILD_ID=201303203</literal>.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v200"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -292,7 +305,9 @@
           the local system.</para>
 
           <para>Examples: <literal>IMAGE_ID=vendorx-cashier-system</literal>,
-          <literal>IMAGE_ID=netbook-image</literal>.</para></listitem>
+          <literal>IMAGE_ID=netbook-image</literal>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v249"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -304,7 +319,9 @@
           </para>
 
           <para>Examples: <literal>IMAGE_VERSION=33</literal>, <literal>IMAGE_VERSION=47.1rc1</literal>.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v249"/></listitem>
         </varlistentry>
       </variablelist>
 
@@ -360,7 +377,9 @@
           not</emphasis> provided.</para>
 
           <para>For example, <literal>SUPPORT_END=2001-01-01</literal> means that the system was supported
-          until the end of the last day of the previous millennium.</para></listitem>
+          until the end of the last day of the previous millennium.</para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -373,7 +392,9 @@
           systems.</para>
 
           <para>Examples: <literal>LOGO=fedora-logo</literal>, <literal>LOGO=distributor-logo-opensuse</literal>
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v240"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -386,6 +407,39 @@
           <para>Examples: <literal>ANSI_COLOR="0;31"</literal> for red, <literal>ANSI_COLOR="1;34"</literal>
           for light blue, or <literal>ANSI_COLOR="0;38;2;60;110;180"</literal> for Fedora blue.
           </para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VENDOR_NAME=</varname></term>
+
+          <listitem><para>The name of the OS vendor. This is the name of the organization or company which
+          produces the OS. This field is optional.</para>
+
+          <para>This name is intended to be exposed in "About this system" UIs or software update UIs when
+          needed to distinguish the OS vendor from the OS itself. It is intended to be human readable.</para>
+
+          <para>Examples: <literal>VENDOR_NAME="Fedora Project"</literal> for Fedora Linux,
+          <literal>VENDOR_NAME="Canonical"</literal> for Ubuntu.</para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VENDOR_URL=</varname></term>
+
+          <listitem><para>The homepage of the OS vendor. This field is optional. The
+          <varname>VENDOR_NAME=</varname> field should be set if this one is, although clients must be
+          robust against either field not being set.</para>
+
+          <para>The value should be in <ulink
+          url="https://tools.ietf.org/html/rfc3986">RFC3986 format</ulink>, and should be
+          <literal>http:</literal> or <literal>https:</literal> URLs. Only one URL shall be listed in the
+          setting.</para>
+
+          <para>Examples: <literal>VENDOR_URL="https://fedoraproject.org/"</literal>,
+          <literal>VENDOR_URL="https://canonical.com/"</literal>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
       </variablelist>
     </refsect2>
@@ -408,7 +462,9 @@
           <para>See <citerefentry><refentrytitle>org.freedesktop.hostname1</refentrytitle><manvolnum>5</manvolnum></citerefentry>
           for a description of how
           <citerefentry><refentrytitle>systemd-hostnamed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-          determines the fallback hostname.</para></listitem>
+          determines the fallback hostname.</para>
+
+          <xi:include href="version-info.xml" xpointer="v248"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -420,7 +476,9 @@
           It may provide redundant information when used in a GPT partition with a GUID type that already
           encodes the architecture. If this is not the case, the architecture should be specified in
           e.g., an extension image, to prevent an incompatible host from loading it.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v252"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -434,7 +492,22 @@
           for more information.</para>
 
           <para>Examples: <literal>SYSEXT_LEVEL=2</literal>, <literal>SYSEXT_LEVEL=15.14</literal>.
-          </para></listitem>
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v248"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>CONFEXT_LEVEL=</varname></term>
+
+          <listitem><para>Semantically the same as <varname>SYSEXT_LEVEL=</varname> but for confext images.
+          See <filename>/etc/extension-release.d/extension-release.<replaceable>IMAGE</replaceable></filename>
+          for more information.</para>
+
+          <para>Examples: <literal>CONFEXT_LEVEL=2</literal>, <literal>CONFEXT_LEVEL=15.14</literal>.
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -445,18 +518,30 @@
           the system extension is applicable to: i.e. to regular systems, to initrds, or to portable service
           images. If unspecified, <literal>SYSEXT_SCOPE=system portable</literal> is implied, i.e. any system
           extension without this field is applicable to regular systems and to portable service environments,
-          but not to initrd environments.</para></listitem>
+          but not to initrd environments.</para>
+
+          <xi:include href="version-info.xml" xpointer="v250"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>CONFEXT_SCOPE=</varname></term>
+
+          <listitem><para>Semantically the same as <varname>SYSEXT_SCOPE=</varname> but for confext images.</para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><varname>PORTABLE_PREFIXES=</varname></term>
           <listitem><para>Takes a space-separated list of one or more valid prefix match strings for the
-          <ulink url="https://systemd.io/PORTABLE_SERVICES">Portable Services Documentation</ulink> logic.
+          <ulink url="https://systemd.io/PORTABLE_SERVICES">Portable Services</ulink> logic.
           This field serves two purposes: it is informational, identifying portable service images as such
           (and thus allowing them to be distinguished from other OS images, such as bootable system images).
           It is also used when a portable service image is attached: the specified or implied portable
           service prefix is checked against the list specified here, to enforce restrictions how images may
-          be attached to a system.</para></listitem>
+          be attached to a system.</para>
+
+          <xi:include href="version-info.xml" xpointer="v250"/></listitem>
         </varlistentry>
       </variablelist>
     </refsect2>

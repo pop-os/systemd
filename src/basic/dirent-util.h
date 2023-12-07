@@ -33,9 +33,11 @@ struct dirent *readdir_no_dot(DIR *dirp);
 /* Maximum space one dirent structure might require at most */
 #define DIRENT_SIZE_MAX CONST_MAX(sizeof(struct dirent), offsetof(struct dirent, d_name) + NAME_MAX + 1)
 
-/* Only if 64bit off_t is enabled struct dirent + struct dirent64 are actually the same. We require this, and
+/* Only if 64-bit off_t is enabled struct dirent + struct dirent64 are actually the same. We require this, and
  * we want them to be interchangeable to make getdents64() work, hence verify that. */
 assert_cc(_FILE_OFFSET_BITS == 64);
+/* These asserts would fail on musl where the LFS extensions don't exist. They should
+ * always be present on glibc however. */
 #if HAVE_STRUCT_DIRENT64
 assert_cc(sizeof(struct dirent) == sizeof(struct dirent64));
 assert_cc(offsetof(struct dirent, d_ino) == offsetof(struct dirent64, d_ino));

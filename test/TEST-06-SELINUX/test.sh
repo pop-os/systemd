@@ -6,53 +6,38 @@ TEST_DESCRIPTION="SELinux tests"
 IMAGE_NAME="selinux"
 TEST_NO_NSPAWN=1
 
-# Requirements:
-# Fedora 23
-# selinux-policy-targeted
-# selinux-policy-devel
+if [[ -e /etc/selinux/config ]]; then
+    SEPOLICY="$(awk -F= '/^SELINUXTYPE=/ {print $2; exit}' /etc/selinux/config)"
 
-# Check if selinux-policy-devel is installed, and if it isn't bail out early instead of failing
-test -f /usr/share/selinux/devel/include/system/systemd.if || exit 0
+    # C8S doesn't set SELINUXTYPE in /etc/selinux/config, so default to 'targeted'
+    if [[ -z "$SEPOLICY" ]]; then
+        echo "Failed to parse SELinux policy from /etc/selinux/config, falling back to 'targeted'"
+        SEPOLICY="targeted"
+    fi
+
+    if [[ ! -d "/etc/selinux/$SEPOLICY" ]]; then
+        echo "Missing policy directory /etc/selinux/$SEPOLICY, skipping the test"
+        exit 0
+    fi
+
+    echo "Using SELinux policy '$SEPOLICY'"
+else
+    echo "/etc/selinux/config is missing, skipping the test"
+    exit 0
+fi
 
 # shellcheck source=test/test-functions
 . "${TEST_BASE_DIR:?}/test-functions"
 
 SETUP_SELINUX=yes
-KERNEL_APPEND="${KERNEL_APPEND:=} selinux=1 security=selinux"
+KERNEL_APPEND="${KERNEL_APPEND:-} selinux=1 enforcing=0 lsm=selinux"
 
 test_append_files() {
-    (
-        local workspace="${1:?}"
-        local policy_headers_dir=/usr/share/selinux/devel
-        local modules_dir=/var/lib/selinux
+    local workspace="${1:?}"
 
-        setup_selinux
-        # Make sure we never expand this to "/..."
-        rm -rf "${workspace:?}/$modules_dir"
-
-        if ! cp -ar "$modules_dir" "$workspace/$modules_dir"; then
-            dfatal "Failed to copy $modules_dir"
-            exit 1
-        fi
-
-        rm -rf "${workspace:?}/$policy_headers_dir"
-        inst_dir /usr/share/selinux
-
-        if ! cp -ar "$policy_headers_dir" "$workspace/$policy_headers_dir"; then
-            dfatal "Failed to copy $policy_headers_dir"
-            exit 1
-        fi
-
-        mkdir "$workspace/systemd-test-module"
-        cp systemd_test.te "$workspace/systemd-test-module"
-        cp systemd_test.if "$workspace/systemd-test-module"
-        cp systemd_test.fc "$workspace/systemd-test-module"
-        image_install -o sesearch
-        image_install runcon
-        image_install checkmodule semodule semodule_package m4 make load_policy sefcontext_compile
-        image_install -o /usr/libexec/selinux/hll/pp # Fedora/RHEL/...
-        image_install -o /usr/lib/selinux/hll/pp     # Debian/Ubuntu/...
-    )
+    setup_selinux
+    # Config file has (unfortunately) always precedence, so let's switch it there as well
+    sed -i '/^SELINUX=disabled$/s/disabled/permissive/' "$workspace/etc/selinux/config"
 }
 
 do_test "$@"

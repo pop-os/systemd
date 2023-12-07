@@ -3,12 +3,9 @@
 set -eux
 set -o pipefail
 
-: >/failed
+# shellcheck source=test/units/test-control.sh
+. "$(dirname "$0")"/test-control.sh
 
-for script in "${0%.sh}".*.sh; do
-    echo "Running $script"
-    "./$script"
-done
+run_subtests
 
 touch /testok
-rm /failed

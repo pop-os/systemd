@@ -9,7 +9,7 @@
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "journal-importer.h"
 #include "journal-internal.h"
 #include "journal-util.h"
@@ -66,20 +66,16 @@ static void server_process_entry_meta(
                 char *t;
 
                 t = memdup_suffix0(p + 18, l - 18);
-                if (t) {
-                        free(*identifier);
-                        *identifier = t;
-                }
+                if (t)
+                        free_and_replace(*identifier, t);
 
         } else if (l >= 8 &&
                    startswith(p, "MESSAGE=")) {
                 char *t;
 
                 t = memdup_suffix0(p + 8, l - 8);
-                if (t) {
-                        free(*message);
-                        *message = t;
-                }
+                if (t)
+                        free_and_replace(*message, t);
 
         } else if (l > STRLEN("OBJECT_PID=") &&
                    l < STRLEN("OBJECT_PID=")  + DECIMAL_STR_MAX(pid_t) &&
@@ -409,6 +405,7 @@ void server_process_native_file(
                 /* The file is sealed, we can just map it and use it. */
 
                 ps = PAGE_ALIGN(st.st_size);
+                assert(ps < SIZE_MAX);
                 p = mmap(NULL, ps, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (p == MAP_FAILED) {
                         log_ratelimit_error_errno(errno, JOURNAL_LOG_RATELIMIT,

@@ -8,9 +8,10 @@
 #include <stdio.h>
 
 #include "alloc-util.h"
-#include "dhcp-internal.h"
+#include "dhcp-option.h"
 #include "dhcp-server-internal.h"
 #include "memory-util.h"
+#include "ordered-set.h"
 #include "strv.h"
 #include "utf8.h"
 
@@ -355,7 +356,7 @@ static int parse_options(const uint8_t options[], size_t buflen, uint8_t *overlo
         return 0;
 }
 
-int dhcp_option_parse(DHCPMessage *message, size_t len, dhcp_option_callback_t cb, void *userdata, char **_error_message) {
+int dhcp_option_parse(DHCPMessage *message, size_t len, dhcp_option_callback_t cb, void *userdata, char **ret_error_message) {
         _cleanup_free_ char *error_message = NULL;
         uint8_t overload = 0;
         uint8_t message_type = 0;
@@ -388,10 +389,35 @@ int dhcp_option_parse(DHCPMessage *message, size_t len, dhcp_option_callback_t c
         if (message_type == 0)
                 return -ENOMSG;
 
-        if (_error_message && IN_SET(message_type, DHCP_NAK, DHCP_DECLINE))
-                *_error_message = TAKE_PTR(error_message);
+        if (ret_error_message && IN_SET(message_type, DHCP_NAK, DHCP_DECLINE))
+                *ret_error_message = TAKE_PTR(error_message);
 
         return message_type;
+}
+
+int dhcp_option_parse_string(const uint8_t *option, size_t len, char **ret) {
+        int r;
+
+        assert(option);
+        assert(ret);
+
+        if (len <= 0)
+                *ret = mfree(*ret);
+        else {
+                char *string;
+
+                /*
+                 * One trailing NUL byte is OK, we don't mind. See:
+                 * https://github.com/systemd/systemd/issues/1337
+                 */
+                r = make_cstring((const char *) option, len, MAKE_CSTRING_ALLOW_TRAILING_NUL, &string);
+                if (r < 0)
+                        return r;
+
+                free_and_replace(*ret, string);
+        }
+
+        return 0;
 }
 
 static sd_dhcp_option* dhcp_option_free(sd_dhcp_option *i) {

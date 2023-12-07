@@ -6,12 +6,49 @@
 #endif
 
 #include <limits.h>
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+/* Temporarily disable some warnings */
+#define DISABLE_WARNING_DEPRECATED_DECLARATIONS                         \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+
+#define DISABLE_WARNING_FORMAT_NONLITERAL                               \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wformat-nonliteral\"")
+
+#define DISABLE_WARNING_MISSING_PROTOTYPES                              \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wmissing-prototypes\"")
+
+#define DISABLE_WARNING_NONNULL                                         \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wnonnull\"")
+
+#define DISABLE_WARNING_SHADOW                                          \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wshadow\"")
+
+#define DISABLE_WARNING_INCOMPATIBLE_POINTER_TYPES                      \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wincompatible-pointer-types\"")
+
+#define DISABLE_WARNING_TYPE_LIMITS                                     \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Wtype-limits\"")
+
+#define DISABLE_WARNING_ADDRESS                                         \
+        _Pragma("GCC diagnostic push");                                 \
+        _Pragma("GCC diagnostic ignored \"-Waddress\"")
+
+#define REENABLE_WARNING                                                \
+        _Pragma("GCC diagnostic pop")
+
 #define _align_(x) __attribute__((__aligned__(x)))
-#define _alignas_(x) __attribute__((__aligned__(__alignof__(x))))
+#define _alignas_(x) __attribute__((__aligned__(alignof(x))))
 #define _alignptr_ __attribute__((__aligned__(sizeof(void *))))
 #define _cleanup_(x) __attribute__((__cleanup__(x)))
 #define _const_ __attribute__((__const__))
@@ -71,7 +108,7 @@
         _noreturn_ void efi_assert(const char *expr, const char *file, unsigned line, const char *function);
 
         #ifdef NDEBUG
-                #define assert(expr)
+                #define assert(expr) ({ if (!(expr)) __builtin_unreachable(); })
                 #define assert_not_reached() __builtin_unreachable()
         #else
                 #define assert(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __func__); })
@@ -106,7 +143,6 @@
         })
 
 #define assert_cc(expr) static_assert(expr, #expr)
-
 
 #define UNIQ_T(x, uniq) CONCATENATE(__unique_prefix_, CONCATENATE(x, uniq))
 #define UNIQ __COUNTER__
@@ -252,6 +288,16 @@
                 (UNIQ_T(X, xq) / UNIQ_T(Y, yq) + !!(UNIQ_T(X, xq) % UNIQ_T(Y, yq))); \
         })
 
+/* Rounds up x to the next multiple of y. Resolves to typeof(x) -1 in case of overflow */
+#define __ROUND_UP(q, x, y)                                             \
+        ({                                                              \
+                const typeof(y) UNIQ_T(A, q) = (y);                     \
+                const typeof(x) UNIQ_T(B, q) = DIV_ROUND_UP((x), UNIQ_T(A, q)); \
+                typeof(x) UNIQ_T(C, q);                                 \
+                __builtin_mul_overflow(UNIQ_T(B, q), UNIQ_T(A, q), &UNIQ_T(C, q)) ? (typeof(x)) -1 : UNIQ_T(C, q); \
+        })
+#define ROUND_UP(x, y) __ROUND_UP(UNIQ, (x), (y))
+
 #define  CASE_F_1(X)      case X:
 #define  CASE_F_2(X, ...) case X:  CASE_F_1( __VA_ARGS__)
 #define  CASE_F_3(X, ...) case X:  CASE_F_2( __VA_ARGS__)
@@ -330,7 +376,40 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
         if (l > SIZE_MAX - (ali - 1))
                 return SIZE_MAX; /* indicate overflow */
 
-        return ((l + ali - 1) & ~(ali - 1));
+        return ((l + (ali - 1)) & ~(ali - 1));
+}
+
+static inline uint64_t ALIGN_TO_U64(uint64_t l, uint64_t ali) {
+        assert(ISPOWEROF2(ali));
+
+        if (l > UINT64_MAX - (ali - 1))
+                return UINT64_MAX; /* indicate overflow */
+
+        return ((l + (ali - 1)) & ~(ali - 1));
+}
+
+static inline size_t ALIGN_DOWN(size_t l, size_t ali) {
+        assert(ISPOWEROF2(ali));
+
+        return l & ~(ali - 1);
+}
+
+static inline uint64_t ALIGN_DOWN_U64(uint64_t l, uint64_t ali) {
+        assert(ISPOWEROF2(ali));
+
+        return l & ~(ali - 1);
+}
+
+static inline size_t ALIGN_OFFSET(size_t l, size_t ali) {
+        assert(ISPOWEROF2(ali));
+
+        return l & (ali - 1);
+}
+
+static inline uint64_t ALIGN_OFFSET_U64(uint64_t l, uint64_t ali) {
+        assert(ISPOWEROF2(ali));
+
+        return l & (ali - 1);
 }
 
 #define ALIGN2(l) ALIGN_TO(l, 2)
@@ -339,16 +418,13 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
 #define ALIGN2_PTR(p) ((void*) ALIGN2((uintptr_t) p))
 #define ALIGN4_PTR(p) ((void*) ALIGN4((uintptr_t) p))
 #define ALIGN8_PTR(p) ((void*) ALIGN8((uintptr_t) p))
-#if !SD_BOOT
-/* libefi also provides ALIGN, and we do not use them in sd-boot explicitly. */
 #define ALIGN(l)  ALIGN_TO(l, sizeof(void*))
 #define ALIGN_PTR(p) ((void*) ALIGN((uintptr_t) (p)))
-#endif
 
 /* Checks if the specified pointer is aligned as appropriate for the specific type */
-#define IS_ALIGNED16(p) (((uintptr_t) p) % __alignof__(uint16_t) == 0)
-#define IS_ALIGNED32(p) (((uintptr_t) p) % __alignof__(uint32_t) == 0)
-#define IS_ALIGNED64(p) (((uintptr_t) p) % __alignof__(uint64_t) == 0)
+#define IS_ALIGNED16(p) (((uintptr_t) p) % alignof(uint16_t) == 0)
+#define IS_ALIGNED32(p) (((uintptr_t) p) % alignof(uint32_t) == 0)
+#define IS_ALIGNED64(p) (((uintptr_t) p) % alignof(uint64_t) == 0)
 
 /* Same as ALIGN_TO but callable in constant contexts. */
 #define CONST_ALIGN_TO(l, ali)                                         \
@@ -366,7 +442,7 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
 #define CAST_ALIGN_PTR(t, p)                                    \
         ({                                                      \
                 const void *_p = (p);                           \
-                assert(((uintptr_t) _p) % __alignof__(t) == 0); \
+                assert(((uintptr_t) _p) % alignof(t) == 0); \
                 (t *) _p;                                       \
         })
 
@@ -376,6 +452,42 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
         (v) = UPDATE_FLAG(v, flag, b)
 #define FLAGS_SET(v, flags) \
         ((~(v) & (flags)) == 0)
+
+/* A wrapper for 'func' to return void.
+ * Only useful when a void-returning function is required by some API. */
+#define DEFINE_TRIVIAL_DESTRUCTOR(name, type, func)             \
+        static inline void name(type *p) {                      \
+                func(p);                                        \
+        }
+
+/* When func() returns the void value (NULL, -1, …) of the appropriate type */
+#define DEFINE_TRIVIAL_CLEANUP_FUNC(type, func)                 \
+        static inline void func##p(type *p) {                   \
+                if (*p)                                         \
+                        *p = func(*p);                          \
+        }
+
+/* When func() doesn't return the appropriate type, set variable to empty afterwards.
+ * The func() may be provided by a dynamically loaded shared library, hence add an assertion. */
+#define DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(type, func, empty)     \
+        static inline void func##p(type *p) {                   \
+                if (*p != (empty)) {                            \
+                        DISABLE_WARNING_ADDRESS;                \
+                        assert(func);                           \
+                        REENABLE_WARNING;                       \
+                        func(*p);                               \
+                        *p = (empty);                           \
+                }                                               \
+        }
+
+/* When func() doesn't return the appropriate type, and is also a macro, set variable to empty afterwards. */
+#define DEFINE_TRIVIAL_CLEANUP_FUNC_FULL_MACRO(type, func, empty)       \
+        static inline void func##p(type *p) {                           \
+                if (*p != (empty)) {                                    \
+                        func(*p);                                       \
+                        *p = (empty);                                   \
+                }                                                       \
+        }
 
 /* Declare a flexible array usable in a union.
  * This is essentially a work-around for a pointless constraint in C99
@@ -388,3 +500,16 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
                 dummy_t __empty__ ## name;             \
                 type name[];                           \
         }
+
+/* Declares an ELF read-only string section that does not occupy memory at runtime. */
+#define DECLARE_NOALLOC_SECTION(name, text)   \
+        asm(".pushsection " name ",\"S\"\n\t" \
+            ".ascii " STRINGIFY(text) "\n\t"  \
+            ".zero 1\n\t"                     \
+            ".popsection\n")
+
+#ifdef SBAT_DISTRO
+        #define DECLARE_SBAT(text) DECLARE_NOALLOC_SECTION(".sbat", text)
+#else
+        #define DECLARE_SBAT(text)
+#endif

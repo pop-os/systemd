@@ -1,32 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <efi.h>
-#include <efilib.h>
-#include <inttypes.h>
-
+#include "device-path-util.h"
+#include "memory-util-fundamental.h"
+#include "proto/device-path.h"
+#include "proto/simple-text-io.h"
 #include "ticks.h"
 #include "util.h"
-
-EFI_STATUS parse_boolean(const char *v, bool *b) {
-        assert(b);
-
-        if (!v)
-                return EFI_INVALID_PARAMETER;
-
-        if (streq8(v, "1") || streq8(v, "yes") || streq8(v, "y") || streq8(v, "true") || streq8(v, "t") ||
-            streq8(v, "on")) {
-                *b = true;
-                return EFI_SUCCESS;
-        }
-
-        if (streq8(v, "0") || streq8(v, "no") || streq8(v, "n") || streq8(v, "false") || streq8(v, "f") ||
-            streq8(v, "off")) {
-                *b = false;
-                return EFI_SUCCESS;
-        }
-
-        return EFI_INVALID_PARAMETER;
-}
+#include "version.h"
 
 EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, size_t size, uint32_t flags) {
         assert(vendor);
@@ -82,6 +62,21 @@ EFI_STATUS efivar_set_uint64_le(const EFI_GUID *vendor, const char16_t *name, ui
         buf[7] = (uint8_t)(value >> 56U & 0xFF);
 
         return efivar_set_raw(vendor, name, buf, sizeof(buf), flags);
+}
+
+EFI_STATUS efivar_unset(const EFI_GUID *vendor, const char16_t *name, uint32_t flags) {
+        EFI_STATUS err;
+
+        assert(vendor);
+        assert(name);
+
+        /* We could be wiping a non-volatile variable here and the spec makes no guarantees that won't incur
+         * in an extra write (and thus wear out). So check and clear only if needed. */
+        err = efivar_get_raw(vendor, name, NULL, NULL);
+        if (err == EFI_SUCCESS)
+                return efivar_set_raw(vendor, name, NULL, 0, flags);
+
+        return err;
 }
 
 EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **ret) {
@@ -186,24 +181,25 @@ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, ui
 }
 
 EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, size_t *ret_size) {
-        _cleanup_free_ char *buf = NULL;
-        size_t l;
         EFI_STATUS err;
 
         assert(vendor);
         assert(name);
 
-        l = sizeof(char16_t *) * EFI_MAXIMUM_VARIABLE_SIZE;
-        buf = xmalloc(l);
+        size_t size = 0;
+        err = RT->GetVariable((char16_t *) name, (EFI_GUID *) vendor, NULL, &size, NULL);
+        if (err != EFI_BUFFER_TOO_SMALL)
+                return err;
 
-        err = RT->GetVariable((char16_t *) name, (EFI_GUID *) vendor, NULL, &l, buf);
+        _cleanup_free_ void *buf = xmalloc(size);
+        err = RT->GetVariable((char16_t *) name, (EFI_GUID *) vendor, NULL, &size, buf);
         if (err != EFI_SUCCESS)
                 return err;
 
         if (ret)
                 *ret = TAKE_PTR(buf);
         if (ret_size)
-                *ret_size = l;
+                *ret_size = size;
 
         return EFI_SUCCESS;
 }
@@ -264,23 +260,36 @@ char16_t *xstr8_to_path(const char *str8) {
         return path;
 }
 
-void mangle_stub_cmdline(char16_t *cmdline) {
-        char16_t *p = cmdline;
+static bool shall_be_whitespace(char16_t c) {
+        return c <= 0x20U || c == 0x7FU; /* All control characters + space */
+}
 
-        for (; *cmdline != '\0'; cmdline++)
-                /* Convert ASCII control characters to spaces. */
-                if (*cmdline <= 0x1F)
-                        *cmdline = ' ';
+char16_t* mangle_stub_cmdline(char16_t *cmdline) {
+        char16_t *p, *q, *e;
 
-        /* chomp the trailing whitespaces */
-        while (cmdline != p) {
-                --cmdline;
+        if (!cmdline)
+                return cmdline;
 
-                if (*cmdline != ' ')
-                        break;
+        p = q = cmdline;
 
-                *cmdline = '\0';
+        /* Skip initial whitespace */
+        while (shall_be_whitespace(*p))
+                p++;
+
+        /* Turn inner control characters into proper spaces */
+        for (e = p; *p != 0; p++) {
+                if (shall_be_whitespace(*p)) {
+                        *(q++) = ' ';
+                        continue;
+                }
+
+                *(q++) = *p;
+                e = q; /* remember last non-whitespace char */
         }
+
+        /* Chop off trailing whitespace */
+        *e = 0;
+        return cmdline;
 }
 
 EFI_STATUS chunked_read(EFI_FILE *file, size_t *size, void *buf) {
@@ -337,7 +346,7 @@ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t siz
         if (size == 0) {
                 _cleanup_free_ EFI_FILE_INFO *info = NULL;
 
-                err = get_file_info_harder(handle, &info, NULL);
+                err = get_file_info(handle, &info, NULL);
                 if (err != EFI_SUCCESS)
                         return err;
 
@@ -359,7 +368,7 @@ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t siz
                 return err;
 
         /* Note that chunked_read() changes size to reflect the actual bytes read. */
-        memset(buf + size, 0, extra);
+        memzero(buf + size, extra);
 
         *ret = TAKE_PTR(buf);
         if (ret_size)
@@ -407,19 +416,13 @@ void sort_pointer_array(
         }
 }
 
-EFI_STATUS get_file_info_harder(
-                EFI_FILE *handle,
-                EFI_FILE_INFO **ret,
-                size_t *ret_size) {
-
-        size_t size = offsetof(EFI_FILE_INFO, FileName) + 256;
+EFI_STATUS get_file_info(EFI_FILE *handle, EFI_FILE_INFO **ret, size_t *ret_size) {
+        size_t size = EFI_FILE_INFO_MIN_SIZE;
         _cleanup_free_ EFI_FILE_INFO *fi = NULL;
         EFI_STATUS err;
 
         assert(handle);
         assert(ret);
-
-        /* A lot like LibFileInfo() but with useful error propagation */
 
         fi = xmalloc(size);
         err = handle->GetInfo(handle, MAKE_GUID_PTR(EFI_FILE_INFO), &size, fi);
@@ -440,7 +443,7 @@ EFI_STATUS get_file_info_harder(
         return EFI_SUCCESS;
 }
 
-EFI_STATUS readdir_harder(
+EFI_STATUS readdir(
                 EFI_FILE *handle,
                 EFI_FILE_INFO **buffer,
                 size_t *buffer_size) {
@@ -456,12 +459,7 @@ EFI_STATUS readdir_harder(
          * the specified buffer needs to be freed by caller, after final use. */
 
         if (!*buffer) {
-                /* Some broken firmware violates the EFI spec by still advancing the readdir
-                 * position when returning EFI_BUFFER_TOO_SMALL, effectively skipping over any files when
-                 * the buffer was too small. Therefore, start with a buffer that should handle FAT32 max
-                 * file name length.
-                 * As a side effect, most readdir_harder() calls will now be slightly faster. */
-                sz = sizeof(EFI_FILE_INFO) + 256 * sizeof(char16_t);
+                sz = EFI_FILE_INFO_MIN_SIZE;
                 *buffer = xmalloc(sz);
                 *buffer_size = sz;
         } else
@@ -526,7 +524,7 @@ EFI_STATUS open_directory(
         if (err != EFI_SUCCESS)
                 return err;
 
-        err = get_file_info_harder(dir, &file_info, NULL);
+        err = get_file_info(dir, &file_info, NULL);
         if (err != EFI_SUCCESS)
                 return err;
         if (!FLAGS_SET(file_info->Attribute, EFI_FILE_DIRECTORY))
@@ -550,10 +548,9 @@ uint64_t get_os_indications_supported(void) {
         return osind;
 }
 
-#ifdef EFI_DEBUG
-extern uint8_t _text, _data;
 __attribute__((noinline)) void notify_debugger(const char *identity, volatile bool wait) {
-        printf("%s@%p,%p\n", identity, &_text, &_data);
+#ifdef EFI_DEBUG
+        printf("%s@%p %s\n", identity, __executable_start, GIT_VERSION);
         if (wait)
                 printf("Waiting for debugger to attach...\n");
 
@@ -561,48 +558,24 @@ __attribute__((noinline)) void notify_debugger(const char *identity, volatile bo
          * has attached to us. Just "set variable wait = 0" or "return" to continue. */
         while (wait)
                 /* Prefer asm based stalling so that gdb has a source location to present. */
-#if defined(__i386__) || defined(__x86_64__)
+#  if defined(__i386__) || defined(__x86_64__)
                 asm volatile("pause");
-#elif defined(__aarch64__)
+#  elif defined(__aarch64__)
                 asm volatile("wfi");
-#else
+#  else
                 BS->Stall(5000);
+#  endif
 #endif
 }
-#endif
-
-#ifdef EFI_DEBUG
-void hexdump(const char16_t *prefix, const void *data, size_t size) {
-        static const char hex[16] = "0123456789abcdef";
-        _cleanup_free_ char16_t *buf = NULL;
-        const uint8_t *d = data;
-
-        assert(prefix);
-        assert(data || size == 0);
-
-        /* Debugging helper — please keep this around, even if not used */
-
-        buf = xnew(char16_t, size*2+1);
-
-        for (size_t i = 0; i < size; i++) {
-                buf[i*2] = hex[d[i] >> 4];
-                buf[i*2+1] = hex[d[i] & 0x0F];
-        }
-
-        buf[size*2] = 0;
-
-        log_error("%ls[%zu]: %ls", prefix, size, buf);
-}
-#endif
 
 #if defined(__i386__) || defined(__x86_64__)
-static inline uint8_t inb(uint16_t port) {
+static uint8_t inb(uint16_t port) {
         uint8_t value;
         asm volatile("inb %1, %0" : "=a"(value) : "Nd"(port));
         return value;
 }
 
-static inline void outb(uint16_t port, uint8_t value) {
+static void outb(uint16_t port, uint8_t value) {
         asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
@@ -665,91 +638,6 @@ EFI_STATUS open_volume(EFI_HANDLE device, EFI_FILE **ret_file) {
         return EFI_SUCCESS;
 }
 
-EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DEVICE_PATH **ret_dp) {
-        EFI_STATUS err;
-        EFI_DEVICE_PATH *dp;
-
-        assert(file);
-        assert(ret_dp);
-
-        err = BS->HandleProtocol(device, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &dp);
-        if (err != EFI_SUCCESS)
-                return err;
-
-        EFI_DEVICE_PATH *end_node = dp;
-        while (!IsDevicePathEnd(end_node))
-                end_node = NextDevicePathNode(end_node);
-
-        size_t file_size = strsize16(file);
-        size_t dp_size = (uint8_t *) end_node - (uint8_t *) dp;
-
-        /* Make a copy that can also hold a file media device path. */
-        *ret_dp = xmalloc(dp_size + file_size + SIZE_OF_FILEPATH_DEVICE_PATH + END_DEVICE_PATH_LENGTH);
-        dp = mempcpy(*ret_dp, dp, dp_size);
-
-        /* Replace end node with file media device path. Use memcpy() in case dp is unaligned (if accessed as
-         * FILEPATH_DEVICE_PATH). */
-        dp->Type = MEDIA_DEVICE_PATH;
-        dp->SubType = MEDIA_FILEPATH_DP;
-        memcpy((uint8_t *) dp + offsetof(FILEPATH_DEVICE_PATH, PathName), file, file_size);
-        SetDevicePathNodeLength(dp, offsetof(FILEPATH_DEVICE_PATH, PathName) + file_size);
-
-        dp = NextDevicePathNode(dp);
-        SetDevicePathEndNode(dp);
-        return EFI_SUCCESS;
-}
-
-EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
-        EFI_DEVICE_PATH_TO_TEXT_PROTOCOL *dp_to_text;
-        EFI_STATUS err;
-        _cleanup_free_ char16_t *str = NULL;
-
-        assert(dp);
-        assert(ret);
-
-        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_DEVICE_PATH_TO_TEXT_PROTOCOL), NULL, (void **) &dp_to_text);
-        if (err != EFI_SUCCESS) {
-                /* If the device path to text protocol is not available we can still do a best-effort attempt
-                 * to convert it ourselves if we are given filepath-only device path. */
-
-                size_t size = 0;
-                for (const EFI_DEVICE_PATH *node = dp; !IsDevicePathEnd(node);
-                     node = NextDevicePathNode(node)) {
-
-                        if (DevicePathType(node) != MEDIA_DEVICE_PATH ||
-                            DevicePathSubType(node) != MEDIA_FILEPATH_DP)
-                                return err;
-
-                        size_t path_size = DevicePathNodeLength(node);
-                        if (path_size <= offsetof(FILEPATH_DEVICE_PATH, PathName) || path_size % sizeof(char16_t))
-                                return EFI_INVALID_PARAMETER;
-                        path_size -= offsetof(FILEPATH_DEVICE_PATH, PathName);
-
-                        _cleanup_free_ char16_t *old = str;
-                        str = xmalloc(size + path_size);
-                        if (old) {
-                                memcpy(str, old, size);
-                                str[size / sizeof(char16_t) - 1] = '\\';
-                        }
-
-                        memcpy(str + (size / sizeof(char16_t)),
-                               ((uint8_t *) node) + offsetof(FILEPATH_DEVICE_PATH, PathName),
-                               path_size);
-                        size += path_size;
-                }
-
-                *ret = TAKE_PTR(str);
-                return EFI_SUCCESS;
-        }
-
-        str = dp_to_text->ConvertDevicePathToText(dp, false, false);
-        if (!str)
-                return EFI_OUT_OF_RESOURCES;
-
-        *ret = TAKE_PTR(str);
-        return EFI_SUCCESS;
-}
-
 void *find_configuration_table(const EFI_GUID *guid) {
         for (size_t i = 0; i < ST->NumberOfTableEntries; i++)
                 if (efi_guid_equal(&ST->ConfigurationTable[i].VendorGuid, guid))
@@ -758,8 +646,54 @@ void *find_configuration_table(const EFI_GUID *guid) {
         return NULL;
 }
 
-/* libgcc's __aeabi_ldiv0 intrinsic will call raise() on division by zero, so we
- * need to provide one ourselves for now. */
-_used_ _noreturn_ int raise(int sig) {
-        assert_not_reached();
+static void remove_boot_count(char16_t *path) {
+        char16_t *prefix_end;
+        const char16_t *tail;
+        uint64_t ignored;
+
+        assert(path);
+
+        prefix_end = strchr16(path, '+');
+        if (!prefix_end)
+                return;
+
+        tail = prefix_end + 1;
+
+        if (!parse_number16(tail, &ignored, &tail))
+                return;
+
+        if (*tail == '-') {
+                ++tail;
+                if (!parse_number16(tail, &ignored, &tail))
+                        return;
+        }
+
+        if (!IN_SET(*tail, '\0', '.'))
+                return;
+
+        strcpy16(prefix_end, tail);
+}
+
+char16_t *get_extra_dir(const EFI_DEVICE_PATH *file_path) {
+        if (!file_path)
+                return NULL;
+
+        /* A device path is allowed to have more than one file path node. If that is the case they are
+         * supposed to be concatenated. Unfortunately, the device path to text protocol simply converts the
+         * nodes individually and then combines those with the usual '/' for device path nodes. But this does
+         * not create a legal EFI file path that the file protocol can use. */
+
+        /* Make sure we really only got file paths. */
+        for (const EFI_DEVICE_PATH *node = file_path; !device_path_is_end(node);
+             node = device_path_next_node(node))
+                if (node->Type != MEDIA_DEVICE_PATH || node->SubType != MEDIA_FILEPATH_DP)
+                        return NULL;
+
+        _cleanup_free_ char16_t *file_path_str = NULL;
+        if (device_path_to_str(file_path, &file_path_str) != EFI_SUCCESS)
+                return NULL;
+
+        convert_efi_path(file_path_str);
+        remove_boot_count(file_path_str);
+        return xasprintf("%ls.extra.d", file_path_str);
 }

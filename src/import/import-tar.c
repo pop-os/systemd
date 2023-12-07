@@ -148,7 +148,7 @@ static void tar_import_report_progress(TarImport *i) {
         if (!ratelimit_below(&i->progress_ratelimit))
                 return;
 
-        sd_notifyf(false, "X_IMPORT_PROGRESS=%u", percent);
+        sd_notifyf(false, "X_IMPORT_PROGRESS=%u%%", percent);
         log_info("Imported %u%%.", percent);
 
         i->last_percent = percent;
@@ -225,7 +225,7 @@ static int tar_import_fork_tar(TarImport *i) {
                 (void) rm_rf(d, REMOVE_ROOT|REMOVE_PHYSICAL|REMOVE_SUBVOLUME);
 
         if (i->flags & IMPORT_BTRFS_SUBVOL)
-                r = btrfs_subvol_make_fallback(d, 0755);
+                r = btrfs_subvol_make_fallback(AT_FDCWD, d, 0755);
         else
                 r = RET_NERRNO(mkdir(d, 0755));
         if (r == -EEXIST && (i->flags & IMPORT_DIRECT)) /* EEXIST is OK if in direct mode, but not otherwise,
@@ -250,7 +250,7 @@ static int tar_import_write(const void *p, size_t sz, void *userdata) {
         TarImport *i = userdata;
         int r;
 
-        r = loop_write(i->tar_fd, p, sz, false);
+        r = loop_write(i->tar_fd, p, sz);
         if (r < 0)
                 return r;
 

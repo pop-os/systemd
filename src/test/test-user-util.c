@@ -47,7 +47,6 @@ static void test_gid_to_name_one(gid_t gid, const char *name) {
 TEST(gid_to_name) {
         test_gid_to_name_one(0, "root");
         test_gid_to_name_one(GID_NOBODY, NOBODY_GROUP_NAME);
-        test_gid_to_name_one(TTY_GID, "tty");
         test_gid_to_name_one(0xFFFF, "65535");
         test_gid_to_name_one(0xFFFFFFFF, "4294967295");
 }
@@ -343,7 +342,6 @@ static void test_get_user_creds_one(const char *id, const char *name, uid_t uid,
         assert_se(ruid == uid);
         assert_se(rgid == gid);
         assert_se(path_equal(rhome, home));
-        assert_se(path_equal(rshell, shell));
 }
 
 TEST(get_user_creds) {

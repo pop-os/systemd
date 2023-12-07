@@ -19,6 +19,8 @@
 #include "hostname-util.h"
 #include "idn-util.h"
 #include "io-util.h"
+#include "iovec-util.h"
+#include "memstream-util.h"
 #include "missing_network.h"
 #include "missing_socket.h"
 #include "netlink-util.h"
@@ -106,7 +108,7 @@ fail:
 
 static int manager_process_address(sd_netlink *rtnl, sd_netlink_message *mm, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
-        union in_addr_union address;
+        union in_addr_union address, broadcast = {};
         uint16_t type;
         int r, ifindex, family;
         LinkAddress *a;
@@ -134,6 +136,7 @@ static int manager_process_address(sd_netlink *rtnl, sd_netlink_message *mm, voi
         switch (family) {
 
         case AF_INET:
+                sd_netlink_message_read_in_addr(mm, IFA_BROADCAST, &broadcast.in);
                 r = sd_netlink_message_read_in_addr(mm, IFA_LOCAL, &address.in);
                 if (r < 0) {
                         r = sd_netlink_message_read_in_addr(mm, IFA_ADDRESS, &address.in);
@@ -164,7 +167,7 @@ static int manager_process_address(sd_netlink *rtnl, sd_netlink_message *mm, voi
         case RTM_NEWADDR:
 
                 if (!a) {
-                        r = link_address_new(l, &a, family, &address);
+                        r = link_address_new(l, &a, family, &address, &broadcast);
                         if (r < 0)
                                 return r;
                 }
@@ -491,16 +494,15 @@ static int manager_watch_hostname(Manager *m) {
 }
 
 static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
-        _cleanup_free_ char *buffer = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
+        _cleanup_(memstream_done) MemStream ms = {};
         Manager *m = ASSERT_PTR(userdata);
-        size_t size = 0;
         Link *l;
+        FILE *f;
 
         assert(s);
         assert(si);
 
-        f = open_memstream_unlocked(&buffer, &size);
+        f = memstream_init(&ms);
         if (!f)
                 return log_oom();
 
@@ -515,11 +517,7 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
                 LIST_FOREACH(servers, server, l->dns_servers)
                         dns_server_dump(server, f);
 
-        if (fflush_and_check(f) < 0)
-                return log_oom();
-
-        log_dump(LOG_INFO, buffer);
-        return 0;
+        return memstream_dump(LOG_INFO, &ms);
 }
 
 static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
@@ -540,6 +538,30 @@ static int manager_sigrtmin1(sd_event_source *s, const struct signalfd_siginfo *
         assert(si);
 
         manager_reset_server_features(m);
+        return 0;
+}
+
+static int manager_memory_pressure(sd_event_source *s, void *userdata) {
+        Manager *m = ASSERT_PTR(userdata);
+
+        log_info("Under memory pressure, flushing caches.");
+
+        manager_flush_caches(m, LOG_INFO);
+        sd_event_trim_memory();
+
+        return 0;
+}
+
+static int manager_memory_pressure_listen(Manager *m) {
+        int r;
+
+        assert(m);
+
+        r = sd_event_add_memory_pressure(m->event, NULL, manager_memory_pressure, m);
+        if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) || ERRNO_IS_PRIVILEGE(r) || (r == -EHOSTDOWN )? LOG_DEBUG : LOG_NOTICE, r,
+                               "Failed to install memory pressure event source, ignoring: %m");
+
         return 0;
 }
 
@@ -572,6 +594,9 @@ int manager_new(Manager **ret) {
                 .need_builtin_fallbacks = true,
                 .etc_hosts_last = USEC_INFINITY,
                 .read_etc_hosts = true,
+
+                .sigrtmin18_info.memory_pressure_handler = manager_memory_pressure,
+                .sigrtmin18_info.memory_pressure_userdata = m,
         };
 
         r = dns_trust_anchor_load(&m->trust_anchor);
@@ -621,6 +646,10 @@ int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
+        r = manager_memory_pressure_listen(m);
+        if (r < 0)
+                return r;
+
         r = manager_connect_bus(m);
         if (r < 0)
                 return r;
@@ -628,6 +657,7 @@ int manager_new(Manager **ret) {
         (void) sd_event_add_signal(m->event, &m->sigusr1_event_source, SIGUSR1, manager_sigusr1, m);
         (void) sd_event_add_signal(m->event, &m->sigusr2_event_source, SIGUSR2, manager_sigusr2, m);
         (void) sd_event_add_signal(m->event, &m->sigrtmin1_event_source, SIGRTMIN+1, manager_sigrtmin1, m);
+        (void) sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, &m->sigrtmin18_info);
 
         manager_cleanup_saved_user(m);
 
@@ -767,13 +797,10 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         iov = IOVEC_MAKE(DNS_PACKET_DATA(p), p->allocated);
 
         l = recvmsg_safe(fd, &mh, 0);
-        if (l < 0) {
-                if (ERRNO_IS_TRANSIENT(l))
-                        return 0;
-                return l;
-        }
-        if (l == 0)
+        if (ERRNO_IS_NEG_TRANSIENT(l))
                 return 0;
+        if (l <= 0)
+                return l;
 
         assert(!(mh.msg_flags & MSG_TRUNC));
 
@@ -801,7 +828,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         switch (cmsg->cmsg_type) {
 
                         case IPV6_PKTINFO: {
-                                struct in6_pktinfo *i = (struct in6_pktinfo*) CMSG_DATA(cmsg);
+                                struct in6_pktinfo *i = CMSG_TYPED_DATA(cmsg, struct in6_pktinfo);
 
                                 if (p->ifindex <= 0)
                                         p->ifindex = i->ipi6_ifindex;
@@ -811,11 +838,11 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         }
 
                         case IPV6_HOPLIMIT:
-                                p->ttl = *(int *) CMSG_DATA(cmsg);
+                                p->ttl = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
 
                         case IPV6_RECVFRAGSIZE:
-                                p->fragsize = *(int *) CMSG_DATA(cmsg);
+                                p->fragsize = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
                         }
                 } else if (cmsg->cmsg_level == IPPROTO_IP) {
@@ -824,7 +851,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         switch (cmsg->cmsg_type) {
 
                         case IP_PKTINFO: {
-                                struct in_pktinfo *i = (struct in_pktinfo*) CMSG_DATA(cmsg);
+                                struct in_pktinfo *i = CMSG_TYPED_DATA(cmsg, struct in_pktinfo);
 
                                 if (p->ifindex <= 0)
                                         p->ifindex = i->ipi_ifindex;
@@ -834,11 +861,11 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         }
 
                         case IP_TTL:
-                                p->ttl = *(int *) CMSG_DATA(cmsg);
+                                p->ttl = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
 
                         case IP_RECVFRAGSIZE:
-                                p->fragsize = *(int *) CMSG_DATA(cmsg);
+                                p->fragsize = *CMSG_TYPED_DATA(cmsg, int);
                                 break;
                         }
                 }
@@ -885,11 +912,10 @@ static int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
                         return -errno;
 
                 r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r))
-                                continue;
+                if (ERRNO_IS_NEG_TRANSIENT(r))
+                        continue;
+                if (r < 0)
                         return r;
-                }
                 if (r == 0)
                         return -ETIMEDOUT;
         }
@@ -913,11 +939,10 @@ static int write_loop(int fd, void *message, size_t length) {
                         return -errno;
 
                 r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
-                if (r < 0) {
-                        if (ERRNO_IS_TRANSIENT(r))
-                                continue;
+                if (ERRNO_IS_NEG_TRANSIENT(r))
+                        continue;
+                if (r < 0)
                         return r;
-                }
                 if (r == 0)
                         return -ETIMEDOUT;
         }
@@ -984,7 +1009,7 @@ static int manager_ipv4_send(
                 cmsg->cmsg_level = IPPROTO_IP;
                 cmsg->cmsg_type = IP_PKTINFO;
 
-                pi = (struct in_pktinfo*) CMSG_DATA(cmsg);
+                pi = CMSG_TYPED_DATA(cmsg, struct in_pktinfo);
                 pi->ipi_ifindex = ifindex;
 
                 if (source)
@@ -1040,7 +1065,7 @@ static int manager_ipv6_send(
                 cmsg->cmsg_level = IPPROTO_IPV6;
                 cmsg->cmsg_type = IPV6_PKTINFO;
 
-                pi = (struct in6_pktinfo*) CMSG_DATA(cmsg);
+                pi = CMSG_TYPED_DATA(cmsg, struct in6_pktinfo);
                 pi->ipi6_ifindex = ifindex;
 
                 if (source)
@@ -1080,6 +1105,7 @@ int manager_monitor_send(
                 int error,
                 DnsQuestion *question_idna,
                 DnsQuestion *question_utf8,
+                DnsPacket *question_bypass,
                 DnsQuestion *collected_questions,
                 DnsAnswer *answer) {
 
@@ -1094,10 +1120,21 @@ int manager_monitor_send(
         if (set_isempty(m->varlink_subscription))
                 return 0;
 
-        /* Merge both questions format into one */
+        /* Merge all questions into one */
         r = dns_question_merge(question_idna, question_utf8, &merged);
         if (r < 0)
                 return log_error_errno(r, "Failed to merge UTF8/IDNA questions: %m");
+
+        if (question_bypass) {
+                _cleanup_(dns_question_unrefp) DnsQuestion *merged2 = NULL;
+
+                r = dns_question_merge(merged, question_bypass->question, &merged2);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to merge UTF8/IDNA questions and DNS packet question: %m");
+
+                dns_question_unref(merged);
+                merged = TAKE_PTR(merged2);
+        }
 
         /* Convert the current primary question to JSON */
         r = dns_question_to_json(merged, &jquestion);
@@ -1110,7 +1147,7 @@ int manager_monitor_send(
                 return log_error_errno(r, "Failed to convert question to JSON: %m");
 
         DNS_ANSWER_FOREACH_ITEM(rri, answer) {
-                _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *w = NULL;
+                _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
 
                 r = dns_resource_record_to_json(rri->rr, &v);
                 if (r < 0)
@@ -1120,14 +1157,12 @@ int manager_monitor_send(
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate RR wire format: %m");
 
-                r = json_build(&w, JSON_BUILD_OBJECT(
-                                               JSON_BUILD_PAIR_CONDITION(v, "rr", JSON_BUILD_VARIANT(v)),
-                                               JSON_BUILD_PAIR("raw", JSON_BUILD_BASE64(rri->rr->wire_format, rri->rr->wire_format_size)),
-                                               JSON_BUILD_PAIR_CONDITION(rri->ifindex > 0, "ifindex", JSON_BUILD_INTEGER(rri->ifindex))));
-                if (r < 0)
-                        return log_error_errno(r, "Failed to make answer RR object: %m");
-
-                r = json_variant_append_array(&janswer, w);
+                r = json_variant_append_arrayb(
+                                &janswer,
+                                JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_CONDITION(v, "rr", JSON_BUILD_VARIANT(v)),
+                                                JSON_BUILD_PAIR("raw", JSON_BUILD_BASE64(rri->rr->wire_format, rri->rr->wire_format_size)),
+                                                JSON_BUILD_PAIR_CONDITION(rri->ifindex > 0, "ifindex", JSON_BUILD_INTEGER(rri->ifindex))));
                 if (r < 0)
                         return log_debug_errno(r, "Failed to append notification entry to array: %m");
         }
@@ -1163,8 +1198,11 @@ int manager_send(
         assert(port > 0);
         assert(p);
 
+        /* For mDNS, it is natural that the packet have truncated flag when we have many known answers. */
+        bool truncated = DNS_PACKET_TC(p) && (p->protocol != DNS_PROTOCOL_MDNS || !p->more);
+
         log_debug("Sending %s%s packet with id %" PRIu16 " on interface %i/%s of size %zu.",
-                  DNS_PACKET_TC(p) ? "truncated (!) " : "",
+                  truncated ? "truncated (!) " : "",
                   DNS_PACKET_QR(p) ? "response" : "query",
                   DNS_PACKET_ID(p),
                   ifindex, af_to_name(family),
@@ -1769,4 +1807,54 @@ int socket_disable_pmtud(int fd, int af) {
         default:
                 return -EAFNOSUPPORT;
         }
+}
+
+int dns_manager_dump_statistics_json(Manager *m, JsonVariant **ret) {
+        uint64_t size = 0, hit = 0, miss = 0;
+
+        assert(m);
+        assert(ret);
+
+        LIST_FOREACH(scopes, s, m->dns_scopes) {
+                size += dns_cache_size(&s->cache);
+                hit += s->cache.n_hit;
+                miss += s->cache.n_miss;
+        }
+
+        return json_build(ret,
+                          JSON_BUILD_OBJECT(
+                                        JSON_BUILD_PAIR("transactions", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("currentTransactions", hashmap_size(m->dns_transactions)),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTransactions", m->n_transactions_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTimeouts", m->n_timeouts_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalTimeoutsServedStale", m->n_timeouts_served_stale_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalFailedResponses", m->n_failure_responses_total),
+                                                JSON_BUILD_PAIR_UNSIGNED("totalFailedResponsesServedStale", m->n_failure_responses_served_stale_total)
+                                        )),
+                                        JSON_BUILD_PAIR("cache", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("size", size),
+                                                JSON_BUILD_PAIR_UNSIGNED("hits", hit),
+                                                JSON_BUILD_PAIR_UNSIGNED("misses", miss)
+                                        )),
+                                        JSON_BUILD_PAIR("dnssec", JSON_BUILD_OBJECT(
+                                                JSON_BUILD_PAIR_UNSIGNED("secure", m->n_dnssec_verdict[DNSSEC_SECURE]),
+                                                JSON_BUILD_PAIR_UNSIGNED("insecure", m->n_dnssec_verdict[DNSSEC_INSECURE]),
+                                                JSON_BUILD_PAIR_UNSIGNED("bogus", m->n_dnssec_verdict[DNSSEC_BOGUS]),
+                                                JSON_BUILD_PAIR_UNSIGNED("indeterminate", m->n_dnssec_verdict[DNSSEC_INDETERMINATE])
+                                        ))));
+}
+
+void dns_manager_reset_statistics(Manager *m) {
+
+        assert(m);
+
+        LIST_FOREACH(scopes, s, m->dns_scopes)
+                s->cache.n_hit = s->cache.n_miss = 0;
+
+        m->n_transactions_total = 0;
+        m->n_timeouts_total = 0;
+        m->n_timeouts_served_stale_total = 0;
+        m->n_failure_responses_total = 0;
+        m->n_failure_responses_served_stale_total = 0;
+        zero(m->n_dnssec_verdict);
 }

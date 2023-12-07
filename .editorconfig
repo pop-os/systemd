@@ -14,13 +14,17 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 charset = utf-8
 
+[NEWS]
+indent_style = space
+indent_size = 4
+
 # Match config files, set indent to spaces with width of eight
 [*.{c,h}]
 indent_style = space
 indent_size = 8
 max_line_length = 109
 
-[*.sh]
+[*.sh,mkosi.build,mkosi.prepare,mkosi.postinst]
 indent_style = space
 indent_size = 4
 

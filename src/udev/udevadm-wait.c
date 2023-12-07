@@ -6,7 +6,7 @@
 #include "sd-event.h"
 
 #include "alloc-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "device-monitor-private.h"
 #include "device-util.h"
 #include "errno-util.h"
@@ -166,8 +166,8 @@ static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device,
         if (path_strv_contains(arg_devices, name))
                 return check_and_exit(sd_device_monitor_get_event(monitor));
 
-        FOREACH_DEVICE_DEVLINK(device, name)
-                if (path_strv_contains(arg_devices, name))
+        FOREACH_DEVICE_DEVLINK(device, link)
+                if (path_strv_contains(arg_devices, link))
                         return check_and_exit(sd_device_monitor_get_event(monitor));
 
         return 0;
@@ -183,8 +183,6 @@ static int setup_monitor(sd_event *event, MonitorNetlinkGroup group, const char 
         r = device_monitor_new_full(&monitor, group, /* fd = */ -1);
         if (r < 0)
                 return r;
-
-        (void) sd_device_monitor_set_receive_buffer_size(monitor, 128*1024*1024);
 
         r = sd_device_monitor_attach_event(monitor, event);
         if (r < 0)

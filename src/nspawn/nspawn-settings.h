@@ -4,10 +4,6 @@
 #include <sched.h>
 #include <stdio.h>
 
-#if HAVE_SECCOMP
-#include <seccomp.h>
-#endif
-
 #include "sd-bus.h"
 #include "sd-id128.h"
 
@@ -18,6 +14,7 @@
 #include "missing_resource.h"
 #include "nspawn-expose-ports.h"
 #include "nspawn-mount.h"
+#include "seccomp-util.h"
 #include "time-util.h"
 
 typedef enum StartMode {
@@ -259,6 +256,9 @@ CONFIG_PARSER_PROTOTYPE(config_parse_tmpfs);
 CONFIG_PARSER_PROTOTYPE(config_parse_overlay);
 CONFIG_PARSER_PROTOTYPE(config_parse_inaccessible);
 CONFIG_PARSER_PROTOTYPE(config_parse_veth_extra);
+CONFIG_PARSER_PROTOTYPE(config_parse_network_iface_pair);
+CONFIG_PARSER_PROTOTYPE(config_parse_macvlan_iface_pair);
+CONFIG_PARSER_PROTOTYPE(config_parse_ipvlan_iface_pair);
 CONFIG_PARSER_PROTOTYPE(config_parse_network_zone);
 CONFIG_PARSER_PROTOTYPE(config_parse_boot);
 CONFIG_PARSER_PROTOTYPE(config_parse_pid2);

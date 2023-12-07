@@ -21,6 +21,8 @@
 #include "bus-error.h"
 #include "bus-internal.h"
 #include "bus-locator.h"
+#include "cap-list.h"
+#include "capability-util.h"
 #include "cgroup-setup.h"
 #include "devnum-util.h"
 #include "errno-util.h"
@@ -32,6 +34,7 @@
 #include "locale-util.h"
 #include "login-util.h"
 #include "macro.h"
+#include "missing_syscall.h"
 #include "pam-util.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -47,20 +50,79 @@
 
 #define LOGIN_SLOW_BUS_CALL_TIMEOUT_USEC (2*USEC_PER_MINUTE)
 
+static int parse_caps(
+                pam_handle_t *handle,
+                const char *value,
+                uint64_t *caps) {
+
+        bool subtract;
+        int r;
+
+        assert(handle);
+        assert(value);
+
+        if (value[0] == '~') {
+                subtract = true;
+                value++;
+        } else
+                subtract = false;
+
+        for (;;) {
+                _cleanup_free_ char *s = NULL;
+                uint64_t b, m;
+                int c;
+
+                /* We can't use spaces as separators here, as PAM's simplistic argument parser doesn't allow
+                 * spaces inside of arguments. We use commas instead (which is similar to cap_from_text(),
+                 * which also uses commas). */
+                r = extract_first_word(&value, &s, ",", EXTRACT_DONT_COALESCE_SEPARATORS);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
+
+                c = capability_from_name(s);
+                if (c < 0) {
+                        pam_syslog(handle, LOG_WARNING, "Unknown capability, ignoring: %s", s);
+                        continue;
+                }
+
+                m = UINT64_C(1) << c;
+
+                if (!caps)
+                        continue;
+
+                if (*caps == UINT64_MAX)
+                        b = subtract ? all_capabilities() : 0;
+                else
+                        b = *caps;
+
+                if (subtract)
+                        *caps = b & ~m;
+                else
+                        *caps = b | m;
+        }
+
+        return 0;
+}
+
 static int parse_argv(
                 pam_handle_t *handle,
                 int argc, const char **argv,
                 const char **class,
                 const char **type,
                 const char **desktop,
-                bool *debug) {
+                bool *debug,
+                uint64_t *default_capability_bounding_set,
+                uint64_t *default_capability_ambient_set) {
 
-        unsigned i;
+        int r;
 
+        assert(handle);
         assert(argc >= 0);
         assert(argc == 0 || argv);
 
-        for (i = 0; i < (unsigned) argc; i++) {
+        for (int i = 0; i < argc; i++) {
                 const char *p;
 
                 if ((p = startswith(argv[i], "class="))) {
@@ -80,16 +142,24 @@ static int parse_argv(
                                 *debug = true;
 
                 } else if ((p = startswith(argv[i], "debug="))) {
-                        int k;
-
-                        k = parse_boolean(p);
-                        if (k < 0)
+                        r = parse_boolean(p);
+                        if (r < 0)
                                 pam_syslog(handle, LOG_WARNING, "Failed to parse debug= argument, ignoring: %s", p);
                         else if (debug)
-                                *debug = k;
+                                *debug = r;
+
+                } else if ((p = startswith(argv[i], "default-capability-bounding-set="))) {
+                        r = parse_caps(handle, p, default_capability_bounding_set);
+                        if (r < 0)
+                                pam_syslog(handle, LOG_WARNING, "Failed to parse default-capability-bounding-set= argument, ignoring: %s", p);
+
+                } else if ((p = startswith(argv[i], "default-capability-ambient-set="))) {
+                        r = parse_caps(handle, p, default_capability_ambient_set);
+                        if (r < 0)
+                                pam_syslog(handle, LOG_WARNING, "Failed to parse default-capability-ambient-set= argument, ignoring: %s", p);
 
                 } else
-                        pam_syslog(handle, LOG_WARNING, "Unknown parameter '%s', ignoring", argv[i]);
+                        pam_syslog(handle, LOG_WARNING, "Unknown parameter '%s', ignoring.", argv[i]);
         }
 
         return 0;
@@ -390,24 +460,40 @@ static int append_session_tasks_max(pam_handle_t *handle, sd_bus_message *m, con
         return PAM_SUCCESS;
 }
 
-static int append_session_cg_weight(pam_handle_t *handle, sd_bus_message *m, const char *limit, const char *field) {
+static int append_session_cpu_weight(pam_handle_t *handle, sd_bus_message *m, const char *limit) {
         uint64_t val;
         int r;
-        bool is_cpu_weight;
 
-        is_cpu_weight = streq(field, "CPUWeight");
         if (isempty(limit))
                 return PAM_SUCCESS;
 
-        r = is_cpu_weight ? cg_cpu_weight_parse(limit, &val) : cg_weight_parse(limit, &val);
-        if (r >= 0) {
-                r = sd_bus_message_append(m, "(sv)", field, "t", val);
+        r = cg_cpu_weight_parse(limit, &val);
+        if (r < 0)
+                pam_syslog(handle, LOG_WARNING, "Failed to parse systemd.cpu_weight, ignoring: %s", limit);
+        else {
+                r = sd_bus_message_append(m, "(sv)", "CPUWeight", "t", val);
                 if (r < 0)
                         return pam_bus_log_create_error(handle, r);
-        } else if (is_cpu_weight)
-                pam_syslog(handle, LOG_WARNING, "Failed to parse systemd.cpu_weight, ignoring: %s", limit);
-        else
+        }
+
+        return PAM_SUCCESS;
+}
+
+static int append_session_io_weight(pam_handle_t *handle, sd_bus_message *m, const char *limit) {
+        uint64_t val;
+        int r;
+
+        if (isempty(limit))
+                return PAM_SUCCESS;
+
+        r = cg_weight_parse(limit, &val);
+        if (r < 0)
                 pam_syslog(handle, LOG_WARNING, "Failed to parse systemd.io_weight, ignoring: %s", limit);
+        else {
+                r = sd_bus_message_append(m, "(sv)", "IOWeight", "t", val);
+                if (r < 0)
+                        return pam_bus_log_create_error(handle, r);
+        }
 
         return PAM_SUCCESS;
 }
@@ -509,13 +595,17 @@ static int pam_putenv_and_log(pam_handle_t *handle, const char *e, bool debug) {
                 return pam_syslog_pam_error(handle, LOG_ERR, r,
                                             "Failed to set PAM environment variable %s: @PAMERR@", e);
 
-        if (debug)
-                pam_syslog(handle, LOG_DEBUG, "PAM environment variable %s set based on user record.", e);
+        pam_debug_syslog(handle, debug, "PAM environment variable %s set based on user record.", e);
 
         return PAM_SUCCESS;
 }
 
-static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool debug) {
+static int apply_user_record_settings(
+                pam_handle_t *handle,
+                UserRecord *ur,
+                bool debug,
+                uint64_t default_capability_bounding_set,
+                uint64_t default_capability_ambient_set) {
         int r;
 
         assert(handle);
@@ -523,9 +613,7 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
 
         if (ur->umask != MODE_INVALID) {
                 umask(ur->umask);
-
-                if (debug)
-                        pam_syslog(handle, LOG_DEBUG, "Set user umask to %04o based on user record.", ur->umask);
+                pam_debug_syslog(handle, debug, "Set user umask to %04o based on user record.", ur->umask);
         }
 
         STRV_FOREACH(i, ur->environment) {
@@ -539,8 +627,8 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
                         return pam_log_oom(handle);
 
                 if (pam_getenv(handle, n)) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "PAM environment variable $%s already set, not changing based on record.", *i);
+                        pam_debug_syslog(handle, debug,
+                                         "PAM environment variable $%s already set, not changing based on record.", *i);
                         continue;
                 }
 
@@ -550,10 +638,10 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
         }
 
         if (ur->email_address) {
-                if (pam_getenv(handle, "EMAIL")) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "PAM environment variable $EMAIL already set, not changing based on user record.");
-                } else {
+                if (pam_getenv(handle, "EMAIL"))
+                        pam_debug_syslog(handle, debug,
+                                         "PAM environment variable $EMAIL already set, not changing based on user record.");
+                else {
                         _cleanup_free_ char *joined = NULL;
 
                         joined = strjoin("EMAIL=", ur->email_address);
@@ -567,13 +655,13 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
         }
 
         if (ur->time_zone) {
-                if (pam_getenv(handle, "TZ")) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "PAM environment variable $TZ already set, not changing based on user record.");
-                } else if (!timezone_is_valid(ur->time_zone, LOG_DEBUG)) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "Time zone specified in user record is not valid locally, not setting $TZ.");
-                } else {
+                if (pam_getenv(handle, "TZ"))
+                        pam_debug_syslog(handle, debug,
+                                         "PAM environment variable $TZ already set, not changing based on user record.");
+                else if (!timezone_is_valid(ur->time_zone, LOG_DEBUG))
+                        pam_debug_syslog(handle, debug,
+                                         "Time zone specified in user record is not valid locally, not setting $TZ.");
+                else {
                         _cleanup_free_ char *joined = NULL;
 
                         joined = strjoin("TZ=:", ur->time_zone);
@@ -587,13 +675,13 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
         }
 
         if (ur->preferred_language) {
-                if (pam_getenv(handle, "LANG")) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "PAM environment variable $LANG already set, not changing based on user record.");
-                } else if (locale_is_installed(ur->preferred_language) <= 0) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "Preferred language specified in user record is not valid or not installed, not setting $LANG.");
-                } else {
+                if (pam_getenv(handle, "LANG"))
+                        pam_debug_syslog(handle, debug,
+                                         "PAM environment variable $LANG already set, not changing based on user record.");
+                else if (locale_is_installed(ur->preferred_language) <= 0)
+                        pam_debug_syslog(handle, debug,
+                                         "Preferred language specified in user record is not valid or not installed, not setting $LANG.");
+                else {
                         _cleanup_free_ char *joined = NULL;
 
                         joined = strjoin("LANG=", ur->preferred_language);
@@ -610,9 +698,9 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
                 if (nice(ur->nice_level) < 0)
                         pam_syslog_errno(handle, LOG_ERR, errno,
                                          "Failed to set nice level to %i, ignoring: %m", ur->nice_level);
-                else if (debug)
-                        pam_syslog(handle, LOG_DEBUG,
-                                   "Nice level set to %i, based on user record.", ur->nice_level);
+                else
+                        pam_debug_syslog(handle, debug,
+                                         "Nice level set to %i, based on user record.", ur->nice_level);
         }
 
         for (int rl = 0; rl < _RLIMIT_MAX; rl++) {
@@ -624,9 +712,34 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
                 if (r < 0)
                         pam_syslog_errno(handle, LOG_ERR, r,
                                          "Failed to set resource limit %s, ignoring: %m", rlimit_to_string(rl));
-                else if (debug)
-                        pam_syslog(handle, LOG_DEBUG,
-                                   "Resource limit %s set, based on user record.", rlimit_to_string(rl));
+                else
+                        pam_debug_syslog(handle, debug,
+                                         "Resource limit %s set, based on user record.", rlimit_to_string(rl));
+        }
+
+        uint64_t a, b;
+        a = user_record_capability_ambient_set(ur);
+        if (a == UINT64_MAX)
+                a = default_capability_ambient_set;
+
+        b = user_record_capability_bounding_set(ur);
+        if (b == UINT64_MAX)
+                b = default_capability_bounding_set;
+
+        if (a != UINT64_MAX && a != 0) {
+                a &= b;
+
+                r = capability_ambient_set_apply(a, /* also_inherit= */ true);
+                if (r < 0)
+                        pam_syslog_errno(handle, LOG_ERR, r,
+                                         "Failed to set ambient capabilities, ignoring: %m");
+        }
+
+        if (b != UINT64_MAX && !cap_test_all(b)) {
+                r = capability_bounding_set_drop(b, /* right_now= */ false);
+                if (r < 0)
+                        pam_syslog_errno(handle, LOG_ERR, r,
+                                         "Failed to set bounding capabilities, ignoring: %m");
         }
 
         return PAM_SUCCESS;
@@ -653,11 +766,125 @@ static int configure_runtime_directory(
         return export_legacy_dbus_address(handle, rt);
 }
 
+static uint64_t pick_default_capability_ambient_set(
+                UserRecord *ur,
+                const char *service,
+                const char *seat) {
+
+        /* If not configured otherwise, let's enable CAP_WAKE_ALARM for regular users when logging in on a
+         * seat (i.e. when they are present physically on the device), or when invoked for the systemd --user
+         * instances. This allows desktops to install CAP_WAKE_ALARM to implement alarm clock apps without
+         * much fuss. */
+
+        return ur &&
+                user_record_disposition(ur) == USER_REGULAR &&
+                (streq_ptr(service, "systemd-user") || !isempty(seat)) ? (UINT64_C(1) << CAP_WAKE_ALARM) : UINT64_MAX;
+}
+
+typedef struct SessionContext {
+        const uid_t uid;
+        const pid_t pid;
+        const char *service;
+        const char *type;
+        const char *class;
+        const char *desktop;
+        const char *seat;
+        const uint32_t vtnr;
+        const char *tty;
+        const char *display;
+        const bool remote;
+        const char *remote_user;
+        const char *remote_host;
+        const char *memory_max;
+        const char *tasks_max;
+        const char *cpu_weight;
+        const char *io_weight;
+        const char *runtime_max_sec;
+} SessionContext;
+
+static int create_session_message(sd_bus *bus, pam_handle_t *handle, const SessionContext *context, bool avoid_pidfd, sd_bus_message **ret) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
+        int r, pidfd = -EBADFD;
+
+        assert(bus);
+        assert(handle);
+        assert(context);
+
+        if (!avoid_pidfd) {
+                pidfd = pidfd_open(getpid_cached(), 0);
+                if (pidfd < 0 && !ERRNO_IS_NOT_SUPPORTED(errno))
+                        return -errno;
+        }
+
+        r = bus_message_new_method_call(bus, &m, bus_login_mgr, pidfd >= 0 ? "CreateSessionWithPIDFD" : "CreateSession");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(m,
+                                  pidfd >= 0 ? "uhsssssussbss" : "uusssssussbss",
+                                  (uint32_t) context->uid,
+                                  pidfd >= 0 ? pidfd : context->pid,
+                                  context->service,
+                                  context->type,
+                                  context->class,
+                                  context->desktop,
+                                  context->seat,
+                                  context->vtnr,
+                                  context->tty,
+                                  context->display,
+                                  context->remote,
+                                  context->remote_user,
+                                  context->remote_host);
+        if (r < 0)
+                return r;
+
+        if (pidfd >= 0) {
+                r = sd_bus_message_append(m, "t", UINT64_C(0));
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_bus_message_open_container(m, 'a', "(sv)");
+        if (r < 0)
+                return r;
+
+        r = append_session_memory_max(handle, m, context->memory_max);
+        if (r != PAM_SUCCESS)
+                return r;
+
+        r = append_session_runtime_max_sec(handle, m, context->runtime_max_sec);
+        if (r != PAM_SUCCESS)
+                return r;
+
+        r = append_session_tasks_max(handle, m, context->tasks_max);
+        if (r != PAM_SUCCESS)
+                return r;
+
+        r = append_session_cpu_weight(handle, m, context->cpu_weight);
+        if (r != PAM_SUCCESS)
+                return r;
+
+        r = append_session_io_weight(handle, m, context->io_weight);
+        if (r != PAM_SUCCESS)
+                return r;
+
+        r = sd_bus_message_close_container(m);
+        if (r < 0)
+                return r;
+
+        *ret = TAKE_PTR(m);
+        return 0;
+}
+
 _public_ PAM_EXTERN int pam_sm_open_session(
                 pam_handle_t *handle,
                 int flags,
                 int argc, const char **argv) {
 
+        /* Let's release the D-Bus connection once this function exits, after all the session might live
+         * quite a long time, and we are not going to process the bus connection in that time, so let's
+         * better close before the daemon kicks us off because we are not processing anything. */
+        _cleanup_(pam_bus_data_disconnectp) PamBusData *d = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         const char
@@ -669,6 +896,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 *type = NULL, *class = NULL,
                 *class_pam = NULL, *type_pam = NULL, *cvtnr = NULL, *desktop = NULL, *desktop_pam = NULL,
                 *memory_max = NULL, *tasks_max = NULL, *cpu_weight = NULL, *io_weight = NULL, *runtime_max_sec = NULL;
+        uint64_t default_capability_bounding_set = UINT64_MAX, default_capability_ambient_set = UINT64_MAX;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(user_record_unrefp) UserRecord *ur = NULL;
         int session_fd = -EBADF, existing, r;
@@ -683,11 +911,12 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                        &class_pam,
                        &type_pam,
                        &desktop_pam,
-                       &debug) < 0)
+                       &debug,
+                       &default_capability_bounding_set,
+                       &default_capability_ambient_set) < 0)
                 return PAM_SESSION_ERR;
 
-        if (debug)
-                pam_syslog(handle, LOG_DEBUG, "pam-systemd initializing");
+        pam_debug_syslog(handle, debug, "pam-systemd initializing");
 
         r = acquire_user_record(handle, &ur);
         if (r != PAM_SUCCESS)
@@ -783,8 +1012,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         }
 
         if (seat && !streq(seat, "seat0") && vtnr != 0) {
-                if (debug)
-                        pam_syslog(handle, LOG_DEBUG, "Ignoring vtnr %"PRIu32" for %s which is not seat0", vtnr, seat);
+                pam_debug_syslog(handle, debug, "Ignoring vtnr %"PRIu32" for %s which is not seat0", vtnr, seat);
                 vtnr = 0;
         }
 
@@ -814,83 +1042,78 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 return pam_syslog_pam_error(handle, LOG_ERR, r, "Failed to get PAM systemd.runtime_max_sec data: @PAMERR@");
 
         /* Talk to logind over the message bus */
-
-        r = pam_acquire_bus_connection(handle, "pam-systemd", &bus);
+        r = pam_acquire_bus_connection(handle, "pam-systemd", &bus, &d);
         if (r != PAM_SUCCESS)
                 return r;
 
-        if (debug) {
-                pam_syslog(handle, LOG_DEBUG, "Asking logind to create session: "
-                           "uid="UID_FMT" pid="PID_FMT" service=%s type=%s class=%s desktop=%s seat=%s vtnr=%"PRIu32" tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
-                           ur->uid, getpid_cached(),
-                           strempty(service),
-                           type, class, strempty(desktop),
-                           strempty(seat), vtnr, strempty(tty), strempty(display),
-                           yes_no(remote), strempty(remote_user), strempty(remote_host));
-                pam_syslog(handle, LOG_DEBUG, "Session limits: "
-                           "memory_max=%s tasks_max=%s cpu_weight=%s io_weight=%s runtime_max_sec=%s",
-                           strna(memory_max), strna(tasks_max), strna(cpu_weight), strna(io_weight), strna(runtime_max_sec));
-        }
+        pam_debug_syslog(handle, debug,
+                         "Asking logind to create session: "
+                         "uid="UID_FMT" pid="PID_FMT" service=%s type=%s class=%s desktop=%s seat=%s vtnr=%"PRIu32" tty=%s display=%s remote=%s remote_user=%s remote_host=%s",
+                         ur->uid, getpid_cached(),
+                         strempty(service),
+                         type, class, strempty(desktop),
+                         strempty(seat), vtnr, strempty(tty), strempty(display),
+                         yes_no(remote), strempty(remote_user), strempty(remote_host));
+        pam_debug_syslog(handle, debug,
+                         "Session limits: "
+                         "memory_max=%s tasks_max=%s cpu_weight=%s io_weight=%s runtime_max_sec=%s",
+                         strna(memory_max), strna(tasks_max), strna(cpu_weight), strna(io_weight), strna(runtime_max_sec));
 
-        r = bus_message_new_method_call(bus, &m, bus_login_mgr, "CreateSession");
-        if (r < 0)
-                return pam_bus_log_create_error(handle, r);
+        const SessionContext context = {
+                .uid = ur->uid,
+                .pid = 0,
+                .service = service,
+                .type = type,
+                .class = class,
+                .desktop = desktop,
+                .seat = seat,
+                .vtnr = vtnr,
+                .tty = tty,
+                .display = display,
+                .remote = remote,
+                .remote_user = remote_user,
+                .remote_host = remote_host,
+                .memory_max = memory_max,
+                .tasks_max = tasks_max,
+                .cpu_weight = cpu_weight,
+                .io_weight = io_weight,
+                .runtime_max_sec = runtime_max_sec,
+        };
 
-        r = sd_bus_message_append(m, "uusssssussbss",
-                        (uint32_t) ur->uid,
-                        0,
-                        service,
-                        type,
-                        class,
-                        desktop,
-                        seat,
-                        vtnr,
-                        tty,
-                        display,
-                        remote,
-                        remote_user,
-                        remote_host);
-        if (r < 0)
-                return pam_bus_log_create_error(handle, r);
-
-        r = sd_bus_message_open_container(m, 'a', "(sv)");
-        if (r < 0)
-                return pam_bus_log_create_error(handle, r);
-
-        r = append_session_memory_max(handle, m, memory_max);
-        if (r != PAM_SUCCESS)
-                return r;
-
-        r = append_session_runtime_max_sec(handle, m, runtime_max_sec);
-        if (r != PAM_SUCCESS)
-                return r;
-
-        r = append_session_tasks_max(handle, m, tasks_max);
-        if (r != PAM_SUCCESS)
-                return r;
-
-        r = append_session_cg_weight(handle, m, cpu_weight, "CPUWeight");
-        if (r != PAM_SUCCESS)
-                return r;
-
-        r = append_session_cg_weight(handle, m, io_weight, "IOWeight");
-        if (r != PAM_SUCCESS)
-                return r;
-
-        r = sd_bus_message_close_container(m);
+        r = create_session_message(bus,
+                                   handle,
+                                   &context,
+                                   false /* avoid_pidfd = */,
+                                   &m);
         if (r < 0)
                 return pam_bus_log_create_error(handle, r);
 
         r = sd_bus_call(bus, m, LOGIN_SLOW_BUS_CALL_TIMEOUT_USEC, &error, &reply);
         if (r < 0) {
                 if (sd_bus_error_has_name(&error, BUS_ERROR_SESSION_BUSY)) {
-                        if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "Not creating session: %s", bus_error_message(&error, r));
-
+                        pam_debug_syslog(handle, debug,
+                                         "Not creating session: %s", bus_error_message(&error, r));
                         /* We are already in a session, don't do anything */
                         goto success;
-                } else {
-                        pam_syslog(handle, LOG_ERR, "Failed to create session: %s", bus_error_message(&error, r));
+                } else if (sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_METHOD)) {
+                        pam_debug_syslog(handle, debug,
+                                         "CreateSessionWithPIDFD() API is not available, retrying with CreateSession().");
+
+                        m = sd_bus_message_unref(m);
+                        r = create_session_message(bus,
+                                                   handle,
+                                                   &context,
+                                                   true /* avoid_pidfd = */,
+                                                   &m);
+                        if (r < 0)
+                                return pam_bus_log_create_error(handle, r);
+
+                        sd_bus_error_free(&error);
+                        r = sd_bus_call(bus, m, LOGIN_SLOW_BUS_CALL_TIMEOUT_USEC, &error, &reply);
+                }
+                if (r < 0) {
+                        pam_syslog(handle, LOG_ERR,
+                                   "Failed to create session: %s", bus_error_message(&error, r));
                         return PAM_SESSION_ERR;
                 }
         }
@@ -908,10 +1131,10 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         if (r < 0)
                 return pam_bus_log_parse_error(handle, r);
 
-        if (debug)
-                pam_syslog(handle, LOG_DEBUG, "Reply from logind: "
-                           "id=%s object_path=%s runtime_path=%s session_fd=%d seat=%s vtnr=%u original_uid=%u",
-                           id, object_path, runtime_path, session_fd, seat, vtnr, original_uid);
+        pam_debug_syslog(handle, debug,
+                         "Reply from logind: "
+                         "id=%s object_path=%s runtime_path=%s session_fd=%d seat=%s vtnr=%u original_uid=%u",
+                         id, object_path, runtime_path, session_fd, seat, vtnr, original_uid);
 
         r = update_environment(handle, "XDG_SESSION_ID", id);
         if (r != PAM_SUCCESS)
@@ -972,15 +1195,10 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         }
 
 success:
-        r = apply_user_record_settings(handle, ur, debug);
-        if (r != PAM_SUCCESS)
-                return r;
+        if (default_capability_ambient_set == UINT64_MAX)
+                default_capability_ambient_set = pick_default_capability_ambient_set(ur, service, seat);
 
-        /* Let's release the D-Bus connection, after all the session might live quite a long time, and we are
-         * not going to use the bus connection in that time, so let's better close before the daemon kicks us
-         * off because we are not processing anything. */
-        (void) pam_release_bus_connection(handle, "pam-systemd");
-        return PAM_SUCCESS;
+        return apply_user_record_settings(handle, ur, debug, default_capability_bounding_set, default_capability_ambient_set);
 }
 
 _public_ PAM_EXTERN int pam_sm_close_session(
@@ -1000,11 +1218,12 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                        NULL,
                        NULL,
                        NULL,
-                       &debug) < 0)
+                       &debug,
+                       NULL,
+                       NULL) < 0)
                 return PAM_SESSION_ERR;
 
-        if (debug)
-                pam_syslog(handle, LOG_DEBUG, "pam-systemd shutting down");
+        pam_debug_syslog(handle, debug, "pam-systemd shutting down");
 
         /* Only release session if it wasn't pre-existing when we
          * tried to create it */
@@ -1021,7 +1240,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                 /* Before we go and close the FIFO we need to tell logind that this is a clean session
                  * shutdown, so that it doesn't just go and slaughter us immediately after closing the fd */
 
-                r = pam_acquire_bus_connection(handle, "pam-systemd", &bus);
+                r = pam_acquire_bus_connection(handle, "pam-systemd", &bus, NULL);
                 if (r != PAM_SUCCESS)
                         return r;
 

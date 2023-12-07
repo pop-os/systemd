@@ -7,9 +7,6 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <linux/oom.h>
-#if HAVE_SECCOMP
-#include <seccomp.h>
-#endif
 #include <sched.h>
 #include <sys/resource.h>
 
@@ -35,11 +32,14 @@
 #include "env-util.h"
 #include "errno-list.h"
 #include "escape.h"
+#include "exec-credential.h"
+#include "execute.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "firewall-util.h"
 #include "fs-util.h"
 #include "hexdecoct.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "ioprio-util.h"
 #include "ip-protocol-list.h"
 #include "journal-file.h"
@@ -56,9 +56,7 @@
 #include "pcre2-util.h"
 #include "percent-util.h"
 #include "process-util.h"
-#if HAVE_SECCOMP
 #include "seccomp-util.h"
-#endif
 #include "securebits-util.h"
 #include "selinux-util.h"
 #include "signal-util.h"
@@ -138,20 +136,22 @@ DEFINE_CONFIG_PARSE_ENUM(config_parse_job_mode, job_mode, JobMode, "Failed to pa
 DEFINE_CONFIG_PARSE_ENUM(config_parse_notify_access, notify_access, NotifyAccess, "Failed to parse notify access specifier");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_protect_home, protect_home, ProtectHome, "Failed to parse protect home value");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_protect_system, protect_system, ProtectSystem, "Failed to parse protect system value");
-DEFINE_CONFIG_PARSE_ENUM(config_parse_runtime_preserve_mode, exec_preserve_mode, ExecPreserveMode, "Failed to parse runtime directory preserve mode");
+DEFINE_CONFIG_PARSE_ENUM(config_parse_exec_preserve_mode, exec_preserve_mode, ExecPreserveMode, "Failed to parse resource preserve mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_type, service_type, ServiceType, "Failed to parse service type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_exit_type, service_exit_type, ServiceExitType, "Failed to parse service exit type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_restart, service_restart, ServiceRestart, "Failed to parse service restart specifier");
+DEFINE_CONFIG_PARSE_ENUM(config_parse_service_restart_mode, service_restart_mode, ServiceRestartMode, "Failed to parse service restart mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_timeout_failure_mode, service_timeout_failure_mode, ServiceTimeoutFailureMode, "Failed to parse timeout failure mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_socket_bind, socket_address_bind_ipv6_only_or_bool, SocketAddressBindIPv6Only, "Failed to parse bind IPv6 only value");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_oom_policy, oom_policy, OOMPolicy, "Failed to parse OOM policy");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_managed_oom_preference, managed_oom_preference, ManagedOOMPreference, "Failed to parse ManagedOOMPreference=");
+DEFINE_CONFIG_PARSE_ENUM(config_parse_memory_pressure_watch, cgroup_pressure_watch, CGroupPressureWatch, "Failed to parse memory pressure watch setting");
 DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_ip_tos, ip_tos, int, -1, "Failed to parse IP TOS value");
 DEFINE_CONFIG_PARSE_PTR(config_parse_blockio_weight, cg_blkio_weight_parse, uint64_t, "Invalid block IO weight");
 DEFINE_CONFIG_PARSE_PTR(config_parse_cg_weight, cg_weight_parse, uint64_t, "Invalid weight");
 DEFINE_CONFIG_PARSE_PTR(config_parse_cg_cpu_weight, cg_cpu_weight_parse, uint64_t, "Invalid CPU weight");
 static DEFINE_CONFIG_PARSE_PTR(config_parse_cpu_shares_internal, cg_cpu_shares_parse, uint64_t, "Invalid CPU shares");
-DEFINE_CONFIG_PARSE_PTR(config_parse_exec_mount_flags, mount_propagation_flag_from_string, unsigned long, "Failed to parse mount flag");
+DEFINE_CONFIG_PARSE_PTR(config_parse_exec_mount_propagation_flag, mount_propagation_flag_from_string, unsigned long, "Failed to parse mount propagation flag");
 DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_numa_policy, mpol, int, -1, "Invalid NUMA policy type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_status_unit_format, status_unit_format, StatusUnitFormat, "Failed to parse status unit format");
 DEFINE_CONFIG_PARSE_ENUM_FULL(config_parse_socket_timestamping, socket_timestamping_from_string_harder, SocketTimestamping, "Failed to parse timestamping precision");
@@ -201,7 +201,7 @@ bool contains_instance_specifier_superset(const char *s) {
                 return false;
 
         /* %i, %n and %N all expand to the instance or a superset of it. */
-        for (; p < q; p++) {
+        for (; p < q; p++)
                 if (*p == '%')
                         percent = !percent;
                 else if (percent) {
@@ -209,7 +209,6 @@ bool contains_instance_specifier_superset(const char *s) {
                                 return true;
                         percent = false;
                 }
-        }
 
         return false;
 }
@@ -1886,7 +1885,7 @@ int config_parse_capability_set(
                 void *userdata) {
 
         uint64_t *capability_set = ASSERT_PTR(data);
-        uint64_t sum = 0, initial = 0;
+        uint64_t sum = 0, initial, def;
         bool invert = false;
         int r;
 
@@ -1899,9 +1898,11 @@ int config_parse_capability_set(
                 rvalue++;
         }
 
-        if (streq(lvalue, "CapabilityBoundingSet"))
-                initial = CAP_ALL; /* initialized to all bits on */
-        /* else "AmbientCapabilities" initialized to all bits off */
+        if (streq(lvalue, "CapabilityBoundingSet")) {
+                initial = CAP_MASK_ALL; /* initialized to all bits on */
+                def = CAP_MASK_UNSET;   /* not set */
+        } else
+                def = initial = 0; /* All bits off */
 
         r = capability_set_from_string(rvalue, &sum);
         if (r < 0) {
@@ -1909,7 +1910,7 @@ int config_parse_capability_set(
                 return 0;
         }
 
-        if (sum == 0 || *capability_set == initial)
+        if (sum == 0 || *capability_set == def)
                 /* "", "~" or uninitialized data -> replace */
                 *capability_set = invert ? ~sum : sum;
         else {
@@ -2741,6 +2742,16 @@ int config_parse_environ(
                 return 0;
         }
 
+        /* If 'u' is set, we operate on the regular unit specifier table. Otherwise we use a manager-specific
+         * specifier table (in which case ltype must contain the runtime scope). */
+        const Specifier *table = u ? NULL : (const Specifier[]) {
+                COMMON_SYSTEM_SPECIFIERS,
+                COMMON_TMP_SPECIFIERS,
+                COMMON_CREDS_SPECIFIERS(ltype),
+                { 'h', specifier_user_home,  NULL },
+                { 's', specifier_user_shell, NULL },
+        };
+
         for (const char *p = rvalue;; ) {
                 _cleanup_free_ char *word = NULL, *resolved = NULL;
 
@@ -2755,10 +2766,10 @@ int config_parse_environ(
                 if (r == 0)
                         return 0;
 
-                if (u)
-                        r = unit_env_printf(u, word, &resolved);
+                if (table)
+                        r = specifier_printf(word, sc_arg_max(), table, NULL, NULL, &resolved);
                 else
-                        r = specifier_printf(word, sc_arg_max(), system_and_tmp_specifier_table, NULL, NULL, &resolved);
+                        r = unit_env_printf(u, word, &resolved);
                 if (r < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to resolve specifiers in %s, ignoring: %m", word);
@@ -3651,7 +3662,7 @@ int config_parse_restrict_filesystems(
 
         if (isempty(rvalue)) {
                 /* Empty assignment resets the list */
-                c->restrict_filesystems = set_free(c->restrict_filesystems);
+                c->restrict_filesystems = set_free_free(c->restrict_filesystems);
                 c->restrict_filesystems_allow_list = false;
                 return 0;
         }
@@ -3813,6 +3824,7 @@ int config_parse_memory_limit(
         if (isempty(rvalue) && STR_IN_SET(lvalue, "DefaultMemoryLow",
                                                   "DefaultMemoryMin",
                                                   "MemoryLow",
+                                                  "StartupMemoryLow",
                                                   "MemoryMin"))
                 bytes = CGROUP_LIMIT_MIN;
         else if (!isempty(rvalue) && !streq(rvalue, "infinity")) {
@@ -3828,7 +3840,17 @@ int config_parse_memory_limit(
                         bytes = physical_memory_scale(r, 10000U);
 
                 if (bytes >= UINT64_MAX ||
-                    (bytes <= 0 && !STR_IN_SET(lvalue, "MemorySwapMax", "MemoryZSwapMax", "MemoryLow", "MemoryMin", "DefaultMemoryLow", "DefaultMemoryMin"))) {
+                    (bytes <= 0 && !STR_IN_SET(lvalue,
+                                               "MemorySwapMax",
+                                               "StartupMemorySwapMax",
+                                               "MemoryZSwapMax",
+                                               "StartupMemoryZSwapMax",
+                                               "MemoryLow",
+                                               "StartupMemoryLow",
+                                               "MemoryMin",
+                                               "DefaultMemoryLow",
+                                               "DefaultstartupMemoryLow",
+                                               "DefaultMemoryMin"))) {
                         log_syntax(unit, LOG_WARNING, filename, line, 0, "Memory limit '%s' out of range, ignoring.", rvalue);
                         return 0;
                 }
@@ -3837,6 +3859,9 @@ int config_parse_memory_limit(
         if (streq(lvalue, "DefaultMemoryLow")) {
                 c->default_memory_low = bytes;
                 c->default_memory_low_set = true;
+        } else if (streq(lvalue, "DefaultStartupMemoryLow")) {
+                c->default_startup_memory_low = bytes;
+                c->default_startup_memory_low_set = true;
         } else if (streq(lvalue, "DefaultMemoryMin")) {
                 c->default_memory_min = bytes;
                 c->default_memory_min_set = true;
@@ -3846,15 +3871,30 @@ int config_parse_memory_limit(
         } else if (streq(lvalue, "MemoryLow")) {
                 c->memory_low = bytes;
                 c->memory_low_set = true;
+        } else if (streq(lvalue, "StartupMemoryLow")) {
+                c->startup_memory_low = bytes;
+                c->startup_memory_low_set = true;
         } else if (streq(lvalue, "MemoryHigh"))
                 c->memory_high = bytes;
-        else if (streq(lvalue, "MemoryMax"))
+        else if (streq(lvalue, "StartupMemoryHigh")) {
+                c->startup_memory_high = bytes;
+                c->startup_memory_high_set = true;
+        } else if (streq(lvalue, "MemoryMax"))
                 c->memory_max = bytes;
-        else if (streq(lvalue, "MemorySwapMax"))
+        else if (streq(lvalue, "StartupMemoryMax")) {
+                c->startup_memory_max = bytes;
+                c->startup_memory_max_set = true;
+        } else if (streq(lvalue, "MemorySwapMax"))
                 c->memory_swap_max = bytes;
-        else if (streq(lvalue, "MemoryZSwapMax"))
+        else if (streq(lvalue, "StartupMemorySwapMax")) {
+                c->startup_memory_swap_max = bytes;
+                c->startup_memory_swap_max_set = true;
+        } else if (streq(lvalue, "MemoryZSwapMax"))
                 c->memory_zswap_max = bytes;
-        else if (streq(lvalue, "MemoryLimit")) {
+        else if (streq(lvalue, "StartupMemoryZSwapMax")) {
+                c->startup_memory_zswap_max = bytes;
+                c->startup_memory_zswap_max_set = true;
+        } else if (streq(lvalue, "MemoryLimit")) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Unit uses MemoryLimit=; please use MemoryMax= instead. Support for MemoryLimit= will be removed soon.");
                 c->memory_limit = bytes;
@@ -3877,23 +3917,23 @@ int config_parse_tasks_max(
                 void *userdata) {
 
         const Unit *u = userdata;
-        TasksMax *tasks_max = data;
+        CGroupTasksMax *tasks_max = data;
         uint64_t v;
         int r;
 
         if (isempty(rvalue)) {
-                *tasks_max = u ? u->manager->default_tasks_max : TASKS_MAX_UNSET;
+                *tasks_max = u ? u->manager->defaults.tasks_max : CGROUP_TASKS_MAX_UNSET;
                 return 0;
         }
 
         if (streq(rvalue, "infinity")) {
-                *tasks_max = TASKS_MAX_UNSET;
+                *tasks_max = CGROUP_TASKS_MAX_UNSET;
                 return 0;
         }
 
         r = parse_permyriad(rvalue);
         if (r >= 0)
-                *tasks_max = (TasksMax) { r, 10000U }; /* r‱ */
+                *tasks_max = (CGroupTasksMax) { r, 10000U }; /* r‱ */
         else {
                 r = safe_atou64(rvalue, &v);
                 if (r < 0) {
@@ -3906,7 +3946,7 @@ int config_parse_tasks_max(
                         return 0;
                 }
 
-                *tasks_max = (TasksMax) { v };
+                *tasks_max = (CGroupTasksMax) { v };
         }
 
         return 0;
@@ -3986,6 +4026,42 @@ int config_parse_delegate(
         }
 
         return 0;
+}
+
+int config_parse_delegate_subgroup(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        CGroupContext *c = ASSERT_PTR(data);
+        UnitType t;
+
+        t = unit_name_to_type(unit);
+        assert(t >= 0);
+
+        if (!unit_vtable[t]->can_delegate) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "DelegateSubgroup= setting not supported for this unit type, ignoring.");
+                return 0;
+        }
+
+        if (isempty(rvalue)) {
+                c->delegate_subgroup = mfree(c->delegate_subgroup);
+                return 0;
+        }
+
+        if (cg_needs_escape(rvalue)) { /* Insist that specified names don't need escaping */
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid control group name, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        return free_and_strdup_warn(&c->delegate_subgroup, rvalue);
 }
 
 int config_parse_managed_oom_mode(
@@ -4075,6 +4151,7 @@ int config_parse_device_allow(
                 void *userdata) {
 
         _cleanup_free_ char *path = NULL, *resolved = NULL;
+        CGroupDevicePermissions permissions;
         CGroupContext *c = data;
         const char *p = rvalue;
         int r;
@@ -4114,12 +4191,13 @@ int config_parse_device_allow(
                 }
         }
 
-        if (!isempty(p) && !in_charset(p, "rwm")) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid device rights '%s', ignoring.", p);
+        permissions = isempty(p) ? 0 : cgroup_device_permissions_from_string(p);
+        if (permissions < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, permissions, "Invalid device rights '%s', ignoring.", p);
                 return 0;
         }
 
-        return cgroup_add_device_allow(c, resolved, p);
+        return cgroup_context_add_device_allow(c, resolved, permissions);
 }
 
 int config_parse_io_device_weight(
@@ -4340,15 +4418,13 @@ int config_parse_io_limit(
                 }
 
         if (!l) {
-                CGroupIOLimitType ttype;
-
                 l = new0(CGroupIODeviceLimit, 1);
                 if (!l)
                         return log_oom();
 
                 l->path = TAKE_PTR(resolved);
-                for (ttype = 0; ttype < _CGROUP_IO_LIMIT_TYPE_MAX; ttype++)
-                        l->limits[ttype] = cgroup_io_limit_defaults[ttype];
+                for (CGroupIOLimitType i = 0; i < _CGROUP_IO_LIMIT_TYPE_MAX; i++)
+                        l->limits[i] = cgroup_io_limit_defaults[i];
 
                 LIST_PREPEND(device_limits, c->io_device_limits, l);
         }
@@ -4765,6 +4841,46 @@ int config_parse_set_credential(
         return 0;
 }
 
+int hashmap_put_credential(Hashmap **h, const char *id, const char *path, bool encrypted) {
+        ExecLoadCredential *old;
+        int r;
+
+        assert(h);
+        assert(id);
+        assert(path);
+
+        old = hashmap_get(*h, id);
+        if (old) {
+                r = free_and_strdup(&old->path, path);
+                if (r < 0)
+                        return r;
+
+                old->encrypted = encrypted;
+        } else {
+                _cleanup_(exec_load_credential_freep) ExecLoadCredential *lc = NULL;
+
+                lc = new(ExecLoadCredential, 1);
+                if (!lc)
+                        return log_oom();
+
+                *lc = (ExecLoadCredential) {
+                        .id = strdup(id),
+                        .path = strdup(path),
+                        .encrypted = encrypted,
+                };
+                if (!lc->id || !lc->path)
+                        return -ENOMEM;
+
+                r = hashmap_ensure_put(h, &exec_load_credential_hash_ops, lc->id, lc);
+                if (r < 0)
+                        return r;
+
+                TAKE_PTR(lc);
+        }
+
+        return 0;
+}
+
 int config_parse_load_credential(
                 const char *unit,
                 const char *filename,
@@ -4779,7 +4895,6 @@ int config_parse_load_credential(
 
         _cleanup_free_ char *word = NULL, *k = NULL, *q = NULL;
         ExecContext *context = ASSERT_PTR(data);
-        ExecLoadCredential *old;
         bool encrypted = ltype;
         Unit *u = userdata;
         const char *p;
@@ -4832,34 +4947,53 @@ int config_parse_load_credential(
                 }
         }
 
-        old = hashmap_get(context->load_credentials, k);
-        if (old) {
-                free_and_replace(old->path, q);
-                old->encrypted = encrypted;
-        } else {
-                _cleanup_(exec_load_credential_freep) ExecLoadCredential *lc = NULL;
+        r = hashmap_put_credential(&context->load_credentials, k, q, encrypted);
+        if (r < 0)
+                return log_error_errno(r, "Failed to store load credential '%s': %m", rvalue);
 
-                lc = new(ExecLoadCredential, 1);
-                if (!lc)
-                        return log_oom();
+        return 0;
+}
 
-                *lc = (ExecLoadCredential) {
-                        .id = TAKE_PTR(k),
-                        .path = TAKE_PTR(q),
-                        .encrypted = encrypted,
-                };
+int config_parse_import_credential(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
 
-                r = hashmap_ensure_put(&context->load_credentials, &exec_load_credential_hash_ops, lc->id, lc);
-                if (r == -ENOMEM)
-                        return log_oom();
-                if (r < 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, r,
-                                   "Duplicated credential value '%s', ignoring assignment: %s", lc->id, rvalue);
-                        return 0;
-                }
+        _cleanup_free_ char *s = NULL;
+        Set** import_credentials = ASSERT_PTR(data);
+        Unit *u = userdata;
+        int r;
 
-                TAKE_PTR(lc);
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                /* Empty assignment resets the list */
+                *import_credentials = set_free_free(*import_credentials);
+                return 0;
         }
+
+        r = unit_cred_printf(u, rvalue, &s);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to resolve unit specifiers in \"%s\", ignoring: %m", s);
+                return 0;
+        }
+        if (!credential_glob_valid(s)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Credential name or glob \"%s\" not valid, ignoring.", s);
+                return 0;
+        }
+
+        r = set_put_strdup(import_credentials, s);
+        if (r < 0)
+                return log_error_errno(r, "Failed to store credential name '%s': %m", rvalue);
 
         return 0;
 }
@@ -5583,7 +5717,7 @@ int config_parse_emergency_action(
                 void *userdata) {
 
         EmergencyAction *x = ASSERT_PTR(data);
-        bool is_system;
+        RuntimeScope runtime_scope;
         int r;
 
         assert(filename);
@@ -5592,16 +5726,16 @@ int config_parse_emergency_action(
 
         /* If we have a unit determine the scope based on it */
         if (unit)
-                is_system = MANAGER_IS_SYSTEM(((Unit*) ASSERT_PTR(userdata))->manager);
+                runtime_scope = ((Unit*) ASSERT_PTR(userdata))->manager->runtime_scope;
         else
-                is_system = ltype; /* otherwise, assume the scope is passed in via ltype */
+                runtime_scope = ltype; /* otherwise, assume the scope is passed in via ltype */
 
-        r = parse_emergency_action(rvalue, is_system, x);
+        r = parse_emergency_action(rvalue, runtime_scope, x);
         if (r < 0) {
                 if (r == -EOPNOTSUPP)
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "%s= specified as %s mode action, ignoring: %s",
-                                   lvalue, is_system ? "user" : "system", rvalue);
+                                   lvalue, runtime_scope_to_string(runtime_scope), rvalue);
                 else
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to parse %s=, ignoring: %s", lvalue, rvalue);
@@ -5846,7 +5980,7 @@ int config_parse_bpf_foreign_program(
         if (r < 0)
                 return 0;
 
-        r = cgroup_add_bpf_foreign_program(c, attach_type, resolved);
+        r = cgroup_context_add_bpf_foreign_program(c, attach_type, resolved);
         if (r < 0)
                 return log_error_errno(r, "Failed to add foreign BPF program to cgroup context: %m");
 
@@ -5919,7 +6053,7 @@ int config_parse_restrict_network_interfaces(
 
         if (isempty(rvalue)) {
                 /* Empty assignment resets the list */
-                c->restrict_network_interfaces = set_free(c->restrict_network_interfaces);
+                c->restrict_network_interfaces = set_free_free(c->restrict_network_interfaces);
                 return 0;
         }
 
@@ -5963,39 +6097,37 @@ int config_parse_restrict_network_interfaces(
         return 0;
 }
 
-static int merge_by_names(Unit **u, Set *names, const char *id) {
+static int merge_by_names(Unit *u, Set *names, const char *id) {
         char *k;
         int r;
 
         assert(u);
-        assert(*u);
 
         /* Let's try to add in all names that are aliases of this unit */
         while ((k = set_steal_first(names))) {
                 _cleanup_free_ _unused_ char *free_k = k;
 
                 /* First try to merge in the other name into our unit */
-                r = unit_merge_by_name(*u, k);
+                r = unit_merge_by_name(u, k);
                 if (r < 0) {
                         Unit *other;
 
                         /* Hmm, we couldn't merge the other unit into ours? Then let's try it the other way
                          * round. */
 
-                        other = manager_get_unit((*u)->manager, k);
+                        other = manager_get_unit(u->manager, k);
                         if (!other)
                                 return r; /* return previous failure */
 
-                        r = unit_merge(other, *u);
+                        r = unit_merge(other, u);
                         if (r < 0)
                                 return r;
 
-                        *u = other;
-                        return merge_by_names(u, names, NULL);
+                        return merge_by_names(other, names, NULL);
                 }
 
                 if (streq_ptr(id, k))
-                        unit_choose_id(*u, id);
+                        unit_choose_id(u, id);
         }
 
         return 0;
@@ -6098,10 +6230,14 @@ int unit_load_fragment(Unit *u) {
          * declared in the file system. In particular, this is true (and frequent) for device and swap units.
          */
         const char *id = u->id;
-        _cleanup_free_ char *free_id = NULL;
+        _cleanup_free_ char *filename = NULL, *free_id = NULL;
 
         if (fragment) {
-                id = basename(fragment);
+                r = path_extract_filename(fragment, &filename);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to extract filename from fragment '%s': %m", fragment);
+                id = filename;
+
                 if (unit_name_is_valid(id, UNIT_NAME_TEMPLATE)) {
                         assert(u->instance); /* If we're not trying to use a template for non-instanced unit,
                                               * this must be set. */
@@ -6113,15 +6249,7 @@ int unit_load_fragment(Unit *u) {
                 }
         }
 
-        Unit *merged = u;
-        r = merge_by_names(&merged, names, id);
-        if (r < 0)
-                return r;
-
-        if (merged != u)
-                u->load_state = UNIT_MERGED;
-
-        return 0;
+        return merge_by_names(u, names, id);
 }
 
 void unit_dump_config_items(FILE *f) {
@@ -6162,6 +6290,7 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_service_type,          "SERVICETYPE" },
                 { config_parse_service_exit_type,     "SERVICEEXITTYPE" },
                 { config_parse_service_restart,       "SERVICERESTART" },
+                { config_parse_service_restart_mode,  "SERVICERESTARTMODE" },
                 { config_parse_service_timeout_failure_mode, "TIMEOUTMODE" },
                 { config_parse_kill_mode,             "KILLMODE" },
                 { config_parse_signal,                "SIGNAL" },
@@ -6172,8 +6301,10 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_nsec,                  "NANOSECONDS" },
                 { config_parse_namespace_path_strv,   "PATH [...]" },
                 { config_parse_bind_paths,            "PATH[:PATH[:OPTIONS]] [...]" },
-                { config_parse_unit_requires_mounts_for, "PATH [...]" },
-                { config_parse_exec_mount_flags,      "MOUNTFLAG [...]" },
+                { config_parse_unit_requires_mounts_for,
+                                                      "PATH [...]" },
+                { config_parse_exec_mount_propagation_flag,
+                                                      "MOUNTFLAG" },
                 { config_parse_unit_string_printf,    "STRING" },
                 { config_parse_trigger_unit,          "UNIT" },
                 { config_parse_timer,                 "TIMER" },
@@ -6506,8 +6637,8 @@ int config_parse_log_filter_patterns(
 
         if (isempty(pattern)) {
                 /* Empty assignment resets the lists. */
-                c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
-                c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
+                c->log_filter_allowed_patterns = set_free_free(c->log_filter_allowed_patterns);
+                c->log_filter_denied_patterns = set_free_free(c->log_filter_denied_patterns);
                 return 0;
         }
 
@@ -6568,4 +6699,22 @@ int config_parse_open_file(
         LIST_APPEND(open_files, *head, TAKE_PTR(of));
 
         return 0;
+}
+
+int config_parse_cgroup_nft_set(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        CGroupContext *c = ASSERT_PTR(data);
+        Unit *u = ASSERT_PTR(userdata);
+
+        return config_parse_nft_set(unit, filename, line, section, section_line, lvalue, ltype, rvalue, &c->nft_set_context, u);
 }

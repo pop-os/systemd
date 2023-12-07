@@ -5,6 +5,7 @@
 
 #include "missing_network.h"
 #include "networkd-link.h"
+#include "networkd-manager.h"
 #include "networkd-network.h"
 #include "networkd-sysctl.h"
 #include "socket-util.h"
@@ -88,8 +89,26 @@ static int link_set_ipv6_forward(Link *link) {
         return sysctl_write_ip_property(AF_INET6, "all", "forwarding", "1");
 }
 
-static int link_set_ipv6_privacy_extensions(Link *link) {
+static int link_set_ipv4_rp_filter(Link *link) {
         assert(link);
+
+        if (link->flags & IFF_LOOPBACK)
+                return 0;
+
+        if (!link->network)
+                return 0;
+
+        if (link->network->ipv4_rp_filter < 0)
+                return 0;
+
+        return sysctl_write_ip_property_int(AF_INET, link->ifname, "rp_filter", link->network->ipv4_rp_filter);
+}
+
+static int link_set_ipv6_privacy_extensions(Link *link) {
+        IPv6PrivacyExtensions val;
+
+        assert(link);
+        assert(link->manager);
 
         if (!socket_ipv6_is_supported())
                 return 0;
@@ -100,11 +119,15 @@ static int link_set_ipv6_privacy_extensions(Link *link) {
         if (!link->network)
                 return 0;
 
-        // this is the special "kernel" value
-        if (link->network->ipv6_privacy_extensions == _IPV6_PRIVACY_EXTENSIONS_INVALID)
+        val = link->network->ipv6_privacy_extensions;
+        if (val < 0) /* If not specified, then use the global setting. */
+                val = link->manager->ipv6_privacy_extensions;
+
+        /* When "kernel", do not update the setting. */
+        if (val == IPV6_PRIVACY_EXTENSIONS_KERNEL)
                 return 0;
 
-        return sysctl_write_ip_property_int(AF_INET6, link->ifname, "use_tempaddr", (int) link->network->ipv6_privacy_extensions);
+        return sysctl_write_ip_property_int(AF_INET6, link->ifname, "use_tempaddr", (int) val);
 }
 
 static int link_set_ipv6_accept_ra(Link *link) {
@@ -155,7 +178,7 @@ static int link_set_ipv6_hop_limit(Link *link) {
         if (!link->network)
                 return 0;
 
-        if (link->network->ipv6_hop_limit < 0)
+        if (link->network->ipv6_hop_limit <= 0)
                 return 0;
 
         return sysctl_write_ip_property_int(AF_INET6, link->ifname, "hop_limit", link->network->ipv6_hop_limit);
@@ -294,6 +317,10 @@ int link_set_sysctl(Link *link) {
         if (r < 0)
                 log_link_warning_errno(link, r, "Cannot set IPv4 route_localnet flag for interface, ignoring: %m");
 
+        r = link_set_ipv4_rp_filter(link);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Cannot set IPv4 reverse path filtering for interface, ignoring: %m");
+
         /* If promote_secondaries is not set, DHCP will work only as long as the IP address does not
          * changes between leases. The kernel will remove all secondary IP addresses of an interface
          * otherwise. The way systemd-networkd works is that the new IP of a lease is added as a
@@ -307,44 +334,23 @@ int link_set_sysctl(Link *link) {
 }
 
 static const char* const ipv6_privacy_extensions_table[_IPV6_PRIVACY_EXTENSIONS_MAX] = {
-        [IPV6_PRIVACY_EXTENSIONS_NO] = "no",
+        [IPV6_PRIVACY_EXTENSIONS_NO]            = "no",
         [IPV6_PRIVACY_EXTENSIONS_PREFER_PUBLIC] = "prefer-public",
-        [IPV6_PRIVACY_EXTENSIONS_YES] = "yes",
+        [IPV6_PRIVACY_EXTENSIONS_YES]           = "yes",
+        [IPV6_PRIVACY_EXTENSIONS_KERNEL]        = "kernel",
 };
 
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(ipv6_privacy_extensions, IPv6PrivacyExtensions,
                                         IPV6_PRIVACY_EXTENSIONS_YES);
+DEFINE_CONFIG_PARSE_ENUM(config_parse_ipv6_privacy_extensions, ipv6_privacy_extensions, IPv6PrivacyExtensions,
+                         "Failed to parse IPv6 privacy extensions option");
 
-int config_parse_ipv6_privacy_extensions(
-                const char* unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
+static const char* const ip_reverse_path_filter_table[_IP_REVERSE_PATH_FILTER_MAX] = {
+        [IP_REVERSE_PATH_FILTER_NO]     = "no",
+        [IP_REVERSE_PATH_FILTER_STRICT] = "strict",
+        [IP_REVERSE_PATH_FILTER_LOOSE]  = "loose",
+};
 
-        IPv6PrivacyExtensions s, *ipv6_privacy_extensions = ASSERT_PTR(data);
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-
-        s = ipv6_privacy_extensions_from_string(rvalue);
-        if (s < 0) {
-                if (streq(rvalue, "kernel"))
-                        s = _IPV6_PRIVACY_EXTENSIONS_INVALID;
-                else {
-                        log_syntax(unit, LOG_WARNING, filename, line, 0,
-                                   "Failed to parse IPv6 privacy extensions option, ignoring: %s", rvalue);
-                        return 0;
-                }
-        }
-
-        *ipv6_privacy_extensions = s;
-
-        return 0;
-}
+DEFINE_STRING_TABLE_LOOKUP(ip_reverse_path_filter, IPReversePathFilter);
+DEFINE_CONFIG_PARSE_ENUM(config_parse_ip_reverse_path_filter, ip_reverse_path_filter, IPReversePathFilter,
+                         "Failed to parse IP reverse path filter option");

@@ -22,7 +22,7 @@
 #include "stat-util.h"
 #include "string-table.h"
 #include "terminal-util.h"
-#include "tpm-pcr.h"
+#include "tpm2-pcr.h"
 #include "tpm2-util.h"
 #include "verbs.h"
 
@@ -122,7 +122,7 @@ not_found:
 }
 
 static int add_credentials_to_table(Table *t, bool encrypted) {
-        _cleanup_(closedirp) DIR *d = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
         const char *prefix;
         int r;
 
@@ -181,8 +181,8 @@ static int add_credentials_to_table(Table *t, bool encrypted) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to determine backing file system of '%s': %m", de->d_name);
 
-                        secure = r ? "secure" : "weak"; /* ramfs is not swappable, hence "secure", everything else is "weak" */
-                        secure_color = r ? ansi_highlight_green() : ansi_highlight_yellow4();
+                        secure = r > 0 ? "secure" : "weak"; /* ramfs is not swappable, hence "secure", everything else is "weak" */
+                        secure_color = r > 0 ? ansi_highlight_green() : ansi_highlight_yellow4();
                 }
 
                 j = path_join(prefix, de->d_name);
@@ -382,7 +382,7 @@ static int verb_cat(int argc, char **argv, void *userdata) {
 
                 /* Look both in regular and in encrypted credentials */
                 for (encrypted = 0; encrypted < 2; encrypted++) {
-                        _cleanup_(closedirp) DIR *d = NULL;
+                        _cleanup_closedir_ DIR *d = NULL;
 
                         r = open_credential_directory(encrypted, &d, NULL);
                         if (r < 0)
@@ -506,20 +506,21 @@ static int verb_encrypt(int argc, char **argv, void *userdata) {
         if (base64_size < 0)
                 return base64_size;
 
-        if (arg_pretty) {
+        /* Pretty print makes sense only if we're printing stuff to stdout
+         * and if a cred name is provided via --name= (since we can't use
+         * the output file name as the cred name here) */
+        if (arg_pretty && !output_path && name) {
                 _cleanup_free_ char *escaped = NULL, *indented = NULL, *j = NULL;
 
-                if (name) {
-                        escaped = cescape(name);
-                        if (!escaped)
-                                return log_oom();
-                }
+                escaped = cescape(name);
+                if (!escaped)
+                        return log_oom();
 
                 indented = strreplace(base64_buf, "\n", " \\\n        ");
                 if (!indented)
                         return log_oom();
 
-                j = strjoin("SetCredentialEncrypted=", name, ": \\\n        ", indented, "\n");
+                j = strjoin("SetCredentialEncrypted=", escaped, ": \\\n        ", indented, "\n");
                 if (!j)
                         return log_oom();
 
@@ -635,11 +636,13 @@ static int verb_has_tpm2(int argc, char **argv, void *userdata) {
                 printf("%sfirmware\n"
                        "%sdriver\n"
                        "%ssystem\n"
-                       "%ssubsystem\n",
+                       "%ssubsystem\n"
+                       "%slibraries\n",
                        plus_minus(s & TPM2_SUPPORT_FIRMWARE),
                        plus_minus(s & TPM2_SUPPORT_DRIVER),
                        plus_minus(s & TPM2_SUPPORT_SYSTEM),
-                       plus_minus(s & TPM2_SUPPORT_SUBSYSTEM));
+                       plus_minus(s & TPM2_SUPPORT_SUBSYSTEM),
+                       plus_minus(s & TPM2_SUPPORT_LIBRARIES));
         }
 
         /* Return inverted bit flags. So that TPM2_SUPPORT_FULL becomes EXIT_SUCCESS and the other values
@@ -807,13 +810,11 @@ static int parse_argv(int argc, char *argv[]) {
                         if (isempty(optarg) || streq(optarg, "auto"))
                                 arg_newline = -1;
                         else {
-                                bool b;
-
-                                r = parse_boolean_argument("--newline=", optarg, &b);
+                                r = parse_boolean_argument("--newline=", optarg, NULL);
                                 if (r < 0)
                                         return r;
 
-                                arg_newline = b;
+                                arg_newline = r;
                         }
                         break;
 
@@ -859,7 +860,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TPM2_PCRS: /* For fixed hash PCR policies only */
-                        r = tpm2_parse_pcr_argument(optarg, &arg_tpm2_pcr_mask);
+                        r = tpm2_parse_pcr_argument_to_mask(optarg, &arg_tpm2_pcr_mask);
                         if (r < 0)
                                 return r;
 
@@ -873,7 +874,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TPM2_PUBLIC_KEY_PCRS: /* For public key PCR policies only */
-                        r = tpm2_parse_pcr_argument(optarg, &arg_tpm2_public_key_pcr_mask);
+                        r = tpm2_parse_pcr_argument_to_mask(optarg, &arg_tpm2_public_key_pcr_mask);
                         if (r < 0)
                                 return r;
 
@@ -929,7 +930,7 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_tpm2_pcr_mask == UINT32_MAX)
                 arg_tpm2_pcr_mask = TPM2_PCR_MASK_DEFAULT;
         if (arg_tpm2_public_key_pcr_mask == UINT32_MAX)
-                arg_tpm2_public_key_pcr_mask = UINT32_C(1) << TPM_PCR_INDEX_KERNEL_IMAGE;
+                arg_tpm2_public_key_pcr_mask = UINT32_C(1) << TPM2_PCR_KERNEL_BOOT;
 
         return 1;
 }

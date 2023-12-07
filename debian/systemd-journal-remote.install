@@ -1,17 +1,17 @@
 # systemd-journal-upload
 etc/systemd/journal-upload.conf
-lib/systemd/systemd-journal-upload
-lib/systemd/system/systemd-journal-upload.service
+usr/lib/systemd/systemd-journal-upload
+usr/lib/systemd/system/systemd-journal-upload.service
 
 # systemd-journal-remote
 etc/systemd/journal-remote.conf
-lib/systemd/systemd-journal-remote
-lib/systemd/system/systemd-journal-remote.service
-lib/systemd/system/systemd-journal-remote.socket
+usr/lib/systemd/systemd-journal-remote
+usr/lib/systemd/system/systemd-journal-remote.service
+usr/lib/systemd/system/systemd-journal-remote.socket
 usr/lib/sysusers.d/systemd-remote.conf
 
 # systemd-journal-gatewayd
-lib/systemd/systemd-journal-gatewayd
-lib/systemd/system/systemd-journal-gatewayd.service
-lib/systemd/system/systemd-journal-gatewayd.socket
+usr/lib/systemd/systemd-journal-gatewayd
+usr/lib/systemd/system/systemd-journal-gatewayd.service
+usr/lib/systemd/system/systemd-journal-gatewayd.socket
 usr/share/systemd/gatewayd/

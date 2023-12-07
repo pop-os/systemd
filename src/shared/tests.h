@@ -8,6 +8,7 @@
 #include "argv-util.h"
 #include "macro.h"
 #include "static-destruct.h"
+#include "strv.h"
 
 static inline bool manager_errno_skip_test(int r) {
         return IN_SET(abs(r),
@@ -27,8 +28,23 @@ int get_testdata_dir(const char *suffix, char **ret);
 const char* get_catalog_dir(void);
 bool slow_tests_enabled(void);
 void test_setup_logging(int level);
-int log_tests_skipped(const char *message);
-int log_tests_skipped_errno(int r, const char *message);
+
+#define log_tests_skipped(fmt, ...)                                     \
+        ({                                                              \
+                log_notice("%s: " fmt ", skipping tests.",              \
+                           program_invocation_short_name,               \
+                           ##__VA_ARGS__);                              \
+                EXIT_TEST_SKIP;                                         \
+        })
+
+#define log_tests_skipped_errno(error, fmt, ...)                        \
+        ({                                                              \
+                log_notice_errno(error,                                 \
+                                 "%s: " fmt ", skipping tests: %m",     \
+                                 program_invocation_short_name,         \
+                                 ##__VA_ARGS__);                        \
+                EXIT_TEST_SKIP;                                         \
+        })
 
 int write_tmpfile(char *pattern, const char *contents);
 
@@ -37,6 +53,12 @@ bool have_namespaces(void);
 /* We use the small but non-trivial limit here */
 #define CAN_MEMLOCK_SIZE (512 * 1024U)
 bool can_memlock(void);
+
+/* Define void* buffer and size_t length variables from a hex string. */
+#define DEFINE_HEX_PTR(name, hex)                                       \
+        _cleanup_free_ void *name = NULL;                               \
+        size_t name##_len = 0;                                          \
+        assert_se(unhexmem(hex, strlen_ptr(hex), &name, &name##_len) >= 0);
 
 #define TEST_REQ_RUNNING_SYSTEMD(x)                                 \
         if (sd_booted() > 0) {                                      \
@@ -82,14 +104,31 @@ extern const TestFunc _weak_ __stop_SYSTEMD_TEST_TABLE[];
         REGISTER_TEST(test_##name, ##__VA_ARGS__); \
         static int test_##name(void)
 
+#define TEST_LOG_FUNC() \
+        log_info("/* %s() */", __func__)
+
 static inline int run_test_table(void) {
+        _cleanup_strv_free_ char **tests = NULL;
         int r = EXIT_SUCCESS;
+        bool ran = false;
+        const char *e;
 
         if (!__start_SYSTEMD_TEST_TABLE)
                 return r;
 
-        const TestFunc *t = ALIGN_PTR(__start_SYSTEMD_TEST_TABLE);
-        while (t < __stop_SYSTEMD_TEST_TABLE) {
+        e = getenv("TESTFUNCS");
+        if (e) {
+                r = strv_split_full(&tests, e, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse $TESTFUNCS: %m");
+        }
+
+        for (const TestFunc *t = ALIGN_PTR(__start_SYSTEMD_TEST_TABLE);
+             t + 1 <= __stop_SYSTEMD_TEST_TABLE;
+             t = ALIGN_PTR(t + 1)) {
+
+                if (tests && !strv_contains(tests, t->name))
+                        continue;
 
                 if (t->sd_booted && sd_booted() <= 0) {
                         log_info("/* systemd not booted, skipping %s */", t->name);
@@ -106,8 +145,11 @@ static inline int run_test_table(void) {
                                 t->f.void_func();
                 }
 
-                t = ALIGN_PTR(t + 1);
+                ran = true;
         }
+
+        if (!ran)
+                return log_error_errno(SYNTHETIC_ERRNO(ENXIO), "No matching tests found.");
 
         return r;
 }

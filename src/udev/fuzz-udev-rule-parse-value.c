@@ -4,7 +4,7 @@
 
 #include "alloc-util.h"
 #include "fuzz.h"
-#include "udev-util.h"
+#include "udev-rules.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         _cleanup_free_ char *str = NULL;
@@ -12,12 +12,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         char *value = UINT_TO_PTR(0x12345678U);
         char *endpos = UINT_TO_PTR(0x87654321U);
 
+        fuzz_setup_logging();
+
         assert_se(str = malloc(size + 1));
         memcpy(str, data, size);
         str[size] = '\0';
 
         r = udev_rule_parse_value(str, &value, &endpos);
-
         if (r < 0) {
                 /* not modified on failure */
                 assert_se(value == UINT_TO_PTR(0x12345678U));

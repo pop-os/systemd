@@ -50,7 +50,6 @@ static int address_new_from_ipv4ll(Link *link, Address **ret) {
         address->prefixlen = 16;
         address->scope = RT_SCOPE_LINK;
         address->route_metric = IPV4LL_ROUTE_METRIC;
-        address_set_broadcast(address, link);
 
         *ret = TAKE_PTR(address);
         return 0;
@@ -120,7 +119,7 @@ static int ipv4ll_address_claimed(sd_ipv4ll *ll, Link *link) {
         log_link_debug(link, "IPv4 link-local claim "IPV4_ADDRESS_FMT_STR,
                        IPV4_ADDRESS_FMT_VAL(address->in_addr.in));
 
-        return link_request_address(link, TAKE_PTR(address), true, NULL, ipv4ll_address_handler, NULL);
+        return link_request_address(link, address, NULL, ipv4ll_address_handler, NULL);
 }
 
 static void ipv4ll_handler(sd_ipv4ll *ll, int event, void *userdata) {

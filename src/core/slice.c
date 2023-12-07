@@ -43,7 +43,7 @@ static void slice_set_state(Slice *t, SliceState state) {
                           slice_state_to_string(old_state),
                           slice_state_to_string(state));
 
-        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static int slice_add_parent_slice(Slice *s) {
@@ -95,6 +95,10 @@ static int slice_verify(Slice *s) {
         r = slice_build_parent_slice(UNIT(s)->id, &parent);
         if (r < 0)
                 return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
+
+        /* If recursive errors are to be ignored, the parent slice should not be verified */
+        if (UNIT(s)->manager && FLAGS_SET(UNIT(s)->manager->test_run_flags, MANAGER_TEST_RUN_IGNORE_DEPENDENCIES))
+                return 0;
 
         if (parent ? !unit_has_name(UNIT_GET_SLICE(UNIT(s)), parent) : !!UNIT_GET_SLICE(UNIT(s)))
                 return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Located outside of parent slice. Refusing.");
@@ -247,10 +251,6 @@ static int slice_stop(Unit *u) {
         return 1;
 }
 
-static int slice_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
-        return unit_kill_common(u, who, signo, -1, -1, error);
-}
-
 static int slice_serialize(Unit *u, FILE *f, FDSet *fds) {
         Slice *s = SLICE(u);
 
@@ -286,13 +286,13 @@ static int slice_deserialize_item(Unit *u, const char *key, const char *value, F
         return 0;
 }
 
-_pure_ static UnitActiveState slice_active_state(Unit *u) {
+static UnitActiveState slice_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[SLICE(u)->state];
 }
 
-_pure_ static const char *slice_sub_state_to_string(Unit *u) {
+static const char *slice_sub_state_to_string(Unit *u) {
         assert(u);
 
         return slice_state_to_string(SLICE(u)->state);
@@ -349,17 +349,14 @@ static void slice_enumerate_perpetual(Manager *m) {
 
 static bool slice_freezer_action_supported_by_children(Unit *s) {
         Unit *member;
-        int r;
 
         assert(s);
 
         UNIT_FOREACH_DEPENDENCY(member, s, UNIT_ATOM_SLICE_OF) {
 
-                if (member->type == UNIT_SLICE) {
-                        r = slice_freezer_action_supported_by_children(member);
-                        if (!r)
-                                return r;
-                }
+                if (member->type == UNIT_SLICE &&
+                    !slice_freezer_action_supported_by_children(member))
+                        return false;
 
                 if (!UNIT_VTABLE(member)->freeze)
                         return false;
@@ -438,8 +435,6 @@ const UnitVTable slice_vtable = {
 
         .start = slice_start,
         .stop = slice_stop,
-
-        .kill = slice_kill,
 
         .freeze = slice_freeze,
         .thaw = slice_thaw,

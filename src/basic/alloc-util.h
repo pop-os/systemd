@@ -146,12 +146,16 @@ static inline void *memdup_suffix0_multiply(const void *p, size_t size, size_t n
 
 void* greedy_realloc(void **p, size_t need, size_t size);
 void* greedy_realloc0(void **p, size_t need, size_t size);
+void* greedy_realloc_append(void **p, size_t *n_p, const void *from, size_t n_from, size_t size);
 
 #define GREEDY_REALLOC(array, need)                                     \
         greedy_realloc((void**) &(array), (need), sizeof((array)[0]))
 
 #define GREEDY_REALLOC0(array, need)                                    \
         greedy_realloc0((void**) &(array), (need), sizeof((array)[0]))
+
+#define GREEDY_REALLOC_APPEND(array, n_array, from, n_from)             \
+        greedy_realloc_append((void**) &(array), (size_t*) &(n_array), (from), (n_from), sizeof((array)[0]))
 
 #define alloca0(n)                                      \
         ({                                              \
@@ -223,7 +227,6 @@ static inline size_t malloc_sizeof_safe(void **xp) {
                 MALLOC_SIZEOF_SAFE(x)/sizeof((x)[0]),                   \
                 VOID_0))
 
-
 /* These are like strdupa()/strndupa(), but honour ALLOCA_MAX */
 #define strdupa_safe(s)                                                 \
         ({                                                              \
@@ -236,5 +239,38 @@ static inline size_t malloc_sizeof_safe(void **xp) {
                 const char *_t = (s);                                   \
                 (char*) memdupa_suffix0(_t, strnlen(_t, (n)));          \
         })
+
+/* Free every element of the array. */
+static inline void free_many(void **p, size_t n) {
+        assert(p || n == 0);
+
+        FOREACH_ARRAY(i, p, n)
+                *i = mfree(*i);
+}
+
+/* Typesafe wrapper for char** rather than void**. Unfortunately C won't implicitly cast this. */
+static inline void free_many_charp(char **c, size_t n) {
+        free_many((void**) c, n);
+}
+
+_alloc_(2) static inline void *realloc0(void *p, size_t new_size) {
+        size_t old_size;
+        void *q;
+
+        /* Like realloc(), but initializes anything appended to zero */
+
+        old_size = MALLOC_SIZEOF_SAFE(p);
+
+        q = realloc(p, new_size);
+        if (!q)
+                return NULL;
+
+        new_size = MALLOC_SIZEOF_SAFE(q); /* Update with actually allocated space */
+
+        if (new_size > old_size)
+                memset((uint8_t*) q + old_size, 0, new_size - old_size);
+
+        return q;
+}
 
 #include "memory-util.h"

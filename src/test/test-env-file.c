@@ -22,7 +22,7 @@
         "e  \\\n"                               \
         "f  \n"                                 \
         "g=g\\ \n"                              \
-        "h= ąęół\\ śćńźżµ \n"                   \
+        "h= ąęół\\ śćńźżμ \n"                   \
         "i=i\\"
 
 #define env_file_2                              \
@@ -31,9 +31,10 @@
 #define env_file_3 \
         "#SPAMD_ARGS=\"-d --socketpath=/var/lib/bulwark/spamd \\\n" \
         "#--nouser-config                                     \\\n" \
-        "normal=line                                          \\\n" \
+        "normal1=line\\\n"                                           \
+        "111\n"                                                     \
         ";normal=ignored                                      \\\n" \
-        "normal_ignored                                       \\\n" \
+        "normal2=line222\n"                                          \
         "normal ignored                                       \\\n"
 
 #define env_file_4                              \
@@ -68,7 +69,7 @@ TEST(load_env_file_1) {
         assert_se(streq(data[1], "b=bc"));
         assert_se(streq(data[2], "d=de  f"));
         assert_se(streq(data[3], "g=g "));
-        assert_se(streq(data[4], "h=ąęół śćńźżµ"));
+        assert_se(streq(data[4], "h=ąęół śćńźżμ"));
         assert_se(streq(data[5], "i=i"));
         assert_se(data[6] == NULL);
 }
@@ -89,7 +90,9 @@ TEST(load_env_file_3) {
 
         _cleanup_strv_free_ char **data = NULL;
         assert_se(load_env_file(NULL, name, &data) == 0);
-        assert_se(data == NULL);
+        assert_se(streq(data[0], "normal1=line111"));
+        assert_se(streq(data[1], "normal2=line222"));
+        assert_se(data[2] == NULL);
 }
 
 TEST(load_env_file_4) {
@@ -169,7 +172,7 @@ TEST(write_and_load_env_file) {
                 assert_se(tempfn_random_child(NULL, NULL, &p) >= 0);
 
                 assert_se(j = strjoin("TEST=", v));
-                assert_se(write_env_file(p, STRV_MAKE(j)) >= 0);
+                assert_se(write_env_file(AT_FDCWD, p, STRV_MAKE("# header 1", "", "# header 2"), STRV_MAKE(j)) >= 0);
 
                 assert_se(cmd = strjoin(". ", p, " && /bin/echo -n \"$TEST\""));
                 assert_se(f = popen(cmd, "re"));

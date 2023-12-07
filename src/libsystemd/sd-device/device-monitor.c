@@ -20,7 +20,7 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "hashmap.h"
-#include "io-util.h"
+#include "iovec-util.h"
 #include "missing_socket.h"
 #include "mountpoint-util.h"
 #include "set.h"
@@ -215,6 +215,15 @@ int device_monitor_new_full(sd_device_monitor **ret, MonitorNetlinkGroup group, 
                 }
         }
 
+        /* Let's bump the receive buffer size, but only if we are not called via socket activation, as in
+         * that case the service manager sets the receive buffer size for us, and the value in the .socket
+         * unit should take full effect. */
+        if (fd < 0) {
+                r = sd_device_monitor_set_receive_buffer_size(m, 128*1024*1024);
+                if (r < 0)
+                        log_monitor_errno(m, r, "Failed to increase receive buffer size, ignoring: %m");
+        }
+
         *ret = TAKE_PTR(m);
         return 0;
 
@@ -242,14 +251,14 @@ _public_ int sd_device_monitor_stop(sd_device_monitor *m) {
 
 static int device_monitor_event_handler(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(sd_device_unrefp) sd_device *device = NULL;
-        _unused_ _cleanup_(log_context_freep) LogContext *c = NULL;
+        _unused_ _cleanup_(log_context_unrefp) LogContext *c = NULL;
         sd_device_monitor *m = ASSERT_PTR(userdata);
 
         if (device_monitor_receive_device(m, &device) <= 0)
                 return 0;
 
         if (log_context_enabled())
-                c = log_context_new_consume(device_make_log_fields(device));
+                c = log_context_new_strv_consume(device_make_log_fields(device));
 
         if (m->callback)
                 return m->callback(m, device, m->userdata);
@@ -503,7 +512,6 @@ int device_monitor_receive_device(sd_device_monitor *m, sd_device **ret) {
                 .msg_name = &snl,
                 .msg_namelen = sizeof(snl),
         };
-        struct cmsghdr *cmsg;
         struct ucred *cred;
         size_t offset;
         ssize_t n;
@@ -559,12 +567,11 @@ int device_monitor_receive_device(sd_device_monitor *m, sd_device **ret) {
                                                  snl.nl.nl_pid);
         }
 
-        cmsg = CMSG_FIRSTHDR(&smsg);
-        if (!cmsg || cmsg->cmsg_type != SCM_CREDENTIALS)
+        cred = CMSG_FIND_DATA(&smsg, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
+        if (!cred)
                 return log_monitor_errno(m, SYNTHETIC_ERRNO(EAGAIN),
                                          "No sender credentials received, ignoring message.");
 
-        cred = (struct ucred*) CMSG_DATA(cmsg);
         if (!check_sender_uid(m, cred->uid))
                 return log_monitor_errno(m, SYNTHETIC_ERRNO(EAGAIN),
                                          "Sender uid="UID_FMT", message ignored.", cred->uid);
@@ -683,8 +690,8 @@ int device_monitor_send_device(
 
         /* add tag bloom filter */
         tag_bloom_bits = 0;
-        FOREACH_DEVICE_TAG(device, val)
-                tag_bloom_bits |= string_bloom64(val);
+        FOREACH_DEVICE_TAG(device, tag)
+                tag_bloom_bits |= string_bloom64(tag);
 
         if (tag_bloom_bits > 0) {
                 nlh.filter_tag_bloom_hi = htobe32(tag_bloom_bits >> 32);

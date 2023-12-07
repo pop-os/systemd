@@ -10,9 +10,9 @@
 [Unit]
 Description=Console Getty
 Documentation=man:agetty(8) man:systemd-getty-generator(8)
-After=systemd-user-sessions.service plymouth-quit-wait.service
+After=systemd-user-sessions.service plymouth-quit-wait.service getty-pre.target
 {% if HAVE_SYSV_COMPAT %}
-After=rc-local.service getty-pre.target
+After=rc-local.service
 {% endif %}
 Before=getty.target
 
@@ -36,6 +36,8 @@ KillMode=process
 {% endif %}
 IgnoreSIGPIPE=no
 SendSIGHUP=yes
+ImportCredential=agetty.*
+ImportCredential=login.*
 
 [Install]
 WantedBy=getty.target

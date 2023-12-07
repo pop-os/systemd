@@ -8,7 +8,9 @@
 #include "sd-device.h"
 
 #include "alloc-util.h"
+#include "battery-util.h"
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-util.h"
 #include "cgroup-util.h"
 #include "conf-parser.h"
@@ -78,13 +80,9 @@ void manager_reset_config(Manager *m) {
 int manager_parse_config_file(Manager *m) {
         assert(m);
 
-        return config_parse_many_nulstr(
-                        PKGSYSCONFDIR "/logind.conf",
-                        CONF_PATHS_NULSTR("systemd/logind.conf.d"),
-                        "Login\0",
-                        config_item_perf_lookup, logind_gperf_lookup,
-                        CONFIG_PARSE_WARN, m,
-                        NULL);
+        return config_parse_config_file("logind.conf", "Login\0",
+                                        config_item_perf_lookup, logind_gperf_lookup,
+                                        CONFIG_PARSE_WARN, m);
 }
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **ret_device) {
@@ -326,15 +324,11 @@ int manager_process_button_device(Manager *m, sd_device *d) {
                 return r;
 
         if (device_for_action(d, SD_DEVICE_REMOVE) ||
-            sd_device_has_current_tag(d, "power-switch") <= 0) {
+            sd_device_has_current_tag(d, "power-switch") <= 0)
 
-                b = hashmap_get(m->buttons, sysname);
-                if (!b)
-                        return 0;
+                button_free(hashmap_get(m->buttons, sysname));
 
-                button_free(b);
-
-        } else {
+        else {
                 const char *sn;
 
                 r = manager_add_button(m, sysname, &b);
@@ -355,21 +349,27 @@ int manager_process_button_device(Manager *m, sd_device *d) {
         return 0;
 }
 
-int manager_get_session_by_pid(Manager *m, pid_t pid, Session **ret) {
+int manager_get_session_by_pidref(Manager *m, const PidRef *pid, Session **ret) {
         _cleanup_free_ char *unit = NULL;
         Session *s;
         int r;
 
         assert(m);
 
-        if (!pid_is_valid(pid))
+        if (!pidref_is_set(pid))
                 return -EINVAL;
 
-        s = hashmap_get(m->sessions_by_leader, PID_TO_PTR(pid));
-        if (!s) {
-                r = cg_pid_get_unit(pid, &unit);
-                if (r >= 0)
-                        s = hashmap_get(m->session_units, unit);
+        s = hashmap_get(m->sessions_by_leader, pid);
+        if (s) {
+                r = pidref_verify(pid);
+                if (r < 0)
+                        return r;
+        } else {
+                r = cg_pidref_get_unit(pid, &unit);
+                if (r < 0)
+                        return r;
+
+                s = hashmap_get(m->session_units, unit);
         }
 
         if (ret)
@@ -542,15 +542,7 @@ int manager_spawn_autovt(Manager *m, unsigned vtnr) {
         }
 
         xsprintf(name, "autovt@tty%u.service", vtnr);
-        r = sd_bus_call_method(
-                        m->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StartUnit",
-                        &error,
-                        NULL,
-                        "ss", name, "fail");
+        r = bus_call_method(m->bus, bus_systemd_mgr, "StartUnit", &error, NULL, "ss", name, "fail");
         if (r < 0)
                 return log_error_errno(r, "Failed to start %s: %s", name, bus_error_message(&error, r));
 
@@ -579,7 +571,6 @@ static bool manager_is_docked(Manager *m) {
 
 static int manager_count_external_displays(Manager *m) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        sd_device *d;
         int r, n = 0;
 
         r = sd_device_enumerator_new(&e);
@@ -749,8 +740,7 @@ int manager_read_utmp(Manager *m) {
                 if (isempty(t))
                         continue;
 
-                s = hashmap_get(m->sessions_by_leader, PID_TO_PTR(u->ut_pid));
-                if (!s)
+                if (manager_get_session_by_pidref(m, &PIDREF_MAKE_FROM_PID(u->ut_pid), &s) <= 0)
                         continue;
 
                 if (s->tty_validity == TTY_FROM_UTMP && !streq_ptr(s->tty, t)) {
@@ -843,13 +833,14 @@ int manager_read_efi_boot_loader_entries(Manager *m) {
                 return 0;
 
         r = efi_loader_get_entries(&m->efi_boot_loader_entries);
-        if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r)) {
-                log_debug_errno(r, "Boot loader reported no entries.");
-                m->efi_boot_loader_entries_set = true;
-                return 0;
-        }
-        if (r < 0)
+        if (r < 0) {
+                if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r)) {
+                        log_debug_errno(r, "Boot loader reported no entries.");
+                        m->efi_boot_loader_entries_set = true;
+                        return 0;
+                }
                 return log_error_errno(r, "Failed to determine entries reported by boot loader: %m");
+        }
 
         m->efi_boot_loader_entries_set = true;
         return 1;

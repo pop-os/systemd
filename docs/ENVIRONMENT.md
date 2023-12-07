@@ -35,6 +35,9 @@ All tools:
   as `start` into no-ops.  If that's what's explicitly desired, you might
   consider setting `$SYSTEMD_OFFLINE=1`.
 
+* `$SYSTEMD_FIRST_BOOT=0|1` — if set, assume "first boot" condition to be false
+  or true, instead of checking the flag file created by PID 1.
+
 * `$SD_EVENT_PROFILE_DELAYS=1` — if set, the sd-event event loop implementation
   will print latency information at runtime.
 
@@ -45,14 +48,17 @@ All tools:
 
 * `$SYSTEMD_OS_RELEASE` — if set, use this path instead of `/etc/os-release` or
   `/usr/lib/os-release`. When operating under some root (e.g. `systemctl
-  --root=…`), the path is taken relative to the outside root. Only useful for
-  debugging.
+  --root=…`), the path is prefixed with the root. Only useful for debugging.
 
 * `$SYSTEMD_FSTAB` — if set, use this path instead of `/etc/fstab`. Only useful
   for debugging.
 
 * `$SYSTEMD_SYSROOT_FSTAB` — if set, use this path instead of
   `/sysroot/etc/fstab`. Only useful for debugging `systemd-fstab-generator`.
+
+* `$SYSTEMD_SYSFS_CHECK` — takes a boolean. If set, overrides sysfs container
+  detection that ignores `/dev/` entries in fstab. Only useful for debugging
+  `systemd-fstab-generator`.
 
 * `$SYSTEMD_CRYPTTAB` — if set, use this path instead of `/etc/crypttab`. Only
   useful for debugging. Currently only supported by
@@ -87,7 +93,7 @@ All tools:
 
 * `$SYSTEMD_UTF8=` — takes a boolean value, and overrides whether to generate
   non-ASCII special glyphs at various places (i.e. "→" instead of
-  "->"). Usually this is deterined automatically, based on $LC_CTYPE, but in
+  "->"). Usually this is determined automatically, based on `$LC_CTYPE`, but in
   scenarios where locale definitions are not installed it might make sense to
   override this check explicitly.
 
@@ -115,7 +121,10 @@ All tools:
   kernel supports this.
 
 * `$SYSTEMD_ENABLE_LOG_CONTEXT` — if set, extra fields will always be logged to
-the journal instead of only when logging in debug mode.
+  the journal instead of only when logging in debug mode.
+
+* `$SYSTEMD_NETLINK_DEFAULT_TIMEOUT` — specifies the default timeout of waiting
+  replies for netlink messages from the kernel. Defaults to 25 seconds.
 
 `systemctl`:
 
@@ -126,6 +135,13 @@ the journal instead of only when logging in debug mode.
   the client side, instead of asking PID 1 to do this.
 
 * `$SYSTEMCTL_SKIP_SYSV=1` — if set, do not call SysV compatibility hooks.
+
+* `$SYSTEMCTL_SKIP_AUTO_KEXEC=1` — if set, do not automatically kexec instead of
+  reboot when a new kernel has been loaded.
+
+* `$SYSTEMCTL_SKIP_AUTO_SOFT_REBOOT=1` — if set, do not automatically soft-reboot
+  instead of reboot when a new root file system has been loaded in
+  `/run/nextroot/`.
 
 `systemd-nspawn`:
 
@@ -148,11 +164,21 @@ the journal instead of only when logging in debug mode.
 * `$SYSTEMD_NSPAWN_TMPFS_TMP=0` — if set, do not overmount `/tmp/` in the
   container with a tmpfs, but leave the directory from the image in place.
 
+* `$SYSTEMD_NSPAWN_CHECK_OS_RELEASE=0` — if set, do not fail when trying to
+  boot an OS tree without an os-release file (useful when trying to boot a
+  container with empty `/etc/` and bind-mounted `/usr/`)
+
 * `$SYSTEMD_SUPPRESS_SYNC=1` — if set, all disk synchronization syscalls are
   blocked to the container payload (e.g. `sync()`, `fsync()`, `syncfs()`, …)
   and the `O_SYNC`/`O_DSYNC` flags are made unavailable to `open()` and
   friends. This is equivalent to passing `--suppress-sync=yes` on the
   `systemd-nspawn` command line.
+
+* `$SYSTEMD_NSPAWN_NETWORK_MAC=...` — if set, allows users to set a specific MAC
+  address for a container, ensuring that it uses the provided value instead of
+  generating a random one. It is effective when used with `--network-veth`. The
+  expected format is six groups of two hexadecimal digits separated by colons,
+  e.g. `SYSTEMD_NSPAWN_NETWORK_MAC=12:34:56:78:90:AB`
 
 `systemd-logind`:
 
@@ -324,7 +350,9 @@ the journal instead of only when logging in debug mode.
   paths. Only "real" file systems and directories that only contain "real" file
   systems as submounts should be used. Do not specify API file systems such as
   `/proc/` or `/sys/` here, or hierarchies that have them as submounts. In
-  particular, do not specify the root directory `/` here.
+  particular, do not specify the root directory `/` here. Similarly,
+  `$SYSTEMD_CONFEXT_HIERARCHIES` works for confext images and supports the
+  systemd-confext multi-call functionality of sysext.
 
 `systemd-tmpfiles`:
 
@@ -336,9 +364,9 @@ the journal instead of only when logging in debug mode.
 
 `systemd-sysusers`
 
-* `SOURCE_DATE_EPOCH` — if unset, the field of the date of last password change
+* `$SOURCE_DATE_EPOCH` — if unset, the field of the date of last password change
   in `/etc/shadow` will be the number of days from Jan 1, 1970 00:00 UTC until
-  today. If SOURCE_DATE_EPOCH is set to a valid UNIX epoch value in seconds,
+  today. If `$SOURCE_DATE_EPOCH` is set to a valid UNIX epoch value in seconds,
   then the field will be the number of days until that time instead. This is to
   support creating bit-by-bit reproducible system images by choosing a
   reproducible value for the field of the date of last password change in
@@ -359,6 +387,10 @@ systemd tests:
 
 * `$SYSTEMD_TEST_NSS_BUFSIZE` — size of scratch buffers for "reentrant"
   functions exported by the nss modules.
+
+* `$TESTFUNCS` – takes a colon separated list of test functions to invoke,
+  causes all non-matching test functions to be skipped. Only applies to tests
+  using our regular test boilerplate.
 
 fuzzers:
 
@@ -426,7 +458,7 @@ disk images with `--image=` or similar:
   specified defaults to something like: `ext4:btrfs:xfs:vfat:erofs:squashfs`
 
 * `$SYSTEMD_LOOP_DIRECT_IO` – takes a boolean, which controls whether to enable
-  LO_FLAGS_DIRECT_IO (i.e. direct IO + asynchronous IO) on loopback block
+  `LO_FLAGS_DIRECT_IO` (i.e. direct IO + asynchronous IO) on loopback block
   devices when opening them. Defaults to on, set this to "0" to disable this
   feature.
 
@@ -436,6 +468,12 @@ disk images with `--image=` or similar:
   whether to use the libcryptsetup "token" plugin module logic even when
   activating via FIDO2, PKCS#11, TPM2, i.e. mechanisms natively supported by
   `systemd-cryptsetup`. Defaults to enabled.
+
+* `$SYSTEMD_CRYPTSETUP_TOKEN_PATH` – takes a path to a directory in the file
+  system. If specified overrides where libcryptsetup will look for token
+  modules (.so). This is useful for debugging token modules: set this
+  environment variable to the build directory and you are set. This variable
+  is only supported when systemd is compiled in developer mode.
 
 Various tools that read passwords from the TTY, such as `systemd-cryptenroll`
 and `homectl`:
@@ -502,17 +540,58 @@ SYSTEMD_HOME_DEBUG_SUFFIX=foo \
   unconditionally as a child process by another tool, such as package managers
   running kernel-install in a postinstall script.
 
-`systemd-journald`:
+`systemd-journald`, `journalctl`:
 
 * `$SYSTEMD_JOURNAL_COMPACT` – Takes a boolean. If enabled, journal files are written
   in a more compact format that reduces the amount of disk space required by the
   journal. Note that journal files in compact mode are limited to 4G to allow use of
   32-bit offsets. Enabled by default.
 
-`systemd-pcrphase`, `systemd-cryptsetup`:
+* `$SYSTEMD_JOURNAL_COMPRESS` – Takes a boolean, or one of the compression
+  algorithms "XZ", "LZ4", and "ZSTD". If enabled, the default compression
+  algorithm set at compile time will be used when opening a new journal file.
+  If disabled, the journal file compression will be disabled. Note that the
+  compression mode of existing journal files are not changed. To make the
+  specified algorithm takes an effect immediately, you need to explicitly run
+  `journalctl --rotate`.
+
+* `$SYSTEMD_CATALOG` – path to the compiled catalog database file to use for
+  `journalctl -x`, `journalctl --update-catalog`, `journalctl --list-catalog`
+  and related calls.
+
+* `$SYSTEMD_CATALOG_SOURCES` – path to the catalog database input source
+  directory to use for `journalctl --update-catalog`.
+
+`systemd-pcrextend`, `systemd-cryptsetup`:
 
 * `$SYSTEMD_FORCE_MEASURE=1` — If set, force measuring of resources (which are
   marked for measurement) even if not booted on a kernel equipped with
   systemd-stub. Normally, requested measurement of resources is conditionalized
   on kernels that have booted with `systemd-stub`. With this environment
   variable the test for that my be bypassed, for testing purposes.
+
+`systemd-repart`:
+
+* `$SYSTEMD_REPART_MKFS_OPTIONS_<FSTYPE>` – configure additional arguments to use for
+  `mkfs` when formatting partition file systems. There's one variable for each
+  of the supported file systems.
+
+* `$SYSTEMD_REPART_OVERRIDE_FSTYPE` – if set the value will override the file
+  system type specified in Format= lines in partition definition files.
+
+`systemd-nspawn`, `systemd-networkd`:
+
+* `$SYSTEMD_FIREWALL_BACKEND` – takes a string, either `iptables` or
+  `nftables`. Selects the firewall backend to use. If not specified tries to
+  use `nftables` and falls back to `iptables` if that's not available.
+
+`systemd-storagetm`:
+
+* `$SYSTEMD_NVME_MODEL`, `$SYSTEMD_NVME_FIRMWARE`, `$SYSTEMD_NVME_SERIAL`,
+  `$SYSTEMD_NVME_UUID` – these take a model string, firmware version string,
+  serial number string, and UUID formatted as string. If specified these
+  override the defaults exposed on the NVME subsystem and namespace, which are
+  derived from the underlying block device and system identity. Do not set the
+  latter two via the environment variable unless `systemd-storagetm` is invoked
+  to expose a single device only, since those identifiers better should be kept
+  unique.

@@ -15,7 +15,7 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-util.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "compress.h"
 #include "constants.h"
 #include "dissect-image.h"
@@ -64,9 +64,11 @@ static const char* arg_output = NULL;
 static bool arg_reverse = false;
 static bool arg_quiet = false;
 static bool arg_all = false;
+static ImagePolicy *arg_image_policy = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_debugger_args, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_file, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 static int add_match(sd_journal *j, const char *match) {
         _cleanup_free_ char *p = NULL;
@@ -198,6 +200,7 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "     --all                     Look at all journal files instead of local ones\n"
                "     --root=PATH               Operate on an alternate filesystem root\n"
                "     --image=PATH              Operate on disk image as filesystem root\n"
+               "     --image-policy=POLICY     Specify disk image dissection policy\n"
                "\nSee the %2$s for details.\n",
                program_invocation_short_name,
                link,
@@ -219,30 +222,32 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_FILE,
                 ARG_ROOT,
                 ARG_IMAGE,
+                ARG_IMAGE_POLICY,
                 ARG_ALL,
         };
 
         int c, r;
 
         static const struct option options[] = {
-                { "help",               no_argument,       NULL, 'h'           },
-                { "version" ,           no_argument,       NULL, ARG_VERSION   },
-                { "no-pager",           no_argument,       NULL, ARG_NO_PAGER  },
-                { "no-legend",          no_argument,       NULL, ARG_NO_LEGEND },
-                { "debugger",           required_argument, NULL, ARG_DEBUGGER  },
-                { "debugger-arguments", required_argument, NULL, 'A'           },
-                { "output",             required_argument, NULL, 'o'           },
-                { "field",              required_argument, NULL, 'F'           },
-                { "file",               required_argument, NULL, ARG_FILE      },
-                { "directory",          required_argument, NULL, 'D'           },
-                { "reverse",            no_argument,       NULL, 'r'           },
-                { "since",              required_argument, NULL, 'S'           },
-                { "until",              required_argument, NULL, 'U'           },
-                { "quiet",              no_argument,       NULL, 'q'           },
-                { "json",               required_argument, NULL, ARG_JSON      },
-                { "root",               required_argument, NULL, ARG_ROOT      },
-                { "image",              required_argument, NULL, ARG_IMAGE     },
-                { "all",                no_argument,       NULL, ARG_ALL       },
+                { "help",               no_argument,       NULL, 'h'              },
+                { "version" ,           no_argument,       NULL, ARG_VERSION      },
+                { "no-pager",           no_argument,       NULL, ARG_NO_PAGER     },
+                { "no-legend",          no_argument,       NULL, ARG_NO_LEGEND    },
+                { "debugger",           required_argument, NULL, ARG_DEBUGGER     },
+                { "debugger-arguments", required_argument, NULL, 'A'              },
+                { "output",             required_argument, NULL, 'o'              },
+                { "field",              required_argument, NULL, 'F'              },
+                { "file",               required_argument, NULL, ARG_FILE         },
+                { "directory",          required_argument, NULL, 'D'              },
+                { "reverse",            no_argument,       NULL, 'r'              },
+                { "since",              required_argument, NULL, 'S'              },
+                { "until",              required_argument, NULL, 'U'              },
+                { "quiet",              no_argument,       NULL, 'q'              },
+                { "json",               required_argument, NULL, ARG_JSON         },
+                { "root",               required_argument, NULL, ARG_ROOT         },
+                { "image",              required_argument, NULL, ARG_IMAGE        },
+                { "image-policy",       required_argument, NULL, ARG_IMAGE_POLICY },
+                { "all",                no_argument,       NULL, ARG_ALL          },
                 {}
         };
 
@@ -340,6 +345,12 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_IMAGE:
                         r = parse_path_argument(optarg, false, &arg_image);
+                        if (r < 0)
+                                return r;
+                        break;
+
+                case ARG_IMAGE_POLICY:
+                        r = parse_image_policy_argument(optarg, &arg_image_policy);
                         if (r < 0)
                                 return r;
                         break;
@@ -472,14 +483,15 @@ static void analyze_coredump_file(
                 r = -errno;
         } else
                 r = access_fd(fd, R_OK);
-        if (ERRNO_IS_PRIVILEGE(r)) {
-                *ret_state = "inaccessible";
-                *ret_color = ansi_highlight_yellow();
-                *ret_size = UINT64_MAX;
-                return;
-        }
-        if (r < 0)
+        if (r < 0) {
+                if (ERRNO_IS_PRIVILEGE(r)) {
+                        *ret_state = "inaccessible";
+                        *ret_color = ansi_highlight_yellow();
+                        *ret_size = UINT64_MAX;
+                        return;
+                }
                 goto error;
+        }
 
         if (fstat(fd, &st) < 0)
                 goto error;
@@ -505,13 +517,13 @@ static int resolve_filename(const char *root, char **p) {
         if (!*p)
                 return 0;
 
-        r = chase_symlinks(*p, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
+        r = chase(*p, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve \"%s%s\": %m", strempty(root), *p);
 
         free_and_replace(*p, resolved);
 
-        /* chase_symlinks() with flag CHASE_NONEXISTENT will return 0 if the file doesn't exist and 1 if it does.
+        /* chase() with flag CHASE_NONEXISTENT will return 0 if the file doesn't exist and 1 if it does.
          * Return that to the caller
          */
         return r;
@@ -981,7 +993,7 @@ static int save_core(sd_journal *j, FILE *file, char **path, bool *unlink_temp) 
                         return r;
                 assert(r > 0);
 
-                r = chase_symlinks_and_access(filename, arg_root, CHASE_PREFIX_ROOT, F_OK, &resolved, NULL);
+                r = chase_and_access(filename, arg_root, CHASE_PREFIX_ROOT, F_OK, &resolved);
                 if (r < 0)
                         return log_error_errno(r, "Cannot access \"%s%s\": %m", strempty(arg_root), filename);
 
@@ -1141,10 +1153,24 @@ static int dump_core(int argc, char **argv, void *userdata) {
         return 0;
 }
 
+static void sigterm_handler(int signal, siginfo_t *info, void *ucontext) {
+        assert(signal == SIGTERM);
+        assert(info);
+
+        /* If the sender is not us, propagate the signal to all processes in
+         * the same process group */
+        if (pid_is_valid(info->si_pid) && info->si_pid != getpid_cached())
+                (void) kill(0, signal);
+}
+
 static int run_debug(int argc, char **argv, void *userdata) {
         _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         _cleanup_free_ char *exe = NULL, *path = NULL;
         _cleanup_strv_free_ char **debugger_call = NULL;
+        struct sigaction sa = {
+                .sa_sigaction = sigterm_handler,
+                .sa_flags = SA_SIGINFO,
+        };
         bool unlink_path = false;
         const char *data, *fork_name;
         size_t len;
@@ -1238,10 +1264,11 @@ static int run_debug(int argc, char **argv, void *userdata) {
 
         /* Don't interfere with gdb and its handling of SIGINT. */
         (void) ignore_signals(SIGINT);
+        (void) sigaction(SIGTERM, &sa, NULL);
 
         fork_name = strjoina("(", debugger_call[0], ")");
 
-        r = safe_fork(fork_name, FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG|FORK_FLUSH_STDIO, &pid);
+        r = safe_fork(fork_name, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG|FORK_FLUSH_STDIO, &pid);
         if (r < 0)
                 goto finish;
         if (r == 0) {
@@ -1254,7 +1281,7 @@ static int run_debug(int argc, char **argv, void *userdata) {
         r = wait_for_terminate_and_check(debugger_call[0], pid, WAIT_LOG_ABNORMAL);
 
 finish:
-        (void) default_signals(SIGINT);
+        (void) default_signals(SIGINT, SIGTERM);
 
         if (unlink_path) {
                 log_debug("Removed temporary file %s", path);
@@ -1339,7 +1366,7 @@ static int coredumpctl_main(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
-        _cleanup_(umount_and_rmdir_and_freep) char *mounted_dir = NULL;
+        _cleanup_(umount_and_freep) char *mounted_dir = NULL;
         int r, units_active;
 
         setlocale(LC_ALL, "");
@@ -1361,11 +1388,13 @@ static int run(int argc, char *argv[]) {
 
                 r = mount_image_privately_interactively(
                                 arg_image,
+                                arg_image_policy,
                                 DISSECT_IMAGE_GENERIC_ROOT |
                                 DISSECT_IMAGE_REQUIRE_ROOT |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_VALIDATE_OS,
                                 &mounted_dir,
+                                /* ret_dir_fd= */ NULL,
                                 &loop_device);
                 if (r < 0)
                         return r;

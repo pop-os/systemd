@@ -1,16 +1,18 @@
 etc/udev/
-lib/udev/*
-lib/systemd/network/*.link
-lib/systemd/system/systemd-udev*
-lib/systemd/system/*.target.wants/systemd-udev*
-lib/systemd/systemd-udevd
-bin/udevadm
-bin/systemd-hwdb
+usr/lib/udev/*
+usr/lib/systemd/network/*.link
+usr/lib/systemd/system/systemd-udev*
+usr/lib/systemd/system/systemd-hwdb*
+usr/lib/systemd/system/*.target.wants/systemd-udev*
+usr/lib/systemd/system/*.target.wants/*hwdb*
+usr/lib/systemd/systemd-udevd
+usr/bin/udevadm
+usr/bin/systemd-hwdb
 usr/lib/tmpfiles.d/static-nodes-permissions.conf
 usr/share/bash-completion/completions/udevadm
 usr/share/zsh/vendor-completions/_udevadm
 ../extra/initramfs-tools usr/share/
-../extra/rules/*.rules lib/udev/rules.d/
-../extra/network/*.link lib/systemd/network/
-../extra/fbdev-blacklist.conf lib/modprobe.d/
-../extra/units/systemd-udevd.service.d lib/systemd/system/
+../extra/rules/*.rules usr/lib/udev/rules.d/
+../extra/network/*.link usr/lib/systemd/network/
+../extra/fbdev-blacklist.conf usr/lib/modprobe.d/
+../extra/units/systemd-udevd.service.d usr/lib/systemd/system/

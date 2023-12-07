@@ -1,10 +1,10 @@
-/sbin/resolvconf
 /etc/systemd/resolved.conf
-/lib/systemd/systemd-resolved
-/lib/systemd/system/systemd-resolved.service
 /usr/bin/resolvectl
+/usr/lib/systemd/systemd-resolved
+/usr/lib/systemd/system/systemd-resolved.service
 /usr/lib/sysusers.d/systemd-resolve.conf
 /usr/lib/tmpfiles.d/systemd-resolve.conf
+/usr/sbin/resolvconf
 /usr/share/bash-completion/completions/resolvectl
 /usr/share/bash-completion/completions/systemd-resolve
 /usr/share/dbus-1/system.d/org.freedesktop.resolve1.conf

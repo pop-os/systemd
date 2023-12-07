@@ -15,6 +15,7 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "set.h"
+#include "stat-util.h"
 
 #define MAKE_SET(s) ((Set*) s)
 #define MAKE_FDSET(s) ((FDSet*) s)
@@ -23,27 +24,29 @@ FDSet *fdset_new(void) {
         return MAKE_FDSET(set_new(NULL));
 }
 
-int fdset_new_array(FDSet **ret, const int *fds, size_t n_fds) {
-        size_t i;
-        FDSet *s;
+static void fdset_shallow_freep(FDSet **s) {
+        /* Destroys the set, but does not free the fds inside, like fdset_free()! */
+        set_free(MAKE_SET(*ASSERT_PTR(s)));
+}
+
+int fdset_new_array(FDSet **ret, const int fds[], size_t n_fds) {
+        _cleanup_(fdset_shallow_freep) FDSet *s = NULL;
         int r;
 
         assert(ret);
+        assert(fds || n_fds == 0);
 
         s = fdset_new();
         if (!s)
                 return -ENOMEM;
 
-        for (i = 0; i < n_fds; i++) {
-
+        for (size_t i = 0; i < n_fds; i++) {
                 r = fdset_put(s, fds[i]);
-                if (r < 0) {
-                        set_free(MAKE_SET(s));
+                if (r < 0)
                         return r;
-                }
         }
 
-        *ret = s;
+        *ret = TAKE_PTR(s);
         return 0;
 }
 
@@ -51,6 +54,8 @@ void fdset_close(FDSet *s) {
         void *p;
 
         while ((p = set_steal_first(MAKE_SET(s)))) {
+                int fd = PTR_TO_FD(p);
+
                 /* Valgrind's fd might have ended up in this set here, due to fdset_new_fill(). We'll ignore
                  * all failures here, so that the EBADFD that valgrind will return us on close() doesn't
                  * influence us */
@@ -59,8 +64,14 @@ void fdset_close(FDSet *s) {
                  * which has no effect at all, since they are only duplicates. So don't be surprised about
                  * these log messages. */
 
-                log_debug("Closing set fd %i", PTR_TO_FD(p));
-                (void) close_nointr(PTR_TO_FD(p));
+                if (DEBUG_LOGGING) {
+                        _cleanup_free_ char *path = NULL;
+
+                        (void) fd_get_path(fd, &path);
+                        log_debug("Closing set fd %i (%s)", fd, strna(path));
+                }
+
+                (void) close_nointr(fd);
         }
 }
 
@@ -81,8 +92,22 @@ int fdset_put(FDSet *s, int fd) {
         return set_put(MAKE_SET(s), FD_TO_PTR(fd));
 }
 
+int fdset_consume(FDSet *s, int fd) {
+        int r;
+
+        assert(s);
+        assert(fd >= 0);
+
+        r = fdset_put(s, fd);
+        if (r < 0)
+                safe_close(fd);
+
+        return r;
+}
+
 int fdset_put_dup(FDSet *s, int fd) {
-        int copy, r;
+        _cleanup_close_ int copy = -EBADF;
+        int r;
 
         assert(s);
         assert(fd >= 0);
@@ -92,12 +117,10 @@ int fdset_put_dup(FDSet *s, int fd) {
                 return -errno;
 
         r = fdset_put(s, copy);
-        if (r < 0) {
-                safe_close(copy);
+        if (r < 0)
                 return r;
-        }
 
-        return copy;
+        return TAKE_FD(copy);
 }
 
 bool fdset_contains(FDSet *s, int fd) {
@@ -126,36 +149,39 @@ int fdset_remove(FDSet *s, int fd) {
 
 int fdset_new_fill(
                 int filter_cloexec, /* if < 0 takes all fds, otherwise only those with O_CLOEXEC set (1) or unset (0) */
-                FDSet **_s) {
+                FDSet **ret) {
+        _cleanup_(fdset_shallow_freep) FDSet *s = NULL;
         _cleanup_closedir_ DIR *d = NULL;
-        int r = 0;
-        FDSet *s;
+        int r;
 
-        assert(_s);
+        assert(ret);
 
-        /* Creates an fdset and fills in all currently open file
-         * descriptors. */
+        /* Creates an fdset and fills in all currently open file descriptors. */
 
         d = opendir("/proc/self/fd");
-        if (!d)
-                return -errno;
+        if (!d) {
+                if (errno == ENOENT && proc_mounted() == 0)
+                        return -ENOSYS;
 
-        s = fdset_new();
-        if (!s) {
-                r = -ENOMEM;
-                goto finish;
+                return -errno;
         }
 
-        FOREACH_DIRENT(de, d, return -errno) {
-                int fd = -EBADF;
+        s = fdset_new();
+        if (!s)
+                return -ENOMEM;
 
-                r = safe_atoi(de->d_name, &fd);
-                if (r < 0)
-                        goto finish;
+        FOREACH_DIRENT(de, d, return -errno) {
+                int fd;
+
+                if (!IN_SET(de->d_type, DT_LNK, DT_UNKNOWN))
+                        continue;
+
+                fd = parse_fd(de->d_name);
+                if (fd < 0)
+                        return fd;
 
                 if (fd < 3)
                         continue;
-
                 if (fd == dirfd(d))
                         continue;
 
@@ -175,18 +201,11 @@ int fdset_new_fill(
 
                 r = fdset_put(s, fd);
                 if (r < 0)
-                        goto finish;
+                        return r;
         }
 
-        r = 0;
-        *_s = TAKE_PTR(s);
-
-finish:
-        /* We won't close the fds here! */
-        if (s)
-                set_free(MAKE_SET(s));
-
-        return r;
+        *ret = TAKE_PTR(s);
+        return 0;
 }
 
 int fdset_cloexec(FDSet *fds, bool b) {
@@ -204,53 +223,66 @@ int fdset_cloexec(FDSet *fds, bool b) {
         return 0;
 }
 
-int fdset_new_listen_fds(FDSet **_s, bool unset) {
+int fdset_new_listen_fds(FDSet **ret, bool unset) {
+        _cleanup_(fdset_shallow_freep) FDSet *s = NULL;
         int n, fd, r;
-        FDSet *s;
 
-        assert(_s);
+        assert(ret);
 
         /* Creates an fdset and fills in all passed file descriptors */
 
         s = fdset_new();
-        if (!s) {
-                r = -ENOMEM;
-                goto fail;
-        }
+        if (!s)
+                return -ENOMEM;
 
         n = sd_listen_fds(unset);
         for (fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd ++) {
                 r = fdset_put(s, fd);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
-        *_s = s;
+        *ret = TAKE_PTR(s);
         return 0;
-
-fail:
-        if (s)
-                set_free(MAKE_SET(s));
-
-        return r;
 }
 
-int fdset_close_others(FDSet *fds) {
+int fdset_to_array(FDSet *fds, int **ret) {
+        unsigned j = 0, m;
         void *e;
-        int *a = NULL;
-        size_t j = 0, m;
+        int *a;
+
+        assert(ret);
 
         m = fdset_size(fds);
-
-        if (m > 0) {
-                a = newa(int, m);
-                SET_FOREACH(e, MAKE_SET(fds))
-                        a[j++] = PTR_TO_FD(e);
+        if (m > INT_MAX) /* We want to be able to return an "int" */
+                return -ENOMEM;
+        if (m == 0) {
+                *ret = NULL; /* suppress array allocation if empty */
+                return 0;
         }
+
+        a = new(int, m);
+        if (!a)
+                return -ENOMEM;
+
+        SET_FOREACH(e, MAKE_SET(fds))
+                a[j++] = PTR_TO_FD(e);
 
         assert(j == m);
 
-        return close_all_fds(a, j);
+        *ret = TAKE_PTR(a);
+        return (int) m;
+}
+
+int fdset_close_others(FDSet *fds) {
+        _cleanup_free_ int *a = NULL;
+        int n;
+
+        n = fdset_to_array(fds, &a);
+        if (n < 0)
+                return n;
+
+        return close_all_fds(a, n);
 }
 
 unsigned fdset_size(FDSet *fds) {

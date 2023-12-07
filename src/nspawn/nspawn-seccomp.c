@@ -6,16 +6,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#if HAVE_SECCOMP
-#include <seccomp.h>
-#endif
-
 #include "alloc-util.h"
 #include "log.h"
 #include "nspawn-seccomp.h"
-#if HAVE_SECCOMP
 #include "seccomp-util.h"
-#endif
 #include "string-util.h"
 #include "strv.h"
 
@@ -175,7 +169,7 @@ static int add_syscall_filters(
         /* We have a large filter here, so let's turn on the binary tree mode if possible. */
         r = seccomp_attr_set(ctx, SCMP_FLTATR_CTL_OPTIMIZE, 2);
         if (r < 0)
-                return r;
+                log_warning_errno(r, "Failed to set SCMP_FLTATR_CTL_OPTIMIZE, ignoring: %m");
 #endif
 
         return 0;
@@ -206,10 +200,11 @@ int setup_seccomp(uint64_t cap_list_retain, char **syscall_allow_list, char **sy
                         return r;
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return log_error_errno(r, "Failed to install seccomp filter: %m");
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         SECCOMP_FOREACH_LOCAL_ARCH(arch) {
@@ -242,10 +237,11 @@ int setup_seccomp(uint64_t cap_list_retain, char **syscall_allow_list, char **sy
                 }
 
                 r = seccomp_load(seccomp);
-                if (ERRNO_IS_SECCOMP_FATAL(r))
+                if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return log_error_errno(r, "Failed to install seccomp audit filter: %m");
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m",
+                                        seccomp_arch_to_string(arch));
         }
 
         return 0;

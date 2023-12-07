@@ -47,7 +47,7 @@ int talk_initctl(char rl) {
                 .runlevel = rl,
         };
 
-        r = loop_write(fd, &request, sizeof(request), false);
+        r = loop_write(fd, &request, sizeof(request));
         if (r < 0)
                 return log_error_errno(r, "Failed to write to %s: %m", path);
 
@@ -117,7 +117,7 @@ int enable_sysv_units(const char *verb, char **args) {
 
         /* Processes all SysV units, and reshuffles the array so that afterwards only the native units remain */
 
-        if (arg_scope != LOOKUP_SCOPE_SYSTEM)
+        if (arg_runtime_scope != RUNTIME_SCOPE_SYSTEM)
                 return 0;
 
         if (getenv_bool("SYSTEMCTL_SKIP_SYSV") > 0)
@@ -129,7 +129,7 @@ int enable_sysv_units(const char *verb, char **args) {
                         "is-enabled"))
                 return 0;
 
-        r = lookup_paths_init_or_warn(&paths, arg_scope, LOOKUP_PATHS_EXCLUDE_GENERATED, arg_root);
+        r = lookup_paths_init_or_warn(&paths, arg_runtime_scope, LOOKUP_PATHS_EXCLUDE_GENERATED, arg_root);
         if (r < 0)
                 return r;
 
@@ -137,7 +137,7 @@ int enable_sysv_units(const char *verb, char **args) {
         while (args[f]) {
 
                 const char *argv[] = {
-                        ROOTLIBEXECDIR "/systemd-sysv-install",
+                        LIBEXECDIR "/systemd-sysv-install",
                         NULL, /* --root= */
                         NULL, /* verb */
                         NULL, /* service */
@@ -159,7 +159,7 @@ int enable_sysv_units(const char *verb, char **args) {
                 if (path_is_absolute(name))
                         continue;
 
-                j = unit_file_exists(arg_scope, &paths, name);
+                j = unit_file_exists(arg_runtime_scope, &paths, name);
                 if (j < 0 && !IN_SET(j, -ELOOP, -ERFKILL, -EADDRNOTAVAIL))
                         return log_error_errno(j, "Failed to look up unit file state: %m");
                 found_native = j != 0;
@@ -210,7 +210,7 @@ int enable_sysv_units(const char *verb, char **args) {
                 if (!arg_quiet)
                         log_info("Executing: %s", l);
 
-                j = safe_fork("(sysv-install)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
+                j = safe_fork("(sysv-install)", FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
                 if (j < 0)
                         return j;
                 if (j == 0) {

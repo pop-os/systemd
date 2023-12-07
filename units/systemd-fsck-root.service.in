@@ -20,5 +20,5 @@ OnFailureJobMode=replace-irreversibly
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart={{ROOTLIBEXECDIR}}/systemd-fsck
-TimeoutSec=0
+ExecStart={{LIBEXECDIR}}/systemd-fsck
+TimeoutSec=infinity

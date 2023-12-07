@@ -5,12 +5,31 @@
 #include <unistd.h>
 
 #include "fd-util.h"
+#include "fs-util.h"
 #include "hexdecoct.h"
 #include "id128-util.h"
 #include "io-util.h"
+#include "sha256.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "sync-util.h"
+
+int id128_from_string_nonzero(const char *s, sd_id128_t *ret) {
+        sd_id128_t t;
+        int r;
+
+        assert(ret);
+
+        r = sd_id128_from_string(ASSERT_PTR(s), &t);
+        if (r < 0)
+                return r;
+
+        if (sd_id128_is_null(t))
+                return -ENXIO;
+
+        *ret = t;
+        return 0;
+}
 
 bool id128_is_valid(const char *s) {
         size_t l;
@@ -20,7 +39,7 @@ bool id128_is_valid(const char *s) {
         l = strlen(s);
 
         if (l == SD_ID128_STRING_MAX - 1)
-                /* Plain formatted 128bit hex string */
+                /* Plain formatted 128-bit hex string */
                 return in_charset(s, HEXDIGITS);
 
         if (l == SD_ID128_UUID_STRING_MAX - 1) {
@@ -40,14 +59,15 @@ bool id128_is_valid(const char *s) {
         return false;
 }
 
-int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
+int id128_read_fd(int fd, Id128Flag f, sd_id128_t *ret) {
         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+        sd_id128_t id;
         ssize_t l;
         int r;
 
         assert(fd >= 0);
 
-        /* Reads an 128bit ID from a file, which may either be in plain format (32 hex digits), or in UUID format, both
+        /* Reads an 128-bit ID from a file, which may either be in plain format (32 hex digits), or in UUID format, both
          * optionally followed by a newline and nothing else. ID files should really be newline terminated, but if they
          * aren't that's OK too, following the rule of "Be conservative in what you send, be liberal in what you
          * accept".
@@ -97,27 +117,43 @@ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
                 return -EUCLEAN;
         }
 
-        r = sd_id128_from_string(buffer, ret);
-        return r == -EINVAL ? -EUCLEAN : r;
+        r = sd_id128_from_string(buffer, &id);
+        if (r == -EINVAL)
+                return -EUCLEAN;
+        if (r < 0)
+                return r;
+
+        if (FLAGS_SET(f, ID128_REFUSE_NULL) && sd_id128_is_null(id))
+                return -ENOMEDIUM;
+
+        if (ret)
+                *ret = id;
+        return 0;
 }
 
-int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
+int id128_read_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t *ret) {
         _cleanup_close_ int fd = -EBADF;
 
-        fd = open(p, O_RDONLY|O_CLOEXEC|O_NOCTTY);
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+        assert(path);
+
+        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
         if (fd < 0)
-                return -errno;
+                return fd;
 
         return id128_read_fd(fd, f, ret);
 }
 
-int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id) {
+int id128_write_fd(int fd, Id128Flag f, sd_id128_t id) {
         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
         size_t sz;
         int r;
 
         assert(fd >= 0);
         assert(IN_SET((f & ID128_FORMAT_ANY), ID128_FORMAT_PLAIN, ID128_FORMAT_UUID));
+
+        if (FLAGS_SET(f, ID128_REFUSE_NULL) && sd_id128_is_null(id))
+                return -ENOMEDIUM;
 
         if (FLAGS_SET(f, ID128_FORMAT_PLAIN)) {
                 assert_se(sd_id128_to_string(id, buffer));
@@ -128,7 +164,7 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id) {
         }
 
         buffer[sz - 1] = '\n';
-        r = loop_write(fd, buffer, sz, false);
+        r = loop_write(fd, buffer, sz);
         if (r < 0)
                 return r;
 
@@ -141,12 +177,15 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id) {
         return 0;
 }
 
-int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id) {
+int id128_write_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t id) {
         _cleanup_close_ int fd = -EBADF;
 
-        fd = open(p, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, 0444);
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+        assert(path);
+
+        fd = xopenat(dir_fd, path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, /* xopen_flags = */ 0, 0444);
         if (fd < 0)
-                return -errno;
+                return fd;
 
         return id128_write_fd(fd, f, id);
 }
@@ -195,4 +234,22 @@ int id128_get_product(sd_id128_t *ret) {
 
         *ret = uuid;
         return 0;
+}
+
+sd_id128_t id128_digest(const void *data, size_t size) {
+        assert(data || size == 0);
+
+        /* Hashes a UUID from some arbitrary data */
+
+        if (size == SIZE_MAX)
+                size = strlen(data);
+
+        uint8_t h[SHA256_DIGEST_SIZE];
+        sd_id128_t id;
+
+        /* Take the first half of the SHA256 result */
+        assert_cc(sizeof(h) >= sizeof(id.bytes));
+        memcpy(id.bytes, sha256_direct(data, size, h), sizeof(id.bytes));
+
+        return id128_make_v4_uuid(id);
 }

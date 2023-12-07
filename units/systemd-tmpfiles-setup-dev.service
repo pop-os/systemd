@@ -12,8 +12,9 @@ Description=Create Static Device Nodes in /dev
 Documentation=man:tmpfiles.d(5) man:systemd-tmpfiles(8)
 
 DefaultDependencies=no
-After=systemd-sysusers.service
+After=systemd-tmpfiles-setup-dev-early.service
 Before=sysinit.target local-fs-pre.target systemd-udevd.service
+Wants=local-fs-pre.target
 Conflicts=shutdown.target initrd-switch-root.target
 Before=shutdown.target initrd-switch-root.target
 
@@ -22,4 +23,4 @@ Type=oneshot
 RemainAfterExit=yes
 ExecStart=systemd-tmpfiles --prefix=/dev --create --boot
 SuccessExitStatus=DATAERR CANTCREAT
-LoadCredential=tmpfiles.extra
+ImportCredential=tmpfiles.*

@@ -351,6 +351,8 @@ static int device_amend(sd_device *device, const char *key, const char *value) {
                                 return r;
                         if (r == 0)
                                 break;
+                        if (isempty(word))
+                                continue;
 
                         r = device_add_tag(device, word, streq(key, "CURRENT_TAGS"));
                         if (r < 0)
@@ -523,7 +525,6 @@ int device_new_from_nulstr(sd_device **ret, char *nulstr, size_t len) {
 static int device_update_properties_bufs(sd_device *device) {
         _cleanup_free_ char **buf_strv = NULL, *buf_nulstr = NULL;
         size_t nulstr_len = 0, num = 0;
-        const char *val, *prop;
 
         assert(device);
 
@@ -618,74 +619,58 @@ int device_get_devlink_priority(sd_device *device, int *ret) {
         return 0;
 }
 
-static int device_shallow_clone(sd_device *device, sd_device **ret) {
+int device_clone_with_db(sd_device *device, sd_device **ret) {
         _cleanup_(sd_device_unrefp) sd_device *dest = NULL;
-        const char *val = NULL;
+        const char *key, *val;
         int r;
 
         assert(device);
         assert(ret);
+
+        /* The device may be already removed. Let's copy minimal set of information that was obtained through
+         * netlink socket. */
 
         r = device_new_aux(&dest);
         if (r < 0)
                 return r;
 
+        /* Seal device to prevent reading the uevent file, as the device may have been already removed. */
+        dest->sealed = true;
+
+        /* Copy syspath, then also devname, sysname or sysnum can be obtained. */
         r = device_set_syspath(dest, device->syspath, false);
         if (r < 0)
                 return r;
 
-        (void) sd_device_get_subsystem(device, &val);
-        r = device_set_subsystem(dest, val);
-        if (r < 0)
-                return r;
-        if (streq_ptr(val, "drivers")) {
-                r = free_and_strdup(&dest->driver_subsystem, device->driver_subsystem);
+        /* Copy other information stored in database. Here, do not use FOREACH_DEVICE_PROPERTY() and
+         * sd_device_get_property_value(), as they calls device_properties_prepare() ->
+         * device_read_uevent_file(), but as commented in the above, the device may be already removed and
+         * reading uevent file may fail. */
+        ORDERED_HASHMAP_FOREACH_KEY(val, key, device->properties) {
+                if (streq(key, "MINOR"))
+                        continue;
+
+                if (streq(key, "MAJOR")) {
+                        const char *minor = NULL;
+
+                        minor = ordered_hashmap_get(device->properties, "MINOR");
+                        r = device_set_devnum(dest, val, minor);
+                } else
+                        r = device_amend(dest, key, val);
                 if (r < 0)
                         return r;
+
+                if (streq(key, "SUBSYSTEM") && streq(val, "drivers")) {
+                        r = free_and_strdup(&dest->driver_subsystem, device->driver_subsystem);
+                        if (r < 0)
+                                return r;
+                }
         }
 
-        /* The device may be already removed. Let's copy minimal set of information to make
-         * device_get_device_id() work without uevent file. */
-
-        if (sd_device_get_property_value(device, "IFINDEX", &val) >= 0) {
-                r = device_set_ifindex(dest, val);
-                if (r < 0)
-                        return r;
-        }
-
-        if (sd_device_get_property_value(device, "MAJOR", &val) >= 0) {
-                const char *minor = NULL;
-
-                (void) sd_device_get_property_value(device, "MINOR", &minor);
-                r = device_set_devnum(dest, val, minor);
-                if (r < 0)
-                        return r;
-        }
-
-        r = device_read_uevent_file(dest);
+        /* Finally, read the udev database. */
+        r = device_read_db_internal(dest, /* force = */ true);
         if (r < 0)
                 return r;
-
-        *ret = TAKE_PTR(dest);
-        return 0;
-}
-
-int device_clone_with_db(sd_device *device, sd_device **ret) {
-        _cleanup_(sd_device_unrefp) sd_device *dest = NULL;
-        int r;
-
-        assert(device);
-        assert(ret);
-
-        r = device_shallow_clone(device, &dest);
-        if (r < 0)
-                return r;
-
-        r = device_read_db(dest);
-        if (r < 0)
-                return r;
-
-        dest->sealed = true;
 
         *ret = TAKE_PTR(dest);
         return 0;
@@ -742,7 +727,6 @@ static int device_tag(sd_device *device, const char *tag, bool add) {
 }
 
 int device_tag_index(sd_device *device, sd_device *device_old, bool add) {
-        const char *tag;
         int r = 0, k;
 
         if (add && device_old)
@@ -794,7 +778,7 @@ int device_update_db(sd_device *device) {
         const char *id;
         char *path;
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_free_ char *path_tmp = NULL;
+        _cleanup_(unlink_and_freep) char *path_tmp = NULL;
         bool has_info;
         int r;
 
@@ -833,11 +817,9 @@ int device_update_db(sd_device *device) {
         }
 
         if (has_info) {
-                const char *property, *value, *tag;
+                const char *property, *value, *ct;
 
                 if (major(device->devnum) > 0) {
-                        const char *devlink;
-
                         FOREACH_DEVICE_DEVLINK(device, devlink)
                                 fprintf(f, "S:%s\n", devlink + STRLEN("/dev/"));
 
@@ -854,8 +836,8 @@ int device_update_db(sd_device *device) {
                 FOREACH_DEVICE_TAG(device, tag)
                         fprintf(f, "G:%s\n", tag); /* Any tag */
 
-                SET_FOREACH(tag, device->current_tags)
-                        fprintf(f, "Q:%s\n", tag); /* Current tag */
+                SET_FOREACH(ct, device->current_tags)
+                        fprintf(f, "Q:%s\n", ct); /* Current tag */
 
                 /* Always write the latest database version here, instead of the value stored in
                  * device->database_version, as which may be 0. */
@@ -871,6 +853,8 @@ int device_update_db(sd_device *device) {
                 goto fail;
         }
 
+        path_tmp = mfree(path_tmp);
+
         log_device_debug(device, "sd-device: Created %s file '%s' for '%s'", has_info ? "db" : "empty",
                          path, device->devpath);
 
@@ -878,7 +862,6 @@ int device_update_db(sd_device *device) {
 
 fail:
         (void) unlink(path);
-        (void) unlink(path_tmp);
 
         return log_device_debug_errno(device, r, "sd-device: Failed to create %s file '%s' for '%s'", has_info ? "db" : "empty", path, device->devpath);
 }

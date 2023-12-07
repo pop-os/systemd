@@ -174,7 +174,6 @@ def property_grammar():
              ('ID_INPUT_TRACKBALL', Or((Literal('0'), Literal('1')))),
              ('ID_SIGNAL_ANALYZER', Or((Literal('0'), Literal('1')))),
              ('POINTINGSTICK_SENSITIVITY', INTEGER),
-             ('POINTINGSTICK_CONST_ACCEL', REAL),
              ('ID_INPUT_JOYSTICK_INTEGRATION', Or(('internal', 'external'))),
              ('ID_INPUT_TOUCHPAD_INTEGRATION', Or(('internal', 'external'))),
              ('XKB_FIXED_LAYOUT', xkb_setting),
@@ -193,6 +192,7 @@ def property_grammar():
              ('ID_TAG_MASTER_OF_SEAT', Literal('1')),
              ('ID_INFRARED_CAMERA', Or((Literal('0'), Literal('1')))),
              ('ID_CAMERA_DIRECTION', Or(('front', 'rear'))),
+             ('SOUND_FORM_FACTOR', Or(('internal', 'webcam', 'speaker', 'headphone', 'headset', 'handset', 'microphone'))),
             )
     fixed_props = [Literal(name)('NAME') - Suppress('=') - val('VALUE')
                    for name, val in props]

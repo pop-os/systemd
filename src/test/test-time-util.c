@@ -1,12 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "env-util.h"
+#include "fd-util.h"
+#include "fileio.h"
 #include "random-util.h"
 #include "serialize.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tests.h"
 #include "time-util.h"
+
+#define TRIAL 100u
 
 TEST(parse_sec) {
         usec_t u;
@@ -31,7 +35,9 @@ TEST(parse_sec) {
         assert_se(u == 700 * USEC_PER_MSEC);
         assert_se(parse_sec("23us", &u) >= 0);
         assert_se(u == 23);
-        assert_se(parse_sec("23µs", &u) >= 0);
+        assert_se(parse_sec("23μs", &u) >= 0); /* greek small letter mu */
+        assert_se(u == 23);
+        assert_se(parse_sec("23µs", &u) >= 0); /* micro symbol */
         assert_se(u == 23);
         assert_se(parse_sec("infinity", &u) >= 0);
         assert_se(u == USEC_INFINITY);
@@ -334,11 +340,11 @@ TEST(usec_sub_signed) {
 }
 
 TEST(format_timestamp) {
-        for (unsigned i = 0; i < 100; i++) {
+        for (unsigned i = 0; i < TRIAL; i++) {
                 char buf[CONST_MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESPAN_MAX)];
                 usec_t x, y;
 
-                x = random_u64_range(2147483600 * USEC_PER_SEC) + 1;
+                x = random_u64_range(USEC_TIMESTAMP_FORMATTABLE_MAX - USEC_PER_SEC) + USEC_PER_SEC;
 
                 assert_se(format_timestamp(buf, sizeof(buf), x));
                 log_debug("%s", buf);
@@ -384,21 +390,161 @@ TEST(format_timestamp) {
         }
 }
 
-TEST(FORMAT_TIMESTAMP) {
-        for (unsigned i = 0; i < 100; i++) {
-                _cleanup_free_ char *buf;
-                usec_t x, y;
+static void test_format_timestamp_impl(usec_t x) {
+        bool success, override;
+        const char *xx, *yy;
+        usec_t y;
 
-                x = random_u64_range(2147483600 * USEC_PER_SEC) + 1;
+        xx = FORMAT_TIMESTAMP(x);
+        assert_se(xx);
+        assert_se(parse_timestamp(xx, &y) >= 0);
+        yy = FORMAT_TIMESTAMP(y);
+        assert_se(yy);
 
-                /* strbuf() is to test the macro in an argument to a function call. */
-                assert_se(buf = strdup(FORMAT_TIMESTAMP(x)));
-                log_debug("%s", buf);
-                assert_se(parse_timestamp(buf, &y) >= 0);
+        success = (x / USEC_PER_SEC == y / USEC_PER_SEC) && streq(xx, yy);
+        /* Workaround for https://github.com/systemd/systemd/issues/28472 */
+        override = !success &&
+                   (STRPTR_IN_SET(tzname[0], "CAT", "EAT") ||
+                    STRPTR_IN_SET(tzname[1], "CAT", "EAT")) &&
+                   DIV_ROUND_UP(y - x, USEC_PER_SEC) == 3600; /* 1 hour, ignore fractional second */
+        log_full(success ? LOG_DEBUG : override ? LOG_WARNING : LOG_ERR,
+                 "@" USEC_FMT " → %s → @" USEC_FMT " → %s%s",
+                 x, xx, y, yy,
+                 override ? ", ignoring." : "");
+        if (!override) {
                 assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
-
-                assert_se(streq(FORMAT_TIMESTAMP(x), buf));
+                assert_se(streq(xx, yy));
         }
+}
+
+static void test_format_timestamp_loop(void) {
+        test_format_timestamp_impl(USEC_PER_SEC);
+        test_format_timestamp_impl(USEC_TIMESTAMP_FORMATTABLE_MAX_32BIT-1);
+        test_format_timestamp_impl(USEC_TIMESTAMP_FORMATTABLE_MAX_32BIT);
+        test_format_timestamp_impl(USEC_TIMESTAMP_FORMATTABLE_MAX-1);
+        test_format_timestamp_impl(USEC_TIMESTAMP_FORMATTABLE_MAX);
+
+        /* Two cases which trigger https://github.com/systemd/systemd/issues/28472 */
+        test_format_timestamp_impl(1504938962980066);
+        test_format_timestamp_impl(1509482094632752);
+
+        for (unsigned i = 0; i < TRIAL; i++) {
+                usec_t x;
+
+                x = random_u64_range(USEC_TIMESTAMP_FORMATTABLE_MAX - USEC_PER_SEC) + USEC_PER_SEC;
+                test_format_timestamp_impl(x);
+        }
+}
+
+TEST(FORMAT_TIMESTAMP) {
+        test_format_timestamp_loop();
+}
+
+static void test_format_timestamp_with_tz_one(const char *tz) {
+        const char *saved_tz, *colon_tz;
+
+        if (!timezone_is_valid(tz, LOG_DEBUG))
+                return;
+
+        log_info("/* %s(%s) */", __func__, tz);
+
+        saved_tz = getenv("TZ");
+
+        assert_se(colon_tz = strjoina(":", tz));
+        assert_se(setenv("TZ", colon_tz, 1) >= 0);
+        tzset();
+        log_debug("%s: tzname[0]=%s, tzname[1]=%s", tz, strempty(tzname[0]), strempty(tzname[1]));
+
+        test_format_timestamp_loop();
+
+        assert_se(set_unset_env("TZ", saved_tz, true) == 0);
+        tzset();
+}
+
+TEST(FORMAT_TIMESTAMP_with_tz) {
+        _cleanup_strv_free_ char **timezones = NULL;
+
+        test_format_timestamp_with_tz_one("UTC");
+
+        if (!slow_tests_enabled())
+                return (void) log_tests_skipped("slow tests are disabled");
+
+        assert_se(get_timezones(&timezones) >= 0);
+        STRV_FOREACH(tz, timezones)
+                test_format_timestamp_with_tz_one(*tz);
+}
+
+TEST(format_timestamp_relative_full) {
+        char buf[CONST_MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESPAN_MAX)];
+        usec_t x;
+
+        /* Years and months */
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_YEAR + 1*USEC_PER_MONTH);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 year 1 month ago"));
+
+        x = now(CLOCK_MONOTONIC) + (1*USEC_PER_YEAR + 1.5*USEC_PER_MONTH);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_MONOTONIC, false));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 year 1 month left"));
+
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_YEAR + 2*USEC_PER_MONTH);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 year 2 months ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_YEAR + 1*USEC_PER_MONTH);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 years 1 month ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_YEAR + 2*USEC_PER_MONTH);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 years 2 months ago"));
+
+        /* Months and days */
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_MONTH + 1*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 month 1 day ago"));
+
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_MONTH + 2*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 month 2 days ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_MONTH + 1*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 months 1 day ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_MONTH + 2*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 months 2 days ago"));
+
+        /* Weeks and days */
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_WEEK + 1*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 week 1 day ago"));
+
+        x = now(CLOCK_REALTIME) - (1*USEC_PER_WEEK + 2*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "1 week 2 days ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_WEEK + 1*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 weeks 1 day ago"));
+
+        x = now(CLOCK_REALTIME) - (2*USEC_PER_WEEK + 2*USEC_PER_DAY);
+        assert_se(format_timestamp_relative_full(buf, sizeof(buf), x, CLOCK_REALTIME, true));
+        log_debug("%s", buf);
+        assert_se(streq(buf, "2 weeks 2 days ago"));
 }
 
 TEST(format_timestamp_relative) {
@@ -501,14 +647,339 @@ TEST(format_timestamp_range) {
         test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, TIMESTAMP_US_UTC, "--- XXXX-XX-XX XX:XX:XX.XXXXXX UTC");
         test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, TIMESTAMP_DATE, "--- XXXX-XX-XX");
 #elif SIZEOF_TIME_T == 4
-        test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX, TIMESTAMP_UTC, "Tue 2038-01-19 03:14:07 UTC");
-        test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX, TIMESTAMP_DATE, "Tue 2038-01-19");
+        test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX, TIMESTAMP_UTC, "Mon 2038-01-18 03:14:07 UTC");
+        test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX, TIMESTAMP_DATE, "Mon 2038-01-18");
         test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, TIMESTAMP_UTC, "--- XXXX-XX-XX XX:XX:XX UTC");
         test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, TIMESTAMP_US_UTC, "--- XXXX-XX-XX XX:XX:XX.XXXXXX UTC");
         test_format_timestamp_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, TIMESTAMP_DATE, "--- XXXX-XX-XX");
 #endif
 
         test_format_timestamp_one(USEC_INFINITY, TIMESTAMP_UTC, NULL);
+}
+
+static void test_parse_timestamp_one(const char *str, usec_t max_diff, usec_t expected) {
+        usec_t usec = USEC_INFINITY;
+        int r;
+
+        r = parse_timestamp(str, &usec);
+        log_debug("/* %s(%s): max_diff="USEC_FMT", expected="USEC_FMT", result="USEC_FMT" */", __func__, str, max_diff, expected, usec);
+        assert_se(r >= 0);
+        assert_se(usec >= expected);
+        assert_se(usec_sub_unsigned(usec, expected) <= max_diff);
+}
+
+static bool time_is_zero(usec_t usec) {
+        const char *s;
+
+        s = FORMAT_TIMESTAMP(usec);
+        return strstr(s, " 00:00:00 ");
+}
+
+static bool timezone_equal(usec_t today, usec_t target) {
+        const char *s, *t, *sz, *tz;
+
+        s = FORMAT_TIMESTAMP(today);
+        t = FORMAT_TIMESTAMP(target);
+        assert_se(sz = strrchr(s, ' '));
+        assert_se(tz = strrchr(t, ' '));
+        log_debug("%s("USEC_FMT", "USEC_FMT") -> %s, %s", __func__, today, target, s, t);
+        return streq(sz, tz);
+}
+
+static void test_parse_timestamp_impl(const char *tz) {
+        usec_t today, today2, now_usec;
+
+        /* Invalid: Ensure that systemctl reboot --when=show and --when=cancel
+         * will not result in ambiguities */
+        assert_se(parse_timestamp("show", NULL) == -EINVAL);
+        assert_se(parse_timestamp("cancel", NULL) == -EINVAL);
+
+        /* UTC */
+        test_parse_timestamp_one("Thu 1970-01-01 00:01 UTC", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Thu 1970-01-01 00:00:01 UTC", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Thu 1970-01-01 00:00:01.001 UTC", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Thu 1970-01-01 00:00:01.0010 UTC", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("Thu 70-01-01 00:01 UTC", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Thu 70-01-01 00:00:01 UTC", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Thu 70-01-01 00:00:01.001 UTC", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Thu 70-01-01 00:00:01.0010 UTC", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("1970-01-01 00:01 UTC", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("1970-01-01 00:00:01 UTC", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("1970-01-01 00:00:01.001 UTC", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("1970-01-01 00:00:01.0010 UTC", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("70-01-01 00:01 UTC", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("70-01-01 00:00:01 UTC", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("70-01-01 00:00:01.001 UTC", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("70-01-01 00:00:01.0010 UTC", 0, USEC_PER_SEC + 1000);
+
+        /* Examples from RFC3339 */
+        test_parse_timestamp_one("1985-04-12T23:20:50.52Z", 0, 482196050 * USEC_PER_SEC + 520000);
+        test_parse_timestamp_one("1996-12-19T16:39:57-08:00", 0, 851042397 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("1996-12-20T00:39:57Z", 0, 851042397 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("1990-12-31T23:59:60Z", 0, 662688000 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("1990-12-31T15:59:60-08:00", 0, 662688000 * USEC_PER_SEC + 000000);
+        assert_se(parse_timestamp("1937-01-01T12:00:27.87+00:20", NULL) == -EINVAL); /* we don't support pre-epoch timestamps */
+        /* We accept timestamps without seconds as well */
+        test_parse_timestamp_one("1996-12-20T00:39Z", 0, (851042397 - 57) * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("1990-12-31T15:59-08:00", 0, (662688000-60) * USEC_PER_SEC + 000000);
+        /* We drop day-of-week before parsing the timestamp */
+        test_parse_timestamp_one("Thu 1970-01-01T00:01 UTC", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Thu 1970-01-01T00:00:01 UTC", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Thu 1970-01-01T00:01Z", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Thu 1970-01-01T00:00:01Z", 0, USEC_PER_SEC);
+        /* RFC3339-style timezones can be welded to all formats */
+        assert_se(parse_timestamp("today UTC", &today) == 0);
+        assert_se(parse_timestamp("todayZ", &today2) == 0);
+        assert_se(today == today2);
+        assert_se(parse_timestamp("today +0200", &today) == 0);
+        assert_se(parse_timestamp("today+02:00", &today2) == 0);
+        assert_se(today == today2);
+
+        /* https://ijmacd.github.io/rfc3339-iso8601/ */
+        test_parse_timestamp_one("2023-09-06 12:49:27-00:00", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06 12:49:27.284-00:00", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06 12:49:27.284029Z", 0, 1694004567 * USEC_PER_SEC + 284029);
+        test_parse_timestamp_one("2023-09-06 12:49:27.284Z", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06 12:49:27.28Z", 0, 1694004567 * USEC_PER_SEC + 280000);
+        test_parse_timestamp_one("2023-09-06 12:49:27.2Z", 0, 1694004567 * USEC_PER_SEC + 200000);
+        test_parse_timestamp_one("2023-09-06 12:49:27Z", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06 14:49:27+02:00", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06 14:49:27.2+02:00", 0, 1694004567 * USEC_PER_SEC + 200000);
+        test_parse_timestamp_one("2023-09-06 14:49:27.28+02:00", 0, 1694004567 * USEC_PER_SEC + 280000);
+        test_parse_timestamp_one("2023-09-06 14:49:27.284+02:00", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06 14:49:27.284029+02:00", 0, 1694004567 * USEC_PER_SEC + 284029);
+        test_parse_timestamp_one("2023-09-06T12:49:27+00:00", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06T12:49:27-00:00", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06T12:49:27.284+00:00", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06T12:49:27.284-00:00", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06T12:49:27.284029Z", 0, 1694004567 * USEC_PER_SEC + 284029);
+        test_parse_timestamp_one("2023-09-06T12:49:27.284Z", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06T12:49:27.28Z", 0, 1694004567 * USEC_PER_SEC + 280000);
+        test_parse_timestamp_one("2023-09-06T12:49:27.2Z", 0, 1694004567 * USEC_PER_SEC + 200000);
+        test_parse_timestamp_one("2023-09-06T12:49:27Z", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06T14:49:27+02:00", 0, 1694004567 * USEC_PER_SEC + 000000);
+        test_parse_timestamp_one("2023-09-06T14:49:27.284+02:00", 0, 1694004567 * USEC_PER_SEC + 284000);
+        test_parse_timestamp_one("2023-09-06T14:49:27.284029+02:00", 0, 1694004567 * USEC_PER_SEC + 284029);
+        test_parse_timestamp_one("2023-09-06T21:34:27+08:45", 0, 1694004567 * USEC_PER_SEC + 000000);
+
+        if (timezone_is_valid("Asia/Tokyo", LOG_DEBUG)) {
+                /* Asia/Tokyo (+0900) */
+                test_parse_timestamp_one("Thu 1970-01-01 09:01 Asia/Tokyo", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01 Asia/Tokyo", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01.001 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01.0010 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("Thu 70-01-01 09:01 Asia/Tokyo", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01 Asia/Tokyo", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01.001 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01.0010 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("1970-01-01 09:01 Asia/Tokyo", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("1970-01-01 09:00:01 Asia/Tokyo", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("1970-01-01 09:00:01.001 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("1970-01-01 09:00:01.0010 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("70-01-01 09:01 Asia/Tokyo", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("70-01-01 09:00:01 Asia/Tokyo", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("70-01-01 09:00:01.001 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("70-01-01 09:00:01.0010 Asia/Tokyo", 0, USEC_PER_SEC + 1000);
+        }
+
+        if (streq_ptr(tz, "Asia/Tokyo")) {
+                /* JST (+0900) */
+                test_parse_timestamp_one("Thu 1970-01-01 09:01 JST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01 JST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01.001 JST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Thu 1970-01-01 09:00:01.0010 JST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("Thu 70-01-01 09:01 JST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01 JST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01.001 JST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Thu 70-01-01 09:00:01.0010 JST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("1970-01-01 09:01 JST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("1970-01-01 09:00:01 JST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("1970-01-01 09:00:01.001 JST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("1970-01-01 09:00:01.0010 JST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("70-01-01 09:01 JST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("70-01-01 09:00:01 JST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("70-01-01 09:00:01.001 JST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("70-01-01 09:00:01.0010 JST", 0, USEC_PER_SEC + 1000);
+        }
+
+        if (timezone_is_valid("America/New_York", LOG_DEBUG)) {
+                /* America/New_York (-0500) */
+                test_parse_timestamp_one("Wed 1969-12-31 19:01 America/New_York", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01 America/New_York", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01.001 America/New_York", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01.0010 America/New_York", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("Wed 69-12-31 19:01 America/New_York", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01 America/New_York", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01.001 America/New_York", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01.0010 America/New_York", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("1969-12-31 19:01 America/New_York", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("1969-12-31 19:00:01 America/New_York", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("1969-12-31 19:00:01.001 America/New_York", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("1969-12-31 19:00:01.0010 America/New_York", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("69-12-31 19:01 America/New_York", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("69-12-31 19:00:01 America/New_York", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("69-12-31 19:00:01.001 America/New_York", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("69-12-31 19:00:01.0010 America/New_York", 0, USEC_PER_SEC + 1000);
+        }
+
+        if (streq_ptr(tz, "America/New_York")) {
+                /* EST (-0500) */
+                test_parse_timestamp_one("Wed 1969-12-31 19:01 EST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01 EST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01.001 EST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Wed 1969-12-31 19:00:01.0010 EST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("Wed 69-12-31 19:01 EST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01 EST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01.001 EST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("Wed 69-12-31 19:00:01.0010 EST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("1969-12-31 19:01 EST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("1969-12-31 19:00:01 EST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("1969-12-31 19:00:01.001 EST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("1969-12-31 19:00:01.0010 EST", 0, USEC_PER_SEC + 1000);
+
+                test_parse_timestamp_one("69-12-31 19:01 EST", 0, USEC_PER_MINUTE);
+                test_parse_timestamp_one("69-12-31 19:00:01 EST", 0, USEC_PER_SEC);
+                test_parse_timestamp_one("69-12-31 19:00:01.001 EST", 0, USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("69-12-31 19:00:01.0010 EST", 0, USEC_PER_SEC + 1000);
+        }
+
+        /* -06 */
+        test_parse_timestamp_one("Wed 1969-12-31 18:01 -06", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01 -06", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.001 -06", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.0010 -06", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("Wed 69-12-31 18:01 -06", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01 -06", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.001 -06", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.0010 -06", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("1969-12-31 18:01 -06", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("1969-12-31 18:00:01 -06", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("1969-12-31 18:00:01.001 -06", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("1969-12-31 18:00:01.0010 -06", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("69-12-31 18:01 -06", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("69-12-31 18:00:01 -06", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("69-12-31 18:00:01.001 -06", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("69-12-31 18:00:01.0010 -06", 0, USEC_PER_SEC + 1000);
+
+        /* -0600 */
+        test_parse_timestamp_one("Wed 1969-12-31 18:01 -0600", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01 -0600", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.001 -0600", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.0010 -0600", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("Wed 69-12-31 18:01 -0600", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01 -0600", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.001 -0600", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.0010 -0600", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("1969-12-31 18:01 -0600", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("1969-12-31 18:00:01 -0600", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("1969-12-31 18:00:01.001 -0600", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("1969-12-31 18:00:01.0010 -0600", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("69-12-31 18:01 -0600", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("69-12-31 18:00:01 -0600", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("69-12-31 18:00:01.001 -0600", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("69-12-31 18:00:01.0010 -0600", 0, USEC_PER_SEC + 1000);
+
+        /* -06:00 */
+        test_parse_timestamp_one("Wed 1969-12-31 18:01 -06:00", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01 -06:00", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.001 -06:00", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 1969-12-31 18:00:01.0010 -06:00", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("Wed 69-12-31 18:01 -06:00", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01 -06:00", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.001 -06:00", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("Wed 69-12-31 18:00:01.0010 -06:00", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("1969-12-31 18:01 -06:00", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("1969-12-31 18:00:01 -06:00", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("1969-12-31 18:00:01.001 -06:00", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("1969-12-31 18:00:01.0010 -06:00", 0, USEC_PER_SEC + 1000);
+
+        test_parse_timestamp_one("69-12-31 18:01 -06:00", 0, USEC_PER_MINUTE);
+        test_parse_timestamp_one("69-12-31 18:00:01 -06:00", 0, USEC_PER_SEC);
+        test_parse_timestamp_one("69-12-31 18:00:01.001 -06:00", 0, USEC_PER_SEC + 1000);
+        test_parse_timestamp_one("69-12-31 18:00:01.0010 -06:00", 0, USEC_PER_SEC + 1000);
+
+        /* without date */
+        assert_se(parse_timestamp("today", &today) == 0);
+        if (time_is_zero(today)) {
+                test_parse_timestamp_one("00:01", 0, today + USEC_PER_MINUTE);
+                test_parse_timestamp_one("00:00:01", 0, today + USEC_PER_SEC);
+                test_parse_timestamp_one("00:00:01.001", 0, today + USEC_PER_SEC + 1000);
+                test_parse_timestamp_one("00:00:01.0010", 0, today + USEC_PER_SEC + 1000);
+
+                if (timezone_equal(today, today + USEC_PER_DAY) && time_is_zero(today + USEC_PER_DAY))
+                        test_parse_timestamp_one("tomorrow", 0, today + USEC_PER_DAY);
+                if (timezone_equal(today, today - USEC_PER_DAY) && time_is_zero(today - USEC_PER_DAY))
+                        test_parse_timestamp_one("yesterday", 0, today - USEC_PER_DAY);
+        }
+
+        /* relative */
+        assert_se(parse_timestamp("now", &now_usec) == 0);
+        test_parse_timestamp_one("+5hours", USEC_PER_MINUTE, now_usec + 5 * USEC_PER_HOUR);
+        if (now_usec >= 10 * USEC_PER_DAY)
+                test_parse_timestamp_one("-10days", USEC_PER_MINUTE, now_usec - 10 * USEC_PER_DAY);
+        test_parse_timestamp_one("2weeks left", USEC_PER_MINUTE, now_usec + 2 * USEC_PER_WEEK);
+        if (now_usec >= 30 * USEC_PER_MINUTE)
+                test_parse_timestamp_one("30minutes ago", USEC_PER_MINUTE, now_usec - 30 * USEC_PER_MINUTE);
+}
+
+TEST(parse_timestamp) {
+        test_parse_timestamp_impl(NULL);
+}
+
+static void test_parse_timestamp_with_tz_one(const char *tz) {
+        const char *saved_tz, *colon_tz;
+
+        if (!timezone_is_valid(tz, LOG_DEBUG))
+                return;
+
+        log_info("/* %s(%s) */", __func__, tz);
+
+        saved_tz = getenv("TZ");
+
+        assert_se(colon_tz = strjoina(":", tz));
+        assert_se(setenv("TZ", colon_tz, 1) >= 0);
+        tzset();
+        log_debug("%s: tzname[0]=%s, tzname[1]=%s", tz, strempty(tzname[0]), strempty(tzname[1]));
+
+        test_parse_timestamp_impl(tz);
+
+        assert_se(set_unset_env("TZ", saved_tz, true) == 0);
+        tzset();
+}
+
+TEST(parse_timestamp_with_tz) {
+        _cleanup_strv_free_ char **timezones = NULL;
+
+        test_parse_timestamp_with_tz_one("UTC");
+
+        if (!slow_tests_enabled())
+                return (void) log_tests_skipped("slow tests are disabled");
+
+        assert_se(get_timezones(&timezones) >= 0);
+        STRV_FOREACH(tz, timezones)
+                test_parse_timestamp_with_tz_one(*tz);
 }
 
 TEST(deserialize_dual_timestamp) {
@@ -632,6 +1103,71 @@ TEST(map_clock_usec) {
                 assert_se(z > 0 && z < USEC_INFINITY);
                 assert_se((z > x ? z - x : x - z) < USEC_PER_HOUR);
         }
+}
+
+static void test_timezone_offset_change_one(const char *utc, const char *pretty) {
+        usec_t x, y, z;
+        char *s;
+
+        assert_se(parse_timestamp(utc, &x) >= 0);
+
+        s = FORMAT_TIMESTAMP_STYLE(x, TIMESTAMP_UTC);
+        assert_se(parse_timestamp(s, &y) >= 0);
+        log_debug("%s -> " USEC_FMT " -> %s -> " USEC_FMT, utc, x, s, y);
+        assert_se(streq(s, utc));
+        assert_se(x == y);
+
+        assert_se(parse_timestamp(pretty, &y) >= 0);
+        s = FORMAT_TIMESTAMP_STYLE(y, TIMESTAMP_PRETTY);
+        assert_se(parse_timestamp(s, &z) >= 0);
+        log_debug("%s -> " USEC_FMT " -> %s -> " USEC_FMT, pretty, y, s, z);
+        assert_se(streq(s, pretty));
+        assert_se(x == y);
+        assert_se(x == z);
+}
+
+TEST(timezone_offset_change) {
+        const char *tz = getenv("TZ");
+
+        /* See issue #26370. */
+
+        if (timezone_is_valid("Africa/Casablanca", LOG_DEBUG)) {
+                assert_se(setenv("TZ", ":Africa/Casablanca", 1) >= 0);
+                tzset();
+                log_debug("Africa/Casablanca: tzname[0]=%s, tzname[1]=%s", strempty(tzname[0]), strempty(tzname[1]));
+
+                test_timezone_offset_change_one("Sun 2015-10-25 01:59:59 UTC", "Sun 2015-10-25 02:59:59 +01");
+                test_timezone_offset_change_one("Sun 2015-10-25 02:00:00 UTC", "Sun 2015-10-25 02:00:00 +00");
+                test_timezone_offset_change_one("Sun 2018-06-17 01:59:59 UTC", "Sun 2018-06-17 01:59:59 +00");
+                test_timezone_offset_change_one("Sun 2018-06-17 02:00:00 UTC", "Sun 2018-06-17 03:00:00 +01");
+                test_timezone_offset_change_one("Sun 2018-10-28 01:59:59 UTC", "Sun 2018-10-28 02:59:59 +01");
+                test_timezone_offset_change_one("Sun 2018-10-28 02:00:00 UTC", "Sun 2018-10-28 03:00:00 +01");
+        }
+
+        if (timezone_is_valid("Asia/Atyrau", LOG_DEBUG)) {
+                assert_se(setenv("TZ", ":Asia/Atyrau", 1) >= 0);
+                tzset();
+                log_debug("Asia/Atyrau: tzname[0]=%s, tzname[1]=%s", strempty(tzname[0]), strempty(tzname[1]));
+
+                test_timezone_offset_change_one("Sat 2004-03-27 21:59:59 UTC", "Sun 2004-03-28 01:59:59 +04");
+                test_timezone_offset_change_one("Sat 2004-03-27 22:00:00 UTC", "Sun 2004-03-28 03:00:00 +05");
+                test_timezone_offset_change_one("Sat 2004-10-30 21:59:59 UTC", "Sun 2004-10-31 02:59:59 +05");
+                test_timezone_offset_change_one("Sat 2004-10-30 22:00:00 UTC", "Sun 2004-10-31 03:00:00 +05");
+        }
+
+        if (timezone_is_valid("Chile/EasterIsland", LOG_DEBUG)) {
+                assert_se(setenv("TZ", ":Chile/EasterIsland", 1) >= 0);
+                tzset();
+                log_debug("Chile/EasterIsland: tzname[0]=%s, tzname[1]=%s", strempty(tzname[0]), strempty(tzname[1]));
+
+                test_timezone_offset_change_one("Sun 1981-10-11 03:59:59 UTC", "Sat 1981-10-10 20:59:59 -07");
+                test_timezone_offset_change_one("Sun 1981-10-11 04:00:00 UTC", "Sat 1981-10-10 22:00:00 -06");
+                test_timezone_offset_change_one("Sun 1982-03-14 02:59:59 UTC", "Sat 1982-03-13 20:59:59 -06");
+                test_timezone_offset_change_one("Sun 1982-03-14 03:00:00 UTC", "Sat 1982-03-13 21:00:00 -06");
+        }
+
+        assert_se(set_unset_env("TZ", tz, true) == 0);
+        tzset();
 }
 
 static int intro(void) {

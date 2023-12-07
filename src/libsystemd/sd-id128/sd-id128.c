@@ -7,6 +7,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "chase.h"
 #include "fd-util.h"
 #include "hexdecoct.h"
 #include "hmac.h"
@@ -15,6 +16,7 @@
 #include "macro.h"
 #include "missing_syscall.h"
 #include "missing_threads.h"
+#include "path-util.h"
 #include "random-util.h"
 #include "stat-util.h"
 #include "user-util.h"
@@ -126,12 +128,9 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
         int r;
 
         if (sd_id128_is_null(saved_machine_id)) {
-                r = id128_read("/etc/machine-id", ID128_FORMAT_PLAIN, &saved_machine_id);
+                r = id128_read("/etc/machine-id", ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, &saved_machine_id);
                 if (r < 0)
                         return r;
-
-                if (sd_id128_is_null(saved_machine_id))
-                        return -ENOMEDIUM;
         }
 
         if (ret)
@@ -139,19 +138,48 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
         return 0;
 }
 
+int id128_get_machine_at(int rfd, sd_id128_t *ret) {
+        _cleanup_close_ int fd = -EBADF;
+        int r;
+
+        assert(rfd >= 0 || rfd == AT_FDCWD);
+
+        r = dir_fd_is_root_or_cwd(rfd);
+        if (r < 0)
+                return r;
+        if (r > 0)
+                return sd_id128_get_machine(ret);
+
+        fd = chase_and_openat(rfd, "/etc/machine-id", CHASE_AT_RESOLVE_IN_ROOT, O_RDONLY|O_CLOEXEC|O_NOCTTY, NULL);
+        if (fd < 0)
+                return fd;
+
+        return id128_read_fd(fd, ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, ret);
+}
+
+int id128_get_machine(const char *root, sd_id128_t *ret) {
+        _cleanup_close_ int fd = -EBADF;
+
+        if (empty_or_root(root))
+                return sd_id128_get_machine(ret);
+
+        fd = chase_and_open("/etc/machine-id", root, CHASE_PREFIX_ROOT, O_RDONLY|O_CLOEXEC|O_NOCTTY, NULL);
+        if (fd < 0)
+                return fd;
+
+        return id128_read_fd(fd, ID128_FORMAT_PLAIN | ID128_REFUSE_NULL, ret);
+}
+
 _public_ int sd_id128_get_boot(sd_id128_t *ret) {
         static thread_local sd_id128_t saved_boot_id = {};
         int r;
 
         if (sd_id128_is_null(saved_boot_id)) {
-                r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID, &saved_boot_id);
+                r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID | ID128_REFUSE_NULL, &saved_boot_id);
                 if (r == -ENOENT && proc_mounted() == 0)
                         return -ENOSYS;
                 if (r < 0)
                         return r;
-
-                if (sd_id128_is_null(saved_boot_id))
-                        return -ENOMEDIUM;
         }
 
         if (ret)
@@ -310,18 +338,20 @@ _public_ int sd_id128_randomize(sd_id128_t *ret) {
         return 0;
 }
 
-static int get_app_specific(sd_id128_t base, sd_id128_t app_id, sd_id128_t *ret) {
-        uint8_t hmac[SHA256_DIGEST_SIZE];
-        sd_id128_t result;
+_public_ int sd_id128_get_app_specific(sd_id128_t base, sd_id128_t app_id, sd_id128_t *ret) {
+        assert_cc(sizeof(sd_id128_t) < SHA256_DIGEST_SIZE); /* Check that we don't need to pad with zeros. */
+        union {
+                uint8_t hmac[SHA256_DIGEST_SIZE];
+                sd_id128_t result;
+        } buf;
 
-        assert(ret);
+        assert_return(ret, -EINVAL);
+        assert_return(!sd_id128_is_null(app_id), -ENXIO);
 
-        hmac_sha256(&base, sizeof(base), &app_id, sizeof(app_id), hmac);
+        hmac_sha256(&base, sizeof(base), &app_id, sizeof(app_id), buf.hmac);
 
         /* Take only the first half. */
-        memcpy(&result, hmac, MIN(sizeof(hmac), sizeof(result)));
-
-        *ret = id128_make_v4_uuid(result);
+        *ret = id128_make_v4_uuid(buf.result);
         return 0;
 }
 
@@ -335,7 +365,7 @@ _public_ int sd_id128_get_machine_app_specific(sd_id128_t app_id, sd_id128_t *re
         if (r < 0)
                 return r;
 
-        return get_app_specific(id, app_id, ret);
+        return sd_id128_get_app_specific(id, app_id, ret);
 }
 
 _public_ int sd_id128_get_boot_app_specific(sd_id128_t app_id, sd_id128_t *ret) {
@@ -348,5 +378,5 @@ _public_ int sd_id128_get_boot_app_specific(sd_id128_t app_id, sd_id128_t *ret) 
         if (r < 0)
                 return r;
 
-        return get_app_specific(id, app_id, ret);
+        return sd_id128_get_app_specific(id, app_id, ret);
 }

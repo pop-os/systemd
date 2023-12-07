@@ -1,2 +1,3 @@
+usr/share/dbus-1/interfaces/
 usr/share/pkgconfig/systemd.pc
 usr/share/pkgconfig/udev.pc

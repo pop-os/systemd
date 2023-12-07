@@ -52,6 +52,7 @@
 #include "networkd-nexthop.h"
 #include "networkd-queue.h"
 #include "networkd-radv.h"
+#include "networkd-route-util.h"
 #include "networkd-route.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-setlink.h"
@@ -92,6 +93,32 @@ bool link_ipv6_enabled(Link *link) {
                 return true;
 
         return false;
+}
+
+bool link_has_ipv6_connectivity(Link *link) {
+        LinkAddressState ipv6_address_state;
+
+        assert(link);
+
+        link_get_address_states(link, NULL, &ipv6_address_state, NULL);
+
+        switch (ipv6_address_state) {
+        case LINK_ADDRESS_STATE_ROUTABLE:
+                /* If the interface has a routable IPv6 address, then we assume yes. */
+                return true;
+
+        case LINK_ADDRESS_STATE_DEGRADED:
+                /* If the interface has only degraded IPv6 address (mostly, link-local address), then let's check
+                 * there is an IPv6 default gateway. */
+                return link_has_default_gateway(link, AF_INET6);
+
+        case LINK_ADDRESS_STATE_OFF:
+                /* No IPv6 address. */
+                return false;
+
+        default:
+                assert_not_reached();
+        }
 }
 
 static bool link_is_ready_to_configure_one(Link *link, bool allow_unmanaged) {
@@ -159,6 +186,8 @@ static void link_free_engines(Link *link) {
 
         link->lldp_rx = sd_lldp_rx_unref(link->lldp_rx);
         link->lldp_tx = sd_lldp_tx_unref(link->lldp_tx);
+
+        link->ipv4acd_by_address = hashmap_free(link->ipv4acd_by_address);
 
         link->ipv4ll = sd_ipv4ll_unref(link->ipv4ll);
 
@@ -398,11 +427,6 @@ void link_check_ready(Link *link) {
         if (!link->static_addresses_configured)
                 return (void) log_link_debug(link, "%s(): static addresses are not configured.", __func__);
 
-        SET_FOREACH(a, link->addresses)
-                if (!address_is_ready(a))
-                        return (void) log_link_debug(link, "%s(): address %s is not ready.", __func__,
-                                                     IN_ADDR_PREFIX_TO_STRING(a->family, &a->in_addr, a->prefixlen));
-
         if (!link->static_address_labels_configured)
                 return (void) log_link_debug(link, "%s(): static address labels are not configured.", __func__);
 
@@ -436,47 +460,79 @@ void link_check_ready(Link *link) {
             !in6_addr_is_set(&link->ipv6ll_address))
                 return (void) log_link_debug(link, "%s(): IPv6LL is not configured yet.", __func__);
 
-        bool has_dynamic_address = false;
+        /* All static addresses must be ready. */
+        bool has_static_address = false;
         SET_FOREACH(a, link->addresses) {
-                if (address_is_marked(a))
+                if (a->source != NETWORK_CONFIG_SOURCE_STATIC)
                         continue;
-                if (!address_exists(a))
-                        continue;
-                if (IN_SET(a->source,
-                           NETWORK_CONFIG_SOURCE_IPV4LL,
-                           NETWORK_CONFIG_SOURCE_DHCP4,
-                           NETWORK_CONFIG_SOURCE_DHCP6,
-                           NETWORK_CONFIG_SOURCE_DHCP_PD,
-                           NETWORK_CONFIG_SOURCE_NDISC)) {
-                        has_dynamic_address = true;
-                        break;
+                if (!address_is_ready(a))
+                        return (void) log_link_debug(link, "%s(): static address %s is not ready.", __func__,
+                                                     IN_ADDR_PREFIX_TO_STRING(a->family, &a->in_addr, a->prefixlen));
+                has_static_address = true;
+        }
+
+        /* If at least one static address is requested, do not request that dynamic addressing protocols are finished. */
+        if (has_static_address)
+                goto ready;
+
+        /* If no dynamic addressing protocol enabled, assume the interface is ready.
+         * Note, ignore NDisc when ConfigureWithoutCarrier= is enabled, as IPv6AcceptRA= is enabled by default. */
+        if (!link_ipv4ll_enabled(link) && !link_dhcp4_enabled(link) &&
+            !link_dhcp6_enabled(link) && !link_dhcp_pd_is_enabled(link) &&
+            (link->network->configure_without_carrier || !link_ipv6_accept_ra_enabled(link)))
+                goto ready;
+
+        bool ipv4ll_ready =
+                link_ipv4ll_enabled(link) && link->ipv4ll_address_configured &&
+                link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_IPV4LL);
+        bool dhcp4_ready =
+                link_dhcp4_enabled(link) && link->dhcp4_configured &&
+                link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_DHCP4);
+        bool dhcp6_ready =
+                link_dhcp6_enabled(link) && link->dhcp6_configured &&
+                (!link->network->dhcp6_use_address ||
+                 link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_DHCP6));
+        bool dhcp_pd_ready =
+                link_dhcp_pd_is_enabled(link) && link->dhcp_pd_configured &&
+                (!link->network->dhcp_pd_assign ||
+                 link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_DHCP_PD));
+        bool ndisc_ready =
+                link_ipv6_accept_ra_enabled(link) && link->ndisc_configured &&
+                (!link->network->ipv6_accept_ra_use_autonomous_prefix ||
+                 link_check_addresses_ready(link, NETWORK_CONFIG_SOURCE_NDISC));
+
+        /* If the uplink for PD is self, then request the corresponding DHCP protocol is also ready. */
+        if (dhcp_pd_is_uplink(link, link, /* accept_auto = */ false)) {
+                if (link_dhcp4_enabled(link) && link->network->dhcp_use_6rd &&
+                    sd_dhcp_lease_has_6rd(link->dhcp_lease)) {
+                        if (!dhcp4_ready)
+                                return (void) log_link_debug(link, "%s(): DHCPv4 6rd prefix is assigned, but DHCPv4 protocol is not finished yet.", __func__);
+                        if (!dhcp_pd_ready)
+                                return (void) log_link_debug(link, "%s(): DHCPv4 is finished, but prefix acquired by DHCPv4-6rd is not assigned yet.", __func__);
+                }
+
+                if (link_dhcp6_enabled(link) && link->network->dhcp6_use_pd_prefix &&
+                    sd_dhcp6_lease_has_pd_prefix(link->dhcp6_lease)) {
+                        if (!dhcp6_ready)
+                                return (void) log_link_debug(link, "%s(): DHCPv6 IA_PD prefix is assigned, but DHCPv6 protocol is not finished yet.", __func__);
+                        if (!dhcp_pd_ready)
+                                return (void) log_link_debug(link, "%s(): DHCPv6 is finished, but prefix acquired by DHCPv6 IA_PD is not assigned yet.", __func__);
                 }
         }
 
-        if ((link_ipv4ll_enabled(link) || link_dhcp4_enabled(link) || link_dhcp6_with_address_enabled(link) ||
-             (link_dhcp_pd_is_enabled(link) && link->network->dhcp_pd_assign)) && !has_dynamic_address)
-                /* When DHCP[46] or IPv4LL is enabled, at least one address is acquired by them. */
-                return (void) log_link_debug(link, "%s(): DHCPv4, DHCPv6, DHCP-PD or IPv4LL is enabled but no dynamic address is assigned yet.", __func__);
+        /* At least one dynamic addressing protocol is finished. */
+        if (!ipv4ll_ready && !dhcp4_ready && !dhcp6_ready && !dhcp_pd_ready && !ndisc_ready)
+                return (void) log_link_debug(link, "%s(): dynamic addressing protocols are enabled but none of them finished yet.", __func__);
 
-        /* Ignore NDisc when ConfigureWithoutCarrier= is enabled, as IPv6AcceptRA= is enabled by default. */
-        if (link_ipv4ll_enabled(link) || link_dhcp4_enabled(link) ||
-            link_dhcp6_enabled(link) || link_dhcp_pd_is_enabled(link) ||
-            (!link->network->configure_without_carrier && link_ipv6_accept_ra_enabled(link))) {
+        log_link_debug(link, "%s(): IPv4LL:%s DHCPv4:%s DHCPv6:%s DHCP-PD:%s NDisc:%s",
+                       __func__,
+                       yes_no(ipv4ll_ready),
+                       yes_no(dhcp4_ready),
+                       yes_no(dhcp6_ready),
+                       yes_no(dhcp_pd_ready),
+                       yes_no(ndisc_ready));
 
-                if (!link->ipv4ll_address_configured && !link->dhcp4_configured &&
-                    !link->dhcp6_configured && !link->dhcp_pd_configured && !link->ndisc_configured)
-                        /* When DHCP[46], NDisc, or IPv4LL is enabled, at least one protocol must be finished. */
-                        return (void) log_link_debug(link, "%s(): dynamic addresses or routes are not configured.", __func__);
-
-                log_link_debug(link, "%s(): IPv4LL:%s DHCPv4:%s DHCPv6:%s DHCP-PD:%s NDisc:%s",
-                               __func__,
-                               yes_no(link->ipv4ll_address_configured),
-                               yes_no(link->dhcp4_configured),
-                               yes_no(link->dhcp6_configured),
-                               yes_no(link->dhcp_pd_configured),
-                               yes_no(link->ndisc_configured));
-        }
-
+ready:
         link_set_state(link, LINK_STATE_CONFIGURED);
 }
 
@@ -923,7 +979,7 @@ static Link *link_drop(Link *link) {
 }
 
 static int link_drop_foreign_config(Link *link) {
-        int k, r;
+        int r;
 
         assert(link);
         assert(link->manager);
@@ -940,48 +996,26 @@ static int link_drop_foreign_config(Link *link) {
 
         r = link_drop_foreign_routes(link);
 
-        k = link_drop_foreign_nexthops(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = link_drop_foreign_addresses(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = link_drop_foreign_neighbors(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = manager_drop_foreign_routing_policy_rules(link->manager);
-        if (k < 0 && r >= 0)
-                r = k;
+        RET_GATHER(r, link_drop_foreign_nexthops(link));
+        RET_GATHER(r, link_drop_foreign_addresses(link));
+        RET_GATHER(r, link_drop_foreign_neighbors(link));
+        RET_GATHER(r, manager_drop_foreign_routing_policy_rules(link->manager));
 
         return r;
 }
 
 static int link_drop_managed_config(Link *link) {
-        int k, r;
+        int r;
 
         assert(link);
         assert(link->manager);
 
         r = link_drop_managed_routes(link);
 
-        k = link_drop_managed_nexthops(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = link_drop_managed_addresses(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = link_drop_managed_neighbors(link);
-        if (k < 0 && r >= 0)
-                r = k;
-
-        k = link_drop_managed_routing_policy_rules(link);
-        if (k < 0 && r >= 0)
-                r = k;
+        RET_GATHER(r, link_drop_managed_nexthops(link));
+        RET_GATHER(r, link_drop_managed_addresses(link));
+        RET_GATHER(r, link_drop_managed_neighbors(link));
+        RET_GATHER(r, link_drop_managed_routing_policy_rules(link));
 
         return r;
 }
@@ -1431,6 +1465,7 @@ static int link_check_initialized(Link *link) {
 
 int manager_udev_process_link(Manager *m, sd_device *device, sd_device_action_t action) {
         int r, ifindex;
+        const char *s;
         Link *link;
 
         assert(m);
@@ -1462,6 +1497,15 @@ int manager_udev_process_link(Manager *m, sd_device *device, sd_device_action_t 
                 /* TODO:
                  * What happens when a device is initialized, then soon renamed after that? When we detect
                  * such, maybe we should cancel or postpone all queued requests for the interface. */
+                return 0;
+        }
+
+        r = sd_device_get_property_value(device, "ID_NET_MANAGED_BY", &s);
+        if (r < 0 && r != -ENOENT)
+                log_device_debug_errno(device, r, "Failed to get ID_NET_MANAGED_BY udev property, ignoring: %m");
+        if (r >= 0 && !streq(s, "io.systemd.Network")) {
+                log_device_debug(device, "Interface is requested to be managed by '%s', not managing the interface.", s);
+                link_set_state(link, LINK_STATE_UNMANAGED);
                 return 0;
         }
 
@@ -1680,28 +1724,13 @@ static bool link_is_enslaved(Link *link) {
         return false;
 }
 
-static LinkAddressState address_state_from_scope(uint8_t scope) {
-        if (scope < RT_SCOPE_SITE)
-                /* universally accessible addresses found */
-                return LINK_ADDRESS_STATE_ROUTABLE;
-
-        if (scope < RT_SCOPE_HOST)
-                /* only link or site local addresses found */
-                return LINK_ADDRESS_STATE_DEGRADED;
-
-        /* no useful addresses found */
-        return LINK_ADDRESS_STATE_OFF;
-}
-
 void link_update_operstate(Link *link, bool also_update_master) {
         LinkOperationalState operstate;
         LinkCarrierState carrier_state;
         LinkAddressState ipv4_address_state, ipv6_address_state, address_state;
         LinkOnlineState online_state;
         _cleanup_strv_free_ char **p = NULL;
-        uint8_t ipv4_scope = RT_SCOPE_NOWHERE, ipv6_scope = RT_SCOPE_NOWHERE;
         bool changed = false;
-        Address *address;
 
         assert(link);
 
@@ -1728,31 +1757,22 @@ void link_update_operstate(Link *link, bool also_update_master) {
                 }
         }
 
-        SET_FOREACH(address, link->addresses) {
-                if (!address_is_ready(address))
-                        continue;
-
-                if (address->family == AF_INET)
-                        ipv4_scope = MIN(ipv4_scope, address->scope);
-
-                if (address->family == AF_INET6)
-                        ipv6_scope = MIN(ipv6_scope, address->scope);
-        }
-
-        ipv4_address_state = address_state_from_scope(ipv4_scope);
-        ipv6_address_state = address_state_from_scope(ipv6_scope);
-        address_state = address_state_from_scope(MIN(ipv4_scope, ipv6_scope));
+        link_get_address_states(link, &ipv4_address_state, &ipv6_address_state, &address_state);
 
         /* Mapping of address and carrier state vs operational state
          *                                                     carrier state
          *                          | off | no-carrier | dormant | degraded-carrier | carrier  | enslaved
          *                 ------------------------------------------------------------------------------
          *                 off      | off | no-carrier | dormant | degraded-carrier | carrier  | enslaved
-         * address_state   degraded | off | no-carrier | dormant | degraded-carrier | degraded | enslaved
-         *                 routable | off | no-carrier | dormant | degraded-carrier | routable | routable
+         * address_state   degraded | off | no-carrier | dormant | degraded         | degraded | enslaved
+         *                 routable | off | no-carrier | dormant | routable         | routable | routable
          */
 
-        if (carrier_state < LINK_CARRIER_STATE_CARRIER || address_state == LINK_ADDRESS_STATE_OFF)
+        if (carrier_state == LINK_CARRIER_STATE_DEGRADED_CARRIER && address_state == LINK_ADDRESS_STATE_ROUTABLE)
+                operstate = LINK_OPERSTATE_ROUTABLE;
+        else if (carrier_state == LINK_CARRIER_STATE_DEGRADED_CARRIER && address_state == LINK_ADDRESS_STATE_DEGRADED)
+                operstate = LINK_OPERSTATE_DEGRADED;
+        else if (carrier_state < LINK_CARRIER_STATE_CARRIER || address_state == LINK_ADDRESS_STATE_OFF)
                 operstate = (LinkOperationalState) carrier_state;
         else if (address_state == LINK_ADDRESS_STATE_ROUTABLE)
                 operstate = LINK_OPERSTATE_ROUTABLE;

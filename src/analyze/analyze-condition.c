@@ -72,27 +72,18 @@ static int log_helper(void *userdata, int level, int error, const char *file, in
         return r;
 }
 
-static int verify_conditions(char **lines, LookupScope scope, const char *unit, const char *root) {
+static int verify_conditions(char **lines, RuntimeScope scope, const char *unit, const char *root) {
         _cleanup_(manager_freep) Manager *m = NULL;
         Unit *u;
         int r, q = 1;
 
         if (unit) {
-                _cleanup_strv_free_ char **filenames = NULL;
-                _cleanup_free_ char *var = NULL;
-
-                filenames = strv_new(unit);
-                if (!filenames)
-                        return log_oom();
-
-                r = verify_generate_path(&var, filenames);
+                r = verify_set_unit_path(STRV_MAKE(unit));
                 if (r < 0)
-                        return log_error_errno(r, "Failed to generate unit load path: %m");
-
-                assert_se(set_unit_path(var) >= 0);
+                        return log_error_errno(r, "Failed to set unit load path: %m");
         }
 
-        r = manager_new(scope, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(scope, MANAGER_TEST_RUN_MINIMAL|MANAGER_TEST_DONT_OPEN_EXECUTOR, &m);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize manager: %m");
 
@@ -123,13 +114,14 @@ static int verify_conditions(char **lines, LookupScope scope, const char *unit, 
                 }
         }
 
-        r = condition_test_list(u->asserts, environ, assert_type_to_string, log_helper, u);
+        condition_test_logger_t logger = arg_quiet ? NULL : log_helper;
+        r = condition_test_list(u->asserts, environ, assert_type_to_string, logger, u);
         if (u->asserts)
-                log_notice("Asserts %s.", r > 0 ? "succeeded" : "failed");
+                log_full(arg_quiet ? LOG_DEBUG : LOG_NOTICE, "Asserts %s.", r > 0 ? "succeeded" : "failed");
 
-        q = condition_test_list(u->conditions, environ, condition_type_to_string, log_helper, u);
+        q = condition_test_list(u->conditions, environ, condition_type_to_string, logger, u);
         if (u->conditions)
-                log_notice("Conditions %s.", q > 0 ? "succeeded" : "failed");
+                log_full(arg_quiet ? LOG_DEBUG : LOG_NOTICE, "Conditions %s.", q > 0 ? "succeeded" : "failed");
 
         return r > 0 && q > 0 ? 0 : -EIO;
 }
@@ -137,7 +129,7 @@ static int verify_conditions(char **lines, LookupScope scope, const char *unit, 
 int verb_condition(int argc, char *argv[], void *userdata) {
         int r;
 
-        r = verify_conditions(strv_skip(argv, 1), arg_scope, arg_unit, arg_root);
+        r = verify_conditions(strv_skip(argv, 1), arg_runtime_scope, arg_unit, arg_root);
         if (r < 0)
                 return r;
 

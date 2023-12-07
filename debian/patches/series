@@ -1,10 +1,8 @@
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
-debian/Only-start-logind-if-dbus-is-installed.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
-debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Ubuntu-UseDomains-by-default.patch
@@ -22,6 +20,7 @@ test-increase-QEMU_MEM-for-some-tests.patch
 test-denylist-TEST-29-PORTABLE-again.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
+debian/pkgconfig-keep-unmerged-paths-for-udevdir.patch
 debian/UBUNTU-read-only-etc-hacks.patch
 test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 test-skip-tests-for-unsupported-localectl-features.patch

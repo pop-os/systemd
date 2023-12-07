@@ -189,10 +189,10 @@ static int ndisc_handle_datagram(sd_ndisc *nd, sd_ndisc_router *rt) {
         if (r < 0)
                 return r;
 
-        log_ndisc(nd, "Received Router Advertisement: flags %s preference %s lifetime %" PRIu16 " sec",
+        log_ndisc(nd, "Received Router Advertisement: flags %s preference %s lifetime %s",
                   rt->flags & ND_RA_FLAG_MANAGED ? "MANAGED" : rt->flags & ND_RA_FLAG_OTHER ? "OTHER" : "none",
                   rt->preference == SD_NDISC_PREFERENCE_HIGH ? "high" : rt->preference == SD_NDISC_PREFERENCE_LOW ? "low" : "medium",
-                  rt->lifetime);
+                  FORMAT_TIMESPAN(rt->lifetime_usec, USEC_PER_SEC));
 
         ndisc_callback(nd, SD_NDISC_EVENT_ROUTER, rt);
         return 0;
@@ -208,10 +208,9 @@ static int ndisc_recv(sd_event_source *s, int fd, uint32_t revents, void *userda
         assert(nd->event);
 
         buflen = next_datagram_size_fd(fd);
+        if (ERRNO_IS_NEG_TRANSIENT(buflen) || ERRNO_IS_NEG_DISCONNECT(buflen))
+                return 0;
         if (buflen < 0) {
-                if (ERRNO_IS_TRANSIENT(buflen) || ERRNO_IS_DISCONNECT(buflen))
-                        return 0;
-
                 log_ndisc_errno(nd, buflen, "Failed to determine datagram size to read, ignoring: %m");
                 return 0;
         }
@@ -221,31 +220,31 @@ static int ndisc_recv(sd_event_source *s, int fd, uint32_t revents, void *userda
                 return -ENOMEM;
 
         r = icmp6_receive(fd, NDISC_ROUTER_RAW(rt), rt->raw_size, &rt->address, &rt->timestamp);
-        if (r < 0) {
-                if (ERRNO_IS_TRANSIENT(r) || ERRNO_IS_DISCONNECT(r))
-                        return 0;
-
+        if (ERRNO_IS_NEG_TRANSIENT(r) || ERRNO_IS_NEG_DISCONNECT(r))
+                return 0;
+        if (r < 0)
                 switch (r) {
                 case -EADDRNOTAVAIL:
-                        log_ndisc(nd, "Received RA from non-link-local address %s. Ignoring.",
-                                  IN6_ADDR_TO_STRING(&rt->address));
-                        break;
+                        log_ndisc(nd, "Received RA from neither link-local nor null address. Ignoring.");
+                        return 0;
 
                 case -EMULTIHOP:
                         log_ndisc(nd, "Received RA with invalid hop limit. Ignoring.");
-                        break;
+                        return 0;
 
                 case -EPFNOSUPPORT:
                         log_ndisc(nd, "Received invalid source address from ICMPv6 socket. Ignoring.");
-                        break;
+                        return 0;
 
                 default:
                         log_ndisc_errno(nd, r, "Unexpected error while reading from ICMPv6, ignoring: %m");
-                        break;
+                        return 0;
                 }
 
-                return 0;
-        }
+        /* The function icmp6_receive() accepts the null source address, but RFC 4861 Section 6.1.2 states
+         * that hosts MUST discard messages with the null source address. */
+        if (in6_addr_is_null(&rt->address))
+                log_ndisc(nd, "Received RA from null address. Ignoring.");
 
         (void) event_source_disable(nd->timeout_event_source);
         (void) ndisc_handle_datagram(nd, rt);

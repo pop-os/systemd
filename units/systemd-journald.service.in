@@ -15,6 +15,11 @@ Requires=systemd-journald.socket
 After=systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket syslog.socket
 Before=sysinit.target
 
+# To avoid journald SIGKILLed during soft-reboot and corrupting journals.
+# See https://github.com/systemd/systemd/issues/30195
+Before=soft-reboot.target
+Conflicts=soft-reboot.target
+
 # Mount and swap units need the journal socket units. If they were removed by
 # an isolate request the mount and swap units would be removed too, hence let's
 # exclude systemd-journald and its sockets from isolate requests.
@@ -22,7 +27,7 @@ IgnoreOnIsolate=yes
 
 [Service]
 DeviceAllow=char-* rw
-ExecStart={{ROOTLIBEXECDIR}}/systemd-journald
+ExecStart={{LIBEXECDIR}}/systemd-journald
 FileDescriptorStoreMax=4224
 IPAddressDeny=any
 LockPersonality=yes
@@ -47,6 +52,7 @@ SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
 Type=notify
+PassEnvironment=TERM
 {{SERVICE_WATCHDOG}}
 
 # In case you're wondering why CAP_SYS_PTRACE is needed, access to

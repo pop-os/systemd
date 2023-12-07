@@ -197,10 +197,11 @@ sd_journal_send("MESSAGE=Hello World, this is PID %lu!", (unsigned long) getpid(
     <function>sd_journal_sendv_with_location()</function>, and
     <function>sd_journal_perror_with_location()</function> are similar to their counterparts without
     <literal>_with_location</literal>, but accept additional parameters to explicitly set the source file
-    name, function, and line. Those arguments must contain valid journal entries including the variable name,
-    e.g. <literal>CODE_FILE=src/foo.c</literal>, <literal>CODE_LINE=666</literal>,
-    <literal>CODE_FUNC=myfunc</literal>. These variants are primarily useful when writing custom wrappers,
-    for example in bindings for a different language.</para>
+    name, function, and line. The arguments <literal>file</literal> and <literal>line</literal> must contain valid
+    journal entries including the variable name, e.g. <literal>CODE_FILE=src/foo.c</literal> and
+    <literal>CODE_LINE=666</literal>, while <literal>func</literal> must only contain the function name, i.e. the value
+    without <literal>CODE_FUNC=</literal>. These variants are primarily useful when writing custom wrappers, for
+    example in bindings for a different language.</para>
 
     <para><citerefentry project='man-pages'><refentrytitle>syslog</refentrytitle><manvolnum>3</manvolnum></citerefentry>
     and <function>sd_journal_print()</function> may
@@ -255,6 +256,20 @@ sd_journal_send("MESSAGE=Hello World, this is PID %lu!", (unsigned long) getpid(
   </refsect1>
 
   <xi:include href="libsystemd-pkgconfig.xml" />
+
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_journal_print()</function>,
+    <function>sd_journal_printv()</function>,
+    <function>sd_journal_send()</function>, and
+    <function>sd_journal_sendv()</function> were added in version 187.</para>
+    <para><function>sd_journal_perror()</function> was added in version 188.</para>
+    <para><function>sd_journal_print_with_location()</function>,
+    <function>sd_journal_printv_with_location()</function>,
+    <function>sd_journal_send_with_location()</function>,
+    <function>sd_journal_sendv_with_location()</function>, and
+    <function>sd_journal_perror_with_location()</function> were added in version 246.</para>
+  </refsect1>
 
   <refsect1>
     <title>See Also</title>

@@ -1,10 +1,10 @@
-lib/systemd/systemd-bless-boot
-lib/systemd/system-generators/systemd-bless-boot-generator
-lib/systemd/system/sysinit.target.wants/systemd-boot-random-seed.service
-lib/systemd/system/systemd-bless-boot.service
-lib/systemd/system/systemd-boot-random-seed.service
-lib/systemd/system/systemd-boot-update.service
 usr/bin/bootctl
+usr/lib/systemd/systemd-bless-boot
+usr/lib/systemd/system-generators/systemd-bless-boot-generator
+usr/lib/systemd/system/sysinit.target.wants/systemd-boot-random-seed.service
+usr/lib/systemd/system/systemd-bless-boot.service
+usr/lib/systemd/system/systemd-boot-random-seed.service
+usr/lib/systemd/system/systemd-boot-update.service
 usr/share/bash-completion/completions/bootctl
 ../extra/initramfs etc/
 ../extra/kernel etc/

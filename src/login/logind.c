@@ -14,6 +14,7 @@
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "cgroup-util.h"
+#include "common-signal.h"
 #include "constants.h"
 #include "daemon-util.h"
 #include "device-util.h"
@@ -39,11 +40,18 @@
 #include "udev-util.h"
 #include "user-util.h"
 
-static Manager* manager_unref(Manager *m);
-DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_unref);
+static Manager* manager_free(Manager *m);
+DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(device_hash_ops, char, string_hash_func, string_compare_func, Device, device_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(seat_hash_ops, char, string_hash_func, string_compare_func, Seat, seat_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(session_hash_ops, char, string_hash_func, string_compare_func, Session, session_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(user_hash_ops, void, trivial_hash_func, trivial_compare_func, User, user_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(inhibitor_hash_ops, char, string_hash_func, string_compare_func, Inhibitor, inhibitor_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(button_hash_ops, char, string_hash_func, string_compare_func, Button, button_free);
 
 static int manager_new(Manager **ret) {
-        _cleanup_(manager_unrefp) Manager *m = NULL;
+        _cleanup_(manager_freep) Manager *m = NULL;
         int r;
 
         assert(ret);
@@ -59,18 +67,17 @@ static int manager_new(Manager **ret) {
                 .idle_action_not_before_usec = now(CLOCK_MONOTONIC),
         };
 
-        m->devices = hashmap_new(&string_hash_ops);
-        m->seats = hashmap_new(&string_hash_ops);
-        m->sessions = hashmap_new(&string_hash_ops);
-        m->sessions_by_leader = hashmap_new(NULL);
-        m->users = hashmap_new(NULL);
-        m->inhibitors = hashmap_new(&string_hash_ops);
-        m->buttons = hashmap_new(&string_hash_ops);
+        m->devices = hashmap_new(&device_hash_ops);
+        m->seats = hashmap_new(&seat_hash_ops);
+        m->sessions = hashmap_new(&session_hash_ops);
+        m->users = hashmap_new(&user_hash_ops);
+        m->inhibitors = hashmap_new(&inhibitor_hash_ops);
+        m->buttons = hashmap_new(&button_hash_ops);
 
         m->user_units = hashmap_new(&string_hash_ops);
         m->session_units = hashmap_new(&string_hash_ops);
 
-        if (!m->devices || !m->seats || !m->sessions || !m->sessions_by_leader || !m->users || !m->inhibitors || !m->buttons || !m->user_units || !m->session_units)
+        if (!m->devices || !m->seats || !m->sessions || !m->users || !m->inhibitors || !m->buttons || !m->user_units || !m->session_units)
                 return -ENOMEM;
 
         r = sd_event_default(&m->event);
@@ -85,6 +92,14 @@ static int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
+        r = sd_event_add_signal(m->event, NULL, SIGRTMIN+18, sigrtmin18_handler, NULL);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
+        if (r < 0)
+                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
+
         (void) sd_event_set_watchdog(m->event, true);
 
         manager_reset_config(m);
@@ -93,39 +108,18 @@ static int manager_new(Manager **ret) {
         return 0;
 }
 
-static Manager* manager_unref(Manager *m) {
-        Session *session;
-        User *u;
-        Device *d;
-        Seat *s;
-        Inhibitor *i;
-        Button *b;
-
+static Manager* manager_free(Manager *m) {
         if (!m)
                 return NULL;
-
-        while ((session = hashmap_first(m->sessions)))
-                session_free(session);
-
-        while ((u = hashmap_first(m->users)))
-                user_free(u);
-
-        while ((d = hashmap_first(m->devices)))
-                device_free(d);
-
-        while ((s = hashmap_first(m->seats)))
-                seat_free(s);
-
-        while ((i = hashmap_first(m->inhibitors)))
-                inhibitor_free(i);
-
-        while ((b = hashmap_first(m->buttons)))
-                button_free(b);
 
         hashmap_free(m->devices);
         hashmap_free(m->seats);
         hashmap_free(m->sessions);
+
+        /* All records should have been removed by session_free */
+        assert(hashmap_isempty(m->sessions_by_leader));
         hashmap_free(m->sessions_by_leader);
+
         hashmap_free(m->users);
         hashmap_free(m->inhibitors);
         hashmap_free(m->buttons);
@@ -181,7 +175,6 @@ static Manager* manager_unref(Manager *m) {
 
 static int manager_enumerate_devices(Manager *m) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        sd_device *d;
         int r;
 
         assert(m);
@@ -210,7 +203,6 @@ static int manager_enumerate_devices(Manager *m) {
 
 static int manager_enumerate_buttons(Manager *m) {
         _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        sd_device *d;
         int r;
 
         assert(m);
@@ -449,6 +441,8 @@ static int manager_attach_fds(Manager *m) {
         /* Upon restart, PID1 will send us back all fds of session devices that we previously opened. Each
          * file descriptor is associated with a given session. The session ids are passed through FDNAMES. */
 
+        assert(m);
+
         n = sd_listen_fds_with_names(true, &fdnames);
         if (n < 0)
                 return log_warning_errno(n, "Failed to acquire passed fd list: %m");
@@ -679,7 +673,7 @@ static int manager_connect_bus(Manager *m) {
 }
 
 static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo *si, void *data) {
-        Manager *m = data;
+        Manager *m = ASSERT_PTR(data);
         Session *active;
 
         /*
@@ -697,6 +691,7 @@ static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo
          */
 
         assert(m->seat0);
+
         seat_read_active_vt(m->seat0);
 
         active = m->seat0->active;
@@ -712,17 +707,16 @@ static int manager_vt_switch(sd_event_source *src, const struct signalfd_siginfo
 
                 log_warning("Received VT_PROCESS signal without a registered session, restoring VT.");
 
-                /* At this point we only have the kernel mapping for referring to the
-                 * current VT. */
+                /* At this point we only have the kernel mapping for referring to the current VT. */
                 fd = open_terminal("/dev/tty0", O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
                 if (fd < 0) {
-                        log_warning_errno(fd, "Failed to open, ignoring: %m");
+                        log_warning_errno(fd, "Failed to open current VT, ignoring: %m");
                         return 0;
                 }
 
-                r = vt_release(fd, true);
+                r = vt_release(fd, /* restore = */ true);
                 if (r < 0)
-                        log_warning_errno(r, "Failed to release VT, ignoring: %m");
+                        log_warning_errno(r, "Failed to release current VT, ignoring: %m");
 
                 return 0;
         }
@@ -900,8 +894,7 @@ static void manager_gc(Manager *m, bool drop_not_started) {
 
         assert(m);
 
-        while ((seat = m->seat_gc_queue)) {
-                LIST_REMOVE(gc_queue, m->seat_gc_queue, seat);
+        while ((seat = LIST_POP(gc_queue, m->seat_gc_queue))) {
                 seat->in_gc_queue = false;
 
                 if (seat_may_gc(seat, drop_not_started)) {
@@ -910,8 +903,7 @@ static void manager_gc(Manager *m, bool drop_not_started) {
                 }
         }
 
-        while ((session = m->session_gc_queue)) {
-                LIST_REMOVE(gc_queue, m->session_gc_queue, session);
+        while ((session = LIST_POP(gc_queue, m->session_gc_queue))) {
                 session->in_gc_queue = false;
 
                 /* First, if we are not closing yet, initiate stopping. */
@@ -927,8 +919,7 @@ static void manager_gc(Manager *m, bool drop_not_started) {
                 }
         }
 
-        while ((user = m->user_gc_queue)) {
-                LIST_REMOVE(gc_queue, m->user_gc_queue, user);
+        while ((user = LIST_POP(gc_queue, m->user_gc_queue))) {
                 user->in_gc_queue = false;
 
                 /* First step: queue stop jobs */
@@ -1168,7 +1159,7 @@ static int manager_run(Manager *m) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_(manager_unrefp) Manager *m = NULL;
+        _cleanup_(manager_freep) Manager *m = NULL;
         _unused_ _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         int r;
 
@@ -1185,7 +1176,7 @@ static int run(int argc, char *argv[]) {
 
         umask(0022);
 
-        r = mac_selinux_init();
+        r = mac_init();
         if (r < 0)
                 return r;
 
@@ -1196,7 +1187,7 @@ static int run(int argc, char *argv[]) {
         (void) mkdir_label("/run/systemd/users", 0755);
         (void) mkdir_label("/run/systemd/sessions", 0755);
 
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGHUP, SIGTERM, SIGINT, SIGCHLD, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGHUP, SIGTERM, SIGINT, SIGCHLD, SIGRTMIN+18, -1) >= 0);
 
         r = manager_new(&m);
         if (r < 0)

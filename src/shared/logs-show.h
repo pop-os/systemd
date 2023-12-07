@@ -6,11 +6,18 @@
 #include <stdio.h>
 #include <sys/types.h>
 
+#include "sd-id128.h"
 #include "sd-journal.h"
 
 #include "macro.h"
 #include "output-mode.h"
 #include "time-util.h"
+
+typedef struct BootId {
+        sd_id128_t id;
+        usec_t first_usec;
+        usec_t last_usec;
+} BootId;
 
 int show_journal_entry(
                 FILE *f,
@@ -33,6 +40,7 @@ int show_journal(
                 OutputFlags flags,
                 bool *ellipsized);
 
+int add_match_boot_id(sd_journal *j, sd_id128_t id);
 int add_match_this_boot(sd_journal *j, const char *machine);
 
 int add_matches_for_unit(
@@ -63,3 +71,7 @@ void json_escape(
                 const char* p,
                 size_t l,
                 OutputFlags flags);
+
+int journal_find_boot_by_id(sd_journal *j, sd_id128_t boot_id);
+int journal_find_boot_by_offset(sd_journal *j, int offset, sd_id128_t *ret);
+int journal_get_boots(sd_journal *j, BootId **ret_boots, size_t *ret_n_boots);

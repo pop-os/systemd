@@ -279,8 +279,7 @@ static void path_init(Unit *u) {
 
         p->directory_mode = 0755;
 
-        p->trigger_limit.interval = USEC_INFINITY;
-        p->trigger_limit.burst = UINT_MAX;
+        p->trigger_limit = RATELIMIT_OFF;
 }
 
 void path_free_specs(Path *p) {
@@ -288,9 +287,8 @@ void path_free_specs(Path *p) {
 
         assert(p);
 
-        while ((s = p->specs)) {
+        while ((s = LIST_POP(spec, p->specs))) {
                 path_spec_unwatch(s);
-                LIST_REMOVE(spec, p->specs, s);
                 path_spec_done(s);
                 free(s);
         }
@@ -477,7 +475,7 @@ static void path_set_state(Path *p, PathState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(p), "Changed %s -> %s", path_state_to_string(old_state), path_state_to_string(state));
 
-        unit_notify(UNIT(p), state_translation_table[old_state], state_translation_table[state], 0);
+        unit_notify(UNIT(p), state_translation_table[old_state], state_translation_table[state], /* reload_success = */ true);
 }
 
 static void path_enter_waiting(Path *p, bool initial, bool from_trigger_notify);
@@ -531,23 +529,26 @@ static void path_enter_running(Path *p, char *trigger_path) {
         trigger = UNIT_TRIGGER(UNIT(p));
         if (!trigger) {
                 log_unit_error(UNIT(p), "Unit to trigger vanished.");
-                path_enter_dead(p, PATH_FAILURE_RESOURCES);
-                return;
+                goto fail;
         }
 
         details = activation_details_new(UNIT(p));
         if (!details) {
-                r = -ENOMEM;
+                log_oom();
                 goto fail;
         }
 
         r = free_and_strdup(&(ACTIVATION_DETAILS_PATH(details))->trigger_path_filename, trigger_path);
-        if (r < 0)
+        if (r < 0) {
+                log_oom();
                 goto fail;
+        }
 
         r = manager_add_job(UNIT(p)->manager, JOB_START, trigger, JOB_REPLACE, NULL, &error, &job);
-        if (r < 0)
+        if (r < 0) {
+                log_unit_warning(UNIT(p), "Failed to queue unit startup job: %s", bus_error_message(&error, r));
                 goto fail;
+        }
 
         job_set_activation_details(job, details);
 
@@ -557,7 +558,6 @@ static void path_enter_running(Path *p, char *trigger_path) {
         return;
 
 fail:
-        log_unit_warning(UNIT(p), "Failed to queue unit startup job: %s", bus_error_message(&error, r));
         path_enter_dead(p, PATH_FAILURE_RESOURCES);
 }
 
@@ -595,8 +595,11 @@ static void path_enter_waiting(Path *p, bool initial, bool from_trigger_notify) 
         }
 
         r = path_watch(p);
-        if (r < 0)
-                goto fail;
+        if (r < 0) {
+                log_unit_warning_errno(UNIT(p), r, "Failed to enter waiting state: %m");
+                path_enter_dead(p, PATH_FAILURE_RESOURCES);
+                return;
+        }
 
         /* Hmm, so now we have created inotify watches, but the file
          * might have appeared/been removed by now, so we must
@@ -609,11 +612,6 @@ static void path_enter_waiting(Path *p, bool initial, bool from_trigger_notify) 
         }
 
         path_set_state(p, PATH_WAITING);
-        return;
-
-fail:
-        log_unit_warning_errno(UNIT(p), r, "Failed to enter waiting state: %m");
-        path_enter_dead(p, PATH_FAILURE_RESOURCES);
 }
 
 static void path_mkdir(Path *p) {
@@ -684,6 +682,8 @@ static int path_serialize(Unit *u, FILE *f, FDSet *fds) {
                                              escaped);
         }
 
+        (void) serialize_ratelimit(f, "trigger-ratelimit", &p->trigger_limit);
+
         return 0;
 }
 
@@ -745,19 +745,22 @@ static int path_deserialize_item(Unit *u, const char *key, const char *value, FD
                                 }
                 }
 
-        } else
+        } else if (streq(key, "trigger-ratelimit"))
+                deserialize_ratelimit(&p->trigger_limit, key, value);
+
+        else
                 log_unit_debug(u, "Unknown serialization key: %s", key);
 
         return 0;
 }
 
-_pure_ static UnitActiveState path_active_state(Unit *u) {
+static UnitActiveState path_active_state(Unit *u) {
         assert(u);
 
         return state_translation_table[PATH(u)->state];
 }
 
-_pure_ static const char *path_sub_state_to_string(Unit *u) {
+static const char *path_sub_state_to_string(Unit *u) {
         assert(u);
 
         return path_state_to_string(PATH(u)->state);

@@ -14,8 +14,7 @@ int main(int argc, char *argv[]) {
         uint64_t v, pid_max, threads_max, limit;
         int r;
 
-        log_parse_environment();
-        log_open();
+        test_setup_logging(LOG_DEBUG);
 
         assert_se(procfs_cpu_get_usage(&nsec) >= 0);
         log_info("Current system CPU time: %s", FORMAT_TIMESPAN(nsec/NSEC_PER_USEC, 1));
@@ -28,14 +27,14 @@ int main(int argc, char *argv[]) {
 
         pid_max = TASKS_MAX;
         r = procfs_get_pid_max(&pid_max);
-        if (r == -ENOENT || ERRNO_IS_PRIVILEGE(r))
+        if (r == -ENOENT || ERRNO_IS_NEG_PRIVILEGE(r))
                 return log_tests_skipped_errno(r, "can't get pid max");
         assert(r >= 0);
         log_info("kernel.pid_max: %"PRIu64, pid_max);
 
         threads_max = TASKS_MAX;
         r = procfs_get_threads_max(&threads_max);
-        if (r == -ENOENT || ERRNO_IS_PRIVILEGE(r))
+        if (r == -ENOENT || ERRNO_IS_NEG_PRIVILEGE(r))
                 return log_tests_skipped_errno(r, "can't get threads max");
         assert(r >= 0);
         log_info("kernel.threads-max: %"PRIu64, threads_max);

@@ -161,7 +161,7 @@ static int scsi_dump_sense(struct scsi_id_device *dev_scsi,
          * Figure out and print the sense key, asc and ascq.
          *
          * If you want to suppress these for a particular drive model, add
-         * a black list entry in the scsi_id config file.
+         * a deny list entry in the scsi_id config file.
          *
          * XXX We probably need to: lookup the sense/asc/ascq in a retry
          * table, and if found return 1 (after dumping the sense, asc, and
@@ -793,14 +793,11 @@ int scsi_get_serial(struct scsi_id_device *dev_scsi, const char *devname,
 
         memzero(dev_scsi->serial, len);
         for (cnt = 20; cnt > 0; cnt--) {
-                struct timespec duration;
-
                 fd = open(devname, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOCTTY);
                 if (fd >= 0 || errno != EBUSY)
                         break;
-                duration.tv_sec = 0;
-                duration.tv_nsec = (200 * 1000 * 1000) + (random_u32() % 100 * 1000 * 1000);
-                nanosleep(&duration, NULL);
+
+                usleep_safe(200U*USEC_PER_MSEC + random_u64_range(100U*USEC_PER_MSEC));
         }
         if (fd < 0)
                 return 1;

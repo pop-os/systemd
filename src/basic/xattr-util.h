@@ -18,6 +18,8 @@ static inline int fgetxattr_malloc(int fd, const char *name, char **ret) {
         return getxattr_at_malloc(fd, NULL, name, AT_EMPTY_PATH, ret);
 }
 
+int getxattr_at_bool(int fd, const char *path, const char *name, int flags);
+
 int fd_setcrtime(int fd, usec_t usec);
 
 int fd_getcrtime_at(int fd, const char *name, int flags, usec_t *ret);
@@ -36,3 +38,5 @@ static inline int llistxattr_malloc(const char *path, char **ret) {
 static inline int flistxattr_malloc(int fd, char **ret) {
         return listxattr_at_malloc(fd, NULL, AT_EMPTY_PATH, ret);
 }
+
+int xsetxattr(int fd, const char *path, const char *name, const char *value, size_t size, int flags);

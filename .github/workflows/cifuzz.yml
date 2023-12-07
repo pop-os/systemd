@@ -35,8 +35,11 @@ jobs:
         include:
           - sanitizer: address
             architecture: i386
+    permissions:
+      security-events: write
+
     steps:
-      - name: Build Fuzzers (${{ matrix.sanitizer }})
+      - name: Build Fuzzers
         id: build
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
         with:
@@ -47,16 +50,25 @@ jobs:
           keep-unaffected-fuzz-targets: true
           sanitizer: ${{ matrix.sanitizer }}
           architecture: ${{ matrix.architecture }}
-      - name: Run Fuzzers (${{ matrix.sanitizer }})
+          output-sarif: true
+      - name: Run Fuzzers
         uses: google/oss-fuzz/infra/cifuzz/actions/run_fuzzers@master
         with:
           oss-fuzz-project-name: 'systemd'
           fuzz-seconds: 600
           dry-run: false
           sanitizer: ${{ matrix.sanitizer }}
+          output-sarif: true
       - name: Upload Crash
-        uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb
+        uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce
         if: failure() && steps.build.outcome == 'success'
         with:
           name: ${{ matrix.sanitizer }}-${{ matrix.architecture }}-artifacts
           path: ./out/artifacts
+      - name: Upload Sarif
+        if: always() && steps.build.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@407ffafae6a767df3e0230c3df91b6443ae8df75
+        with:
+          # Path to SARIF file relative to the root of the repository
+          sarif_file: cifuzz-sarif/results.sarif
+          checkout_path: cifuzz-sarif

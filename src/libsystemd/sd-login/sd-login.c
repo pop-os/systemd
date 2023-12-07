@@ -124,10 +124,9 @@ _public_ int sd_pid_get_cgroup(pid_t pid, char **cgroup) {
          * cgroup, let's return the "/" in the public APIs instead, as
          * that's easier and less ambiguous for people to grok. */
         if (isempty(c)) {
-                free(c);
-                c = strdup("/");
-                if (!c)
-                        return -ENOMEM;
+                r = free_and_strdup(&c, "/");
+                if (r < 0)
+                        return r;
 
         }
 
@@ -503,6 +502,36 @@ _public_ int sd_uid_get_display(uid_t uid, char **session) {
         return 0;
 }
 
+_public_ int sd_uid_get_login_time(uid_t uid, uint64_t *usec) {
+        _cleanup_free_ char *p = NULL, *s = NULL, *rt = NULL;
+        usec_t t;
+        int r;
+
+        assert_return(usec, -EINVAL);
+
+        r = file_of_uid(uid, &p);
+        if (r < 0)
+                return r;
+
+        r = parse_env_file(NULL, p, "STATE", &s, "REALTIME", &rt);
+        if (r == -ENOENT)
+                return -ENXIO;
+        if (r < 0)
+                return r;
+        if (isempty(s) || isempty(rt))
+                return -EIO;
+
+        if (!STR_IN_SET(s, "active", "online"))
+                return -ENXIO;
+
+        r = safe_atou64(rt, &t);
+        if (r < 0)
+                return r;
+
+        *usec = t;
+        return 0;
+}
+
 static int file_of_seat(const char *seat, char **_p) {
         char *p;
         int r;
@@ -742,8 +771,39 @@ static int session_get_string(const char *session, const char *field, char **val
         return 0;
 }
 
+_public_ int sd_session_get_username(const char *session, char **username) {
+        return session_get_string(session, "USER", username);
+}
+
 _public_ int sd_session_get_seat(const char *session, char **seat) {
         return session_get_string(session, "SEAT", seat);
+}
+
+_public_ int sd_session_get_start_time(const char *session, uint64_t *usec) {
+        _cleanup_free_ char *p = NULL, *s = NULL;
+        usec_t t;
+        int r;
+
+        assert_return(usec, -EINVAL);
+
+        r = file_of_session(session, &p);
+        if (r < 0)
+                return r;
+
+        r = parse_env_file(NULL, p, "REALTIME", &s);
+        if (r == -ENOENT)
+                return -ENXIO;
+        if (r < 0)
+                return r;
+        if (isempty(s))
+                return -EIO;
+
+        r = safe_atou64(s, &t);
+        if (r < 0)
+                return r;
+
+        *usec = t;
+        return 0;
 }
 
 _public_ int sd_session_get_tty(const char *session, char **tty) {
@@ -808,6 +868,25 @@ _public_ int sd_session_get_remote_user(const char *session, char **remote_user)
 
 _public_ int sd_session_get_remote_host(const char *session, char **remote_host) {
         return session_get_string(session, "REMOTE_HOST", remote_host);
+}
+
+_public_ int sd_session_get_leader(const char *session, pid_t *leader) {
+        _cleanup_free_ char *leader_string = NULL;
+        pid_t pid;
+        int r;
+
+        assert_return(leader, -EINVAL);
+
+        r = session_get_string(session, "LEADER", &leader_string);
+        if (r < 0)
+                return r;
+
+        r = parse_pid(leader_string, &pid);
+        if (r < 0)
+                return r;
+
+        *leader = pid;
+        return 0;
 }
 
 _public_ int sd_seat_get_active(const char *seat, char **session, uid_t *uid) {

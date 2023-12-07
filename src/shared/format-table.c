@@ -7,6 +7,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "devnum-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-table.h"
@@ -17,6 +18,7 @@
 #include "id128-util.h"
 #include "in-addr-util.h"
 #include "memory-util.h"
+#include "memstream-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -24,6 +26,7 @@
 #include "process-util.h"
 #include "signal-util.h"
 #include "sort-util.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "strxcpyx.h"
 #include "terminal-util.h"
@@ -107,6 +110,7 @@ typedef struct TableData {
                 gid_t gid;
                 pid_t pid;
                 mode_t mode;
+                dev_t devnum;
                 /* … add more here as we start supporting more cell data types … */
         };
 } TableData;
@@ -297,6 +301,8 @@ static size_t table_data_size(TableDataType type, const void *data) {
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE:
         case TABLE_TIMESPAN:
         case TABLE_TIMESPAN_MSEC:
@@ -312,6 +318,7 @@ static size_t table_data_size(TableDataType type, const void *data) {
 
         case TABLE_INT32:
         case TABLE_UINT32:
+        case TABLE_UINT32_HEX:
                 return sizeof(uint32_t);
 
         case TABLE_INT16:
@@ -347,7 +354,11 @@ static size_t table_data_size(TableDataType type, const void *data) {
                 return sizeof(pid_t);
 
         case TABLE_MODE:
+        case TABLE_MODE_INODE_TYPE:
                 return sizeof(mode_t);
+
+        case TABLE_DEVNUM:
+                return sizeof(dev_t);
 
         default:
                 assert_not_reached();
@@ -866,6 +877,7 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         gid_t gid;
                         pid_t pid;
                         mode_t mode;
+                        dev_t devnum;
                 } buffer;
 
                 switch (type) {
@@ -896,6 +908,8 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                 case TABLE_TIMESTAMP:
                 case TABLE_TIMESTAMP_UTC:
                 case TABLE_TIMESTAMP_RELATIVE:
+                case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+                case TABLE_TIMESTAMP_LEFT:
                 case TABLE_TIMESTAMP_DATE:
                 case TABLE_TIMESPAN:
                 case TABLE_TIMESPAN_MSEC:
@@ -968,6 +982,7 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                 }
 
                 case TABLE_UINT32:
+                case TABLE_UINT32_HEX:
                         buffer.uint32 = va_arg(ap, uint32_t);
                         data = &buffer.uint32;
                         break;
@@ -1020,8 +1035,14 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         break;
 
                 case TABLE_MODE:
+                case TABLE_MODE_INODE_TYPE:
                         buffer.mode = va_arg(ap, mode_t);
                         data = &buffer.mode;
+                        break;
+
+                case TABLE_DEVNUM:
+                        buffer.devnum = va_arg(ap, dev_t);
+                        data = &buffer.devnum;
                         break;
 
                 case TABLE_SET_MINIMUM_WIDTH: {
@@ -1271,6 +1292,8 @@ int table_hide_column_from_display_internal(Table *t, ...) {
 }
 
 static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t index_b) {
+        int r;
+
         assert(a);
         assert(b);
 
@@ -1304,6 +1327,8 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                 case TABLE_TIMESTAMP:
                 case TABLE_TIMESTAMP_UTC:
                 case TABLE_TIMESTAMP_RELATIVE:
+                case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+                case TABLE_TIMESTAMP_LEFT:
                 case TABLE_TIMESTAMP_DATE:
                         return CMP(a->timestamp, b->timestamp);
 
@@ -1342,6 +1367,7 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                         return CMP(a->uint16, b->uint16);
 
                 case TABLE_UINT32:
+                case TABLE_UINT32_HEX:
                         return CMP(a->uint32, b->uint32);
 
                 case TABLE_UINT64:
@@ -1374,7 +1400,15 @@ static int cell_data_compare(TableData *a, size_t index_a, TableData *b, size_t 
                         return CMP(a->pid, b->pid);
 
                 case TABLE_MODE:
+                case TABLE_MODE_INODE_TYPE:
                         return CMP(a->mode, b->mode);
+
+                case TABLE_DEVNUM:
+                        r = CMP(major(a->devnum), major(b->devnum));
+                        if (r != 0)
+                                return r;
+
+                        return CMP(minor(a->devnum), minor(b->devnum));
 
                 default:
                         ;
@@ -1416,11 +1450,10 @@ static int table_data_compare(const size_t *a, const size_t *b, Table *t) {
 }
 
 static char* format_strv_width(char **strv, size_t column_width) {
-        _cleanup_free_ char *buf = NULL; /* buf must be freed after f */
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t sz = 0;
+        _cleanup_(memstream_done) MemStream m = {};
+        FILE *f;
 
-        f = open_memstream_unlocked(&buf, &sz);
+        f = memstream_init(&m);
         if (!f)
                 return NULL;
 
@@ -1441,11 +1474,11 @@ static char* format_strv_width(char **strv, size_t column_width) {
                 }
         }
 
-        if (fflush_and_check(f) < 0)
+        char *buf;
+        if (memstream_finalize(&m, &buf, NULL) < 0)
                 return NULL;
 
-        f = safe_fclose(f);
-        return TAKE_PTR(buf);
+        return buf;
 }
 
 static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercasing, size_t column_width, bool *have_soft) {
@@ -1537,11 +1570,15 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE: {
                 _cleanup_free_ char *p = NULL;
                 char *ret;
 
-                p = new(char, d->type == TABLE_TIMESTAMP_RELATIVE ? FORMAT_TIMESTAMP_RELATIVE_MAX : FORMAT_TIMESTAMP_MAX);
+                p = new(char,
+                        IN_SET(d->type, TABLE_TIMESTAMP_RELATIVE, TABLE_TIMESTAMP_RELATIVE_MONOTONIC, TABLE_TIMESTAMP_LEFT) ?
+                                FORMAT_TIMESTAMP_RELATIVE_MAX : FORMAT_TIMESTAMP_MAX);
                 if (!p)
                         return NULL;
 
@@ -1551,8 +1588,12 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_UTC);
                 else if (d->type == TABLE_TIMESTAMP_DATE)
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_DATE);
+                else if (d->type == TABLE_TIMESTAMP_RELATIVE_MONOTONIC)
+                        ret = format_timestamp_relative_monotonic(p, FORMAT_TIMESTAMP_RELATIVE_MAX, d->timestamp);
                 else
-                        ret = format_timestamp_relative(p, FORMAT_TIMESTAMP_RELATIVE_MAX, d->timestamp);
+                        ret = format_timestamp_relative_full(p, FORMAT_TIMESTAMP_RELATIVE_MAX,
+                                                             d->timestamp, CLOCK_REALTIME,
+                                                             /* implicit_left = */ d->type == TABLE_TIMESTAMP_LEFT);
                 if (!ret)
                         return "-";
 
@@ -1718,6 +1759,18 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 break;
         }
 
+        case TABLE_UINT32_HEX: {
+                _cleanup_free_ char *p = NULL;
+
+                p = new(char, 8 + 1);
+                if (!p)
+                        return NULL;
+
+                sprintf(p, "%" PRIx32, d->uint32);
+                d->formatted = TAKE_PTR(p);
+                break;
+        }
+
         case TABLE_UINT64: {
                 _cleanup_free_ char *p = NULL;
 
@@ -1873,6 +1926,22 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 d->formatted = p;
                 break;
         }
+
+        case TABLE_MODE_INODE_TYPE:
+
+                if (d->mode == MODE_INVALID)
+                        return table_ersatz_string(t);
+
+                return inode_type_to_string(d->mode);
+
+        case TABLE_DEVNUM:
+                if (devnum_is_zero(d->devnum))
+                        return table_ersatz_string(t);
+
+                if (asprintf(&d->formatted, DEVNUM_FORMAT_STR, DEVNUM_FORMAT_VAL(d->devnum)) < 0)
+                        return NULL;
+
+                break;
 
         default:
                 assert_not_reached();
@@ -2474,12 +2543,14 @@ int table_print(Table *t, FILE *f) {
 }
 
 int table_format(Table *t, char **ret) {
-        _cleanup_free_ char *buf = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
-        size_t sz = 0;
+        _cleanup_(memstream_done) MemStream m = {};
+        FILE *f;
         int r;
 
-        f = open_memstream_unlocked(&buf, &sz);
+        assert(t);
+        assert(ret);
+
+        f = memstream_init(&m);
         if (!f)
                 return -ENOMEM;
 
@@ -2487,11 +2558,7 @@ int table_format(Table *t, char **ret) {
         if (r < 0)
                 return r;
 
-        f = safe_fclose(f);
-
-        *ret = TAKE_PTR(buf);
-
-        return 0;
+        return memstream_finalize(&m, ret, NULL);
 }
 
 size_t table_get_rows(Table *t) {
@@ -2508,6 +2575,14 @@ size_t table_get_columns(Table *t) {
 
         assert(t->n_columns > 0);
         return t->n_columns;
+}
+
+size_t table_get_current_column(Table *t) {
+        if (!t)
+                return 0;
+
+        assert(t->n_columns > 0);
+        return t->n_cells % t->n_columns;
 }
 
 int table_set_reverse(Table *t, size_t column, bool b) {
@@ -2589,6 +2664,8 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
         case TABLE_TIMESTAMP_RELATIVE:
+        case TABLE_TIMESTAMP_RELATIVE_MONOTONIC:
+        case TABLE_TIMESTAMP_LEFT:
         case TABLE_TIMESTAMP_DATE:
                 if (d->timestamp == USEC_INFINITY)
                         return json_variant_new_null(ret);
@@ -2635,6 +2712,7 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
                 return json_variant_new_unsigned(ret, d->uint16);
 
         case TABLE_UINT32:
+        case TABLE_UINT32_HEX:
                 return json_variant_new_unsigned(ret, d->uint32);
 
         case TABLE_UINT64:
@@ -2687,10 +2765,19 @@ static int table_data_to_json(TableData *d, JsonVariant **ret) {
                 return json_variant_new_integer(ret, d->int_val);
 
         case TABLE_MODE:
+        case TABLE_MODE_INODE_TYPE:
                 if (d->mode == MODE_INVALID)
                         return json_variant_new_null(ret);
 
                 return json_variant_new_unsigned(ret, d->mode);
+
+        case TABLE_DEVNUM:
+                if (devnum_is_zero(d->devnum))
+                        return json_variant_new_null(ret);
+
+                return json_build(ret, JSON_BUILD_ARRAY(
+                                                  JSON_BUILD_UNSIGNED(major(d->devnum)),
+                                                  JSON_BUILD_UNSIGNED(minor(d->devnum))));
 
         default:
                 return -EINVAL;
@@ -2763,10 +2850,8 @@ static int table_to_json_regular(Table *t, JsonVariant **ret) {
                 /* If sorting is requested, let's calculate an index table we use to lookup the actual index to display with. */
 
                 sorted = new(size_t, n_rows);
-                if (!sorted) {
-                        r = -ENOMEM;
-                        goto finish;
-                }
+                if (!sorted)
+                        return -ENOMEM;
 
                 for (size_t i = 0; i < n_rows; i++)
                         sorted[i] = i * t->n_columns;
@@ -2781,10 +2866,10 @@ static int table_to_json_regular(Table *t, JsonVariant **ret) {
         assert(display_columns > 0);
 
         elements = new0(JsonVariant*, display_columns * 2);
-        if (!elements) {
-                r = -ENOMEM;
-                goto finish;
-        }
+        if (!elements)
+                return -ENOMEM;
+
+        CLEANUP_ARRAY(elements, (size_t) { display_columns * 2 }, json_variant_unref_many);
 
         for (size_t j = 0; j < display_columns; j++) {
                 _cleanup_free_ char *mangled = NULL;
@@ -2798,21 +2883,21 @@ static int table_to_json_regular(Table *t, JsonVariant **ret) {
                 if (!n) {
                         r = table_make_json_field_name(t, ASSERT_PTR(t->data[c]), &mangled);
                         if (r < 0)
-                                goto finish;
+                                return r;
 
                         n = mangled;
                 }
 
                 r = json_variant_new_string(elements + j*2, n);
                 if (r < 0)
-                        goto finish;
+                        return r;
         }
 
         rows = new0(JsonVariant*, n_rows-1);
-        if (!rows) {
-                r = -ENOMEM;
-                goto finish;
-        }
+        if (!rows)
+                return -ENOMEM;
+
+        CLEANUP_ARRAY(rows, (size_t) { n_rows - 1 }, json_variant_unref_many);
 
         for (size_t i = 1; i < n_rows; i++) {
                 TableData **row;
@@ -2833,28 +2918,15 @@ static int table_to_json_regular(Table *t, JsonVariant **ret) {
 
                         r = table_data_to_json(d, elements + k);
                         if (r < 0)
-                                goto finish;
+                                return r;
                 }
 
                 r = json_variant_new_object(rows + i - 1, elements, display_columns * 2);
                 if (r < 0)
-                        goto finish;
+                        return r;
         }
 
-        r = json_variant_new_array(ret, rows, n_rows - 1);
-
-finish:
-        if (rows) {
-                json_variant_unref_many(rows, n_rows-1);
-                free(rows);
-        }
-
-        if (elements) {
-                json_variant_unref_many(elements, display_columns*2);
-                free(elements);
-        }
-
-        return r;
+        return json_variant_new_array(ret, rows, n_rows - 1);
 }
 
 static int table_to_json_vertical(Table *t, JsonVariant **ret) {
@@ -2872,10 +2944,10 @@ static int table_to_json_vertical(Table *t, JsonVariant **ret) {
         assert(t->n_cells % t->n_columns == 0);
 
         elements = new0(JsonVariant *, t->n_cells);
-        if (!elements) {
-                r = -ENOMEM;
-                goto finish;
-        }
+        if (!elements)
+                return -ENOMEM;
+
+        CLEANUP_ARRAY(elements, n_elements, json_variant_unref_many);
 
         for (size_t i = t->n_columns; i < t->n_cells; i++) {
 
@@ -2887,7 +2959,7 @@ static int table_to_json_vertical(Table *t, JsonVariant **ret) {
                         if (!n) {
                                 r = table_make_json_field_name(t, ASSERT_PTR(t->data[i]), &mangled);
                                 if (r < 0)
-                                        goto finish;
+                                        return r;
 
                                 n = mangled;
                         }
@@ -2896,20 +2968,12 @@ static int table_to_json_vertical(Table *t, JsonVariant **ret) {
                 } else
                         r = table_data_to_json(t->data[i], elements + n_elements);
                 if (r < 0)
-                        goto finish;
+                        return r;
 
                 n_elements++;
         }
 
-        r = json_variant_new_object(ret, elements, n_elements);
-
-finish:
-        if (elements) {
-                json_variant_unref_many(elements, n_elements);
-                free(elements);
-        }
-
-        return r;
+        return json_variant_new_object(ret, elements, n_elements);
 }
 
 int table_to_json(Table *t, JsonVariant **ret) {

@@ -7,7 +7,7 @@
 #include "bootctl-status.h"
 #include "bootctl-util.h"
 #include "bootspec.h"
-#include "chase-symlinks.h"
+#include "chase.h"
 #include "devnum-util.h"
 #include "dirent-util.h"
 #include "efi-api.h"
@@ -43,7 +43,7 @@ static int boot_config_load_and_select(
                 _cleanup_strv_free_ char **efi_entries = NULL;
 
                 r = efi_loader_get_entries(&efi_entries);
-                if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r))
+                if (r == -ENOENT || ERRNO_IS_NEG_NOT_SUPPORTED(r))
                         log_debug_errno(r, "Boot loader reported no entries.");
                 else if (r < 0)
                         log_warning_errno(r, "Failed to determine entries reported by boot loader, ignoring: %m");
@@ -200,7 +200,7 @@ static int enumerate_binaries(
         assert(previous);
         assert(is_first);
 
-        r = chase_symlinks_and_opendir(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -219,15 +219,15 @@ static int enumerate_binaries(
                 filename = path_join(p, de->d_name);
                 if (!filename)
                         return log_oom();
+                LOG_SET_PREFIX(filename);
 
                 fd = openat(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC);
                 if (fd < 0)
-                        return log_error_errno(errno, "Failed to open file '%s' for reading: %m", filename);
+                        return log_error_errno(errno, "Failed to open file for reading: %m");
 
                 r = get_file_version(fd, &v);
-                if (r == -ESRCH) /* Not the file we are looking for. */
-                        continue;
-                if (r < 0)
+
+                if (r < 0 && r != -ESRCH)
                         return r;
 
                 if (*previous) { /* Let's output the previous entry now, since now we know that there will be
@@ -242,10 +242,10 @@ static int enumerate_binaries(
                 /* Do not output this entry immediately, but store what should be printed in a state
                  * variable, because we only will know the tree glyph to print (branch or final edge) once we
                  * read one more entry */
-                if (r > 0)
-                        r = asprintf(previous, "/%s/%s (%s%s%s)", path, de->d_name, ansi_highlight(), v, ansi_normal());
-                else
+                if (r == -ESRCH) /* No systemd-owned file but still interesting to print */
                         r = asprintf(previous, "/%s/%s", path, de->d_name);
+                else /* if (r >= 0) */
+                        r = asprintf(previous, "/%s/%s (%s%s%s)", path, de->d_name, ansi_highlight(), v, ansi_normal());
                 if (r < 0)
                         return log_oom();
 
@@ -273,15 +273,13 @@ static int status_binaries(const char *esp_path, sd_id128_t partition) {
         printf("\n");
 
         r = enumerate_binaries(esp_path, "EFI/systemd", NULL, &last, &is_first);
-        if (r < 0) {
-                printf("\n");
-                return r;
-        }
+        if (r < 0)
+                goto fail;
 
         k = enumerate_binaries(esp_path, "EFI/BOOT", "boot", &last, &is_first);
         if (k < 0) {
-                printf("\n");
-                return k;
+                r = k;
+                goto fail;
         }
 
         if (last) /* let's output the last entry now, since now we know that there will be no more, and can draw the tree glyph properly */
@@ -296,6 +294,11 @@ static int status_binaries(const char *esp_path, sd_id128_t partition) {
 
         printf("\n");
         return 0;
+
+fail:
+        errno = -r;
+        printf("         File: (can't access %s: %m)\n\n", esp_path);
+        return r;
 }
 
 static void read_efi_var(const char *variable, char **ret) {
@@ -318,7 +321,7 @@ int verb_status(int argc, char *argv[], void *userdata) {
         dev_t esp_devid = 0, xbootldr_devid = 0;
         int r, k;
 
-        r = acquire_esp(/* unprivileged_mode= */ geteuid() != 0, /* graceful= */ false, NULL, NULL, NULL, &esp_uuid, &esp_devid);
+        r = acquire_esp(/* unprivileged_mode= */ -1, /* graceful= */ false, NULL, NULL, NULL, &esp_uuid, &esp_devid);
         if (arg_print_esp_path) {
                 if (r == -EACCES) /* If we couldn't acquire the ESP path, log about access errors (which is the only
                                    * error the find_esp_and_warn() won't log on its own) */
@@ -329,7 +332,7 @@ int verb_status(int argc, char *argv[], void *userdata) {
                 puts(arg_esp_path);
         }
 
-        r = acquire_xbootldr(/* unprivileged_mode= */ geteuid() != 0, &xbootldr_uuid, &xbootldr_devid);
+        r = acquire_xbootldr(/* unprivileged_mode= */ -1, &xbootldr_uuid, &xbootldr_devid);
         if (arg_print_dollar_boot_path) {
                 if (r == -EACCES)
                         return log_error_errno(r, "Failed to determine XBOOTLDR partition: %m");
@@ -367,6 +370,9 @@ int verb_status(int argc, char *argv[], void *userdata) {
                         { EFI_LOADER_FEATURE_SORT_KEY,                "Support Type #1 sort-key field"        },
                         { EFI_LOADER_FEATURE_SAVED_ENTRY,             "Support @saved pseudo-entry"           },
                         { EFI_LOADER_FEATURE_DEVICETREE,              "Support Type #1 devicetree field"      },
+                        { EFI_LOADER_FEATURE_SECUREBOOT_ENROLL,       "Enroll SecureBoot keys"                },
+                        { EFI_LOADER_FEATURE_RETAIN_SHIM,             "Retain SHIM protocols"                 },
+                        { EFI_LOADER_FEATURE_MENU_DISABLE,            "Menu can be disabled"                  },
                 };
                 static const struct {
                         uint64_t flag;
@@ -377,6 +383,9 @@ int verb_status(int argc, char *argv[], void *userdata) {
                         { EFI_STUB_FEATURE_PICK_UP_SYSEXTS,           "Picks up system extension images from boot partition" },
                         { EFI_STUB_FEATURE_THREE_PCRS,                "Measures kernel+command line+sysexts"                 },
                         { EFI_STUB_FEATURE_RANDOM_SEED,               "Support for passing random seed to OS"                },
+                        { EFI_STUB_FEATURE_CMDLINE_ADDONS,            "Pick up .cmdline from addons"                         },
+                        { EFI_STUB_FEATURE_CMDLINE_SMBIOS,            "Pick up .cmdline from SMBIOS Type 11"                 },
+                        { EFI_STUB_FEATURE_DEVICETREE_ADDONS,         "Pick up .dtb from addons"                             },
                 };
                 _cleanup_free_ char *fw_type = NULL, *fw_info = NULL, *loader = NULL, *loader_path = NULL, *stub = NULL;
                 sd_id128_t loader_part_uuid = SD_ID128_NULL;
@@ -403,9 +412,15 @@ int verb_status(int argc, char *argv[], void *userdata) {
                 printf("%sSystem:%s\n", ansi_underline(), ansi_normal());
                 printf("      Firmware: %s%s (%s)%s\n", ansi_highlight(), strna(fw_type), strna(fw_info), ansi_normal());
                 printf(" Firmware Arch: %s\n", get_efi_arch());
-                printf("   Secure Boot: %sd (%s)\n",
-                       enable_disable(IN_SET(secure, SECURE_BOOT_USER, SECURE_BOOT_DEPLOYED)),
-                       secure_boot_mode_to_string(secure));
+                printf("   Secure Boot: %s%s%s",
+                       IN_SET(secure, SECURE_BOOT_USER, SECURE_BOOT_DEPLOYED) ? ansi_highlight_green() : ansi_normal(),
+                       enabled_disabled(IN_SET(secure, SECURE_BOOT_USER, SECURE_BOOT_DEPLOYED)),
+                       ansi_normal());
+
+                if (secure != SECURE_BOOT_DISABLED)
+                        printf(" (%s)\n", secure_boot_mode_to_string(secure));
+                else
+                        printf("\n");
 
                 s = tpm2_support();
                 printf("  TPM2 Support: %s%s%s\n",
@@ -415,6 +430,16 @@ int verb_status(int argc, char *argv[], void *userdata) {
                        (s & TPM2_SUPPORT_FIRMWARE) ? "firmware only, driver unavailable" :
                        (s & TPM2_SUPPORT_DRIVER) ? "driver only, firmware unavailable" : "no",
                        ansi_normal());
+
+                k = efi_measured_uki(LOG_DEBUG);
+                if (k > 0)
+                        printf("  Measured UKI: %syes%s\n", ansi_highlight_green(), ansi_normal());
+                else if (k == 0)
+                        printf("  Measured UKI: no\n");
+                else {
+                        errno = -k;
+                        printf("  Measured UKI: %sfailed%s (%m)\n", ansi_highlight_red(), ansi_normal());
+                }
 
                 k = efi_get_reboot_to_firmware();
                 if (k > 0)
@@ -479,17 +504,11 @@ int verb_status(int argc, char *argv[], void *userdata) {
                        "Not booted with EFI\n\n",
                        ansi_underline(), ansi_normal());
 
-        if (arg_esp_path) {
-                k = status_binaries(arg_esp_path, esp_uuid);
-                if (k < 0)
-                        r = k;
-        }
+        if (arg_esp_path)
+                RET_GATHER(r, status_binaries(arg_esp_path, esp_uuid));
 
-        if (!arg_root && is_efi_boot()) {
-                k = status_variables();
-                if (k < 0)
-                        r = k;
-        }
+        if (!arg_root && is_efi_boot())
+                RET_GATHER(r, status_variables());
 
         if (arg_esp_path || arg_xbootldr_path) {
                 _cleanup_(boot_config_free) BootConfig config = BOOT_CONFIG_NULL;
@@ -497,15 +516,13 @@ int verb_status(int argc, char *argv[], void *userdata) {
                 k = boot_config_load_and_select(&config,
                                                 arg_esp_path, esp_devid,
                                                 arg_xbootldr_path, xbootldr_devid);
-                if (k < 0)
-                        r = k;
-                else {
-                        k = status_entries(&config,
-                                           arg_esp_path, esp_uuid,
-                                           arg_xbootldr_path, xbootldr_uuid);
-                        if (k < 0)
-                                r = k;
-                }
+                RET_GATHER(r, k);
+
+                if (k >= 0)
+                        RET_GATHER(r,
+                                   status_entries(&config,
+                                                  arg_esp_path, esp_uuid,
+                                                  arg_xbootldr_path, xbootldr_uuid));
         }
 
         return r;
@@ -567,7 +584,7 @@ static void deref_unlink_file(Hashmap *known_files, const char *fn, const char *
                 return;
 
         if (arg_dry_run) {
-                r = chase_symlinks_and_access(fn, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, &path, NULL);
+                r = chase_and_access(fn, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, &path);
                 if (r < 0)
                         log_info_errno(r, "Unable to determine whether \"%s\" exists, ignoring: %m", fn);
                 else
@@ -575,7 +592,7 @@ static void deref_unlink_file(Hashmap *known_files, const char *fn, const char *
                 return;
         }
 
-        r = chase_symlinks_and_unlink(fn, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, 0, &path);
+        r = chase_and_unlink(fn, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, 0, &path);
         if (r >= 0)
                 log_info("Removed \"%s\"", path);
         else if (r != -ENOENT)
@@ -583,7 +600,7 @@ static void deref_unlink_file(Hashmap *known_files, const char *fn, const char *
 
         _cleanup_free_ char *d = NULL;
         if (path_extract_directory(fn, &d) >= 0 && !path_equal(d, "/")) {
-                r = chase_symlinks_and_unlink(d, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, AT_REMOVEDIR, NULL);
+                r = chase_and_unlink(d, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, AT_REMOVEDIR, NULL);
                 if (r < 0 && !IN_SET(r, -ENOTEMPTY, -ENOENT))
                         log_warning_errno(r, "Failed to remove directory \"%s\", ignoring: %m", d);
         }
@@ -679,7 +696,7 @@ static int unlink_entry(const BootConfig *config, const char *root, const char *
         if (arg_dry_run)
                 log_info("Would remove \"%s\"", e->path);
         else {
-                r = chase_symlinks_and_unlink(e->path, root, CHASE_PROHIBIT_SYMLINKS, 0, NULL);
+                r = chase_and_unlink(e->path, root, CHASE_PROHIBIT_SYMLINKS, 0, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to remove \"%s\": %m", e->path);
 
@@ -725,8 +742,8 @@ static int cleanup_orphaned_files(
 
         _cleanup_(hashmap_free_free_keyp) Hashmap *known_files = NULL;
         _cleanup_free_ char *full = NULL, *p = NULL;
-        _cleanup_close_ int dir_fd = -1;
-        int r = -1;
+        _cleanup_close_ int dir_fd = -EBADF;
+        int r;
 
         assert(config);
         assert(root);
@@ -741,7 +758,7 @@ static int cleanup_orphaned_files(
         if (r < 0)
                 return log_error_errno(r, "Failed to count files in %s: %m", root);
 
-        dir_fd = chase_symlinks_and_open(arg_entry_token, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS,
+        dir_fd = chase_and_open(arg_entry_token, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS,
                         O_DIRECTORY|O_CLOEXEC, &full);
         if (dir_fd == -ENOENT)
                 return 0;
@@ -769,13 +786,13 @@ int verb_list(int argc, char *argv[], void *userdata) {
          * Here we're interested in the latter but not the former, hence request the mode, and log about
          * EACCES. */
 
-        r = acquire_esp(/* unprivileged_mode= */ geteuid() != 0, /* graceful= */ false, NULL, NULL, NULL, NULL, &esp_devid);
+        r = acquire_esp(/* unprivileged_mode= */ -1, /* graceful= */ false, NULL, NULL, NULL, NULL, &esp_devid);
         if (r == -EACCES) /* We really need the ESP path for this call, hence also log about access errors */
                 return log_error_errno(r, "Failed to determine ESP location: %m");
         if (r < 0)
                 return r;
 
-        r = acquire_xbootldr(/* unprivileged_mode= */ geteuid() != 0, NULL, &xbootldr_devid);
+        r = acquire_xbootldr(/* unprivileged_mode= */ -1, NULL, &xbootldr_devid);
         if (r == -EACCES)
                 return log_error_errno(r, "Failed to determine XBOOTLDR partition: %m");
         if (r < 0)

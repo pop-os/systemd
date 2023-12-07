@@ -163,7 +163,15 @@ static int dns_trust_anchor_add_builtin_negative(DnsTrustAnchor *d) {
                 "private\0"
 
                 /* Defined by RFC 8375. The most official choice. */
-                "home.arpa\0";
+                "home.arpa\0"
+
+                /* RFC 8880 says because the 'ipv4only.arpa' zone has to
+                 * be an insecure delegation, DNSSEC cannot be used to
+                 * protect these answers from tampering by malicious
+                 * devices on the path */
+                "ipv4only.arpa\0"
+                "170.0.0.192.in-addr.arpa\0"
+                "171.0.0.192.in-addr.arpa\0";
 
         int r;
 
@@ -433,9 +441,8 @@ static int dns_trust_anchor_load_files(
 
                 for (;;) {
                         _cleanup_free_ char *line = NULL;
-                        char *l;
 
-                        r = read_line(g, LONG_LINE_MAX, &line);
+                        r = read_stripped_line(g, LONG_LINE_MAX, &line);
                         if (r < 0) {
                                 log_warning_errno(r, "Failed to read '%s', ignoring: %m", *f);
                                 break;
@@ -445,14 +452,13 @@ static int dns_trust_anchor_load_files(
 
                         n++;
 
-                        l = strstrip(line);
-                        if (isempty(l))
+                        if (isempty(line))
                                 continue;
 
-                        if (*l == ';')
+                        if (*line == ';')
                                 continue;
 
-                        (void) loader(d, *f, n, l);
+                        (void) loader(d, *f, n, line);
                 }
         }
 

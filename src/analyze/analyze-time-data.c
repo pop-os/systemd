@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "analyze.h"
 #include "analyze-time-data.h"
+#include "analyze.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
 #include "bus-unit-util.h"
+#include "memory-util.h"
 #include "special.h"
+#include "strv.h"
 
 static void subtract_timestamp(usec_t *a, usec_t b) {
         assert(a);
@@ -23,7 +25,7 @@ static int log_not_finished(usec_t finish_time) {
                                "Please try again later.\n"
                                "Hint: Use 'systemctl%s list-jobs' to see active jobs",
                                finish_time,
-                               arg_scope == LOOKUP_SCOPE_SYSTEM ? "" : " --user");
+                               arg_runtime_scope == RUNTIME_SCOPE_SYSTEM ? "" : " --user");
 }
 
 int acquire_boot_times(sd_bus *bus, bool require_finished, BootTimes **ret) {
@@ -79,7 +81,7 @@ int acquire_boot_times(sd_bus *bus, bool require_finished, BootTimes **ret) {
         if (require_finished && times.finish_time <= 0)
                 return log_not_finished(times.finish_time);
 
-        if (arg_scope == LOOKUP_SCOPE_SYSTEM && times.security_start_time > 0) {
+        if (arg_runtime_scope == RUNTIME_SCOPE_SYSTEM && times.security_start_time > 0) {
                 /* security_start_time is set when systemd is not running under container environment. */
                 if (times.initrd_time > 0)
                         times.kernel_done_time = times.initrd_time;
@@ -173,24 +175,24 @@ int pretty_boot_time(sd_bus *bus, char **ret) {
         if (!text)
                 return log_oom();
 
-        if (t->firmware_time > 0 && !strextend(&text, FORMAT_TIMESPAN(t->firmware_time - t->loader_time, USEC_PER_MSEC), " (firmware) + "))
+        if (timestamp_is_set(t->firmware_time) && !strextend(&text, FORMAT_TIMESPAN(t->firmware_time - t->loader_time, USEC_PER_MSEC), " (firmware) + "))
                 return log_oom();
-        if (t->loader_time > 0 && !strextend(&text, FORMAT_TIMESPAN(t->loader_time, USEC_PER_MSEC), " (loader) + "))
+        if (timestamp_is_set(t->loader_time) && !strextend(&text, FORMAT_TIMESPAN(t->loader_time, USEC_PER_MSEC), " (loader) + "))
                 return log_oom();
-        if (t->kernel_done_time > 0 && !strextend(&text, FORMAT_TIMESPAN(t->kernel_done_time, USEC_PER_MSEC), " (kernel) + "))
+        if (timestamp_is_set(t->kernel_done_time) && !strextend(&text, FORMAT_TIMESPAN(t->kernel_done_time, USEC_PER_MSEC), " (kernel) + "))
                 return log_oom();
-        if (t->initrd_time > 0 && !strextend(&text, FORMAT_TIMESPAN(t->userspace_time - t->initrd_time, USEC_PER_MSEC), " (initrd) + "))
+        if (timestamp_is_set(t->initrd_time) && !strextend(&text, FORMAT_TIMESPAN(t->userspace_time - t->initrd_time, USEC_PER_MSEC), " (initrd) + "))
                 return log_oom();
 
         if (!strextend(&text, FORMAT_TIMESPAN(t->finish_time - t->userspace_time, USEC_PER_MSEC), " (userspace) "))
                 return log_oom();
 
-        if (t->kernel_done_time > 0)
+        if (timestamp_is_set(t->kernel_done_time))
                 if (!strextend(&text, "= ", FORMAT_TIMESPAN(t->firmware_time + t->finish_time, USEC_PER_MSEC),  " "))
                         return log_oom();
 
         if (unit_id && timestamp_is_set(activated_time)) {
-                usec_t base = t->userspace_time > 0 ? t->userspace_time : t->reverse_offset;
+                usec_t base = timestamp_is_set(t->userspace_time) ? t->userspace_time : t->reverse_offset;
 
                 if (!strextend(&text, "\n", unit_id, " reached after ", FORMAT_TIMESPAN(activated_time - base, USEC_PER_MSEC), " in userspace."))
                         return log_oom();
@@ -215,22 +217,41 @@ int pretty_boot_time(sd_bus *bus, char **ret) {
         return 0;
 }
 
+void unit_times_clear(UnitTimes *t) {
+        if (!t)
+                return;
+
+        FOREACH_ARRAY(d, t->deps, ELEMENTSOF(t->deps))
+                *d = strv_free(*d);
+
+        t->name = mfree(t->name);
+}
+
 UnitTimes* unit_times_free_array(UnitTimes *t) {
         if (!t)
                 return NULL;
 
         for (UnitTimes *p = t; p->has_data; p++)
-                free(p->name);
+                unit_times_clear(p);
 
         return mfree(t);
 }
 
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(UnitTimes*, unit_times_clear, NULL);
+
 int acquire_time_data(sd_bus *bus, bool require_finished, UnitTimes **out) {
         static const struct bus_properties_map property_map[] = {
-                { "InactiveExitTimestampMonotonic",  "t", NULL, offsetof(UnitTimes, activating)   },
-                { "ActiveEnterTimestampMonotonic",   "t", NULL, offsetof(UnitTimes, activated)    },
-                { "ActiveExitTimestampMonotonic",    "t", NULL, offsetof(UnitTimes, deactivating) },
-                { "InactiveEnterTimestampMonotonic", "t", NULL, offsetof(UnitTimes, deactivated)  },
+                { "InactiveExitTimestampMonotonic",  "t",  NULL, offsetof(UnitTimes, activating)           },
+                { "ActiveEnterTimestampMonotonic",   "t",  NULL, offsetof(UnitTimes, activated)            },
+                { "ActiveExitTimestampMonotonic",    "t",  NULL, offsetof(UnitTimes, deactivating)         },
+                { "InactiveEnterTimestampMonotonic", "t",  NULL, offsetof(UnitTimes, deactivated)          },
+                { "After",                           "as", NULL, offsetof(UnitTimes, deps[UNIT_AFTER])     },
+                { "Before",                          "as", NULL, offsetof(UnitTimes, deps[UNIT_BEFORE])    },
+                { "Requires",                        "as", NULL, offsetof(UnitTimes, deps[UNIT_REQUIRES])  },
+                { "Requisite",                       "as", NULL, offsetof(UnitTimes, deps[UNIT_REQUISITE]) },
+                { "Wants",                           "as", NULL, offsetof(UnitTimes, deps[UNIT_WANTS])     },
+                { "Conflicts",                       "as", NULL, offsetof(UnitTimes, deps[UNIT_CONFLICTS]) },
+                { "Upholds",                         "as", NULL, offsetof(UnitTimes, deps[UNIT_UPHOLDS])   },
                 {},
         };
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
@@ -254,14 +275,14 @@ int acquire_time_data(sd_bus *bus, bool require_finished, UnitTimes **out) {
                 return bus_log_parse_error(r);
 
         while ((r = bus_parse_unit_info(reply, &u)) > 0) {
-                UnitTimes *t;
+                _cleanup_(unit_times_clearp) UnitTimes *t = NULL;
 
-                if (!GREEDY_REALLOC(unit_times, c + 2))
+                if (!GREEDY_REALLOC0(unit_times, c + 2))
                         return log_oom();
 
-                unit_times[c + 1].has_data = false;
+                /* t initially has pointers zeroed by the allocation, and unit_times_clearp will have zeroed
+                 * them if the entry is being reused. */
                 t = &unit_times[c];
-                t->name = NULL;
 
                 assert_cc(sizeof(usec_t) == sizeof(uint64_t));
 
@@ -298,6 +319,8 @@ int acquire_time_data(sd_bus *bus, bool require_finished, UnitTimes **out) {
                         return log_oom();
 
                 t->has_data = true;
+                /* Prevent destructor from running on t reference. */
+                TAKE_PTR(t);
                 c++;
         }
         if (r < 0)

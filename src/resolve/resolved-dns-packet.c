@@ -307,13 +307,13 @@ int dns_packet_validate_query(DnsPacket *p) {
         if (DNS_PACKET_OPCODE(p) != 0)
                 return -EBADMSG;
 
-        if (DNS_PACKET_TC(p))
-                return -EBADMSG;
-
         switch (p->protocol) {
 
         case DNS_PROTOCOL_LLMNR:
         case DNS_PROTOCOL_DNS:
+                if (DNS_PACKET_TC(p)) /* mDNS query may have truncation flag. */
+                        return -EBADMSG;
+
                 /* RFC 4795, Section 2.1.1. says to discard all queries with QDCOUNT != 1 */
                 if (DNS_PACKET_QDCOUNT(p) != 1)
                         return -EBADMSG;
@@ -911,9 +911,9 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
                 if (r < 0)
                         goto fail;
 
-                /* RFC 2782 states "Unless and until permitted by future standards
-                 * action, name compression is not to be used for this field." */
-                r = dns_packet_append_name(p, rr->srv.name, false, true, NULL);
+                /* RFC 2782 states "Unless and until permitted by future standards action, name compression
+                 * is not to be used for this field." Hence we turn off compression here. */
+                r = dns_packet_append_name(p, rr->srv.name, /* allow_compression= */ false, /* canonical_candidate= */ true, NULL);
                 break;
 
         case DNS_TYPE_PTR:
@@ -1728,7 +1728,13 @@ int dns_packet_read_rr(
                 r = dns_packet_read_uint16(p, &rr->srv.port, NULL);
                 if (r < 0)
                         return r;
-                r = dns_packet_read_name(p, &rr->srv.name, true, NULL);
+
+                /* RFC 2782 states "Unless and until permitted by future standards action, name compression
+                 * is not to be used for this field." Nonetheless, we support it here, in the interest of
+                 * increasing compatibility with implementations that do not implement this correctly. After
+                 * all we didn't do this right once upon a time ourselves (see
+                 * https://github.com/systemd/systemd/issues/9793). */
+                r = dns_packet_read_name(p, &rr->srv.name, /* allow_compression= */ true, NULL);
                 break;
 
         case DNS_TYPE_PTR:
@@ -2342,8 +2348,11 @@ static int dns_packet_extract_answer(DnsPacket *p, DnsAnswer **ret_answer) {
                 } else {
                         DnsAnswerFlags flags = 0;
 
-                        if (p->protocol == DNS_PROTOCOL_MDNS && !cache_flush)
-                                flags |= DNS_ANSWER_SHARED_OWNER;
+                        if (p->protocol == DNS_PROTOCOL_MDNS) {
+                                flags |= DNS_ANSWER_REFUSE_TTL_NO_MATCH;
+                                if (!cache_flush)
+                                        flags |= DNS_ANSWER_SHARED_OWNER;
+                        }
 
                         /* According to RFC 4795, section 2.9. only the RRs from the Answer section shall be
                          * cached. Hence mark only those RRs as cacheable by default, but not the ones from

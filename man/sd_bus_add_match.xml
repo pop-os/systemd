@@ -151,10 +151,15 @@
     </para>
   </refsect1>
 
-  <refsect1>
-    <title>Notes</title>
+  <xi:include href="libsystemd-pkgconfig.xml" />
 
-    <xi:include href="libsystemd-pkgconfig.xml" xpointer="pkgconfig-text"/>
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_bus_add_match()</function> and
+    <function>sd_bus_message_handler_t()</function> were added in version 231.</para>
+    <para><function>sd_bus_add_match_async()</function>,
+    <function>sd_bus_match_signal()</function>, and
+    <function>sd_bus_match_signal_async()</function> were added in version 237.</para>
   </refsect1>
 
   <refsect1>

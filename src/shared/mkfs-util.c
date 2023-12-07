@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <sys/mount.h>
 #include <unistd.h>
 
 #include "dirent-util.h"
@@ -8,10 +9,12 @@
 #include "fs-util.h"
 #include "id128-util.h"
 #include "mkfs-util.h"
+#include "mount-util.h"
 #include "mountpoint-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "recurse-dir.h"
+#include "rm-rf.h"
 #include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
@@ -152,13 +155,13 @@ static int do_mcopy(const char *node, const char *root) {
         if (strv_extend(&argv, "::") < 0)
                 return log_oom();
 
-        r = safe_fork("(mcopy)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS, NULL);
+        r = safe_fork("(mcopy)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS, NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Avoid failures caused by mismatch in expectations between mkfs.vfat and mcopy by disabling
                  * the stricter mcopy checks using MTOOLS_SKIP_CHECK. */
-                execve(mcopy, argv, STRV_MAKE("MTOOLS_SKIP_CHECK=1"));
+                execve(mcopy, argv, STRV_MAKE("MTOOLS_SKIP_CHECK=1", "TZ=UTC", strv_find_prefix(environ, "SOURCE_DATE_EPOCH=")));
 
                 log_error_errno(errno, "Failed to execute mcopy: %m");
 
@@ -167,6 +170,12 @@ static int do_mcopy(const char *node, const char *root) {
 
         return 0;
 }
+
+typedef struct ProtofileData {
+        FILE *file;
+        bool has_filename_with_spaces;
+        const char *tmpdir;
+} ProtofileData;
 
 static int protofile_print_item(
                 RecurseDirEvent event,
@@ -177,11 +186,12 @@ static int protofile_print_item(
                 const struct statx *sx,
                 void *userdata) {
 
-        FILE *f = ASSERT_PTR(userdata);
+        ProtofileData *data = ASSERT_PTR(userdata);
+        _cleanup_free_ char *copy = NULL;
         int r;
 
         if (event == RECURSE_DIR_LEAVE) {
-                fputs("$\n", f);
+                fputs("$\n", data->file);
                 return 0;
         }
 
@@ -197,38 +207,79 @@ static int protofile_print_item(
         if (type == 0)
                 return RECURSE_DIR_CONTINUE;
 
-        fprintf(f, "%s %c%c%c%03o 0 0 ",
-                de->d_name,
+        /* The protofile format does not support spaces in filenames as whitespace is used as a token
+         * delimiter. To work around this limitation, mkfs.xfs allows escaping whitespace by using the /
+         * character (which isn't allowed in filenames and as such can be used to escape whitespace). See
+         * https://lore.kernel.org/linux-xfs/20230222090303.h6tujm7y32gjhgal@andromeda/T/#m8066b3e7d62a080ee7434faac4861d944e64493b
+         * for more information.*/
+
+        if (strchr(de->d_name, ' ')) {
+                copy = strdup(de->d_name);
+                if (!copy)
+                        return log_oom();
+
+                string_replace_char(copy, ' ', '/');
+                data->has_filename_with_spaces = true;
+        }
+
+        fprintf(data->file, "%s %c%c%c%03o "UID_FMT" "GID_FMT" ",
+                copy ?: de->d_name,
                 type,
                 sx->stx_mode & S_ISUID ? 'u' : '-',
                 sx->stx_mode & S_ISGID ? 'g' : '-',
-                (unsigned) (sx->stx_mode & 0777));
+                (unsigned) (sx->stx_mode & 0777),
+                sx->stx_uid, sx->stx_gid);
 
-        if (S_ISREG(sx->stx_mode))
-                fputs(path, f);
-        else if (S_ISLNK(sx->stx_mode)) {
+        if (S_ISREG(sx->stx_mode)) {
+                _cleanup_free_ char *p = NULL;
+
+                /* While we can escape whitespace in the filename, we cannot escape whitespace in the source
+                 * path, so hack around that by creating a symlink to the path in a temporary directory and
+                 * using the symlink as the source path instead. */
+
+                if (strchr(path, ' ')) {
+                        r = tempfn_random_child(data->tmpdir, "mkfs-xfs", &p);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to generate random child name in %s: %m", data->tmpdir);
+
+                        if (symlink(path, p) < 0)
+                                return log_error_errno(errno, "Failed to symlink %s to %s: %m", p, path);
+                }
+
+                fputs(p ?: path, data->file);
+        } else if (S_ISLNK(sx->stx_mode)) {
                 _cleanup_free_ char *p = NULL;
 
                 r = readlinkat_malloc(dir_fd, de->d_name, &p);
                 if (r < 0)
                         return log_error_errno(r, "Failed to read symlink %s: %m", path);
 
-                fputs(p, f);
-        } else if (S_ISBLK(sx->stx_mode) || S_ISCHR(sx->stx_mode))
-                fprintf(f, "%" PRIu32 " %" PRIu32, sx->stx_rdev_major, sx->stx_rdev_minor);
+                /* If we have a symlink to a path with whitespace in it, we're out of luck, as there's no way
+                 * to encode that in the mkfs.xfs protofile format. */
 
-        fputc('\n', f);
+                if (strchr(p, ' '))
+                        return log_error_errno(r, "Symlinks to paths containing whitespace are not supported by mkfs.xfs: %m");
+
+                fputs(p, data->file);
+        } else if (S_ISBLK(sx->stx_mode) || S_ISCHR(sx->stx_mode))
+                fprintf(data->file, "%" PRIu32 " %" PRIu32, sx->stx_rdev_major, sx->stx_rdev_minor);
+
+        fputc('\n', data->file);
 
         return RECURSE_DIR_CONTINUE;
 }
 
-static int make_protofile(const char *root, char **ret) {
+static int make_protofile(const char *root, char **ret_path, bool *ret_has_filename_with_spaces, char **ret_tmpdir) {
+        _cleanup_(rm_rf_physical_and_freep) char *tmpdir = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_(unlink_and_freep) char *p = NULL;
+        struct ProtofileData data = {};
         const char *vt;
         int r;
 
-        assert(ret);
+        assert(ret_path);
+        assert(ret_has_filename_with_spaces);
+        assert(ret_tmpdir);
 
         r = var_tmp_dir(&vt);
         if (r < 0)
@@ -238,11 +289,20 @@ static int make_protofile(const char *root, char **ret) {
         if (r < 0)
                 return log_error_errno(r, "Failed to open temporary file: %m");
 
+        /* Explicitly use /tmp here because this directory cannot have spaces its path. */
+        r = mkdtemp_malloc("/tmp/systemd-mkfs-XXXXXX", &tmpdir);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create temporary directory: %m");
+
+        data.file = f;
+        data.tmpdir = tmpdir;
+
         fputs("/\n"
               "0 0\n"
               "d--755 0 0\n", f);
 
-        r = recurse_dir_at(AT_FDCWD, root, STATX_TYPE|STATX_MODE, UINT_MAX, RECURSE_DIR_SORT, protofile_print_item, f);
+        r = recurse_dir_at(AT_FDCWD, root, STATX_TYPE|STATX_MODE|STATX_UID|STATX_GID, UINT_MAX,
+                           RECURSE_DIR_SORT, protofile_print_item, &data);
         if (r < 0)
                 return log_error_errno(r, "Failed to recurse through %s: %m", root);
 
@@ -252,7 +312,9 @@ static int make_protofile(const char *root, char **ret) {
         if (r < 0)
                 return log_error_errno(r, "Failed to flush %s: %m", p);
 
-        *ret = TAKE_PTR(p);
+        *ret_path = TAKE_PTR(p);
+        *ret_has_filename_with_spaces = data.has_filename_with_spaces;
+        *ret_tmpdir = TAKE_PTR(tmpdir);
 
         return 0;
 }
@@ -264,13 +326,18 @@ int make_filesystem(
                 const char *root,
                 sd_id128_t uuid,
                 bool discard,
+                bool quiet,
                 uint64_t sector_size,
                 char * const *extra_mkfs_args) {
 
         _cleanup_free_ char *mkfs = NULL, *mangled_label = NULL;
-        _cleanup_strv_free_ char **argv = NULL;
+        _cleanup_strv_free_ char **argv = NULL, **env = NULL;
+        _cleanup_(rm_rf_physical_and_freep) char *protofile_tmpdir = NULL;
         _cleanup_(unlink_and_freep) char *protofile = NULL;
         char vol_id[CONST_MAX(SD_ID128_UUID_STRING_MAX, 8U + 1U)] = {};
+        int stdio_fds[3] = { -EBADF, STDERR_FILENO, STDERR_FILENO};
+        ForkFlags flags = FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|
+                        FORK_CLOSE_ALL_FDS|FORK_REARRANGE_STDIO|FORK_REOPEN_LOG;
         int r;
 
         assert(node);
@@ -352,9 +419,8 @@ int make_filesystem(
                 assert_se(sd_id128_to_uuid_string(uuid, vol_id));
 
         /* When changing this conditional, also adjust the log statement below. */
-        if (streq(fstype, "ext2")) {
+        if (STR_IN_SET(fstype, "ext2", "ext3", "ext4")) {
                 argv = strv_new(mkfs,
-                                "-q",
                                 "-L", label,
                                 "-U", vol_id,
                                 "-I", "256",
@@ -363,31 +429,23 @@ int make_filesystem(
                                 "-b", "4096",
                                 "-T", "default",
                                 node);
-                if (!argv)
-                        return log_oom();
 
                 if (root && strv_extend_strv(&argv, STRV_MAKE("-d", root), false) < 0)
                         return log_oom();
 
-        } else if (STR_IN_SET(fstype, "ext3", "ext4")) {
-                argv = strv_new(mkfs,
-                                "-q",
-                                "-L", label,
-                                "-U", vol_id,
-                                "-I", "256",
-                                "-O", "has_journal",
-                                "-m", "0",
-                                "-E", discard ? "discard,lazy_itable_init=1" : "nodiscard,lazy_itable_init=1",
-                                "-b", "4096",
-                                "-T", "default",
-                                node);
-
-                if (root && strv_extend_strv(&argv, STRV_MAKE("-d", root), false) < 0)
+                if (quiet && strv_extend(&argv, "-q") < 0)
                         return log_oom();
+
+                if (sector_size > 0) {
+                        if (strv_extend(&env, "MKE2FS_DEVICE_SECTSIZE") < 0)
+                                        return log_oom();
+
+                        if (strv_extendf(&env, "%"PRIu64, sector_size) < 0)
+                                return log_oom();
+                }
 
         } else if (streq(fstype, "btrfs")) {
                 argv = strv_new(mkfs,
-                                "-q",
                                 "-L", label,
                                 "-U", vol_id,
                                 node);
@@ -400,9 +458,16 @@ int make_filesystem(
                 if (root && strv_extend_strv(&argv, STRV_MAKE("-r", root), false) < 0)
                         return log_oom();
 
+                if (quiet && strv_extend(&argv, "-q") < 0)
+                        return log_oom();
+
+                /* mkfs.btrfs unconditionally warns about several settings changing from v5.15 onwards which
+                 * isn't silenced by "-q", so let's redirect stdout to /dev/null as well. */
+                if (quiet)
+                        stdio_fds[1] = -EBADF;
+
         } else if (streq(fstype, "f2fs")) {
                 argv = strv_new(mkfs,
-                                "-q",
                                 "-g",  /* "default options" */
                                 "-f",  /* force override, without this it doesn't seem to want to write to an empty partition */
                                 "-l", label,
@@ -410,13 +475,23 @@ int make_filesystem(
                                 "-t", one_zero(discard),
                                 node);
 
+                if (quiet && strv_extend(&argv, "-q") < 0)
+                        return log_oom();
+
+                if (sector_size > 0) {
+                        if (strv_extend(&argv, "-w") < 0)
+                                return log_oom();
+
+                        if (strv_extendf(&argv, "%"PRIu64, sector_size) < 0)
+                                return log_oom();
+                }
+
         } else if (streq(fstype, "xfs")) {
                 const char *j;
 
                 j = strjoina("uuid=", vol_id);
 
                 argv = strv_new(mkfs,
-                                "-q",
                                 "-L", label,
                                 "-m", j,
                                 "-m", "reflink=1",
@@ -428,11 +503,23 @@ int make_filesystem(
                         return log_oom();
 
                 if (root) {
-                        r = make_protofile(root, &protofile);
+                        bool has_filename_with_spaces = false;
+                        _cleanup_free_ char *protofile_with_opt = NULL;
+
+                        r = make_protofile(root, &protofile, &has_filename_with_spaces, &protofile_tmpdir);
                         if (r < 0)
                                 return r;
 
-                        if (strv_extend_strv(&argv, STRV_MAKE("-p", protofile), false) < 0)
+                        /* Gross hack to make mkfs.xfs interpret slashes as spaces so we can encode filenames
+                         * with spaces in the protofile format. */
+                        if (has_filename_with_spaces)
+                                protofile_with_opt = strjoin("slashes_are_spaces=1,", protofile);
+                        else
+                                protofile_with_opt = strdup(protofile);
+                        if (!protofile_with_opt)
+                                return -ENOMEM;
+
+                        if (strv_extend_strv(&argv, STRV_MAKE("-p", protofile_with_opt), false) < 0)
                                 return log_oom();
                 }
 
@@ -443,6 +530,9 @@ int make_filesystem(
                         if (strv_extendf(&argv, "size=%"PRIu64, sector_size) < 0)
                                 return log_oom();
                 }
+
+                if (quiet && strv_extend(&argv, "-q") < 0)
+                        return log_oom();
 
         } else if (streq(fstype, "vfat")) {
 
@@ -460,27 +550,41 @@ int make_filesystem(
                                 return log_oom();
                 }
 
-        } else if (streq(fstype, "swap"))
-                /* TODO: add --quiet here if
-                 * https://github.com/util-linux/util-linux/issues/1499 resolved. */
+                /* mkfs.vfat does not have a --quiet option so let's redirect stdout to /dev/null instead. */
+                if (quiet)
+                        stdio_fds[1] = -EBADF;
+
+        } else if (streq(fstype, "swap")) {
+                /* TODO: add --quiet once util-linux v2.38 is available everywhere. */
 
                 argv = strv_new(mkfs,
                                 "-L", label,
                                 "-U", vol_id,
                                 node);
 
-        else if (streq(fstype, "squashfs"))
+                if (quiet)
+                        stdio_fds[1] = -EBADF;
+
+        } else if (streq(fstype, "squashfs")) {
 
                 argv = strv_new(mkfs,
                                 root, node,
                                 "-noappend");
 
-        else if (streq(fstype, "erofs"))
+                /* mksquashfs -quiet option is pretty new so let's redirect stdout to /dev/null instead. */
+                if (quiet)
+                        stdio_fds[1] = -EBADF;
+
+        } else if (streq(fstype, "erofs")) {
 
                 argv = strv_new(mkfs,
                                 "-U", vol_id,
                                 node, root);
-        else
+
+                if (quiet && strv_extend(&argv, "--quiet") < 0)
+                        return log_oom();
+
+        } else
                 /* Generic fallback for all other file systems */
                 argv = strv_new(mkfs, node);
 
@@ -490,11 +594,47 @@ int make_filesystem(
         if (extra_mkfs_args && strv_extend_strv(&argv, extra_mkfs_args, false) < 0)
                 return log_oom();
 
-        r = safe_fork("(mkfs)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS, NULL);
+        if (streq(fstype, "btrfs")) {
+                struct stat st;
+
+                if (stat(node, &st) < 0)
+                        return log_error_errno(r, "Failed to stat '%s': %m", node);
+
+                if (S_ISBLK(st.st_mode))
+                        flags |= FORK_NEW_MOUNTNS;
+        }
+
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *j = NULL;
+
+                j = strv_join(argv, " ");
+                log_debug("Executing mkfs command: %s", strna(j));
+        }
+
+        r = safe_fork_full(
+                        "(mkfs)",
+                        stdio_fds,
+                        /*except_fds=*/ NULL,
+                        /*n_except_fds=*/ 0,
+                        flags,
+                        /*ret_pid=*/ NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
+
+                STRV_FOREACH_PAIR(k, v, env)
+                        if (setenv(*k, *v, /* replace = */ true) < 0) {
+                                log_error_errno(r, "Failed to set %s=%s environment variable: %m", *k, *v);
+                                _exit(EXIT_FAILURE);
+                        }
+
+                /* mkfs.btrfs refuses to operate on block devices with mounted partitions, even if operating
+                 * on unformatted free space, so let's trick it and other mkfs tools into thinking no
+                 * partitions are mounted. See https://github.com/kdave/btrfs-progs/issues/640 for more
+                 ° information. */
+                 if (flags & FORK_NEW_MOUNTNS)
+                        (void) mount_nofollow_verbose(LOG_DEBUG, "/dev/null", "/proc/self/mounts", NULL, MS_BIND, NULL);
 
                 execvp(mkfs, argv);
 
@@ -519,5 +659,26 @@ int make_filesystem(
                 log_info("%s successfully formatted as %s (no label or uuid specified)",
                          node, fstype);
 
+        return 0;
+}
+
+int mkfs_options_from_env(const char *component, const char *fstype, char ***ret) {
+        _cleanup_strv_free_ char **l = NULL;
+        const char *e;
+        char *n;
+
+        assert(component);
+        assert(fstype);
+        assert(ret);
+
+        n = strjoina("SYSTEMD_", component, "_MKFS_OPTIONS_", fstype);
+        e = getenv(ascii_strupper(n));
+        if (e) {
+                l = strv_split(e, NULL);
+                if (!l)
+                        return -ENOMEM;
+        }
+
+        *ret = TAKE_PTR(l);
         return 0;
 }

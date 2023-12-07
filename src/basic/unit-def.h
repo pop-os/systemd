@@ -144,7 +144,11 @@ typedef enum ServiceState {
         SERVICE_FINAL_SIGTERM,     /* In case the STOP_POST executable hangs, we shoot that down, too */
         SERVICE_FINAL_SIGKILL,
         SERVICE_FAILED,
+        SERVICE_DEAD_BEFORE_AUTO_RESTART,
+        SERVICE_FAILED_BEFORE_AUTO_RESTART,
+        SERVICE_DEAD_RESOURCES_PINNED,  /* Like SERVICE_DEAD, but with pinned resources */
         SERVICE_AUTO_RESTART,
+        SERVICE_AUTO_RESTART_QUEUED,
         SERVICE_CLEANING,
         _SERVICE_STATE_MAX,
         _SERVICE_STATE_INVALID = -EINVAL,
@@ -282,6 +286,8 @@ const char *unit_dbus_interface_from_name(const char *name);
 
 const char *unit_type_to_string(UnitType i) _const_;
 UnitType unit_type_from_string(const char *s) _pure_;
+
+const char* unit_type_to_capitalized_string(UnitType t);
 
 const char *unit_load_state_to_string(UnitLoadState i) _const_;
 UnitLoadState unit_load_state_from_string(const char *s) _pure_;

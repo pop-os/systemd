@@ -106,7 +106,7 @@
         <varlistentry>
           <term><constant>-ECHILD</constant></term>
 
-          <listitem><para>The event loop has been created in a different process.</para></listitem>
+          <listitem><para>The event loop has been created in a different process, library or module instance.</para></listitem>
 
         </varlistentry>
 
@@ -121,6 +121,12 @@
   </refsect1>
 
   <xi:include href="libsystemd-pkgconfig.xml" />
+
+  <refsect1>
+    <title>History</title>
+    <para><function>sd_event_source_set_description()</function> and
+    <function>sd_event_source_get_description()</function> were added in version 229.</para>
+  </refsect1>
 
   <refsect1>
     <title>See Also</title>

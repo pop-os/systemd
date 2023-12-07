@@ -49,7 +49,7 @@ TEST(specifier_escape_strv) {
 static const Specifier specifier_table[] = {
         COMMON_SYSTEM_SPECIFIERS,
 
-        COMMON_CREDS_SPECIFIERS(LOOKUP_SCOPE_USER),
+        COMMON_CREDS_SPECIFIERS(RUNTIME_SCOPE_USER),
         { 'h', specifier_user_home,       NULL },
 
         COMMON_TMP_SPECIFIERS,
@@ -106,7 +106,7 @@ TEST(specifier_real_path) {
         puts(strnull(w));
 
         /* /dev/initctl should normally be a symlink to /run/initctl */
-        if (files_same("/dev/initctl", "/run/initctl", 0) > 0)
+        if (inode_same("/dev/initctl", "/run/initctl", 0) > 0)
                 assert_se(streq(w, "p=/dev/initctl y=/run/initctl Y=/run w=/dev/tty W=/dev"));
 }
 
@@ -138,7 +138,7 @@ TEST(specifiers) {
                 xsprintf(spec, "%%%c", s->specifier);
 
                 r = specifier_printf(spec, SIZE_MAX, specifier_table, NULL, NULL, &resolved);
-                if (s->specifier == 'm' && IN_SET(r, -ENOENT, -ENOMEDIUM)) /* machine-id might be missing in build chroots */
+                if (s->specifier == 'm' && IN_SET(r, -EUNATCH, -ENOMEDIUM, -ENOPKG)) /* machine-id might be missing in build chroots */
                         continue;
                 assert_se(r >= 0);
 

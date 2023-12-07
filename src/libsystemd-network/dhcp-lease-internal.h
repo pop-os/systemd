@@ -7,9 +7,10 @@
 
 #include "sd-dhcp-client.h"
 
-#include "dhcp-internal.h"
-#include "dhcp-protocol.h"
+#include "alloc-util.h"
+#include "dhcp-option.h"
 #include "list.h"
+#include "time-util.h"
 
 struct sd_dhcp_route {
         struct in_addr dst_addr;
@@ -29,9 +30,11 @@ struct sd_dhcp_lease {
         unsigned n_ref;
 
         /* each 0 if unset */
-        uint32_t t1;
-        uint32_t t2;
-        uint32_t lifetime;
+        usec_t t1;
+        usec_t t2;
+        usec_t lifetime;
+        triple_timestamp timestamp;
+        usec_t ipv6_only_preferred_usec;
 
         /* each 0 if unset */
         be32_t address;
@@ -47,6 +50,8 @@ struct sd_dhcp_lease {
         struct in_addr *router;
         size_t router_size;
 
+        bool rapid_commit;
+
         DHCPServerData servers[_SD_DHCP_LEASE_SERVER_TYPE_MAX];
 
         struct sd_dhcp_route *static_routes;
@@ -60,6 +65,7 @@ struct sd_dhcp_lease {
         char **search_domains;
         char *hostname;
         char *root_path;
+        char *captive_portal;
 
         void *client_id;
         size_t client_id_len;
@@ -84,6 +90,9 @@ int dhcp_lease_parse_options(uint8_t code, uint8_t len, const void *option, void
 int dhcp_lease_parse_search_domains(const uint8_t *option, size_t len, char ***domains);
 int dhcp_lease_insert_private_option(sd_dhcp_lease *lease, uint8_t tag, const void *data, uint8_t len);
 
+void dhcp_lease_set_timestamp(sd_dhcp_lease *lease, const triple_timestamp *timestamp);
 int dhcp_lease_set_default_subnet_mask(sd_dhcp_lease *lease);
-
 int dhcp_lease_set_client_id(sd_dhcp_lease *lease, const void *client_id, size_t client_id_len);
+
+#define dhcp_lease_unref_and_replace(a, b)                              \
+        unref_and_replace_full(a, b, sd_dhcp_lease_ref, sd_dhcp_lease_unref)
