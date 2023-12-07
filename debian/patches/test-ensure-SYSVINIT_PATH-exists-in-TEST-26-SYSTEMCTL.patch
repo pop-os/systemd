@@ -1,0 +1,21 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Thu, 7 Dec 2023 15:57:34 -0500
+Subject: test: ensure SYSVINIT_PATH exists in TEST-26-SYSTEMCTL
+
+Forwarded: no, support for systemd-sysv-generator will be dropped upstream soon
+---
+ test/units/testsuite-26.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/units/testsuite-26.sh b/test/units/testsuite-26.sh
+index 1e11c42..3a523ac 100755
+--- a/test/units/testsuite-26.sh
++++ b/test/units/testsuite-26.sh
+@@ -347,6 +347,7 @@ if [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]; then
+     # This is configurable via -Dsysvinit-path=, but we can't get the value
+     # at runtime, so let's just support the two most common paths for now.
+     [[ -d /etc/rc.d/init.d ]] && SYSVINIT_PATH="/etc/rc.d/init.d" || SYSVINIT_PATH="/etc/init.d"
++    mkdir -p "$SYSVINIT_PATH"
+ 
+     # invalid dependency
+     cat >"${SYSVINIT_PATH:?}/issue-24990" <<\EOF
