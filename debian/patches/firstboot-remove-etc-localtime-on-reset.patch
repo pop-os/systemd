@@ -1,0 +1,26 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Thu, 7 Dec 2023 16:21:51 -0500
+Subject: firstboot: remove /etc/localtime on --reset
+
+Origin: upstream, https://github.com/systemd/systemd/commit/cd3207491d2a6ea633562925f46e88ad9cfb8aa5
+
+The --reset option is supposed to remove all files configured by
+firstboot, but currently it does not remove /etc/localtime.
+---
+ src/firstboot/firstboot.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
+index fb42531..cd8b1e1 100644
+--- a/src/firstboot/firstboot.c
++++ b/src/firstboot/firstboot.c
+@@ -1209,7 +1209,8 @@ static int process_reset(int rfd) {
+                        "/etc/vconsole.conf",
+                        "/etc/hostname",
+                        "/etc/machine-id",
+-                       "/etc/kernel/cmdline") {
++                       "/etc/kernel/cmdline",
++                       "/etc/localtime") {
+                 r = reset_one(rfd, p);
+                 if (r < 0)
+                         return r;
