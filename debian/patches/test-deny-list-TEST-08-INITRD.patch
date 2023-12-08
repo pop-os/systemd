@@ -1,0 +1,21 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Fri, 8 Dec 2023 16:02:36 -0500
+Subject: test: deny-list TEST-08-INITRD
+
+Upstream already disables this: https://github.com/systemd/systemd/pull/28813.
+
+It makes sense for us to as well, because we don't run systemd in the
+initrd.
+---
+ test/TEST-08-INITRD/deny-list-upstream-ci | 2 ++
+ 1 file changed, 2 insertions(+)
+ create mode 100644 test/TEST-08-INITRD/deny-list-upstream-ci
+
+diff --git a/test/TEST-08-INITRD/deny-list-upstream-ci b/test/TEST-08-INITRD/deny-list-upstream-ci
+new file mode 100644
+index 0000000..c65d4ed
+--- /dev/null
++++ b/test/TEST-08-INITRD/deny-list-upstream-ci
+@@ -0,0 +1,2 @@
++# Upstream disables this too, see https://github.com/systemd/systemd/pull/28813.
++# It makes sense for us to disable this as well, because we don't run systemd in the initrd.
