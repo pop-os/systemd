@@ -213,6 +213,8 @@ Depends: systemd-tests,
   tzdata-legacy | tzdata (<< 2023c-8),
   python3-pefile,
   nvme-cli,
+  mdadm,
+  lvm2,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
