@@ -24,3 +24,4 @@ test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch
 firstboot-remove-etc-localtime-on-reset.patch
 test-deny-list-TEST-08-INITRD.patch
 test-install-all-necessary-units-generators-for-LVM-on-De.patch
+test-skip-failing-test-execute-tests-in-LXC.patch

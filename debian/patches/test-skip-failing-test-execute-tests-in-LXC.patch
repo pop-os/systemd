@@ -1,0 +1,73 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Wed, 13 Dec 2023 10:23:10 -0500
+Subject: test: skip failing test-execute tests in LXC
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046486
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046488
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046495
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046498
+Forwarded: no
+
+---
+ src/test/test-execute.c | 20 +++++++++++++-------
+ 1 file changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 9a03e29..be51538 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -235,6 +235,12 @@ static void _test(const char *file, unsigned line, const char *func,
+ #define test(m, unit_name, status_expected, code_expected) \
+         _test(PROJECT_FILE, __LINE__, __func__, m, unit_name, status_expected, code_expected)
+ 
++#define test_if_not_in_lxc(m, unit_name, status_expected, code_expected)                \
++        if (detect_container() == VIRTUALIZATION_LXC)                                   \
++                log_notice("Testing in LXC, skipping %s in %s", unit_name, __func__);   \
++        else                                                                            \
++                test(m, unit_name, status_expected, code_expected);
++
+ static void _test_service(const char *file, unsigned line, const char *func,
+                           Manager *m, const char *unit_name, ServiceResult result_expected) {
+         Unit *unit;
+@@ -282,9 +288,9 @@ static void test_exec_cpuaffinity(Manager *m) {
+ }
+ 
+ static void test_exec_credentials(Manager *m) {
+-        test(m, "exec-set-credential.service", 0, CLD_EXITED);
+-        test(m, "exec-load-credential.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
+-        test(m, "exec-credentials-dir-specifier.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-set-credential.service", 0, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-load-credential.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-credentials-dir-specifier.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
+ }
+ 
+ static void test_exec_workingdirectory(Manager *m) {
+@@ -1045,7 +1051,7 @@ static void test_exec_capabilityboundingset(Manager *m) {
+ }
+ 
+ static void test_exec_basic(Manager *m) {
+-        test(m, "exec-basic.service", can_unshare || MANAGER_IS_SYSTEM(m) ? 0 : EXIT_NAMESPACE, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-basic.service", can_unshare || MANAGER_IS_SYSTEM(m) ? 0 : EXIT_NAMESPACE, CLD_EXITED);
+ }
+ 
+ static void test_exec_ambientcapabilities(Manager *m) {
+@@ -1100,7 +1106,7 @@ static void test_exec_privatenetwork(Manager *m) {
+         }
+ 
+         test(m, "exec-privatenetwork-yes-privatemounts-no.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_FAILURE, CLD_EXITED);
+-        test(m, "exec-privatenetwork-yes-privatemounts-yes.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_NAMESPACE, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-privatenetwork-yes-privatemounts-yes.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_NAMESPACE, CLD_EXITED);
+ }
+ 
+ static void test_exec_networknamespacepath(Manager *m) {
+@@ -1115,8 +1121,8 @@ static void test_exec_networknamespacepath(Manager *m) {
+                 return;
+         }
+ 
+-        test(m, "exec-networknamespacepath-privatemounts-no.service", MANAGER_IS_SYSTEM(m) ? EXIT_SUCCESS : EXIT_FAILURE, CLD_EXITED);
+-        test(m, "exec-networknamespacepath-privatemounts-yes.service", can_unshare ? EXIT_SUCCESS : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-networknamespacepath-privatemounts-no.service", MANAGER_IS_SYSTEM(m) ? EXIT_SUCCESS : EXIT_FAILURE, CLD_EXITED);
++        test_if_not_in_lxc(m, "exec-networknamespacepath-privatemounts-yes.service", can_unshare ? EXIT_SUCCESS : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
+ }
+ 
+ static void test_exec_oomscoreadjust(Manager *m) {
