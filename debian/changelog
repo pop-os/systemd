@@ -1,4 +1,4 @@
-systemd (255-1ubuntu1) UNRELEASED; urgency=medium
+systemd (255-1ubuntu1) noble; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -107,7 +107,7 @@ systemd (255-1ubuntu1) UNRELEASED; urgency=medium
       These are hopefully temporary workarounds so that we can figure out the
       root cause in either upstream systemd or LXC.
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 14 Dec 2023 17:23:51 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 14 Dec 2023 18:11:39 -0500
 
 systemd (255-1) unstable; urgency=medium
 
