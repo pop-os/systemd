@@ -196,27 +196,21 @@ execute_after_dh_install-arch:
 	# install standalone binaries
 	for pkg in sysusers tmpfiles; do \
 		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
-		mv debian/systemd/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
+		mv debian/tmp/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
 	done
 	# We don't want repart and shutdown standalone binaries for now
-	rm -f debian/systemd/usr/bin/systemd-repart.standalone
-	rm -f debian/systemd/usr/lib/systemd/systemd-shutdown.standalone
+	rm -f debian/tmp/usr/bin/systemd-repart.standalone
+	rm -f debian/tmp/usr/lib/systemd/systemd-shutdown.standalone
 
 	# we don't want /tmp to be a tmpfs by default
-	mv debian/systemd/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
+	mv debian/tmp/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
-	rm debian/systemd/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
+	rm debian/tmp/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 	rm -f debian/tmp/usr/share/man/man5/crypttab.5
 endif
-
-	# files shipped by systemd
-	rm debian/udev/usr/lib/udev/rules.d/70-uaccess.rules
-	rm debian/udev/usr/lib/udev/rules.d/73-seat-late.rules
-	rm debian/udev/usr/lib/udev/rules.d/71-seat.rules
-	rm debian/udev/usr/lib/udev/rules.d/99-systemd.rules
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
@@ -226,15 +220,6 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	cp -a debian/extra/units-ubuntu/* debian/systemd/usr/lib/systemd/system/
 endif
 
-execute_after_dh_installman-arch:
-	# remove duplicate files shipped by systemd-*/udev
-	# run after dh_installman, which runs after dh_install, to include manpages
-	echo "Removing duplicate files in systemd package:"
-	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
-		echo "... from $$pkg..."; \
-		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
-		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
-	done
 	# Remove empty directories from /usr/lib.
 	# Those are not strictly needed and can trigger piuparts errors due to
 	# accidential directory removal by dpkg on merged-/usr systems.
