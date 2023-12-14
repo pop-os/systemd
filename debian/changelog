@@ -1,3 +1,114 @@
+systemd (255-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/storage: skip tests if scsi_debug module is not available
+    - debian/tests/boot-and-services:
+      + skip test_syslog on s390x
+      + skip coredump tests on s390x
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Set default user path
+      + Disable LLMNR by default
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+      + Do not ship systemd-gpt-auto-generator
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf:
+      Set ManagedOOMSwap=auto, disabling swap kill by default
+    - debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin
+      to the kernel (we previously only set it in modprobe.d)
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Provide upgrade path (Replaces:) for Jammy's systemd-repart
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+    - d/p/debian/Ubuntu-UseDomains-by-default.patch:
+      Enable UseDomains by default on Ubuntu.
+    - d/p/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch:
+      Set AssumedAppArmorLabel=unconfined in timedate1 dbus service file
+    - d/p/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch:
+      Launch QEMU with -vga none in test-functions
+    - d/p/debian/UBUNTU-resolved-default-no-negative-caching.patch:
+      Default to Cache=no-negative in systemd-resolved
+    - d/p/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch:
+      Revert "network: if /sys is rw, then udev should be around" upstream
+      commit
+    - d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
+      skip disk/by-uuid for bcache devices
+    - d/p/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch:
+      Don't override Ubuntu's default sysctl values
+    - d/p/test-increase-QEMU_MEM-for-some-tests.patch:
+      Increase QEMU_MEM for some tests to improve success rate
+    - debian/patches/debian/UBUNTU-read-only-etc-hacks.patch:
+      Workaround Ubuntu core's read-only etc
+    - test-skip-tests-for-unsupported-localectl-features.patch:
+      skip tests for unsupported localectl features
+    - d/p/test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
+    - d/p/meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch:
+      Disable -Wformat-overflow on gcc with -O3
+  * Dropped changes, fixed upstream:
+    - Drop lp2009743/test-network-add-one-more-testcase-for-DHCPv4-classless-r.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/86f6760038
+    - Drop lp2009743/network-dhcp4-do-not-ignore-the-gateway-even-if-the-desti.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/77451f654a
+    - Drop lp2013543-core-reorder-systemd-arguments-on-reexec.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/06afda6b38
+    - Drop lp2033325-Revert-core-service-when-resetting-PID-also-reset-known-f.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/996b00ede8
+    - Drop test-denylist-TEST-29-PORTABLE-again.patch.
+      According to upstream, this has been resolved by
+      https://github.com/systemd/systemd/pull/28123, and a PPA autopkgtest
+      confirms this.
+  * Dropped changes, no longer needed:
+    - Drop deny-list-TEST-55-OOMD-on-ppc64el.patch.
+      We already disable qemu tests on ppc64el, so having this too is
+      unnecessary.
+    - Drop debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch.
+      These tests no longer fail when run in LXD, so drop the patch.
+    - Drop debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch (LP: #1959047)
+  * New changes:
+    - test: ensure SYSVINIT_PATH exists in TEST-26-SYSTEMCTL.
+      On Ubuntu, we hit the case where SYSVINIT_PATH falls back to
+      /etc/init.d, but nothing guarantees that the path is created for the
+      test.
+    - firstboot: remove /etc/localtime on --reset
+    - debian/tests/upstream: drop blacklist support.
+    - test: deny-list TEST-08-INITRD.
+      Upstream already disables this: https://github.com/systemd/systemd/pull/28813.
+      It makes sense for us to as well, because we don't run systemd in the
+      initrd.
+    - debian/tests/control: add Depends: systemd-boot-efi for upstream-2.
+      TEST-70-TPM2 wants the systemd-boot EFI binary for testing pcrlock, so
+      just install the binaries.
+    - debian/systemd.install: do not install pcrlock.d on i386.
+      We don't build this stuff on i386.
+    - debian/tests/control: add Depends: mdadm lvm2 for TEST-64-UDEV-STORAGE
+    - test: install all necessary units & generators for LVM on Debian
+    - debian/extra: use a dropin to configure Nice=-1 on systemd-journald.service.
+      It is preferred that we override units with dropins like this, rather
+      than patching the original. This has no functional change.
+    - test: skip failing test-execute tests in LXC.
+      These are hopefully temporary workarounds so that we can figure out the
+      root cause in either upstream systemd or LXC.
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 14 Dec 2023 17:23:51 -0500
+
 systemd (255-1) unstable; urgency=medium
 
   * New upstream version 255. For a full list of changes, see:
