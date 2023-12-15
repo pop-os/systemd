@@ -21,6 +21,7 @@ export TEST_PREFER_NSPAWN=1
 export NO_BUILD=1
 export QEMU_TIMEOUT=2400
 export NSPAWN_TIMEOUT=2400
+export QEMU_MEM="1024M"
 
 # Temporarily disable tests running in QEMU on ppc64el (LP: #1992178)
 if [ "$DPKGARCH" = "ppc64el" ]; then
