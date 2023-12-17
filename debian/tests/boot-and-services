@@ -558,7 +558,9 @@ def pre_boot_setup():
         Driver "dummy"
 EndSection''')
 
-    # accounts-daemon.service fails if /usr/share/accountsservice/interfaces does not exist
+    # accounts-daemon.service fails if /usr/share/accountsservice/interfaces does not exist.
+    # FIXME: remove this workaround again when
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1038137 is fixed
     os.makedirs('/usr/share/accountsservice/interfaces', exist_ok=True)
 
 
