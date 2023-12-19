@@ -19,7 +19,7 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 19 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 2ac59da..d048980 100644
+index 3f71cc0..876c7d5 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
 @@ -1653,22 +1653,6 @@ static void cmdline_take_random_seed(void) {
@@ -45,7 +45,7 @@ index 2ac59da..d048980 100644
  static void initialize_core_pattern(bool skip_setup) {
          int r;
  
-@@ -2924,8 +2908,6 @@ int main(int argc, char *argv[]) {
+@@ -2922,8 +2906,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  
