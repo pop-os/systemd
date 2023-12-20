@@ -514,8 +514,8 @@ Depends: ${misc:Depends},
          systemd (>= ${source:Version}),
          python3:any,
          python3-pefile,
-Breaks: systemd (<< 255-2~)
-Replaces: systemd (<< 255-2~)
+Breaks: systemd (<< 255.1-1~)
+Replaces: systemd (<< 255.1-1~)
 Description: tool to build Unified Kernel Images
  This package provides ukify, a script that combines a kernel image, an initrd,
  with a command line, and possibly PCR measurements and other metadata, into a
