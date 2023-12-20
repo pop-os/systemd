@@ -1,3 +1,58 @@
+systemd (255.1-1) experimental; urgency=medium
+
+  [ Luca Boccassi ]
+  * Drop pkgconfig-keep-unmerged-paths-for-udevdir.patch, no longer needed
+  * New upstream version 255.1
+  * Refresh patches
+
+  [ Michael Biebl ]
+  * autopkgtest: install systemd-boot-efi for upstream suite.
+    TEST-70-TPM2 (specifically test/units/testsuite-70.pcrlock.sh) requires
+    the EFI stub files from /usr/lib/systemd/boot/efi/.
+  * test: skip tests for unsupported localectl features.
+    Update the upstream test suite to skip tests for unsupported localectl
+    features in Debian. Fixes TEST-73-LOCALE.
+    Thanks to Nick Rosbrook
+  * Update symbol versions for the final 255 release
+  * Install systemd and udev files explicitly without duplicates.
+    Stop making systemd and udev "catch-all" packages and removing duplicate
+    files in debian/rules by compiling a list of files that are installed by
+    other systemd binary packages. This approach no longer works reliably
+    if we have arch "all" binary packages and we do a partial type "any" build.
+    Instead, list all files that are installed in systemd and udev
+    explicitly in .install and .manpages.
+  * Mark usr/lib/sysctl.d/50-pid-max.conf as arch specific.
+    It's only installed by Meson if cc.sizeof('long') > 4.
+    See https://wiki.debian.org/ArchitectureSpecificsMemo
+  * Fix arch "all" builds.
+    Files handled by debian/rules and dh-exec are not understood by
+    dh_missing. So mark those as not-installed.
+    See man dh_missing and
+    https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=831786
+  * Install standalone binaries using dh-exec
+  * Print empty directories
+    dh_missing will not fail on uninstalled (empty) directories.
+    So show them during build as it makes it easier to spot if all of them
+    are handled.
+  * Split ukify into a separate package named systemd-ukify.
+    The main motivation for splitting the tool (and its kernel-install
+    integration) into a separate package is the dependency on python3 and
+    python3-pefile, which are not suitable dependencies for the main systemd
+    package. (Closes: #1051981)
+  * Make the Conflicts against bfh-container and progress-linux-container
+    versioned
+
+  [ Nick Rosbrook ]
+  * debian/tests/control: add Depends: mdadm lvm2 for TEST-64-UDEV-STORAGE.
+    This ensures that testcase_mdadm_lvm in TEST-64-UDEV-STORAGE will run.
+  * debian/tests/upstream: drop blacklist support.
+    Upstream has been using deny-list-ubuntu-ci, rather than
+    blacklist-ubuntu-ci, for a while now. In Ubuntu, we use the
+    deny-list-upstream-ci convention too. Hence, it seems we can drop
+    support for the blacklist version.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 20 Dec 2023 17:54:00 +0100
+
 systemd (255-1) unstable; urgency=medium
 
   * New upstream version 255. For a full list of changes, see:
