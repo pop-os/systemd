@@ -1,3 +1,4 @@
+#!/usr/bin/dh-exec
 etc/udev/
 usr/bin/systemd-hwdb
 usr/bin/udevadm
