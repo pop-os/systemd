@@ -1,3 +1,32 @@
+systemd (255.1-2) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Upgrade the Breaks to Conflicts for the systemd-ukify package split.
+    This avoids potential loss of the /usr/lib/systemd/ukify compat symlink
+    for upgrades from bookworm-backports.
+  * Update package description of libnss-myhostname to use the correct IPv4
+    address (Closes: #1057953)
+  * resolved: actually check authenticated flag of SOA transaction.
+    Patch cherry-picked from upstream Git.
+    CVE-2023-7008 (Closes: #1059278)
+  * Explicitly disable ukify for stage1 builds
+  * Enable dh-exec for systemd.manpages and udev.install.
+    This enables files to be installed specific to certain architectures or
+    build profiles. Unfortunately for systemd.manpages this requires to add a
+    debian/tmp/ prefix to all files.
+    See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1053834#46
+  * Restrict pcr/tpm2 related files to UEFI architectures.
+    Mirrors the python3-pyelftools [amd64 i386 arm64 armhf riscv64]
+    Build-Depends.
+  * Install dmi_memory_id and its udev rules file only on dmi architectures.
+  * Fix stage1 profile build
+
+  [ Helmut Grohne ]
+  * Restore diverted symlinks in systemd-sysv.postinst that may have been lost
+    due to /usr-merge (Closes: #1057220)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 24 Dec 2023 00:52:15 +0100
+
 systemd (255.1-1) experimental; urgency=medium
 
   [ Luca Boccassi ]
