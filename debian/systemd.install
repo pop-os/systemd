@@ -32,8 +32,8 @@ usr/bin/systemd-cgls
 usr/bin/systemd-cgtop
 usr/bin/systemd-confext
 usr/bin/systemd-creds
-usr/bin/systemd-cryptenroll
-usr/bin/systemd-cryptsetup
+<!stage1> usr/bin/systemd-cryptenroll
+<!stage1> usr/bin/systemd-cryptsetup
 usr/bin/systemd-delta
 usr/bin/systemd-detect-virt
 usr/bin/systemd-escape
@@ -84,21 +84,21 @@ usr/lib/systemd/system/bluetooth.target
 usr/lib/systemd/system/boot-complete.target
 usr/lib/systemd/system/console-getty.service
 usr/lib/systemd/system/container-getty@.service
-usr/lib/systemd/system/cryptsetup-pre.target
-usr/lib/systemd/system/cryptsetup.target
+<!stage1> usr/lib/systemd/system/cryptsetup-pre.target
+<!stage1> usr/lib/systemd/system/cryptsetup.target
 usr/lib/systemd/system/ctrl-alt-del.target
 usr/lib/systemd/systemd
 usr/lib/systemd/systemd-backlight
 usr/lib/systemd/systemd-battery-check
 usr/lib/systemd/systemd-binfmt
 usr/lib/systemd/systemd-boot-check-no-failures
-usr/lib/systemd/systemd-bsod
+<!stage1> usr/lib/systemd/systemd-bsod
 usr/lib/systemd/system/dbus-org.freedesktop.hostname1.service
 usr/lib/systemd/system/dbus-org.freedesktop.locale1.service
 usr/lib/systemd/system/dbus-org.freedesktop.login1.service
 usr/lib/systemd/system/dbus-org.freedesktop.timedate1.service
 usr/lib/systemd/systemd-cgroups-agent
-usr/lib/systemd/systemd-cryptsetup
+<!stage1> usr/lib/systemd/systemd-cryptsetup
 usr/lib/systemd/system/debug-shell.service
 usr/lib/systemd/system/default.target
 usr/lib/systemd/system/dev-hugepages.mount
@@ -110,18 +110,18 @@ usr/lib/systemd/systemd-growfs
 usr/lib/systemd/systemd-hibernate-resume
 usr/lib/systemd/systemd-hostnamed
 usr/lib/systemd/systemd-initctl
-usr/lib/systemd/systemd-integritysetup
+<!stage1> usr/lib/systemd/systemd-integritysetup
 usr/lib/systemd/systemd-journald
 usr/lib/systemd/systemd-localed
 usr/lib/systemd/systemd-logind
 usr/lib/systemd/systemd-makefs
-usr/lib/systemd/systemd-measure
+<!stage1> usr/lib/systemd/systemd-measure
 usr/lib/systemd/systemd-modules-load
 usr/lib/systemd/systemd-networkd
 usr/lib/systemd/systemd-networkd-wait-online
 usr/lib/systemd/systemd-network-generator
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/systemd-pcrextend
-usr/lib/systemd/systemd-pcrlock
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/systemd-pcrextend
+<!stage1> usr/lib/systemd/systemd-pcrlock
 usr/lib/systemd/systemd-pstore
 usr/lib/systemd/systemd-quotacheck
 usr/lib/systemd/systemd-random-seed
@@ -135,15 +135,15 @@ usr/lib/systemd/systemd-storagetm
 usr/lib/systemd/systemd-sulogin-shell
 usr/lib/systemd/systemd-sysctl
 usr/lib/systemd/systemd-sysroot-fstab-check
-usr/lib/systemd/systemd-sysupdate
+<!stage1> usr/lib/systemd/systemd-sysupdate
 usr/lib/systemd/systemd-timedated
 usr/lib/systemd/systemd-time-wait-sync
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/systemd-tpm2-setup
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/systemd-tpm2-setup
 usr/lib/systemd/systemd-update-done
 usr/lib/systemd/systemd-update-utmp
 usr/lib/systemd/systemd-user-runtime-dir
 usr/lib/systemd/systemd-user-sessions
-usr/lib/systemd/systemd-veritysetup
+<!stage1> usr/lib/systemd/systemd-veritysetup
 usr/lib/systemd/systemd-volatile-root
 usr/lib/systemd/systemd-xdg-autostart-condition
 usr/lib/systemd/system/emergency.service
@@ -152,18 +152,18 @@ usr/lib/systemd/system/exit.target
 usr/lib/systemd/system/factory-reset.target
 usr/lib/systemd/system/final.target
 usr/lib/systemd/system/first-boot-complete.target
-usr/lib/systemd/system-generators/systemd-cryptsetup-generator
+<!stage1> usr/lib/systemd/system-generators/systemd-cryptsetup-generator
 usr/lib/systemd/system-generators/systemd-debug-generator
 usr/lib/systemd/system-generators/systemd-fstab-generator
 usr/lib/systemd/system-generators/systemd-getty-generator
 usr/lib/systemd/system-generators/systemd-gpt-auto-generator
 usr/lib/systemd/system-generators/systemd-hibernate-resume-generator
-usr/lib/systemd/system-generators/systemd-integritysetup-generator
+<!stage1> usr/lib/systemd/system-generators/systemd-integritysetup-generator
 usr/lib/systemd/system-generators/systemd-rc-local-generator
 usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
 usr/lib/systemd/system-generators/systemd-sysv-generator
-usr/lib/systemd/system-generators/systemd-veritysetup-generator
+<!stage1> usr/lib/systemd/system-generators/systemd-veritysetup-generator
 usr/lib/systemd/system/getty-pre.target
 usr/lib/systemd/system/getty@.service
 usr/lib/systemd/system/getty.target
@@ -176,20 +176,20 @@ usr/lib/systemd/system/initrd-cleanup.service
 usr/lib/systemd/system/initrd-fs.target
 usr/lib/systemd/system/initrd-parse-etc.service
 usr/lib/systemd/system/initrd-root-device.target
-usr/lib/systemd/system/initrd-root-device.target.wants/remote-cryptsetup.target
-usr/lib/systemd/system/initrd-root-device.target.wants/remote-veritysetup.target
+<!stage1> usr/lib/systemd/system/initrd-root-device.target.wants/remote-cryptsetup.target
+<!stage1> usr/lib/systemd/system/initrd-root-device.target.wants/remote-veritysetup.target
 usr/lib/systemd/system/initrd-root-fs.target
 usr/lib/systemd/system/initrd-root-fs.target.wants/systemd-repart.service
 usr/lib/systemd/system/initrd-switch-root.service
 usr/lib/systemd/system/initrd-switch-root.target
 usr/lib/systemd/system/initrd.target
 usr/lib/systemd/system/initrd.target.wants/systemd-battery-check.service
-usr/lib/systemd/system/initrd.target.wants/systemd-bsod.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/initrd.target.wants/systemd-pcrphase-initrd.service
+<!stage1> usr/lib/systemd/system/initrd.target.wants/systemd-bsod.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/initrd.target.wants/systemd-pcrphase-initrd.service
 usr/lib/systemd/system/initrd-udevadm-cleanup-db.service
 usr/lib/systemd/system/initrd-usr-fs.target
-usr/lib/systemd/system/integritysetup-pre.target
-usr/lib/systemd/system/integritysetup.target
+<!stage1> usr/lib/systemd/system/integritysetup-pre.target
+<!stage1> usr/lib/systemd/system/integritysetup.target
 usr/lib/systemd/system/kexec.target
 usr/lib/systemd/system/kmod-static-nodes.service
 usr/lib/systemd/system/ldconfig.service
@@ -217,10 +217,10 @@ usr/lib/systemd/system/proc-sys-fs-binfmt_misc.mount
 usr/lib/systemd/system/quotaon.service
 usr/lib/systemd/system/rc-local.service
 usr/lib/systemd/system/reboot.target
-usr/lib/systemd/system/remote-cryptsetup.target
+<!stage1> usr/lib/systemd/system/remote-cryptsetup.target
 usr/lib/systemd/system/remote-fs-pre.target
 usr/lib/systemd/system/remote-fs.target
-usr/lib/systemd/system/remote-veritysetup.target
+<!stage1> usr/lib/systemd/system/remote-veritysetup.target
 usr/lib/systemd/system/rescue.service
 usr/lib/systemd/system/rescue.target
 usr/lib/systemd/system/rescue.target.wants/systemd-update-utmp-runlevel.service
@@ -242,7 +242,7 @@ usr/lib/systemd/system/sockets.target
 usr/lib/systemd/system/sockets.target.wants/systemd-initctl.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald.socket
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-sysext.socket
 usr/lib/systemd/system/soft-reboot.target
 usr/lib/systemd/system/sound.target
@@ -252,10 +252,10 @@ usr/lib/systemd/system/suspend-then-hibernate.target
 usr/lib/systemd/system/swap.target
 usr/lib/systemd/system/sys-fs-fuse-connections.mount
 usr/lib/systemd/system/sysinit.target
-usr/lib/systemd/system/sysinit.target.wants/cryptsetup.target
+<!stage1> usr/lib/systemd/system/sysinit.target.wants/cryptsetup.target
 usr/lib/systemd/system/sysinit.target.wants/dev-hugepages.mount
 usr/lib/systemd/system/sysinit.target.wants/dev-mqueue.mount
-usr/lib/systemd/system/sysinit.target.wants/integritysetup.target
+<!stage1> usr/lib/systemd/system/sysinit.target.wants/integritysetup.target
 usr/lib/systemd/system/sysinit.target.wants/kmod-static-nodes.service
 usr/lib/systemd/system/sysinit.target.wants/ldconfig.service
 usr/lib/systemd/system/sysinit.target.wants/proc-sys-fs-binfmt_misc.automount
@@ -271,9 +271,9 @@ usr/lib/systemd/system/sysinit.target.wants/systemd-journald.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-journal-flush.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-machine-id-commit.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-modules-load.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sysinit.target.wants/systemd-pcrmachine.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sysinit.target.wants/systemd-pcrphase.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sysinit.target.wants/systemd-pcrphase-sysinit.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrmachine.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrphase.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrphase-sysinit.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-random-seed.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-repart.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-sysctl.service
@@ -281,11 +281,11 @@ usr/lib/systemd/system/sysinit.target.wants/systemd-sysusers.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup-dev-early.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup-dev.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup-early.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup-early.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-update-done.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-update-utmp.service
-usr/lib/systemd/system/sysinit.target.wants/veritysetup.target
+<!stage1> usr/lib/systemd/system/sysinit.target.wants/veritysetup.target
 usr/lib/systemd/system/sys-kernel-config.mount
 usr/lib/systemd/system/sys-kernel-debug.mount
 usr/lib/systemd/system/sys-kernel-tracing.mount
@@ -298,7 +298,7 @@ usr/lib/systemd/system/systemd-backlight@.service
 usr/lib/systemd/system/systemd-battery-check.service
 usr/lib/systemd/system/systemd-binfmt.service
 usr/lib/systemd/system/systemd-boot-check-no-failures.service
-usr/lib/systemd/system/systemd-bsod.service
+<!stage1> usr/lib/systemd/system/systemd-bsod.service
 usr/lib/systemd/system/systemd-confext.service
 usr/lib/systemd/system/systemd-exit.service
 usr/lib/systemd/system/systemd-firstboot.service
@@ -334,21 +334,21 @@ usr/lib/systemd/system/systemd-networkd.socket
 usr/lib/systemd/system/systemd-networkd-wait-online.service
 usr/lib/systemd/system/systemd-networkd-wait-online@.service
 usr/lib/systemd/system/systemd-network-generator.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrextend@.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrextend.socket
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrfs-root.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrfs@.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-file-system.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-firmware-code.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-firmware-config.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-machine-id.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-make-policy.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-secureboot-authority.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrlock-secureboot-policy.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrmachine.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrphase-initrd.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrphase.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-pcrphase-sysinit.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrextend@.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrextend.socket
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrfs-root.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrfs@.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-file-system.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-firmware-code.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-firmware-config.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-machine-id.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-make-policy.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-secureboot-authority.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-secureboot-policy.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrmachine.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-initrd.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrphase.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-sysinit.service
 usr/lib/systemd/system/systemd-poweroff.service
 usr/lib/systemd/system/systemd-pstore.service
 usr/lib/systemd/system/systemd-quotacheck.service
@@ -366,10 +366,10 @@ usr/lib/systemd/system/systemd-sysctl.service
 usr/lib/systemd/system/systemd-sysext.service
 usr/lib/systemd/system/systemd-sysext@.service
 usr/lib/systemd/system/systemd-sysext.socket
-usr/lib/systemd/system/systemd-sysupdate-reboot.service
-usr/lib/systemd/system/systemd-sysupdate-reboot.timer
-usr/lib/systemd/system/systemd-sysupdate.service
-usr/lib/systemd/system/systemd-sysupdate.timer
+<!stage1> usr/lib/systemd/system/systemd-sysupdate-reboot.service
+<!stage1> usr/lib/systemd/system/systemd-sysupdate-reboot.timer
+<!stage1> usr/lib/systemd/system/systemd-sysupdate.service
+<!stage1> usr/lib/systemd/system/systemd-sysupdate.timer
 usr/lib/systemd/system/systemd-sysusers.service
 usr/lib/systemd/system/systemd-timedated.service
 usr/lib/systemd/system/systemd-time-wait-sync.service
@@ -378,15 +378,15 @@ usr/lib/systemd/system/systemd-tmpfiles-clean.timer
 usr/lib/systemd/system/systemd-tmpfiles-setup-dev-early.service
 usr/lib/systemd/system/systemd-tmpfiles-setup-dev.service
 usr/lib/systemd/system/systemd-tmpfiles-setup.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-tpm2-setup-early.service
-[amd64 i386 arm64 armhf riscv64] usr/lib/systemd/system/systemd-tpm2-setup.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-tpm2-setup-early.service
+[amd64 i386 arm64 armhf riscv64] <!stage1> usr/lib/systemd/system/systemd-tpm2-setup.service
 usr/lib/systemd/system/systemd-update-done.service
 usr/lib/systemd/system/systemd-update-utmp-runlevel.service
 usr/lib/systemd/system/systemd-update-utmp.service
 usr/lib/systemd/system/systemd-user-sessions.service
 usr/lib/systemd/system/systemd-volatile-root.service
-usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice
-usr/lib/systemd/system/system-systemd\x2dveritysetup.slice
+<!stage1> usr/lib/systemd/system/system-systemd\x2dcryptsetup.slice
+<!stage1> usr/lib/systemd/system/system-systemd\x2dveritysetup.slice
 usr/lib/systemd/system/system-update-cleanup.service
 usr/lib/systemd/system/system-update-pre.target
 usr/lib/systemd/system/system-update.target
@@ -402,8 +402,8 @@ usr/lib/systemd/system/user@.service
 usr/lib/systemd/system/user@.service.d/10-login-barrier.conf
 usr/lib/systemd/system/user.slice
 usr/lib/systemd/system/user-.slice.d/10-defaults.conf
-usr/lib/systemd/system/veritysetup-pre.target
-usr/lib/systemd/system/veritysetup.target
+<!stage1> usr/lib/systemd/system/veritysetup-pre.target
+<!stage1> usr/lib/systemd/system/veritysetup.target
 usr/lib/systemd/user/app.slice
 usr/lib/systemd/user/background.slice
 usr/lib/systemd/user/basic.target
@@ -461,7 +461,7 @@ usr/share/bash-completion/completions/systemd-analyze
 usr/share/bash-completion/completions/systemd-cat
 usr/share/bash-completion/completions/systemd-cgls
 usr/share/bash-completion/completions/systemd-cgtop
-usr/share/bash-completion/completions/systemd-cryptenroll
+<!stage1> usr/share/bash-completion/completions/systemd-cryptenroll
 usr/share/bash-completion/completions/systemd-delta
 usr/share/bash-completion/completions/systemd-detect-virt
 usr/share/bash-completion/completions/systemd-dissect
