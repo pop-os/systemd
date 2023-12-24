@@ -96,7 +96,6 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
-	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),false,auto) \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -123,6 +122,7 @@ CONFFLAGS += \
 	-Duserdb=true \
 	-Dpcre2=enabled \
 	-Dukify=enabled \
+	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),disabled,auto) \
 	-Dsysupdate=enabled
 else
 CONFFLAGS += \
@@ -146,6 +146,7 @@ CONFFLAGS += \
 	-Duserdb=false \
 	-Dpcre2=disabled \
 	-Dukify=disabled \
+	-Dbootloader=disabled \
 	-Dsysupdate=disabled
 endif
 
