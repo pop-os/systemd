@@ -1,3 +1,9 @@
+systemd (255.2-2) unstable; urgency=medium
+
+  * udev: mips does not install dmi_memory_id and its rules
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 24 Dec 2023 14:25:27 +0100
+
 systemd (255.2-1) unstable; urgency=medium
 
   * New upstream version 255.2
