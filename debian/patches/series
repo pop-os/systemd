@@ -1,4 +1,3 @@
-resolved-actually-check-authenticated-flag-of-SOA-transac.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
