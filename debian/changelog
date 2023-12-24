@@ -1,3 +1,14 @@
+systemd (255.1-3) unstable; urgency=medium
+
+  * Upload to unstable
+  * Fix installation of dmi_memory_id on i386 and x32
+  * Explicitly disable bootloader for stage1 build.
+    This ensures that the stage1 build is not broken in a tainted build
+    environment.
+  * Mark missing man pages from stage1 build
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 24 Dec 2023 11:08:06 +0100
+
 systemd (255.1-2) experimental; urgency=medium
 
   [ Michael Biebl ]
@@ -8,7 +19,7 @@ systemd (255.1-2) experimental; urgency=medium
     address (Closes: #1057953)
   * resolved: actually check authenticated flag of SOA transaction.
     Patch cherry-picked from upstream Git.
-    CVE-2023-7008 (Closes: #1059278)
+    (CVE-2023-7008, Closes: #1059278)
   * Explicitly disable ukify for stage1 builds
   * Enable dh-exec for systemd.manpages and udev.install.
     This enables files to be installed specific to certain architectures or
