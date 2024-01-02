@@ -25,3 +25,6 @@
 
 # Create a compat symlink as systemd-sysctl no longer reads /etc/sysctl.conf
 /etc/sysctl.conf /etc/sysctl.d/99-sysctl.conf
+
+# Disable systemd-gpt-auto-generator by default.
+/dev/null /etc/systemd/system-generators/systemd-gpt-auto-generator
