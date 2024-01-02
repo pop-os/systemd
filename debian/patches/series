@@ -7,7 +7,6 @@ debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
-debian/test-deny-list-TEST-13-NSPAWN.patch
 test-skip-TEST-08-INITRD-if-systemd-didn-t-run-in-the-ini.patch
 test-install-empty-directories-with-NO_BUILD-1.patch
 test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
