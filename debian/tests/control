@@ -199,6 +199,7 @@ Depends: systemd-tests,
   nvme-cli,
   mdadm,
   lvm2,
+  btrfs-progs,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
