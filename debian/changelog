@@ -1,3 +1,19 @@
+systemd (255.2-3) sid; urgency=medium
+
+  * Cherry-pick fixes for upstream integration tests.
+    Fixes TEST-07-PID1, TEST-08-INITRD (skip), TEST-26-SYSTEMCTL and
+    TEST-75-RESOLVED.
+  * Add explicit Build-Depends on debhelper (>= 13.11.6)
+    This ensures we have a recent enough version of dh_installsystemd that
+    supports service files in /usr/lib/.
+  * test: deny-list TEST-13-NSPAWN.
+    The default ram size of 1024M for qemu virt is not sufficient
+    to make the test pass reliably on Debian sid/trixie.
+    Disable the test for now until this has been addressed in debci:
+    https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1059840
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 02 Jan 2024 11:44:49 +0100
+
 systemd (255.2-2) unstable; urgency=medium
 
   * udev: mips does not install dmi_memory_id and its rules
