@@ -1,0 +1,56 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Sun, 24 Dec 2023 12:53:53 +0100
+Subject: test: flush the socket once the triggered unit exits
+
+Since the triggered unit intentionally fails without consuming any data
+from the socket, we'd try to trigger it again and again, and we might
+try to check the unit state in one of the "in-between" states, failing
+the test:
+
+[  165.271698] H testsuite-07.sh[1032]: + systemctl start badbin_assert.socket
+[  165.977637] H testsuite-07.sh[1032]: + socat - ABSTRACT-CONNECT:badbin_assert.socket
+[  165.983787] H systemd[1]: Cannot find unit for notify message of PID 1039, ignoring.
+[  166.817187] H testsuite-07.sh[1032]: + timeout 10 sh -c 'while systemctl is-active badbin_assert.service; do sleep .5; done'
+[  167.049218] H testsuite-07.sh[1065]: active
+[  167.146854] H systemd[1]: Listening on badbin_assert.socket.
+[  167.163473] H systemd[1]: badbin_assert.socket: Incoming traffic
+[  167.542626] H systemd[1]: Cannot find unit for notify message of PID 1065, ignoring.
+[  167.543437] H (badbin)[1062]: badbin_assert.service: Failed to execute /tmp/badbin: Exec format error
+[  167.548346] H systemd[1]: badbin_assert.service: Main process exited, code=exited, status=203/EXEC
+[  167.549482] H systemd[1]: badbin_assert.service: Failed with result 'exit-code'.
+[  167.561537] H systemd[1]: badbin_assert.socket: Incoming traffic
+[  167.933390] H systemd[1]: Started badbin_assert.service.
+[  167.950489] H (badbin)[1070]: badbin_assert.service: Failed to execute /tmp/badbin: Exec format error
+[  167.956318] H systemd[1]: badbin_assert.service: Main process exited, code=exited, status=203/EXEC
+[  167.957173] H systemd[1]: badbin_assert.service: Failed with result 'exit-code'.
+[  167.974609] H systemd[1]: badbin_assert.socket: Incoming traffic
+[  168.042838] H testsuite-07.sh[1072]: failed
+[  168.094431] H testsuite-07.sh[1075]: ++ systemctl show -P ExecMainStatus badbin_assert.service
+[  168.704022] H systemd[1]: Started badbin_assert.service.
+[  168.778680] H (badbin)[1074]: badbin_assert.service: Failed to execute /tmp/badbin: Exec format error
+[  168.826881] H systemd[1]: badbin_assert.service: Main process exited, code=exited, status=203/EXEC
+[  168.833825] H systemd[1]: badbin_assert.service: Failed with result 'exit-code'.
+[  168.923931] H testsuite-07.sh[1032]: + [[ 0 == 203 ]]
+[  168.951492] H systemd[1]: Cannot find unit for notify message of PID 1075, ignoring.
+[  168.999862] H testsuite-07.sh[615]: + echo 'Subtest /usr/lib/systemd/tests/testdata/units/testsuite-07.issue-30412.sh failed'
+[  168.999862] H testsuite-07.sh[615]: Subtest /usr/lib/systemd/tests/testdata/units/testsuite-07.issue-30412.sh failed
+
+Follow-up for 1eeaa93de36 and 28a2d27650c.
+
+(cherry picked from commit 4ddf27c57bbaaa66bed5cfa951e60a83b9f64e29)
+---
+ test/units/testsuite-07.issue-30412.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/units/testsuite-07.issue-30412.sh b/test/units/testsuite-07.issue-30412.sh
+index 61801c5..c1cb00e 100755
+--- a/test/units/testsuite-07.issue-30412.sh
++++ b/test/units/testsuite-07.issue-30412.sh
+@@ -20,6 +20,7 @@ EOF
+ cat >/run/systemd/system/badbin_assert.socket <<EOF
+ [Socket]
+ ListenStream=@badbin_assert.socket
++FlushPending=yes
+ EOF
+ 
+ systemctl daemon-reload

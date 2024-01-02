@@ -1,0 +1,51 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 15 Dec 2023 11:04:39 +0100
+Subject: test: skip TEST-08-INITRD if systemd didn't run in the initrd
+
+This test requires systemd in the initrd, which is not the case in
+mkinitrd-based initrds (Ubuntu/Debian).
+
+Resolves: #30481
+(cherry picked from commit 57d61ff319ec217294d9e0c4646010322b8be5e5)
+---
+ test/TEST-08-INITRD/test.sh | 5 +++++
+ test/units/testsuite-08.sh  | 8 ++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/test/TEST-08-INITRD/test.sh b/test/TEST-08-INITRD/test.sh
+index 29fd1f7..caa27f6 100755
+--- a/test/TEST-08-INITRD/test.sh
++++ b/test/TEST-08-INITRD/test.sh
+@@ -44,8 +44,13 @@ EOF
+ }
+ 
+ check_result_qemu_hook() {
++    local workspace="${1:?}"
+     local console_log="${TESTDIR:?}/console.log"
+ 
++    if [[ -e "$workspace/skipped" ]]; then
++        return 0
++    fi
++
+     if [[ ! -e "$console_log" ]]; then
+         dfatal "Missing console log - this shouldn't happen"
+         return 1
+diff --git a/test/units/testsuite-08.sh b/test/units/testsuite-08.sh
+index 9598c8e..5c6b4ce 100755
+--- a/test/units/testsuite-08.sh
++++ b/test/units/testsuite-08.sh
+@@ -8,6 +8,14 @@ if systemd-detect-virt -qc; then
+     exit 1
+ fi
+ 
++# This test requires systemd to run in the initrd as well, which is not the case
++# for mkinitrd-based initrd (Ubuntu/Debian)
++if [[ "$(systemctl show -P InitRDTimestampMonotonic)" -eq 0 ]]; then
++    echo "systemd didn't run in the initrd, skipping the test"
++    touch /skipped
++    exit 0
++fi
++
+ # We should've created a mount under /run in initrd (see the other half of the test)
+ # that should've survived the transition from initrd to the real system
+ test -d /run/initrd-mount-target

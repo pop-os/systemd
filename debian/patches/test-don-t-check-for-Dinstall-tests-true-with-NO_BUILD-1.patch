@@ -1,0 +1,27 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 14 Dec 2023 15:06:46 +0100
+Subject: test: don't check for -Dinstall-tests=true with NO_BUILD=1
+
+(cherry picked from commit 58bcbad86cc910e007fae3c66c3a5cfc17046801)
+---
+ test/test-functions | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 6a6f624..f887346 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -3309,9 +3309,10 @@ test_create_image() {
+ }
+ 
+ test_setup() {
+-    if get_bool "${TEST_REQUIRE_INSTALL_TESTS:?}" && \
+-            command -v meson >/dev/null && \
+-            [[ "$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')" != "true" ]]; then
++    if ! get_bool "$NO_BUILD" && \
++         get_bool "${TEST_REQUIRE_INSTALL_TESTS:?}" && \
++         command -v meson >/dev/null && \
++         [[ "$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')" != "true" ]]; then
+         dfatal "$BUILD_DIR needs to be built with -Dinstall-tests=true"
+         exit 1
+     fi

@@ -15,6 +15,7 @@ Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper-compat (= 13),
+               debhelper (>= 13.11.6),
                dh-exec,
                dh-package-notes,
                dh-sequence-installnss,
@@ -96,8 +97,6 @@ Suggests: systemd-container,
           libtss2-mu0,
           libtss2-rc0,
           polkitd,
-          python3:any,
-          python3-pefile,
 Pre-Depends: ${shlibs:Pre-Depends},
              ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -136,9 +135,9 @@ Conflicts: sysvinit-core,
            systemd-shim,
            initscripts,
            orphan-sysvinit-scripts,
-           bfh-container,
+           bfh-container (<< 20211009-22~),
            molly-guard (<< 0.8.2~),
-           progress-linux-container,
+           progress-linux-container (<< 20221002-11~),
 Replaces: sysvinit-core,
 Pre-Depends: systemd
 Depends: systemd (= ${binary:Version}),
@@ -253,7 +252,7 @@ Description: nss module providing fallback resolution for the current hostname
  This package contains a plugin for the Name Service Switch, providing host
  name resolution for the locally configured system hostname as returned by
  gethostname(2). It returns all locally configured public IP addresses or -- if
- none are configured, the IPv4 address 127.0.1.1 (which is on the local
+ none are configured, the IPv4 address 127.0.0.2 (which is on the local
  loopback) and the IPv6 address ::1 (which is the local host).
  .
  A lot of software relies on that the local host name is resolvable. This
@@ -488,6 +487,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd-boot-efi (= ${binary:Version}),
 Recommends: efibootmgr,
+Suggests: systemd-ukify,
 Breaks: systemd (<< 251.2-3~)
 Replaces: systemd (<< 251.2-3~)
 Description: simple UEFI boot manager - tools and services
@@ -514,6 +514,21 @@ Description: simple UEFI boot manager - EFI binaries
  line. It supports systems with UEFI firmware only.
  .
  This package contains the EFI binaries.
+
+Package: systemd-ukify
+Build-Profiles: <!stage1>
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends},
+         systemd (>= ${source:Version}),
+         python3:any,
+         python3-pefile,
+Conflicts: systemd (<< 255.1-1~)
+Replaces: systemd (<< 255.1-1~)
+Description: tool to build Unified Kernel Images
+ This package provides ukify, a script that combines a kernel image, an initrd,
+ with a command line, and possibly PCR measurements and other metadata, into a
+ Unified Kernel Image (UKI).
 
 Package: systemd-resolved
 Multi-Arch: foreign

@@ -15,7 +15,6 @@ debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 test-increase-QEMU_MEM-for-some-tests.patch
 debian/Skip-flaky-test_resolved_domain_restricted_dns-in-network.patch
 debian/localectl-disable-keymap-support.patch
-debian/pkgconfig-keep-unmerged-paths-for-udevdir.patch
 debian/UBUNTU-read-only-etc-hacks.patch
 test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 test-skip-tests-for-unsupported-localectl-features.patch
@@ -25,3 +24,9 @@ firstboot-remove-etc-localtime-on-reset.patch
 test-deny-list-TEST-08-INITRD.patch
 test-install-all-necessary-units-generators-for-LVM-on-De.patch
 test-skip-failing-test-execute-tests-in-LXC.patch
+debian/test-deny-list-TEST-13-NSPAWN.patch
+test-skip-TEST-08-INITRD-if-systemd-didn-t-run-in-the-ini.patch
+test-install-empty-directories-with-NO_BUILD-1.patch
+test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
+test-tell-delv-to-load-anchors-from-etc-bind.keys-explici.patch
+test-flush-the-socket-once-the-triggered-unit-exits.patch

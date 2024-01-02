@@ -99,7 +99,6 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
-	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),false,auto) \
 	-Dstandalone-binaries=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -125,6 +124,8 @@ CONFFLAGS += \
 	-Dhomed=enabled \
 	-Duserdb=true \
 	-Dpcre2=enabled \
+	-Dukify=enabled \
+	-Dbootloader=$(if $(filter x32,$(DEB_HOST_ARCH)),disabled,auto) \
 	-Dsysupdate=enabled
 else
 CONFFLAGS += \
@@ -146,7 +147,10 @@ CONFFLAGS += \
 	-Dqrencode=disabled \
 	-Dhomed=disabled \
 	-Duserdb=false \
-	-Dpcre2=disabled
+	-Dpcre2=disabled \
+	-Dukify=disabled \
+	-Dbootloader=disabled \
+	-Dsysupdate=disabled
 endif
 
 override_dh_auto_configure:
@@ -197,32 +201,22 @@ execute_before_dh_install:
 	# Do not ship systemd-gpt-auto-genrator on Ubuntu
 	rm -f debian/tmp/lib/systemd/system-generators/systemd-gpt-auto-generator
 	rm -f debian/tmp/usr/share/man/man8/systemd-gpt-auto-generator.8
-
-execute_after_dh_install-arch:
-	# install standalone binaries
-	for pkg in sysusers tmpfiles; do \
-		mkdir -p debian/systemd-standalone-$$pkg/usr/bin; \
-		mv debian/systemd/usr/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/usr/bin/systemd-$$pkg; \
-	done
-	# We don't want repart and shutdown standalone binaries for now
-	rm -f debian/systemd/usr/bin/systemd-repart.standalone
-	rm -f debian/systemd/usr/lib/systemd/systemd-shutdown.standalone
-
-	# we don't want /tmp to be a tmpfs by default
-	mv debian/systemd/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
-	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
-	rm debian/systemd/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
+	# we don't want repart and shutdown standalone binaries for now
+	rm -f debian/tmp/usr/bin/systemd-repart.standalone
+	rm -f debian/tmp/usr/lib/systemd/systemd-shutdown.standalone
 
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 	rm -f debian/tmp/usr/share/man/man5/crypttab.5
 endif
+	# print empty directories, makes it easier to keep *.install files up-to-date
+	find debian/tmp -type d -empty -print
 
-	# files shipped by systemd
-	rm debian/udev/usr/lib/udev/rules.d/70-uaccess.rules
-	rm debian/udev/usr/lib/udev/rules.d/73-seat-late.rules
-	rm debian/udev/usr/lib/udev/rules.d/71-seat.rules
-	rm debian/udev/usr/lib/udev/rules.d/99-systemd.rules
+execute_after_dh_install-arch:
+	# we don't want /tmp to be a tmpfs by default
+	mv debian/tmp/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
+	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
+	rm debian/tmp/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
@@ -238,15 +232,6 @@ ifeq ($(DEB_HOST_ARCH),i386)
 	rm -f debian/systemd-boot-efi/usr/lib/systemd/boot/efi/linuxia32.elf.stub
 endif
 
-execute_after_dh_installman-arch:
-	# remove duplicate files shipped by systemd-*/udev
-	# run after dh_installman, which runs after dh_install, to include manpages
-	echo "Removing duplicate files in systemd package:"
-	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
-		echo "... from $$pkg..."; \
-		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
-		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
-	done
 	# Remove empty directories from /usr/lib.
 	# Those are not strictly needed and can trigger piuparts errors due to
 	# accidential directory removal by dpkg on merged-/usr systems.
