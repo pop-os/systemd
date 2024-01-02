@@ -200,6 +200,8 @@ Depends: systemd-tests,
   mdadm,
   lvm2,
   btrfs-progs,
+  multipath-tools,
+  kpartx,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
