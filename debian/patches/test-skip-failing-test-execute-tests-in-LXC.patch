@@ -7,13 +7,12 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046488
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046495
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046498
 Forwarded: no
-
 ---
  src/test/test-execute.c | 20 +++++++++++++-------
  1 file changed, 13 insertions(+), 7 deletions(-)
 
 diff --git a/src/test/test-execute.c b/src/test/test-execute.c
-index 9a03e29..be51538 100644
+index b96d814..edb8629 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
 @@ -235,6 +235,12 @@ static void _test(const char *file, unsigned line, const char *func,
@@ -29,7 +28,7 @@ index 9a03e29..be51538 100644
  static void _test_service(const char *file, unsigned line, const char *func,
                            Manager *m, const char *unit_name, ServiceResult result_expected) {
          Unit *unit;
-@@ -282,9 +288,9 @@ static void test_exec_cpuaffinity(Manager *m) {
+@@ -286,9 +292,9 @@ static void test_exec_cpuaffinity(Manager *m) {
  }
  
  static void test_exec_credentials(Manager *m) {
@@ -42,7 +41,7 @@ index 9a03e29..be51538 100644
  }
  
  static void test_exec_workingdirectory(Manager *m) {
-@@ -1045,7 +1051,7 @@ static void test_exec_capabilityboundingset(Manager *m) {
+@@ -1084,7 +1090,7 @@ static void test_exec_capabilityboundingset(Manager *m) {
  }
  
  static void test_exec_basic(Manager *m) {
@@ -51,7 +50,7 @@ index 9a03e29..be51538 100644
  }
  
  static void test_exec_ambientcapabilities(Manager *m) {
-@@ -1100,7 +1106,7 @@ static void test_exec_privatenetwork(Manager *m) {
+@@ -1139,7 +1145,7 @@ static void test_exec_privatenetwork(Manager *m) {
          }
  
          test(m, "exec-privatenetwork-yes-privatemounts-no.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_FAILURE, CLD_EXITED);
@@ -60,7 +59,7 @@ index 9a03e29..be51538 100644
  }
  
  static void test_exec_networknamespacepath(Manager *m) {
-@@ -1115,8 +1121,8 @@ static void test_exec_networknamespacepath(Manager *m) {
+@@ -1154,8 +1160,8 @@ static void test_exec_networknamespacepath(Manager *m) {
                  return;
          }
  

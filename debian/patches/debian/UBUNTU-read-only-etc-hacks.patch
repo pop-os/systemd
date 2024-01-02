@@ -130,7 +130,7 @@ index 37e4f70..7a9c484 100644
          if (r == -ENOENT) {
                  /* If the file doesn't exist yet, subscribe to /etc instead, and wait until it is created either by
 diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
-index f77a5f6..fb42531 100644
+index 17d344e..cd8b1e1 100644
 --- a/src/firstboot/firstboot.c
 +++ b/src/firstboot/firstboot.c
 @@ -42,6 +42,7 @@
@@ -169,7 +169,7 @@ index f77a5f6..fb42531 100644
          r = symlinkat_atomic_full(e, pfd, f, /* make_relative= */ false);
          if (r < 0)
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index e1d53f2..3f94074 100644
+index fc7a97f..064a8d1 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -28,6 +28,7 @@
