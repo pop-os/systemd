@@ -20,7 +20,6 @@ test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 test-skip-tests-for-unsupported-localectl-features.patch
 meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch
-firstboot-remove-etc-localtime-on-reset.patch
 test-deny-list-TEST-08-INITRD.patch
 test-skip-failing-test-execute-tests-in-LXC.patch
 debian/test-deny-list-TEST-13-NSPAWN.patch
