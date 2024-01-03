@@ -1,4 +1,4 @@
-systemd (255.2-3ubuntu1) UNRELEASED; urgency=medium
+systemd (255.2-3ubuntu1) noble; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -96,7 +96,7 @@ systemd (255.2-3ubuntu1) UNRELEASED; urgency=medium
     - debian/systemd.manpages: do not ship sd-bsod manpages on i386
     - debian/tests/control: only install systemd-boot-efi for supported arches
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 03 Jan 2024 16:18:12 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 03 Jan 2024 17:34:00 -0500
 
 systemd (255.2-3) sid; urgency=medium
 
