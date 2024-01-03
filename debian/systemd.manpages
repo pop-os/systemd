@@ -140,8 +140,8 @@ debian/tmp/usr/share/man/man8/systemd-binfmt.8
 debian/tmp/usr/share/man/man8/systemd-binfmt.service.8
 debian/tmp/usr/share/man/man8/systemd-boot-check-no-failures.8
 debian/tmp/usr/share/man/man8/systemd-boot-check-no-failures.service.8
-<!stage1> debian/tmp/usr/share/man/man8/systemd-bsod.8
-<!stage1> debian/tmp/usr/share/man/man8/systemd-bsod.service.8
+[!i386] <!stage1> debian/tmp/usr/share/man/man8/systemd-bsod.8
+[!i386] <!stage1> debian/tmp/usr/share/man/man8/systemd-bsod.service.8
 debian/tmp/usr/share/man/man8/systemd-confext.8
 debian/tmp/usr/share/man/man8/systemd-confext.service.8
 <!stage1> debian/tmp/usr/share/man/man8/systemd-cryptsetup.8
