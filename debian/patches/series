@@ -12,3 +12,4 @@ test-install-empty-directories-with-NO_BUILD-1.patch
 test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
 test-tell-delv-to-load-anchors-from-etc-bind.keys-explici.patch
 test-flush-the-socket-once-the-triggered-unit-exits.patch
+test-install-correct-kpartx-udev-rules-on-Debian.patch
