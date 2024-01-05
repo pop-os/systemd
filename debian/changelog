@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.11pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Fri, 05 Jan 2024 09:49:29 -0700
+
 systemd (249.11-0ubuntu3.11) jammy; urgency=medium
 
   * wait-online: exit early if all links are ignored (LP: #2036358)
