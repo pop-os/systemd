@@ -1,3 +1,16 @@
+systemd (255.2-4) sid; urgency=medium
+
+  * autopkgtest: add btrfs-progs Depends to upstream suite.
+    Required by TEST-83-BTRFS and testcase_btrfs_basic from
+    TEST-64-UDEV-STORAGE.
+  * Revert "test: deny-list TEST-13-NSPAWN"
+    This reverts commit df8e5367aca20e0c75c9c91f826d22d8a0f7e36d.
+  * autopkgtest: add multipath-tools and kpartx Depends to upstream suite.
+    Required by testcase_multipath_basic_failover from TEST-64-UDEV-STORAGE.
+  * test: install correct kpartx udev rules on Debian
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 06 Jan 2024 16:21:03 +0100
+
 systemd (255.2-3) sid; urgency=medium
 
   * Cherry-pick fixes for upstream integration tests.
