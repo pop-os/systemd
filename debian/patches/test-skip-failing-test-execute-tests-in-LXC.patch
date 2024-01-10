@@ -5,14 +5,13 @@ Subject: test: skip failing test-execute tests in LXC
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046486
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046488
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046495
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046498
 Forwarded: no
 ---
- src/test/test-execute.c | 20 +++++++++++++-------
- 1 file changed, 13 insertions(+), 7 deletions(-)
+ src/test/test-execute.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
 
 diff --git a/src/test/test-execute.c b/src/test/test-execute.c
-index b96d814..edb8629 100644
+index b96d814..22e9790 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
 @@ -235,6 +235,12 @@ static void _test(const char *file, unsigned line, const char *func,
@@ -28,20 +27,21 @@ index b96d814..edb8629 100644
  static void _test_service(const char *file, unsigned line, const char *func,
                            Manager *m, const char *unit_name, ServiceResult result_expected) {
          Unit *unit;
-@@ -286,9 +292,9 @@ static void test_exec_cpuaffinity(Manager *m) {
+@@ -286,9 +292,10 @@ static void test_exec_cpuaffinity(Manager *m) {
  }
  
  static void test_exec_credentials(Manager *m) {
 -        test(m, "exec-set-credential.service", 0, CLD_EXITED);
 -        test(m, "exec-load-credential.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
 -        test(m, "exec-credentials-dir-specifier.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
++        /* These SHOULD work when https://github.com/canonical/lxd/pull/12698 is applied. */
 +        test_if_not_in_lxc(m, "exec-set-credential.service", 0, CLD_EXITED);
 +        test_if_not_in_lxc(m, "exec-load-credential.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
 +        test_if_not_in_lxc(m, "exec-credentials-dir-specifier.service", MANAGER_IS_SYSTEM(m) ? 0 : EXIT_CREDENTIALS, CLD_EXITED);
  }
  
  static void test_exec_workingdirectory(Manager *m) {
-@@ -1084,7 +1090,7 @@ static void test_exec_capabilityboundingset(Manager *m) {
+@@ -1084,7 +1091,7 @@ static void test_exec_capabilityboundingset(Manager *m) {
  }
  
  static void test_exec_basic(Manager *m) {
@@ -50,7 +50,7 @@ index b96d814..edb8629 100644
  }
  
  static void test_exec_ambientcapabilities(Manager *m) {
-@@ -1139,7 +1145,7 @@ static void test_exec_privatenetwork(Manager *m) {
+@@ -1139,7 +1146,7 @@ static void test_exec_privatenetwork(Manager *m) {
          }
  
          test(m, "exec-privatenetwork-yes-privatemounts-no.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_FAILURE, CLD_EXITED);
@@ -59,14 +59,3 @@ index b96d814..edb8629 100644
  }
  
  static void test_exec_networknamespacepath(Manager *m) {
-@@ -1154,8 +1160,8 @@ static void test_exec_networknamespacepath(Manager *m) {
-                 return;
-         }
- 
--        test(m, "exec-networknamespacepath-privatemounts-no.service", MANAGER_IS_SYSTEM(m) ? EXIT_SUCCESS : EXIT_FAILURE, CLD_EXITED);
--        test(m, "exec-networknamespacepath-privatemounts-yes.service", can_unshare ? EXIT_SUCCESS : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
-+        test_if_not_in_lxc(m, "exec-networknamespacepath-privatemounts-no.service", MANAGER_IS_SYSTEM(m) ? EXIT_SUCCESS : EXIT_FAILURE, CLD_EXITED);
-+        test_if_not_in_lxc(m, "exec-networknamespacepath-privatemounts-yes.service", can_unshare ? EXIT_SUCCESS : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
- }
- 
- static void test_exec_oomscoreadjust(Manager *m) {
