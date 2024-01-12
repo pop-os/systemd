@@ -28,3 +28,4 @@ test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
 test-tell-delv-to-load-anchors-from-etc-bind.keys-explici.patch
 test-flush-the-socket-once-the-triggered-unit-exits.patch
 lp2046498-test-skip-test_exec_networknamespacepath-if-netns-setup-f.patch
+test-skip-TEST-43-PRIVATEUSER-UNPRIV-if-unprivileged-user.patch
