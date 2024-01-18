@@ -29,3 +29,4 @@ lp2046498-test-skip-test_exec_networknamespacepath-if-netns-setup-f.patch
 test-skip-TEST-43-PRIVATEUSER-UNPRIV-if-unprivileged-user.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
+test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch

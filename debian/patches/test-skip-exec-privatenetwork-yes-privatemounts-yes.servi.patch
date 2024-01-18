@@ -1,0 +1,31 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Thu, 18 Jan 2024 14:10:45 -0500
+Subject: test: skip exec-privatenetwork-yes-privatemounts-yes.service in LXC
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2046495
+Forwarded: no, Ubuntu specific
+
+The AppArmor policy for LXD prevents a /sys mount that is needed for
+this to work. systemd is doing the right thing by continuing and letting
+the unit fail, so just skip this test in LXC containers.
+---
+ src/test/test-execute.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index e062625..ae438a7 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -1108,7 +1108,11 @@ static void test_exec_privatenetwork(Manager *m) {
+         }
+ 
+         test(m, "exec-privatenetwork-yes-privatemounts-no.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_FAILURE, CLD_EXITED);
+-        test(m, "exec-privatenetwork-yes-privatemounts-yes.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_NAMESPACE, CLD_EXITED);
++
++        if (detect_container() == VIRTUALIZATION_LXC)
++                log_notice("Skipping exec-privatenetwork-yes-privatemounts-yes.service in %s (LP: #2046495)", __func__);
++        else
++                test(m, "exec-privatenetwork-yes-privatemounts-yes.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_NAMESPACE, CLD_EXITED);
+ }
+ 
+ static void test_exec_networknamespacepath(Manager *m) {
