@@ -1,3 +1,41 @@
+systemd (255.2-3ubuntu2) UNRELEASED; urgency=medium
+
+  * test: skip test_exec_networknamespacepath if netns setup fails (LP: #2046498)
+    Files:
+    - debian/patches/lp2046498-test-skip-test_exec_networknamespacepath-if-netns-setup-f.patch
+    - debian/patches/test-skip-failing-test-execute-tests-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=de1fcf756e47858f4a206db97434bce4a71384d0
+  * test: skip TEST-43-PRIVATEUSER-UNPRIV if unprivileged userns is restricted
+    File: debian/patches/test-skip-TEST-43-PRIVATEUSER-UNPRIV-if-unprivileged-user.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2aba69874c83289c43d199ca360aa2fc451486a7
+  * Drop debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch.
+    This will be re-addressed with a different patch.
+    File: debian/patches/debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c3cd814e028364fe0c641d4bacfce22aafd1b572
+  * Drop test-skip-failing-test-execute-tests-in-LXC.patch.
+    This will be re-addressed with different patches.
+    File: debian/patches/test-skip-failing-test-execute-tests-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ab853707f4cc3e7e2d5993ff38998c3c2c789f62
+  * test: temporarily skip credentials tests in LXC.
+    This was already skipped in another patch, but now that we know what's
+    going on with it, split it out.
+    File: debian/patches/test-temporarily-skip-credentials-tests-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c71acb411d315267fe811f024cdab97e032453f3
+  * test: skip test-execute in arhmf LXC containers
+    File: debian/patches/test-skip-test-execute-in-arhmf-LXC-containers.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1cb1e3060822bfadddead564e779942e73e02f62
+  * test: skip exec-privatenetwork-yes-privatemounts-yes.service in LXC (LP: #2046495)
+    File: debian/patches/test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3ab76fd2db4291ee0531a07085c72cee06cb0d12
+  * test: skip a systemd-run test if unprivileged userns is restricted
+    File: debian/patches/test-skip-a-systemd-run-test-if-unprivileged-userns-is-re.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c85f2b4e32ee8fd1c0dc58d23e7fabdb7590d3cc
+  * test-execute: skip tests that are broken without unprivileged userns
+    File: debian/patches/test-execute-skip-tests-that-are-broken-without-unprivile.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7a6573c4f5133a7fec11fb059dd215f7c8c2204e
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 24 Jan 2024 14:53:45 -0500
+
 systemd (255.2-3ubuntu1) noble; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
