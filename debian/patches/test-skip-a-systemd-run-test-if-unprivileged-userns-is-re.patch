@@ -1,0 +1,40 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Thu, 18 Jan 2024 15:29:46 -0500
+Subject: test: skip a systemd-run test if unprivileged userns is restricted
+
+Origin: upstream, https://github.com/systemd/systemd/commit/6327d3022452c3c2ad408fbee9cdfbc2120753c9
+
+With newer versions of AppArmor, unprivileged user namespace creation
+may be restricted by default, in which case user manager instances will
+not be able to apply PrivateUsers=yes, which is implied by
+PrivateTmp=yes in this systemd-run invocation.
+---
+ test/units/testsuite-74.run.sh | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/test/units/testsuite-74.run.sh b/test/units/testsuite-74.run.sh
+index 2caca7a..e894932 100755
+--- a/test/units/testsuite-74.run.sh
++++ b/test/units/testsuite-74.run.sh
+@@ -80,11 +80,16 @@ systemd-run --wait --pipe --user --machine=testuser@ \
+             bash -xec '[[ "$(id -nu)" == testuser && "$(id -ng)" == testuser ]]'
+ systemd-run --wait --pipe --user --machine=testuser@ \
+             bash -xec '[[ "$PWD" == /home/testuser && -n "$INVOCATION_ID" ]]'
+-systemd-run --wait --pipe --user --machine=testuser@ \
+-            --property=LimitCORE=1M:2M \
+-            --property=LimitCORE=16M:32M \
+-            --property=PrivateTmp=yes \
+-            bash -xec '[[ "$(ulimit -c -S)" -eq 16384 && "$(ulimit -c -H)" -eq 32768 && ! -e /tmp/public-marker ]]'
++
++# PrivateTmp=yes implies PrivateUsers=yes for user manager, so skip this if we
++# don't have unprivileged user namespaces.
++if [[ "$(sysctl -ne kernel.apparmor_restrict_unprivileged_userns)" -ne 1 ]]; then
++    systemd-run --wait --pipe --user --machine=testuser@ \
++                --property=LimitCORE=1M:2M \
++                --property=LimitCORE=16M:32M \
++                --property=PrivateTmp=yes \
++                bash -xec '[[ "$(ulimit -c -S)" -eq 16384 && "$(ulimit -c -H)" -eq 32768 && ! -e /tmp/public-marker ]]'
++fi
+ 
+ : "Transient scope (system daemon)"
+ systemd-run --scope \
