@@ -8,10 +8,10 @@ Subject: test: don't check for -Dinstall-tests=true with NO_BUILD=1
  1 file changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/test/test-functions b/test/test-functions
-index 6a6f624..f887346 100644
+index 8f04a37..948a00b 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -3309,9 +3309,10 @@ test_create_image() {
+@@ -3345,9 +3345,10 @@ test_create_image() {
  }
  
  test_setup() {

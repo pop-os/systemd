@@ -9,10 +9,10 @@ Resolves: #30478
  1 file changed, 24 insertions(+), 18 deletions(-)
 
 diff --git a/test/test-functions b/test/test-functions
-index 4606745..6a6f624 100644
+index 1777982..8f04a37 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -1310,19 +1310,35 @@ install_compiled_systemd() {
+@@ -1327,19 +1327,35 @@ install_compiled_systemd() {
      fi
  }
  
@@ -55,7 +55,7 @@ index 4606745..6a6f624 100644
      done < <(grep -E '^Package:' "${SOURCE_DIR}/debian/control" | cut -d ':' -f 2)
  }
  
-@@ -1337,17 +1353,7 @@ install_rpm() {
+@@ -1354,17 +1370,7 @@ install_rpm() {
  
      dinfo "Installing contents of RPM $rpm"
      while read -r file; do
