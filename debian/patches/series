@@ -11,3 +11,6 @@ test-skip-TEST-08-INITRD-if-systemd-didn-t-run-in-the-ini.patch
 test-install-empty-directories-with-NO_BUILD-1.patch
 test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
 test-tell-delv-to-load-anchors-from-etc-bind.keys-explici.patch
+Sort-input-file-list.patch
+meson-drop-arch-filtering-in-syscall-list.patch
+test-unset-TZ-before-timezone-sensitive-unit-tests-are-ru.patch

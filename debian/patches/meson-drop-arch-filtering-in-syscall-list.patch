@@ -1,0 +1,47 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 25 Jan 2024 13:26:21 +0100
+Subject: meson: drop arch filtering in syscall list
+
+I added the filtering in 752fedbea7c02c82287c7ff2a4139f528b3f7ba8 as a way
+to reduce the number of items in the tables. I thought it's "obvious", but
+it might not be so.
+
+One immediate problem is that the filter is broken, because on arm64,
+os.uname().machine returns "aarch64", so we incorrectly filter out the arm
+syscalls (there is just one: arm_fadvise64_64). Of course we could fix the
+filter, but I think it's better to nuke it altogether. The filter on applies to
+1 arm syscall and 5 s390 syscalls, and we have 500+ other syscalls, so this
+"optimization" doesn't really matter. OTOH, if we get the filter wrong,
+the result is bad. And also, the existence of the filter at all creates
+problems for cross-builds.
+
+I wanted to get rid of 'generate-syscall-list.py', but we need to generate a
+backslash in the output. https://github.com/mesonbuild/meson/issues/1564 makes
+this very very hard, since any attempt to put a backslash an inline argument
+results in the backslash being replaces by a forward slash, which doesn't quite
+have the same meaning. So let's use a standalone script until
+https://github.com/mesonbuild/meson/issues/1564 is resolved.
+---
+ src/shared/generate-syscall-list.py | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/src/shared/generate-syscall-list.py b/src/shared/generate-syscall-list.py
+index 3ee19ff..c0975a0 100755
+--- a/src/shared/generate-syscall-list.py
++++ b/src/shared/generate-syscall-list.py
+@@ -2,15 +2,6 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ 
+ import sys
+-import os
+-
+-s390 = 's390' in os.uname().machine
+-arm = 'arm' in os.uname().machine
+ 
+ for line in open(sys.argv[1]):
+-    if line.startswith('s390_') and not s390:
+-        continue
+-    if line.startswith('arm_') and not arm:
+-        continue
+-
+     print('"{}\\0"'.format(line.strip()))

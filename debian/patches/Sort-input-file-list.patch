@@ -1,0 +1,28 @@
+From: "Bernhard M. Wiedemann" <bwiedemann@suse.de>
+Date: Thu, 25 Jan 2024 05:48:35 +0100
+Subject: Sort input file list
+
+so that /usr/lib/systemd/tests/unit-tests/test-libsystemd-sym
+builds in a reproducible way
+in spite of non-deterministic filesystem readdir order
+
+See https://reproducible-builds.org/ for why this is good.
+
+This patch was done while working on reproducible builds for openSUSE.
+---
+ src/test/generate-sym-test.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/test/generate-sym-test.py b/src/test/generate-sym-test.py
+index e97b6bb..028d108 100755
+--- a/src/test/generate-sym-test.py
++++ b/src/test/generate-sym-test.py
+@@ -66,7 +66,7 @@ print('''        {}
+ }, symbols_from_source[] = {''')
+ 
+ for dirpath, _, filenames in sorted(os.walk(sys.argv[2])):
+-    for filename in filenames:
++    for filename in sorted(filenames):
+         if not filename.endswith(".c") and not filename.endswith(".h"):
+             continue
+         with open(os.path.join(dirpath, filename), "r") as f:

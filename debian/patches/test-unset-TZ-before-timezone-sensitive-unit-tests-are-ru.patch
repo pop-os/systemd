@@ -1,0 +1,58 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Fri, 26 Jan 2024 00:22:38 +0000
+Subject: test: unset TZ before timezone-sensitive unit tests are run
+
+Some tests have hard-coded results that need to match, and change if
+the caller has a timezone set via the TZ= environment variable, as it
+is the case during reproducible build tests. Unset it.
+---
+ src/test/test-calendarspec.c | 9 ++++++++-
+ src/test/test-date.c         | 3 +++
+ src/test/test-time-util.c    | 3 +++
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test-calendarspec.c b/src/test/test-calendarspec.c
+index db64142..18a0f8f 100644
+--- a/src/test/test-calendarspec.c
++++ b/src/test/test-calendarspec.c
+@@ -254,4 +254,11 @@ TEST(calendar_spec_from_string) {
+         assert_se(calendar_spec_from_string("*:4,30:*\n", &c) == -EINVAL);
+ }
+ 
+-DEFINE_TEST_MAIN(LOG_INFO);
++static int intro(void) {
++        /* Tests have hard-coded results that do not expect a specific timezone to be set by the caller */
++        assert_se(unsetenv("TZ") >= 0);
++
++        return EXIT_SUCCESS;
++}
++
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-date.c b/src/test/test-date.c
+index a7058a3..162ac34 100644
+--- a/src/test/test-date.c
++++ b/src/test/test-date.c
+@@ -62,6 +62,9 @@ static void test_one_noutc(const char *p) {
+ }
+ 
+ int main(int argc, char *argv[]) {
++        /* Tests have hard-coded results that do not expect a specific timezone to be set by the caller */
++        assert_se(unsetenv("TZ") >= 0);
++
+         test_setup_logging(LOG_DEBUG);
+ 
+         test_one("17:41");
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 76931ce..53bc779 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -1171,6 +1171,9 @@ TEST(timezone_offset_change) {
+ }
+ 
+ static int intro(void) {
++        /* Tests have hard-coded results that do not expect a specific timezone to be set by the caller */
++        assert_se(unsetenv("TZ") >= 0);
++
+         log_info("realtime=" USEC_FMT "\n"
+                  "monotonic=" USEC_FMT "\n"
+                  "boottime=" USEC_FMT "\n",
