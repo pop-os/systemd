@@ -5,4 +5,3 @@ include:
 variables:
   # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1011649
   SALSA_CI_DISABLE_PIUPARTS: 1
-  SALSA_CI_DISABLE_REPROTEST: 1
