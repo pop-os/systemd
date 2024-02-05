@@ -53,7 +53,6 @@ CONFFLAGS = \
 	-Dloadkeys-path=/usr/bin/loadkeys \
 	-Dsetfont-path=/usr/bin/setfont \
 	-Dnologin-path=/usr/sbin/nologin \
-	-Dtelinit-path=/usr/sbin/telinit \
 	-Dsysvinit-path=/etc/init.d \
 	-Dsysvrcnd-path=/etc \
 	-Dlocalegen-path=/usr/sbin/locale-gen \
