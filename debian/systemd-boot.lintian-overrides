@@ -1,3 +1,2 @@
 # Lintian is really bad at associating manpages
 systemd-boot: spare-manual-page
-systemd-boot: package-supports-alternative-init-but-no-init.d-script
