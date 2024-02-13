@@ -98,6 +98,12 @@ CONFFLAGS = \
 	-Dstatus-unit-format-default=combined \
 	-Dstandalone-binaries=true
 
+ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
+CONFFLAGS += -Dtests=false
+else
+CONFFLAGS += -Dtests=true
+endif
+
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
 	-Daudit=enabled \
