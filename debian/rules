@@ -4,7 +4,6 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 export LC_ALL = C.UTF-8
-export DEB_CFLAGS_MAINT_APPEND = -ffat-lto-objects
 
 include /usr/share/dpkg/default.mk
 include /usr/share/debhelper/dh_package_notes/package-notes.mk
@@ -31,9 +30,11 @@ else
     GENSYMBOLS_LEVEL = 1
 endif
 
+# Make sure that DEB_BUILD_OPTIONS can be used by users to override any options
+# we set here (By default DEB_BUILD_MAINT_OPTIONS overrides DEB_BUILD_OPTIONS).
+export DEB_BUILD_MAINT_OPTIONS = optimize=+lto hardening=+pie $(DEB_BUILD_OPTIONS)
+
 CONFFLAGS = \
-	-Db_lto=true \
-	-Db_pie=true \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
 	-Dversion-tag="$(DEB_VERSION)" \
