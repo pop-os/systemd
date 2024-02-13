@@ -22,7 +22,7 @@ TEST_TIMEOUT_MULTIPLIER = "-t 10"
 
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
-ifeq ($(TEST_UPSTREAM),)
+ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
     DH_MISSING = --fail-missing
     GENSYMBOLS_LEVEL = 4
 else
@@ -172,7 +172,7 @@ execute_after_dh_auto_build:
 	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
 execute_before_dh_auto_clean:
-ifneq (, $(TEST_UPSTREAM))
+ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 	debian/extra/checkout-upstream
 endif
 

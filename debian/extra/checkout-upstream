@@ -9,10 +9,12 @@
 
 set -eu
 test -x debian/rules
-if [ -z "${TEST_UPSTREAM:-}" ]; then
-    echo "Not in upstream testing mode. Do *not* run this script unless you know what you are doing." >&2
-    exit 1
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*) ;;
+    *)
+        echo "Not in upstream testing mode. Do *not* run this script unless you know what you are doing." >&2
+        exit 1
+esac
 if [ -n "${UPSTREAM_PULL_REQUEST:-}" ]; then
     FETCH="git fetch -fu origin refs/pull/$UPSTREAM_PULL_REQUEST/head:pr"
     CO='git checkout pr'
