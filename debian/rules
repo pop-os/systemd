@@ -242,7 +242,7 @@ override_dh_installsystemduser:
 execute_after_dh_installsysusers:
 	dh_installsysusers -pudev --name=debian-udev
 
-PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
+PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION / {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
