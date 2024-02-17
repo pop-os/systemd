@@ -75,6 +75,7 @@ Build-Depends: debhelper-compat (= 13),
                zstd <!nocheck>,
                gawk <!nocheck>,
                fdisk <!nocheck>,
+               libarchive-dev <pkg.systemd.upstream>,
 
 Package: systemd
 Architecture: linux-any
