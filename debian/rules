@@ -20,14 +20,19 @@ endif
 
 TEST_TIMEOUT_MULTIPLIER = "-t 10"
 
-# fail on missing files and symbols changes on distro builds, but not if we
-# build/test upstream master
+# Fail on missing files and symbol changes on distro builds, but not if we
+# build/test upstream master. Also, don't put the debian revision in the version
+# tag when we build/test upstream as it doesn't have any meaning in that case
+# and it allows using the current date as the debian revision without causing
+# unnecessary rebuilds all the time.
 ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
     DH_MISSING = --fail-missing
     GENSYMBOLS_LEVEL = 4
+    VERSION_TAG = $(DEB_VERSION)
 else
     DH_MISSING = --list-missing
     GENSYMBOLS_LEVEL = 1
+    VERSION_TAG = $(DEB_VERSION_UPSTREAM)
 endif
 
 # Make sure that DEB_BUILD_OPTIONS can be used by users to override any options
@@ -37,7 +42,7 @@ export DEB_BUILD_MAINT_OPTIONS = optimize=+lto hardening=+pie $(DEB_BUILD_OPTION
 CONFFLAGS = \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
-	-Dversion-tag="$(DEB_VERSION)" \
+	-Dversion-tag="$(VERSION_TAG)" \
 	-Dquotaon-path=/usr/sbin/quotaon \
 	-Dquotacheck-path=/usr/sbin/quotacheck \
 	-Dkmod-path=/usr/bin/kmod \
