@@ -26,11 +26,11 @@ TEST_TIMEOUT_MULTIPLIER = "-t 10"
 # and it allows using the current date as the debian revision without causing
 # unnecessary rebuilds all the time.
 ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
-    DH_MISSING = --fail-missing
+    DH_MISSING ?= --fail-missing
     GENSYMBOLS_LEVEL = 4
     VERSION_TAG = $(DEB_VERSION)
 else
-    DH_MISSING = --list-missing
+    DH_MISSING ?= --list-missing
     GENSYMBOLS_LEVEL = 1
     VERSION_TAG = $(DEB_VERSION_UPSTREAM)
 endif
