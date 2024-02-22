@@ -112,7 +112,7 @@ Depends: systemd-tests,
   libfido2-dev,
   libdw-dev,
   libqrencode-dev,
-  tzdata-legacy | tzdata (<< 2023c-8),
+  tzdata-legacy | tzdata (<< 2024a-1),
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: upstream
@@ -194,7 +194,7 @@ Depends: systemd-tests,
   locales-all,
   stress,
   curl,
-  tzdata-legacy | tzdata (<< 2023c-8),
+  tzdata-legacy | tzdata (<< 2024a-1),
   python3-pefile,
   nvme-cli,
   mdadm,
