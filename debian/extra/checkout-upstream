@@ -100,6 +100,10 @@ fi
 if grep -q log-trace debian/tmp/upstream/meson_options.txt; then
     sed -i "s/option('log-trace', type : 'boolean', value : false/option('log-trace', type : 'boolean', value : true/" debian/tmp/upstream/meson_options.txt
 fi
+# TODO: drop when Jammy is no longer used
+if grep -q sshdconfdir debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('sshdconfdir',/option('sshdconfdir', value : 'no',/" debian/tmp/upstream/meson_options.txt
+fi
 
 # replace with checkout
 mv debian/tmp/upstream/* .
