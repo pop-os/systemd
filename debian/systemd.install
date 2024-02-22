@@ -105,7 +105,7 @@ usr/lib/systemd/system/dev-hugepages.mount
 usr/lib/systemd/system/dev-mqueue.mount
 usr/lib/systemd/systemd-executor
 usr/lib/systemd/systemd-fsck
-usr/lib/systemd/systemd-fsckd
+<!pkg.systemd.upstream> usr/lib/systemd/systemd-fsckd
 usr/lib/systemd/systemd-growfs
 usr/lib/systemd/systemd-hibernate-resume
 usr/lib/systemd/systemd-hostnamed
@@ -302,8 +302,8 @@ usr/lib/systemd/system/systemd-boot-check-no-failures.service
 usr/lib/systemd/system/systemd-confext.service
 usr/lib/systemd/system/systemd-exit.service
 usr/lib/systemd/system/systemd-firstboot.service
-usr/lib/systemd/system/systemd-fsckd.service
-usr/lib/systemd/system/systemd-fsckd.socket
+<!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.service
+<!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.socket
 usr/lib/systemd/system/systemd-fsck-root.service
 usr/lib/systemd/system/systemd-fsck@.service
 usr/lib/systemd/system/systemd-growfs-root.service

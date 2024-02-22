@@ -150,9 +150,9 @@ debian/tmp/usr/share/man/man8/systemd-confext.service.8
 debian/tmp/usr/share/man/man8/systemd-debug-generator.8
 debian/tmp/usr/share/man/man8/systemd-environment-d-generator.8
 debian/tmp/usr/share/man/man8/systemd-fsck.8
-debian/tmp/usr/share/man/man8/systemd-fsckd.8
-debian/tmp/usr/share/man/man8/systemd-fsckd.service.8
-debian/tmp/usr/share/man/man8/systemd-fsckd.socket.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-fsckd.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-fsckd.service.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-fsckd.socket.8
 debian/tmp/usr/share/man/man8/systemd-fsck-root.service.8
 debian/tmp/usr/share/man/man8/systemd-fsck@.service.8
 debian/tmp/usr/share/man/man8/systemd-fsck-usr.service.8
