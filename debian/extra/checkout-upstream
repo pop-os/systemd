@@ -97,6 +97,9 @@ find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xarg
 if grep -q default-timeout-sec debian/tmp/upstream/meson_options.txt; then
     sed -i "s/option('default-timeout-sec', type : 'integer', value : 90/option('default-timeout-sec', type : 'integer', value : 180/" debian/tmp/upstream/meson_options.txt
 fi
+if grep -q log-trace debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('log-trace', type : 'boolean', value : false/option('log-trace', type : 'boolean', value : true/" debian/tmp/upstream/meson_options.txt
+fi
 
 # replace with checkout
 mv debian/tmp/upstream/* .
