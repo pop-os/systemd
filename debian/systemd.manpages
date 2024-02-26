@@ -29,6 +29,7 @@ debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
 debian/tmp/usr/share/man/man1/systemd-run.1
 debian/tmp/usr/share/man/man1/systemd-socket-activate.1
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-ssh-proxy.1
 debian/tmp/usr/share/man/man1/systemd-stdio-bridge.1
 debian/tmp/usr/share/man/man1/systemd-tty-ask-password-agent.1
 debian/tmp/usr/share/man/man1/systemd-umount.1
@@ -240,6 +241,7 @@ debian/tmp/usr/share/man/man8/systemd-shutdown.8
 debian/tmp/usr/share/man/man8/systemd-sleep.8
 debian/tmp/usr/share/man/man8/systemd-socket-proxyd.8
 debian/tmp/usr/share/man/man8/systemd-soft-reboot.service.8
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-ssh-generator.8
 debian/tmp/usr/share/man/man8/systemd-storagetm.8
 debian/tmp/usr/share/man/man8/systemd-storagetm.service.8
 debian/tmp/usr/share/man/man8/systemd-suspend.service.8

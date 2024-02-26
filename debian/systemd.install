@@ -4,6 +4,7 @@ etc/credstore/
 etc/credstore.encrypted/
 etc/init.d/
 etc/kernel/install.d/
+<pkg.systemd.upstream> etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
 etc/systemd/journald.conf
 etc/systemd/logind.conf
 etc/systemd/network/
@@ -77,6 +78,7 @@ usr/lib/systemd/network/80-wifi-station.network.example
 usr/lib/systemd/network/89-ethernet.network.example
 usr/lib/systemd/repart/
 usr/lib/systemd/resolv.conf
+<pkg.systemd.upstream> usr/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
 usr/lib/systemd/system/autovt@.service
 usr/lib/systemd/system/basic.target
 usr/lib/systemd/system/blockdev@.target
@@ -131,6 +133,7 @@ usr/lib/systemd/systemd-rfkill
 usr/lib/systemd/systemd-shutdown
 usr/lib/systemd/systemd-sleep
 usr/lib/systemd/systemd-socket-proxyd
+<pkg.systemd.upstream> usr/lib/systemd/systemd-ssh-proxy
 usr/lib/systemd/systemd-storagetm
 usr/lib/systemd/systemd-sulogin-shell
 usr/lib/systemd/systemd-sysctl
@@ -161,6 +164,7 @@ usr/lib/systemd/system-generators/systemd-hibernate-resume-generator
 <!stage1> usr/lib/systemd/system-generators/systemd-integritysetup-generator
 usr/lib/systemd/system-generators/systemd-rc-local-generator
 usr/lib/systemd/system-generators/systemd-run-generator
+<pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
 usr/lib/systemd/system-generators/systemd-sysv-generator
 <!stage1> usr/lib/systemd/system-generators/systemd-veritysetup-generator
@@ -431,6 +435,7 @@ usr/lib/systemd/user/xdg-desktop-autostart.target
 usr/lib/sysusers.d/basic.conf
 usr/lib/sysusers.d/systemd-journal.conf
 usr/lib/sysusers.d/systemd-network.conf
+<pkg.systemd.upstream> usr/lib/tmpfiles.d/20-systemd-ssh-generator.conf
 usr/lib/tmpfiles.d/credstore.conf
 usr/lib/tmpfiles.d/home.conf
 usr/lib/tmpfiles.d/journal-nocow.conf
