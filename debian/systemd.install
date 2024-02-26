@@ -499,6 +499,7 @@ usr/share/dbus-1/system-services/org.freedesktop.systemd1.service
 usr/share/dbus-1/system-services/org.freedesktop.timedate1.service
 usr/share/doc/systemd/
 usr/share/locale/
+<pkg.systemd.upstream> usr/share/mime/packages/io.systemd.xml
 usr/share/polkit-1/actions/org.freedesktop.hostname1.policy
 usr/share/polkit-1/actions/org.freedesktop.locale1.policy
 usr/share/polkit-1/actions/org.freedesktop.login1.policy
