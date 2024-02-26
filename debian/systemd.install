@@ -65,12 +65,17 @@ usr/lib/modprobe.d/systemd.conf
 <!stage1> usr/lib/pcrlock.d/
 [alpha amd64 arm64 ia64 loong64 mips64el ppc64 ppc64el riscv64 s390x sparc64] usr/lib/sysctl.d/50-pid-max.conf
 usr/lib/systemd/catalog/
+<pkg.systemd.upstream> usr/lib/systemd/network/80-6rd-tunnel.link
 usr/lib/systemd/network/80-6rd-tunnel.network
 usr/lib/systemd/network/80-auto-link-local.network.example
 usr/lib/systemd/network/80-container-host0.network
+<pkg.systemd.upstream> usr/lib/systemd/network/80-container-vb.link
 usr/lib/systemd/network/80-container-vb.network
+<pkg.systemd.upstream> usr/lib/systemd/network/80-container-ve.link
 usr/lib/systemd/network/80-container-ve.network
+<pkg.systemd.upstream> usr/lib/systemd/network/80-container-vz.link
 usr/lib/systemd/network/80-container-vz.network
+<pkg.systemd.upstream> usr/lib/systemd/network/80-vm-vt.link 
 usr/lib/systemd/network/80-vm-vt.network
 usr/lib/systemd/network/80-wifi-adhoc.network
 usr/lib/systemd/network/80-wifi-ap.network.example
