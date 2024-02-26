@@ -1,5 +1,7 @@
+#!/usr/bin/dh-exec
 etc/systemd/homed.conf
 usr/bin/homectl
+<pkg.systemd.upstream> usr/bin/systemd-home-fallback-shell
 usr/lib/*/security/pam_systemd_home.so
 usr/lib/systemd/systemd-homed
 usr/lib/systemd/systemd-homework
