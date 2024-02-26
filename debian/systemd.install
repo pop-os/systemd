@@ -54,6 +54,7 @@ usr/bin/systemd-sysusers
 usr/bin/systemd-tmpfiles
 usr/bin/systemd-tty-ask-password-agent
 usr/bin/systemd-umount
+<pkg.systemd.upstream> usr/bin/systemd-vpick
 usr/bin/timedatectl
 <pkg.systemd.upstream> usr/bin/uid0
 usr/bin/varlinkctl

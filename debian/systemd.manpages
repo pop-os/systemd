@@ -33,6 +33,7 @@ debian/tmp/usr/share/man/man1/systemd-socket-activate.1
 debian/tmp/usr/share/man/man1/systemd-stdio-bridge.1
 debian/tmp/usr/share/man/man1/systemd-tty-ask-password-agent.1
 debian/tmp/usr/share/man/man1/systemd-umount.1
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-vpick.1
 debian/tmp/usr/share/man/man1/timedatectl.1
 <pkg.systemd.upstream> debian/tmp/usr/share/man/man1/uid0.1
 debian/tmp/usr/share/man/man1/varlinkctl.1
@@ -126,6 +127,7 @@ debian/tmp/usr/share/man/man7/systemd.special.7
 debian/tmp/usr/share/man/man7/systemd.syntax.7
 debian/tmp/usr/share/man/man7/systemd.system-credentials.7
 debian/tmp/usr/share/man/man7/systemd.time.7
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man7/systemd.v.7
 debian/tmp/usr/share/man/man8/30-systemd-environment-d-generator.8
 debian/tmp/usr/share/man/man8/kernel-install.8
 debian/tmp/usr/share/man/man8/pam_systemd_loadkey.8
