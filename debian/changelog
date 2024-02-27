@@ -1,4 +1,4 @@
-systemd (255.4-1ubuntu1) UNRELEASED; urgency=medium
+systemd (255.4-1ubuntu1) noble; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -95,7 +95,7 @@ systemd (255.4-1ubuntu1) UNRELEASED; urgency=medium
       longer applies. Update the patch so it does apply.
       Thanks to Florent 'Skia' Jacquet
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 27 Feb 2024 17:02:40 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 27 Feb 2024 17:13:21 -0500
 
 systemd (255.4-1) sid; urgency=medium
 
