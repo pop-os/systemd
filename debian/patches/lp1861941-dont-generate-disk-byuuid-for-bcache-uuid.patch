@@ -42,10 +42,10 @@ Last-Update: 2020-07-23
  1 file changed, 3 insertions(+)
 
 diff --git a/rules.d/60-persistent-storage.rules.in b/rules.d/60-persistent-storage.rules.in
-index 6787430..d6cb7e0 100644
+index 17a9d08..e9d6308 100644
 --- a/rules.d/60-persistent-storage.rules.in
 +++ b/rules.d/60-persistent-storage.rules.in
-@@ -135,8 +135,11 @@ LABEL="persistent_storage_blkid_probe_end"
+@@ -137,8 +137,11 @@ LABEL="persistent_storage_blkid_probe_end"
  {% endif %}
  
  # by-label/by-uuid links (filesystem metadata)

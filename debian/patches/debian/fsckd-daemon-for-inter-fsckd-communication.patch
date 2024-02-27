@@ -241,7 +241,7 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index f1f4e7e..24f5bd2 100644
+index a577ac7..da723fa 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -2152,6 +2152,7 @@ subdir('src/environment-d-generator')

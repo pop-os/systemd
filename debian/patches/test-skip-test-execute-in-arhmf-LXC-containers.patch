@@ -20,7 +20,7 @@ Forwarded: no, Ubuntu specific
  1 file changed, 4 insertions(+)
 
 diff --git a/src/test/test-execute.c b/src/test/test-execute.c
-index 4a4f0f0..e062625 100644
+index a7c8c64..929b258 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
 @@ -7,6 +7,7 @@
@@ -31,7 +31,7 @@ index 4a4f0f0..e062625 100644
  #include "capability-util.h"
  #include "cpu-set-util.h"
  #include "copy.h"
-@@ -1441,6 +1442,9 @@ TEST(run_tests_unprivileged) {
+@@ -1514,6 +1515,9 @@ TEST(run_tests_unprivileged) {
  }
  
  static int intro(void) {

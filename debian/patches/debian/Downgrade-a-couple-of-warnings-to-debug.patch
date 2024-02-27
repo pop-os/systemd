@@ -16,7 +16,7 @@ Closes: #981407
  3 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index f442bd8..a92f683 100644
+index 0baf08e..8eec584 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -544,6 +544,7 @@ static int patch_var_run(
@@ -51,7 +51,7 @@ index 4485e2e..d0e8ed8 100644
                                                 "%s Automatically generating a unit file for compatibility. Please update package to include a native systemd unit file, in order to make it safe, robust and future-proof. "
                                                 "%s This compatibility logic is deprecated, expect removal soon. %s",
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index 230ec09..d513d40 100644
+index bc83aab..6421eac 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
 @@ -3266,6 +3266,7 @@ static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *

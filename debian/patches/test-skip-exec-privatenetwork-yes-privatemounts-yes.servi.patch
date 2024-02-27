@@ -13,10 +13,10 @@ the unit fail, so just skip this test in LXC containers.
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/src/test/test-execute.c b/src/test/test-execute.c
-index e062625..ae438a7 100644
+index 929b258..9e221ae 100644
 --- a/src/test/test-execute.c
 +++ b/src/test/test-execute.c
-@@ -1108,7 +1108,11 @@ static void test_exec_privatenetwork(Manager *m) {
+@@ -1178,7 +1178,11 @@ static void test_exec_privatenetwork(Manager *m) {
          }
  
          test(m, "exec-privatenetwork-yes-privatemounts-no.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_NETWORK : EXIT_FAILURE, CLD_EXITED);
