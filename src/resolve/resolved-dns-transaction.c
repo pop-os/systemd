@@ -74,6 +74,10 @@ static void dns_transaction_close_connection(
          * and the reply we might still get from the server will be eaten up instead of resulting in an ICMP
          * port unreachable error message. */
 
+        /* Skip the graveyard stuff when we're shutting down, since that requires running event loop */
+        if (!t->scope->manager->event || sd_event_get_state(t->scope->manager->event) == SD_EVENT_FINISHED)
+                use_graveyard = false;
+
         if (use_graveyard && t->dns_udp_fd >= 0 && t->sent && !t->received) {
                 r = manager_add_socket_to_graveyard(t->scope->manager, t->dns_udp_fd);
                 if (r < 0)
@@ -627,9 +631,20 @@ static int on_stream_complete(DnsStream *s, int error) {
                 }
         }
 
-        if (error != 0)
-                LIST_FOREACH(transactions_by_stream, t, s->transactions)
+        if (error != 0) {
+                /* First, detach the stream from the server. Otherwise, transactions attached to this stream
+                 * may be restarted by on_transaction_stream_error() below with this stream. */
+                dns_stream_detach(s);
+
+                /* Do not use LIST_FOREACH() here, as
+                 *     on_transaction_stream_error()
+                 *         -> dns_transaction_complete_errno()
+                 *             -> dns_transaction_free()
+                 * may free multiple transactions in the list. */
+                DnsTransaction *t;
+                while ((t = s->transactions))
                         on_transaction_stream_error(t, error);
+        }
 
         return 0;
 }
@@ -3148,10 +3163,13 @@ static int dnssec_validate_records(
                 DnsTransaction *t,
                 Phase phase,
                 bool *have_nsec,
+                unsigned *nvalidations,
                 DnsAnswer **validated) {
 
         DnsResourceRecord *rr;
         int r;
+
+        assert(nvalidations);
 
         /* Returns negative on error, 0 if validation failed, 1 to restart validation, 2 when finished. */
 
@@ -3194,6 +3212,7 @@ static int dnssec_validate_records(
                                 &rrsig);
                 if (r < 0)
                         return r;
+                *nvalidations += r;
 
                 log_debug("Looking at %s: %s", strna(dns_resource_record_to_string(rr)), dnssec_result_to_string(result));
 
@@ -3391,7 +3410,8 @@ static int dnssec_validate_records(
                                            DNSSEC_SIGNATURE_EXPIRED,
                                            DNSSEC_NO_SIGNATURE))
                                         manager_dnssec_verdict(t->scope->manager, DNSSEC_BOGUS, rr->key);
-                                else /* DNSSEC_MISSING_KEY or DNSSEC_UNSUPPORTED_ALGORITHM */
+                                else /* DNSSEC_MISSING_KEY, DNSSEC_UNSUPPORTED_ALGORITHM,
+                                        or DNSSEC_TOO_MANY_VALIDATIONS */
                                         manager_dnssec_verdict(t->scope->manager, DNSSEC_INDETERMINATE, rr->key);
 
                                 /* This is a primary response to our question, and it failed validation.
@@ -3484,12 +3504,20 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
                 return r;
 
         phase = DNSSEC_PHASE_DNSKEY;
-        for (;;) {
+        for (unsigned nvalidations = 0;;) {
                 bool have_nsec = false;
 
-                r = dnssec_validate_records(t, phase, &have_nsec, &validated);
+                r = dnssec_validate_records(t, phase, &have_nsec, &nvalidations, &validated);
                 if (r <= 0)
                         return r;
+
+                if (nvalidations > DNSSEC_VALIDATION_MAX) {
+                        /* This reply requires an onerous number of signature validations to verify. Let's
+                         * not waste our time trying, as this shouldn't happen for well-behaved domains
+                         * anyway. */
+                        t->answer_dnssec_result = DNSSEC_TOO_MANY_VALIDATIONS;
+                        return 0;
+                }
 
                 /* Try again as long as we managed to achieve something */
                 if (r == 1)

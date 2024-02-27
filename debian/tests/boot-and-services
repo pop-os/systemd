@@ -71,7 +71,7 @@ class ServicesTest(unittest.TestCase):
         self.assertNotEqual(b'', out)
         self.active_unit('systemd-logind')
 
-    @unittest.skipIf('TEST_UPSTREAM' in os.environ,
+    @unittest.skipIf('pkg.systemd.upstream' in os.environ.get('DEB_BUILD_PROFILES', ''),
                      'Forwarding to rsyslog is a Debian patch')
     @unittest.skipIf(is_container and platform.machine() == 's390x', 'LP: #1895576')
     def test_rsyslog(self):
@@ -120,7 +120,7 @@ class ServicesTest(unittest.TestCase):
             self.assertIn(status, [3, 4], status_out)
             self.assertNotEqual(findmnt, 0)
 
-    @unittest.skipIf('TEST_UPSTREAM' in os.environ,
+    @unittest.skipIf('pkg.systemd.upstream' in os.environ.get('DEB_BUILD_PROFILES', ''),
                      'Debian specific configuration, N/A for upstream')
     def test_tmp_cleanup(self):
         # systemd-tmpfiles-clean.timer only runs 15 mins after boot, shortcut

@@ -13,7 +13,7 @@ _update_catalog() {
 }
 
 _update_binfmt() {
-    _systemctl try-restart systemd-binfmt.service || true
+    _systemctl restart systemd-binfmt.service || true
 }
 
 # Update Message Catalogs database and binfmt registrations in response to dpkg triggers

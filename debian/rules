@@ -4,7 +4,6 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 export LC_ALL = C.UTF-8
-export DEB_CFLAGS_MAINT_APPEND = -ffat-lto-objects
 
 include /usr/share/dpkg/default.mk
 include /usr/share/debhelper/dh_package_notes/package-notes.mk
@@ -21,23 +20,30 @@ endif
 
 TEST_TIMEOUT_MULTIPLIER = "-t 10"
 
-# fail on missing files and symbols changes on distro builds, but not if we
-# build/test upstream master
-ifeq ($(TEST_UPSTREAM),)
-    DH_MISSING = --fail-missing
+# Fail on missing files and symbol changes on distro builds, but not if we
+# build/test upstream master. Also, don't put the debian revision in the version
+# tag when we build/test upstream as it doesn't have any meaning in that case
+# and it allows using the current date as the debian revision without causing
+# unnecessary rebuilds all the time.
+ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+    DH_MISSING ?= --fail-missing
     GENSYMBOLS_LEVEL = 4
+    VERSION_TAG = $(DEB_VERSION)
 else
-    DH_MISSING = --list-missing
+    DH_MISSING ?= --list-missing
     GENSYMBOLS_LEVEL = 1
+    VERSION_TAG = $(DEB_VERSION_UPSTREAM)
 endif
 
+# Make sure that DEB_BUILD_OPTIONS can be used by users to override any options
+# we set here (By default DEB_BUILD_MAINT_OPTIONS overrides DEB_BUILD_OPTIONS).
+export DEB_BUILD_MAINT_OPTIONS = optimize=+lto hardening=+pie $(DEB_BUILD_OPTIONS)
+
 CONFFLAGS = \
-	-Db_lto=true \
-	-Db_pie=true \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
 	-Duser-path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-	-Dversion-tag="$(DEB_VERSION)" \
+	-Dversion-tag="$(VERSION_TAG)" \
 	-Dquotaon-path=/usr/sbin/quotaon \
 	-Dquotacheck-path=/usr/sbin/quotacheck \
 	-Dkmod-path=/usr/bin/kmod \
@@ -48,7 +54,6 @@ CONFFLAGS = \
 	-Dloadkeys-path=/usr/bin/loadkeys \
 	-Dsetfont-path=/usr/bin/setfont \
 	-Dnologin-path=/usr/sbin/nologin \
-	-Dtelinit-path=/usr/sbin/telinit \
 	-Dsysvinit-path=/etc/init.d \
 	-Dsysvrcnd-path=/etc \
 	-Dlocalegen-path=/usr/sbin/locale-gen \
@@ -100,6 +105,12 @@ CONFFLAGS = \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
 	-Dstandalone-binaries=true
+
+ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
+CONFFLAGS += -Dtests=false
+else
+CONFFLAGS += -Dtests=true
+endif
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += \
@@ -168,7 +179,7 @@ execute_after_dh_auto_build:
 	ninja -C obj-$(DEB_HOST_GNU_TYPE) systemd-pot
 
 execute_before_dh_auto_clean:
-ifneq (, $(TEST_UPSTREAM))
+ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 	debian/extra/checkout-upstream
 endif
 
@@ -252,7 +263,7 @@ override_dh_installsystemduser:
 execute_after_dh_installsysusers:
 	dh_installsysusers -pudev --name=debian-udev
 
-PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
+PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION / {print $$3}' obj-$(DEB_HOST_GNU_TYPE)/config.h | tr -d \")
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends

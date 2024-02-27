@@ -1,10 +1,12 @@
 #!/bin/sh
 set -e
 
-if [ -z "$TEST_UPSTREAM" ]; then
-    echo "keymapping not supported for now, SKIP test"
-    exit 77
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*) ;;
+    *)
+        echo "keymapping not supported for now, SKIP test"
+        exit 77
+esac
 
 . `dirname $0`/assert.sh
 
@@ -33,25 +35,29 @@ assert_in "X11 Layout:" "`localectl --no-pager`"
 assert_eq "`localectl --no-pager set-x11-keymap et pc101 2>&1`" ""
 sync
 
-if [ -n "$TEST_UPSTREAM" ]; then
-    # Upstream writes xorg.conf.d file
-    assert_in 'Option "XkbLayout" "et' "`cat /etc/X11/xorg.conf.d/00-keyboard.conf`"
-    assert_in 'Option "XkbModel" "pc101"' "`cat /etc/X11/xorg.conf.d/00-keyboard.conf`"
-else
-    # Debian console-setup config file
-    assert_in 'XKBLAYOUT="\?et"\?' "`cat /etc/default/keyboard`"
-    assert_in 'XKBMODEL="\?pc101"\?' "`cat /etc/default/keyboard`"
-
-    ! [ -f /etc/X11/xorg.conf.d/00-keyboard.conf ]
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*)
+        # Upstream writes xorg.conf.d file
+        assert_in 'Option "XkbLayout" "et' "`cat /etc/X11/xorg.conf.d/00-keyboard.conf`"
+        assert_in 'Option "XkbModel" "pc101"' "`cat /etc/X11/xorg.conf.d/00-keyboard.conf`"
+        ;;
+    *)
+        # Debian console-setup config file
+        assert_in 'XKBLAYOUT="\?et"\?' "`cat /etc/default/keyboard`"
+        assert_in 'XKBMODEL="\?pc101"\?' "`cat /etc/default/keyboard`"
+        ! [ -f /etc/X11/xorg.conf.d/00-keyboard.conf ]
+        ;;
+esac
 
 STATUS=`localectl --no-pager`
 assert_in "X11 Layout: et" "$STATUS"
 assert_in "X11 Model: pc101" "$STATUS"
 
-# gets along without config file
-if [ -z "$TEST_UPSTREAM" ]; then
-    rm /etc/default/keyboard
-    systemctl stop systemd-localed
-    assert_in "X11 Layout: (unset)" "`localectl --no-pager`"
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*) ;;
+    *)
+        rm /etc/default/keyboard
+        systemctl stop systemd-localed
+        assert_in "X11 Layout: (unset)" "`localectl --no-pager`"
+        ;;
+esac

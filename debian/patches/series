@@ -19,12 +19,6 @@ test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch
 test-deny-list-TEST-08-INITRD.patch
-debian/test-deny-list-TEST-13-NSPAWN.patch
-test-skip-TEST-08-INITRD-if-systemd-didn-t-run-in-the-ini.patch
-test-install-empty-directories-with-NO_BUILD-1.patch
-test-don-t-check-for-Dinstall-tests-true-with-NO_BUILD-1.patch
-test-tell-delv-to-load-anchors-from-etc-bind.keys-explici.patch
-test-flush-the-socket-once-the-triggered-unit-exits.patch
 lp2046498-test-skip-test_exec_networknamespacepath-if-netns-setup-f.patch
 test-skip-TEST-43-PRIVATEUSER-UNPRIV-if-unprivileged-user.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch

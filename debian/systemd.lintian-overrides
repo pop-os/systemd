@@ -3,6 +3,5 @@ systemd: maintainer-script-calls-systemctl
 systemd: systemd-service-file-missing-install-key
 # Lintian is really bad at associating manpages
 systemd: spare-manual-page
-systemd: package-supports-alternative-init-but-no-init.d-script
 # netlink keyword
 systemd: spelling-error-in-binary iif if [usr/lib/systemd/systemd-networkd]

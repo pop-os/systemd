@@ -118,7 +118,7 @@ Depends: systemd-tests,
   libfido2-dev,
   libdw-dev,
   libqrencode-dev [!i386],
-  tzdata-legacy | tzdata (<< 2023c-8),
+  tzdata-legacy | tzdata (<< 2024a-1),
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: tests-in-lxd
@@ -210,11 +210,19 @@ Depends: systemd-tests,
   locales-all,
   stress,
   curl,
-  tzdata-legacy | tzdata (<< 2023c-8),
+  tzdata-legacy | tzdata (<< 2024a-1),
   python3-pefile,
   nvme-cli,
   mdadm,
   lvm2,
+  btrfs-progs,
+  multipath-tools,
+  kpartx,
+  gnutls-bin,
+  opensc,
+  softhsm2,
+  openssh-client,
+  openssh-server,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke

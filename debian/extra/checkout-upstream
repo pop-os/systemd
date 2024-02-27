@@ -9,10 +9,12 @@
 
 set -eu
 test -x debian/rules
-if [ -z "${TEST_UPSTREAM:-}" ]; then
-    echo "Not in upstream testing mode. Do *not* run this script unless you know what you are doing." >&2
-    exit 1
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*) ;;
+    *)
+        echo "Not in upstream testing mode. Do *not* run this script unless you know what you are doing." >&2
+        exit 1
+esac
 if [ -n "${UPSTREAM_PULL_REQUEST:-}" ]; then
     FETCH="git fetch -fu origin refs/pull/$UPSTREAM_PULL_REQUEST/head:pr"
     CO='git checkout pr'
@@ -81,7 +83,7 @@ mkdir -p debian/tmp
  $CO
  git config user.email "$DUMMY_USER_EMAIL"
  git config user.name "$DUMMY_USER_NAME"
- if  [ -n "${UPSTREAM_PULL_REQUEST:-}" ]; then
+ if  [ -n "${UPSTREAM_PULL_REQUEST:-}" ] && [ "${UPSTREAM_REPO}" != "https://github.com/systemd/systemd-stable.git" ]; then
      git rebase main
  fi
  git submodule update --init --recursive)
@@ -89,6 +91,19 @@ UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//;s/-/./g')
 
 # clean out original upstream sources
 find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xargs -0n1 rm -rf
+
+# These options changes are only needed for the upstream CI, and we don't want to pollute d/rules with them.
+# Also we want to ensure running on an older branch (e.g.: for the systemd-stable repository) doesn't break.
+if grep -q default-timeout-sec debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('default-timeout-sec', type : 'integer', value : 90/option('default-timeout-sec', type : 'integer', value : 180/" debian/tmp/upstream/meson_options.txt
+fi
+if grep -q log-trace debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('log-trace', type : 'boolean', value : false/option('log-trace', type : 'boolean', value : true/" debian/tmp/upstream/meson_options.txt
+fi
+# TODO: drop when Jammy is no longer used
+if grep -q sshdconfdir debian/tmp/upstream/meson_options.txt; then
+    sed -i "s/option('sshdconfdir',/option('sshdconfdir', value : 'no',/" debian/tmp/upstream/meson_options.txt
+fi
 
 # replace with checkout
 mv debian/tmp/upstream/* .

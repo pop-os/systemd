@@ -7,14 +7,21 @@ DPKGARCH=$(dpkg --print-architecture)
 
 # Because this test is used both by upstream and by Debian, we use different deny-list filenames.
 # For more details see https://salsa.debian.org/systemd-team/systemd/merge_requests/52
-if [ -n "$TEST_UPSTREAM" ]; then
-    denylist="deny-list-ubuntu-ci"
-else
-    denylist="deny-list-upstream-ci"
-fi
+case "${DEB_BUILD_PROFILES:-}" in
+    *pkg.systemd.upstream*)
+        denylist="deny-list-ubuntu-ci"
+        if [ "$DPKGARCH" = ppc64el ]; then
+            export TEST_NO_QEMU=1
+        fi
+        ;;
+    *)
+        denylist="deny-list-upstream-ci"
+        ;;
+esac
 
 export DENY_LIST_MARKERS="$denylist-$DPKGARCH $denylist"
-export ARTIFACT_DIRECTORY=$AUTOPKGTEST_ARTIFACTS
+export ARTIFACT_DIRECTORY="$AUTOPKGTEST_ARTIFACTS"
+export TEST_SAVE_JOURNAL=fail
 export TEST_SHOW_JOURNAL=warning
 export TEST_REQUIRE_INSTALL_TESTS=0
 export TEST_PREFER_NSPAWN=1

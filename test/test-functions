@@ -255,6 +255,7 @@ BASICTOOLS=(
     useradd
     userdel
     wc
+    whoami
     xargs
     xzcat
 )
@@ -1118,14 +1119,14 @@ install_fs_tools() {
 install_modules() {
     dinfo "Install modules"
 
-    instmods bridge dummy ipvlan macvlan vfat veth
+    instmods bridge dummy ext4 ipvlan macvlan vfat veth
     instmods loop =block
     instmods nls_ascii =nls
     instmods overlay =overlayfs
     instmods scsi_debug
 
     if get_bool "$LOOKS_LIKE_SUSE"; then
-        instmods ext4 af_packet
+        instmods af_packet
     fi
 }
 
@@ -1151,7 +1152,9 @@ install_multipath() {
     image_install kpartx /lib/udev/kpartx_id lsmod mpathpersist multipath multipathd partx
     image_install "${ROOTLIBDIR:?}"/system/multipathd.{service,socket}
     if get_bool "$LOOKS_LIKE_DEBIAN"; then
-        inst_rules 56-dm-parts.rules 56-dm-mpath.rules 60-multipath.rules 68-del-part-nodes.rules 95-kpartx.rules
+        # Note: try both 60-kpartx.rules (as seen on Debian Sid with 0.9.4-7) and 90-kpartx.rules (as seen on
+        # Ubuntu Jammy with 0.8.8-1ubuntu1.22.04.4)
+        inst_rules 56-dm-parts.rules 56-dm-mpath.rules 60-kpartx.rules 60-multipath.rules 68-del-part-nodes.rules 90-kpartx.rules
     else
         inst_rules 11-dm-mpath.rules 11-dm-parts.rules 62-multipath.rules 66-kpartx.rules 68-del-part-nodes.rules
     fi
@@ -1197,6 +1200,11 @@ install_lvm() {
 
     mkdir -p "${initdir:?}/etc/lvm"
 }
+
+host_has_btrfs() (
+    set -e
+    modprobe -nv btrfs && command -v mkfs.btrfs && command -v btrfs || return $?
+)
 
 install_btrfs() {
     instmods btrfs
@@ -1265,6 +1273,11 @@ install_iscsi() {
     fi
 }
 
+host_has_mdadm() (
+    set -e
+    command -v mdadm || return $?
+)
+
 install_mdadm() {
     local unit
     local mdadm_units=(
@@ -1278,6 +1291,7 @@ install_mdadm() {
         system-shutdown/mdadm.shutdown
     )
 
+    instmods "=md"
     image_install mdadm mdmon
     inst_rules 01-md-raid-creating.rules 63-md-raid-arrays.rules 64-md-raid-assembly.rules 69-md-clustered-confirm-device.rules
     # Fedora/CentOS/RHEL ships this rule file
@@ -1286,6 +1300,10 @@ install_mdadm() {
     for unit in "${mdadm_units[@]}"; do
         image_install "${ROOTLIBDIR:?}/$unit"
     done
+
+    # Disable the mdmonitor service, since it fails if there's no valid email address
+    # configured in /etc/mdadm.conf, which just unnecessarily pollutes the logs
+    "${SYSTEMCTL:?}" mask --root "${initdir:?}" mdmonitor.service || :
 }
 
 install_compiled_systemd() {
@@ -1310,19 +1328,35 @@ install_compiled_systemd() {
     fi
 }
 
+install_package_file() {
+    local file="${1:?}"
+
+    # Skip missing files (like /etc/machine-info)
+    [[ ! -e "$file" ]] && return 0
+    # Skip python unit tests, since the image_install machinery will try to pull
+    # in the whole python stack in a very questionable state, making the tests fail.
+    # And given we're trying to transition to mkosi-based images anyway I'm not even
+    # going to bother
+    [[ "$file" =~ /tests/unit-tests/.*.py$ ]] && return 0
+    # If the current file is a directory, create it with the original
+    # mode; if it's a symlink to a directory, copy it as-is
+    if [[ -d "$file" ]]; then
+        inst_dir "$file"
+    else
+        inst "$file"
+    fi
+}
+
 install_debian_systemd() {
     dinfo "Install debian systemd"
 
-    local files
+    local deb file
 
     while read -r deb; do
-        files="$(dpkg-query -L "$deb" 2>/dev/null)" || continue
         ddebug "Install debian files from package $deb"
-        for file in $files; do
-            [ -e "$file" ] || continue
-            [ ! -L "$file" ] && [ -d "$file" ] && continue
-            inst "$file"
-        done
+        while read -r file; do
+            install_package_file "$file"
+        done < <(dpkg-query -L "$deb" 2>/dev/null)
     done < <(grep -E '^Package:' "${SOURCE_DIR}/debian/control" | cut -d ':' -f 2)
 }
 
@@ -1337,27 +1371,21 @@ install_rpm() {
 
     dinfo "Installing contents of RPM $rpm"
     while read -r file; do
-        # Skip missing files (like /etc/machine-info)
-        [[ ! -e "$file" ]] && continue
-        # Skip directories unless they are a symlink (both -L and -d pass in this case)
-        [[ -d "$file" && ! -L "$file" ]] && continue
-        # Skip python unit tests, since the image_install machinery will try to pull
-        # in the whole python stack in a very questionable state, making the tests fail.
-        # And given we're trying to transition to mkosi-based images anyway I'm not even
-        # going to bother
-        [[ "$file" =~ /tests/unit-tests/.*.py$ ]] && continue
-
-        image_install "$file"
+        install_package_file "$file"
     done < <(rpm -ql "$rpm")
 }
 
 install_suse_systemd() {
     local pkgs
 
+    dinfo "Install basic filesystem structure"
+    install_rpm filesystem
+
     dinfo "Install SUSE systemd"
 
     pkgs=(
         systemd
+        systemd-boot
         systemd-container
         systemd-coredump
         systemd-experimental
@@ -1591,6 +1619,9 @@ create_empty_image() {
     # Partition sizes are in MiBs
     local root_size=768
     local data_size=100
+    local esp_size=128
+    local boot_size=128
+    local total=
     if ! get_bool "$NO_BUILD"; then
         if meson configure "${BUILD_DIR:?}" | grep 'static-lib\|standalone-binaries' | awk '{ print $2 }' | grep -q 'true'; then
             root_size=$((root_size + 200))
@@ -1613,28 +1644,44 @@ create_empty_image() {
         data_size=$((data_size + IMAGE_ADDITIONAL_DATA_SIZE))
     fi
 
-    echo "Setting up ${IMAGE_PUBLIC:?} (${root_size} MB)"
+    total=$((root_size + data_size + esp_size + boot_size))
+
+    echo "Setting up ${IMAGE_PUBLIC:?} (${total} MB)"
     rm -f "${IMAGE_PRIVATE:?}" "$IMAGE_PUBLIC"
 
     # Create the blank file to use as a root filesystem
-    truncate -s "${root_size}M" "$IMAGE_PUBLIC"
+    truncate -s "${total}M" "$IMAGE_PUBLIC"
 
     LOOPDEV="$(losetup --show -P -f "$IMAGE_PUBLIC")"
     [[ -b "$LOOPDEV" ]] || return 1
     # Create two partitions - a root one and a data one (utilized by some tests)
     sfdisk "$LOOPDEV" <<EOF
 label: gpt
-type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=root size=$((root_size - data_size))M bootable
+type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp  size=${esp_size}M
+type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=root size=${root_size}M bootable
+type=BC13C2FF-59E6-4262-A352-B275FD6F7172 name=boot size=${boot_size}M
 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=data
 EOF
 
     udevadm settle
 
+    if ! mkfs -t vfat "${LOOPDEV}p1"; then
+        dfatal "Failed to mkfs -t vfat ${LOOPDEV}p1"
+        exit 1
+    fi
+
     local label=(-L systemd_boot)
     # mkfs.reiserfs doesn't know -L. so, use --label instead
     [[ "$FSTYPE" == "reiserfs" ]] && label=(--label systemd_boot)
-    if ! mkfs -t "${FSTYPE}" "${label[@]}" "${LOOPDEV}p1" -q; then
-        dfatal "Failed to mkfs -t ${FSTYPE}"
+    if ! mkfs -t "${FSTYPE}" "${label[@]}" "${LOOPDEV}p2" -q; then
+        dfatal "Failed to mkfs -t ${FSTYPE} ${label[*]} ${LOOPDEV}p2 -q"
+        exit 1
+    fi
+
+    local label=(-L xbootldr)
+    [[ "$FSTYPE" == "reiserfs" ]] && label=(--label xbootldr)
+    if ! mkfs -t "${FSTYPE}" "${label[@]}" "${LOOPDEV}p3" -q; then
+        dfatal "Failed to mkfs -t ${FSTYPE} ${label[*]} ${LOOPDEV}p3 -q"
         exit 1
     fi
 }
@@ -1650,7 +1697,7 @@ mount_initdir() {
 
     if ! mountpoint -q "${initdir:?}"; then
         mkdir -p "$initdir"
-        mount "${LOOPDEV}p1" "$initdir"
+        mount "${LOOPDEV}p2" "$initdir"
         TEST_SETUP_CLEANUP_ROOTDIR=1
     fi
 }
@@ -1799,7 +1846,7 @@ save_journal() {
 
     # Show messages from the testsuite-XX.service or messages with priority "warning" and higher
     echo " --- $source_dir ---"
-    "$JOURNALCTL" --no-pager --no-hostname -o short-monotonic -D "$source_dir" \
+    "$JOURNALCTL" --all --no-pager --no-hostname -o short-monotonic -D "$source_dir" \
         _SYSTEMD_UNIT="testsuite-${TESTID:?}.service" + PRIORITY=4 + PRIORITY=3 + PRIORITY=2 + PRIORITY=1 + PRIORITY=0
 
     if get_bool "$save"; then
@@ -2153,14 +2200,14 @@ install_dbus() {
     # Newer Fedora versions use dbus-broker by default. Let's install it if it's available.
     if [ -f "$ROOTLIBDIR/system/dbus-broker.service" ]; then
         inst "$ROOTLIBDIR/system/dbus-broker.service"
-        inst_symlink /etc/systemd/system/dbus.service
         inst /usr/bin/dbus-broker
         inst /usr/bin/dbus-broker-launch
+        image_install -o {/etc,/usr/lib}/systemd/system/dbus.service
     elif [ -f "$ROOTLIBDIR/system/dbus-daemon.service" ]; then
         # Fedora rawhide replaced dbus.service with dbus-daemon.service
         inst "$ROOTLIBDIR/system/dbus-daemon.service"
         # Alias symlink
-        inst_symlink /etc/systemd/system/dbus.service
+        image_install -o {/etc,/usr/lib}/systemd/system/dbus.service
     else
         inst "$ROOTLIBDIR/system/dbus.service"
     fi
@@ -2219,12 +2266,12 @@ EOF
     # Newer Fedora versions use dbus-broker by default. Let's install it if it's available.
     if [ -f "$userunitdir/dbus-broker.service" ]; then
         inst "$userunitdir/dbus-broker.service"
-        inst_symlink /etc/systemd/user/dbus.service
+        image_install -o {/etc,/usr/lib}/systemd/user/dbus.service
     elif [ -f "${ROOTLIBDIR:?}/system/dbus-daemon.service" ]; then
         # Fedora rawhide replaced dbus.service with dbus-daemon.service
         inst "$userunitdir/dbus-daemon.service"
         # Alias symlink
-        inst_symlink /etc/systemd/user/dbus.service
+        image_install -o {/etc,/usr/lib}/systemd/user/dbus.service
     else
         inst "$userunitdir/dbus.service"
     fi
@@ -3303,9 +3350,10 @@ test_create_image() {
 }
 
 test_setup() {
-    if get_bool "${TEST_REQUIRE_INSTALL_TESTS:?}" && \
-            command -v meson >/dev/null && \
-            [[ "$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')" != "true" ]]; then
+    if ! get_bool "$NO_BUILD" && \
+         get_bool "${TEST_REQUIRE_INSTALL_TESTS:?}" && \
+         command -v meson >/dev/null && \
+         [[ "$(meson configure "${BUILD_DIR:?}" | grep install-tests | awk '{ print $2 }')" != "true" ]]; then
         dfatal "$BUILD_DIR needs to be built with -Dinstall-tests=true"
         exit 1
     fi

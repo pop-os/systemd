@@ -2325,24 +2325,31 @@ static int context_load_partition_table(Context *context) {
                 uint32_t ssz;
                 struct stat st;
 
-                r = context_open_and_lock_backing_fd(context->node, arg_dry_run ? LOCK_SH : LOCK_EX,
-                                                     &context->backing_fd);
+                r = context_open_and_lock_backing_fd(
+                                context->node,
+                                arg_dry_run ? LOCK_SH : LOCK_EX,
+                                &context->backing_fd);
                 if (r < 0)
                         return r;
 
                 if (fstat(context->backing_fd, &st) < 0)
                         return log_error_errno(errno, "Failed to stat %s: %m", context->node);
 
-                /* Auto-detect sector size if not specified. */
-                r = probe_sector_size_prefer_ioctl(context->backing_fd, &ssz);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to probe sector size of '%s': %m", context->node);
+                if (IN_SET(arg_empty, EMPTY_REQUIRE, EMPTY_FORCE, EMPTY_CREATE) && S_ISREG(st.st_mode))
+                        /* Don't probe sector size from partition table if we are supposed to strat from an empty disk */
+                        fs_secsz = ssz = 512;
+                else {
+                        /* Auto-detect sector size if not specified. */
+                        r = probe_sector_size_prefer_ioctl(context->backing_fd, &ssz);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to probe sector size of '%s': %m", context->node);
 
-                /* If we found the sector size and we're operating on a block device, use it as the file
-                 * system sector size as well, as we know its the sector size of the actual block device and
-                 * not just the offset at which we found the GPT header. */
-                if (r > 0 && S_ISBLK(st.st_mode))
-                        fs_secsz = ssz;
+                        /* If we found the sector size and we're operating on a block device, use it as the file
+                         * system sector size as well, as we know its the sector size of the actual block device and
+                         * not just the offset at which we found the GPT header. */
+                        if (r > 0 && S_ISBLK(st.st_mode))
+                                fs_secsz = ssz;
+                }
 
                 r = fdisk_save_user_sector_size(c, /* phy= */ 0, ssz);
         }
@@ -2908,12 +2915,13 @@ static int context_dump_partitions(Context *context) {
         return table_print_with_pager(t, arg_json_format_flags, arg_pager_flags, arg_legend);
 }
 
-static void context_bar_char_process_partition(
+static int context_bar_char_process_partition(
                 Context *context,
                 Partition *bar[],
                 size_t n,
                 Partition *p,
-                size_t *ret_start) {
+                size_t **start_array,
+                size_t *n_start_array) {
 
         uint64_t from, to, total;
         size_t x, y;
@@ -2922,9 +2930,11 @@ static void context_bar_char_process_partition(
         assert(bar);
         assert(n > 0);
         assert(p);
+        assert(start_array);
+        assert(n_start_array);
 
         if (p->dropped)
-                return;
+                return 0;
 
         assert(p->offset != UINT64_MAX);
         assert(p->new_size != UINT64_MAX);
@@ -2947,7 +2957,10 @@ static void context_bar_char_process_partition(
         for (size_t i = x; i < y; i++)
                 bar[i] = p;
 
-        *ret_start = x;
+        if (!GREEDY_REALLOC_APPEND(*start_array, *n_start_array, &x, 1))
+                return log_oom();
+
+        return 1;
 }
 
 static int partition_hint(const Partition *p, const char *node, char **ret) {
@@ -2991,9 +3004,11 @@ done:
 static int context_dump_partition_bar(Context *context) {
         _cleanup_free_ Partition **bar = NULL;
         _cleanup_free_ size_t *start_array = NULL;
+        size_t n_start_array = 0;
         Partition *last = NULL;
         bool z = false;
         size_t c, j = 0;
+        int r;
 
         assert_se((c = columns()) >= 2);
         c -= 2; /* We do not use the leftmost and rightmost character cell */
@@ -3002,12 +3017,11 @@ static int context_dump_partition_bar(Context *context) {
         if (!bar)
                 return log_oom();
 
-        start_array = new(size_t, context->n_partitions);
-        if (!start_array)
-                return log_oom();
-
-        LIST_FOREACH(partitions, p, context->partitions)
-                context_bar_char_process_partition(context, bar, c, p, start_array + j++);
+        LIST_FOREACH(partitions, p, context->partitions) {
+                r = context_bar_char_process_partition(context, bar, c, p, &start_array, &n_start_array);
+                if (r < 0)
+                        return r;
+        }
 
         putc(' ', stdout);
 
@@ -3029,7 +3043,7 @@ static int context_dump_partition_bar(Context *context) {
         fputs(ansi_normal(), stdout);
         putc('\n', stdout);
 
-        for (size_t i = 0; i < context->n_partitions; i++) {
+        for (size_t i = 0; i < n_start_array; i++) {
                 _cleanup_free_ char **line = NULL;
 
                 line = new0(char*, c);
@@ -3039,9 +3053,13 @@ static int context_dump_partition_bar(Context *context) {
                 j = 0;
                 LIST_FOREACH(partitions, p, context->partitions) {
                         _cleanup_free_ char *d = NULL;
+
+                        if (p->dropped)
+                                continue;
+
                         j++;
 
-                        if (i < context->n_partitions - j) {
+                        if (i < n_start_array - j) {
 
                                 if (line[start_array[j-1]]) {
                                         const char *e;
@@ -3061,7 +3079,7 @@ static int context_dump_partition_bar(Context *context) {
                                                 return log_oom();
                                 }
 
-                        } else if (i == context->n_partitions - j) {
+                        } else if (i == n_start_array - j) {
                                 _cleanup_free_ char *hint = NULL;
 
                                 (void) partition_hint(p, context->node, &hint);

@@ -505,7 +505,7 @@ void link_check_ready(Link *link) {
         if (dhcp_pd_is_uplink(link, link, /* accept_auto = */ false)) {
                 if (link_dhcp4_enabled(link) && link->network->dhcp_use_6rd &&
                     sd_dhcp_lease_has_6rd(link->dhcp_lease)) {
-                        if (!dhcp4_ready)
+                        if (!link->dhcp4_configured)
                                 return (void) log_link_debug(link, "%s(): DHCPv4 6rd prefix is assigned, but DHCPv4 protocol is not finished yet.", __func__);
                         if (!dhcp_pd_ready)
                                 return (void) log_link_debug(link, "%s(): DHCPv4 is finished, but prefix acquired by DHCPv4-6rd is not assigned yet.", __func__);
@@ -513,7 +513,7 @@ void link_check_ready(Link *link) {
 
                 if (link_dhcp6_enabled(link) && link->network->dhcp6_use_pd_prefix &&
                     sd_dhcp6_lease_has_pd_prefix(link->dhcp6_lease)) {
-                        if (!dhcp6_ready)
+                        if (!link->dhcp6_configured)
                                 return (void) log_link_debug(link, "%s(): DHCPv6 IA_PD prefix is assigned, but DHCPv6 protocol is not finished yet.", __func__);
                         if (!dhcp_pd_ready)
                                 return (void) log_link_debug(link, "%s(): DHCPv6 is finished, but prefix acquired by DHCPv6 IA_PD is not assigned yet.", __func__);
@@ -1654,7 +1654,7 @@ static int link_carrier_lost(Link *link) {
                 usec = 5 * USEC_PER_SEC;
 
         else
-                /* Otherwise, use the currently set value. */
+                /* Otherwise, use the implied default value. */
                 usec = link->network->ignore_carrier_loss_usec;
 
         if (usec == USEC_INFINITY)
@@ -1989,20 +1989,18 @@ static int link_update_master(Link *link, sd_netlink_message *message) {
         if (master_ifindex == link->ifindex)
                 master_ifindex = 0;
 
-        if (master_ifindex == link->master_ifindex)
-                return 0;
+        if (master_ifindex != link->master_ifindex) {
+                if (link->master_ifindex == 0)
+                        log_link_debug(link, "Attached to master interface: %i", master_ifindex);
+                else if (master_ifindex == 0)
+                        log_link_debug(link, "Detached from master interface: %i", link->master_ifindex);
+                else
+                        log_link_debug(link, "Master interface changed: %i %s %i", link->master_ifindex,
+                                       special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), master_ifindex);
 
-        if (link->master_ifindex == 0)
-                log_link_debug(link, "Attached to master interface: %i", master_ifindex);
-        else if (master_ifindex == 0)
-                log_link_debug(link, "Detached from master interface: %i", link->master_ifindex);
-        else
-                log_link_debug(link, "Master interface changed: %i %s %i", link->master_ifindex,
-                               special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), master_ifindex);
-
-        link_drop_from_master(link);
-
-        link->master_ifindex = master_ifindex;
+                link_drop_from_master(link);
+                link->master_ifindex = master_ifindex;
+        }
 
         r = link_append_to_master(link);
         if (r < 0)

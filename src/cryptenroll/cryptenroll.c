@@ -488,7 +488,7 @@ static int parse_argv(int argc, char *argv[]) {
                                         if (n > INT_MAX)
                                                 return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Slot index out of range: %u", n);
 
-                                        a = reallocarray(arg_wipe_slots, sizeof(int), arg_n_wipe_slots + 1);
+                                        a = reallocarray(arg_wipe_slots, arg_n_wipe_slots + 1, sizeof(int));
                                         if (!a)
                                                 return log_oom();
 
@@ -601,7 +601,7 @@ static int load_volume_key_keyfile(
         r = read_full_file_full(
                         AT_FDCWD,
                         arg_unlock_keyfile,
-                        0,
+                        UINT64_MAX,
                         SIZE_MAX,
                         READ_FULL_FILE_SECURE|READ_FULL_FILE_WARN_WORLD_READABLE|READ_FULL_FILE_CONNECT_SOCKET,
                         NULL,

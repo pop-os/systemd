@@ -182,7 +182,7 @@ class CryptsetupTest(FakeDriveTestBase):
 
         # should not be mounted
         with open('/proc/mounts') as f:
-            self.assertNotIn(self.plaintext_name, f.read())
+            self.assertNotRegex(f.read(), "(?<!/run/credentials/systemd-cryptsetup@)%s" % (self.plaintext_name))
 
         # device should not have anything on it
         p = subprocess.Popen(['blkid', self.plaintext_dev], stdout=subprocess.PIPE)
@@ -202,7 +202,7 @@ class CryptsetupTest(FakeDriveTestBase):
 
         # should not be mounted
         with open('/proc/mounts') as f:
-            self.assertNotIn(self.plaintext_name, f.read())
+            self.assertNotRegex(f.read(), "(?<!/run/credentials/systemd-cryptsetup@)%s" % (self.plaintext_name))
 
         # device should not have anything on it
         p = subprocess.Popen(['blkid', self.plaintext_dev], stdout=subprocess.PIPE)
@@ -220,7 +220,7 @@ class CryptsetupTest(FakeDriveTestBase):
 
         # should not be mounted
         with open('/proc/mounts') as f:
-            self.assertNotIn(self.plaintext_name, f.read())
+            self.assertNotRegex(f.read(), "(?<!/run/credentials/systemd-cryptsetup@)%s" % (self.plaintext_name))
 
         # device should be formatted with swap
         out = subprocess.check_output(['blkid', '-ovalue', '-sTYPE', self.plaintext_dev])
@@ -236,7 +236,7 @@ class CryptsetupTest(FakeDriveTestBase):
 
         # should not be mounted
         with open('/proc/mounts') as f:
-            self.assertNotIn(self.plaintext_name, f.read())
+            self.assertNotRegex(f.read(), "(?<!/run/credentials/systemd-cryptsetup@)%s" % (self.plaintext_name))
 
         # device should be formatted with ext2 or (with newer systemd) ext4
         out = subprocess.check_output(['blkid', '-ovalue', '-sTYPE', self.plaintext_dev])

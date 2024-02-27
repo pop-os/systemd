@@ -300,7 +300,7 @@ meson_build_sh = find_program('tools/meson-build.sh')
 want_tests = get_option('tests')
 slow_tests = want_tests != 'false' and get_option('slow-tests')
 fuzz_tests = want_tests != 'false' and get_option('fuzz-tests')
-install_tests = get_option('install-tests')
+install_tests = want_tests != 'false' and get_option('install-tests')
 
 if add_languages('cpp', native : false, required : fuzzer_build)
         #  Used only for tests
@@ -328,6 +328,7 @@ endif
 basic_disabled_warnings = [
         '-Wno-missing-field-initializers',
         '-Wno-unused-parameter',
+        '-Wno-nonnull-compare',
 ]
 
 possible_common_cc_flags = [
@@ -1804,7 +1805,9 @@ if have and efi_arch == 'x64' and cc.links('''
         efi_cpu_family_alt = 'x86'
 endif
 
-want_ukify = get_option('ukify').require(python_39, error_message : 'Python >= 3.9 required').allowed()
+pefile = pymod.find_installation('python3', required: false, modules : ['pefile'])
+
+want_ukify = get_option('ukify').require(python_39 and (want_tests != 'true' or pefile.found()), error_message : 'Python >= 3.9 and pefile required').allowed()
 conf.set10('ENABLE_UKIFY', want_ukify)
 
 ############################################################
