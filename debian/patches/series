@@ -19,7 +19,6 @@ test-drop-etc-default-locale-handling-from-TEST-74-AUX-UT.patch
 meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch
 test-deny-list-TEST-08-INITRD.patch
-test-skip-TEST-43-PRIVATEUSER-UNPRIV-if-unprivileged-user.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
