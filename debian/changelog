@@ -1,3 +1,80 @@
+systemd (255.4-1) sid; urgency=medium
+
+  [ Luca Boccassi ]
+  * Drop override for deprecated package-supports-alternative-init-but-no-
+    init.d-script warning
+  * Build-depend on pkgconf pkg-config is deprecated
+  * Move kernel-install initrd script to slightly later prefix
+    afea8e1a35e15382977d459241e8c56c180c862d moved it from 85 to 50, but
+    this conflicts with the upstream mkosi job, which also runs at 50 and
+    needs to run first. Move it back up slightly to 55 to fix the mkosi
+    builds, eg: https://github.com/systemd/systemd-
+    stable/actions/runs/7863691120/job/21454589626?pr=366
+  * Mark python3-pefile build dependency as native. As suggested in
+    #1063393
+  * Skip python3-pefile build dependency only if both nocheck and
+    noinsttests are set (Closes: #1063393)
+  * Build with -Dtests=false if nocheck and noinsttest profiles are set.
+    The required build dependencies will not be installed, so the tests
+    won't build.
+  * systemd-binfmt: use restart instead of try-restart on upgrade. It's
+    not a long-running service so it doesn't matter, and it fixes
+    installing a new binfmt provider (Closes: #1061960)
+  * d/e/checkout-upstream: do not rebase when building on systemd-stable
+    repo. We do rebase only pulls in the stable repo, and it's too much
+    hassle to figure out the right parent branch, given the webhook is
+    configured per repository rather than per branch, so just skip it
+  * d/e/checkout-upstream: build with default-timeout-sec=180. Helps with
+    slow daemon-reload on some CI runs. As requested by:
+    https://github.com/systemd/systemd/pull/27182
+  * d/e/checkout-upstream: enable log-trace by default. Its abscence
+    appears to cause TEST-10-ISSUE-2467 to reliably fail. Enable it while
+    we figure it out. Also probably it is helpful to have it always turned
+    on for the CI, to get more info out of test runs. See:
+    https://github.com/systemd/systemd/issues/19154
+  * d/e/checkout-upstream: do not install userdbd sshd config drop-in.
+    Breaks booting testbed in Jammy. Can be dropped after rebasing to
+    Noble.
+  * d/t/upstream: add dependencies on openssh, gnutls-bin, opensc and
+    softhsm2. Required for https://github.com/systemd/systemd/pull/28658
+    and https://github.com/systemd/systemd/pull/30777
+  * d/t/upstream: fix shellcheck warning. SC2086 (info): Double quote to
+    prevent globbing and word splitting.
+  * Add dependency on libkmod2 on udev, and suggestion on systemd dlopen()
+    dependency since https://github.com/systemd/systemd/pull/31131 but the
+    system can't boot without it, so add it as a dependency on udev which
+    is also needed outside of containers
+  * Update tzdata build dependency constraint to 2024a-1
+  * Drop libarchive-dev build dependency. Not useful for now, we'll re-add
+    it after the next release
+  * New upstream version 255.4
+  * Drop patches merged upstream
+
+  [ Daan De Meyer ]
+  * Fix libtss2-mu dependency. This package recently changed name so let's
+    update the Suggests to account for that.
+  * Add Suggests for libtss2-tcti-device systemd wants to use this library
+    when tpm2 support is enabled so let's make sure we list it in
+    Suggests. (https://github.com/systemd/systemd/blob/db11bab38ccf1ed257f
+    310d29070843d4c58ea01/meson.build#L1341)
+  * Make sure awk only matches PROJECT|PACKAGE_VERSION
+  * Use DEB_BUILD_MAINT_OPTIONS instead of meson options.
+  * Don't put debian revision in version tag when building for upstream.
+  * Allow users to configure DH_MISSING.
+
+  [ Frantisek Sumsal ]
+  * d/t/storage: ignore credential mounts when checking /proc/mounts.
+
+  [ Daniel P. Berrangé ]
+  * debian/rules: don't override default telinit-path. The 'telinit-path'
+    meson option is to be used to point to a non-systemd telinit binary
+    path. When systemctl is invoked as 'telinit', it will exec this binary
+    when it detects the current environment is not running under systemd.
+    If 'telinit-path' points back to 'systemctl', that would result in an
+    infinite re-execve() loop. (Closes: #1063147)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 27 Feb 2024 17:43:55 +0000
+
 systemd (255.3-2) sid; urgency=medium
 
   * Backport patches to fix reproducibility issues
