@@ -1,3 +1,13 @@
+systemd (255.4-1ubuntu2) UNRELEASED; urgency=medium
+
+  * debian/patches: modify tmpfiles.d/tmp.conf default for Ubuntu (LP: #2019026)
+    In addition to cleaning /tmp at boot as is done in Debian, add a 30d
+    cleanup age for files in /tmp.
+    File: debian/patches/debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1b9bc51bb1b58a6f625f67f1632296940d78e82c
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 29 Feb 2024 12:02:42 -0500
+
 systemd (255.4-1ubuntu1) noble; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
