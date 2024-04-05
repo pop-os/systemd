@@ -1,0 +1,23 @@
+From 9a4341b680248a253d1a6f7ae3b15a7b0f6fad0b Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 18 Apr 2021 02:04:20 +0900
+Subject: network: dhcp4: also apply RouteMetric= setting in [DHCPv4] to
+ prefix route
+
+Origin: upstream, https://github.com/systemd/systemd/commit/415deef9c3e9
+Bug-Ubuntu: https://launchpad.net/bugs/2055397
+Bug: https://github.com/systemd/systemd/issues/928
+---
+ src/network/networkd-dhcp4.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+--- a/src/network/networkd-dhcp4.c
++++ b/src/network/networkd-dhcp4.c
+@@ -853,6 +853,7 @@ static int dhcp4_update_address(Link *li
+         addr->prefixlen = prefixlen;
+         addr->broadcast.s_addr = address->s_addr | ~netmask->s_addr;
+         addr->prefix_route = link_prefixroute(link);
++        addr->route_metric = link->network->dhcp_route_metric;
+ 
+         /* allow reusing an existing address and simply update its lifetime
+          * in case it already exists */

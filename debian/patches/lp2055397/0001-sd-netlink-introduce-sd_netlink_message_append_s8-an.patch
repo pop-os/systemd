@@ -1,0 +1,117 @@
+From 502abd8b6bd5fba898d9e1abae286b58b90429f7 Mon Sep 17 00:00:00 2001
+From: Susant Sahani <ssahani@vmware.com>
+Date: Mon, 2 Mar 2020 15:51:16 +0900
+Subject: sd-netlink: introduce sd_netlink_message_append_s8() and friends
+
+Origin: upstream, https://github.com/systemd/systemd/commit/aa550d2a51b0
+Bug-Ubuntu: https://launchpad.net/bugs/2055397
+Bug: https://github.com/systemd/systemd/issues/928
+---
+ src/libsystemd/sd-netlink/netlink-message.c | 68 +++++++++++++++++++++
+ src/libsystemd/sd-netlink/netlink-types.h   |  4 ++
+ src/systemd/sd-netlink.h                    |  4 ++
+ 3 files changed, 76 insertions(+)
+
+--- a/src/libsystemd/sd-netlink/netlink-message.c
++++ b/src/libsystemd/sd-netlink/netlink-message.c
+@@ -343,6 +343,74 @@ int sd_netlink_message_append_u64(sd_net
+         return 0;
+ }
+ 
++int sd_netlink_message_append_s8(sd_netlink_message *m, unsigned short type, int8_t data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_S8);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, &data, sizeof(int8_t));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
++int sd_netlink_message_append_s16(sd_netlink_message *m, unsigned short type, int16_t data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_S16);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, &data, sizeof(int16_t));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
++int sd_netlink_message_append_s32(sd_netlink_message *m, unsigned short type, int32_t data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_S32);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, &data, sizeof(int32_t));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
++int sd_netlink_message_append_s64(sd_netlink_message *m, unsigned short type, int64_t data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_S64);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, &data, sizeof(int64_t));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
+ int sd_netlink_message_append_data(sd_netlink_message *m, unsigned short type, const void *data, size_t len) {
+         int r;
+ 
+--- a/src/libsystemd/sd-netlink/netlink-types.h
++++ b/src/libsystemd/sd-netlink/netlink-types.h
+@@ -9,6 +9,10 @@ enum {
+         NETLINK_TYPE_U16,                       /* NLA_U16 */
+         NETLINK_TYPE_U32,                       /* NLA_U32 */
+         NETLINK_TYPE_U64,                       /* NLA_U64 */
++        NETLINK_TYPE_S8,                        /* NLA_S8 */
++        NETLINK_TYPE_S16,                       /* NLA_S16 */
++        NETLINK_TYPE_S32,                       /* NLA_S32 */
++        NETLINK_TYPE_S64,                       /* NLA_S64 */
+         NETLINK_TYPE_STRING,                    /* NLA_STRING */
+         NETLINK_TYPE_FLAG,                      /* NLA_FLAG */
+         NETLINK_TYPE_IN_ADDR,
+--- a/src/systemd/sd-netlink.h
++++ b/src/systemd/sd-netlink.h
+@@ -86,6 +86,10 @@ int sd_netlink_message_append_u8(sd_netl
+ int sd_netlink_message_append_u16(sd_netlink_message *m, unsigned short type, uint16_t data);
+ int sd_netlink_message_append_u32(sd_netlink_message *m, unsigned short type, uint32_t data);
+ int sd_netlink_message_append_u64(sd_netlink_message *m, unsigned short type, uint64_t data);
++int sd_netlink_message_append_s8(sd_netlink_message *m, unsigned short type, int8_t data);
++int sd_netlink_message_append_s16(sd_netlink_message *m, unsigned short type, int16_t data);
++int sd_netlink_message_append_s32(sd_netlink_message *m, unsigned short type, int32_t data);
++int sd_netlink_message_append_s64(sd_netlink_message *m, unsigned short type, int64_t data);
+ int sd_netlink_message_append_data(sd_netlink_message *m, unsigned short type, const void *data, size_t len);
+ int sd_netlink_message_append_in_addr(sd_netlink_message *m, unsigned short type, const struct in_addr *data);
+ int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short type, const struct in6_addr *data);

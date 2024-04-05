@@ -1,0 +1,132 @@
+From 280ea37a08943670be9a069ca1ecf7616372db61 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 18 Apr 2021 02:02:29 +0900
+Subject: network: add RouteMetric= setting in [Address] section
+
+Origin: upstream, https://github.com/systemd/systemd/commit/c4ff0629dd45
+Bug-Ubuntu: https://launchpad.net/bugs/2055397
+Bug: https://github.com/systemd/systemd/issues/928
+---
+ man/systemd.network.xml                       |  9 ++++
+ src/network/networkd-address.c                | 46 +++++++++++++++++++
+ src/network/networkd-address.h                |  2 +
+ src/network/networkd-network-gperf.gperf      |  1 +
+ .../fuzz-network-parser/directives.network    |  1 +
+ 5 files changed, 59 insertions(+)
+
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
+@@ -956,6 +956,15 @@
+           </listitem>
+         </varlistentry>
+         <varlistentry>
++          <term><varname>RouteMetric=</varname></term>
++          <listitem>
++            <para>The metric of the prefix route, which is pointing to the subnet of the configured IP
++            address, taking the configured prefix length into account. Takes an unsigned integer in the
++            range 0…4294967295. When unset or set to 0, the kernel's default value is used. This
++            setting will be ignored when <varname>AddPrefixRoute=</varname> is false.</para>
++          </listitem>
++        </varlistentry>
++        <varlistentry>
+           <term><varname>HomeAddress=</varname></term>
+           <listitem>
+             <para>Takes a boolean. Designates this address the "home address" as defined in
+--- a/src/network/networkd-address.c
++++ b/src/network/networkd-address.c
+@@ -645,6 +645,10 @@ int address_configure(
+         if (r < 0)
+                 log_link_warning_errno(link, r, "Could not enable IP masquerading, ignoring: %m");
+ 
++        r = sd_netlink_message_append_u32(req, IFA_RT_PRIORITY, address->route_metric);
++        if (r < 0)
++                return log_link_error_errno(link, r, "Could not append IFA_RT_PRIORITY attribute: %m");
++
+         r = netlink_call_async(link->manager->rtnl, NULL, req, callback, link_netlink_destroy_callback, link);
+         if (r < 0) {
+                 address_release(address);
+@@ -1058,6 +1062,48 @@ int config_parse_address_scope(const cha
+         return 0;
+ }
+ 
++int config_parse_address_route_metric(
++                const char *unit,
++                const char *filename,
++                unsigned line,
++                const char *section,
++                unsigned section_line,
++                const char *lvalue,
++                int ltype,
++                const char *rvalue,
++                void *data,
++                void *userdata) {
++
++        Network *network = userdata;
++        _cleanup_(address_free_or_set_invalidp) Address *n = NULL;
++        int r;
++
++        assert(filename);
++        assert(section);
++        assert(lvalue);
++        assert(rvalue);
++        assert(data);
++
++        r = address_new_static(network, filename, section_line, &n);
++        if (r == -ENOMEM)
++                return log_oom();
++        if (r < 0) {
++                log_syntax(unit, LOG_WARNING, filename, line, r,
++                           "Failed to allocate new address, ignoring assignment: %m");
++                return 0;
++        }
++
++        r = safe_atou32(rvalue, &n->route_metric);
++        if (r < 0) {
++                log_syntax(unit, LOG_WARNING, filename, line, r,
++                           "Could not parse %s=, ignoring assignment: %s", lvalue, rvalue);
++                return 0;
++        }
++
++        TAKE_PTR(n);
++        return 0;
++}
++
+ int config_parse_duplicate_address_detection(
+                 const char *unit,
+                 const char *filename,
+--- a/src/network/networkd-address.h
++++ b/src/network/networkd-address.h
+@@ -31,6 +31,7 @@ struct Address {
+         unsigned char prefixlen;
+         unsigned char scope;
+         uint32_t flags;
++        uint32_t route_metric; /* route metric for prefix route */
+         char *label;
+ 
+         struct in_addr broadcast;
+@@ -76,4 +77,5 @@ CONFIG_PARSER_PROTOTYPE(config_parse_lab
+ CONFIG_PARSER_PROTOTYPE(config_parse_lifetime);
+ CONFIG_PARSER_PROTOTYPE(config_parse_address_flags);
+ CONFIG_PARSER_PROTOTYPE(config_parse_address_scope);
++CONFIG_PARSER_PROTOTYPE(config_parse_address_route_metric);
+ CONFIG_PARSER_PROTOTYPE(config_parse_duplicate_address_detection);
+--- a/src/network/networkd-network-gperf.gperf
++++ b/src/network/networkd-network-gperf.gperf
+@@ -113,6 +113,7 @@ Address.AddPrefixRoute,
+ Address.AutoJoin,                            config_parse_address_flags,                               0,                             0
+ Address.DuplicateAddressDetection,           config_parse_duplicate_address_detection,                 0,                             0
+ Address.Scope,                               config_parse_address_scope,                               0,                             0
++Address.RouteMetric,                         config_parse_address_route_metric,                        0,                             0
+ IPv6AddressLabel.Prefix,                     config_parse_address_label_prefix,                        0,                             0
+ IPv6AddressLabel.Label,                      config_parse_address_label,                               0,                             0
+ Neighbor.Address,                            config_parse_neighbor_address,                            0,                             0
+--- a/test/fuzz/fuzz-network-parser/directives.network
++++ b/test/fuzz/fuzz-network-parser/directives.network
+@@ -213,6 +213,7 @@ ManageTemporaryAddress=
+ Broadcast=
+ Peer=
+ Label=
++RouteMetric=
+ [RoutingPolicyRule]
+ Table=
+ IncomingInterface=

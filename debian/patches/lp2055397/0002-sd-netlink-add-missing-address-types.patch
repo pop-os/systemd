@@ -1,0 +1,33 @@
+From 287fdbab9a71697881f907db793599fdea3f6920 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 18 Apr 2021 01:32:19 +0900
+Subject: sd-netlink: add missing address types
+
+Origin: upstream, https://github.com/systemd/systemd/commit/0e7bb99ff919
+Bug-Ubuntu: https://launchpad.net/bugs/2055397
+Bug: https://github.com/systemd/systemd/issues/928
+---
+ src/libsystemd/sd-netlink/netlink-types.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+--- a/src/libsystemd/sd-netlink/netlink-types.c
++++ b/src/libsystemd/sd-netlink/netlink-types.c
+@@ -607,13 +607,13 @@ static const NLType rtnl_address_types[]
+         [IFA_ADDRESS]           = { .type = NETLINK_TYPE_IN_ADDR },
+         [IFA_LOCAL]             = { .type = NETLINK_TYPE_IN_ADDR },
+         [IFA_LABEL]             = { .type = NETLINK_TYPE_STRING, .size = IFNAMSIZ - 1 },
+-        [IFA_BROADCAST]         = { .type = NETLINK_TYPE_IN_ADDR }, /* 6? */
++        [IFA_BROADCAST]         = { .type = NETLINK_TYPE_IN_ADDR },
++        [IFA_ANYCAST]           = { .type = NETLINK_TYPE_IN_ADDR },
+         [IFA_CACHEINFO]         = { .type = NETLINK_TYPE_CACHE_INFO, .size = sizeof(struct ifa_cacheinfo) },
+-/*
+-        [IFA_ANYCAST],
+-        [IFA_MULTICAST],
+-*/
++        [IFA_MULTICAST]         = { .type = NETLINK_TYPE_IN_ADDR },
+         [IFA_FLAGS]             = { .type = NETLINK_TYPE_U32 },
++        [IFA_RT_PRIORITY]       = { .type = NETLINK_TYPE_U32 },
++        [IFA_TARGET_NETNSID]    = { .type = NETLINK_TYPE_S32 },
+ };
+ 
+ static const NLTypeSystem rtnl_address_type_system = {

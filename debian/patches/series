@@ -199,3 +199,7 @@ lp1837227-core-mount-adjust-deserialized-state-based-on-proc-self-m.patch
 lp2024009-dns-query-bump-CNAME_MAX-to-16.patch
 lp1969365-Fall-back-to-kexec-when-no-kexec-binary-exists.patch
 lp2029352-test-ignore-LXC-filesystem-when-checking-for-writable-loc.patch
+lp2055397/0001-sd-netlink-introduce-sd_netlink_message_append_s8-an.patch
+lp2055397/0002-sd-netlink-add-missing-address-types.patch
+lp2055397/0003-network-add-RouteMetric-setting-in-Address-section.patch
+lp2055397/0004-network-dhcp4-also-apply-RouteMetric-setting-in-DHCP.patch
