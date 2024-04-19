@@ -1,3 +1,11 @@
+systemd (255.4-1ubuntu8) noble; urgency=medium
+
+  * copy: ignore -EOPNOTSUPP from copy_file_range() (LP: #2058179)
+    File: debian/patches/lp2058179-copy-ignore-EOPNOTSUPP-from-copy_file_range.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fc81bb680f5d5c8c5995fcf6ed7f55f739dcd6a7
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 19 Apr 2024 10:24:36 -0400
+
 systemd (255.4-1ubuntu7) noble; urgency=medium
 
   * No-change rebuild against libssl3t64
