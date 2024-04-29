@@ -21,7 +21,6 @@ test-deny-list-TEST-08-INITRD.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
-lp2058179-copy-ignore-EOPNOTSUPP-from-copy_file_range.patch
 test-do-not-fail-if-mknod-fails-in-a-build-system.patch
 build-path-fix-SIGEGV-on-RISC-V.patch
 meson-copy-prefix-mapping-CFLAGS-when-building-BPF-object.patch
