@@ -20,6 +20,7 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "fs-util.h"
+#include "gcrypt-util.h"
 #include "id128-util.h"
 #include "journal-authenticate.h"
 #include "journal-def.h"
@@ -46,10 +47,6 @@
 
 #define DEFAULT_COMPRESS_THRESHOLD (512ULL)
 #define MIN_COMPRESS_THRESHOLD (8ULL)
-
-#define U64_KB UINT64_C(1024)
-#define U64_MB (UINT64_C(1024) * U64_KB)
-#define U64_GB (UINT64_C(1024) * U64_MB)
 
 /* This is the minimum journal file size */
 #define JOURNAL_FILE_SIZE_MIN (512 * U64_KB)             /* 512 KiB */
@@ -285,6 +282,8 @@ JournalFile* journal_file_close(JournalFile *f) {
 
         assert(f->newest_boot_id_prioq_idx == PRIOQ_IDX_NULL);
 
+        sd_event_source_disable_unref(f->post_change_timer);
+
         if (f->cache_fd)
                 mmap_cache_fd_free(f->cache_fd);
 
@@ -309,7 +308,7 @@ JournalFile* journal_file_close(JournalFile *f) {
         free(f->fsprg_seed);
 
         if (f->hmac)
-                gcry_md_close(f->hmac);
+                sym_gcry_md_close(f->hmac);
 #endif
 
         return mfree(f);
@@ -639,7 +638,7 @@ static int journal_file_verify_header(JournalFile *f) {
                                 return -ENODATA;
                         if (!VALID_REALTIME(le64toh(f->header->tail_entry_realtime)))
                                 return -ENODATA;
-                        if (!VALID_MONOTONIC(le64toh(f->header->tail_entry_realtime)))
+                        if (!VALID_MONOTONIC(le64toh(f->header->tail_entry_monotonic)))
                                 return -ENODATA;
                 } else {
                         /* Otherwise, the fields must be zero. */
@@ -650,7 +649,7 @@ static int journal_file_verify_header(JournalFile *f) {
                                 return -ENODATA;
                         if (f->header->tail_entry_realtime != 0)
                                 return -ENODATA;
-                        if (f->header->tail_entry_realtime != 0)
+                        if (f->header->tail_entry_monotonic != 0)
                                 return -ENODATA;
                 }
         }
@@ -736,8 +735,9 @@ int journal_file_fstat(JournalFile *f) {
                 return r;
 
         /* Refuse appending to files that are already deleted */
-        if (f->last_stat.st_nlink <= 0)
-                return -EIDRM;
+        r = stat_verify_linked(&f->last_stat);
+        if (r < 0)
+                return r;
 
         return 0;
 }
@@ -2248,7 +2248,6 @@ static int journal_file_link_entry(
         f->header->tail_entry_monotonic = o->entry.monotonic;
         if (JOURNAL_HEADER_CONTAINS(f->header, tail_entry_offset))
                 f->header->tail_entry_offset = htole64(offset);
-        f->newest_mtime = 0; /* we have a new tail entry now, explicitly invalidate newest boot id/timestamp info */
 
         /* Link up the items */
         for (uint64_t i = 0; i < n_items; i++) {
@@ -2532,7 +2531,7 @@ int journal_file_append_entry(
                                                ts->realtime);
                 if (!VALID_MONOTONIC(ts->monotonic))
                         return log_debug_errno(SYNTHETIC_ERRNO(EBADMSG),
-                                               "Invalid monotomic timestamp %" PRIu64 ", refusing entry.",
+                                               "Invalid monotonic timestamp %" PRIu64 ", refusing entry.",
                                                ts->monotonic);
         } else {
                 dual_timestamp_now(&_ts);
@@ -2761,7 +2760,7 @@ static int generic_array_get(
                 Object **ret_object,    /* The found object. */
                 uint64_t *ret_offset) { /* The offset of the found object. */
 
-        uint64_t a, t = 0, k;
+        uint64_t a, t = 0, k = 0; /* Explicit initialization of k to appease gcc */
         ChainCacheItem *ci;
         Object *o = NULL;
         int r;
@@ -3051,7 +3050,7 @@ static int generic_array_bisect(
                 left = 0;
                 right = m - 1;
 
-                if (direction == DIRECTION_UP) {
+                if (direction == DIRECTION_UP && left < right) {
                         /* If we're going upwards, the last entry of the previous array may pass the test,
                          * and the first entry of the current array may not pass. In that case, the last
                          * entry of the previous array must be returned. Hence, we need to test the first
@@ -3166,10 +3165,21 @@ previous:
         if (direction == DIRECTION_DOWN)
                 return 0;
 
-        /* Indicate to go to the previous array later. Note, do not move to the previous array here,
-         * as that may invalidate the current array object in the mmap cache and
-         * journal_file_entry_array_item() below may read invalid address. */
-        i = UINT64_MAX;
+        /* Get the last entry of the previous array. */
+        r = bump_entry_array(f, NULL, a, first, DIRECTION_UP, &a);
+        if (r <= 0)
+                return r;
+
+        r = journal_file_move_to_object(f, OBJECT_ENTRY_ARRAY, a, &array);
+        if (r < 0)
+                return r;
+
+        p = journal_file_entry_array_n_items(f, array);
+        if (p == 0 || t < p)
+                return -EBADMSG;
+
+        t -= p;
+        i = p - 1;
 
 found:
         p = journal_file_entry_array_item(f, array, 0);
@@ -3178,27 +3188,6 @@ found:
 
         /* Let's cache this item for the next invocation */
         chain_cache_put(f->chain_cache, ci, first, a, p, t, i);
-
-        if (i == UINT64_MAX) {
-                uint64_t m;
-
-                /* Get the last entry of the previous array. */
-
-                r = bump_entry_array(f, NULL, a, first, DIRECTION_UP, &a);
-                if (r <= 0)
-                        return r;
-
-                r = journal_file_move_to_object(f, OBJECT_ENTRY_ARRAY, a, &array);
-                if (r < 0)
-                        return r;
-
-                m = journal_file_entry_array_n_items(f, array);
-                if (m == 0 || t < m)
-                        return -EBADMSG;
-
-                t -= m;
-                i = m - 1;
-        }
 
         p = journal_file_entry_array_item(f, array, i);
         if (p == 0)
@@ -3553,7 +3542,8 @@ int journal_file_next_entry(
                                  p,
                                  test_object_offset,
                                  direction,
-                                 ret_object ? &o : NULL, &q, &i);
+                                 NULL, &q, &i); /* Here, do not read entry object, as the result object
+                                                 * may not be the one we want, and it may be broken. */
         if (r <= 0)
                 return r;
 
@@ -3563,12 +3553,11 @@ int journal_file_next_entry(
          * the same offset, and the index needs to be shifted. Otherwise, use the found object as is,
          * as it is the nearest entry object from the input offset 'p'. */
 
-        if (p != q)
-                goto found;
-
-        r = bump_array_index(&i, direction, n);
-        if (r <= 0)
-                return r;
+        if (p == q) {
+                r = bump_array_index(&i, direction, n);
+                if (r <= 0)
+                        return r;
+        }
 
         /* And jump to it */
         r = generic_array_get(f, le64toh(f->header->entry_array_offset), i, direction, ret_object ? &o : NULL, &q);
@@ -3580,7 +3569,7 @@ int journal_file_next_entry(
                 return log_debug_errno(SYNTHETIC_ERRNO(EBADMSG),
                                        "%s: entry array not properly ordered at entry index %" PRIu64,
                                        f->path, i);
-found:
+
         if (ret_object)
                 *ret_object = o;
         if (ret_offset)
@@ -4373,11 +4362,9 @@ int journal_file_archive(JournalFile *f, char **ret_previous_path) {
         (void) fsync_directory_of_file(f->fd);
 
         if (ret_previous_path)
-                *ret_previous_path = f->path;
-        else
-                free(f->path);
+                *ret_previous_path = TAKE_PTR(f->path);
 
-        f->path = TAKE_PTR(p);
+        free_and_replace(f->path, p);
 
         /* Set as archive so offlining commits w/state=STATE_ARCHIVED. Previously we would set old_file->header->state
          * to STATE_ARCHIVED directly here, but journal_file_set_offline() short-circuits when state != STATE_ONLINE,

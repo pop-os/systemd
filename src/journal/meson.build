@@ -12,6 +12,7 @@ sources = files(
         'journald-stream.c',
         'journald-syslog.c',
         'journald-wall.c',
+        'journald-socket.c',
 )
 
 sources += custom_target(
@@ -28,11 +29,24 @@ libjournal_core = static_library(
                        userspace],
         build_by_default : false)
 
+journalctl_sources = files(
+        'journalctl.c',
+        'journalctl-catalog.c',
+        'journalctl-filter.c',
+        'journalctl-misc.c',
+        'journalctl-show.c',
+        'journalctl-util.c',
+        'journalctl-varlink.c',
+)
+
+if conf.get('HAVE_GCRYPT') == 1
+        journalctl_sources += files('journalctl-authenticate.c')
+endif
+
 if get_option('link-journalctl-shared')
         journalctl_link_with = [libshared]
 else
         journalctl_link_with = [
-                libbasic_gcrypt,
                 libshared_static,
                 libsystemd_static,
         ]
@@ -62,10 +76,10 @@ executables += [
                         libshared,
                 ],
                 'dependencies' : [
-                        liblz4,
+                        liblz4_cflags,
                         libselinux,
-                        libxz,
-                        libzstd,
+                        libxz_cflags,
+                        libzstd_cflags,
                         threads,
                 ],
         },
@@ -90,30 +104,30 @@ executables += [
         executable_template + {
                 'name' : 'journalctl',
                 'public' : true,
-                'sources' : files('journalctl.c'),
+                'sources' : journalctl_sources,
                 'link_with' : journalctl_link_with,
                 'dependencies' : [
                         libdl,
-                        liblz4,
-                        libxz,
-                        libzstd,
+                        liblz4_cflags,
+                        libxz_cflags,
+                        libzstd_cflags,
                         threads,
                 ],
         },
         journal_test_template + {
                 'sources' : files('test-journald-config.c'),
                 'dependencies' : [
-                        liblz4,
+                        liblz4_cflags,
                         libselinux,
-                        libxz,
+                        libxz_cflags,
                 ],
         },
         journal_test_template + {
                 'sources' : files('test-journald-syslog.c'),
                 'dependencies' : [
-                        liblz4,
+                        liblz4_cflags,
                         libselinux,
-                        libxz,
+                        libxz_cflags,
                         threads,
                 ],
         },

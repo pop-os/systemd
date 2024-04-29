@@ -147,7 +147,7 @@ void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p)
 
         const char *path = exec_context_tty_path(context);
 
-        if (p && p->stdin_fd >= 0 && isatty(p->stdin_fd))
+        if (p && p->stdin_fd >= 0 && isatty_safe(p->stdin_fd))
                 fd = p->stdin_fd;
         else if (path && (context->tty_path || is_terminal_input(context->std_input) ||
                         is_terminal_output(context->std_output) || is_terminal_output(context->std_error))) {
@@ -163,6 +163,8 @@ void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p)
         lock_fd = lock_dev_console();
         if (ERRNO_IS_NEG_PRIVILEGE(lock_fd))
                 log_debug_errno(lock_fd, "No privileges to lock /dev/console, proceeding without: %m");
+        else if (ERRNO_IS_NEG_DEVICE_ABSENT(lock_fd))
+                log_debug_errno(lock_fd, "Device /dev/console does not exist, proceeding without locking it: %m");
         else if (lock_fd < 0)
                 return (void) log_debug_errno(lock_fd, "Failed to lock /dev/console: %m");
 
@@ -357,13 +359,13 @@ int exec_spawn(Unit *unit,
                ExecParameters *params,
                ExecRuntime *runtime,
                const CGroupContext *cgroup_context,
-               pid_t *ret) {
+               PidRef *ret) {
 
         char serialization_fd_number[DECIMAL_STR_MAX(int) + 1];
-        _cleanup_free_ char *subcgroup_path = NULL, *log_level = NULL, *executor_path = NULL;
+        _cleanup_free_ char *subcgroup_path = NULL, *max_log_levels = NULL, *executor_path = NULL;
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
         _cleanup_fdset_free_ FDSet *fdset = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        pid_t pid;
         int r;
 
         assert(unit);
@@ -371,10 +373,11 @@ int exec_spawn(Unit *unit,
         assert(unit->manager->executor_fd >= 0);
         assert(command);
         assert(context);
-        assert(ret);
         assert(params);
-        assert(params->fds || (params->n_socket_fds + params->n_storage_fds <= 0));
+        assert(!params->fds || FLAGS_SET(params->flags, EXEC_PASS_FDS));
+        assert(params->fds || (params->n_socket_fds + params->n_storage_fds == 0));
         assert(!params->files_env); /* We fill this field, ensure it comes NULL-initialized to us */
+        assert(ret);
 
         LOG_CONTEXT_PUSH_UNIT(unit);
 
@@ -404,8 +407,8 @@ int exec_spawn(Unit *unit,
          * child's memory.max, serialize all the state needed to start the unit, and pass it to the
          * systemd-executor binary. clone() with CLONE_VM + CLONE_VFORK will pause the parent until the exec
          * and ensure all memory is shared. The child immediately execs the new binary so the delay should
-         * be minimal. Once glibc provides a clone3 wrapper we can switch to that, and clone directly in the
-         * target cgroup. */
+         * be minimal. If glibc 2.39 is available pidfd_spawn() is used in order to get a race-free pid fd
+         * and to clone directly into the target cgroup (if we booted with cgroupv2). */
 
         r = open_serialization_file("sd-executor-state", &f);
         if (r < 0)
@@ -430,9 +433,12 @@ int exec_spawn(Unit *unit,
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to set O_CLOEXEC on serialized fds: %m");
 
-        r = log_level_to_string_alloc(log_get_max_level(), &log_level);
+        /* If LogLevelMax= is specified, then let's use the specified log level at the beginning of the
+         * executor process. To achieve that the specified log level is passed as an argument, rather than
+         * the one for the manager process. */
+        r = log_max_levels_to_string(context->log_level_max >= 0 ? context->log_level_max : log_get_max_level(), &max_log_levels);
         if (r < 0)
-                return log_unit_error_errno(unit, r, "Failed to convert log level to string: %m");
+                return log_unit_error_errno(unit, r, "Failed to convert max log levels to string: %m");
 
         r = fd_get_path(unit->manager->executor_fd, &executor_path);
         if (r < 0)
@@ -445,24 +451,31 @@ int exec_spawn(Unit *unit,
                         FORMAT_PROC_FD_PATH(unit->manager->executor_fd),
                         STRV_MAKE(executor_path,
                                   "--deserialize", serialization_fd_number,
-                                  "--log-level", log_level,
+                                  "--log-level", max_log_levels,
                                   "--log-target", log_target_to_string(manager_get_executor_log_target(unit->manager))),
                         environ,
-                        &pid);
+                        cg_unified() > 0 ? subcgroup_path : NULL,
+                        &pidref);
+        if (r == -EUCLEAN && subcgroup_path)
+                return log_unit_error_errno(unit, r,
+                                            "Failed to spawn process into cgroup '%s', because the cgroup "
+                                            "or one of its parents or siblings is in the threaded mode.",
+                                            subcgroup_path);
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to spawn executor: %m");
-
-        log_unit_debug(unit, "Forked %s as "PID_FMT, command->path, pid);
-
         /* We add the new process to the cgroup both in the child (so that we can be sure that no user code is ever
          * executed outside of the cgroup) and in the parent (so that we can be sure that when we kill the cgroup the
          * process will be killed too). */
-        if (subcgroup_path)
-                (void) cg_attach(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path, pid);
+        if (r == 0 && subcgroup_path)
+                (void) cg_attach(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path, pidref.pid);
+        /* r > 0: Already in the right cgroup thanks to CLONE_INTO_CGROUP */
 
-        exec_status_start(&command->exec_status, pid);
+        log_unit_debug(unit, "Forked %s as " PID_FMT " (%s CLONE_INTO_CGROUP)",
+                       command->path, pidref.pid, r > 0 ? "via" : "without");
 
-        *ret = pid;
+        exec_status_start(&command->exec_status, pidref.pid);
+
+        *ret = TAKE_PIDREF(pidref);
         return 0;
 }
 
@@ -664,13 +677,19 @@ void exec_command_done_array(ExecCommand *c, size_t n) {
                 exec_command_done(i);
 }
 
+ExecCommand* exec_command_free(ExecCommand *c) {
+        if (!c)
+                return NULL;
+
+        exec_command_done(c);
+        return mfree(c);
+}
+
 ExecCommand* exec_command_free_list(ExecCommand *c) {
         ExecCommand *i;
 
-        while ((i = LIST_POP(command, c))) {
-                exec_command_done(i);
-                free(i);
-        }
+        while ((i = LIST_POP(command, c)))
+                exec_command_free(i);
 
         return NULL;
 }
@@ -1396,7 +1415,7 @@ bool exec_context_maintains_privileges(const ExecContext *c) {
         if (!c->user)
                 return true;
 
-        if (streq(c->user, "root") || streq(c->user, "0"))
+        if (STR_IN_SET(c->user, "root", "0"))
                 return true;
 
         return false;
@@ -1657,6 +1676,15 @@ uint64_t exec_context_get_timer_slack_nsec(const ExecContext *c) {
         return (uint64_t) MAX(r, 0);
 }
 
+bool exec_context_get_set_login_environment(const ExecContext *c) {
+        assert(c);
+
+        if (c->set_login_environment >= 0)
+                return c->set_login_environment;
+
+        return c->user || c->dynamic_user || c->pam_name;
+}
+
 char** exec_context_get_syscall_filter(const ExecContext *c) {
         _cleanup_strv_free_ char **l = NULL;
 
@@ -1814,6 +1842,19 @@ void exec_status_exit(ExecStatus *s, const ExecContext *context, pid_t pid, int 
                 (void) utmp_put_dead_process(context->utmp_id, pid, code, status);
 }
 
+void exec_status_handoff(ExecStatus *s, const struct ucred *ucred, const dual_timestamp *ts) {
+        assert(s);
+        assert(ucred);
+        assert(ts);
+
+        if (ucred->pid != s->pid)
+                *s = (ExecStatus) {
+                        .pid = ucred->pid,
+                };
+
+        s->handoff_timestamp = *ts;
+}
+
 void exec_status_reset(ExecStatus *s) {
         assert(s);
 
@@ -1836,19 +1877,45 @@ void exec_status_dump(const ExecStatus *s, FILE *f, const char *prefix) {
         if (dual_timestamp_is_set(&s->start_timestamp))
                 fprintf(f,
                         "%sStart Timestamp: %s\n",
-                        prefix, FORMAT_TIMESTAMP(s->start_timestamp.realtime));
+                        prefix, FORMAT_TIMESTAMP_STYLE(s->start_timestamp.realtime, TIMESTAMP_US));
 
-        if (dual_timestamp_is_set(&s->exit_timestamp))
+        if (dual_timestamp_is_set(&s->handoff_timestamp) && dual_timestamp_is_set(&s->start_timestamp) &&
+            s->handoff_timestamp.monotonic > s->start_timestamp.monotonic)
                 fprintf(f,
-                        "%sExit Timestamp: %s\n"
+                        "%sHandoff Timestamp: %s since start\n",
+                        prefix,
+                        FORMAT_TIMESPAN(usec_sub_unsigned(s->handoff_timestamp.monotonic, s->start_timestamp.monotonic), 1));
+        else
+                fprintf(f,
+                        "%sHandoff Timestamp: %s\n",
+                        prefix, FORMAT_TIMESTAMP_STYLE(s->handoff_timestamp.realtime, TIMESTAMP_US));
+
+        if (dual_timestamp_is_set(&s->exit_timestamp)) {
+
+                if (dual_timestamp_is_set(&s->handoff_timestamp) && s->exit_timestamp.monotonic > s->handoff_timestamp.monotonic)
+                        fprintf(f,
+                                "%sExit Timestamp: %s since handoff\n",
+                                prefix,
+                                FORMAT_TIMESPAN(usec_sub_unsigned(s->exit_timestamp.monotonic, s->handoff_timestamp.monotonic), 1));
+                else if (dual_timestamp_is_set(&s->start_timestamp) && s->exit_timestamp.monotonic > s->start_timestamp.monotonic)
+                        fprintf(f,
+                                "%sExit Timestamp: %s since start\n",
+                                prefix,
+                                FORMAT_TIMESPAN(usec_sub_unsigned(s->exit_timestamp.monotonic, s->start_timestamp.monotonic), 1));
+                else
+                        fprintf(f,
+                                "%sExit Timestamp: %s\n",
+                                prefix, FORMAT_TIMESTAMP_STYLE(s->exit_timestamp.realtime, TIMESTAMP_US));
+
+                fprintf(f,
                         "%sExit Code: %s\n"
                         "%sExit Status: %i\n",
-                        prefix, FORMAT_TIMESTAMP(s->exit_timestamp.realtime),
                         prefix, sigchld_code_to_string(s->code),
                         prefix, s->status);
+        }
 }
 
-static void exec_command_dump(ExecCommand *c, FILE *f, const char *prefix) {
+void exec_command_dump(ExecCommand *c, FILE *f, const char *prefix) {
         _cleanup_free_ char *cmd = NULL;
         const char *prefix2;
 
@@ -1951,8 +2018,7 @@ static char *destroy_tree(char *path) {
 }
 
 void exec_shared_runtime_done(ExecSharedRuntime *rt) {
-        if (!rt)
-                return;
+        assert(rt);
 
         if (rt->manager)
                 (void) hashmap_remove(rt->manager->exec_shared_runtime_by_id, rt->id);
@@ -1965,8 +2031,10 @@ void exec_shared_runtime_done(ExecSharedRuntime *rt) {
 }
 
 static ExecSharedRuntime* exec_shared_runtime_free(ExecSharedRuntime *rt) {
-        exec_shared_runtime_done(rt);
+        if (!rt)
+                return NULL;
 
+        exec_shared_runtime_done(rt);
         return mfree(rt);
 }
 
@@ -2090,15 +2158,13 @@ static int exec_shared_runtime_make(
                         return r;
         }
 
-        if (exec_needs_network_namespace(c)) {
+        if (exec_needs_network_namespace(c))
                 if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, netns_storage_socket) < 0)
                         return -errno;
-        }
 
-        if (exec_needs_ipc_namespace(c)) {
+        if (exec_needs_ipc_namespace(c))
                 if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, ipcns_storage_socket) < 0)
                         return -errno;
-        }
 
         r = exec_shared_runtime_add(m, id, &tmp_dir, &var_tmp_dir, netns_storage_socket, ipcns_storage_socket, ret);
         if (r < 0)
@@ -2488,7 +2554,7 @@ void exec_params_shallow_clear(ExecParameters *p) {
         p->fds = mfree(p->fds);
         p->exec_fd = safe_close(p->exec_fd);
         p->user_lookup_fd = -EBADF;
-        p->bpf_outer_map_fd = -EBADF;
+        p->bpf_restrict_fs_map_fd = -EBADF;
         p->unit_id = mfree(p->unit_id);
         p->invocation_id = SD_ID128_NULL;
         p->invocation_id_string[0] = '\0';
@@ -2643,46 +2709,46 @@ ExecCleanMask exec_clean_mask_from_string(const char *s) {
 }
 
 static const char* const exec_input_table[_EXEC_INPUT_MAX] = {
-        [EXEC_INPUT_NULL] = "null",
-        [EXEC_INPUT_TTY] = "tty",
+        [EXEC_INPUT_NULL]      = "null",
+        [EXEC_INPUT_TTY]       = "tty",
         [EXEC_INPUT_TTY_FORCE] = "tty-force",
-        [EXEC_INPUT_TTY_FAIL] = "tty-fail",
-        [EXEC_INPUT_SOCKET] = "socket",
-        [EXEC_INPUT_NAMED_FD] = "fd",
-        [EXEC_INPUT_DATA] = "data",
-        [EXEC_INPUT_FILE] = "file",
+        [EXEC_INPUT_TTY_FAIL]  = "tty-fail",
+        [EXEC_INPUT_SOCKET]    = "socket",
+        [EXEC_INPUT_NAMED_FD]  = "fd",
+        [EXEC_INPUT_DATA]      = "data",
+        [EXEC_INPUT_FILE]      = "file",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_input, ExecInput);
 
 static const char* const exec_output_table[_EXEC_OUTPUT_MAX] = {
-        [EXEC_OUTPUT_INHERIT] = "inherit",
-        [EXEC_OUTPUT_NULL] = "null",
-        [EXEC_OUTPUT_TTY] = "tty",
-        [EXEC_OUTPUT_KMSG] = "kmsg",
-        [EXEC_OUTPUT_KMSG_AND_CONSOLE] = "kmsg+console",
-        [EXEC_OUTPUT_JOURNAL] = "journal",
+        [EXEC_OUTPUT_INHERIT]             = "inherit",
+        [EXEC_OUTPUT_NULL]                = "null",
+        [EXEC_OUTPUT_TTY]                 = "tty",
+        [EXEC_OUTPUT_KMSG]                = "kmsg",
+        [EXEC_OUTPUT_KMSG_AND_CONSOLE]    = "kmsg+console",
+        [EXEC_OUTPUT_JOURNAL]             = "journal",
         [EXEC_OUTPUT_JOURNAL_AND_CONSOLE] = "journal+console",
-        [EXEC_OUTPUT_SOCKET] = "socket",
-        [EXEC_OUTPUT_NAMED_FD] = "fd",
-        [EXEC_OUTPUT_FILE] = "file",
-        [EXEC_OUTPUT_FILE_APPEND] = "append",
-        [EXEC_OUTPUT_FILE_TRUNCATE] = "truncate",
+        [EXEC_OUTPUT_SOCKET]              = "socket",
+        [EXEC_OUTPUT_NAMED_FD]            = "fd",
+        [EXEC_OUTPUT_FILE]                = "file",
+        [EXEC_OUTPUT_FILE_APPEND]         = "append",
+        [EXEC_OUTPUT_FILE_TRUNCATE]       = "truncate",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_output, ExecOutput);
 
 static const char* const exec_utmp_mode_table[_EXEC_UTMP_MODE_MAX] = {
-        [EXEC_UTMP_INIT] = "init",
+        [EXEC_UTMP_INIT]  = "init",
         [EXEC_UTMP_LOGIN] = "login",
-        [EXEC_UTMP_USER] = "user",
+        [EXEC_UTMP_USER]  = "user",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_utmp_mode, ExecUtmpMode);
 
 static const char* const exec_preserve_mode_table[_EXEC_PRESERVE_MODE_MAX] = {
-        [EXEC_PRESERVE_NO] = "no",
-        [EXEC_PRESERVE_YES] = "yes",
+        [EXEC_PRESERVE_NO]      = "no",
+        [EXEC_PRESERVE_YES]     = "yes",
         [EXEC_PRESERVE_RESTART] = "restart",
 };
 
@@ -2690,10 +2756,10 @@ DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(exec_preserve_mode, ExecPreserveMode, EX
 
 /* This table maps ExecDirectoryType to the setting it is configured with in the unit */
 static const char* const exec_directory_type_table[_EXEC_DIRECTORY_TYPE_MAX] = {
-        [EXEC_DIRECTORY_RUNTIME] = "RuntimeDirectory",
-        [EXEC_DIRECTORY_STATE] = "StateDirectory",
-        [EXEC_DIRECTORY_CACHE] = "CacheDirectory",
-        [EXEC_DIRECTORY_LOGS] = "LogsDirectory",
+        [EXEC_DIRECTORY_RUNTIME]       = "RuntimeDirectory",
+        [EXEC_DIRECTORY_STATE]         = "StateDirectory",
+        [EXEC_DIRECTORY_CACHE]         = "CacheDirectory",
+        [EXEC_DIRECTORY_LOGS]          = "LogsDirectory",
         [EXEC_DIRECTORY_CONFIGURATION] = "ConfigurationDirectory",
 };
 
@@ -2724,10 +2790,10 @@ DEFINE_STRING_TABLE_LOOKUP(exec_directory_type_mode, ExecDirectoryType);
  * one is supposed to be generic enough to be used for unit types that don't use ExecContext and per-unit
  * directories, specifically .timer units with their timestamp touch file. */
 static const char* const exec_resource_type_table[_EXEC_DIRECTORY_TYPE_MAX] = {
-        [EXEC_DIRECTORY_RUNTIME] = "runtime",
-        [EXEC_DIRECTORY_STATE] = "state",
-        [EXEC_DIRECTORY_CACHE] = "cache",
-        [EXEC_DIRECTORY_LOGS] = "logs",
+        [EXEC_DIRECTORY_RUNTIME]       = "runtime",
+        [EXEC_DIRECTORY_STATE]         = "state",
+        [EXEC_DIRECTORY_CACHE]         = "cache",
+        [EXEC_DIRECTORY_LOGS]          = "logs",
         [EXEC_DIRECTORY_CONFIGURATION] = "configuration",
 };
 
@@ -2736,7 +2802,7 @@ DEFINE_STRING_TABLE_LOOKUP(exec_resource_type, ExecDirectoryType);
 static const char* const exec_keyring_mode_table[_EXEC_KEYRING_MODE_MAX] = {
         [EXEC_KEYRING_INHERIT] = "inherit",
         [EXEC_KEYRING_PRIVATE] = "private",
-        [EXEC_KEYRING_SHARED] = "shared",
+        [EXEC_KEYRING_SHARED]  = "shared",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_keyring_mode, ExecKeyringMode);

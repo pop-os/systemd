@@ -17,7 +17,7 @@ static int environment_dirs(char ***ret) {
         _cleanup_free_ char *c = NULL;
         int r;
 
-        dirs = strv_new(CONF_PATHS_USR("environment.d"), NULL);
+        dirs = strv_new(CONF_PATHS("environment.d"));
         if (!dirs)
                 return -ENOMEM;
 
@@ -26,7 +26,7 @@ static int environment_dirs(char ***ret) {
         if (r < 0)
                 return r;
 
-        r = strv_extend_front(&dirs, c);
+        r = strv_consume_prepend(&dirs, TAKE_PTR(c));
         if (r < 0)
                 return r;
 
@@ -84,8 +84,7 @@ static int load_and_print(void) {
 static int run(int argc, char *argv[]) {
         int r;
 
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         if (argc > 1)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "This program takes no arguments.");

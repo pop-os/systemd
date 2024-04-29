@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # systemctl(1) completion                                 -*- shell-script -*-
 # vi: ft=sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
@@ -192,7 +193,7 @@ _systemctl () {
                 comps='auto yes no'
                 ;;
             --what)
-                comps='configuration state cache logs runtime all'
+                comps='configuration state cache logs runtime fdstore all'
                 ;;
             --image)
                 comps=$(compgen -A file -- "$cur")

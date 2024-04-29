@@ -31,56 +31,56 @@ TEST(mount_option_mangle) {
 
         assert_se(mount_option_mangle(NULL, MS_RDONLY|MS_NOSUID, &f, &opts) == 0);
         assert_se(f == (MS_RDONLY|MS_NOSUID));
-        assert_se(opts == NULL);
+        ASSERT_NULL(opts);
 
         assert_se(mount_option_mangle("", MS_RDONLY|MS_NOSUID, &f, &opts) == 0);
         assert_se(f == (MS_RDONLY|MS_NOSUID));
-        assert_se(opts == NULL);
+        ASSERT_NULL(opts);
 
         assert_se(mount_option_mangle("ro,nosuid,nodev,noexec", 0, &f, &opts) == 0);
         assert_se(f == (MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC));
-        assert_se(opts == NULL);
+        ASSERT_NULL(opts);
 
         assert_se(mount_option_mangle("ro,nosuid,nodev,noexec,mode=0755", 0, &f, &opts) == 0);
         assert_se(f == (MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC));
-        assert_se(streq(opts, "mode=0755"));
+        ASSERT_STREQ(opts, "mode=0755");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,nosuid,foo,hogehoge,nodev,mode=0755", 0, &f, &opts) == 0);
         assert_se(f == (MS_NOSUID|MS_NODEV));
-        assert_se(streq(opts, "foo,hogehoge,mode=0755"));
+        ASSERT_STREQ(opts, "foo,hogehoge,mode=0755");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,nosuid,nodev,noexec,relatime,net_cls,net_prio", MS_RDONLY, &f, &opts) == 0);
         assert_se(f == (MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_RELATIME));
-        assert_se(streq(opts, "net_cls,net_prio"));
+        ASSERT_STREQ(opts, "net_cls,net_prio");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,nosuid,nodev,relatime,size=1630748k,mode=0700,uid=1000,gid=1000", MS_RDONLY, &f, &opts) == 0);
         assert_se(f == (MS_NOSUID|MS_NODEV|MS_RELATIME));
-        assert_se(streq(opts, "size=1630748k,mode=0700,uid=1000,gid=1000"));
+        ASSERT_STREQ(opts, "size=1630748k,mode=0700,uid=1000,gid=1000");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("size=1630748k,rw,gid=1000,,,nodev,relatime,,mode=0700,nosuid,uid=1000", MS_RDONLY, &f, &opts) == 0);
         assert_se(f == (MS_NOSUID|MS_NODEV|MS_RELATIME));
-        assert_se(streq(opts, "size=1630748k,gid=1000,mode=0700,uid=1000"));
+        ASSERT_STREQ(opts, "size=1630748k,gid=1000,mode=0700,uid=1000");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,exec,size=8143984k,nr_inodes=2035996,mode=0755", MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, &f, &opts) == 0);
         assert_se(f == (MS_NOSUID|MS_NODEV));
-        assert_se(streq(opts, "size=8143984k,nr_inodes=2035996,mode=0755"));
+        ASSERT_STREQ(opts, "size=8143984k,nr_inodes=2035996,mode=0755");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,relatime,fmask=0022,,,dmask=0022", MS_RDONLY, &f, &opts) == 0);
         assert_se(f == MS_RELATIME);
-        assert_se(streq(opts, "fmask=0022,dmask=0022"));
+        ASSERT_STREQ(opts, "fmask=0022,dmask=0022");
         opts = mfree(opts);
 
         assert_se(mount_option_mangle("rw,relatime,fmask=0022,dmask=0022,\"hogehoge", MS_RDONLY, &f, &opts) < 0);
 
         assert_se(mount_option_mangle("mode=01777,size=10%,nr_inodes=400k,uid=496107520,gid=496107520,context=\"system_u:object_r:svirt_sandbox_file_t:s0:c0,c1\"", 0, &f, &opts) == 0);
         assert_se(f == 0);
-        assert_se(streq(opts, "mode=01777,size=10%,nr_inodes=400k,uid=496107520,gid=496107520,context=\"system_u:object_r:svirt_sandbox_file_t:s0:c0,c1\""));
+        ASSERT_STREQ(opts, "mode=01777,size=10%,nr_inodes=400k,uid=496107520,gid=496107520,context=\"system_u:object_r:svirt_sandbox_file_t:s0:c0,c1\"");
         opts = mfree(opts);
 }
 
@@ -91,7 +91,7 @@ static void test_mount_flags_to_string_one(unsigned long flags, const char *expe
         r = mount_flags_to_string(flags, &x);
         log_info("flags: %#lX → %d/\"%s\"", flags, r, strnull(x));
         assert_se(r >= 0);
-        assert_se(streq(x, expected));
+        ASSERT_STREQ(x, expected);
 }
 
 TEST(mount_flags_to_string) {
@@ -213,6 +213,25 @@ TEST(bind_remount_one) {
                 _exit(EXIT_SUCCESS);
         }
 
+        assert_se(wait_for_terminate_and_check("test-remount-one-with-mountinfo", pid, WAIT_LOG) == EXIT_SUCCESS);
+
+        pid = fork();
+        assert_se(pid >= 0);
+
+        if (pid == 0) {
+                /* child */
+
+                assert_se(detach_mount_namespace() >= 0);
+
+                assert_se(bind_remount_one("/run", MS_RDONLY, MS_RDONLY) >= 0);
+                assert_se(bind_remount_one("/run", MS_NOEXEC, MS_RDONLY|MS_NOEXEC) >= 0);
+                assert_se(bind_remount_one("/proc/idontexist", MS_RDONLY, MS_RDONLY) == -ENOENT);
+                assert_se(bind_remount_one("/proc/self", MS_RDONLY, MS_RDONLY) == -EINVAL);
+                assert_se(bind_remount_one("/", MS_RDONLY, MS_RDONLY) >= 0);
+
+                _exit(EXIT_SUCCESS);
+        }
+
         assert_se(wait_for_terminate_and_check("test-remount-one", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
@@ -276,7 +295,17 @@ TEST(make_mount_switch_root) {
         assert_se(s);
         assert_se(touch(s) >= 0);
 
-        for (int force_ms_move = 0; force_ms_move < 2; force_ms_move++) {
+        struct {
+                const char *path;
+                bool force_ms_move;
+        } table[] = {
+                { t,   false },
+                { t,   true  },
+                { "/", false },
+                { "/", true  },
+        };
+
+        FOREACH_ELEMENT(i, table) {
                 r = safe_fork("(switch-root)",
                               FORK_RESET_SIGNALS |
                               FORK_CLOSE_ALL_FDS |
@@ -290,12 +319,14 @@ TEST(make_mount_switch_root) {
                 assert_se(r >= 0);
 
                 if (r == 0) {
-                        assert_se(make_mount_point(t) >= 0);
-                        assert_se(mount_switch_root_full(t, /* mount_propagation_flag= */ 0, force_ms_move) >= 0);
+                        assert_se(make_mount_point(i->path) >= 0);
+                        assert_se(mount_switch_root_full(i->path, /* mount_propagation_flag= */ 0, i->force_ms_move) >= 0);
 
-                        assert_se(access(ASSERT_PTR(strrchr(s, '/')), F_OK) >= 0);       /* absolute */
-                        assert_se(access(ASSERT_PTR(strrchr(s, '/')) + 1, F_OK) >= 0);   /* relative */
-                        assert_se(access(s, F_OK) < 0 && errno == ENOENT);               /* doesn't exist in our new environment */
+                        if (!path_equal(i->path, "/")) {
+                                assert_se(access(ASSERT_PTR(strrchr(s, '/')), F_OK) >= 0);       /* absolute */
+                                assert_se(access(ASSERT_PTR(strrchr(s, '/')) + 1, F_OK) >= 0);   /* relative */
+                                assert_se(access(s, F_OK) < 0 && errno == ENOENT);               /* doesn't exist in our new environment */
+                        }
 
                         _exit(EXIT_SUCCESS);
                 }
@@ -327,7 +358,7 @@ TEST(umount_recursive) {
 
         int r;
 
-        FOREACH_ARRAY(t, test_table, ELEMENTSOF(test_table)) {
+        FOREACH_ELEMENT(t, test_table) {
 
                 r = safe_fork("(umount-rec)",
                               FORK_RESET_SIGNALS |
@@ -496,11 +527,11 @@ TEST(bind_mount_submounts) {
         free(x);
 
         assert_se(x = path_join(b, "x"));
-        assert_se(path_is_mount_point(x, NULL, 0) > 0);
+        assert_se(path_is_mount_point(x) > 0);
         free(x);
 
         assert_se(x = path_join(b, "y"));
-        assert_se(path_is_mount_point(x, NULL, 0) > 0);
+        assert_se(path_is_mount_point(x) > 0);
 
         assert_se(umount_recursive(a, 0) >= 0);
         assert_se(umount_recursive(b, 0) >= 0);

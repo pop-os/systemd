@@ -254,6 +254,9 @@ struct sd_bus {
         char *address;
         unsigned address_index;
 
+        uid_t connect_as_uid;
+        gid_t connect_as_gid;
+
         int last_connect_error;
 
         enum bus_auth auth;
@@ -269,6 +272,7 @@ struct sd_bus {
         size_t n_groups;
         union sockaddr_union sockaddr_peer;
         socklen_t sockaddr_size_peer;
+        int pidfd;
 
         uint64_t creds_mask;
 

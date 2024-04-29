@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 
 <!--
   SPDX-License-Identifier: LGPL-2.1-or-later
@@ -27,17 +27,20 @@
   </refnamediv>
 
   <refsynopsisdiv>
-    <para><filename>/etc/systemd/networkd.conf</filename></para>
-    <para><filename>/etc/systemd/networkd.conf.d/*.conf</filename></para>
-    <para><filename>/usr/lib/systemd/networkd.conf.d/*.conf</filename></para>
+    <para><simplelist>
+      <member><filename>/etc/systemd/networkd.conf</filename></member>
+      <member><filename>/run/systemd/networkd.conf</filename></member>
+      <member><filename>/usr/lib/systemd/networkd.conf</filename></member>
+      <member><filename>/etc/systemd/networkd.conf.d/*.conf</filename></member>
+      <member><filename>/run/systemd/networkd.conf.d/*.conf</filename></member>
+      <member><filename>/usr/lib/systemd/networkd.conf.d/*.conf</filename></member>
+    </simplelist></para>
   </refsynopsisdiv>
 
   <refsect1>
     <title>Description</title>
 
-    <para>These configuration files control global network parameters.
-    Currently the DHCP Unique Identifier (DUID).</para>
-
+    <para>These configuration files control global network parameters.</para>
   </refsect1>
 
   <xi:include href="standard-conf.xml" xpointer="main-conf" />
@@ -91,6 +94,17 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>ManageForeignNextHops=</varname></term>
+        <listitem><para>A boolean. When true, <command>systemd-networkd</command> will remove nexthops
+        that are not configured in .network files (except for routes with protocol
+        <literal>kernel</literal>). When false, it will
+        not remove any foreign nexthops, keeping them even if they are not configured in a .network file.
+        Defaults to yes.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>RouteTable=</varname></term>
         <listitem><para>Defines the route table name. Takes a whitespace-separated list of the pairs of
         route table name and number. The route table name and number in each pair are separated with a
@@ -106,6 +120,34 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>IPv4Forwarding=</varname></term>
+        <listitem>
+          <para>Configures IPv4 packet forwarding for the system. Takes a boolean value. This controls the
+          <filename>net.ipv4.conf.default.forwarding</filename> and
+          <filename>net.ipv4.conf.all.forwarding</filename>sysctl options. See
+          <ulink url="https://docs.kernel.org/networking/ip-sysctl.html">IP Sysctl</ulink>
+          for more details about the sysctl options. Defaults to unset and the sysctl options will not be
+          changed.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>IPv6Forwarding=</varname></term>
+        <listitem>
+          <para>Configures IPv6 packet forwarding for the system. Takes a boolean value. This controls the
+          <filename>net.ipv6.conf.default.forwarding</filename> and
+          <filename>net.ipv6.conf.all.forwarding</filename> sysctl options. See
+          <ulink url="https://docs.kernel.org/networking/ip-sysctl.html">IP Sysctl</ulink>
+          for more details about the sysctl options. Defaults to unset and the sysctl options will not be
+          changed.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>IPv6PrivacyExtensions=</varname></term>
         <listitem>
           <para>Specifies the default value for per-network <varname>IPv6PrivacyExtensions=</varname>.
@@ -115,6 +157,43 @@
           Defaults to <literal>no</literal>.</para>
 
         <xi:include href="version-info.xml" xpointer="v254"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>UseDomains=</varname></term>
+        <listitem>
+          <para>Specifies the network- and protocol-independent default value for the same settings in
+          [IPv6AcceptRA], [DHCPv4], and [DHCPv6] sections below. Takes a boolean, or the special value
+          <option>route</option>. See the same setting in
+          <citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          Defaults to <literal>no</literal>.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[IPv6AcceptRA] Section Options</title>
+
+    <para>This section configures the default setting of the Neighbor Discovery. The following options are
+    available in the [IPv6AcceptRA] section:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>UseDomains=</varname></term>
+        <listitem>
+          <para>Specifies the network-independent default value for the same setting in the [IPv6AcceptRA]
+          section in
+          <citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          Takes a boolean, or the special value <option>route</option>. When unspecified, the value specified
+          in the [Network] section in
+          <citerefentry><refentrytitle>networkd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+          which defaults to <literal>no</literal>, will be used.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -215,6 +294,15 @@ DUIDRawData=00:00:ab:11:f9:2a:c2:77:29:f9:5c:00</programlisting>
           <xi:include href="version-info.xml" xpointer="v230"/>
         </listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>UseDomains=</varname></term>
+        <listitem>
+          <para>Same as the one in the [IPv6AcceptRA] section, but applied for DHCPv4 protocol.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -239,18 +327,43 @@ DUIDRawData=00:00:ab:11:f9:2a:c2:77:29:f9:5c:00</programlisting>
 
         <xi:include href="version-info.xml" xpointer="v249"/></listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>UseDomains=</varname></term>
+        <listitem><para>As in the [DHCPv4] section.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[DHCPServer] Section Options</title>
+
+    <para>This section configures the default setting of the DHCP server. The following options are available
+    in the [DHCPServer] section:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>UseDomains=</varname></term>
+        <listitem>
+          <para>Same as the one in the [IPv6AcceptRA] section, but applied for DHCPv4 protocol.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
   <refsect1>
       <title>See Also</title>
-      <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>sd_id128_get_machine_app_specific</refentrytitle><manvolnum>3</manvolnum></citerefentry>
-      </para>
+      <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>sd_id128_get_machine_app_specific</refentrytitle><manvolnum>3</manvolnum></citerefentry></member>
+      </simplelist></para>
   </refsect1>
 
 </refentry>

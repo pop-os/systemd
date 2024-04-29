@@ -155,7 +155,7 @@ TEST(get_ctty) {
         }
 
         /* In almost all cases STDIN will match our controlling TTY. Let's verify that and then compare paths */
-        assert_se(fstat(STDIN_FILENO, &st) >= 0);
+        ASSERT_OK_ERRNO(fstat(STDIN_FILENO, &st));
         if (S_ISCHR(st.st_mode) && st.st_rdev == devnr) {
                 _cleanup_free_ char *stdin_name = NULL;
 
@@ -163,6 +163,17 @@ TEST(get_ctty) {
                 assert_se(path_equal(stdin_name, ctty));
         } else
                 log_notice("Not invoked with stdin == ctty, cutting get_ctty() test short");
+}
+
+TEST(get_default_background_color) {
+        double red, green, blue;
+        int r;
+
+        r = get_default_background_color(&red, &green, &blue);
+        if (r < 0)
+                log_notice_errno(r, "Can't get terminal default background color: %m");
+        else
+                log_notice("R=%g G=%g B=%g", red, green, blue);
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

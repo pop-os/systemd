@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-resolved.service" conditional='ENABLE_RESOLVE'
@@ -36,7 +36,7 @@
     via three interfaces:</para>
 
     <itemizedlist>
-      <listitem><para>The native, fully-featured API <command>systemd-resolved</command> exposes on the bus,
+      <listitem><para>The native, fully-featured API <command>systemd-resolved</command> exposes via D-Bus,
       see
       <citerefentry><refentrytitle>org.freedesktop.resolve1</refentrytitle><manvolnum>5</manvolnum></citerefentry>
       and
@@ -44,6 +44,11 @@
       for details. Usage of this API is generally recommended to clients as it is asynchronous and fully
       featured (for example, properly returns DNSSEC validation status and interface scope for addresses as
       necessary for supporting link-local networking).</para></listitem>
+
+      <listitem><para>The native API <command>systemd-resolved</command> exposes via Varlink on the
+      <filename>/run/systemd/resolve/io.systemd.Resolve</filename> AF_UNIX socket. This provides similar
+      functionality as the D-Bus interface, but is available during the entire runtime, without requiring a
+      running D-Bus system bus broker service.</para></listitem>
 
       <listitem><para>The glibc
       <citerefentry project='man-pages'><refentrytitle>getaddrinfo</refentrytitle><manvolnum>3</manvolnum></citerefentry>
@@ -416,6 +421,16 @@ search foobar.com barbar.com
 
         <xi:include href="version-info.xml" xpointer="v235"/></listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><constant>SIGHUP</constant></term>
+
+        <listitem><para>Upon reception of the <constant>SIGHUP</constant> process signal
+        <command>systemd-resolved</command> will flush all caches it maintains, drop all open TCP
+        connections (if any), and reload its configuration files.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -489,17 +504,17 @@ search foobar.com barbar.com
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>resolved.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>dnssec-trust-anchors.d</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>nss-resolve</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>resolvectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>hosts</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>resolved.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>dnssec-trust-anchors.d</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>nss-resolve</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>resolvectl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>hosts</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

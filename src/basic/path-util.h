@@ -11,27 +11,26 @@
 #include "strv.h"
 #include "time-util.h"
 
-#define PATH_SPLIT_SBIN_BIN(x) x "sbin:" x "bin"
-#define PATH_SPLIT_SBIN_BIN_NULSTR(x) x "sbin\0" x "bin\0"
+#define PATH_SPLIT_BIN(x) x "sbin:" x "bin"
+#define PATH_SPLIT_BIN_NULSTR(x) x "sbin\0" x "bin\0"
 
-#define PATH_NORMAL_SBIN_BIN(x) x "bin"
-#define PATH_NORMAL_SBIN_BIN_NULSTR(x) x "bin\0"
+#define PATH_MERGED_BIN(x) x "bin"
+#define PATH_MERGED_BIN_NULSTR(x) x "bin\0"
 
-#if HAVE_SPLIT_BIN
-#  define PATH_SBIN_BIN(x) PATH_SPLIT_SBIN_BIN(x)
-#  define PATH_SBIN_BIN_NULSTR(x) PATH_SPLIT_SBIN_BIN_NULSTR(x)
+#define DEFAULT_PATH_WITH_SBIN PATH_SPLIT_BIN("/usr/local/") ":" PATH_SPLIT_BIN("/usr/")
+#define DEFAULT_PATH_WITHOUT_SBIN PATH_MERGED_BIN("/usr/local/") ":" PATH_MERGED_BIN("/usr/")
+
+#define DEFAULT_PATH_COMPAT PATH_SPLIT_BIN("/usr/local/") ":" PATH_SPLIT_BIN("/usr/") ":" PATH_SPLIT_BIN("/")
+
+const char* default_PATH(void);
+
+static inline const char* default_user_PATH(void) {
+#ifdef DEFAULT_USER_PATH
+        return DEFAULT_USER_PATH;
 #else
-#  define PATH_SBIN_BIN(x) PATH_NORMAL_SBIN_BIN(x)
-#  define PATH_SBIN_BIN_NULSTR(x) PATH_NORMAL_SBIN_BIN_NULSTR(x)
+        return default_PATH();
 #endif
-
-#define DEFAULT_PATH PATH_SBIN_BIN("/usr/local/") ":" PATH_SBIN_BIN("/usr/")
-#define DEFAULT_PATH_NULSTR PATH_SBIN_BIN_NULSTR("/usr/local/") PATH_SBIN_BIN_NULSTR("/usr/")
-#define DEFAULT_PATH_COMPAT PATH_SPLIT_SBIN_BIN("/usr/local/") ":" PATH_SPLIT_SBIN_BIN("/usr/") ":" PATH_SPLIT_SBIN_BIN("/")
-
-#ifndef DEFAULT_USER_PATH
-#  define DEFAULT_USER_PATH DEFAULT_PATH
-#endif
+}
 
 static inline bool is_path(const char *p) {
         if (!p) /* A NULL pointer is definitely not a path */
@@ -68,13 +67,18 @@ static inline bool path_equal_filename(const char *a, const char *b) {
         return path_compare_filename(a, b) == 0;
 }
 
+int path_equal_or_inode_same_full(const char *a, const char *b, int flags);
 static inline bool path_equal_or_inode_same(const char *a, const char *b, int flags) {
-        return path_equal(a, b) || inode_same(a, b, flags) > 0;
+        return path_equal_or_inode_same_full(a, b, flags) > 0;
 }
 
 char* path_extend_internal(char **x, ...);
 #define path_extend(x, ...) path_extend_internal(x, __VA_ARGS__, POINTER_MAX)
 #define path_join(...) path_extend_internal(NULL, __VA_ARGS__, POINTER_MAX)
+
+static inline char* skip_leading_slash(const char *p) {
+        return skip_leading_chars(p, "/");
+}
 
 typedef enum PathSimplifyFlags {
         PATH_SIMPLIFY_KEEP_TRAILING_SLASH = 1 << 0,
@@ -99,10 +103,6 @@ static inline int path_simplify_alloc(const char *path, char **ret) {
 
         *ret = path_simplify(t);
         return 0;
-}
-
-static inline bool path_equal_ptr(const char *a, const char *b) {
-        return !!a == !!b && (!a || path_equal(a, b));
 }
 
 /* Note: the search terminates on the first NULL item. */
@@ -156,7 +156,7 @@ int fsck_exists_for_fstype(const char *fstype);
                 char *_p, *_n;                                          \
                 size_t _l;                                              \
                 while (_path[0] == '/' && _path[1] == '/')              \
-                        _path ++;                                       \
+                        _path++;                                        \
                 if (isempty(_root))                                     \
                         _ret = _path;                                   \
                 else {                                                  \
@@ -200,6 +200,8 @@ bool valid_device_node_path(const char *path);
 bool valid_device_allow_pattern(const char *path);
 
 bool dot_or_dot_dot(const char *path);
+
+bool path_implies_directory(const char *path);
 
 static inline const char *skip_dev_prefix(const char *p) {
         const char *e;

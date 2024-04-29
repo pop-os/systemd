@@ -28,7 +28,8 @@ int dns_server_new(
                 const union in_addr_union *in_addr,
                 uint16_t port,
                 int ifindex,
-                const char *server_name) {
+                const char *server_name,
+                ResolveConfigSource config_source) {
 
         _cleanup_free_ char *name = NULL;
         DnsServer *s;
@@ -67,6 +68,7 @@ int dns_server_new(
                 .port = port,
                 .ifindex = ifindex,
                 .server_name = TAKE_PTR(name),
+                .config_source = config_source,
         };
 
         dns_server_reset_features(s);
@@ -751,10 +753,10 @@ size_t dns_server_get_mtu(DnsServer *s) {
 static void dns_server_hash_func(const DnsServer *s, struct siphash *state) {
         assert(s);
 
-        siphash24_compress(&s->family, sizeof(s->family), state);
-        siphash24_compress(&s->address, FAMILY_ADDRESS_SIZE(s->family), state);
-        siphash24_compress(&s->port, sizeof(s->port), state);
-        siphash24_compress(&s->ifindex, sizeof(s->ifindex), state);
+        siphash24_compress_typesafe(s->family, state);
+        in_addr_hash_func(&s->address, s->family, state);
+        siphash24_compress_typesafe(s->port, state);
+        siphash24_compress_typesafe(s->ifindex, state);
         siphash24_compress_string(s->server_name, state);
 }
 
@@ -792,6 +794,17 @@ void dns_server_unlink_all(DnsServer *first) {
         dns_server_unlink(first);
 
         dns_server_unlink_all(next);
+}
+
+void dns_server_unlink_on_reload(DnsServer *server) {
+        while (server) {
+                DnsServer *next = server->servers_next;
+
+                if (server->config_source == RESOLVE_CONFIG_SOURCE_FILE)
+                        dns_server_unlink(server);
+
+                server = next;
+        }
 }
 
 bool dns_server_unlink_marked(DnsServer *server) {

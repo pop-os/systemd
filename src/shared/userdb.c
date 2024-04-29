@@ -199,7 +199,7 @@ static int userdb_on_query_reply(
 
                 assert_se(!iterator->found_user);
 
-                r = json_dispatch(parameters, dispatch_table, 0, &user_data);
+                r = json_dispatch(parameters, dispatch_table, JSON_ALLOW_EXTENSIONS, &user_data);
                 if (r < 0)
                         goto finish;
 
@@ -256,7 +256,7 @@ static int userdb_on_query_reply(
 
                 assert_se(!iterator->found_group);
 
-                r = json_dispatch(parameters, dispatch_table, 0, &group_data);
+                r = json_dispatch(parameters, dispatch_table, JSON_ALLOW_EXTENSIONS, &group_data);
                 if (r < 0)
                         goto finish;
 
@@ -309,7 +309,7 @@ static int userdb_on_query_reply(
                 assert(!iterator->found_user_name);
                 assert(!iterator->found_group_name);
 
-                r = json_dispatch(parameters, dispatch_table, 0, &membership_data);
+                r = json_dispatch(parameters, dispatch_table, JSON_ALLOW_EXTENSIONS, &membership_data);
                 if (r < 0)
                         goto finish;
 
@@ -1455,7 +1455,9 @@ int userdb_block_nss_systemd(int b) {
                 return 0;
         }
 
-        call = (int (*)(bool b)) dlsym(dl, "_nss_systemd_block");
+        log_debug("Loaded '%s' via dlopen()", LIBDIR "/libnss_systemd.so.2");
+
+        call = dlsym(dl, "_nss_systemd_block");
         if (!call)
                 /* If the file is installed but lacks the symbol we expect, things are weird, let's complain */
                 return log_debug_errno(SYNTHETIC_ERRNO(ELIBBAD),

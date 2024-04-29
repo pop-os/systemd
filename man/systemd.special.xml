@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.special" xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -83,6 +83,7 @@
     <filename>sockets.target</filename>,
     <filename>soft-reboot.target</filename>,
     <filename>sound.target</filename>,
+    <filename>ssh-access.target</filename>,
     <filename>storage-target-mode.target</filename>,
     <filename>suspend.target</filename>,
     <filename>swap.target</filename>,
@@ -92,12 +93,14 @@
     <filename>time-set.target</filename>,
     <filename>time-sync.target</filename>,
     <filename>timers.target</filename>,
+    <filename>tpm2.target</filename>,
     <filename>umount.target</filename>,
     <filename>usb-gadget.target</filename>,
     <!-- slices --><filename>-.slice</filename>,
+    <filename>capsule.slice</filename>,
+    <filename>machine.slice</filename>,
     <filename>system.slice</filename>,
     <filename>user.slice</filename>,
-    <filename>machine.slice</filename>,
     <!-- the rest --><filename>-.mount</filename>,
     <filename>dbus.service</filename>,
     <filename>dbus.socket</filename>,
@@ -948,6 +951,24 @@
             <xi:include href="version-info.xml" xpointer="v242"/>
           </listitem>
         </varlistentry>
+        <varlistentry>
+          <term><filename>tpm2.target</filename></term>
+          <listitem>
+            <para>This target is started automatically if a TPM2 device is discovered, either by the OS or by
+            the firmware. It acts as synchronization point for services that require TPM2 device access. The
+            target unit is enqueued by
+            <citerefentry><refentrytitle>systemd-tpm2-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+            if it detects that the firmware has discovered a TPM2 device but the OS kernel has not activated
+            a driver for it yet. It is also pulled in whenever
+            <citerefentry><refentrytitle>systemd-udevd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+            discovers a TPM2 device. The target unit is ordered after the <filename>/dev/tpmrm0</filename>
+            device node, so that it only becomes active once the TPM2 device is actually accessible. Early
+            boot programs that intend to access the TPM2 device should hence order themselves after this
+            target unit, but not pull it in.</para>
+
+            <xi:include href="version-info.xml" xpointer="v256"/>
+          </listitem>
+        </varlistentry>
       </variablelist>
     </refsect2>
 
@@ -1154,6 +1175,19 @@
           </listitem>
         </varlistentry>
         <varlistentry>
+          <term><filename>ssh-access.target</filename></term>
+          <listitem>
+            <para>Service and socket units that provide remote SSH secure shell access to the local system
+            should pull in this unit and order themselves before this unit. It's supposed to act as a
+            milestone indicating if and when SSH access into the system is available. It should only become
+            active when an SSH port is bound for remote clients (i.e. if SSH is used as a local privilege
+            escalation mechanism, it should <emphasis>not</emphasis> involve this target unit), regardless of
+            the protocol choices, i.e. regardless if IPv4, IPv6 or <constant>AF_VSOCK</constant> is
+            used.</para>
+            <xi:include href="version-info.xml" xpointer="v256"/>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
           <term><filename>time-set.target</filename></term>
           <listitem>
             <para>Services responsible for setting the system clock (<constant>CLOCK_REALTIME</constant>)
@@ -1272,18 +1306,39 @@
         <varlistentry>
           <term><filename>-.slice</filename></term>
           <listitem>
-            <para>The root slice is the root of the slice hierarchy. It usually does not contain
-            units directly, but may be used to set defaults for the whole tree.</para>
+            <para>The root slice is the root of the slice hierarchy. It usually does not contain units
+            directly, but may be used to set defaults for the whole tree.</para>
 
             <xi:include href="version-info.xml" xpointer="v206"/>
           </listitem>
         </varlistentry>
 
         <varlistentry>
+          <term><filename>machine.slice</filename></term>
+          <listitem>
+            <para>By default, all virtual machines and containers registered with
+            <command>systemd-machined</command> are found in this slice. This is pulled in by
+            <filename>systemd-machined.service</filename>.</para>
+
+            <xi:include href="version-info.xml" xpointer="v206"/>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><filename>capsule.slice</filename></term>
+          <listitem>
+            <para>By default, all capsules encapsulated in <filename>capsule@.service</filename> are found in
+            this slice.</para>
+
+            <xi:include href="version-info.xml" xpointer="v255"/>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><filename>system.slice</filename></term>
           <listitem>
-            <para>By default, all system services started by
-            <command>systemd</command> are found in this slice.</para>
+            <para>By default, all system services started by <command>systemd</command> are found in this
+            slice.</para>
 
             <xi:include href="version-info.xml" xpointer="v206"/>
           </listitem>
@@ -1301,17 +1356,6 @@
           </listitem>
         </varlistentry>
 
-        <varlistentry>
-          <term><filename>machine.slice</filename></term>
-          <listitem>
-            <para>By default, all virtual machines and containers
-            registered with <command>systemd-machined</command> are
-            found in this slice. This is pulled in by
-            <filename>systemd-machined.service</filename>.</para>
-
-            <xi:include href="version-info.xml" xpointer="v206"/>
-          </listitem>
-        </varlistentry>
       </variablelist>
     </refsect2>
   </refsect1>
@@ -1329,12 +1373,27 @@
         <varlistentry>
           <term><filename>default.target</filename></term>
           <listitem>
-            <para>This is the main target of the user session, started by default. Various services that
-            compose the normal user session should be pulled into this target. In this regard,
-            <filename>default.target</filename> is similar to <filename>multi-user.target</filename> in the
-            system instance, but it is a real unit, not an alias.</para>
+            <para>This is the main target of the user service manager, started by default when the service
+            manager is invoked. Various services that compose the normal user session should be pulled into
+            this target. In this regard, <filename>default.target</filename> is similar to
+            <filename>multi-user.target</filename> in the system instance, but it is a real unit, not an
+            alias.</para>
 
             <xi:include href="version-info.xml" xpointer="v242"/>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+
+      <variablelist>
+        <varlistentry>
+          <term><filename>capsule@.target</filename></term>
+          <listitem>
+            <para>This is the main target of capsule service managers, started by default, instantiated with
+            the capsule name. This may be used to define different sets of units that are started for
+            different capsules via generic unit definitions. For details about capsules see
+            <citerefentry><refentrytitle>capsule@.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+            <xi:include href="version-info.xml" xpointer="v255"/>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -1497,17 +1556,17 @@ PartOf=graphical-session.target
 
   <refsect1>
       <title>See Also</title>
-      <para>
-        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>bootup</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>user@.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-      </para>
+      <para><simplelist type="inline">
+        <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>bootup</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>user@.service</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      </simplelist></para>
   </refsect1>
 
 </refentry>

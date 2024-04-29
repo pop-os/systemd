@@ -9,9 +9,12 @@
 #include "hexdecoct.h"
 #include "id128-util.h"
 #include "io-util.h"
+#include "namespace-util.h"
+#include "process-util.h"
 #include "sha256.h"
 #include "stdio-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "sync-util.h"
 #include "virt.h"
 
@@ -138,7 +141,7 @@ int id128_read_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t *ret) {
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
         assert(path);
 
-        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
+        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY);
         if (fd < 0)
                 return fd;
 
@@ -184,7 +187,7 @@ int id128_write_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t id) {
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
         assert(path);
 
-        fd = xopenat(dir_fd, path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, /* xopen_flags = */ 0, 0444);
+        fd = xopenat_full(dir_fd, path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, /* xopen_flags = */ 0, 0444);
         if (fd < 0)
                 return fd;
 
@@ -192,11 +195,11 @@ int id128_write_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t id) {
 }
 
 void id128_hash_func(const sd_id128_t *p, struct siphash *state) {
-        siphash24_compress(p, sizeof(sd_id128_t), state);
+        siphash24_compress_typesafe(*p, state);
 }
 
 int id128_compare_func(const sd_id128_t *a, const sd_id128_t *b) {
-        return memcmp(a, b, 16);
+        return memcmp(a, b, sizeof(sd_id128_t));
 }
 
 sd_id128_t id128_make_v4_uuid(sd_id128_t id) {
@@ -231,11 +234,15 @@ int id128_get_product(sd_id128_t *ret) {
                     * of the host */
                 return -ENOENT;
 
-        r = id128_read("/sys/class/dmi/id/product_uuid", ID128_FORMAT_UUID, &uuid);
-        if (r == -ENOENT)
-                r = id128_read("/proc/device-tree/vm,uuid", ID128_FORMAT_UUID, &uuid);
-        if (r == -ENOENT)
-                r = id128_read("/sys/hypervisor/uuid", ID128_FORMAT_UUID, &uuid);
+        FOREACH_STRING(i,
+                       "/sys/class/dmi/id/product_uuid", /* KVM */
+                       "/proc/device-tree/vm,uuid",      /* Device tree */
+                       "/sys/hypervisor/uuid") {         /* Xen */
+
+                r = id128_read(i, ID128_FORMAT_UUID, &uuid);
+                if (r != -ENOENT)
+                        break;
+        }
         if (r < 0)
                 return r;
 
@@ -262,4 +269,65 @@ sd_id128_t id128_digest(const void *data, size_t size) {
         memcpy(id.bytes, sha256_direct(data, size, h), sizeof(id.bytes));
 
         return id128_make_v4_uuid(id);
+}
+
+int id128_get_boot_for_machine(const char *machine, sd_id128_t *ret) {
+        _cleanup_close_ int pidnsfd = -EBADF, mntnsfd = -EBADF, rootfd = -EBADF;
+        _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
+        pid_t pid, child;
+        sd_id128_t id;
+        ssize_t k;
+        int r;
+
+        assert(ret);
+
+        if (isempty(machine))
+                return sd_id128_get_boot(ret);
+
+        r = container_get_leader(machine, &pid);
+        if (r < 0)
+                return r;
+
+        r = namespace_open(pid, &pidnsfd, &mntnsfd, /* ret_netns_fd = */ NULL, /* ret_userns_fd = */ NULL, &rootfd);
+        if (r < 0)
+                return r;
+
+        if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
+                return -errno;
+
+        r = namespace_fork("(sd-bootidns)", "(sd-bootid)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
+                           pidnsfd, mntnsfd, -1, -1, rootfd, &child);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                pair[0] = safe_close(pair[0]);
+
+                r = id128_get_boot(&id);
+                if (r < 0)
+                        _exit(EXIT_FAILURE);
+
+                k = send(pair[1], &id, sizeof(id), MSG_NOSIGNAL);
+                if (k != sizeof(id))
+                        _exit(EXIT_FAILURE);
+
+                _exit(EXIT_SUCCESS);
+        }
+
+        pair[1] = safe_close(pair[1]);
+
+        r = wait_for_terminate_and_check("(sd-bootidns)", child, 0);
+        if (r < 0)
+                return r;
+        if (r != EXIT_SUCCESS)
+                return -EIO;
+
+        k = recv(pair[0], &id, sizeof(id), 0);
+        if (k != sizeof(id))
+                return -EIO;
+
+        if (sd_id128_is_null(id))
+                return -EIO;
+
+        *ret = id;
+        return 0;
 }

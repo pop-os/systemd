@@ -11,6 +11,7 @@
 #include "af-list.h"
 #include "alloc-util.h"
 #include "bus-polkit.h"
+#include "daemon-util.h"
 #include "dirent-util.h"
 #include "dns-domain.h"
 #include "event-util.h"
@@ -388,7 +389,7 @@ static char* fallback_hostname(void) {
 
 static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, char **mdns_hostname) {
         _cleanup_free_ char *h = NULL, *n = NULL, *m = NULL;
-        char label[DNS_LABEL_MAX];
+        char label[DNS_LABEL_MAX+1];
         const char *p;
         int r;
 
@@ -565,6 +566,73 @@ static int manager_memory_pressure_listen(Manager *m) {
         return 0;
 }
 
+static void manager_set_defaults(Manager *m) {
+        assert(m);
+
+        m->llmnr_support = DEFAULT_LLMNR_MODE;
+        m->mdns_support = DEFAULT_MDNS_MODE;
+        m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+        m->dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE;
+        m->enable_cache = DNS_CACHE_MODE_YES;
+        m->dns_stub_listener_mode = DNS_STUB_LISTENER_YES;
+        m->read_etc_hosts = true;
+        m->resolve_unicast_single_label = false;
+        m->cache_from_localhost = false;
+        m->stale_retention_usec = 0;
+}
+
+static int manager_dispatch_reload_signal(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        (void) notify_reloading();
+
+        manager_set_defaults(m);
+
+        dns_server_unlink_on_reload(m->dns_servers);
+        dns_server_unlink_on_reload(m->fallback_dns_servers);
+        m->dns_extra_stub_listeners = ordered_set_free(m->dns_extra_stub_listeners);
+        dnssd_service_clear_on_reload(m->dnssd_services);
+        m->unicast_scope = dns_scope_free(m->unicast_scope);
+
+        dns_trust_anchor_flush(&m->trust_anchor);
+
+        r = dns_trust_anchor_load(&m->trust_anchor);
+        if (r < 0)
+                return r;
+
+        r = manager_parse_config_file(m);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse config file on reload: %m");
+        else
+                log_info("Config file reloaded.");
+
+        r = dnssd_load(m);
+        if (r < 0)
+                log_warning_errno(r, "Failed to load DNS-SD configuration files: %m");
+
+        /* The default scope configuration is influenced by the manager's configuration (modes, etc.), so
+         * recreate it on reload. */
+        r = dns_scope_new(m, &m->unicast_scope, NULL, DNS_PROTOCOL_DNS, AF_UNSPEC);
+        if (r < 0)
+                return r;
+
+        /* The configuration has changed, so reload the per-interface configuration too in order to take
+         * into account any changes (e.g.: enable/disable DNSSEC). */
+        r = on_network_event(/* sd_event_source= */ NULL, -EBADF, /* revents= */ 0, m);
+        if (r < 0)
+                log_warning_errno(r, "Failed to update network information: %m");
+
+        /* We have new configuration, which means potentially new servers, so close all connections and drop
+         * all caches, so that we can start fresh. */
+        (void) dns_stream_disconnect_all(m);
+        manager_flush_caches(m, LOG_INFO);
+        manager_verify_all(m);
+
+        (void) sd_notify(/* unset= */ false, NOTIFY_READY);
+        return 0;
+}
+
 int manager_new(Manager **ret) {
         _cleanup_(manager_freep) Manager *m = NULL;
         int r;
@@ -584,20 +652,15 @@ int manager_new(Manager **ret) {
                 .mdns_ipv6_fd = -EBADF,
                 .hostname_fd = -EBADF,
 
-                .llmnr_support = DEFAULT_LLMNR_MODE,
-                .mdns_support = DEFAULT_MDNS_MODE,
-                .dnssec_mode = DEFAULT_DNSSEC_MODE,
-                .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
-                .enable_cache = DNS_CACHE_MODE_YES,
-                .dns_stub_listener_mode = DNS_STUB_LISTENER_YES,
                 .read_resolv_conf = true,
                 .need_builtin_fallbacks = true,
                 .etc_hosts_last = USEC_INFINITY,
-                .read_etc_hosts = true,
 
                 .sigrtmin18_info.memory_pressure_handler = manager_memory_pressure,
                 .sigrtmin18_info.memory_pressure_userdata = m,
         };
+
+        manager_set_defaults(m);
 
         r = dns_trust_anchor_load(&m->trust_anchor);
         if (r < 0)
@@ -619,6 +682,7 @@ int manager_new(Manager **ret) {
 
         (void) sd_event_add_signal(m->event, NULL, SIGTERM, NULL,  NULL);
         (void) sd_event_add_signal(m->event, NULL, SIGINT, NULL, NULL);
+        (void) sd_event_add_signal(m->event, NULL, SIGHUP | SD_EVENT_SIGNAL_PROCMASK, manager_dispatch_reload_signal, m);
 
         (void) sd_event_set_watchdog(m->event, true);
 
@@ -731,7 +795,7 @@ Manager *manager_free(Manager *m) {
 
         ordered_set_free(m->dns_extra_stub_listeners);
 
-        bus_verify_polkit_async_registry_free(m->polkit_registry);
+        hashmap_free(m->polkit_registry);
 
         sd_bus_flush_close_unref(m->bus);
 
@@ -894,7 +958,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         return 1;
 }
 
-static int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
+int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
         usec_t end;
         int r;
 
@@ -1098,17 +1162,7 @@ static int dns_question_to_json(DnsQuestion *q, JsonVariant **ret) {
         return 0;
 }
 
-int manager_monitor_send(
-                Manager *m,
-                int state,
-                int rcode,
-                int error,
-                DnsQuestion *question_idna,
-                DnsQuestion *question_utf8,
-                DnsPacket *question_bypass,
-                DnsQuestion *collected_questions,
-                DnsAnswer *answer) {
-
+int manager_monitor_send(Manager *m, DnsQuery *q) {
         _cleanup_(json_variant_unrefp) JsonVariant *jquestion = NULL, *jcollected_questions = NULL, *janswer = NULL;
         _cleanup_(dns_question_unrefp) DnsQuestion *merged = NULL;
         Varlink *connection;
@@ -1121,14 +1175,14 @@ int manager_monitor_send(
                 return 0;
 
         /* Merge all questions into one */
-        r = dns_question_merge(question_idna, question_utf8, &merged);
+        r = dns_question_merge(q->question_idna, q->question_utf8, &merged);
         if (r < 0)
                 return log_error_errno(r, "Failed to merge UTF8/IDNA questions: %m");
 
-        if (question_bypass) {
+        if (q->question_bypass) {
                 _cleanup_(dns_question_unrefp) DnsQuestion *merged2 = NULL;
 
-                r = dns_question_merge(merged, question_bypass->question, &merged2);
+                r = dns_question_merge(merged, q->question_bypass->question, &merged2);
                 if (r < 0)
                         return log_error_errno(r, "Failed to merge UTF8/IDNA questions and DNS packet question: %m");
 
@@ -1142,11 +1196,11 @@ int manager_monitor_send(
                 return log_error_errno(r, "Failed to convert question to JSON: %m");
 
         /* Generate a JSON array of the questions preceding the current one in the CNAME chain */
-        r = dns_question_to_json(collected_questions, &jcollected_questions);
+        r = dns_question_to_json(q->collected_questions, &jcollected_questions);
         if (r < 0)
                 return log_error_errno(r, "Failed to convert question to JSON: %m");
 
-        DNS_ANSWER_FOREACH_ITEM(rri, answer) {
+        DNS_ANSWER_FOREACH_ITEM(rri, q->answer) {
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
 
                 r = dns_resource_record_to_json(rri->rr, &v);
@@ -1169,12 +1223,28 @@ int manager_monitor_send(
 
         SET_FOREACH(connection, m->varlink_subscription) {
                 r = varlink_notifyb(connection,
-                                    JSON_BUILD_OBJECT(JSON_BUILD_PAIR("state", JSON_BUILD_STRING(dns_transaction_state_to_string(state))),
-                                                      JSON_BUILD_PAIR_CONDITION(state == DNS_TRANSACTION_RCODE_FAILURE, "rcode", JSON_BUILD_INTEGER(rcode)),
-                                                      JSON_BUILD_PAIR_CONDITION(state == DNS_TRANSACTION_ERRNO, "errno", JSON_BUILD_INTEGER(error)),
+                                    JSON_BUILD_OBJECT(JSON_BUILD_PAIR("state", JSON_BUILD_STRING(dns_transaction_state_to_string(q->state))),
+                                                      JSON_BUILD_PAIR_CONDITION(q->state == DNS_TRANSACTION_DNSSEC_FAILED,
+                                                                                "result", JSON_BUILD_STRING(dnssec_result_to_string(q->answer_dnssec_result))),
+                                                      JSON_BUILD_PAIR_CONDITION(q->state == DNS_TRANSACTION_RCODE_FAILURE,
+                                                                                "rcode", JSON_BUILD_INTEGER(q->answer_rcode)),
+                                                      JSON_BUILD_PAIR_CONDITION(q->state == DNS_TRANSACTION_ERRNO,
+                                                                                "errno", JSON_BUILD_INTEGER(q->answer_errno)),
+                                                      JSON_BUILD_PAIR_CONDITION(IN_SET(q->state,
+                                                                                       DNS_TRANSACTION_DNSSEC_FAILED,
+                                                                                       DNS_TRANSACTION_RCODE_FAILURE) &&
+                                                                                q->answer_ede_rcode >= 0,
+                                                                                "extendedDNSErrorCode", JSON_BUILD_INTEGER(q->answer_ede_rcode)),
+                                                      JSON_BUILD_PAIR_CONDITION(IN_SET(q->state,
+                                                                                       DNS_TRANSACTION_DNSSEC_FAILED,
+                                                                                       DNS_TRANSACTION_RCODE_FAILURE) &&
+                                                                                q->answer_ede_rcode >= 0 && !isempty(q->answer_ede_msg),
+                                                                                "extendedDNSErrorMessage", JSON_BUILD_STRING(q->answer_ede_msg)),
                                                       JSON_BUILD_PAIR("question", JSON_BUILD_VARIANT(jquestion)),
-                                                      JSON_BUILD_PAIR_CONDITION(jcollected_questions, "collectedQuestions", JSON_BUILD_VARIANT(jcollected_questions)),
-                                                      JSON_BUILD_PAIR_CONDITION(janswer, "answer", JSON_BUILD_VARIANT(janswer))));
+                                                      JSON_BUILD_PAIR_CONDITION(jcollected_questions,
+                                                                                "collectedQuestions", JSON_BUILD_VARIANT(jcollected_questions)),
+                                                      JSON_BUILD_PAIR_CONDITION(janswer,
+                                                                                "answer", JSON_BUILD_VARIANT(janswer))));
                 if (r < 0)
                         log_debug_errno(r, "Failed to send monitor event, ignoring: %m");
         }
@@ -1279,7 +1349,7 @@ void manager_refresh_rrs(Manager *m) {
         if (m->mdns_support == RESOLVE_SUPPORT_YES)
                 HASHMAP_FOREACH(s, m->dnssd_services)
                         if (dnssd_update_rrs(s) < 0)
-                                log_warning("Failed to refresh DNS-SD service '%s'", s->name);
+                                log_warning("Failed to refresh DNS-SD service '%s'", s->id);
 
         HASHMAP_FOREACH(l, m->links)
                 link_add_rrs(l, false);
@@ -1708,7 +1778,7 @@ bool manager_next_dnssd_names(Manager *m) {
 
                 r = manager_next_random_name(s->name_template, &new_name);
                 if (r < 0) {
-                        log_warning_errno(r, "Failed to get new name for service '%s': %m", s->name);
+                        log_warning_errno(r, "Failed to get new name for service '%s': %m", s->id);
                         continue;
                 }
 

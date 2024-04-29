@@ -1,23 +1,34 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+/* Make sure the net/if.h header is included before any linux/ one */
 #include <net/if.h>
 #include <linux/if.h>
+#include <linux/nl80211.h>
 #include <linux/veth.h>
 #include <sys/file.h>
+#include <sys/mount.h>
 
 #include "sd-device.h"
 #include "sd-id128.h"
 #include "sd-netlink.h"
 
 #include "alloc-util.h"
+#include "device-private.h"
+#include "device-util.h"
 #include "ether-addr-util.h"
+#include "fd-util.h"
 #include "hexdecoct.h"
 #include "lock-util.h"
 #include "missing_network.h"
+#include "mkdir.h"
+#include "mount-util.h"
+#include "namespace-util.h"
 #include "netif-naming-scheme.h"
+#include "netif-util.h"
 #include "netlink-util.h"
 #include "nspawn-network.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "siphash24.h"
 #include "socket-netlink.h"
 #include "socket-util.h"
@@ -31,7 +42,6 @@
 #define VETH_EXTRA_HOST_HASH_KEY SD_ID128_MAKE(48,c7,f6,b7,ea,9d,4c,9e,b7,28,d4,de,91,d5,bf,66)
 #define VETH_EXTRA_CONTAINER_HASH_KEY SD_ID128_MAKE(af,50,17,61,ce,f9,4d,35,84,0d,2b,20,54,be,ce,59)
 #define MACVLAN_HASH_KEY SD_ID128_MAKE(00,13,6d,bc,66,83,44,81,bb,0c,f9,51,1f,24,a6,6f)
-#define SHORTEN_IFNAME_HASH_KEY SD_ID128_MAKE(e1,90,a4,04,a8,ef,4b,51,8c,cc,c3,3a,9f,11,fc,a2)
 
 static int remove_one_link(sd_netlink *rtnl, const char *name) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
@@ -55,51 +65,6 @@ static int remove_one_link(sd_netlink *rtnl, const char *name) {
                 return log_error_errno(r, "Failed to remove interface %s: %m", name);
 
         return 1;
-}
-
-static int generate_mac(
-                const char *machine_name,
-                struct ether_addr *mac,
-                sd_id128_t hash_key,
-                uint64_t idx) {
-
-        uint64_t result;
-        size_t l, sz;
-        uint8_t *v, *i;
-        int r;
-
-        l = strlen(machine_name);
-        sz = sizeof(sd_id128_t) + l;
-        if (idx > 0)
-                sz += sizeof(idx);
-
-        v = newa(uint8_t, sz);
-
-        /* fetch some persistent data unique to the host */
-        r = sd_id128_get_machine((sd_id128_t*) v);
-        if (r < 0)
-                return r;
-
-        /* combine with some data unique (on this host) to this
-         * container instance */
-        i = mempcpy(v + sizeof(sd_id128_t), machine_name, l);
-        if (idx > 0) {
-                idx = htole64(idx);
-                memcpy(i, &idx, sizeof(idx));
-        }
-
-        /* Let's hash the host machine ID plus the container name. We
-         * use a fixed, but originally randomly created hash key here. */
-        result = htole64(siphash24(v, sz, hash_key.bytes));
-
-        assert_cc(ETH_ALEN <= sizeof(result));
-        memcpy(mac->ether_addr_octet, &result, ETH_ALEN);
-
-        /* see eth_random_addr in the kernel */
-        mac->ether_addr_octet[0] &= 0xfe;        /* clear multicast bit */
-        mac->ether_addr_octet[0] |= 0x02;        /* set local assignment bit (IEEE802) */
-
-        return 0;
 }
 
 static int set_alternative_ifname(sd_netlink *rtnl, const char *ifname, const char *altifname) {
@@ -200,39 +165,6 @@ static int add_veth(
         return 0;
 }
 
-static int shorten_ifname(char *ifname) {
-        char new_ifname[IFNAMSIZ];
-
-        assert(ifname);
-
-        if (strlen(ifname) < IFNAMSIZ) /* Name is short enough */
-                return 0;
-
-        if (naming_scheme_has(NAMING_NSPAWN_LONG_HASH)) {
-                uint64_t h;
-
-                /* Calculate 64-bit hash value */
-                h = siphash24(ifname, strlen(ifname), SHORTEN_IFNAME_HASH_KEY.bytes);
-
-                /* Set the final four bytes (i.e. 32-bit) to the lower 24bit of the hash, encoded in url-safe base64 */
-                memcpy(new_ifname, ifname, IFNAMSIZ - 5);
-                new_ifname[IFNAMSIZ - 5] = urlsafe_base64char(h >> 18);
-                new_ifname[IFNAMSIZ - 4] = urlsafe_base64char(h >> 12);
-                new_ifname[IFNAMSIZ - 3] = urlsafe_base64char(h >> 6);
-                new_ifname[IFNAMSIZ - 2] = urlsafe_base64char(h);
-        } else
-                /* On old nspawn versions we just truncated the name, provide compatibility */
-                memcpy(new_ifname, ifname, IFNAMSIZ-1);
-
-        new_ifname[IFNAMSIZ - 1] = 0;
-
-        /* Log the incident to make it more discoverable */
-        log_warning("Network interface name '%s' has been changed to '%s' to fit length constraints.", ifname, new_ifname);
-
-        strcpy(ifname, new_ifname);
-        return 1;
-}
-
 int setup_veth(const char *machine_name,
                pid_t pid,
                char iface_name[IFNAMSIZ],
@@ -252,18 +184,18 @@ int setup_veth(const char *machine_name,
         /* Use two different interface name prefixes depending whether
          * we are in bridge mode or not. */
         n = strjoina(bridge ? "vb-" : "ve-", machine_name);
-        r = shorten_ifname(n);
+        r = net_shorten_ifname(n, /* check_naming_scheme= */ true);
         if (r > 0)
                 a = strjoina(bridge ? "vb-" : "ve-", machine_name);
 
         if (ether_addr_is_null(provided_mac)){
-                r = generate_mac(machine_name, &mac_container, CONTAINER_HASH_KEY, 0);
+                r = net_generate_mac(machine_name, &mac_container, CONTAINER_HASH_KEY, 0);
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate predictable MAC address for container side: %m");
         } else
                 mac_container = *provided_mac;
 
-        r = generate_mac(machine_name, &mac_host, HOST_HASH_KEY, 0);
+        r = net_generate_mac(machine_name, &mac_host, HOST_HASH_KEY, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to generate predictable MAC address for host side: %m");
 
@@ -306,11 +238,11 @@ int setup_veth_extra(
         STRV_FOREACH_PAIR(a, b, pairs) {
                 struct ether_addr mac_host, mac_container;
 
-                r = generate_mac(machine_name, &mac_container, VETH_EXTRA_CONTAINER_HASH_KEY, idx);
+                r = net_generate_mac(machine_name, &mac_container, VETH_EXTRA_CONTAINER_HASH_KEY, idx);
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate predictable MAC address for container side of extra veth link: %m");
 
-                r = generate_mac(machine_name, &mac_host, VETH_EXTRA_HOST_HASH_KEY, idx);
+                r = net_generate_mac(machine_name, &mac_host, VETH_EXTRA_HOST_HASH_KEY, idx);
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate predictable MAC address for host side of extra veth link: %m");
 
@@ -480,7 +412,7 @@ static int test_network_interface_initialized(const char *name) {
         if (r < 0)
                 return log_error_errno(r, "Failed to get device %s: %m", name);
 
-        r = sd_device_get_is_initialized(d);
+        r = device_is_processed(d);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine whether interface %s is initialized: %m", name);
         if (r == 0)
@@ -505,42 +437,302 @@ int test_network_interfaces_initialized(char **iface_pairs) {
         return 0;
 }
 
-int move_network_interfaces(int netns_fd, char **iface_pairs) {
+int resolve_network_interface_names(char **iface_pairs) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         int r;
+
+        /* Due to a bug in kernel fixed by 8e15aee621618a3ee3abecaf1fd8c1428098b7ef (v6.6, backported to
+         * 6.1.60 and 6.5.9), an interface with alternative names cannot be resolved by the alternative name
+         * if the interface is moved to another network namespace. Hence, we need to adjust the provided
+         * names before moving interfaces to container namespace. */
+
+        STRV_FOREACH_PAIR(from, to, iface_pairs) {
+                _cleanup_free_ char *name = NULL;
+                _cleanup_strv_free_ char **altnames = NULL;
+
+                r = rtnl_resolve_ifname_full(&rtnl, _RESOLVE_IFNAME_ALL, *from, &name, &altnames);
+                if (r < 0)
+                        return r;
+
+                /* Always use the resolved name for 'from'. */
+                free_and_replace(*from, name);
+
+                /* If the name 'to' is assigned as an alternative name, we cannot rename the interface.
+                 * Hence, use the assigned interface name (including the alternative names) as is, and
+                 * use the resolved name for 'to'. */
+                if (strv_contains(altnames, *to)) {
+                        r = free_and_strdup_warn(to, *from);
+                        if (r < 0)
+                                return r;
+                }
+        }
+        return 0;
+}
+
+static int netns_child_begin(int netns_fd, int *ret_original_netns_fd) {
+        _cleanup_close_ int original_netns_fd = -EBADF;
+        int r;
+
+        assert(netns_fd >= 0);
+
+        if (ret_original_netns_fd) {
+                r = namespace_open(0,
+                                   /* ret_pidns_fd = */ NULL,
+                                   /* ret_mntns_fd = */ NULL,
+                                   &original_netns_fd,
+                                   /* ret_userns_fd = */ NULL,
+                                   /* ret_root_fd = */ NULL);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to open original network namespace: %m");
+        }
+
+        r = namespace_enter(/* pidns_fd = */ -EBADF,
+                            /* mntns_fd = */ -EBADF,
+                            netns_fd,
+                            /* userns_fd = */ -EBADF,
+                            /* root_fd = */ -EBADF);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enter child network namespace: %m");
+
+        r = umount_recursive("/sys/", /* flags = */ 0);
+        if (r < 0)
+                log_debug_errno(r, "Failed to unmount directories below /sys/, ignoring: %m");
+
+        (void) mkdir_p("/sys/", 0755);
+
+        /* Populate new sysfs instance associated with the client netns, to make sd_device usable. */
+        r = mount_nofollow_verbose(LOG_ERR, "sysfs", "/sys/", "sysfs",
+                                   MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, /* opts = */ NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to mount sysfs on /sys/: %m");
+
+        /* udev_avaliable() might be called previously and the result may be cached.
+         * Now, we (re-)mount sysfs. Hence, we need to reset the cache. */
+        reset_cached_udev_availability();
+
+        if (ret_original_netns_fd)
+                *ret_original_netns_fd = TAKE_FD(original_netns_fd);
+
+        return 0;
+}
+
+static int netns_fork_and_wait(int netns_fd, int *ret_original_netns_fd) {
+        int r;
+
+        assert(netns_fd >= 0);
+
+        r = safe_fork("(sd-netns)", FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_WAIT|FORK_LOG|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to fork process (sd-netns): %m");
+        if (r == 0) {
+                if (netns_child_begin(netns_fd, ret_original_netns_fd) < 0)
+                        _exit(EXIT_FAILURE);
+
+                return 0;
+        }
+
+        if (ret_original_netns_fd)
+                *ret_original_netns_fd = -EBADF;
+
+        return 1;
+}
+
+static int move_wlan_interface_impl(sd_netlink **genl, int netns_fd, sd_device *dev) {
+        _cleanup_(sd_netlink_unrefp) sd_netlink *our_genl = NULL;
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
+        int r;
+
+        assert(netns_fd >= 0);
+        assert(dev);
+
+        if (!genl)
+                genl = &our_genl;
+        if (!*genl) {
+                r = sd_genl_socket_open(genl);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to connect to generic netlink: %m");
+        }
+
+        r = sd_genl_message_new(*genl, NL80211_GENL_NAME, NL80211_CMD_SET_WIPHY_NETNS, &m);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to allocate netlink message: %m");
+
+        uint32_t phy_index;
+        r = device_get_sysattr_u32(dev, "phy80211/index", &phy_index);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to get phy index: %m");
+
+        r = sd_netlink_message_append_u32(m, NL80211_ATTR_WIPHY, phy_index);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to append phy index to netlink message: %m");
+
+        r = sd_netlink_message_append_u32(m, NL80211_ATTR_NETNS_FD, netns_fd);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to append namespace fd to netlink message: %m");
+
+        r = sd_netlink_call(*genl, m, 0, NULL);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to move interface to namespace: %m");
+
+        return 0;
+}
+
+static int move_wlan_interface_one(
+                        sd_netlink **rtnl,
+                        sd_netlink **genl,
+                        int *temp_netns_fd,
+                        int netns_fd,
+                        sd_device *dev,
+                        const char *name) {
+
+        int r;
+
+        assert(rtnl);
+        assert(genl);
+        assert(temp_netns_fd);
+        assert(netns_fd >= 0);
+        assert(dev);
+
+        if (!name)
+                return move_wlan_interface_impl(genl, netns_fd, dev);
+
+        /* The command NL80211_CMD_SET_WIPHY_NETNS takes phy instead of network interface, and does not take
+         * an interface name in the passed network namespace. Hence, we need to move the phy and interface to
+         * a temporary network namespace, rename the interface in it, and move them to the requested netns. */
+
+        if (*temp_netns_fd < 0) {
+                r = netns_acquire();
+                if (r < 0)
+                        return log_error_errno(r, "Failed to acquire new network namespace: %m");
+                *temp_netns_fd = r;
+        }
+
+        r = move_wlan_interface_impl(genl, *temp_netns_fd, dev);
+        if (r < 0)
+                return r;
+
+        const char *sysname;
+        r = sd_device_get_sysname(dev, &sysname);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to get interface name: %m");
+
+        r = netns_fork_and_wait(*temp_netns_fd, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to fork process (nspawn-rename-wlan): %m");
+        if (r == 0) {
+                _cleanup_(sd_device_unrefp) sd_device *temp_dev = NULL;
+
+                r = rtnl_rename_link(NULL, sysname, name);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to rename network interface '%s' to '%s': %m", sysname, name);
+                        goto finalize;
+                }
+
+                r = sd_device_new_from_ifname(&temp_dev, name);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to acquire device '%s': %m", name);
+                        goto finalize;
+                }
+
+                r = move_wlan_interface_impl(NULL, netns_fd, temp_dev);
+
+        finalize:
+                _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
+        }
+
+        return 0;
+}
+
+static int move_network_interface_one(sd_netlink **rtnl, int netns_fd, sd_device *dev, const char *name) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
+        int r;
+
+        assert(rtnl);
+        assert(netns_fd >= 0);
+        assert(dev);
+
+        if (!*rtnl) {
+                r = sd_netlink_open(rtnl);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to connect to rtnetlink: %m");
+        }
+
+        int ifindex;
+        r = sd_device_get_ifindex(dev, &ifindex);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to get ifindex: %m");
+
+        r = sd_rtnl_message_new_link(*rtnl, &m, RTM_SETLINK, ifindex);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to allocate netlink message: %m");
+
+        r = sd_netlink_message_append_u32(m, IFLA_NET_NS_FD, netns_fd);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to append namespace fd to netlink message: %m");
+
+        if (name) {
+                r = sd_netlink_message_append_string(m, IFLA_IFNAME, name);
+                if (r < 0)
+                        return log_device_error_errno(dev, r, "Failed to add netlink interface name: %m");
+        }
+
+        r = sd_netlink_call(*rtnl, m, 0, NULL);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to move interface to namespace: %m");
+
+        return 0;
+}
+
+int move_network_interfaces(int netns_fd, char **iface_pairs) {
+        _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL, *genl = NULL;
+        _cleanup_close_ int temp_netns_fd = -EBADF;
+        int r;
+
+        assert(netns_fd >= 0);
 
         if (strv_isempty(iface_pairs))
                 return 0;
 
-        r = sd_netlink_open(&rtnl);
+        STRV_FOREACH_PAIR(from, to, iface_pairs) {
+                _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
+                const char *name;
+
+                name = streq(*from, *to) ? NULL : *to;
+
+                r = sd_device_new_from_ifname(&dev, *from);
+                if (r < 0)
+                        return log_error_errno(r, "Unknown interface name %s: %m", *from);
+
+                if (device_is_devtype(dev, "wlan"))
+                        r = move_wlan_interface_one(&rtnl, &genl, &temp_netns_fd, netns_fd, dev, name);
+                else
+                        r = move_network_interface_one(&rtnl, netns_fd, dev, name);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
+int move_back_network_interfaces(int child_netns_fd, char **interface_pairs) {
+        _cleanup_close_ int parent_netns_fd = -EBADF;
+        int r;
+
+        assert(child_netns_fd >= 0);
+
+        if (strv_isempty(interface_pairs))
+                return 0;
+
+        r = netns_fork_and_wait(child_netns_fd, &parent_netns_fd);
         if (r < 0)
-                return log_error_errno(r, "Failed to connect to netlink: %m");
+                return r;
+        if (r == 0) {
+                /* Reverse network interfaces pair list so that interfaces get their initial name back.
+                 * This is about ensuring interfaces get their old name back when being moved back. */
+                interface_pairs = strv_reverse(interface_pairs);
 
-        STRV_FOREACH_PAIR(i, b, iface_pairs) {
-                _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *m = NULL;
-                int ifi;
-
-                ifi = rtnl_resolve_interface_or_warn(&rtnl, *i);
-                if (ifi < 0)
-                        return ifi;
-
-                r = sd_rtnl_message_new_link(rtnl, &m, RTM_SETLINK, ifi);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to allocate netlink message: %m");
-
-                r = sd_netlink_message_append_u32(m, IFLA_NET_NS_FD, netns_fd);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to append namespace fd to netlink message: %m");
-
-                if (!streq(*b, *i)) {
-                        r = sd_netlink_message_append_string(m, IFLA_IFNAME, *b);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to add netlink interface name: %m");
-                }
-
-                r = sd_netlink_call(rtnl, m, 0, NULL);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to move interface %s to namespace: %m", *i);
+                r = move_network_interfaces(parent_netns_fd, interface_pairs);
+                _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
         }
 
         return 0;
@@ -568,7 +760,7 @@ int setup_macvlan(const char *machine_name, pid_t pid, char **iface_pairs) {
                 if (ifi < 0)
                         return ifi;
 
-                r = generate_mac(machine_name, &mac, MACVLAN_HASH_KEY, idx++);
+                r = net_generate_mac(machine_name, &mac, MACVLAN_HASH_KEY, idx++);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create MACVLAN MAC address: %m");
 
@@ -584,7 +776,7 @@ int setup_macvlan(const char *machine_name, pid_t pid, char **iface_pairs) {
                 if (!n)
                         return log_oom();
 
-                shortened = shorten_ifname(n);
+                shortened = net_shorten_ifname(n, /* check_naming_scheme= */ true);
 
                 r = sd_netlink_message_append_string(m, IFLA_IFNAME, n);
                 if (r < 0)
@@ -661,7 +853,7 @@ int setup_ipvlan(const char *machine_name, pid_t pid, char **iface_pairs) {
                 if (!n)
                         return log_oom();
 
-                shortened = shorten_ifname(n);
+                shortened = net_shorten_ifname(n, /* check_naming_scheme= */ true);
 
                 r = sd_netlink_message_append_string(m, IFLA_IFNAME, n);
                 if (r < 0)

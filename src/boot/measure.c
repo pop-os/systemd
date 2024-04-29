@@ -30,7 +30,10 @@ static char *arg_sections[_UNIFIED_SECTION_MAX] = {};
 static char **arg_banks = NULL;
 static char *arg_tpm2_device = NULL;
 static char *arg_private_key = NULL;
+static KeySourceType arg_private_key_source_type = OPENSSL_KEY_SOURCE_FILE;
+static char *arg_private_key_source = NULL;
 static char *arg_public_key = NULL;
+static char *arg_certificate = NULL;
 static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO|JSON_FORMAT_OFF;
 static PagerFlags arg_pager_flags = 0;
 static bool arg_current = false;
@@ -40,7 +43,9 @@ static char *arg_append = NULL;
 STATIC_DESTRUCTOR_REGISTER(arg_banks, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_tpm2_device, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_private_key, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_private_key_source, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_public_key, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_certificate, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_phase, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_append, freep);
 
@@ -74,7 +79,11 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --bank=DIGEST       Select TPM bank (SHA1, SHA256, SHA384, SHA512)\n"
                "     --tpm2-device=PATH  Use specified TPM2 device\n"
                "     --private-key=KEY   Private key (PEM) to sign with\n"
+               "     --private-key-source=file|provider:PROVIDER|engine:ENGINE\n"
+               "                         Specify how to use the --private-key=. Allows to use\n"
+               "                         an OpenSSL engine/provider when signing\n"
                "     --public-key=KEY    Public key (PEM) to validate against\n"
+               "     --certificate=PATH  PEM certificate to use when signing with a URI\n"
                "     --json=MODE         Output as JSON\n"
                "  -j                     Same as --json=pretty on tty, --json=short otherwise\n"
                "     --append=PATH       Load specified JSON signature, and append new signature to it\n"
@@ -83,6 +92,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --osrel=PATH        Path to os-release file                %7$s .osrel\n"
                "     --cmdline=PATH      Path to file with kernel command line  %7$s .cmdline\n"
                "     --initrd=PATH       Path to initrd image file              %7$s .initrd\n"
+               "     --ucode=PATH        Path to microcode image file           %7$s .ucode\n"
                "     --splash=PATH       Path to splash bitmap file             %7$s .splash\n"
                "     --dtb=PATH          Path to Devicetree file                %7$s .dtb\n"
                "     --uname=PATH        Path to 'uname -r' file                %7$s .uname\n"
@@ -124,6 +134,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_OSREL,
                 ARG_CMDLINE,
                 ARG_INITRD,
+                ARG_UCODE,
                 ARG_SPLASH,
                 ARG_DTB,
                 ARG_UNAME,
@@ -133,7 +144,9 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PCRPKEY = _ARG_SECTION_LAST,
                 ARG_BANK,
                 ARG_PRIVATE_KEY,
+                ARG_PRIVATE_KEY_SOURCE,
                 ARG_PUBLIC_KEY,
+                ARG_CERTIFICATE,
                 ARG_TPM2_DEVICE,
                 ARG_JSON,
                 ARG_PHASE,
@@ -141,26 +154,29 @@ static int parse_argv(int argc, char *argv[]) {
         };
 
         static const struct option options[] = {
-                { "help",        no_argument,       NULL, 'h'             },
-                { "no-pager",    no_argument,       NULL, ARG_NO_PAGER    },
-                { "version",     no_argument,       NULL, ARG_VERSION     },
-                { "linux",       required_argument, NULL, ARG_LINUX       },
-                { "osrel",       required_argument, NULL, ARG_OSREL       },
-                { "cmdline",     required_argument, NULL, ARG_CMDLINE     },
-                { "initrd",      required_argument, NULL, ARG_INITRD      },
-                { "splash",      required_argument, NULL, ARG_SPLASH      },
-                { "dtb",         required_argument, NULL, ARG_DTB         },
-                { "uname",       required_argument, NULL, ARG_UNAME       },
-                { "sbat",        required_argument, NULL, ARG_SBAT        },
-                { "pcrpkey",     required_argument, NULL, ARG_PCRPKEY     },
-                { "current",     no_argument,       NULL, 'c'             },
-                { "bank",        required_argument, NULL, ARG_BANK        },
-                { "tpm2-device", required_argument, NULL, ARG_TPM2_DEVICE },
-                { "private-key", required_argument, NULL, ARG_PRIVATE_KEY },
-                { "public-key",  required_argument, NULL, ARG_PUBLIC_KEY  },
-                { "json",        required_argument, NULL, ARG_JSON        },
-                { "phase",       required_argument, NULL, ARG_PHASE       },
-                { "append",      required_argument, NULL, ARG_APPEND      },
+                { "help",               no_argument,       NULL, 'h'                    },
+                { "no-pager",           no_argument,       NULL, ARG_NO_PAGER           },
+                { "version",            no_argument,       NULL, ARG_VERSION            },
+                { "linux",              required_argument, NULL, ARG_LINUX              },
+                { "osrel",              required_argument, NULL, ARG_OSREL              },
+                { "cmdline",            required_argument, NULL, ARG_CMDLINE            },
+                { "initrd",             required_argument, NULL, ARG_INITRD             },
+                { "ucode",              required_argument, NULL, ARG_UCODE              },
+                { "splash",             required_argument, NULL, ARG_SPLASH             },
+                { "dtb",                required_argument, NULL, ARG_DTB                },
+                { "uname",              required_argument, NULL, ARG_UNAME              },
+                { "sbat",               required_argument, NULL, ARG_SBAT               },
+                { "pcrpkey",            required_argument, NULL, ARG_PCRPKEY            },
+                { "current",            no_argument,       NULL, 'c'                    },
+                { "bank",               required_argument, NULL, ARG_BANK               },
+                { "tpm2-device",        required_argument, NULL, ARG_TPM2_DEVICE        },
+                { "private-key",        required_argument, NULL, ARG_PRIVATE_KEY        },
+                { "private-key-source", required_argument, NULL, ARG_PRIVATE_KEY_SOURCE },
+                { "public-key",         required_argument, NULL, ARG_PUBLIC_KEY         },
+                { "certificate",        required_argument, NULL, ARG_CERTIFICATE        },
+                { "json",               required_argument, NULL, ARG_JSON               },
+                { "phase",              required_argument, NULL, ARG_PHASE              },
+                { "append",             required_argument, NULL, ARG_APPEND             },
                 {}
         };
 
@@ -213,7 +229,17 @@ static int parse_argv(int argc, char *argv[]) {
                 }
 
                 case ARG_PRIVATE_KEY:
-                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_private_key);
+                        r = free_and_strdup_warn(&arg_private_key, optarg);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_PRIVATE_KEY_SOURCE:
+                        r = parse_openssl_key_source_argument(
+                                        optarg,
+                                        &arg_private_key_source,
+                                        &arg_private_key_source_type);
                         if (r < 0)
                                 return r;
 
@@ -221,6 +247,13 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_PUBLIC_KEY:
                         r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_public_key);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_CERTIFICATE:
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_certificate);
                         if (r < 0)
                                 return r;
 
@@ -281,6 +314,12 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached();
                 }
 
+        if (arg_public_key && arg_certificate)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Both --public-key= and --certificate= specified, refusing.");
+
+        if (arg_private_key_source && !arg_certificate)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "When using --private-key-source=, --certificate= must be specified.");
+
         if (strv_isempty(arg_banks)) {
                 /* If no banks are specifically selected, pick all known banks */
                 arg_banks = strv_new("SHA1", "SHA256", "SHA384", "SHA512");
@@ -300,12 +339,11 @@ static int parse_argv(int argc, char *argv[]) {
         if (strv_isempty(arg_phase)) {
                 /* If no phases are specifically selected, pick everything from the beginning of the initrd
                  * to the beginning of shutdown. */
-                if (strv_extend_strv(&arg_phase,
-                                     STRV_MAKE("enter-initrd",
-                                               "enter-initrd:leave-initrd",
-                                               "enter-initrd:leave-initrd:sysinit",
-                                               "enter-initrd:leave-initrd:sysinit:ready"),
-                                     /* filter_duplicates= */ false) < 0)
+                if (strv_extend_many(&arg_phase,
+                                     "enter-initrd",
+                                     "enter-initrd:leave-initrd",
+                                     "enter-initrd:leave-initrd:sysinit",
+                                     "enter-initrd:leave-initrd:sysinit:ready") < 0)
                         return log_oom();
         } else {
                 strv_sort(arg_phase);
@@ -419,7 +457,7 @@ static int measure_kernel(PcrState *pcr_states, size_t n) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read '%s': %m", p);
 
-                        r = unhexmem(strstrip(s), SIZE_MAX, &v, &sz);
+                        r = unhexmem(strstrip(s), &v, &sz);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to decode PCR value '%s': %m", s);
 
@@ -732,7 +770,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
         _cleanup_(pcr_state_free_all) PcrState *pcr_states = NULL;
         _cleanup_(EVP_PKEY_freep) EVP_PKEY *privkey = NULL, *pubkey = NULL;
-        _cleanup_fclose_ FILE *privkeyf = NULL;
+        _cleanup_(X509_freep) X509 *certificate = NULL;
         size_t n;
         int r;
 
@@ -760,13 +798,57 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
         /* When signing we only support JSON output */
         arg_json_format_flags &= ~JSON_FORMAT_OFF;
 
-        privkeyf = fopen(arg_private_key, "re");
-        if (!privkeyf)
-                return log_error_errno(errno, "Failed to open private key file '%s': %m", arg_private_key);
+        /* This must be done before openssl_load_key_from_token() otherwise it will get stuck */
+        if (arg_certificate) {
+                _cleanup_(BIO_freep) BIO *cb = NULL;
+                _cleanup_free_ char *crt = NULL;
 
-        privkey = PEM_read_PrivateKey(privkeyf, NULL, NULL, NULL);
-        if (!privkey)
-                return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse private key '%s'.", arg_private_key);
+                r = read_full_file_full(
+                                AT_FDCWD, arg_certificate, UINT64_MAX, SIZE_MAX,
+                                READ_FULL_FILE_CONNECT_SOCKET,
+                                /* bind_name= */ NULL,
+                                &crt, &n);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read certificate file '%s': %m", arg_certificate);
+
+                cb = BIO_new_mem_buf(crt, n);
+                if (!cb)
+                        return log_oom();
+
+                certificate = PEM_read_bio_X509(cb, NULL, NULL, NULL);
+                if (!certificate)
+                        return log_error_errno(
+                                        SYNTHETIC_ERRNO(EBADMSG),
+                                        "Failed to parse X.509 certificate: %s",
+                                        ERR_error_string(ERR_get_error(), NULL));
+        }
+
+        if (arg_private_key_source_type == OPENSSL_KEY_SOURCE_FILE) {
+                _cleanup_fclose_ FILE *privkeyf = NULL;
+                _cleanup_free_ char *resolved_pkey = NULL;
+
+                r = parse_path_argument(arg_private_key, /* suppress_root= */ false, &resolved_pkey);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse private key path %s: %m", arg_private_key);
+
+                privkeyf = fopen(resolved_pkey, "re");
+                if (!privkeyf)
+                        return log_error_errno(errno, "Failed to open private key file '%s': %m", resolved_pkey);
+
+                privkey = PEM_read_PrivateKey(privkeyf, NULL, NULL, NULL);
+                if (!privkey)
+                        return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse private key '%s'.", resolved_pkey);
+        } else if (arg_private_key_source &&
+                   IN_SET(arg_private_key_source_type, OPENSSL_KEY_SOURCE_ENGINE, OPENSSL_KEY_SOURCE_PROVIDER)) {
+                r = openssl_load_key_from_token(
+                                arg_private_key_source_type, arg_private_key_source, arg_private_key, &privkey);
+                if (r < 0)
+                        return log_error_errno(
+                                        r,
+                                        "Failed to load key '%s' from OpenSSL key source %s: %m",
+                                        arg_private_key,
+                                        arg_private_key_source);
+        }
 
         if (arg_public_key) {
                 _cleanup_fclose_ FILE *pubkeyf = NULL;
@@ -778,6 +860,13 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
                 pubkey = PEM_read_PUBKEY(pubkeyf, NULL, NULL, NULL);
                 if (!pubkey)
                         return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to parse public key '%s'.", arg_public_key);
+        } else if (certificate) {
+                pubkey = X509_get_pubkey(certificate);
+                if (!pubkey)
+                        return log_error_errno(
+                                        SYNTHETIC_ERRNO(EIO),
+                                        "Failed to extract public key from certificate %s.",
+                                        arg_certificate);
         } else {
                 _cleanup_(memstream_done) MemStream m = {};
                 FILE *tf;
@@ -995,7 +1084,7 @@ static int verb_status(int argc, char *argv[], void *userdata) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read '%s': %m", p);
 
-                        r = unhexmem(strstrip(s), SIZE_MAX, &h, &l);
+                        r = unhexmem(strstrip(s), &h, &l);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to decode PCR value '%s': %m", s);
 
@@ -1071,9 +1160,7 @@ static int measure_main(int argc, char *argv[]) {
 static int run(int argc, char *argv[]) {
         int r;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

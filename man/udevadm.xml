@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="udevadm"
@@ -83,8 +83,8 @@
     </variablelist>
 
     <refsect2><title>udevadm info
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt" rep="repeat"><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></optional>
     </title>
 
       <para>Query the udev database for device information.</para>
@@ -382,8 +382,8 @@
     </refsect2>
 
     <refsect2><title>udevadm trigger
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt"><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></optional>
       </title>
       <para>Request device events from the kernel. Primarily used to replay events at system coldplug time.</para>
 
@@ -550,14 +550,16 @@
             <para>Typically, it is essential that applications which intend to use such a match, make
             sure a suitable udev rule is installed that sets at least one property on devices that
             shall be matched. See also Initialized Devices section below for more details.</para>
-            <para>WARNING: <option>--initialized-nomatch</option> can potentially save a significant
-            amount of time compared to re-triggering all devices in the system and e.g. can be used to
-            optimize boot time. However, this is not safe to be used in a boot sequence in general.
-            Especially, when udev rules for a device depend on its parent devices (e.g.
-            <literal>ATTRS</literal> or <literal>IMPORT{parent}</literal> keys, see
-            <citerefentry><refentrytitle>udev</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-            for more details), the final state of the device becomes easily unstable with this option.
-            </para>
+            <warning>
+              <para><option>--initialized-nomatch</option> can potentially save a significant
+              amount of time compared to re-triggering all devices in the system and e.g. can be used to
+              optimize boot time. However, this is not safe to be used in a boot sequence in general.
+              Especially, when udev rules for a device depend on its parent devices (e.g.
+              <literal>ATTRS</literal> or <literal>IMPORT{parent}</literal> keys, see
+              <citerefentry><refentrytitle>udev</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+              for more details), the final state of the device becomes easily unstable with this option.
+              </para>
+            </warning>
 
             <xi:include href="version-info.xml" xpointer="v251"/>
           </listitem>
@@ -607,7 +609,7 @@
     </refsect2>
 
     <refsect2><title>udevadm settle
-      <arg choice="opt"><replaceable>options</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
     </title>
       <para>Watches the udev event queue, and exits if all current events are handled.</para>
       <variablelist>
@@ -702,7 +704,7 @@
         </varlistentry>
         <varlistentry>
           <term><option>-m</option></term>
-          <term><option>--children-max=</option><replaceable>value</replaceable></term>
+          <term><option>--children-max=<replaceable>value</replaceable></option></term>
           <listitem>
             <para>Set the maximum number of events, systemd-udevd will handle at the same time. When 0 is
             specified, then the maximum is determined based on the system resources.</para>
@@ -719,9 +721,50 @@
         </varlistentry>
         <varlistentry>
           <term><option>-t</option></term>
-          <term><option>--timeout=</option><replaceable>seconds</replaceable></term>
+          <term><option>--timeout=<replaceable>seconds</replaceable></option></term>
           <listitem>
             <para>The maximum number of seconds to wait for a reply from systemd-udevd.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><option>--load-credentials</option></term>
+          <listitem>
+            <para>When specified, the following credentials are used when passed in:</para>
+
+            <variablelist>
+              <varlistentry>
+                <term><varname>udev.conf.*</varname></term>
+                <listitem>
+                  <para>These credentials should contain valid
+                  <citerefentry><refentrytitle>udev.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+                  configuration data. From each matching credential a separate file is created. Example: a
+                  passed credential <filename>udev.conf.50-foobar</filename> will be copied into a
+                  configuration file <filename>/run/udev/udev.conf.d/50-foobar.conf</filename>.</para>
+
+                  <xi:include href="version-info.xml" xpointer="v256"/>
+                </listitem>
+              </varlistentry>
+              <varlistentry>
+                <term><varname>udev.rules.*</varname></term>
+                <listitem>
+                  <para>These credentials should contain valid
+                  <citerefentry><refentrytitle>udev</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+                  rules. From each matching credential a separate file is created. Example: a passed credential
+                  <filename>udev.rules.50-foobar</filename> will be copied into a configuration file
+                  <filename>/run/udev/rules.d/50-foobar.rules</filename>.</para>
+
+                  <xi:include href="version-info.xml" xpointer="v256"/>
+                </listitem>
+              </varlistentry>
+            </variablelist>
+
+            <para>Note, this <emphasis>does not</emphasis> imply <option>--reload</option> option. So, if
+            <command>systemd-udevd</command> is already running, please consider to also specify
+            <option>-reload</option> to make the copied udev rules files used by
+            <command>systemd-udevd</command>.</para>
+
+            <xi:include href="version-info.xml" xpointer="v256"/>
           </listitem>
         </varlistentry>
 
@@ -730,7 +773,7 @@
     </refsect2>
 
     <refsect2><title>udevadm monitor
-      <arg choice="opt"><replaceable>options</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
     </title>
       <para>Listens to the kernel uevents and events sent out by a udev rule
       and prints the devpath of the event to the console. It can be used to analyze the
@@ -782,8 +825,8 @@
     </refsect2>
 
     <refsect2><title>udevadm test
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt"><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></optional>
     </title>
       <para>Simulate a udev event run for the given device, and print debug output.</para>
       <variablelist>
@@ -819,9 +862,9 @@
     </refsect2>
 
     <refsect2><title>udevadm test-builtin
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg><replaceable>command</replaceable></arg>
-      <arg choice="opt"><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <replaceable>command</replaceable>
+      <optional><replaceable>devpath</replaceable>|<replaceable>file</replaceable>|<replaceable>unit</replaceable></optional>
     </title>
       <para>Run a built-in command <replaceable>COMMAND</replaceable>
       for device <replaceable>DEVPATH</replaceable>, and print debug
@@ -848,8 +891,8 @@
 
     <refsect2>
       <title>udevadm verify
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt" rep="repeat"><replaceable>file</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>file</replaceable></optional>
       …
       </title>
 
@@ -913,8 +956,8 @@
 
     <refsect2>
       <title>udevadm wait
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt"><replaceable>device|syspath</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>device|syspath</replaceable></optional>
       …
       </title>
 
@@ -977,8 +1020,8 @@
 
     <refsect2>
       <title>udevadm lock
-      <arg choice="opt"><replaceable>options</replaceable></arg>
-      <arg choice="opt"><replaceable>command</replaceable></arg>
+      <optional><replaceable>options</replaceable></optional>
+      <optional><replaceable>command</replaceable></optional>
       …
       </title>
 
@@ -1111,11 +1154,13 @@
 
   <refsect1>
     <title>See Also</title>
-    <para><citerefentry>
+    <para><simplelist type="inline">
+      <member><citerefentry>
         <refentrytitle>udev</refentrytitle><manvolnum>7</manvolnum>
-    </citerefentry>,
-    <citerefentry>
+      </citerefentry></member>
+      <member><citerefentry>
         <refentrytitle>systemd-udevd.service</refentrytitle><manvolnum>8</manvolnum>
-    </citerefentry></para>
+      </citerefentry></member>
+    </simplelist></para>
   </refsect1>
 </refentry>

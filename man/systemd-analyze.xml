@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-analyze" conditional='ENABLE_ANALYZE'
@@ -177,7 +177,14 @@
     <cmdsynopsis>
       <command>systemd-analyze</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
-      <arg choice="plain">srk</arg> &gt;<arg choice="plain"><replaceable>FILE</replaceable></arg>
+      <arg choice="plain">srk</arg>
+      <arg choice="opt"><replaceable>&gt;FILE</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">architectures</arg>
+      <arg choice="opt" rep="repeat"><replaceable>NAME</replaceable></arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -933,12 +940,43 @@ NR NAME                SHA256
     </refsect2>
 
     <refsect2>
-      <title><command>systemd-analyze srk &gt; <replaceable>FILE</replaceable></command></title>
+      <title><command>systemd-analyze srk <optional>&gt;<replaceable>FILE</replaceable></optional></command></title>
 
       <para>This command reads the Storage Root Key (SRK) from the TPM2 device, and writes it in marshalled
-      TPM2B_PUBLIC format to stdout. Example:</para>
+      TPM2B_PUBLIC format to stdout. The output is non-printable data, so it should be redirected to a file
+      or into a pipe.</para>
 
-      <programlisting>systemd-analyze srk &gt; srk.tpm2b_public</programlisting>
+      <example>
+        <title>Save the Storage Root Key to <filename>srk.tpm2b_public</filename></title>
+
+        <programlisting>systemd-analyze srk &gt;srk.tpm2b_public</programlisting>
+      </example>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze architectures <optional><replaceable>NAME</replaceable>...</optional></command></title>
+
+      <para>Lists all known CPU architectures, and which ones are native. The listed architecture names are
+      those <varname>ConditionArchitecture=</varname> supports, see
+      <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+      details. If architecture names are specified only those specified are listed.</para>
+
+      <example>
+        <title>Table output</title>
+        <programlisting>$ systemd-analyze architectures
+NAME        SUPPORT
+alpha       foreign
+arc         foreign
+arc-be      foreign
+arm         foreign
+arm64       foreign
+…
+sparc       foreign
+sparc64     foreign
+tilegx      foreign
+x86         secondary
+x86-64      native</programlisting>
+      </example>
     </refsect2>
 
   </refsect1>
@@ -980,16 +1018,12 @@ NR NAME                SHA256
         <term><option>--order</option></term>
         <term><option>--require</option></term>
 
-        <listitem><para>When used in conjunction with the
-        <command>dot</command> command (see above), selects which
-        dependencies are shown in the dependency graph. If
-        <option>--order</option> is passed, only dependencies of type
-        <varname>After=</varname> or <varname>Before=</varname> are
-        shown. If <option>--require</option> is passed, only
-        dependencies of type <varname>Requires=</varname>,
-        <varname>Requisite=</varname>,
-        <varname>Wants=</varname> and <varname>Conflicts=</varname>
-        are shown. If neither is passed, this shows dependencies of
+        <listitem><para>When used in conjunction with the <command>dot</command> command (see above),
+        selects which dependencies are shown in the dependency graph. If <option>--order</option> is passed,
+        only dependencies of type <varname>After=</varname> or <varname>Before=</varname> are shown.
+        If <option>--require</option> is passed, only dependencies of type <varname>Requires=</varname>,
+        <varname>Requisite=</varname>, <varname>BindsTo=</varname>, <varname>Wants=</varname>, and
+        <varname>Conflicts=</varname> are shown. If neither is passed, this shows dependencies of
         all these types.</para>
 
         <xi:include href="version-info.xml" xpointer="v198"/></listitem>
@@ -1022,7 +1056,7 @@ NR NAME                SHA256
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fuzz=</option><replaceable>timespan</replaceable></term>
+        <term><option>--fuzz=<replaceable>timespan</replaceable></option></term>
 
         <listitem><para>When used in conjunction with the
         <command>critical-chain</command> command (see above), also
@@ -1075,8 +1109,10 @@ NR NAME                SHA256
       <varlistentry>
         <term><option>--root=<replaceable>PATH</replaceable></option></term>
 
-        <listitem><para>With <command>cat-files</command> and <command>verify</command>,
-        operate on files underneath the specified root path <replaceable>PATH</replaceable>.</para>
+        <listitem><para>With <command>cat-config</command>, <command>verify</command>,
+        <command>condition</command> and <command>security</command> when used with
+        <option>--offline=</option>, operate on files underneath the specified root path
+        <replaceable>PATH</replaceable>.</para>
 
         <xi:include href="version-info.xml" xpointer="v239"/></listitem>
       </varlistentry>
@@ -1084,8 +1120,10 @@ NR NAME                SHA256
       <varlistentry>
         <term><option>--image=<replaceable>PATH</replaceable></option></term>
 
-        <listitem><para>With <command>cat-files</command> and <command>verify</command>,
-        operate on files inside the specified image path <replaceable>PATH</replaceable>.</para>
+        <listitem><para>With <command>cat-config</command>, <command>verify</command>,
+        <command>condition</command> and <command>security</command> when used with
+        <option>--offline=</option>, operate on files inside the specified image path
+        <replaceable>PATH</replaceable>.</para>
 
         <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
@@ -1585,10 +1623,10 @@ NR NAME                SHA256
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

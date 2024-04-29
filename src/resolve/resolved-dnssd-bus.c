@@ -20,10 +20,14 @@ int bus_dnssd_method_unregister(sd_bus_message *message, void *userdata, sd_bus_
 
         m = s->manager;
 
-        r = bus_verify_polkit_async(message, CAP_SYS_ADMIN,
-                                    "org.freedesktop.resolve1.unregister-service",
-                                    NULL, false, s->originator,
-                                    &m->polkit_registry, error);
+        r = bus_verify_polkit_async_full(
+                        message,
+                        "org.freedesktop.resolve1.unregister-service",
+                        /* details= */ NULL,
+                        /* good_user= */ s->originator,
+                        /* flags= */ 0,
+                        &m->polkit_registry,
+                        error);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -36,6 +40,7 @@ int bus_dnssd_method_unregister(sd_bus_message *message, void *userdata, sd_bus_
                                 log_warning_errno(r, "Failed to send goodbye messages in IPv4 scope: %m");
 
                         dns_zone_remove_rr(&l->mdns_ipv4_scope->zone, s->ptr_rr);
+                        dns_zone_remove_rr(&l->mdns_ipv4_scope->zone, s->sub_ptr_rr);
                         dns_zone_remove_rr(&l->mdns_ipv4_scope->zone, s->srv_rr);
                         LIST_FOREACH(items, txt_data, s->txt_data_items)
                                 dns_zone_remove_rr(&l->mdns_ipv4_scope->zone, txt_data->rr);
@@ -47,6 +52,7 @@ int bus_dnssd_method_unregister(sd_bus_message *message, void *userdata, sd_bus_
                                 log_warning_errno(r, "Failed to send goodbye messages in IPv6 scope: %m");
 
                         dns_zone_remove_rr(&l->mdns_ipv6_scope->zone, s->ptr_rr);
+                        dns_zone_remove_rr(&l->mdns_ipv6_scope->zone, s->sub_ptr_rr);
                         dns_zone_remove_rr(&l->mdns_ipv6_scope->zone, s->srv_rr);
                         LIST_FOREACH(items, txt_data, s->txt_data_items)
                                 dns_zone_remove_rr(&l->mdns_ipv6_scope->zone, txt_data->rr);
@@ -101,7 +107,7 @@ static int dnssd_node_enumerator(sd_bus *bus, const char *path, void *userdata, 
         HASHMAP_FOREACH(service, m->dnssd_services) {
                 char *p;
 
-                r = sd_bus_path_encode("/org/freedesktop/resolve1/dnssd", service->name, &p);
+                r = sd_bus_path_encode("/org/freedesktop/resolve1/dnssd", service->id, &p);
                 if (r < 0)
                         return r;
 

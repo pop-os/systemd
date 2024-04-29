@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # systemd-nspawn(1) completion                  -*- shell-script -*-
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
@@ -73,7 +74,7 @@ _systemd_nspawn() {
                       --pivot-root --property --private-users --private-users-ownership --network-namespace-path
                       --network-ipvlan --network-veth-extra --network-zone -p --port --system-call-filter --overlay
                       --overlay-ro --settings --rlimit --hostname --no-new-privileges --oom-score-adjust --cpu-affinity
-                      --resolv-conf --timezone --root-hash-sig'
+                      --resolv-conf --timezone --root-hash-sig --background'
     )
 
     _init_completion || return

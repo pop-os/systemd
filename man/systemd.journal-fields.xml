@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.journal-fields" xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -546,8 +546,7 @@
       <varlistentry>
         <term><varname>OBJECT_PID=<replaceable>PID</replaceable></varname></term>
         <listitem>
-          <para>PID of the program that this message pertains to.
-          </para>
+          <para>PID of the program that this message pertains to.</para>
 
           <xi:include href="version-info.xml" xpointer="v205"/>
         </listitem>
@@ -567,9 +566,8 @@
         <term><varname>OBJECT_SYSTEMD_UNIT=</varname></term>
         <term><varname>OBJECT_SYSTEMD_USER_UNIT=</varname></term>
         <listitem>
-          <para>These are additional fields added automatically by
-          <command>systemd-journald</command>. Their meaning is the
-          same as
+          <para>These are additional fields added automatically by <command>systemd-journald</command>.
+          Their meaning is the same as
           <varname>_UID=</varname>,
           <varname>_GID=</varname>,
           <varname>_COMM=</varname>,
@@ -587,6 +585,17 @@
           process which logged the message.</para>
 
           <xi:include href="version-info.xml" xpointer="v205"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>OBJECT_SYSTEMD_INVOCATION_ID=</varname></term>
+        <listitem>
+          <para>An additional field added automatically by <command>systemd-journald</command>. The meaning
+          is mostly the same as <varname>_SYSTEMD_INVOCATION_ID=</varname>, with the difference described
+          above.</para>
+
+          <xi:include href="version-info.xml" xpointer="v235"/>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -665,15 +674,15 @@
 
   <refsect1>
       <title>See Also</title>
-      <para>
-        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>journald.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>sd-journal</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>coredumpctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-      </para>
+      <para><simplelist type="inline">
+        <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>journald.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>sd-journal</refentrytitle><manvolnum>3</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>coredumpctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      </simplelist></para>
   </refsect1>
 
 </refentry>

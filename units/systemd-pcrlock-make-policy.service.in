@@ -8,12 +8,13 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=Make TPM2 PCR Policy
+Description=Make TPM PCR Policy
 Documentation=man:systemd-pcrlock(8)
 DefaultDependencies=no
 Conflicts=shutdown.target
 After=systemd-tpm2-setup.service
 Before=sysinit.target shutdown.target
+After=systemd-remount-fs.service var.mount
 ConditionPathExists=!/etc/initrd-release
 ConditionSecurity=measured-uki
 

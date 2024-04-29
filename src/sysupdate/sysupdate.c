@@ -676,7 +676,7 @@ static int context_vacuum(
         if (space == 0)
                 log_info("Making room%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
         else
-                log_info("Making room for %" PRIu64 " updates%s", space,special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                log_info("Making room for %" PRIu64 " updates%s", space, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
 
         for (size_t i = 0; i < c->n_transfers; i++) {
                 r = transfer_vacuum(c->transfers[i], space, extra_protected_version);
@@ -882,7 +882,8 @@ static int process_image(
                         DISSECT_IMAGE_RELAX_VAR_CHECK |
                         DISSECT_IMAGE_USR_NO_ROOT |
                         DISSECT_IMAGE_GENERIC_ROOT |
-                        DISSECT_IMAGE_REQUIRE_ROOT,
+                        DISSECT_IMAGE_REQUIRE_ROOT |
+                        DISSECT_IMAGE_ALLOW_USERSPACE_VERITY,
                         &mounted_dir,
                         /* ret_dir_fd= */ NULL,
                         &loop_device);
@@ -1220,12 +1221,13 @@ static int verb_help(int argc, char **argv, void *userdata) {
                "     --no-legend          Do not show the headers and footers\n"
                "     --json=pretty|short|off\n"
                "                          Generate JSON output\n"
-               "\nSee the %2$s for details.\n"
-               , program_invocation_short_name
-               , link
-               , ansi_underline(), ansi_normal()
-               , ansi_highlight(), ansi_normal()
-        );
+               "\nSee the %2$s for details.\n",
+               program_invocation_short_name,
+               link,
+               ansi_underline(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal());
 
         return 0;
 }

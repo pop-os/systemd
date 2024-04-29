@@ -74,7 +74,7 @@ if [[ -n "$SD_STUB" ]]; then
     "$SD_PCRLOCK" lock-uki <"$SD_STUB"
 fi
 
-PIN=huhu "$SD_PCRLOCK" make-policy --pcr="$PCRS" --recovery-pin=yes
+PIN=huhu "$SD_PCRLOCK" make-policy --pcr="$PCRS" --recovery-pin=query
 # Repeat immediately (this call will have to reuse the nvindex, rather than create it)
 "$SD_PCRLOCK" make-policy --pcr="$PCRS"
 "$SD_PCRLOCK" make-policy --pcr="$PCRS" --force
@@ -102,7 +102,7 @@ systemd-cryptsetup detach pcrlock
 # work.
 echo -n test70 | "$SD_PCRLOCK" lock-raw --pcrlock=/var/lib/pcrlock.d/910-test70.pcrlock --pcr=16
 (! "$SD_PCRLOCK" make-policy --pcr="$PCRS")
-PIN=huhu "$SD_PCRLOCK" make-policy --pcr="$PCRS" --recovery-pin=yes
+PIN=huhu "$SD_PCRLOCK" make-policy --pcr="$PCRS" --recovery-pin=query
 
 systemd-cryptsetup attach pcrlock "$img" - tpm2-device=auto,tpm2-pcrlock=/var/lib/systemd/pcrlock.json,headless
 systemd-cryptsetup detach pcrlock
@@ -110,6 +110,10 @@ systemd-cryptsetup detach pcrlock
 # And now let's do it the clean way, and generate the right policy ahead of time.
 echo -n test70-take-two | "$SD_PCRLOCK" lock-raw --pcrlock=/var/lib/pcrlock.d/920-test70.pcrlock --pcr=16
 "$SD_PCRLOCK" make-policy --pcr="$PCRS"
+# the next one should be skipped because redundant
+"$SD_PCRLOCK" make-policy --pcr="$PCRS"
+# but this one should not be skipped, even if redundant, because we force it
+"$SD_PCRLOCK" make-policy --pcr="$PCRS" --force --recovery-pin=show
 
 "$SD_PCREXTEND" --pcr=16 test70-take-two
 
@@ -118,7 +122,20 @@ echo -n test70-take-two | "$SD_PCRLOCK" lock-raw --pcrlock=/var/lib/pcrlock.d/92
 systemd-cryptsetup attach pcrlock "$img" - tpm2-device=auto,tpm2-pcrlock=/var/lib/systemd/pcrlock.json,headless
 systemd-cryptsetup detach pcrlock
 
-"$SD_PCRLOCK" remove-policy
+# Now use the root fs support, i.e. make the tool write a copy of the pcrlock
+# file as service credential to some temporary dir and remove the local copy, so that
+# it has to use the credential version.
+mkdir /tmp/fakexbootldr
+SYSTEMD_XBOOTLDR_PATH=/tmp/fakexbootldr SYSTEMD_RELAX_XBOOTLDR_CHECKS=1 "$SD_PCRLOCK" make-policy --pcr="$PCRS" --force
+mv /var/lib/systemd/pcrlock.json /var/lib/systemd/pcrlock.json.gone
+
+systemd-creds decrypt /tmp/fakexbootldr/loader/credentials/pcrlock.*.cred
+
+SYSTEMD_ENCRYPTED_SYSTEM_CREDENTIALS_DIRECTORY=/tmp/fakexbootldr/loader/credentials systemd-cryptsetup attach pcrlock "$img" - tpm2-device=auto,headless
+systemd-cryptsetup detach pcrlock
+
+mv /var/lib/systemd/pcrlock.json.gone /var/lib/systemd/pcrlock.json
+SYSTEMD_XBOOTLDR_PATH=/tmp/fakexbootldr SYSTEMD_RELAX_XBOOTLDR_CHECKS=1 "$SD_PCRLOCK" remove-policy
 
 "$SD_PCRLOCK" unlock-firmware-config
 "$SD_PCRLOCK" unlock-gpt
@@ -142,5 +159,21 @@ systemd-cryptsetup detach pcrlock
 (! "$SD_PCRLOCK" lock-uki /dev/full)
 (! "$SD_PCRLOCK" lock-uki /bin/true)
 (! "$SD_PCRLOCK" lock-file-system "")
+
+# Exercise Varlink API a bit (but first turn off condition)
+
+mkdir -p /run/systemd/system/systemd-pcrlock.socket.d
+cat > /run/systemd/system/systemd-pcrlock.socket.d/50-no-condition.conf <<EOF
+[Unit]
+# Turn off all conditions
+ConditionSecurity=
+EOF
+
+systemctl daemon-reload
+systemctl restart systemd-pcrlock.socket
+
+varlinkctl call /run/systemd/io.systemd.PCRLock io.systemd.PCRLock.RemovePolicy '{}'
+varlinkctl call /run/systemd/io.systemd.PCRLock io.systemd.PCRLock.MakePolicy '{}'
+varlinkctl call --collect --json=pretty /run/systemd/io.systemd.PCRLock io.systemd.PCRLock.ReadEventLog '{}'
 
 rm "$img" /tmp/pcrlockpwd

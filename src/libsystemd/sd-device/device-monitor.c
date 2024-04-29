@@ -47,7 +47,7 @@ struct sd_device_monitor {
         union sockaddr_union snl_trusted_sender;
         bool bound;
 
-        UidRange *mapped_userns_uid_range;
+        UIDRange *mapped_userns_uid_range;
 
         Hashmap *subsystem_filter;
         Set *tag_filter;
@@ -402,8 +402,7 @@ static sd_device_monitor *device_monitor_free(sd_device_monitor *m) {
 DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_device_monitor, sd_device_monitor, device_monitor_free);
 
 static int check_subsystem_filter(sd_device_monitor *m, sd_device *device) {
-        const char *s, *subsystem, *d, *devtype = NULL;
-        int r;
+        const char *s, *d;
 
         assert(m);
         assert(device);
@@ -411,20 +410,14 @@ static int check_subsystem_filter(sd_device_monitor *m, sd_device *device) {
         if (hashmap_isempty(m->subsystem_filter))
                 return true;
 
-        r = sd_device_get_subsystem(device, &subsystem);
-        if (r < 0)
-                return r;
-
-        r = sd_device_get_devtype(device, &devtype);
-        if (r < 0 && r != -ENOENT)
-                return r;
-
         HASHMAP_FOREACH_KEY(d, s, m->subsystem_filter) {
-                if (!streq(s, subsystem))
+                if (!device_in_subsystem(device, s))
                         continue;
 
-                if (!d || streq_ptr(d, devtype))
-                        return true;
+                if (d && !device_is_devtype(device, d))
+                        continue;
+
+                return true;
         }
 
         return false;
@@ -480,7 +473,7 @@ static bool check_sender_uid(sd_device_monitor *m, uid_t uid) {
                 return true;
 
         if (!m->mapped_userns_uid_range) {
-                r = uid_range_load_userns(&m->mapped_userns_uid_range, NULL);
+                r = uid_range_load_userns(/* path = */ NULL, UID_RANGE_USERNS_INSIDE, &m->mapped_userns_uid_range);
                 if (r < 0)
                         log_monitor_errno(m, r, "Failed to load UID ranges mapped to the current user namespace, ignoring: %m");
         }

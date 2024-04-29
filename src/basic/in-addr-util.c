@@ -91,14 +91,26 @@ bool in6_addr_is_link_local_all_nodes(const struct in6_addr *a) {
                 be32toh(a->s6_addr32[3]) == UINT32_C(0x00000001);
 }
 
+bool in4_addr_is_multicast(const struct in_addr *a) {
+        assert(a);
+
+        return IN_MULTICAST(be32toh(a->s_addr));
+}
+
+bool in6_addr_is_multicast(const struct in6_addr *a) {
+        assert(a);
+
+        return IN6_IS_ADDR_MULTICAST(a);
+}
+
 int in_addr_is_multicast(int family, const union in_addr_union *u) {
         assert(u);
 
         if (family == AF_INET)
-                return IN_MULTICAST(be32toh(u->in.s_addr));
+                return in4_addr_is_multicast(&u->in);
 
         if (family == AF_INET6)
-                return IN6_IS_ADDR_MULTICAST(&u->in6);
+                return in6_addr_is_multicast(&u->in6);
 
         return -EAFNOSUPPORT;
 }
@@ -182,6 +194,52 @@ int in_addr_equal(int family, const union in_addr_union *a, const union in_addr_
         return -EAFNOSUPPORT;
 }
 
+bool in4_addr_prefix_intersect(
+                const struct in_addr *a,
+                unsigned aprefixlen,
+                const struct in_addr *b,
+                unsigned bprefixlen) {
+
+        assert(a);
+        assert(b);
+
+        unsigned m = MIN3(aprefixlen, bprefixlen, (unsigned) (sizeof(struct in_addr) * 8));
+        if (m == 0)
+                return true; /* Let's return earlier, to avoid shift by 32. */
+
+        uint32_t x = be32toh(a->s_addr ^ b->s_addr);
+        uint32_t n = 0xFFFFFFFFUL << (32 - m);
+        return (x & n) == 0;
+}
+
+bool in6_addr_prefix_intersect(
+                const struct in6_addr *a,
+                unsigned aprefixlen,
+                const struct in6_addr *b,
+                unsigned bprefixlen) {
+
+        assert(a);
+        assert(b);
+
+        unsigned m = MIN3(aprefixlen, bprefixlen, (unsigned) (sizeof(struct in6_addr) * 8));
+        if (m == 0)
+                return true;
+
+        for (size_t i = 0; i < sizeof(struct in6_addr); i++) {
+                uint8_t x = a->s6_addr[i] ^ b->s6_addr[i];
+                uint8_t n = m < 8 ? (0xFF << (8 - m)) : 0xFF;
+                if ((x & n) != 0)
+                        return false;
+
+                if (m <= 8)
+                        break;
+
+                m -= 8;
+        }
+
+        return true;
+}
+
 int in_addr_prefix_intersect(
                 int family,
                 const union in_addr_union *a,
@@ -189,51 +247,16 @@ int in_addr_prefix_intersect(
                 const union in_addr_union *b,
                 unsigned bprefixlen) {
 
-        unsigned m;
-
         assert(a);
         assert(b);
 
-        /* Checks whether there are any addresses that are in both networks */
+        /* Checks whether there are any addresses that are in both networks. */
 
-        m = MIN(aprefixlen, bprefixlen);
+        if (family == AF_INET)
+                return in4_addr_prefix_intersect(&a->in, aprefixlen, &b->in, bprefixlen);
 
-        if (family == AF_INET) {
-                uint32_t x, nm;
-
-                x = be32toh(a->in.s_addr ^ b->in.s_addr);
-                nm = m == 0 ? 0 : 0xFFFFFFFFUL << (32 - m);
-
-                return (x & nm) == 0;
-        }
-
-        if (family == AF_INET6) {
-                unsigned i;
-
-                if (m > 128)
-                        m = 128;
-
-                for (i = 0; i < 16; i++) {
-                        uint8_t x, nm;
-
-                        x = a->in6.s6_addr[i] ^ b->in6.s6_addr[i];
-
-                        if (m < 8)
-                                nm = 0xFF << (8 - m);
-                        else
-                                nm = 0xFF;
-
-                        if ((x & nm) != 0)
-                                return 0;
-
-                        if (m > 8)
-                                m -= 8;
-                        else
-                                m = 0;
-                }
-
-                return 1;
-        }
+        if (family == AF_INET6)
+                return in6_addr_prefix_intersect(&a->in6, aprefixlen, &b->in6, bprefixlen);
 
         return -EAFNOSUPPORT;
 }
@@ -922,12 +945,19 @@ int in_addr_prefix_from_string_auto_internal(
 
 }
 
+void in_addr_hash_func(const union in_addr_union *u, int family, struct siphash *state) {
+        assert(u);
+        assert(state);
+
+        siphash24_compress(u->bytes, FAMILY_ADDRESS_SIZE(family), state);
+}
+
 void in_addr_data_hash_func(const struct in_addr_data *a, struct siphash *state) {
         assert(a);
         assert(state);
 
-        siphash24_compress(&a->family, sizeof(a->family), state);
-        siphash24_compress(&a->address, FAMILY_ADDRESS_SIZE(a->family), state);
+        siphash24_compress_typesafe(a->family, state);
+        in_addr_hash_func(&a->address, a->family, state);
 }
 
 int in_addr_data_compare_func(const struct in_addr_data *x, const struct in_addr_data *y) {
@@ -960,7 +990,7 @@ void in6_addr_hash_func(const struct in6_addr *addr, struct siphash *state) {
         assert(addr);
         assert(state);
 
-        siphash24_compress(addr, sizeof(*addr), state);
+        siphash24_compress_typesafe(*addr, state);
 }
 
 int in6_addr_compare_func(const struct in6_addr *a, const struct in6_addr *b) {

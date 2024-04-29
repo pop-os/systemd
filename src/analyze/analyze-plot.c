@@ -168,7 +168,7 @@ static void plot_tooltip(const UnitTimes *ut) {
         svg("%s:\n", ut->name);
 
         UnitDependency i;
-        VA_ARGS_FOREACH(i, UNIT_AFTER, UNIT_BEFORE, UNIT_REQUIRES, UNIT_REQUISITE, UNIT_WANTS, UNIT_CONFLICTS, UNIT_UPHOLDS)
+        FOREACH_ARGUMENT(i, UNIT_AFTER, UNIT_BEFORE, UNIT_REQUIRES, UNIT_REQUISITE, UNIT_WANTS, UNIT_CONFLICTS, UNIT_UPHOLDS)
                 if (!strv_isempty(ut->deps[i])) {
                         svg("\n%s:\n", unit_dependency_to_string(i));
                         STRV_FOREACH(s, ut->deps[i])
@@ -316,7 +316,10 @@ static int produce_plot_as_svg(
                     strempty(host->virtualization));
 
         svg("<g transform=\"translate(%.3f,100)\">\n", 20.0 + (SCALE_X * boot->firmware_time));
-        svg_graph_box(m, -(double) boot->firmware_time, boot->finish_time);
+        if (boot->soft_reboots_count > 0)
+                svg_graph_box(m, 0, boot->finish_time);
+        else
+                svg_graph_box(m, -(double) boot->firmware_time, boot->finish_time);
 
         if (timestamp_is_set(boot->firmware_time)) {
                 svg_bar("firmware", -(double) boot->firmware_time, -(double) boot->loader_time, y);
@@ -342,6 +345,11 @@ static int produce_plot_as_svg(
                 if (boot->initrd_unitsload_start_time < boot->initrd_unitsload_finish_time)
                         svg_bar("unitsload", boot->initrd_unitsload_start_time, boot->initrd_unitsload_finish_time, y);
                 svg_text(true, boot->initrd_time, y, "initrd");
+                y++;
+        }
+        if (boot->soft_reboots_count > 0) {
+                svg_bar("soft-reboot", 0, boot->userspace_time, y);
+                svg_text(true, 0, y, "soft-reboot");
                 y++;
         }
 
@@ -402,7 +410,7 @@ static int show_table(Table *table, const char *word) {
         assert(table);
         assert(word);
 
-        if (table_get_rows(table) > 1) {
+        if (!table_isempty(table)) {
                 table_set_header(table, arg_legend);
 
                 if (!FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF))
@@ -414,10 +422,10 @@ static int show_table(Table *table, const char *word) {
         }
 
         if (arg_legend) {
-                if (table_get_rows(table) > 1)
-                        printf("\n%zu %s listed.\n", table_get_rows(table) - 1, word);
-                else
+                if (table_isempty(table))
                         printf("No %s.\n", word);
+                else
+                        printf("\n%zu %s listed.\n", table_get_rows(table) - 1, word);
         }
 
         return 0;

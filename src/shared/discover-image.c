@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "blockdev-util.h"
 #include "btrfs-util.h"
 #include "chase.h"
 #include "chattr-util.h"
@@ -44,9 +45,10 @@
 #include "strv.h"
 #include "time-util.h"
 #include "utf8.h"
+#include "vpick.h"
 #include "xattr-util.h"
 
-static const char* const image_search_path[_IMAGE_CLASS_MAX] = {
+const char* const image_search_path[_IMAGE_CLASS_MAX] = {
         [IMAGE_MACHINE] =   "/etc/machines\0"              /* only place symlinks here */
                             "/run/machines\0"              /* and here too */
                             "/var/lib/machines\0"          /* the main place for images */
@@ -74,15 +76,20 @@ static const char* const image_search_path[_IMAGE_CLASS_MAX] = {
                             "/usr/lib/confexts\0",
 };
 
-/* Inside the initrd, use a slightly different set of search path (i.e. include .extra/sysext in extension
- * search dir) */
+/* Inside the initrd, use a slightly different set of search path (i.e. include .extra/sysext/ and
+ * .extra/confext/ in extension search dir) */
 static const char* const image_search_path_initrd[_IMAGE_CLASS_MAX] = {
         /* (entries that aren't listed here will get the same search path as for the non initrd-case) */
 
         [IMAGE_SYSEXT] =    "/etc/extensions\0"            /* only place symlinks here */
                             "/run/extensions\0"            /* and here too */
                             "/var/lib/extensions\0"        /* the main place for images */
-                            "/.extra/sysext\0"             /* put sysext picked up by systemd-stub last, since not trusted */
+                            "/.extra/sysext\0",            /* put sysext picked up by systemd-stub last, since not trusted */
+
+        [IMAGE_CONFEXT] =   "/run/confexts\0"              /* only place symlinks here */
+                            "/var/lib/confexts\0"          /* the main place for images */
+                            "/usr/local/lib/confexts\0"
+                            "/.extra/confext\0",           /* put confext picked up by systemd-stub last, since not trusted */
 };
 
 static const char* image_class_suffix_table[_IMAGE_CLASS_MAX] = {
@@ -91,6 +98,15 @@ static const char* image_class_suffix_table[_IMAGE_CLASS_MAX] = {
 };
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(image_class_suffix, ImageClass);
+
+static const char *const image_root_table[_IMAGE_CLASS_MAX] = {
+        [IMAGE_MACHINE]  = "/var/lib/machines",
+        [IMAGE_PORTABLE] = "/var/lib/portables",
+        [IMAGE_SYSEXT]   = "/var/lib/extensions",
+        [IMAGE_CONFEXT]  = "/var/lib/confexts",
+};
+
+DEFINE_STRING_TABLE_LOOKUP_TO_STRING(image_root, ImageClass);
 
 static Image *image_free(Image *i) {
         assert(i);
@@ -209,40 +225,60 @@ static int image_new(
         return 0;
 }
 
-static int extract_pretty(
+static int extract_image_basename(
                 const char *path,
-                const char *class_suffix,
-                const char *format_suffix,
-                char **ret) {
+                const char *class_suffix,  /* e.g. ".sysext" (this is an optional suffix) */
+                char **format_suffixes,    /* e.g. ".raw"    (one of these will be required) */
+                char **ret_basename,
+                char **ret_suffix) {
 
-        _cleanup_free_ char *name = NULL;
+        _cleanup_free_ char *name = NULL, *suffix = NULL;
         int r;
 
         assert(path);
-        assert(ret);
 
         r = path_extract_filename(path, &name);
         if (r < 0)
                 return r;
 
-        if (format_suffix) {
-                char *e = endswith(name, format_suffix);
+        if (format_suffixes) {
+                char *e = endswith_strv(name, format_suffixes);
                 if (!e) /* Format suffix is required */
                         return -EINVAL;
+
+                if (ret_suffix) {
+                        suffix = strdup(e);
+                        if (!suffix)
+                                return -ENOMEM;
+                }
 
                 *e = 0;
         }
 
         if (class_suffix) {
                 char *e = endswith(name, class_suffix);
-                if (e) /* Class suffix is optional */
+                if (e) { /* Class suffix is optional */
+                        if (ret_suffix) {
+                                _cleanup_free_ char *j = strjoin(e, suffix);
+                                if (!j)
+                                        return -ENOMEM;
+
+                                free_and_replace(suffix, j);
+                        }
+
                         *e = 0;
+                }
         }
 
         if (!image_name_is_valid(name))
                 return -EINVAL;
 
-        *ret = TAKE_PTR(name);
+        if (ret_suffix)
+                *ret_suffix = TAKE_PTR(suffix);
+
+        if (ret_basename)
+                *ret_basename = TAKE_PTR(name);
+
         return 0;
 }
 
@@ -297,7 +333,12 @@ static int image_make(
                         return 0;
 
                 if (!pretty) {
-                        r = extract_pretty(filename, image_class_suffix_to_string(c), NULL, &pretty_buffer);
+                        r = extract_image_basename(
+                                        filename,
+                                        image_class_suffix_to_string(c),
+                                        /* format_suffix= */ NULL,
+                                        &pretty_buffer,
+                                        /* ret_suffix= */ NULL);
                         if (r < 0)
                                 return r;
 
@@ -384,7 +425,12 @@ static int image_make(
                 (void) fd_getcrtime_at(dfd, filename, AT_SYMLINK_FOLLOW, &crtime);
 
                 if (!pretty) {
-                        r = extract_pretty(filename, image_class_suffix_to_string(c), ".raw", &pretty_buffer);
+                        r = extract_image_basename(
+                                        filename,
+                                        image_class_suffix_to_string(c),
+                                        STRV_MAKE(".raw"),
+                                        &pretty_buffer,
+                                        /* ret_suffix= */ NULL);
                         if (r < 0)
                                 return r;
 
@@ -418,7 +464,12 @@ static int image_make(
                         return 0;
 
                 if (!pretty) {
-                        r = extract_pretty(filename, NULL, NULL, &pretty_buffer);
+                        r = extract_image_basename(
+                                        filename,
+                                        /* class_suffix= */ NULL,
+                                        /* format_suffix= */ NULL,
+                                        &pretty_buffer,
+                                        /* ret_suffix= */ NULL);
                         if (r < 0)
                                 return r;
 
@@ -446,8 +497,9 @@ static int image_make(
                                         read_only = true;
                         }
 
-                        if (ioctl(block_fd, BLKGETSIZE64, &size) < 0)
-                                log_debug_errno(errno, "Failed to issue BLKGETSIZE64 on device %s/%s, ignoring: %m", path ?: strnull(parent), filename);
+                        r = blockdev_get_device_size(block_fd, &size);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to issue BLKGETSIZE64 on device %s/%s, ignoring: %m", path ?: strnull(parent), filename);
 
                         block_fd = safe_close(block_fd);
                 }
@@ -481,6 +533,37 @@ static const char *pick_image_search_path(ImageClass class) {
         return in_initrd() && image_search_path_initrd[class] ? image_search_path_initrd[class] : image_search_path[class];
 }
 
+static char **make_possible_filenames(ImageClass class, const char *image_name) {
+        _cleanup_strv_free_ char **l = NULL;
+
+        assert(image_name);
+
+        FOREACH_STRING(v_suffix, "", ".v")
+                FOREACH_STRING(format_suffix, "", ".raw") {
+                        _cleanup_free_ char *j = NULL;
+                        const char *class_suffix;
+
+                        class_suffix = image_class_suffix_to_string(class);
+                        if (class_suffix) {
+                                j = strjoin(image_name, class_suffix, format_suffix, v_suffix);
+                                if (!j)
+                                        return NULL;
+
+                                if (strv_consume(&l, TAKE_PTR(j)) < 0)
+                                        return NULL;
+                        }
+
+                        j = strjoin(image_name, format_suffix, v_suffix);
+                        if (!j)
+                                return NULL;
+
+                        if (strv_consume(&l, TAKE_PTR(j)) < 0)
+                                return NULL;
+                }
+
+        return TAKE_PTR(l);
+}
+
 int image_find(ImageClass class,
                const char *name,
                const char *root,
@@ -495,6 +578,10 @@ int image_find(ImageClass class,
         /* There are no images with invalid names */
         if (!image_name_is_valid(name))
                 return -ENOENT;
+
+        _cleanup_strv_free_ char **names = make_possible_filenames(class, name);
+        if (!names)
+                return -ENOMEM;
 
         NULSTR_FOREACH(path, pick_image_search_path(class)) {
                 _cleanup_free_ char *resolved = NULL;
@@ -512,43 +599,97 @@ int image_find(ImageClass class,
                  * to symlink block devices into the search path. (For now, we disable that when operating
                  * relative to some root directory.) */
                 flags = root ? AT_SYMLINK_NOFOLLOW : 0;
-                if (fstatat(dirfd(d), name, &st, flags) < 0) {
-                        _cleanup_free_ char *raw = NULL;
 
-                        if (errno != ENOENT)
-                                return -errno;
+                STRV_FOREACH(n, names) {
+                        _cleanup_free_ char *fname_buf = NULL;
+                        const char *fname = *n;
 
-                        raw = strjoin(name, ".raw");
-                        if (!raw)
-                                return -ENOMEM;
+                        if (fstatat(dirfd(d), fname, &st, flags) < 0) {
+                                if (errno != ENOENT)
+                                        return -errno;
 
-                        if (fstatat(dirfd(d), raw, &st, flags) < 0) {
-                                if (errno == ENOENT)
-                                        continue;
-
-                                return -errno;
+                                continue; /* Vanished while we were looking at it */
                         }
 
-                        if (!S_ISREG(st.st_mode))
+                        if (endswith(fname, ".raw")) {
+                                if (!S_ISREG(st.st_mode)) {
+                                        log_debug("Ignoring non-regular file '%s' with .raw suffix.", fname);
+                                        continue;
+                                }
+
+                        } else if (endswith(fname, ".v")) {
+
+                                if (!S_ISDIR(st.st_mode)) {
+                                        log_debug("Ignoring non-directory file '%s' with .v suffix.", fname);
+                                        continue;
+                                }
+
+                                _cleanup_free_ char *suffix = NULL;
+                                suffix = strdup(ASSERT_PTR(startswith(fname, name)));
+                                if (!suffix)
+                                        return -ENOMEM;
+
+                                *ASSERT_PTR(endswith(suffix, ".v")) = 0;
+
+                                _cleanup_free_ char *vp = path_join(resolved, fname);
+                                if (!vp)
+                                        return -ENOMEM;
+
+                                PickFilter filter = {
+                                        .type_mask = endswith(suffix, ".raw") ? (UINT32_C(1) << DT_REG) | (UINT32_C(1) << DT_BLK) : (UINT32_C(1) << DT_DIR),
+                                        .basename = name,
+                                        .architecture = _ARCHITECTURE_INVALID,
+                                        .suffix = STRV_MAKE(suffix),
+                                };
+
+                                _cleanup_(pick_result_done) PickResult result = PICK_RESULT_NULL;
+                                r = path_pick(root,
+                                              /* toplevel_fd= */ AT_FDCWD,
+                                              vp,
+                                              &filter,
+                                              PICK_ARCHITECTURE|PICK_TRIES,
+                                              &result);
+                                if (r < 0) {
+                                        log_debug_errno(r, "Failed to pick versioned image on '%s', skipping: %m", vp);
+                                        continue;
+                                }
+                                if (!result.path) {
+                                        log_debug("Found versioned directory '%s', without matching entry, skipping: %m", vp);
+                                        continue;
+                                }
+
+                                /* Refresh the stat data for the discovered target */
+                                st = result.st;
+
+                                _cleanup_free_ char *bn = NULL;
+                                r = path_extract_filename(result.path, &bn);
+                                if (r < 0) {
+                                        log_debug_errno(r, "Failed to extract basename of image path '%s', skipping: %m", result.path);
+                                        continue;
+                                }
+
+                                fname_buf = path_join(fname, bn);
+                                if (!fname_buf)
+                                        return log_oom();
+
+                                fname = fname_buf;
+
+                        } else if (!S_ISDIR(st.st_mode) && !S_ISBLK(st.st_mode)) {
+                                log_debug("Ignoring non-directory and non-block device file '%s' without suffix.", fname);
                                 continue;
+                        }
 
-                        r = image_make(class, name, dirfd(d), resolved, raw, &st, ret);
-
-                } else {
-                        if (!S_ISDIR(st.st_mode) && !S_ISBLK(st.st_mode))
+                        r = image_make(class, name, dirfd(d), resolved, fname, &st, ret);
+                        if (IN_SET(r, -ENOENT, -EMEDIUMTYPE))
                                 continue;
+                        if (r < 0)
+                                return r;
 
-                        r = image_make(class, name, dirfd(d), resolved, name, &st, ret);
+                        if (ret)
+                                (*ret)->discoverable = true;
+
+                        return 1;
                 }
-                if (IN_SET(r, -ENOENT, -EMEDIUMTYPE))
-                        continue;
-                if (r < 0)
-                        return r;
-
-                if (ret)
-                        (*ret)->discoverable = true;
-
-                return 1;
         }
 
         if (class == IMAGE_MACHINE && streq(name, ".host")) {
@@ -559,7 +700,7 @@ int image_find(ImageClass class,
                 if (ret)
                         (*ret)->discoverable = true;
 
-                return r;
+                return 1;
         }
 
         return -ENOENT;
@@ -606,43 +747,133 @@ int image_discover(
                         return r;
 
                 FOREACH_DIRENT_ALL(de, d, return -errno) {
+                        _cleanup_free_ char *pretty = NULL, *fname_buf = NULL;
                         _cleanup_(image_unrefp) Image *image = NULL;
-                        _cleanup_free_ char *pretty = NULL;
+                        const char *fname = de->d_name;
                         struct stat st;
                         int flags;
 
-                        if (dot_or_dot_dot(de->d_name))
+                        if (dot_or_dot_dot(fname))
                                 continue;
 
                         /* As mentioned above, we follow symlinks on this fstatat(), because we want to
                          * permit people to symlink block devices into the search path. */
                         flags = root ? AT_SYMLINK_NOFOLLOW : 0;
-                        if (fstatat(dirfd(d), de->d_name, &st, flags) < 0) {
+                        if (fstatat(dirfd(d), fname, &st, flags) < 0) {
                                 if (errno == ENOENT)
                                         continue;
 
                                 return -errno;
                         }
 
-                        if (S_ISREG(st.st_mode))
-                                r = extract_pretty(de->d_name, image_class_suffix_to_string(class), ".raw", &pretty);
-                        else if (S_ISDIR(st.st_mode))
-                                r = extract_pretty(de->d_name, image_class_suffix_to_string(class), NULL, &pretty);
-                        else if (S_ISBLK(st.st_mode))
-                                r = extract_pretty(de->d_name, NULL, NULL, &pretty);
-                        else {
-                                log_debug("Skipping directory entry '%s', which is neither regular file, directory nor block device.", de->d_name);
-                                continue;
-                        }
-                        if (r < 0) {
-                                log_debug_errno(r, "Skipping directory entry '%s', which doesn't look like an image.", de->d_name);
+                        if (S_ISREG(st.st_mode)) {
+                                r = extract_image_basename(
+                                                fname,
+                                                image_class_suffix_to_string(class),
+                                                STRV_MAKE(".raw"),
+                                                &pretty,
+                                                /* suffix= */ NULL);
+                                if (r < 0) {
+                                        log_debug_errno(r, "Skipping directory entry '%s', which doesn't look like an image.", fname);
+                                        continue;
+                                }
+                        } else if (S_ISDIR(st.st_mode)) {
+                                const char *v;
+
+                                v = endswith(fname, ".v");
+                                if (v) {
+                                        _cleanup_free_ char *suffix = NULL, *nov = NULL;
+
+                                        nov = strndup(fname, v - fname); /* Chop off the .v */
+                                        if (!nov)
+                                                return -ENOMEM;
+
+                                        r = extract_image_basename(
+                                                        nov,
+                                                        image_class_suffix_to_string(class),
+                                                        STRV_MAKE(".raw", ""),
+                                                        &pretty,
+                                                        &suffix);
+                                        if (r < 0) {
+                                                log_debug_errno(r, "Skipping directory entry '%s', which doesn't look like a versioned image.", fname);
+                                                continue;
+                                        }
+
+                                        _cleanup_free_ char *vp = path_join(resolved, fname);
+                                        if (!vp)
+                                                return -ENOMEM;
+
+                                        PickFilter filter = {
+                                                .type_mask = endswith(suffix, ".raw") ? (UINT32_C(1) << DT_REG) | (UINT32_C(1) << DT_BLK) : (UINT32_C(1) << DT_DIR),
+                                                .basename = pretty,
+                                                .architecture = _ARCHITECTURE_INVALID,
+                                                .suffix = STRV_MAKE(suffix),
+                                        };
+
+                                        _cleanup_(pick_result_done) PickResult result = PICK_RESULT_NULL;
+                                        r = path_pick(root,
+                                                      /* toplevel_fd= */ AT_FDCWD,
+                                                      vp,
+                                                      &filter,
+                                                      PICK_ARCHITECTURE|PICK_TRIES,
+                                                      &result);
+                                        if (r < 0) {
+                                                log_debug_errno(r, "Failed to pick versioned image on '%s', skipping: %m", vp);
+                                                continue;
+                                        }
+                                        if (!result.path) {
+                                                log_debug("Found versioned directory '%s', without matching entry, skipping: %m", vp);
+                                                continue;
+                                        }
+
+                                        /* Refresh the stat data for the discovered target */
+                                        st = result.st;
+
+                                        _cleanup_free_ char *bn = NULL;
+                                        r = path_extract_filename(result.path, &bn);
+                                        if (r < 0) {
+                                                log_debug_errno(r, "Failed to extract basename of image path '%s', skipping: %m", result.path);
+                                                continue;
+                                        }
+
+                                        fname_buf = path_join(fname, bn);
+                                        if (!fname_buf)
+                                                return log_oom();
+
+                                        fname = fname_buf;
+                                } else {
+                                        r = extract_image_basename(
+                                                        fname,
+                                                        image_class_suffix_to_string(class),
+                                                        /* format_suffix= */ NULL,
+                                                        &pretty,
+                                                        /* ret_suffix= */ NULL);
+                                        if (r < 0) {
+                                                log_debug_errno(r, "Skipping directory entry '%s', which doesn't look like an image.", fname);
+                                                continue;
+                                        }
+                                }
+
+                        } else if (S_ISBLK(st.st_mode)) {
+                                r = extract_image_basename(
+                                                fname,
+                                                /* class_suffix= */ NULL,
+                                                /* format_suffix= */ NULL,
+                                                &pretty,
+                                                /* ret_v_suffix= */ NULL);
+                                if (r < 0) {
+                                        log_debug_errno(r, "Skipping directory entry '%s', which doesn't look like an image.", fname);
+                                        continue;
+                                }
+                        } else {
+                                log_debug("Skipping directory entry '%s', which is neither regular file, directory nor block device.", fname);
                                 continue;
                         }
 
                         if (hashmap_contains(h, pretty))
                                 continue;
 
-                        r = image_make(class, pretty, dirfd(d), resolved, de->d_name, &st, &image);
+                        r = image_make(class, pretty, dirfd(d), resolved, fname, &st, &image);
                         if (IN_SET(r, -ENOENT, -EMEDIUMTYPE))
                                 continue;
                         if (r < 0)
@@ -1064,7 +1295,12 @@ static void make_lock_dir(void) {
         (void) mkdir("/run/systemd/nspawn/locks", 0700);
 }
 
-int image_path_lock(const char *path, int operation, LockFile *global, LockFile *local) {
+int image_path_lock(
+                const char *path,
+                int operation,
+                LockFile *ret_global,
+                LockFile *ret_local) {
+
         _cleanup_free_ char *p = NULL;
         LockFile t = LOCK_FILE_INIT;
         struct stat st;
@@ -1072,8 +1308,7 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
         int r;
 
         assert(path);
-        assert(global);
-        assert(local);
+        assert(ret_local);
 
         /* Locks an image path. This actually creates two locks: one "local" one, next to the image path
          * itself, which might be shared via NFS. And another "global" one, in /run, that uses the
@@ -1095,7 +1330,9 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
         }
 
         if (getenv_bool("SYSTEMD_NSPAWN_LOCK") == 0) {
-                *local = *global = (LockFile) LOCK_FILE_INIT;
+                *ret_local = LOCK_FILE_INIT;
+                if (ret_global)
+                        *ret_global = LOCK_FILE_INIT;
                 return 0;
         }
 
@@ -1111,19 +1348,23 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
                 if (exclusive)
                         return -EBUSY;
 
-                *local = *global = (LockFile) LOCK_FILE_INIT;
+                *ret_local = LOCK_FILE_INIT;
+                if (ret_global)
+                        *ret_global = LOCK_FILE_INIT;
                 return 0;
         }
 
-        if (stat(path, &st) >= 0) {
-                if (S_ISBLK(st.st_mode))
-                        r = asprintf(&p, "/run/systemd/nspawn/locks/block-%u:%u", major(st.st_rdev), minor(st.st_rdev));
-                else if (S_ISDIR(st.st_mode) || S_ISREG(st.st_mode))
-                        r = asprintf(&p, "/run/systemd/nspawn/locks/inode-%lu:%lu", (unsigned long) st.st_dev, (unsigned long) st.st_ino);
-                else
-                        return -ENOTTY;
-                if (r < 0)
-                        return -ENOMEM;
+        if (ret_global) {
+                if (stat(path, &st) >= 0) {
+                        if (S_ISBLK(st.st_mode))
+                                r = asprintf(&p, "/run/systemd/nspawn/locks/block-%u:%u", major(st.st_rdev), minor(st.st_rdev));
+                        else if (S_ISDIR(st.st_mode) || S_ISREG(st.st_mode))
+                                r = asprintf(&p, "/run/systemd/nspawn/locks/inode-%lu:%lu", (unsigned long) st.st_dev, (unsigned long) st.st_ino);
+                        else
+                                return -ENOTTY;
+                        if (r < 0)
+                                return -ENOMEM;
+                }
         }
 
         /* For block devices we don't need the "local" lock, as the major/minor lock above should be
@@ -1141,15 +1382,15 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
         if (p) {
                 make_lock_dir();
 
-                r = make_lock_file(p, operation, global);
+                r = make_lock_file(p, operation, ret_global);
                 if (r < 0) {
                         release_lock_file(&t);
                         return r;
                 }
-        } else
-                *global = (LockFile) LOCK_FILE_INIT;
+        } else if (ret_global)
+                *ret_global = LOCK_FILE_INIT;
 
-        *local = t;
+        *ret_local = t;
         return 0;
 }
 
@@ -1249,8 +1490,25 @@ int image_read_metadata(Image *i, const ImagePolicy *image_policy) {
         case IMAGE_BLOCK: {
                 _cleanup_(loop_device_unrefp) LoopDevice *d = NULL;
                 _cleanup_(dissected_image_unrefp) DissectedImage *m = NULL;
+                DissectImageFlags flags =
+                        DISSECT_IMAGE_GENERIC_ROOT |
+                        DISSECT_IMAGE_REQUIRE_ROOT |
+                        DISSECT_IMAGE_RELAX_VAR_CHECK |
+                        DISSECT_IMAGE_READ_ONLY |
+                        DISSECT_IMAGE_USR_NO_ROOT |
+                        DISSECT_IMAGE_ADD_PARTITION_DEVICES |
+                        DISSECT_IMAGE_PIN_PARTITION_DEVICES |
+                        DISSECT_IMAGE_VALIDATE_OS |
+                        DISSECT_IMAGE_VALIDATE_OS_EXT |
+                        DISSECT_IMAGE_ALLOW_USERSPACE_VERITY;
 
-                r = loop_device_make_by_path(i->path, O_RDONLY, /* sector_size= */ UINT32_MAX, LO_FLAGS_PARTSCAN, LOCK_SH, &d);
+                r = loop_device_make_by_path(
+                                i->path,
+                                O_RDONLY,
+                                /* sector_size= */ UINT32_MAX,
+                                LO_FLAGS_PARTSCAN,
+                                LOCK_SH,
+                                &d);
                 if (r < 0)
                         return r;
 
@@ -1259,20 +1517,15 @@ int image_read_metadata(Image *i, const ImagePolicy *image_policy) {
                                 /* verity= */ NULL,
                                 /* mount_options= */ NULL,
                                 image_policy,
-                                DISSECT_IMAGE_GENERIC_ROOT |
-                                DISSECT_IMAGE_REQUIRE_ROOT |
-                                DISSECT_IMAGE_RELAX_VAR_CHECK |
-                                DISSECT_IMAGE_READ_ONLY |
-                                DISSECT_IMAGE_USR_NO_ROOT |
-                                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
-                                DISSECT_IMAGE_PIN_PARTITION_DEVICES,
+                                flags,
                                 &m);
                 if (r < 0)
                         return r;
 
-                r = dissected_image_acquire_metadata(m,
-                                                     DISSECT_IMAGE_VALIDATE_OS |
-                                                     DISSECT_IMAGE_VALIDATE_OS_EXT);
+                r = dissected_image_acquire_metadata(
+                                m,
+                                /* userns_fd= */ -EBADF,
+                                flags);
                 if (r < 0)
                         return r;
 

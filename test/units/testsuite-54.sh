@@ -3,15 +3,25 @@
 # shellcheck disable=SC2016
 set -eux
 
+# shellcheck source=test/units/util.sh
+. "$(dirname "$0")"/util.sh
+
 systemd-analyze log-level debug
 
-run_with_cred_compare() {
+run_with_cred_compare() (
     local cred="${1:?}"
     local exp="${2?}"
+    local log_file
     shift 2
 
-    diff <(systemd-run -p SetCredential="$cred" --wait --pipe -- systemd-creds "$@") <(echo -ne "$exp")
-}
+    log_file="$(mktemp)"
+    # shellcheck disable=SC2064
+    trap "rm -f '$log_file'" RETURN
+
+    set -o pipefail
+    systemd-run -p SetCredential="$cred" --wait --pipe -- systemd-creds "$@" | tee "$log_file"
+    diff "$log_file" <(echo -ne "$exp")
+)
 
 # Sanity checks
 #
@@ -197,6 +207,10 @@ elif [ -d /sys/firmware/qemu_fw_cfg/by_name ]; then
     [ "$(cat /tmp/sourcedfromcredential)" = "tmpfilessecret" ]
     [ "$(cat /etc/motd.d/50-provision.conf)" = "hello" ]
     [ "$(cat /etc/issue.d/50-provision.conf)" = "welcome" ]
+
+    # Verify that adding a unit and drop-in via credentials worked
+    systemctl start my-service
+    test -f /tmp/unit-dropin
 else
     echo "qemu_fw_cfg support missing in kernel. Sniff!"
     expected_credential=""
@@ -297,10 +311,39 @@ fi
 systemd-run -p DynamicUser=yes -p 'LoadCredential=os:/etc/os-release' \
             -p 'ExecStartPre=true' \
             -p 'ExecStartPre=systemd-creds cat os' \
-            --unit=test-54-exec-start.service \
+            --unit=test-54-exec-start-pre.service \
             --wait \
             --pipe \
             true | cmp /etc/os-release
+
+# https://github.com/systemd/systemd/issues/31194
+systemd-run -p DynamicUser=yes -p 'LoadCredential=os:/etc/os-release' \
+            -p 'ExecStartPost=systemd-creds cat os' \
+            --unit=test-54-exec-start-post.service \
+            --service-type=oneshot --wait --pipe \
+            true | cmp /etc/os-release
+
+# https://github.com/systemd/systemd/pull/24734#issuecomment-1925440546
+# Also ExecStartPre= should be able to update creds
+dd if=/dev/urandom of=/tmp/cred-huge bs=600K count=1
+chmod 777 /tmp/cred-huge
+systemd-run -p ProtectSystem=full \
+            -p 'LoadCredential=huge:/tmp/cred-huge' \
+            -p 'ExecStartPre=true' \
+            -p 'ExecStartPre=bash -c "echo fresh >/tmp/cred-huge"' \
+            --unit=test-54-huge-cred.service \
+            --wait --pipe \
+            systemd-creds cat huge | cmp - <(echo "fresh")
+rm /tmp/cred-huge
+
+echo stable >/tmp/cred-stable
+systemd-run -p 'LoadCredential=stable:/tmp/cred-stable' \
+            -p 'ExecStartPost=systemd-creds cat stable' \
+            --unit=test-54-stable.service \
+            --service-type=oneshot --wait --pipe \
+            bash -c "echo bogus >/tmp/cred-stable" | cmp - <(echo "stable")
+assert_eq "$(cat /tmp/cred-stable)" "bogus"
+rm /tmp/cred-stable
 
 if ! systemd-detect-virt -q -c ; then
     # Validate that the credential we inserted via the initrd logic arrived
@@ -313,6 +356,44 @@ if ! systemd-detect-virt -q -c ; then
     # Make sure the getty generator processed the credentials properly
     systemctl -P Wants show getty.target | grep -q container-getty@idontexist.service
 fi
+
+# Decrypt/encrypt via varlink
+
+echo '{"data":"Zm9vYmFyCg=="}' > /tmp/vlcredsdata
+
+varlinkctl call /run/systemd/io.systemd.Credentials io.systemd.Credentials.Encrypt "$(cat /tmp/vlcredsdata)" | \
+    varlinkctl call --json=short /run/systemd/io.systemd.Credentials io.systemd.Credentials.Decrypt > /tmp/vlcredsdata2
+
+cmp /tmp/vlcredsdata /tmp/vlcredsdata2
+rm /tmp/vlcredsdata /tmp/vlcredsdata2
+
+clean_usertest() {
+    rm -f /tmp/usertest.data /tmp/usertest.data
+}
+
+trap clean_usertest EXIT
+dd if=/dev/urandom of=/tmp/usertest.data bs=4096 count=1
+
+systemd-creds encrypt --user /tmp/usertest.data /tmp/usertest.cred
+
+systemd-creds decrypt --user /tmp/usertest.cred - | cmp /tmp/usertest.data
+
+# Decryption must fail if it's not done in user context
+(! systemd-creds decrypt /tmp/usertest.cred - )
+
+# Decryption must also fail if a different user is used
+(! systemd-creds decrypt --user --uid=65534 /tmp/usertest.cred - )
+
+# Try the reverse
+systemd-creds encrypt --user --uid=65534 /tmp/usertest.data /tmp/usertest.cred
+(! systemd-creds decrypt --user /tmp/usertest.cred - )
+systemd-creds decrypt --user --uid=65534 /tmp/usertest.cred - | cmp /tmp/usertest.data
+
+systemd-creds encrypt --user /tmp/usertest.data /tmp/usertest.creds --name=mytest
+
+# Make sure we actually can decode this in user context
+systemctl start user@0.service
+XDG_RUNTIME_DIR=/run/user/0 systemd-run --pipe --user --unit=waldi.service -p LoadCredentialEncrypted=mytest:/tmp/usertest.creds cat /run/user/0/credentials/waldi.service/mytest | cmp /tmp/usertest.data
 
 systemd-analyze log-level info
 

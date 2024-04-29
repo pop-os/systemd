@@ -23,6 +23,7 @@
 #include "device-private.h"
 #include "device-util.h"
 #include "dns-domain.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "firewall-util.h"
@@ -36,8 +37,9 @@
 #include "networkd-dhcp-server-bus.h"
 #include "networkd-dhcp6.h"
 #include "networkd-link-bus.h"
-#include "networkd-manager-bus.h"
 #include "networkd-manager.h"
+#include "networkd-manager-bus.h"
+#include "networkd-manager-varlink.h"
 #include "networkd-neighbor.h"
 #include "networkd-network-bus.h"
 #include "networkd-nexthop.h"
@@ -163,7 +165,6 @@ static int manager_connect_bus(Manager *m) {
 static int manager_process_uevent(sd_device_monitor *monitor, sd_device *device, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
         sd_device_action_t action;
-        const char *s;
         int r;
 
         assert(device);
@@ -172,20 +173,12 @@ static int manager_process_uevent(sd_device_monitor *monitor, sd_device *device,
         if (r < 0)
                 return log_device_warning_errno(device, r, "Failed to get udev action, ignoring: %m");
 
-        r = sd_device_get_subsystem(device, &s);
-        if (r < 0)
-                return log_device_warning_errno(device, r, "Failed to get subsystem, ignoring: %m");
-
-        if (streq(s, "net"))
+        if (device_in_subsystem(device, "net"))
                 r = manager_udev_process_link(m, device, action);
-        else if (streq(s, "ieee80211"))
+        else if (device_in_subsystem(device, "ieee80211"))
                 r = manager_udev_process_wiphy(m, device, action);
-        else if (streq(s, "rfkill"))
+        else if (device_in_subsystem(device, "rfkill"))
                 r = manager_udev_process_rfkill(m, device, action);
-        else {
-                log_device_debug(device, "Received device with unexpected subsystem \"%s\", ignoring.", s);
-                return 0;
-        }
         if (r < 0)
                 log_device_warning_errno(device, r, "Failed to process \"%s\" uevent, ignoring: %m",
                                          device_action_to_string(action));
@@ -429,24 +422,13 @@ static int manager_connect_rtnl(Manager *m, int fd) {
         return manager_setup_rtnl_filter(m);
 }
 
-static int manager_dirty_handler(sd_event_source *s, void *userdata) {
-        Manager *m = ASSERT_PTR(userdata);
-        Link *link;
-        int r;
+static int manager_post_handler(sd_event_source *s, void *userdata) {
+        Manager *manager = ASSERT_PTR(userdata);
 
-        if (m->dirty) {
-                r = manager_save(m);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to update state file %s, ignoring: %m", m->state_file);
-        }
-
-        SET_FOREACH(link, m->dirty_links) {
-                r = link_save_and_clean(link);
-                if (r < 0)
-                        log_link_warning_errno(link, r, "Failed to update link state file %s, ignoring: %m", link->state_file);
-        }
-
-        return 1;
+        (void) manager_process_remove_requests(manager);
+        (void) manager_process_requests(manager);
+        (void) manager_clean_all(manager);
+        return 0;
 }
 
 static int signal_terminate_callback(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
@@ -472,7 +454,7 @@ static int signal_restart_callback(sd_event_source *s, const struct signalfd_sig
 static int signal_reload_callback(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
 
-        manager_reload(m);
+        (void) manager_reload(m, /* message = */ NULL);
 
         return 0;
 }
@@ -522,11 +504,7 @@ int manager_setup(Manager *m) {
         if (r < 0)
                 log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
 
-        r = sd_event_add_post(m->event, NULL, manager_dirty_handler, m);
-        if (r < 0)
-                return r;
-
-        r = sd_event_add_post(m->event, NULL, manager_process_requests, m);
+        r = sd_event_add_post(m->event, NULL, manager_post_handler, m);
         if (r < 0)
                 return r;
 
@@ -544,6 +522,10 @@ int manager_setup(Manager *m) {
 
         if (m->test_mode)
                 return 0;
+
+        r = manager_connect_varlink(m);
+        if (r < 0)
+                return r;
 
         r = manager_connect_bus(m);
         if (r < 0)
@@ -576,6 +558,29 @@ int manager_setup(Manager *m) {
         return 0;
 }
 
+static int persistent_storage_open(void) {
+        _cleanup_close_ int fd = -EBADF;
+        int r;
+
+        r = getenv_bool("SYSTEMD_NETWORK_PERSISTENT_STORAGE_READY");
+        if (r < 0 && r != -ENXIO)
+                return log_debug_errno(r, "Failed to parse $SYSTEMD_NETWORK_PERSISTENT_STORAGE_READY environment variable, ignoring: %m");
+        if (r <= 0)
+                return -EBADF;
+
+        fd = open("/var/lib/systemd/network/", O_CLOEXEC | O_DIRECTORY);
+        if (fd < 0)
+                return log_debug_errno(errno, "Failed to open /var/lib/systemd/network/, ignoring: %m");
+
+        r = fd_is_read_only_fs(fd);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to check if /var/lib/systemd/network/ is writable: %m");
+        if (r > 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(EROFS), "The directory /var/lib/systemd/network/ is on read-only filesystem.");
+
+        return TAKE_FD(fd);
+}
+
 int manager_new(Manager **ret, bool test_mode) {
         _cleanup_(manager_freep) Manager *m = NULL;
 
@@ -591,10 +596,17 @@ int manager_new(Manager **ret, bool test_mode) {
                 .online_state = _LINK_ONLINE_STATE_INVALID,
                 .manage_foreign_routes = true,
                 .manage_foreign_rules = true,
+                .manage_foreign_nexthops = true,
                 .ethtool_fd = -EBADF,
+                .persistent_storage_fd = persistent_storage_open(),
+                .dhcp_use_domains = _USE_DOMAINS_INVALID,
+                .dhcp6_use_domains = _USE_DOMAINS_INVALID,
+                .ndisc_use_domains = _USE_DOMAINS_INVALID,
                 .dhcp_duid.type = DUID_TYPE_EN,
                 .dhcp6_duid.type = DUID_TYPE_EN,
                 .duid_product_uuid.type = DUID_TYPE_UUID,
+                .dhcp_server_persist_leases = true,
+                .ip_forwarding = { -1, -1, },
         };
 
         *ret = TAKE_PTR(m);
@@ -613,6 +625,7 @@ Manager* manager_free(Manager *m) {
                 (void) link_stop_engines(link, true);
 
         m->request_queue = ordered_set_free(m->request_queue);
+        m->remove_request_queue = ordered_set_free(m->remove_request_queue);
 
         m->dirty_links = set_free_with_destructor(m->dirty_links, link_unref);
         m->new_wlan_ifindices = set_free(m->new_wlan_ifindices);
@@ -648,21 +661,23 @@ Manager* manager_free(Manager *m) {
          * set_free() must be called after the above sd_netlink_unref(). */
         m->routes = set_free(m->routes);
 
-        m->nexthops = set_free(m->nexthops);
         m->nexthops_by_id = hashmap_free(m->nexthops_by_id);
+        m->nexthop_ids = set_free(m->nexthop_ids);
 
         sd_event_source_unref(m->speed_meter_event_source);
         sd_event_unref(m->event);
 
         sd_device_monitor_unref(m->device_monitor);
 
-        bus_verify_polkit_async_registry_free(m->polkit_registry);
+        manager_varlink_done(m);
+        hashmap_free(m->polkit_registry);
         sd_bus_flush_close_unref(m->bus);
 
         free(m->dynamic_timezone);
         free(m->dynamic_hostname);
 
         safe_close(m->ethtool_fd);
+        safe_close(m->persistent_storage_fd);
 
         m->fw_ctx = fw_ctx_free(m->fw_ctx);
 
@@ -674,6 +689,8 @@ int manager_start(Manager *m) {
         int r;
 
         assert(m);
+
+        manager_set_sysctl(m);
 
         r = manager_start_speed_meter(m);
         if (r < 0)
@@ -708,7 +725,15 @@ int manager_load_config(Manager *m) {
         if (r < 0)
                 return r;
 
-        return manager_build_dhcp_pd_subnet_ids(m);
+        r = manager_build_dhcp_pd_subnet_ids(m);
+        if (r < 0)
+                return r;
+
+        r = manager_build_nexthop_ids(m);
+        if (r < 0)
+                return r;
+
+        return 0;
 }
 
 int manager_enumerate_internal(
@@ -749,6 +774,20 @@ static int manager_enumerate_links(Manager *m) {
         assert(m->rtnl);
 
         r = sd_rtnl_message_new_link(m->rtnl, &req, RTM_GETLINK, 0);
+        if (r < 0)
+                return r;
+
+        r = manager_enumerate_internal(m, m->rtnl, req, manager_rtnl_process_link);
+        if (r < 0)
+                return r;
+
+        req = sd_netlink_message_unref(req);
+
+        r = sd_rtnl_message_new_link(m->rtnl, &req, RTM_GETLINK, 0);
+        if (r < 0)
+                return r;
+
+        r = sd_rtnl_message_link_set_family(req, AF_BRIDGE);
         if (r < 0)
                 return r;
 
@@ -852,6 +891,9 @@ static int manager_enumerate_nexthop(Manager *m) {
 
         assert(m);
         assert(m->rtnl);
+
+        if (!m->manage_foreign_nexthops)
+                return 0;
 
         r = sd_rtnl_message_new_nexthop(m->rtnl, &req, RTM_GETNEXTHOP, 0, 0);
         if (r < 0)
@@ -1076,16 +1118,13 @@ int manager_set_timezone(Manager *m, const char *tz) {
         return 0;
 }
 
-int manager_reload(Manager *m) {
+int manager_reload(Manager *m, sd_bus_message *message) {
         Link *link;
         int r;
 
         assert(m);
 
-        (void) sd_notifyf(/* unset= */ false,
-                          "RELOADING=1\n"
-                          "STATUS=Reloading configuration...\n"
-                          "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
+        (void) notify_reloading();
 
         r = netdev_load(m, /* reload= */ true);
         if (r < 0)
@@ -1096,9 +1135,14 @@ int manager_reload(Manager *m) {
                 goto finish;
 
         HASHMAP_FOREACH(link, m->links_by_index) {
-                r = link_reconfigure(link, /* force = */ false);
-                if (r < 0)
-                        goto finish;
+                if (message)
+                        r = link_reconfigure_on_bus_method_reload(link, message);
+                else
+                        r = link_reconfigure(link, /* force = */ false);
+                if (r < 0) {
+                        log_link_warning_errno(link, r, "Failed to reconfigure the interface: %m");
+                        link_enter_failed(link);
+                }
         }
 
         r = 0;

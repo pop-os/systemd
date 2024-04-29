@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="pstore.conf" conditional="ENABLE_PSTORE"
@@ -22,10 +22,14 @@
   </refnamediv>
 
   <refsynopsisdiv>
-    <para>
-    <filename>/etc/systemd/pstore.conf</filename>
-    <filename>/etc/systemd/pstore.conf.d/*</filename>
-    </para>
+    <para><simplelist>
+      <member><filename>/etc/systemd/pstore.conf</filename></member>
+      <member><filename>/run/systemd/pstore.conf</filename></member>
+      <member><filename>/usr/lib/systemd/pstore.conf</filename></member>
+      <member><filename>/etc/systemd/pstore.conf.d/*.conf</filename></member>
+      <member><filename>/run/systemd/pstore.conf.d/*.conf</filename></member>
+      <member><filename>/usr/lib/systemd/pstore.conf.d/*.conf</filename></member>
+    </simplelist></para>
   </refsynopsisdiv>
 
   <refsect1>

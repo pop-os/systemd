@@ -665,7 +665,7 @@ static int start_transient_mount(
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                r = bus_wait_for_jobs_one(w, object, arg_quiet, NULL);
+                r = bus_wait_for_jobs_one(w, object, arg_quiet ? 0 : BUS_WAIT_JOBS_LOG_ERROR, NULL);
                 if (r < 0)
                         return r;
         }
@@ -774,7 +774,7 @@ static int start_transient_automount(
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                r = bus_wait_for_jobs_one(w, object, arg_quiet, NULL);
+                r = bus_wait_for_jobs_one(w, object, arg_quiet ? 0 : BUS_WAIT_JOBS_LOG_ERROR, NULL);
                 if (r < 0)
                         return r;
         }
@@ -936,7 +936,7 @@ static int stop_mount(
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                r = bus_wait_for_jobs_one(w, object, arg_quiet, NULL);
+                r = bus_wait_for_jobs_one(w, object, arg_quiet ? 0 : BUS_WAIT_JOBS_LOG_ERROR, NULL);
                 if (r < 0)
                         return r;
         }
@@ -1267,7 +1267,7 @@ static int acquire_removable(sd_device *d) {
                 if (sd_device_get_parent(d, &d) < 0)
                         return 0;
 
-                if (sd_device_get_subsystem(d, &v) < 0 || !streq(v, "block"))
+                if (!device_in_subsystem(d, "block"))
                         return 0;
         }
 
@@ -1492,9 +1492,7 @@ static int run(int argc, char* argv[]) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

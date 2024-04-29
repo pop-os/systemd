@@ -12,6 +12,7 @@
 
 #include "alloc-util.h"
 #include "build.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "main-func.h"
@@ -23,6 +24,7 @@
 #include "terminal-util.h"
 
 static const char *arg_identifier = NULL;
+static const char *arg_namespace = NULL;
 static int arg_priority = LOG_INFO;
 static int arg_stderr_priority = -1;
 static bool arg_level_prefix = true;
@@ -43,6 +45,7 @@ static int help(void) {
                "  -p --priority=PRIORITY         Set priority value (0..7)\n"
                "     --stderr-priority=PRIORITY  Set priority value (0..7) used for stderr\n"
                "     --level-prefix=BOOL         Control whether level prefix shall be parsed\n"
+               "     --namespace=NAMESPACE       Connect to specified journal namespace\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                ansi_highlight(),
@@ -57,7 +60,8 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_STDERR_PRIORITY,
-                ARG_LEVEL_PREFIX
+                ARG_LEVEL_PREFIX,
+                ARG_NAMESPACE,
         };
 
         static const struct option options[] = {
@@ -67,6 +71,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "priority",        required_argument, NULL, 'p'                 },
                 { "stderr-priority", required_argument, NULL, ARG_STDERR_PRIORITY },
                 { "level-prefix",    required_argument, NULL, ARG_LEVEL_PREFIX    },
+                { "namespace",       required_argument, NULL, ARG_NAMESPACE       },
                 {}
         };
 
@@ -90,10 +95,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case 't':
-                        if (isempty(optarg))
-                                arg_identifier = NULL;
-                        else
-                                arg_identifier = optarg;
+                        arg_identifier = empty_to_null(optarg);
                         break;
 
                 case 'p':
@@ -116,6 +118,10 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case ARG_NAMESPACE:
+                        arg_namespace = empty_to_null(optarg);
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -136,12 +142,12 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        outfd = sd_journal_stream_fd(arg_identifier, arg_priority, arg_level_prefix);
+        outfd = sd_journal_stream_fd_with_namespace(arg_namespace, arg_identifier, arg_priority, arg_level_prefix);
         if (outfd < 0)
                 return log_error_errno(outfd, "Failed to create stream fd: %m");
 
         if (arg_stderr_priority >= 0 && arg_stderr_priority != arg_priority) {
-                errfd = sd_journal_stream_fd(arg_identifier, arg_stderr_priority, arg_level_prefix);
+                errfd = sd_journal_stream_fd_with_namespace(arg_namespace, arg_identifier, arg_stderr_priority, arg_level_prefix);
                 if (errfd < 0)
                         return log_error_errno(errfd, "Failed to create stream fd: %m");
         }
@@ -157,7 +163,6 @@ static int run(int argc, char *argv[]) {
         if (argc <= optind)
                 (void) execl("/bin/cat", "/bin/cat", NULL);
         else {
-                _cleanup_free_ char *s = NULL;
                 struct stat st;
 
                 if (fstat(STDERR_FILENO, &st) < 0)
@@ -165,11 +170,9 @@ static int run(int argc, char *argv[]) {
                                                "Failed to fstat(%s): %m",
                                                FORMAT_PROC_FD_PATH(STDERR_FILENO));
 
-                if (asprintf(&s, DEV_FMT ":" INO_FMT, (dev_t)st.st_dev, st.st_ino) < 0)
-                        return log_oom();
-
-                if (setenv("JOURNAL_STREAM", s, /* overwrite = */ true) < 0)
-                        return log_error_errno(errno, "Failed to set environment variable JOURNAL_STREAM: %m");
+                r = setenvf("JOURNAL_STREAM", /* overwrite = */ true, DEV_FMT ":" INO_FMT, (dev_t) st.st_dev, st.st_ino);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to set environment variable JOURNAL_STREAM: %m");
 
                 (void) execvp(argv[optind], argv + optind);
         }

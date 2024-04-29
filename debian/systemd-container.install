@@ -1,15 +1,26 @@
+#!/usr/bin/dh-exec
+usr/bin/importctl
+<pkg.systemd.upstream> usr/bin/systemd-vmspawn
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-vmspawn@.service
 usr/bin/machinectl
 usr/bin/portablectl
 usr/lib/systemd/import-pubring.gpg
+usr/lib/systemd/network/80-namespace-ns.*
 usr/lib/systemd/portable
 usr/lib/systemd/systemd-machined
 usr/lib/systemd/systemd-export
 usr/lib/systemd/systemd-import*
+usr/lib/systemd/systemd-mountfsd
+usr/lib/systemd/systemd-mountwork
+usr/lib/systemd/systemd-nsresourced
+usr/lib/systemd/systemd-nsresourcework
 usr/lib/systemd/systemd-portabled
 usr/lib/systemd/systemd-pull
 usr/lib/systemd/system/systemd-nspawn@.service
 usr/lib/systemd/system/systemd-importd.service
 usr/lib/systemd/system/systemd-machined.service
+usr/lib/systemd/system/systemd-mountfsd*
+usr/lib/systemd/system/systemd-nsresourced*
 usr/lib/systemd/system/systemd-portabled.service
 usr/lib/systemd/system/var-lib-machines.mount
 usr/lib/systemd/system/machines.target
@@ -28,6 +39,7 @@ usr/share/dbus-1/system.d/org.freedesktop.portable1.conf
 usr/share/dbus-1/system-services/org.freedesktop.import1.service
 usr/share/dbus-1/system-services/org.freedesktop.machine1.service
 usr/share/dbus-1/system-services/org.freedesktop.portable1.service
+usr/share/polkit-1/actions/io.systemd.mount-file-system.policy
 usr/share/polkit-1/actions/org.freedesktop.import1.policy
 usr/share/polkit-1/actions/org.freedesktop.machine1.policy
 usr/share/polkit-1/actions/org.freedesktop.portable1.policy

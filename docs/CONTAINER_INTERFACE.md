@@ -7,8 +7,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 
 # The Container Interface
 
-Also consult [Writing Virtual Machine or Container
-Managers](https://www.freedesktop.org/wiki/Software/systemd/writing-vm-managers).
+Also consult [Writing Virtual Machine or Container Managers](/WRITING_VM_AND_CONTAINER_MANAGERS).
 
 systemd has a number of interfaces for interacting with container managers,
 when systemd is used inside of an OS container. If you work on a container
@@ -121,7 +120,7 @@ manager, please consider supporting the following interfaces.
    variable's name you may only specify ptys, and not other types of ttys. Also
    you need to specify the pty itself, a symlink will not suffice. This is
    implemented in
-   [systemd-getty-generator(8)](https://www.freedesktop.org/software/systemd/man/systemd-getty-generator.html).
+   [systemd-getty-generator(8)](https://www.freedesktop.org/software/systemd/man/latest/systemd-getty-generator.html).
    Note that this variable should not include the pty that `/dev/console` maps
    to if it maps to one (see below). Example: if the container receives
    `container_ttys=pts/7 pts/8 pts/14` it will spawn three additional login
@@ -131,7 +130,7 @@ manager, please consider supporting the following interfaces.
    running the container manager, if this is considered desirable, please parse
    the host's `/etc/os-release` and set a `$container_host_<key>=<VALUE>`
    environment variable for the ID fields described by the [os-release
-   interface](https://www.freedesktop.org/software/systemd/man/os-release.html), eg:
+   interface](https://www.freedesktop.org/software/systemd/man/latest/os-release.html), eg:
    `$container_host_id=debian`
    `$container_host_build_id=2020-06-15`
    `$container_host_variant_id=server`
@@ -165,10 +164,15 @@ manager, please consider supporting the following interfaces.
    issuing `journalctl -m`. The container machine ID can be determined from
    `/etc/machine-id` in the container.
 
-3. If the container manager wants to cleanly shutdown the container, it might
+3. If the container manager wants to cleanly shut down the container, it might
    be a good idea to send `SIGRTMIN+3` to its init process. systemd will then
    do a clean shutdown. Note however, that since only systemd understands
-   `SIGRTMIN+3` like this, this might confuse other init systems.
+   `SIGRTMIN+3` like this, this might confuse other init systems. A container
+   manager may implement the `$NOTIFY_SOCKET` protocol mentioned below in which
+   case it will receive a notification message `X_SYSTEMD_SIGNALS_LEVEL=2` that
+   indicates if and when these additional signal handlers are installed. If
+   these signals are sent to the container's PID 1 before this notification
+   message is sent they might not be handled correctly yet.
 
 4. To support [Socket Activated
    Containers](https://0pointer.de/blog/projects/socket-activated-containers.html)
@@ -190,12 +194,14 @@ manager, please consider supporting the following interfaces.
    unit they created for their container. That's private property of systemd,
    and no other code should modify it.
 
-6. systemd running inside the container can report when boot-up is complete
-   using the usual `sd_notify()` protocol that is also used when a service
-   wants to tell the service manager about readiness. A container manager can
-   set the `$NOTIFY_SOCKET` environment variable to a suitable socket path to
-   make use of this functionality. (Also see information about
-   `/run/host/notify` below.)
+6. systemd running inside the container can report when boot-up is complete,
+   boot progress and functionality as well as various other bits of system
+   information using the `sd_notify()` protocol that is also used when a
+   service wants to tell the service manager about readiness. A container
+   manager can set the `$NOTIFY_SOCKET` environment variable to a suitable
+   socket path to make use of this functionality. (Also see information about
+   `/run/host/notify` below, as well as the Readiness Protocol section on
+   [systemd(1)](https://www.freedesktop.org/software/systemd/man/latest/systemd.html)
 
 ## Networking
 
@@ -272,6 +278,30 @@ care should be taken to avoid naming conflicts. `systemd` (and in particular
 
 7. The `/run/host/credentials/` directory is a good place to pass credentials
    into the container, using the `$CREDENTIALS_DIRECTORY` protocol, see above.
+
+8. The `/run/host/unix-export/` directory shall be writable from the container
+   payload, and is where container payload can bind `AF_UNIX` sockets in that
+   shall be *exported* to the host, so that the host can connect to them. The
+   container manager should bind mount this directory on the host side
+   (read-only ideally), so that the host can connect to contained sockets. This
+   is most prominently used by `systemd-ssh-generator` when run in such a
+   container to automatically bind an SSH socket into that directory, which
+   then can be used to connect to the container.
+
+9. The `/run/host/unix-export/ssh` `AF_UNIX` socket will be automatically bound
+   by `systemd-ssh-generator` in the container if possible, and can be used to
+   connect to the container.
+
+10. The `/run/host/userdb/` directory may be used to drop-in additional JSON
+    user records that `nss-systemd` inside the container shall include in the
+    system's user database. This is useful to make host users and their home
+    directories automatically accessible to containers in transitive
+    fashion. See `nss-systemd(8)` for details.
+
+11. The `/run/host/home/` directory may be used to bind mount host home
+    directories of users that shall be made available in the container to. This
+    may be used in combination with `/run/host/userdb/` above: one defines the
+    user record, the other contains the user's home directory.
 
 ## What You Shouldn't Do
 

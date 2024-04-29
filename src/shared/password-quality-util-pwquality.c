@@ -14,14 +14,14 @@
 
 static void *pwquality_dl = NULL;
 
-int (*sym_pwquality_check)(pwquality_settings_t *pwq, const char *password, const char *oldpassword, const char *user, void **auxerror);
-pwquality_settings_t *(*sym_pwquality_default_settings)(void);
-void (*sym_pwquality_free_settings)(pwquality_settings_t *pwq);
-int (*sym_pwquality_generate)(pwquality_settings_t *pwq, int entropy_bits, char **password);
-int (*sym_pwquality_get_str_value)(pwquality_settings_t *pwq, int setting, const char **value);
-int (*sym_pwquality_read_config)(pwquality_settings_t *pwq, const char *cfgfile, void **auxerror);
-int (*sym_pwquality_set_int_value)(pwquality_settings_t *pwq, int setting, int value);
-const char* (*sym_pwquality_strerror)(char *buf, size_t len, int errcode, void *auxerror);
+DLSYM_FUNCTION(pwquality_check);
+DLSYM_FUNCTION(pwquality_default_settings);
+DLSYM_FUNCTION(pwquality_free_settings);
+DLSYM_FUNCTION(pwquality_generate);
+DLSYM_FUNCTION(pwquality_get_str_value);
+DLSYM_FUNCTION(pwquality_read_config);
+DLSYM_FUNCTION(pwquality_set_int_value);
+DLSYM_FUNCTION(pwquality_strerror);
 
 int dlopen_pwquality(void) {
         return dlopen_many_sym_or_warn(
@@ -101,7 +101,6 @@ int suggest_passwords(void) {
         _cleanup_strv_free_erase_ char **suggestions = NULL;
         _cleanup_(erase_and_freep) char *joined = NULL;
         char buf[PWQ_MAX_ERROR_MESSAGE_LEN];
-        size_t i;
         int r;
 
         r = pwq_allocate_context(&pwq);
@@ -115,7 +114,7 @@ int suggest_passwords(void) {
         if (!suggestions)
                 return log_oom();
 
-        for (i = 0; i < N_SUGGESTIONS; i++) {
+        for (size_t i = 0; i < N_SUGGESTIONS; i++) {
                 r = sym_pwquality_generate(pwq, 64, suggestions + i);
                 if (r < 0)
                         return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to generate password, ignoring: %s",
@@ -145,13 +144,10 @@ int check_password_quality(const char *password, const char *old, const char *us
         r = sym_pwquality_check(pwq, password, old, username, &auxerror);
         if (r < 0) {
                 if (ret_error) {
-                        _cleanup_free_ char *e = NULL;
-
-                        e = strdup(sym_pwquality_strerror(buf, sizeof(buf), r, auxerror));
-                        if (!e)
-                                return -ENOMEM;
-
-                        *ret_error = TAKE_PTR(e);
+                        r = strdup_to(ret_error,
+                                      sym_pwquality_strerror(buf, sizeof(buf), r, auxerror));
+                        if (r < 0)
+                                return r;
                 }
 
                 return 0; /* all bad */

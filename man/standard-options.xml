@@ -1,17 +1,15 @@
 <?xml version="1.0"?>
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+<!DOCTYPE variablelist PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
-<variablelist
-    xmlns:xi="http://www.w3.org/2001/XInclude">
-
+<variablelist>
   <varlistentry id='help'>
     <term><option>-h</option></term>
     <term><option>--help</option></term>
 
     <listitem id='help-text'>
-      <para>Print a short help text and exit.
+      <para id='help-para'>Print a short help text and exit.
     </para></listitem>
   </varlistentry>
 
@@ -31,16 +29,6 @@
     </listitem>
   </varlistentry>
 
-  <varlistentry id='no-pager-255'>
-    <term><option>--no-pager</option></term>
-
-    <listitem>
-      <para>Do not pipe output into a pager.</para>
-
-      <xi:include href="version-info.xml" xpointer="v255"/>
-    </listitem>
-  </varlistentry>
-
   <varlistentry id='no-ask-password'>
     <term><option>--no-ask-password</option></term>
 
@@ -48,7 +36,7 @@
   </varlistentry>
 
   <varlistentry id='legend'>
-    <term><option>--legend=</option><replaceable>BOOL</replaceable></term>
+    <term><option>--legend=<replaceable>BOOL</replaceable></option></term>
 
     <listitem>
       <para>Enable or disable printing of the legend, i.e. column headers and the footer with hints. The
@@ -85,12 +73,19 @@
   </varlistentry>
 
   <varlistentry id='json'>
-    <term><option>--json=</option><replaceable>MODE</replaceable></term>
+    <term><option>--json=<replaceable>MODE</replaceable></option></term>
 
     <listitem><para>Shows output formatted as JSON. Expects one of <literal>short</literal> (for the
     shortest possible output without any redundant whitespace or line breaks), <literal>pretty</literal>
     (for a pretty version of the same, with indentation and line breaks) or <literal>off</literal> (to turn
     off JSON output, the default).</para></listitem>
+  </varlistentry>
+
+  <varlistentry id='j'>
+    <term><option>-j</option></term>
+
+    <listitem><para>Equivalent to <option>--json=pretty</option> if running on a terminal, and
+    <option>--json=short</option> otherwise.</para></listitem>
   </varlistentry>
 
   <varlistentry id='signal'>
@@ -140,4 +135,13 @@
     </listitem>
   </varlistentry>
 
+  <varlistentry id='option-P'>
+    <term><option>-P</option></term>
+
+    <listitem>
+      <para>Equivalent to <option>--value</option> <option>--property=</option>, i.e. shows the value of the
+      property without the property name or <literal>=</literal>. Note that using <option>-P</option> once
+      will also affect all properties listed with <option>-p</option>/<option>--property=</option>.</para>
+    </listitem>
+  </varlistentry>
 </variablelist>

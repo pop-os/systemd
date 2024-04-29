@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="loginctl" conditional='ENABLE_LOGIND'
@@ -50,7 +50,8 @@
       <varlistentry>
         <term><command>list-sessions</command></term>
 
-        <listitem><para>List current sessions.</para></listitem>
+        <listitem><para>List current sessions. The JSON format output can be toggled using <option>--json=</option>
+        or <option>-j</option> option.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -145,8 +146,8 @@
       <varlistentry>
         <term><command>list-users</command></term>
 
-        <listitem><para>List currently logged in users.
-        </para></listitem>
+        <listitem><para>List currently logged in users. The JSON format output can be toggled using
+        <option>--json=</option> or <option>-j</option> option.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -225,8 +226,8 @@
       <varlistentry>
         <term><command>list-seats</command></term>
 
-        <listitem><para>List currently available seats on the local
-        system.</para></listitem>
+        <listitem><para>List currently available seats on the local system. The JSON format output can be
+        toggled using <option>--json=</option> or <option>-j</option> option.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -411,6 +412,8 @@
 
       <xi:include href="standard-options.xml" xpointer="no-pager" />
       <xi:include href="standard-options.xml" xpointer="no-legend" />
+      <xi:include href="standard-options.xml" xpointer="json" />
+      <xi:include href="standard-options.xml" xpointer="j" />
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
     </variablelist>
@@ -458,12 +461,12 @@ Apr 09 14:40:30 laptop login[2325]: LOGIN ON tty3 BY fatima
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-logind.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>logind.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-logind.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>logind.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

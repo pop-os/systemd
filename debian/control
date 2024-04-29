@@ -3,13 +3,12 @@ Section: admin
 Priority: optional
 Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 XSBC-Original-Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
-Uploaders: Michael Biebl <biebl@debian.org>,
-           Marco d'Itri <md@linux.it>,
+Uploaders: Marco d'Itri <md@linux.it>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>,
            Felipe Sateler <fsateler@debian.org>,
            Luca Boccassi <bluca@debian.org>,
-Standards-Version: 4.6.2
+Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
@@ -25,6 +24,11 @@ Build-Depends: debhelper-compat (= 13),
                docbook-xsl <!nodoc>,
                docbook-xml <!nodoc>,
                meson (>= 0.60.0),
+               clang [amd64 arm64 ppc64el riscv64 s390x] <!pkg.systemd.nobpf !stage1>,
+               linux-headers-generic [amd64 arm64 ppc64el riscv64 s390x] <!pkg.systemd.nobpf !stage1>,
+               libbpf-dev [amd64 arm64 ppc64el riscv64 s390x] <!pkg.systemd.nobpf !stage1>,
+               bpftool [amd64 arm64 ppc64el riscv64 s390x] <!pkg.systemd.nobpf !stage1 !pkg.systemd.upstream>,
+               linux-tools-generic <pkg.systemd.upstream> | bpftool <pkg.systemd.upstream>,
                gettext,
                gperf,
                libcap-dev,
@@ -40,7 +44,7 @@ Build-Depends: debhelper-compat (= 13),
                libacl1-dev,
                liblzma-dev,
                liblz4-dev (>= 1.3.0),
-               liblz4-tool <!nocheck>,
+               lz4 <!nocheck>,
                libbz2-dev <!stage1>,
                zlib1g-dev <!stage1> | libz-dev <!stage1>,
                libcurl4-openssl-dev <!stage1>,
@@ -61,6 +65,8 @@ Build-Depends: debhelper-compat (= 13),
                libssl-dev <!stage1>,
                libqrencode-dev [!i386] <!stage1>,
                libxen-dev [amd64 arm64 armhf] <!stage1>,
+               libpwquality-dev <!stage1>,
+               libarchive-dev <!stage1>,
                linux-base <!nocheck>,
                acl <!nocheck>,
                python3:native,
@@ -89,10 +95,12 @@ Suggests: systemd-container,
           systemd-homed,
           systemd-userdbd,
           systemd-boot,
+          libbpf1,
           libfido2-1,
           libip4tc2,
           libkmod2,
           libp11-kit0,
+          libpwquality1,
           libqrencode4,
           libtss2-esys-3.0.2-0,
           libtss2-mu-4.0.1-0,
@@ -315,6 +323,7 @@ Multi-Arch: same
 Section: libs
 Depends: ${shlibs:Depends},
          ${misc:Depends}
+Recommends: libgcrypt20,
 Description: systemd utility library
  This library provides APIs to interface with various system components such as
  the system journal, the system service manager, D-Bus and more.
@@ -478,6 +487,7 @@ Depends: ${shlibs:Depends},
          systemd-userdbd (= ${binary:Version}),
          systemd (= ${binary:Version}),
          libpam-runtime,
+         libpwquality1,
 Description: home area manager
  systemd-homed is a system service designed to manage home directories. This
  package includes the homed service, a PAM module to automatically mount home

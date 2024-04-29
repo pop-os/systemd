@@ -3,10 +3,38 @@
 #include "errno-util.h"
 #include "fd-util.h"
 #include "missing_syscall.h"
+#include "missing_wait.h"
 #include "parse-util.h"
 #include "pidref.h"
 #include "process-util.h"
 #include "signal-util.h"
+#include "stat-util.h"
+
+bool pidref_equal(const PidRef *a, const PidRef *b) {
+        int r;
+
+        if (pidref_is_set(a)) {
+                if (!pidref_is_set(b))
+                        return false;
+
+                if (a->pid != b->pid)
+                        return false;
+
+                if (a->fd < 0 || b->fd < 0)
+                        return true;
+
+                /* pidfds live in their own pidfs and each process comes with a unique inode number since
+                 * kernel 6.8. We can safely do this on older kernels too though, as previously anonymous
+                 * inode was used and inode number was the same for all pidfds. */
+                r = fd_inode_same(a->fd, b->fd);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to check whether pidfds for pid " PID_FMT " are equal, assuming yes: %m",
+                                        a->pid);
+                return r != 0;
+        }
+
+        return !pidref_is_set(b);
+}
 
 int pidref_set_pid(PidRef *pidref, pid_t pid) {
         int fd;
@@ -106,6 +134,38 @@ int pidref_set_pidfd_consume(PidRef *pidref, int fd) {
         return r;
 }
 
+int pidref_set_parent(PidRef *ret) {
+        _cleanup_(pidref_done) PidRef parent = PIDREF_NULL;
+        pid_t ppid;
+        int r;
+
+        assert(ret);
+
+        /* Acquires a pidref to our parent process. Deals with the fact that parent processes might exit, and
+         * we get reparented to other processes, with our old parent's PID already being recycled. */
+
+        ppid = getppid();
+        for (;;) {
+                r = pidref_set_pid(&parent, ppid);
+                if (r < 0)
+                        return r;
+
+                if (parent.fd < 0) /* If pidfds are not available, then we are done */
+                        break;
+
+                pid_t now_ppid = getppid();
+                if (now_ppid == ppid) /* If our ppid is still the same, then we are done */
+                        break;
+
+                /* Otherwise let's try again with the new ppid */
+                ppid = now_ppid;
+                pidref_done(&parent);
+        }
+
+        *ret = TAKE_PIDREF(parent);
+        return 0;
+}
+
 void pidref_done(PidRef *pidref) {
         assert(pidref);
 
@@ -123,11 +183,11 @@ PidRef *pidref_free(PidRef *pidref) {
         return mfree(pidref);
 }
 
-int pidref_dup(const PidRef *pidref, PidRef **ret) {
+int pidref_copy(const PidRef *pidref, PidRef *dest) {
         _cleanup_close_ int dup_fd = -EBADF;
         pid_t dup_pid = 0;
 
-        assert(ret);
+        assert(dest);
 
         /* Allocates a new PidRef on the heap, making it a copy of the specified pidref. This does not try to
          * acquire a pidfd if we don't have one yet!
@@ -150,21 +210,34 @@ int pidref_dup(const PidRef *pidref, PidRef **ret) {
                         dup_pid = pidref->pid;
         }
 
-        PidRef *dup_pidref = new(PidRef, 1);
-        if (!dup_pidref)
-                return -ENOMEM;
-
-        *dup_pidref = (PidRef) {
+        *dest = (PidRef) {
                 .fd = TAKE_FD(dup_fd),
                 .pid = dup_pid,
         };
+
+        return 0;
+}
+
+int pidref_dup(const PidRef *pidref, PidRef **ret) {
+        _cleanup_(pidref_freep) PidRef *dup_pidref = NULL;
+        int r;
+
+        assert(ret);
+
+        dup_pidref = newdup(PidRef, &PIDREF_NULL, 1);
+        if (!dup_pidref)
+                return -ENOMEM;
+
+        r = pidref_copy(pidref, dup_pidref);
+        if (r < 0)
+                return r;
 
         *ret = TAKE_PTR(dup_pidref);
         return 0;
 }
 
 int pidref_new_from_pid(pid_t pid, PidRef **ret) {
-        _cleanup_(pidref_freep) PidRef *n = 0;
+        _cleanup_(pidref_freep) PidRef *n = NULL;
         int r;
 
         assert(ret);
@@ -270,8 +343,46 @@ bool pidref_is_self(const PidRef *pidref) {
         return pidref->pid == getpid_cached();
 }
 
+int pidref_wait(const PidRef *pidref, siginfo_t *ret, int options) {
+        int r;
+
+        if (!pidref_is_set(pidref))
+                return -ESRCH;
+
+        if (pidref->pid == 1 || pidref->pid == getpid_cached())
+                return -ECHILD;
+
+        siginfo_t si = {};
+
+        if (pidref->fd >= 0) {
+                r = RET_NERRNO(waitid(P_PIDFD, pidref->fd, &si, options));
+                if (r >= 0) {
+                        if (ret)
+                                *ret = si;
+                        return r;
+                }
+                if (r != -EINVAL) /* P_PIDFD was added in kernel 5.4 only */
+                        return r;
+        }
+
+        r = RET_NERRNO(waitid(P_PID, pidref->pid, &si, options));
+        if (r >= 0 && ret)
+                *ret = si;
+        return r;
+}
+
+int pidref_wait_for_terminate(const PidRef *pidref, siginfo_t *ret) {
+        int r;
+
+        for (;;) {
+                r = pidref_wait(pidref, ret, WEXITED);
+                if (r != -EINTR)
+                        return r;
+        }
+}
+
 static void pidref_hash_func(const PidRef *pidref, struct siphash *state) {
-        siphash24_compress(&pidref->pid, sizeof(pidref->pid), state);
+        siphash24_compress_typesafe(pidref->pid, state);
 }
 
 static int pidref_compare_func(const PidRef *a, const PidRef *b) {

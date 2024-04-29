@@ -23,6 +23,7 @@
 #include "log.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "proc-cmdline.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -129,6 +130,13 @@ static int read_resume_config(dev_t *ret_devno, uint64_t *ret_offset) {
         assert(ret_devno);
         assert(ret_offset);
 
+        r = proc_cmdline_get_key("noresume", /* flags = */ 0, /* ret_value = */ NULL);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to check if 'noresume' kernel command line option is set: %m");
+        if (r > 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                       "'noresume' kernel command line option is set, refusing hibernation device lookup.");
+
         r = read_one_line_file("/sys/power/resume", &devno_str);
         if (r < 0)
                 return log_debug_errno(r, "Failed to read /sys/power/resume: %m");
@@ -152,7 +160,8 @@ static int read_resume_config(dev_t *ret_devno, uint64_t *ret_offset) {
 
         if (devno == 0 && offset > 0 && offset != UINT64_MAX)
                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Found resume_offset=%" PRIu64 " but resume= is unset, refusing.", offset);
+                                       "Found populated /sys/power/resume_offset (%" PRIu64 ") but /sys/power/resume is not set, refusing.",
+                                       offset);
 
         *ret_devno = devno;
         *ret_offset = offset;
@@ -458,7 +467,7 @@ int hibernation_is_safe(void) {
                                        "Not running on EFI and resume= is not set. Hibernation is not safe.");
 
         if (bypass_space_check)
-                return true;
+                return 0;
 
         r = get_proc_meminfo_active(&active);
         if (r < 0)
@@ -475,21 +484,14 @@ int hibernation_is_safe(void) {
 
 int write_resume_config(dev_t devno, uint64_t offset, const char *device) {
         char offset_str[DECIMAL_STR_MAX(uint64_t)];
-        _cleanup_free_ char *path = NULL;
         const char *devno_str;
         int r;
 
+        assert(devno > 0);
+        assert(device);
+
         devno_str = FORMAT_DEVNUM(devno);
         xsprintf(offset_str, "%" PRIu64, offset);
-
-        if (!device) {
-                r = device_path_make_canonical(S_IFBLK, devno, &path);
-                if (r < 0)
-                        return log_error_errno(r,
-                                               "Failed to format canonical device path for devno '" DEVNUM_FORMAT_STR "': %m",
-                                               DEVNUM_FORMAT_VAL(devno));
-                device = path;
-        }
 
         /* We write the offset first since it's safer. Note that this file is only available in 4.17+, so
          * fail gracefully if it doesn't exist and we're only overwriting it with 0. */
@@ -497,8 +499,8 @@ int write_resume_config(dev_t devno, uint64_t offset, const char *device) {
         if (r == -ENOENT) {
                 if (offset != 0)
                         return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
-                                               "Can't configure hibernation offset %" PRIu64 ", kernel does not support /sys/power/resume_offset. Refusing.",
-                                               offset);
+                                               "Can't configure swap file offset %s, kernel does not support /sys/power/resume_offset. Refusing.",
+                                               offset_str);
 
                 log_warning_errno(r, "/sys/power/resume_offset is unavailable, skipping writing swap file offset.");
         } else if (r < 0)
@@ -517,4 +519,19 @@ int write_resume_config(dev_t devno, uint64_t offset, const char *device) {
         log_debug("Wrote resume=%s for device '%s' to /sys/power/resume.", devno_str, device);
 
         return 0;
+}
+
+int clear_efi_hibernate_location_and_warn(void) {
+        int r;
+
+        if (!is_efi_boot())
+                return 0;
+
+        r = efi_set_variable(EFI_SYSTEMD_VARIABLE(HibernateLocation), NULL, 0);
+        if (r == -ENOENT)
+                return 0;
+        if (r < 0)
+                return log_warning_errno(r, "Failed to clear HibernateLocation EFI variable: %m");
+
+        return 1;
 }

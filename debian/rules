@@ -62,7 +62,6 @@ CONFFLAGS = \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
-	-Ddefault-hierarchy=unified \
 	-Ddefault-dnssec=no \
 	-Ddefault-llmnr=no \
 	-Ddefault-mdns=no \
@@ -73,7 +72,6 @@ CONFFLAGS = \
 	-Dfirstboot=true \
 	-Dxkbcommon=disabled \
 	-Dwheel-group=false \
-	-Dpwquality=disabled \
 	-Doomd=true \
 	-Durlify=true \
 	-Dgnutls=disabled \
@@ -104,7 +102,8 @@ CONFFLAGS = \
 	-Dnss-systemd=true \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
-	-Dstandalone-binaries=true
+	-Dstandalone-binaries=true \
+	-Dmode=$(if $(filter pkg.systemd.upstream,$(DEB_BUILD_PROFILES)),developer,release)
 
 ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
 CONFFLAGS += -Dtests=false
@@ -132,6 +131,7 @@ CONFFLAGS += \
 	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),disabled,enabled) \
 	-Dp11kit=enabled \
 	-Dqrencode=$(if $(filter i386,$(DEB_HOST_ARCH)),disabled,enabled) \
+	-Dpwquality=enabled \
 	-Dhomed=enabled \
 	-Duserdb=true \
 	-Dpcre2=enabled \
@@ -156,12 +156,62 @@ CONFFLAGS += \
 	-Dtpm2=disabled \
 	-Dp11kit=disabled \
 	-Dqrencode=disabled \
+	-Dpwquality=disabled \
 	-Dhomed=disabled \
 	-Duserdb=false \
 	-Dpcre2=disabled \
 	-Dukify=disabled \
 	-Dbootloader=disabled \
 	-Dsysupdate=disabled
+endif
+
+# BPF/BTF are only enabled and usable on a few architectures
+ifeq (, $(filter $(DEB_BUILD_PROFILES), stage1 pkg.systemd.nobpf))
+ifneq (,$(filter $(DEB_TARGET_ARCH), amd64 arm64 ppc64el riscv64 s390x))
+CONFFLAGS += \
+	-Dbpf-framework=enabled \
+	-Dbpf-compiler=clang
+
+ifeq ($(DEB_VENDOR),Ubuntu)
+# Source: https://git.launchpad.net/ubuntu/+source/xdp-tools/tree/debian/rules
+# On Ubuntu, the `bpftool` in path is a shell wrapper pointing at
+# the binary corresponding to runtime kernel version.
+#
+# We do not know the kernel version being used on the system building
+# this package, and in sbuild/container environments uname might not
+# even match anything available to the build.
+# Gladly for the build we only need the tool to generate skeleton code.
+#
+# If any /usr/lib/linux-tools/*/bpftool exists, locate the most recent
+# version and point to that, otherwise `bpftool` from PATH will be
+# used.
+bpftool_binary := $(shell find /usr/lib/linux-tools/ -name 'bpftool' -perm /u=x 2>/dev/null | sort | head -n1)
+ifneq ($(bpftool_binary),)
+export PATH := $(shell dirname $(bpftool_binary)):$(PATH)
+endif
+endif
+
+# The vmlinux.h we want is in the headers package that linux-headers-ARCH depends on,
+# which itself is the package that provides linux-headers-generic that we build depend on.
+# This is available since Trixie. If we can't find it, default to auto for the upstream CI
+# so that it is generated at build time, or disabled for distribution builds, as we don't
+# want to depend on the buildd kernels.
+ifeq ($(DEB_VENDOR),Ubuntu)
+HEADERS_PACKAGE = $(shell dpkg-query --showformat='$${Depends}' --show linux-headers-generic | sed "s/.*\(linux-headers-.*)\)-generic.*/\1/")
+else
+HEADERS_PACKAGE = $(shell dpkg-query --showformat='$${Depends}' --show linux-headers-$(DEB_HOST_ARCH) | sed "s/.*\(linux-headers-.*-$(DEB_HOST_ARCH)\).*/\1/")
+endif
+
+ifneq ("$(wildcard /usr/src/$(HEADERS_PACKAGE)/vmlinux.h)","")
+CONFFLAGS += -Dvmlinux-h=provided -Dvmlinux-h-path=/usr/src/$(HEADERS_PACKAGE)/vmlinux.h
+else
+ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+CONFFLAGS += -Dvmlinux-h=auto
+else
+CONFFLAGS += -Dvmlinux-h=disabled
+endif
+endif
+endif
 endif
 
 override_dh_auto_configure:
@@ -244,6 +294,15 @@ endif
 	# Those are not strictly needed and can trigger piuparts errors due to
 	# accidential directory removal by dpkg on merged-/usr systems.
 	find debian/systemd/usr/lib -type d -empty -print -delete
+
+	# Can be dropped once upstream CI stops running on Jammy, which needs
+	# the old pkla config files, which are created only when building with
+	# old polkit versions.
+ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+	if [ -f debian/tmp/var/lib/polkit-1/localauthority/10-vendor.d/systemd-networkd.pkla ]; then \
+		dh_install -psystemd var/lib/polkit-1/localauthority/10-vendor.d/systemd-networkd.pkla; \
+	fi
+endif
 
 override_dh_missing:
 	dh_missing $(DH_MISSING)

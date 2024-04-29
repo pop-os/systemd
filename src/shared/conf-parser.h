@@ -93,26 +93,48 @@ int config_parse(
                 void *userdata,
                 struct stat *ret_stat);     /* possibly NULL */
 
-int config_parse_config_file(
-                const char *conf_file,
-                const char *sections,       /* nulstr */
-                ConfigItemLookup lookup,
-                const void *table,
-                ConfigParseFlags flags,
-                void *userdata);
-
 int config_parse_many(
                 const char* const* conf_files,  /* possibly empty */
                 const char* const* conf_file_dirs,
                 const char *dropin_dirname,
                 const char *root,
-                const char *sections,       /* nulstr */
+                const char *sections,         /* nulstr */
                 ConfigItemLookup lookup,
                 const void *table,
                 ConfigParseFlags flags,
                 void *userdata,
                 Hashmap **ret_stats_by_path,  /* possibly NULL */
                 char ***ret_drop_in_files);   /* possibly NULL */
+
+int config_parse_standard_file_with_dropins_full(
+                const char *root,
+                const char *main_file,        /* A path like "systemd/frobnicator.conf" */
+                const char *sections,
+                ConfigItemLookup lookup,
+                const void *table,
+                ConfigParseFlags flags,
+                void *userdata,
+                Hashmap **ret_stats_by_path,  /* possibly NULL */
+                char ***ret_dropin_files);    /* possibly NULL */
+
+static inline int config_parse_standard_file_with_dropins(
+                const char *main_file,        /* A path like "systemd/frobnicator.conf" */
+                const char *sections,         /* nulstr */
+                ConfigItemLookup lookup,
+                const void *table,
+                ConfigParseFlags flags,
+                void *userdata) {
+        return config_parse_standard_file_with_dropins_full(
+                        /* root= */ NULL,
+                        main_file,
+                        sections,
+                        lookup,
+                        table,
+                        flags,
+                        userdata,
+                        /* ret_stats_by_path= */ NULL,
+                        /* ret_dropin_files= */ NULL);
+}
 
 int config_get_stats_by_path(
                 const char *suffix,
@@ -137,7 +159,11 @@ static inline ConfigSection* config_section_free(ConfigSection *cs) {
 DEFINE_TRIVIAL_CLEANUP_FUNC(ConfigSection*, config_section_free);
 
 int config_section_new(const char *filename, unsigned line, ConfigSection **ret);
+
+void config_section_hash_func(const ConfigSection *c, struct siphash *state);
+int config_section_compare_func(const ConfigSection *x, const ConfigSection *y);
 extern const struct hash_ops config_section_hash_ops;
+
 int _hashmap_by_section_find_unused_line(
                 HashmapBase *entries_by_section,
                 const char *filename,
@@ -224,6 +250,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_percent);
 CONFIG_PARSER_PROTOTYPE(config_parse_permyriad);
 CONFIG_PARSER_PROTOTYPE(config_parse_pid);
 CONFIG_PARSER_PROTOTYPE(config_parse_sec_fix_0);
+CONFIG_PARSER_PROTOTYPE(config_parse_timezone);
 
 typedef enum Disabled {
         DISABLED_CONFIGURATION,

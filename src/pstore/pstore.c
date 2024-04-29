@@ -56,9 +56,9 @@ typedef enum PStoreStorage {
 } PStoreStorage;
 
 static const char* const pstore_storage_table[_PSTORE_STORAGE_MAX] = {
-        [PSTORE_STORAGE_NONE] = "none",
+        [PSTORE_STORAGE_NONE]     = "none",
         [PSTORE_STORAGE_EXTERNAL] = "external",
-        [PSTORE_STORAGE_JOURNAL] = "journal",
+        [PSTORE_STORAGE_JOURNAL]  = "journal",
 };
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP(pstore_storage, PStoreStorage);
@@ -77,9 +77,12 @@ static int parse_config(void) {
                 {}
         };
 
-        return config_parse_config_file("pstore.conf", "PStore\0",
-                                        config_item_table_lookup, items,
-                                        CONFIG_PARSE_WARN, NULL);
+        return config_parse_standard_file_with_dropins(
+                        "systemd/pstore.conf",
+                        "PStore\0",
+                        config_item_table_lookup, items,
+                        CONFIG_PARSE_WARN,
+                        /* userdata= */ NULL);
 }
 
 /* File list handling - PStoreEntry is the struct and
@@ -279,6 +282,7 @@ static int process_dmesg_files(PStoreList *list) {
                 } else
                         log_debug("Unknown backend, ignoring \"%s\".", pe->dirent.d_name);
         }
+
         return 0;
 }
 

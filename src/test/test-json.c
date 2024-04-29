@@ -6,9 +6,11 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "iovec-util.h"
 #include "json-internal.h"
 #include "json.h"
 #include "math-util.h"
+#include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tests.h"
@@ -42,7 +44,7 @@ static void test_tokenizer_one(const char *data, ...) {
                         const char *nn;
 
                         nn = va_arg(ap, const char *);
-                        assert_se(streq_ptr(nn, str));
+                        ASSERT_STREQ(nn, str);
 
                 } else if (t == JSON_TOKEN_REAL) {
                         double d;
@@ -105,6 +107,17 @@ static void test_variant_one(const char *data, Test test) {
         assert_se(json_variant_equal(v, w));
 
         s = mfree(s);
+        r = json_variant_format(w, JSON_FORMAT_CENSOR_SENSITIVE, &s);
+        assert_se(s);
+        ASSERT_STREQ(s, "\"<sensitive data>\"");
+
+        s = mfree(s);
+        r = json_variant_format(w, JSON_FORMAT_PRETTY, &s);
+        assert_se(r >= 0);
+        assert_se(s);
+        assert_se((size_t) r == strlen(s));
+
+        s = mfree(s);
         w = json_variant_unref(w);
 
         r = json_variant_format(v, JSON_FORMAT_PRETTY, &s);
@@ -154,7 +167,7 @@ static void test_1(JsonVariant *v) {
         assert_se(p && json_variant_type(p) == JSON_VARIANT_STRING);
 
         /* k equals v */
-        assert_se(streq(json_variant_string(p), "v"));
+        ASSERT_STREQ(json_variant_string(p), "v");
 
         /* has foo */
         p = json_variant_by_key(v, "foo");
@@ -321,7 +334,7 @@ TEST(build) {
         assert_se(json_variant_format(b, 0, &t) >= 0);
         log_info("GOT: %s", t);
 
-        assert_se(streq(s, t));
+        ASSERT_STREQ(s, t);
 
         a = json_variant_unref(a);
         b = json_variant_unref(b);
@@ -349,7 +362,7 @@ TEST(json_parse_file_empty) {
 
         assert_se(fopen_unlocked("/dev/null", "re", &f) >= 0);
         assert_se(json_parse_file(f, "waldo", 0, &v, NULL, NULL) == -ENODATA);
-        assert_se(v == NULL);
+        ASSERT_NULL(v);
 }
 
 TEST(json_parse_file_invalid) {
@@ -358,7 +371,7 @@ TEST(json_parse_file_invalid) {
 
         assert_se(f = fmemopen_unlocked((void*) "kookoo", 6, "r"));
         assert_se(json_parse_file(f, "waldo", 0, &v, NULL, NULL) == -EINVAL);
-        assert_se(v == NULL);
+        ASSERT_NULL(v);
 }
 
 TEST(source) {
@@ -449,7 +462,7 @@ TEST(normalize) {
         assert_se(!json_variant_is_normalized(v));
 
         assert_se(json_variant_format(v, 0, &t) >= 0);
-        assert_se(streq(t, "{\"b\":\"x\",\"c\":\"y\",\"a\":\"z\"}"));
+        ASSERT_STREQ(t, "{\"b\":\"x\",\"c\":\"y\",\"a\":\"z\"}");
         t = mfree(t);
 
         assert_se(json_build(&w, JSON_BUILD_OBJECT(
@@ -460,7 +473,7 @@ TEST(normalize) {
         assert_se(!json_variant_is_normalized(w));
 
         assert_se(json_variant_format(w, 0, &t) >= 0);
-        assert_se(streq(t, "{\"bar\":\"zzz\",\"foo\":{\"b\":\"x\",\"c\":\"y\",\"a\":\"z\"}}"));
+        ASSERT_STREQ(t, "{\"bar\":\"zzz\",\"foo\":{\"b\":\"x\",\"c\":\"y\",\"a\":\"z\"}}");
         t = mfree(t);
 
         assert_se(json_variant_sort(&v) >= 0);
@@ -468,7 +481,7 @@ TEST(normalize) {
         assert_se(json_variant_is_normalized(v));
 
         assert_se(json_variant_format(v, 0, &t) >= 0);
-        assert_se(streq(t, "{\"a\":\"z\",\"b\":\"x\",\"c\":\"y\"}"));
+        ASSERT_STREQ(t, "{\"a\":\"z\",\"b\":\"x\",\"c\":\"y\"}");
         t = mfree(t);
 
         assert_se(json_variant_normalize(&w) >= 0);
@@ -476,7 +489,7 @@ TEST(normalize) {
         assert_se(json_variant_is_normalized(w));
 
         assert_se(json_variant_format(w, 0, &t) >= 0);
-        assert_se(streq(t, "{\"bar\":\"zzz\",\"foo\":{\"a\":\"z\",\"b\":\"x\",\"c\":\"y\"}}"));
+        ASSERT_STREQ(t, "{\"bar\":\"zzz\",\"foo\":{\"a\":\"z\",\"b\":\"x\",\"c\":\"y\"}}");
         t = mfree(t);
 }
 
@@ -518,7 +531,7 @@ TEST(bisect) {
                 assert_se(json_variant_is_string(k));
 
                 z = (char[5]){ '<', c, c, '>', 0};
-                assert_se(streq(json_variant_string(k), z));
+                ASSERT_STREQ(json_variant_string(k), z);
         }
 }
 
@@ -685,8 +698,8 @@ static void json_array_append_with_source_one(bool source) {
         assert_se(json_variant_get_source(a, &s1, &line1, &col1) >= 0);
         assert_se(json_variant_get_source(b, &s2, &line2, &col2) >= 0);
 
-        assert_se(streq_ptr(s1, source ? "string 1" : NULL));
-        assert_se(streq_ptr(s2, source ? "string 2" : NULL));
+        ASSERT_STREQ(s1, source ? "string 1" : NULL);
+        ASSERT_STREQ(s2, source ? "string 2" : NULL);
         assert_se(line1 == 1);
         assert_se(col1 == 2);
         assert_se(line2 == 3);
@@ -710,8 +723,8 @@ static void json_array_append_with_source_one(bool source) {
         assert_se(elem = json_variant_by_index(a, 1));
         assert_se(json_variant_get_source(elem, &s2, &line2, &col2) >= 0);
 
-        assert_se(streq_ptr(s1, source ? "string 2" : NULL));
-        assert_se(streq_ptr(s2, source ? "string 2" : NULL));
+        ASSERT_STREQ(s1, source ? "string 2" : NULL);
+        ASSERT_STREQ(s2, source ? "string 2" : NULL);
         assert_se(line1 == 3);
         assert_se(col1 == 5);
         assert_se(line2 == 3);
@@ -811,6 +824,174 @@ TEST(json_dispatch) {
         assert_se(foobar.j == UINT16_MAX);
         assert_se(foobar.k == INT16_MIN);
         assert_se(foobar.l == INT16_MIN);
+}
+
+typedef enum mytestenum {
+        myfoo, mybar, mybaz, _mymax, _myinvalid = -EINVAL,
+} mytestenum;
+
+static const char *mytestenum_table[_mymax] = {
+        [myfoo] = "myfoo",
+        [mybar] = "mybar",
+        [mybaz] = "mybaz",
+};
+
+DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(mytestenum, mytestenum);
+
+static JSON_DISPATCH_ENUM_DEFINE(dispatch_mytestenum, mytestenum, mytestenum_from_string);
+
+TEST(json_dispatch_enum_define) {
+
+        struct data {
+                mytestenum a, b, c, d;
+        } data = {
+                .a = _myinvalid,
+                .b = _myinvalid,
+                .c = _myinvalid,
+                .d = mybar,
+        };
+
+        _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
+
+        assert_se(json_build(&j, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR("a", JSON_BUILD_STRING("mybaz")),
+                                             JSON_BUILD_PAIR("b", JSON_BUILD_STRING("mybar")),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_STRING("myfoo")),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_NULL))) >= 0);
+
+        assert_se(json_dispatch(j,
+                                (const JsonDispatch[]) {
+                                        { "a", _JSON_VARIANT_TYPE_INVALID, dispatch_mytestenum, offsetof(struct data, a), 0 },
+                                        { "b", _JSON_VARIANT_TYPE_INVALID, dispatch_mytestenum, offsetof(struct data, b), 0 },
+                                        { "c", _JSON_VARIANT_TYPE_INVALID, dispatch_mytestenum, offsetof(struct data, c), 0 },
+                                        { "d", _JSON_VARIANT_TYPE_INVALID, dispatch_mytestenum, offsetof(struct data, d), 0 },
+                                        {},
+                                },
+                                /* flags= */ 0,
+                                &data) >= 0);
+
+        assert(data.a == mybaz);
+        assert(data.b == mybar);
+        assert(data.c == myfoo);
+        assert(data.d < 0);
+}
+
+TEST(json_sensitive) {
+        _cleanup_(json_variant_unrefp) JsonVariant *a = NULL, *b = NULL, *v = NULL;
+        _cleanup_free_ char *s = NULL;
+        int r;
+
+        assert_se(json_build(&a, JSON_BUILD_STRV(STRV_MAKE("foo", "bar", "baz", "bar", "baz", "foo", "qux", "baz"))) >= 0);
+        assert_se(json_build(&b, JSON_BUILD_STRV(STRV_MAKE("foo", "bar", "baz", "qux"))) >= 0);
+
+        json_variant_sensitive(a);
+
+        assert_se(json_variant_format(a, JSON_FORMAT_CENSOR_SENSITIVE, &s) >= 0);
+        ASSERT_STREQ(s, "\"<sensitive data>\"");
+        s = mfree(s);
+
+        r = json_variant_format(b, JSON_FORMAT_CENSOR_SENSITIVE, &s);
+        assert_se(r >= 0);
+        assert_se(s);
+        assert_se((size_t) r == strlen(s));
+        s = mfree(s);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        r = json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s);
+        assert_se(r >= 0);
+        assert_se(s);
+        assert_se((size_t) r == strlen(s));
+        s = mfree(s);
+        v = json_variant_unref(v);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR_VARIANT("b", b),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        r = json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s);
+        assert_se(r >= 0);
+        assert_se(s);
+        assert_se((size_t) r == strlen(s));
+        s = mfree(s);
+        v = json_variant_unref(v);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR_VARIANT("b", b),
+                                             JSON_BUILD_PAIR_VARIANT("a", a),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        assert_se(json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s) >= 0);
+        ASSERT_STREQ(s, "{\"b\":[\"foo\",\"bar\",\"baz\",\"qux\"],\"a\":\"<sensitive data>\",\"c\":-9223372036854775808,\"d\":\"-9223372036854775808\",\"e\":{}}");
+        s = mfree(s);
+        v = json_variant_unref(v);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR_VARIANT("b", b),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR_VARIANT("a", a),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        assert_se(json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s) >= 0);
+        ASSERT_STREQ(s, "{\"b\":[\"foo\",\"bar\",\"baz\",\"qux\"],\"c\":-9223372036854775808,\"a\":\"<sensitive data>\",\"d\":\"-9223372036854775808\",\"e\":{}}");
+        s = mfree(s);
+        v = json_variant_unref(v);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR_VARIANT("b", b),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR_VARIANT("a", a),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        assert_se(json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s) >= 0);
+        ASSERT_STREQ(s, "{\"b\":[\"foo\",\"bar\",\"baz\",\"qux\"],\"c\":-9223372036854775808,\"d\":\"-9223372036854775808\",\"a\":\"<sensitive data>\",\"e\":{}}");
+        s = mfree(s);
+        v = json_variant_unref(v);
+
+        assert_se(json_build(&v, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR_VARIANT("b", b),
+                                             JSON_BUILD_PAIR("c", JSON_BUILD_INTEGER(INT64_MIN)),
+                                             JSON_BUILD_PAIR("d", JSON_BUILD_STRING("-9223372036854775808")),
+                                             JSON_BUILD_PAIR("e", JSON_BUILD_EMPTY_OBJECT),
+                                             JSON_BUILD_PAIR_VARIANT("a", a))) >= 0);
+        json_variant_dump(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, NULL, NULL);
+
+        assert_se(json_variant_format(v, JSON_FORMAT_CENSOR_SENSITIVE, &s) >= 0);
+        ASSERT_STREQ(s, "{\"b\":[\"foo\",\"bar\",\"baz\",\"qux\"],\"c\":-9223372036854775808,\"d\":\"-9223372036854775808\",\"e\":{},\"a\":\"<sensitive data>\"}");
+}
+
+TEST(json_iovec) {
+        struct iovec iov1 = CONST_IOVEC_MAKE_STRING("üxknürz"), iov2 = CONST_IOVEC_MAKE_STRING("wuffwuffmiau");
+
+        _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
+        assert_se(json_build(&j, JSON_BUILD_OBJECT(
+                                             JSON_BUILD_PAIR("nr1", JSON_BUILD_IOVEC_BASE64(&iov1)),
+                                             JSON_BUILD_PAIR("nr2", JSON_BUILD_IOVEC_HEX(&iov2)))) >= 0);
+
+        json_variant_dump(j, JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO, /* f= */ NULL, /* prefix= */ NULL);
+
+        _cleanup_(iovec_done) struct iovec a = {}, b = {};
+        assert_se(json_variant_unbase64_iovec(json_variant_by_key(j, "nr1"), &a) >= 0);
+        assert_se(json_variant_unhex_iovec(json_variant_by_key(j, "nr2"), &b) >= 0);
+
+        assert_se(iovec_memcmp(&iov1, &a) == 0);
+        assert_se(iovec_memcmp(&iov2, &b) == 0);
+        assert_se(iovec_memcmp(&iov2, &a) < 0);
+        assert_se(iovec_memcmp(&iov1, &b) > 0);
 }
 
 DEFINE_TEST_MAIN(LOG_DEBUG);

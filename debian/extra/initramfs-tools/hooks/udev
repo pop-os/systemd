@@ -16,6 +16,12 @@ esac
 mkdir -p "$DESTDIR/usr/lib/systemd"
 copy_exec /usr/lib/systemd/systemd-udevd      /usr/lib/systemd
 copy_exec /usr/bin/udevadm    /usr/bin
+# libkmod is loaded via dlopen() since v256 so pull it in manually
+for library in usr/lib/*/libkmod.so.*; do
+  if [ -f "${library}" ]; then
+    copy_exec "${library}"
+  fi
+done
 
 mkdir -p "$DESTDIR/etc/udev"
 cp -p /etc/udev/udev.conf "$DESTDIR/etc/udev/"

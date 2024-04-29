@@ -8,11 +8,17 @@
 #include "varlink.h"
 #include "varlink-idl.h"
 #include "varlink-io.systemd.h"
+#include "varlink-io.systemd.BootControl.h"
+#include "varlink-io.systemd.Credentials.h"
 #include "varlink-io.systemd.Journal.h"
 #include "varlink-io.systemd.ManagedOOM.h"
+#include "varlink-io.systemd.MountFileSystem.h"
+#include "varlink-io.systemd.NamespaceResource.h"
+#include "varlink-io.systemd.Network.h"
 #include "varlink-io.systemd.PCRExtend.h"
-#include "varlink-io.systemd.Resolve.Monitor.h"
+#include "varlink-io.systemd.PCRLock.h"
 #include "varlink-io.systemd.Resolve.h"
+#include "varlink-io.systemd.Resolve.Monitor.h"
 #include "varlink-io.systemd.UserDatabase.h"
 #include "varlink-io.systemd.oom.h"
 #include "varlink-io.systemd.service.h"
@@ -117,13 +123,15 @@ static void test_parse_format_one(const VarlinkInterface *iface) {
         assert_se(varlink_idl_parse(text, NULL, NULL, &parsed) >= 0);
         assert_se(varlink_idl_consistent(parsed, LOG_ERR) >= 0);
         assert_se(varlink_idl_format(parsed, &text2) >= 0);
-        assert_se(streq(text, text2));
+        ASSERT_STREQ(text, text2);
 }
 
 TEST(parse_format) {
         test_parse_format_one(&vl_interface_org_varlink_service);
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd_UserDatabase);
+        print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_NamespaceResource);
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd_Journal);
         print_separator();
@@ -133,15 +141,25 @@ TEST(parse_format) {
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd_ManagedOOM);
         print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_MountFileSystem);
+        print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_Network);
+        print_separator();
         test_parse_format_one(&vl_interface_io_systemd_oom);
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd);
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd_PCRExtend);
         print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_PCRLock);
+        print_separator();
         test_parse_format_one(&vl_interface_io_systemd_service);
         print_separator();
         test_parse_format_one(&vl_interface_io_systemd_sysext);
+        print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_Credentials);
+        print_separator();
+        test_parse_format_one(&vl_interface_io_systemd_BootControl);
         print_separator();
         test_parse_format_one(&vl_interface_xyz_test);
 }
@@ -338,7 +356,7 @@ TEST(validate_method_call) {
 
         JsonVariant *reply = NULL;
         const char *error_id = NULL;
-        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id, NULL,
+        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id,
                                 JSON_BUILD_OBJECT(
                                                 JSON_BUILD_PAIR_UNSIGNED("foo", 8),
                                                 JSON_BUILD_PAIR_UNSIGNED("bar", 9))) >= 0);
@@ -355,7 +373,7 @@ TEST(validate_method_call) {
         json_variant_dump(expected_reply, JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO, NULL, NULL);
         assert_se(json_variant_equal(reply, expected_reply));
 
-        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id, NULL,
+        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id,
                                 JSON_BUILD_OBJECT(
                                                 JSON_BUILD_PAIR_UNSIGNED("foo", 9),
                                                 JSON_BUILD_PAIR_UNSIGNED("bar", 8),
@@ -364,18 +382,18 @@ TEST(validate_method_call) {
         assert_se(!error_id);
         assert_se(json_variant_equal(reply, expected_reply));
 
-        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id, NULL,
+        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id,
                                 JSON_BUILD_OBJECT(
                                                 JSON_BUILD_PAIR_UNSIGNED("foo", 8),
                                                 JSON_BUILD_PAIR_UNSIGNED("bar", 9),
                                                 JSON_BUILD_PAIR_STRING("zzz", "pfft"))) >= 0);
-        assert_se(streq_ptr(error_id, VARLINK_ERROR_INVALID_PARAMETER));
+        ASSERT_STREQ(error_id, VARLINK_ERROR_INVALID_PARAMETER);
 
-        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id, NULL,
+        assert_se(varlink_callb(v, "xyz.TestMethod", &reply, &error_id,
                                 JSON_BUILD_OBJECT(
-                                                JSON_BUILD_PAIR_STRING("foo", "wuff"),
+                                                JSON_BUILD_PAIR_BOOLEAN("foo", true),
                                                 JSON_BUILD_PAIR_UNSIGNED("bar", 9))) >= 0);
-        assert_se(streq_ptr(error_id, VARLINK_ERROR_INVALID_PARAMETER));
+        ASSERT_STREQ(error_id, VARLINK_ERROR_INVALID_PARAMETER);
 
         assert_se(varlink_send(v, "xyz.Done", NULL) >= 0);
         assert_se(varlink_flush(v) >= 0);

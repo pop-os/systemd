@@ -587,7 +587,7 @@ static uint16_t calculate_start_port(const char *name, int ip_family) {
         /* Use some fixed key Lennart pulled from /dev/urandom, so that we are deterministic */
         siphash24_init(&state, SD_ID128_MAKE(d1,0b,67,b5,e2,b7,4a,91,8d,6b,27,b6,35,c1,9f,d9).bytes);
         siphash24_compress_string(name, &state);
-        siphash24_compress(&ip_family, sizeof(ip_family), &state);
+        siphash24_compress_typesafe(ip_family, &state);
 
         nr = 1024U + siphash24_finalize(&state) % (0xFFFFU - 1024U);
         SET_FLAG(nr, 1, ip_family == AF_INET6); /* Lowest bit reflects family */
@@ -789,10 +789,10 @@ static void device_hash_func(const struct stat *q, struct siphash *state) {
         assert(q);
 
         mode_t m = q->st_mode & S_IFMT;
-        siphash24_compress(&m, sizeof(m), state);
+        siphash24_compress_typesafe(m, state);
 
         if (S_ISBLK(q->st_mode) || S_ISCHR(q->st_mode)) {
-                siphash24_compress(&q->st_rdev, sizeof(q->st_rdev), state);
+                siphash24_compress_typesafe(q->st_rdev, state);
                 return;
         }
 
@@ -951,9 +951,14 @@ static int device_added(Context *c, sd_device *device) {
                 .st_mode = S_IFBLK,
         };
 
-        r = sd_device_get_devnum(device, &lookup_key.st_rdev);
+        /* MIPS OABI declares st_rdev as unsigned long instead of dev_t.
+         * Use a temp var to avoid passing an incompatible pointer.
+         * https://sourceware.org/bugzilla/show_bug.cgi?id=21278 */
+        dev_t devnum;
+        r = sd_device_get_devnum(device, &devnum);
         if (r < 0)
                 return log_device_error_errno(device, r, "Failed to get major/minor from device: %m");
+        lookup_key.st_rdev = devnum;
 
         if (hashmap_contains(c->subsystems, &lookup_key)) {
                 log_debug("Device '%s' already seen.", devname);
@@ -1007,9 +1012,14 @@ static int device_removed(Context *c, sd_device *device) {
                 .st_mode = S_IFBLK,
         };
 
-        r = sd_device_get_devnum(device, &lookup_key.st_rdev);
+        /* MIPS OABI declares st_rdev as unsigned long instead of dev_t.
+         * Use a temp var to avoid passing an incompatible pointer.
+         * https://sourceware.org/bugzilla/show_bug.cgi?id=21278 */
+        dev_t devnum;
+        r = sd_device_get_devnum(device, &devnum);
         if (r < 0)
                 return log_device_error_errno(device, r, "Failed to get major/minor from device: %m");
+        lookup_key.st_rdev = devnum;
 
         NvmeSubsystem *s = hashmap_remove(c->subsystems, &lookup_key);
         if (!s)
@@ -1044,7 +1054,7 @@ static int on_display_refresh(sd_event_source *s, uint64_t usec, void *userdata)
 
         c->display_refresh_scheduled = false;
 
-        if (isatty(STDERR_FILENO) > 0)
+        if (isatty(STDERR_FILENO))
                 fputs(ANSI_HOME_CLEAR, stderr);
 
         /* If we have both IPv4 and IPv6, we display IPv4 info via Plymouth, since it doesn't have much
@@ -1101,9 +1111,7 @@ static int run(int argc, char* argv[]) {
         _cleanup_(context_done) Context context = {};
         int r;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -1204,8 +1212,11 @@ static int run(int argc, char* argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to exclude loop devices: %m");
 
-                FOREACH_DEVICE(enumerator, device)
+                FOREACH_DEVICE(enumerator, device) {
+                        if (device_is_processed(device) <= 0)
+                                continue;
                         device_added(&context, device);
+                }
         }
 
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
@@ -1225,7 +1236,7 @@ static int run(int argc, char* argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to subscribe to RTM_DELADDR events: %m");
 
-        if (isatty(0) > 0)
+        if (isatty(STDIN_FILENO))
                 log_info("Hit Ctrl-C to exit target mode.");
 
         _unused_ _cleanup_(notify_on_cleanup) const char *notify_message =

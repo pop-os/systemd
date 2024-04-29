@@ -91,6 +91,37 @@ int xdg_user_data_dir(char **ret, const char *suffix) {
         return 1;
 }
 
+int runtime_directory(char **ret, RuntimeScope scope, const char *suffix) {
+        int r;
+
+        assert(ret);
+        assert(suffix);
+        assert(IN_SET(scope, RUNTIME_SCOPE_SYSTEM, RUNTIME_SCOPE_USER, RUNTIME_SCOPE_GLOBAL));
+
+        /* Accept $RUNTIME_DIRECTORY as authoritative
+         * If its missing apply the suffix to /run or $XDG_RUNTIME_DIR
+         * if we are in a user runtime scope.
+         *
+         * Return value indicates whether the suffix was applied or not */
+
+        const char *e = secure_getenv("RUNTIME_DIRECTORY");
+        if (e)
+                return strdup_to(ret, e);
+
+        if (scope == RUNTIME_SCOPE_USER) {
+                r = xdg_user_runtime_dir(ret, suffix);
+                if (r < 0)
+                        return r;
+        } else {
+                char *d = path_join("/run", suffix);
+                if (!d)
+                        return -ENOMEM;
+                *ret = d;
+        }
+
+        return true;
+}
+
 static const char* const user_data_unit_paths[] = {
         "/usr/local/lib/systemd/user",
         "/usr/local/share/systemd/user",
@@ -167,22 +198,16 @@ static char** user_dirs(
                 return NULL;
 
         /* Now merge everything we found. */
-        if (strv_extend(&res, persistent_control) < 0)
+        if (strv_extend_many(
+                            &res,
+                            persistent_control,
+                            runtime_control,
+                            transient,
+                            generator_early,
+                            persistent_config) < 0)
                 return NULL;
 
-        if (strv_extend(&res, runtime_control) < 0)
-                return NULL;
-
-        if (strv_extend(&res, transient) < 0)
-                return NULL;
-
-        if (strv_extend(&res, generator_early) < 0)
-                return NULL;
-
-        if (strv_extend(&res, persistent_config) < 0)
-                return NULL;
-
-        if (strv_extend_strv_concat(&res, config_dirs, "/systemd/user") < 0)
+        if (strv_extend_strv_concat(&res, (const char* const*) config_dirs, "/systemd/user") < 0)
                 return NULL;
 
         /* global config has lower priority than the user config of the same type */
@@ -192,19 +217,15 @@ static char** user_dirs(
         if (strv_extend_strv(&res, (char**) user_config_unit_paths, false) < 0)
                 return NULL;
 
-        if (strv_extend(&res, runtime_config) < 0)
+        if (strv_extend_many(
+                            &res,
+                            runtime_config,
+                            global_runtime_config,
+                            generator,
+                            data_home) < 0)
                 return NULL;
 
-        if (strv_extend(&res, global_runtime_config) < 0)
-                return NULL;
-
-        if (strv_extend(&res, generator) < 0)
-                return NULL;
-
-        if (strv_extend(&res, data_home) < 0)
-                return NULL;
-
-        if (strv_extend_strv_concat(&res, data_dirs, "/systemd/user") < 0)
+        if (strv_extend_strv_concat(&res, (const char* const*) data_dirs, "/systemd/user") < 0)
                 return NULL;
 
         if (strv_extend_strv(&res, (char**) user_data_unit_paths, false) < 0)
@@ -748,9 +769,8 @@ int lookup_paths_init_or_warn(LookupPaths *lp, RuntimeScope scope, LookupPathsFl
         return r;
 }
 
-void lookup_paths_free(LookupPaths *lp) {
-        if (!lp)
-                return;
+void lookup_paths_done(LookupPaths *lp) {
+        assert(lp);
 
         lp->search_path = strv_free(lp->search_path);
 

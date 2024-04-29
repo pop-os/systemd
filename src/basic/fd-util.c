@@ -167,7 +167,23 @@ int fd_nonblock(int fd, bool nonblock) {
         if (nflags == flags)
                 return 0;
 
-        return RET_NERRNO(fcntl(fd, F_SETFL, nflags));
+        if (fcntl(fd, F_SETFL, nflags) < 0)
+                return -errno;
+
+        return 1;
+}
+
+int stdio_disable_nonblock(void) {
+        int ret = 0;
+
+        /* stdin/stdout/stderr really should have O_NONBLOCK, which would confuse apps if left on, as
+         * write()s might unexpectedly fail with EAGAIN. */
+
+        RET_GATHER(ret, fd_nonblock(STDIN_FILENO, false));
+        RET_GATHER(ret, fd_nonblock(STDOUT_FILENO, false));
+        RET_GATHER(ret, fd_nonblock(STDERR_FILENO, false));
+
+        return ret;
 }
 
 int fd_cloexec(int fd, bool cloexec) {
@@ -449,6 +465,53 @@ int close_all_fds(const int except[], size_t n_except) {
         }
 
         return r;
+}
+
+int pack_fds(int fds[], size_t n_fds) {
+        if (n_fds <= 0)
+                return 0;
+
+        /* Shifts around the fds in the provided array such that they
+         * all end up packed next to each-other, in order, starting
+         * from SD_LISTEN_FDS_START. This must be called after close_all_fds();
+         * it is likely to freeze up otherwise. You should probably use safe_fork_full
+         * with FORK_CLOSE_ALL_FDS|FORK_PACK_FDS set, to ensure that this is done correctly.
+         * The fds array is modified in place with the new FD numbers. */
+
+        assert(fds);
+
+        for (int start = 0;;) {
+                int restart_from = -1;
+
+                for (int i = start; i < (int) n_fds; i++) {
+                        int nfd;
+
+                        /* Already at right index? */
+                        if (fds[i] == i + 3)
+                                continue;
+
+                        nfd = fcntl(fds[i], F_DUPFD, i + 3);
+                        if (nfd < 0)
+                                return -errno;
+
+                        safe_close(fds[i]);
+                        fds[i] = nfd;
+
+                        /* Hmm, the fd we wanted isn't free? Then
+                         * let's remember that and try again from here */
+                        if (nfd != i + 3 && restart_from < 0)
+                                restart_from = i;
+                }
+
+                if (restart_from < 0)
+                        break;
+
+                start = restart_from;
+        }
+
+        assert(fds[0] == 3);
+
+        return 0;
 }
 
 int same_fd(int a, int b) {
@@ -809,6 +872,49 @@ int fd_reopen(int fd, int flags) {
         return new_fd;
 }
 
+int fd_reopen_propagate_append_and_position(int fd, int flags) {
+        /* Invokes fd_reopen(fd, flags), but propagates O_APPEND if set on original fd, and also tries to
+         * keep current file position.
+         *
+         * You should use this if the original fd potentially is O_APPEND, otherwise we get rather
+         * "unexpected" behavior. Unless you intentionally want to overwrite pre-existing data, and have
+         * your output overwritten by the next user.
+         *
+         * Use case: "systemd-run --pty >> some-log".
+         *
+         * The "keep position" part is obviously nonsense for the O_APPEND case, but should reduce surprises
+         * if someone carefully pre-positioned the passed in original input or non-append output FDs. */
+
+        assert(fd >= 0);
+        assert(!(flags & (O_APPEND|O_DIRECTORY)));
+
+        int existing_flags = fcntl(fd, F_GETFL);
+        if (existing_flags < 0)
+                return -errno;
+
+        int new_fd = fd_reopen(fd, flags | (existing_flags & O_APPEND));
+        if (new_fd < 0)
+                return new_fd;
+
+        /* Try to adjust the offset, but ignore errors for now. */
+        off_t p = lseek(fd, 0, SEEK_CUR);
+        if (p <= 0)
+                return new_fd;
+
+        off_t new_p = lseek(new_fd, p, SEEK_SET);
+        if (new_p == (off_t) -1)
+                log_debug_errno(errno,
+                                "Failed to propagate file position for re-opened fd %d, ignoring: %m",
+                                fd);
+        else if (new_p != p)
+                log_debug("Failed to propagate file position for re-opened fd %d (%lld != %lld), ignoring: %m",
+                          fd,
+                          (long long) new_p,
+                          (long long) p);
+
+        return new_fd;
+}
+
 int fd_reopen_condition(
                 int fd,
                 int flags,
@@ -851,6 +957,38 @@ int fd_is_opath(int fd) {
                 return -errno;
 
         return FLAGS_SET(r, O_PATH);
+}
+
+int fd_verify_safe_flags_full(int fd, int extra_flags) {
+        int flags, unexpected_flags;
+
+        /* Check if an extrinsic fd is safe to work on (by a privileged service). This ensures that clients
+         * can't trick a privileged service into giving access to a file the client doesn't already have
+         * access to (especially via something like O_PATH).
+         *
+         * O_NOFOLLOW: For some reason the kernel will return this flag from fcntl(); it doesn't go away
+         *             immediately after open(). It should have no effect whatsoever to an already-opened FD,
+         *             and since we refuse O_PATH it should be safe.
+         *
+         * RAW_O_LARGEFILE: glibc secretly sets this and neglects to hide it from us if we call fcntl.
+         *                  See comment in missing_fcntl.h for more details about this.
+         *
+         * If 'extra_flags' is specified as non-zero the included flags are also allowed.
+         */
+
+        assert(fd >= 0);
+
+        flags = fcntl(fd, F_GETFL);
+        if (flags < 0)
+                return -errno;
+
+        unexpected_flags = flags & ~(O_ACCMODE|O_NOFOLLOW|RAW_O_LARGEFILE|extra_flags);
+        if (unexpected_flags != 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(EREMOTEIO),
+                                       "Unexpected flags set for extrinsic fd: 0%o",
+                                       (unsigned) unexpected_flags);
+
+        return flags & (O_ACCMODE | extra_flags); /* return the flags variable, but remove the noise */
 }
 
 int read_nr_open(void) {
@@ -899,10 +1037,7 @@ int fd_get_diskseq(int fd, uint64_t *ret) {
 }
 
 int path_is_root_at(int dir_fd, const char *path) {
-        STRUCT_NEW_STATX_DEFINE(st);
-        STRUCT_NEW_STATX_DEFINE(pst);
-        _cleanup_close_ int fd = -EBADF;
-        int r;
+        _cleanup_close_ int fd = -EBADF, pfd = -EBADF;
 
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
 
@@ -914,19 +1049,9 @@ int path_is_root_at(int dir_fd, const char *path) {
                 dir_fd = fd;
         }
 
-        r = statx_fallback(dir_fd, ".", 0, STATX_TYPE|STATX_INO|STATX_MNT_ID, &st.sx);
-        if (r == -ENOTDIR)
-                return false;
-        if (r < 0)
-                return r;
-
-        r = statx_fallback(dir_fd, "..", 0, STATX_TYPE|STATX_INO|STATX_MNT_ID, &pst.sx);
-        if (r < 0)
-                return r;
-
-        /* First, compare inode. If these are different, the fd does not point to the root directory "/". */
-        if (!statx_inode_same(&st.sx, &pst.sx))
-                return false;
+        pfd = openat(dir_fd, "..", O_PATH|O_DIRECTORY|O_CLOEXEC);
+        if (pfd < 0)
+                return errno == ENOTDIR ? false : -errno;
 
         /* Even if the parent directory has the same inode, the fd may not point to the root directory "/",
          * and we also need to check that the mount ids are the same. Otherwise, a construct like the
@@ -934,40 +1059,64 @@ int path_is_root_at(int dir_fd, const char *path) {
          *
          * $ mkdir /tmp/x /tmp/x/y
          * $ mount --bind /tmp/x /tmp/x/y
-         *
-         * Note, statx() does not provide the mount ID and path_get_mnt_id_at() does not work when an old
+         */
+
+        return fds_are_same_mount(dir_fd, pfd);
+}
+
+int fds_are_same_mount(int fd1, int fd2) {
+        STRUCT_NEW_STATX_DEFINE(st1);
+        STRUCT_NEW_STATX_DEFINE(st2);
+        int r;
+
+        assert(fd1 >= 0);
+        assert(fd2 >= 0);
+
+        r = statx_fallback(fd1, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &st1.sx);
+        if (r < 0)
+                return r;
+
+        r = statx_fallback(fd2, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &st2.sx);
+        if (r < 0)
+                return r;
+
+        /* First, compare inode. If these are different, the fd does not point to the root directory "/". */
+        if (!statx_inode_same(&st1.sx, &st2.sx))
+                return false;
+
+        /* Note, statx() does not provide the mount ID and path_get_mnt_id_at() does not work when an old
          * kernel is used. In that case, let's assume that we do not have such spurious mount points in an
          * early boot stage, and silently skip the following check. */
 
-        if (!FLAGS_SET(st.nsx.stx_mask, STATX_MNT_ID)) {
+        if (!FLAGS_SET(st1.nsx.stx_mask, STATX_MNT_ID)) {
                 int mntid;
 
-                r = path_get_mnt_id_at_fallback(dir_fd, "", &mntid);
+                r = path_get_mnt_id_at_fallback(fd1, "", &mntid);
                 if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                         return true; /* skip the mount ID check */
                 if (r < 0)
                         return r;
                 assert(mntid >= 0);
 
-                st.nsx.stx_mnt_id = mntid;
-                st.nsx.stx_mask |= STATX_MNT_ID;
+                st1.nsx.stx_mnt_id = mntid;
+                st1.nsx.stx_mask |= STATX_MNT_ID;
         }
 
-        if (!FLAGS_SET(pst.nsx.stx_mask, STATX_MNT_ID)) {
+        if (!FLAGS_SET(st2.nsx.stx_mask, STATX_MNT_ID)) {
                 int mntid;
 
-                r = path_get_mnt_id_at_fallback(dir_fd, "..", &mntid);
+                r = path_get_mnt_id_at_fallback(fd2, "", &mntid);
                 if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                         return true; /* skip the mount ID check */
                 if (r < 0)
                         return r;
                 assert(mntid >= 0);
 
-                pst.nsx.stx_mnt_id = mntid;
-                pst.nsx.stx_mask |= STATX_MNT_ID;
+                st2.nsx.stx_mnt_id = mntid;
+                st2.nsx.stx_mask |= STATX_MNT_ID;
         }
 
-        return statx_mount_same(&st.nsx, &pst.nsx);
+        return statx_mount_same(&st1.nsx, &st2.nsx);
 }
 
 const char *accmode_to_string(int flags) {

@@ -214,7 +214,7 @@ int main(int argc, char *argv[]) {
         assert_se(manager_load_unit(m, "unit-with-multiple-dashes.service", NULL, NULL, &unit_with_multiple_dashes) >= 0);
 
         assert_se(strv_equal(unit_with_multiple_dashes->documentation, STRV_MAKE("man:test", "man:override2", "man:override3")));
-        assert_se(streq_ptr(unit_with_multiple_dashes->description, "override4"));
+        ASSERT_STREQ(unit_with_multiple_dashes->description, "override4");
 
         /* Now merge a synthetic unit into the existing one */
         assert_se(unit_new_for_name(m, sizeof(Service), "merged.service", &stub) >= 0);
@@ -241,10 +241,10 @@ int main(int argc, char *argv[]) {
         assert_se( unit_has_dependency(manager_get_unit(m, "non-existing-on-failure.target"), UNIT_ATOM_ON_FAILURE_OF, a));
         assert_se( unit_has_dependency(a, UNIT_ATOM_ON_SUCCESS, manager_get_unit(m, "non-existing-on-success.target")));
         assert_se( unit_has_dependency(manager_get_unit(m, "non-existing-on-success.target"), UNIT_ATOM_ON_SUCCESS_OF, a));
-        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_FAILURE, manager_get_unit(m, "basic.target")));
-        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_SUCCESS, manager_get_unit(m, "basic.target")));
-        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_FAILURE_OF, manager_get_unit(m, "basic.target")));
-        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_SUCCESS_OF, manager_get_unit(m, "basic.target")));
+        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_FAILURE, manager_get_unit(m, SPECIAL_BASIC_TARGET)));
+        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_SUCCESS, manager_get_unit(m, SPECIAL_BASIC_TARGET)));
+        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_FAILURE_OF, manager_get_unit(m, SPECIAL_BASIC_TARGET)));
+        assert_se(!unit_has_dependency(a, UNIT_ATOM_ON_SUCCESS_OF, manager_get_unit(m, SPECIAL_BASIC_TARGET)));
         assert_se(!unit_has_dependency(a, UNIT_ATOM_PROPAGATES_RELOAD_TO, manager_get_unit(m, "non-existing-on-failure.target")));
 
         assert_se(unit_has_name(a, "a.service"));

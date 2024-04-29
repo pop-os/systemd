@@ -217,7 +217,7 @@ static int bus_socket_auth_verify_client(sd_bus *b) {
         /* And possibly check the third line, too */
         if (b->accept_fd) {
                 l = lines[i++];
-                b->can_fds = !!memory_startswith(l, lines[i] - l, "AGREE_UNIX_FD");
+                b->can_fds = memory_startswith(l, lines[i] - l, "AGREE_UNIX_FD");
         }
 
         assert(i == n);
@@ -266,7 +266,7 @@ static int verify_anonymous_token(sd_bus *b, const char *p, size_t l) {
         if (l % 2 != 0)
                 return 0;
 
-        r = unhexmem(p, l, (void **) &token, &len);
+        r = unhexmem_full(p, l, /* secure = */ false, (void**) &token, &len);
         if (r < 0)
                 return 0;
 
@@ -298,7 +298,7 @@ static int verify_external_token(sd_bus *b, const char *p, size_t l) {
         if (l % 2 != 0)
                 return 0;
 
-        r = unhexmem(p, l, (void**) &token, &len);
+        r = unhexmem_full(p, l, /* secure = */ false, (void**) &token, &len);
         if (r < 0)
                 return 0;
 
@@ -503,10 +503,37 @@ static int bus_socket_write_auth(sd_bus *b) {
         if (b->prefer_writev)
                 k = writev(b->output_fd, b->auth_iovec + b->auth_index, ELEMENTSOF(b->auth_iovec) - b->auth_index);
         else {
+                CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control = {};
+
                 struct msghdr mh = {
                         .msg_iov = b->auth_iovec + b->auth_index,
                         .msg_iovlen = ELEMENTSOF(b->auth_iovec) - b->auth_index,
                 };
+
+                if (uid_is_valid(b->connect_as_uid) || gid_is_valid(b->connect_as_gid)) {
+
+                        /* If we shall connect under some specific UID/GID, then synthesize an
+                         * SCM_CREDENTIALS record accordingly. After all we want to adopt this UID/GID both
+                         * for SO_PEERCRED (where we have to fork()) and SCM_CREDENTIALS (where we can just
+                         * fake it via sendmsg()) */
+
+                        struct ucred ucred = {
+                                .pid = getpid_cached(),
+                                .uid = uid_is_valid(b->connect_as_uid) ? b->connect_as_uid : getuid(),
+                                .gid = gid_is_valid(b->connect_as_gid) ? b->connect_as_gid : getgid(),
+                        };
+
+                        mh.msg_control = &control;
+                        mh.msg_controllen = sizeof(control);
+                        struct cmsghdr *cmsg = CMSG_FIRSTHDR(&mh);
+                        *cmsg = (struct cmsghdr) {
+                                .cmsg_level = SOL_SOCKET,
+                                .cmsg_type = SCM_CREDENTIALS,
+                                .cmsg_len = CMSG_LEN(sizeof(struct ucred)),
+                        };
+
+                        memcpy(CMSG_DATA(cmsg), &ucred, sizeof(struct ucred));
+                }
 
                 k = sendmsg(b->output_fd, &mh, MSG_DONTWAIT|MSG_NOSIGNAL);
                 if (k < 0 && errno == ENOTSOCK) {
@@ -643,14 +670,20 @@ static void bus_get_peercred(sd_bus *b) {
         /* Get the SELinux context of the peer */
         r = getpeersec(b->input_fd, &b->label);
         if (r < 0 && !IN_SET(r, -EOPNOTSUPP, -ENOPROTOOPT))
-                log_debug_errno(r, "Failed to determine peer security context: %m");
+                log_debug_errno(r, "Failed to determine peer security context, ignoring: %m");
 
         /* Get the list of auxiliary groups of the peer */
         r = getpeergroups(b->input_fd, &b->groups);
         if (r >= 0)
                 b->n_groups = (size_t) r;
         else if (!IN_SET(r, -EOPNOTSUPP, -ENOPROTOOPT))
-                log_debug_errno(r, "Failed to determine peer's group list: %m");
+                log_debug_errno(r, "Failed to determine peer's group list, ignoring: %m");
+
+        r = getpeerpidfd(b->input_fd);
+        if (r < 0)
+                log_debug_errno(r, "Failed to determine peer pidfd, ignoring: %m");
+        else
+                close_and_replace(b->pidfd, r);
 
         /* Let's query the peers socket address, it might carry information such as the peer's comm or
          * description string */
@@ -943,6 +976,66 @@ static int bind_description(sd_bus *b, int fd, int family) {
         return 0;
 }
 
+static int connect_as(int fd, const struct sockaddr *sa, socklen_t salen, uid_t uid, gid_t gid) {
+        _cleanup_(close_pairp) int pfd[2] = EBADF_PAIR;
+        ssize_t n;
+        int r;
+
+        /* Shortcut if we are not supposed to drop privileges */
+        if (!uid_is_valid(uid) && !gid_is_valid(gid))
+                return RET_NERRNO(connect(fd, sa, salen));
+
+        /* This changes identity to the specified uid/gid and issues connect() as that. This is useful to
+         * make sure SO_PEERCRED reports the selected UID/GID rather than the usual one of the caller. */
+
+        if (pipe2(pfd, O_CLOEXEC) < 0)
+                return -errno;
+
+        r = safe_fork("(sd-setresuid)", FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL|FORK_WAIT, /* ret_pid= */ NULL);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                /* child */
+
+                pfd[0] = safe_close(pfd[0]);
+
+                r = RET_NERRNO(setgroups(0, NULL));
+                if (r < 0)
+                        goto child_finish;
+
+                if (gid_is_valid(gid)) {
+                        r = RET_NERRNO(setresgid(gid, gid, gid));
+                        if (r < 0)
+                                goto child_finish;
+                }
+
+                if (uid_is_valid(uid)) {
+                        r = RET_NERRNO(setresuid(uid, uid, uid));
+                        if (r < 0)
+                                goto child_finish;
+                }
+
+                r = RET_NERRNO(connect(fd, sa, salen));
+                if (r < 0)
+                        goto child_finish;
+
+                r = 0;
+
+        child_finish:
+                n = write(pfd[1], &r, sizeof(r));
+                if (n != sizeof(r))
+                        _exit(EXIT_FAILURE);
+
+                _exit(EXIT_SUCCESS);
+        }
+
+        n = read(pfd[0], &r, sizeof(r));
+        if (n != sizeof(r))
+                return -EIO;
+
+        return r;
+}
+
 int bus_socket_connect(sd_bus *b) {
         bool inotify_done = false;
         int r;
@@ -974,8 +1067,9 @@ int bus_socket_connect(sd_bus *b) {
                 b->output_fd = b->input_fd;
                 bus_socket_setup(b);
 
-                if (connect(b->input_fd, &b->sockaddr.sa, b->sockaddr_size) < 0) {
-                        if (errno == EINPROGRESS) {
+                r = connect_as(b->input_fd, &b->sockaddr.sa, b->sockaddr_size, b->connect_as_uid, b->connect_as_gid);
+                if (r < 0) {
+                        if (r == -EINPROGRESS) {
 
                                 /* If we have any inotify watches open, close them now, we don't need them anymore, as
                                  * we have successfully initiated a connection */
@@ -988,7 +1082,7 @@ int bus_socket_connect(sd_bus *b) {
                                 return 1;
                         }
 
-                        if (IN_SET(errno, ENOENT, ECONNREFUSED) &&  /* ENOENT → unix socket doesn't exist at all; ECONNREFUSED → unix socket stale */
+                        if (IN_SET(r, -ENOENT, -ECONNREFUSED) &&  /* ENOENT → unix socket doesn't exist at all; ECONNREFUSED → unix socket stale */
                             b->watch_bind &&
                             b->sockaddr.sa.sa_family == AF_UNIX &&
                             b->sockaddr.un.sun_path[0] != 0) {
@@ -1016,7 +1110,7 @@ int bus_socket_connect(sd_bus *b) {
                                 inotify_done = true;
 
                         } else
-                                return -errno;
+                                return r;
                 } else
                         break;
         }

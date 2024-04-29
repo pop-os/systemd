@@ -18,20 +18,21 @@ struct signalfd_siginfo;
 
 typedef enum LogTarget{
         LOG_TARGET_CONSOLE,
-        LOG_TARGET_CONSOLE_PREFIXED,
         LOG_TARGET_KMSG,
         LOG_TARGET_JOURNAL,
-        LOG_TARGET_JOURNAL_OR_KMSG,
         LOG_TARGET_SYSLOG,
+        LOG_TARGET_CONSOLE_PREFIXED,
+        LOG_TARGET_JOURNAL_OR_KMSG,
         LOG_TARGET_SYSLOG_OR_KMSG,
         LOG_TARGET_AUTO, /* console if stderr is not journal, JOURNAL_OR_KMSG otherwise */
         LOG_TARGET_NULL,
-        _LOG_TARGET_MAX,
+        _LOG_TARGET_SINGLE_MAX = LOG_TARGET_SYSLOG + 1,
+        _LOG_TARGET_MAX = LOG_TARGET_NULL + 1,
         _LOG_TARGET_INVALID = -EINVAL,
 } LogTarget;
 
 /* This log level disables logging completely. It can only be passed to log_set_max_level() and cannot be
- * used a regular log level. */
+ * used as a regular log level. */
 #define LOG_NULL (LOG_EMERG - 1)
 
 /* Note to readers: << and >> have lower precedence (are evaluated earlier) than & and | */
@@ -59,6 +60,7 @@ void log_settle_target(void);
 void log_set_max_level(int level);
 int log_set_max_level_from_string(const char *e);
 int log_get_max_level(void) _pure_;
+int log_max_levels_to_string(int level, char **ret);
 
 void log_set_facility(int facility);
 
@@ -83,6 +85,7 @@ int log_show_tid_from_string(const char *e);
 assert_cc(STRLEN(__FILE__) > STRLEN(RELATIVE_SOURCE_PATH) + 1);
 #define PROJECT_FILE (&__FILE__[STRLEN(RELATIVE_SOURCE_PATH) + 1])
 
+bool stderr_is_journal(void);
 int log_open(void);
 void log_close(void);
 void log_forget_fds(void);
@@ -331,6 +334,9 @@ void log_set_open_when_needed(bool b);
  * stderr, the console or kmsg */
 void log_set_prohibit_ipc(bool b);
 
+void log_set_assert_return_is_critical(bool b);
+bool log_get_assert_return_is_critical(void) _pure_;
+
 int log_dup_console(void);
 
 int log_syntax_internal(
@@ -380,7 +386,7 @@ typedef struct LogRateLimit {
         RateLimit ratelimit;
 } LogRateLimit;
 
-#define log_ratelimit_internal(_level, _error, _ratelimit, _format, _file, _line, _func, ...)        \
+#define log_ratelimit_internal(_level, _error, _ratelimit, _file, _line, _func, _format, ...)        \
 ({                                                                              \
         int _log_ratelimit_error = (_error);                                    \
         int _log_ratelimit_level = (_level);                                    \
@@ -404,7 +410,7 @@ typedef struct LogRateLimit {
         ({                                                              \
                 int _level = (level), _e = (error);                     \
                 _e = (log_get_max_level() >= LOG_PRI(_level))           \
-                        ? log_ratelimit_internal(_level, _e, _ratelimit, format, PROJECT_FILE, __LINE__, __func__, ##__VA_ARGS__) \
+                        ? log_ratelimit_internal(_level, _e, _ratelimit, PROJECT_FILE, __LINE__, __func__, format, ##__VA_ARGS__) \
                         : -ERRNO_VALUE(_e);                             \
                 _e < 0 ? _e : -ESTRPIPE;                                \
         })

@@ -1,13 +1,12 @@
-#!/usr/bin/dh-exec
 etc/systemd/homed.conf
 usr/bin/homectl
-<pkg.systemd.upstream> usr/bin/systemd-home-fallback-shell
+usr/bin/systemd-home-fallback-shell
 usr/lib/*/security/pam_systemd_home.so
 usr/lib/systemd/systemd-homed
 usr/lib/systemd/systemd-homework
 usr/lib/systemd/system/systemd-homed.service
 usr/lib/systemd/system/systemd-homed-activate.service
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-homed-firstboot.service
+usr/lib/systemd/system/systemd-homed-firstboot.service
 usr/share/dbus-1/system.d/org.freedesktop.home1.conf
 usr/share/dbus-1/system-services/org.freedesktop.home1.service
 usr/share/polkit-1/actions/org.freedesktop.home1.policy

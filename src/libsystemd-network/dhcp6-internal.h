@@ -11,7 +11,7 @@
 #include "sd-event.h"
 #include "sd-dhcp6-client.h"
 
-#include "dhcp-identifier.h"
+#include "dhcp-duid-internal.h"
 #include "dhcp6-client-internal.h"
 #include "dhcp6-option.h"
 #include "dhcp6-protocol.h"
@@ -64,8 +64,7 @@ struct sd_dhcp6_client {
         DHCP6IA ia_na;
         DHCP6IA ia_pd;
         DHCP6RequestIA request_ia;
-        struct duid duid;
-        size_t duid_len;
+        sd_dhcp_duid duid;
         be16_t *req_opts;
         size_t n_req_opts;
         char *fqdn;
@@ -85,9 +84,8 @@ struct sd_dhcp6_client {
         bool send_release;
 };
 
-int dhcp6_network_bind_udp_socket(int ifindex, struct in6_addr *address);
-int dhcp6_network_send_udp_socket(int s, struct in6_addr *address,
-                                  const void *packet, size_t len);
+int dhcp6_network_bind_udp_socket(int ifindex, const struct in6_addr *address);
+int dhcp6_network_send_udp_socket(int s, const struct in6_addr *address, const void *packet, size_t len);
 
 int dhcp6_client_send_message(sd_dhcp6_client *client);
 int dhcp6_client_set_transaction_id(sd_dhcp6_client *client, uint32_t transaction_id);

@@ -1,8 +1,11 @@
 usr/bin/bootctl
 usr/lib/systemd/systemd-bless-boot
 usr/lib/systemd/system-generators/systemd-bless-boot-generator
+usr/lib/systemd/system/sockets.target.wants/systemd-bootctl.socket
 usr/lib/systemd/system/sysinit.target.wants/systemd-boot-random-seed.service
 usr/lib/systemd/system/systemd-bless-boot.service
+usr/lib/systemd/system/systemd-bootctl.socket
+usr/lib/systemd/system/systemd-bootctl@.service
 usr/lib/systemd/system/systemd-boot-random-seed.service
 usr/lib/systemd/system/systemd-boot-update.service
 usr/share/bash-completion/completions/bootctl

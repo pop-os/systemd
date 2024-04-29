@@ -67,7 +67,7 @@ typedef enum CGroupMask {
         /* All real cgroup v2 controllers */
         CGROUP_MASK_V2 = CGROUP_MASK_CPU|CGROUP_MASK_CPUSET|CGROUP_MASK_IO|CGROUP_MASK_MEMORY|CGROUP_MASK_PIDS,
 
-        /* All controllers we want to delegate in case of Delegate=yes. Which are prety much the v2 controllers only, as delegation on v1 is not safe, and bpf stuff isn't a real controller */
+        /* All controllers we want to delegate in case of Delegate=yes. Which are pretty much the v2 controllers only, as delegation on v1 is not safe, and bpf stuff isn't a real controller */
         CGROUP_MASK_DELEGATE = CGROUP_MASK_V2,
 
         /* All cgroup v2 BPF pseudo-controllers */
@@ -180,6 +180,9 @@ typedef enum CGroupUnified {
  * generate paths with multiple adjacent / removed.
  */
 
+int cg_path_open(const char *controller, const char *path);
+int cg_cgroupid_open(int fsfd, uint64_t id);
+
 int cg_enumerate_processes(const char *controller, const char *path, FILE **ret);
 int cg_read_pid(FILE *f, pid_t *ret);
 int cg_read_pidref(FILE *f, PidRef *ret);
@@ -218,7 +221,7 @@ int cg_is_delegated_fd(int fd);
 
 int cg_has_coredump_receive(const char *path);
 
-typedef enum  {
+typedef enum {
         CG_KEY_MODE_GRACEFUL = 1 << 0,
 } CGroupKeyMode;
 
@@ -267,6 +270,7 @@ int cg_is_empty_recursive(const char *controller, const char *path);
 int cg_get_root_path(char **path);
 
 int cg_path_get_cgroupid(const char *path, uint64_t *ret);
+int cg_fd_get_cgroupid(int fd, uint64_t *ret);
 int cg_path_get_session(const char *path, char **ret_session);
 int cg_path_get_owner_uid(const char *path, uid_t *ret_uid);
 int cg_path_get_unit(const char *path, char **ret_unit);
@@ -352,5 +356,10 @@ typedef union {
         uint8_t space[offsetof(struct file_handle, f_handle) + sizeof(uint64_t)];
 } cg_file_handle;
 
-#define CG_FILE_HANDLE_INIT { .file_handle.handle_bytes = sizeof(uint64_t) }
+#define CG_FILE_HANDLE_INIT                                     \
+        (cg_file_handle) {                                      \
+                .file_handle.handle_bytes = sizeof(uint64_t),   \
+                .file_handle.handle_type = FILEID_KERNFS,       \
+        }
+
 #define CG_FILE_HANDLE_CGROUPID(fh) (*(uint64_t*) (fh).file_handle.f_handle)

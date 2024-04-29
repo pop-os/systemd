@@ -218,19 +218,28 @@ for opt in nice on-{active,boot,calendar,startup,unit-active,unit-inactive} prop
 done
 
 # Let's make sure that ProtectProc= properly moves submounts of the original /proc over to the new proc
+BOOT_ID="$(</proc/sys/kernel/random/boot_id)"
+UNIT_BOOT_ID="$(systemd-run -q --wait --pipe -p ProtectProc=invisible cat /proc/sys/kernel/random/boot_id)"
+assert_eq "$BOOT_ID" "$UNIT_BOOT_ID"
 
-A=$(cat /proc/sys/kernel/random/boot_id)
-B=$(systemd-run -q --wait --pipe -p ProtectProc=invisible cat /proc/sys/kernel/random/boot_id)
-assert_eq "$A" "$B"
-
-V="/tmp/version.$RANDOM"
-A="$(cat /proc/version).piff"
-echo "$A" > "$V"
-mount --bind "$V" /proc/version
-
-B=$(systemd-run -q --wait --pipe -p ProtectProc=invisible cat /proc/version)
-
-assert_eq "$A" "$B"
-
+TMP_KVER="/tmp/version.$RANDOM"
+KVER="$(</proc/version).piff"
+echo "$KVER" >"$TMP_KVER"
+mount --bind "$TMP_KVER" /proc/version
+UNIT_KVER="$(systemd-run -q --wait --pipe -p ProtectProc=invisible cat /proc/version)"
+assert_eq "$KVER" "$UNIT_KVER"
 umount /proc/version
-rm "$V"
+rm -f "$TMP_KVER"
+
+# Check that invoking the tool under the run0 alias name works
+run0 ls /
+assert_eq "$(run0 echo foo)" "foo"
+# Check if we set some expected environment variables
+for arg in "" "--user=root" "--user=testuser"; do
+    assert_eq "$(run0 ${arg:+"$arg"} bash -c 'echo $SUDO_USER')" "$USER"
+    assert_eq "$(run0 ${arg:+"$arg"} bash -c 'echo $SUDO_UID')" "$(id -u "$USER")"
+    assert_eq "$(run0 ${arg:+"$arg"} bash -c 'echo $SUDO_GID')" "$(id -u "$USER")"
+done
+# Let's chain a couple of run0 calls together, for fun
+readarray -t cmdline < <(printf "%.0srun0\n" {0..31})
+assert_eq "$("${cmdline[@]}" bash -c 'echo $SUDO_USER')" "$USER"

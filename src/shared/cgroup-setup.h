@@ -10,6 +10,7 @@
 bool cg_is_unified_wanted(void);
 bool cg_is_legacy_wanted(void);
 bool cg_is_hybrid_wanted(void);
+bool cg_is_legacy_force_enabled(void);
 
 int cg_weight_parse(const char *s, uint64_t *ret);
 int cg_cpu_weight_parse(const char *s, uint64_t *ret);
@@ -20,6 +21,7 @@ int cg_trim(const char *controller, const char *path, bool delete_root);
 
 int cg_create(const char *controller, const char *path);
 int cg_attach(const char *controller, const char *path, pid_t pid);
+int cg_fd_attach(int fd, pid_t pid);
 int cg_attach_fallback(const char *controller, const char *path, pid_t pid);
 int cg_create_and_attach(const char *controller, const char *path, pid_t pid);
 

@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-repart" conditional='ENABLE_REPART'
@@ -355,6 +355,18 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>--private-key-source=</option></term>
+
+        <listitem><para>Takes one of <literal>file</literal>, <literal>engine</literal> or
+        <literal>provider</literal>. In the latter two cases, it is followed by the name of a provider or
+        engine, separated by colon, that will be passed to OpenSSL's "engine" or "provider" logic.
+        Configures the signing mechanism to use when creating verity signature partitions with the
+        <varname>Verity=signature</varname> setting in partition files.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--certificate=</option></term>
 
         <listitem><para>Takes a file system path. Configures the PEM encoded X.509 certificate to use when
@@ -378,8 +390,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--tpm2-device-key=</option><arg>PATH</arg></term>
-        <term><option>--tpm2-seal-key-handle=</option><arg>HANDLE</arg></term>
+        <term><option>--tpm2-device-key=<replaceable>PATH</replaceable></option></term>
+        <term><option>--tpm2-seal-key-handle=<replaceable>HANDLE</replaceable></option></term>
 
         <listitem><para>Configures a TPM2 SRK key to bind encryption to. See
         <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -389,8 +401,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--tpm2-public-key=</option><arg>PATH</arg></term>
-        <term><option>--tpm2-public-key-pcrs=</option><arg rep="repeat">PCR</arg></term>
+        <term><option>--tpm2-public-key=<replaceable>PATH</replaceable></option></term>
+        <term><option>--tpm2-public-key-pcrs=<replaceable>PCR<optional>+PCR...</optional></replaceable></option></term>
 
         <listitem><para>Configures a TPM2 signed PCR policy to bind encryption to. See
         <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -400,7 +412,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--tpm2-pcrlock=</option><arg>PATH</arg></term>
+        <term><option>--tpm2-pcrlock=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>Configures a TPM2 pcrlock policy to bind encryption to. See
         <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -410,7 +422,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--split=</option><arg>BOOL</arg></term>
+        <term><option>--split=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Enables generation of split artifacts from partitions configured with
         <varname>SplitName=</varname>. If enabled, for each partition with <varname>SplitName=</varname> set,
@@ -427,8 +439,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--include-partitions=</option><arg rep="repeat">PARTITION</arg></term>
-        <term><option>--exclude-partitions=</option><arg rep="repeat">PARTITION</arg></term>
+        <term><option>--include-partitions=<replaceable>PARTITIONS</replaceable></option></term>
+        <term><option>--exclude-partitions=<replaceable>PARTITIONS</replaceable></option></term>
 
         <listitem><para>These options specify which partition types <command>systemd-repart</command> should
         operate on. If <option>--include-partitions=</option> is used, all partitions that aren't specified
@@ -442,7 +454,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--defer-partitions=</option><arg rep="repeat">PARTITION</arg></term>
+        <term><option>--defer-partitions=<replaceable>PARTITIONS</replaceable></option></term>
 
         <listitem><para>This option specifies for which partition types <command>systemd-repart</command>
         should defer. All partitions that are deferred using this option are still taken into account when
@@ -455,7 +467,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--sector-size=</option><arg>BYTES</arg></term>
+        <term><option>--sector-size=<replaceable>BYTES</replaceable></option></term>
 
         <listitem><para>This option allows configuring the sector size of the image produced by
         <command>systemd-repart</command>. It takes a value that is a power of <literal>2</literal> between
@@ -466,7 +478,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--architecture=</option><arg>ARCH</arg></term>
+        <term><option>--architecture=<replaceable>ARCH</replaceable></option></term>
 
         <listitem><para>This option allows overriding the architecture used for architecture specific
         partition types. For example, if set to <literal>arm64</literal> a partition type of
@@ -496,7 +508,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--offline=</option><arg>BOOL</arg></term>
+        <term><option>--offline=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Instructs <command>systemd-repart</command> to build the image offline. Takes a
         boolean or <literal>auto</literal>. Defaults to <literal>auto</literal>. If enabled, the image is
@@ -510,7 +522,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--copy-from=</option><arg>IMAGE</arg></term>
+        <term><option>--copy-from=<replaceable>IMAGE</replaceable></option></term>
 
         <listitem><para>Instructs <command>systemd-repart</command> to synthesize partition definitions from
         the partition table in the given image. This option can be specified multiple times to synthesize
@@ -525,7 +537,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--copy-source=</option><replaceable>PATH</replaceable></term>
+        <term><option>--copy-source=<replaceable>PATH</replaceable></option></term>
         <term><option>-s</option> <replaceable>PATH</replaceable></term>
 
         <listitem><para>Specifies a source directory all <varname>CopyFiles=</varname> source paths shall be
@@ -538,7 +550,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--make-ddi=</option><replaceable>TYPE</replaceable></term>
+        <term><option>--make-ddi=<replaceable>TYPE</replaceable></option></term>
 
         <listitem><para>Takes one of <literal>sysext</literal>, <literal>confext</literal> or
         <literal>portable</literal>. Generates a Discoverable Disk Image (DDI) for a system extension
@@ -578,6 +590,28 @@
         <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--generate-fstab=<replaceable>PATH</replaceable></option></term>
+
+        <listitem><para>Specifies a path where to write fstab entries for the mountpoints configured with
+        <option>MountPoint=</option> in the root directory specified with <option>--copy-source=</option> or
+        <option>--root=</option> or in the host's root directory if neither is specified. Disabled by
+        default.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--generate-crypttab=<replaceable>PATH</replaceable></option></term>
+
+        <listitem><para>Specifies a path where to write crypttab entries for the encrypted volumes configured
+        with <option>EncryptedVolume=</option> in the root directory specified with
+        <option>--copy-source=</option> or <option>--root=</option> or in the host's root directory if
+        neither is specified. Disabled by default.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
       <xi:include href="standard-options.xml" xpointer="no-pager" />
@@ -599,7 +633,7 @@
       <title>Generate a configuration extension image</title>
 
       <para>The following creates a configuration extension DDI (confext) for an
-      <filename>/etc/motd</filename> update.</para>
+      <filename>/etc/motd</filename> update:</para>
 
       <programlisting>mkdir tree tree/etc tree/etc/extension-release.d
 echo "Hello World" > tree/etc/motd
@@ -616,18 +650,39 @@ systemd-confext refresh</programlisting>
       <citerefentry><refentrytitle>systemd-confext</refentrytitle><manvolnum>1</manvolnum></citerefentry>.</para>
     </example>
 
+    <example>
+      <title>Generate a system extension image and sign it via PKCS11</title>
+
+      <para>The following creates a system extension DDI (sysext) for an
+      <filename>/usr/foo</filename> update and signs it with a hardware token via PKCS11.</para>
+
+      <programlisting>mkdir tree tree/usr tree/usr/lib/extension-release.d
+echo "Hello World" > tree/usr/foo
+cat > tree/usr/lib/extension-release.d/extension-release.my-foo &lt;&lt;EOF
+ID=fedora
+VERSION_ID=38
+IMAGE_ID=my-foo
+IMAGE_VERSION=7
+EOF
+systemd-repart --make-ddi=sysext --private-key-source=engine:pkcs11 --private-key="pkcs11:model=PKCS%2315%20emulated;manufacturer=piv_II;serial=0123456789abcdef;token=Some%20Cert" --certificate=cert.crt -s tree/ /var/lib/extensions/my-foo.sysext.raw
+systemd-sysext refresh</programlisting>
+
+      <para>The DDI generated that way may be applied to the system with
+      <citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>1</manvolnum></citerefentry>.</para>
+    </example>
+
   </refsect1>
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>repart.d</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>portablectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>repart.d</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>portablectl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

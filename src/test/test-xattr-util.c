@@ -45,13 +45,13 @@ TEST(getxattr_at_malloc) {
         fd = open("/", O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOCTTY);
         assert_se(fd >= 0);
         r = getxattr_at_malloc(fd, "usr", "user.idontexist", 0, &value);
-        assert_se(r < 0 && ERRNO_IS_XATTR_ABSENT(r));
+        assert_se(ERRNO_IS_NEG_XATTR_ABSENT(r));
 
         safe_close(fd);
         fd = open(x, O_PATH|O_CLOEXEC);
         assert_se(fd >= 0);
         assert_se(getxattr_at_malloc(fd, NULL, "user.foo", 0, &value) == 3);
-        assert_se(streq(value, "bar"));
+        ASSERT_STREQ(value, "bar");
 }
 
 TEST(getcrtime) {
@@ -83,7 +83,7 @@ static void verify_xattr(int dfd, const char *expected) {
         _cleanup_free_ char *value = NULL;
 
         assert_se(getxattr_at_malloc(dfd, "test", "user.foo", 0, &value) == (int) strlen(expected));
-        assert_se(streq(value, expected));
+        ASSERT_STREQ(value, expected);
 }
 
 TEST(xsetxattr) {
@@ -99,7 +99,7 @@ TEST(xsetxattr) {
 
         /* by full path */
         r = xsetxattr(AT_FDCWD, x, "user.foo", "fullpath", SIZE_MAX, 0);
-        if (r < 0 && ERRNO_IS_NOT_SUPPORTED(r))
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                 return (void) log_tests_skipped_errno(r, "no xattrs supported on /var/tmp");
         assert_se(r >= 0);
         verify_xattr(dfd, "fullpath");

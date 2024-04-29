@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-timedated.service" conditional='ENABLE_TIMEDATED'>
@@ -63,7 +63,7 @@
   <refsect1>
     <title>List of network time synchronization services</title>
 
-    <para><command>systemd-timesyncd</command> will look for files with a <literal>.list</literal> extension
+    <para><command>systemd-timedated</command> will look for files with a <literal>.list</literal> extension
     in <filename>ntp-units.d/</filename> directories. Each file is parsed as a list of unit names, one per
     line. Empty lines and lines with comments (<literal>#</literal>) are ignored.  Files are read from
     <filename>/usr/lib/systemd/ntp-units.d/</filename> and the corresponding directories under
@@ -82,7 +82,7 @@ systemd-timesyncd.service
     </example>
 
     <para>If the environment variable <varname>$SYSTEMD_TIMEDATED_NTP_SERVICES</varname> is set,
-    <command>systemd-timesyncd</command> will parse the contents of that variable as a colon-separated list
+    <command>systemd-timedated</command> will parse the contents of that variable as a colon-separated list
     of unit names. When set, this variable overrides the file-based list described above.</para>
 
     <example>
@@ -93,13 +93,13 @@ systemd-timesyncd.service
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>timedatectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>localtime</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>hwclock</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-timesyncd</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>timedatectl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>localtime</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>hwclock</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-timesyncd</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

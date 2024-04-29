@@ -36,7 +36,7 @@ Description=TEST-59-RELOADING-RESTART Normal exit
 
 [Service]
 Type=notify
-ExecStart=/bin/bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 1; exit 1"
+ExecStart=bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 1; exit 1"
 EOF
 
 cat >/run/systemd/system/testservice-fail-restart-59.service <<EOF
@@ -45,7 +45,7 @@ Description=TEST-59-RELOADING-RESTART Restart=on-failure
 
 [Service]
 Type=notify
-ExecStart=/bin/bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 1; exit 1"
+ExecStart=bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 1; exit 1"
 Restart=on-failure
 StartLimitBurst=1
 EOF
@@ -57,7 +57,7 @@ Description=TEST-59-RELOADING-RESTART Restart=on-abort
 
 [Service]
 Type=notify
-ExecStart=/bin/bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 5; exit 1"
+ExecStart=bash -c "systemd-notify --ready; systemd-notify RELOADING=1; sleep 5; exit 1"
 Restart=on-abort
 EOF
 
@@ -103,6 +103,14 @@ timeout 15 bash -c 'while systemctl daemon-reload --no-block; do true; done'
 sleep 10
 
 systemctl daemon-reload
+
+# Same test for reexec, but we wait here
+timeout 15 bash -c 'while systemctl daemon-reexec; do true; done'
+
+# Rate limit should reset after 9s
+sleep 10
+
+systemctl daemon-reexec
 
 # Let's now test the notify-reload logic
 

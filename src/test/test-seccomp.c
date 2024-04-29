@@ -52,40 +52,40 @@ TEST(parse_syscall_and_errno) {
         int e;
 
         assert_se(parse_syscall_and_errno("uname:EILSEQ", &n, &e) >= 0);
-        assert_se(streq(n, "uname"));
+        ASSERT_STREQ(n, "uname");
         assert_se(e == errno_from_name("EILSEQ") && e >= 0);
         n = mfree(n);
 
         assert_se(parse_syscall_and_errno("uname:EINVAL", &n, &e) >= 0);
-        assert_se(streq(n, "uname"));
+        ASSERT_STREQ(n, "uname");
         assert_se(e == errno_from_name("EINVAL") && e >= 0);
         n = mfree(n);
 
         assert_se(parse_syscall_and_errno("@sync:4095", &n, &e) >= 0);
-        assert_se(streq(n, "@sync"));
+        ASSERT_STREQ(n, "@sync");
         assert_se(e == 4095);
         n = mfree(n);
 
         /* If errno is omitted, then e is set to -1 */
         assert_se(parse_syscall_and_errno("mount", &n, &e) >= 0);
-        assert_se(streq(n, "mount"));
+        ASSERT_STREQ(n, "mount");
         assert_se(e == -1);
         n = mfree(n);
 
         /* parse_syscall_and_errno() does not check the syscall name is valid or not. */
         assert_se(parse_syscall_and_errno("hoge:255", &n, &e) >= 0);
-        assert_se(streq(n, "hoge"));
+        ASSERT_STREQ(n, "hoge");
         assert_se(e == 255);
         n = mfree(n);
 
         /* 0 is also a valid errno. */
         assert_se(parse_syscall_and_errno("hoge:0", &n, &e) >= 0);
-        assert_se(streq(n, "hoge"));
+        ASSERT_STREQ(n, "hoge");
         assert_se(e == 0);
         n = mfree(n);
 
         assert_se(parse_syscall_and_errno("hoge:kill", &n, &e) >= 0);
-        assert_se(streq(n, "hoge"));
+        ASSERT_STREQ(n, "hoge");
         assert_se(e == SECCOMP_ERROR_NUMBER_KILL);
         n = mfree(n);
 
@@ -151,7 +151,7 @@ TEST(architecture_table) {
                 assert_se(seccomp_arch_from_string(n, &c) >= 0);
                 n2 = seccomp_arch_to_string(c);
                 log_info("seccomp-arch: %s → 0x%"PRIx32" → %s", n, c, n2);
-                assert_se(streq_ptr(n, n2));
+                ASSERT_STREQ(n, n2);
         }
 }
 
@@ -231,11 +231,11 @@ TEST(filter_sets) {
 TEST(filter_sets_ordered) {
         /* Ensure "@default" always remains at the beginning of the list */
         assert_se(SYSCALL_FILTER_SET_DEFAULT == 0);
-        assert_se(streq(syscall_filter_sets[0].name, "@default"));
+        ASSERT_STREQ(syscall_filter_sets[0].name, "@default");
 
         /* Ensure "@known" always remains at the end of the list */
         assert_se(SYSCALL_FILTER_SET_KNOWN == _SYSCALL_FILTER_SET_MAX - 1);
-        assert_se(streq(syscall_filter_sets[SYSCALL_FILTER_SET_KNOWN].name, "@known"));
+        ASSERT_STREQ(syscall_filter_sets[SYSCALL_FILTER_SET_KNOWN].name, "@known");
 
         for (size_t i = 0; i < _SYSCALL_FILTER_SET_MAX; i++) {
                 const char *p = NULL;
@@ -294,7 +294,7 @@ TEST(restrict_namespace) {
         s = mfree(s);
 
         assert_se(namespace_flags_to_string(NAMESPACE_FLAGS_ALL, &s) == 0);
-        assert_se(streq(s, "cgroup ipc net mnt pid user uts"));
+        ASSERT_STREQ(s, "cgroup ipc net mnt pid user uts");
         assert_se(namespace_flags_from_string(s, &ul) == 0 && ul == NAMESPACE_FLAGS_ALL);
         s = mfree(s);
 
@@ -624,17 +624,17 @@ TEST(memory_deny_write_execute_mmap) {
         if (pid == 0) {
                 void *p;
 
-                p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
                 assert_se(p != MAP_FAILED);
                 assert_se(munmap(p, page_size()) >= 0);
 
-                p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
                 assert_se(p != MAP_FAILED);
                 assert_se(munmap(p, page_size()) >= 0);
 
                 assert_se(seccomp_memory_deny_write_execute() >= 0);
 
-                p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 #if defined(__x86_64__) || defined(__i386__) || defined(__powerpc64__) || defined(__arm__) || defined(__aarch64__) || defined(__loongarch_lp64)
                 assert_se(p == MAP_FAILED);
                 assert_se(errno == EPERM);
@@ -644,7 +644,7 @@ TEST(memory_deny_write_execute_mmap) {
                 if (p != MAP_FAILED)
                         assert_se(munmap(p, page_size()) == 0);
 
-                p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
                 assert_se(p != MAP_FAILED);
                 assert_se(munmap(p, page_size()) >= 0);
 
@@ -937,7 +937,7 @@ TEST(native_syscalls_filtered) {
 }
 
 TEST(lock_personality) {
-        unsigned long current;
+        unsigned long current_opinionated;
         pid_t pid;
 
         if (!is_seccomp_available()) {
@@ -949,24 +949,21 @@ TEST(lock_personality) {
                 return;
         }
 
-        assert_se(opinionated_personality(&current) >= 0);
-        /* On ppc64le sanitizers disable ASLR (i.e. by setting ADDR_NO_RANDOMIZE),
-         * which opinionated_personality() doesn't return. Let's tweak the current
-         * personality ourselves in such cases.
-         * See: https://github.com/llvm/llvm-project/commit/78f7a6eaa601bfdd6ae70ffd3da2254c21ff77f9
-         */
-        if (FLAGS_SET(safe_personality(PERSONALITY_INVALID), ADDR_NO_RANDOMIZE))
-                current |= ADDR_NO_RANDOMIZE;
+        assert_se(opinionated_personality(&current_opinionated) >= 0);
 
-        log_info("current personality=0x%lX", current);
+        log_info("current personality=0x%lX", (unsigned long) safe_personality(PERSONALITY_INVALID));
+        log_info("current opinionated personality=0x%lX", current_opinionated);
 
         pid = fork();
         assert_se(pid >= 0);
 
         if (pid == 0) {
-                assert_se(seccomp_lock_personality(current) >= 0);
+                unsigned long current;
 
-                assert_se((unsigned long) safe_personality(current) == current);
+                assert_se(seccomp_lock_personality(current_opinionated) >= 0);
+
+                current = safe_personality(current_opinionated);
+                assert_se((current & OPINIONATED_PERSONALITY_MASK) == current_opinionated);
 
                 /* Note, we also test that safe_personality() works correctly, by checking whether errno is properly
                  * set, in addition to the return value */
@@ -981,14 +978,15 @@ TEST(lock_personality) {
                 assert_se(safe_personality(PER_LINUX_32BIT) == -EPERM);
                 assert_se(safe_personality(PER_SVR4) == -EPERM);
                 assert_se(safe_personality(PER_BSD) == -EPERM);
-                assert_se(safe_personality(current == PER_LINUX ? PER_LINUX32 : PER_LINUX) == -EPERM);
+                assert_se(safe_personality(current_opinionated == PER_LINUX ? PER_LINUX32 : PER_LINUX) == -EPERM);
                 assert_se(safe_personality(PER_LINUX32_3GB) == -EPERM);
                 assert_se(safe_personality(PER_UW7) == -EPERM);
                 assert_se(safe_personality(0x42) == -EPERM);
 
                 assert_se(safe_personality(PERSONALITY_INVALID) == -EPERM); /* maybe remove this later */
 
-                assert_se((unsigned long) personality(current) == current);
+                current = safe_personality(current_opinionated);
+                assert_se((current & OPINIONATED_PERSONALITY_MASK) == current_opinionated);
                 _exit(EXIT_SUCCESS);
         }
 

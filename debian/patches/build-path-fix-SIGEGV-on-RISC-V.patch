@@ -1,0 +1,63 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Sat, 27 Apr 2024 15:25:09 +0100
+Subject: build-path: fix SIGEGV on RISC-V
+
+On RISC-V and MIPS DT_STRTAB is an offset, not a full address. Check
+whether it's below the dynamic section rather than above, and if so
+adjust it.
+
+Follow-up for 91d149cfb45fc2fad7ce18fb651297ee50ecc1f8
+---
+ src/basic/build-path.c | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/src/basic/build-path.c b/src/basic/build-path.c
+index 8ddef7b..2465b96 100644
+--- a/src/basic/build-path.c
++++ b/src/basic/build-path.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include <dlfcn.h>
+ #include <elf.h>
+ #include <link.h>
+ #include <sys/auxv.h>
+@@ -12,15 +13,15 @@
+ #include "process-util.h"
+ #include "unistd.h"
+ 
+-static int get_runpath_from_dynamic(const ElfW(Dyn) *d, const char **ret) {
++static int get_runpath_from_dynamic(const ElfW(Dyn) *dynamic, const char **ret) {
+         size_t runpath_index = SIZE_MAX, rpath_index = SIZE_MAX;
+         const char *strtab = NULL;
+ 
+-        assert(d);
++        assert(dynamic);
+ 
+         /* Iterates through the PT_DYNAMIC section to find the DT_RUNPATH/DT_RPATH entries */
+ 
+-        for (; d->d_tag != DT_NULL; d++) {
++        for (const ElfW(Dyn) *d = dynamic; d->d_tag != DT_NULL; d++) {
+ 
+                 switch (d->d_tag) {
+ 
+@@ -45,7 +46,18 @@ static int get_runpath_from_dynamic(const ElfW(Dyn) *d, const char **ret) {
+         if (!strtab)
+                 return -ENOTRECOVERABLE;
+ 
+-        /* According to dl.so runpath wins of both runpath and rpath are defined. */
++        /* On MIPS and RISC-V DT_STRTAB records an offset, not a valid address, so it has to be adjusted.
++         * Check whether strtab is below the PT_DYNAMIC, and if so assume it's an offset. */
++        struct link_map *map;
++        Dl_info info;
++
++        if (dladdr1(dynamic, &info, (void **)&map, RTLD_DL_LINKMAP) <= 0)
++                return -ENOTRECOVERABLE;
++
++        if (strtab < (const char *)map->l_addr)
++                strtab += map->l_addr;
++
++        /* According to dl.so runpath wins if both runpath and rpath are defined. */
+         if (runpath_index != SIZE_MAX) {
+                 if (ret)
+                         *ret = strtab + runpath_index;

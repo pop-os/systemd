@@ -71,12 +71,13 @@ typedef enum TimestampStyle {
 
 #define TIME_T_MAX (time_t)((UINTMAX_C(1) << ((sizeof(time_t) << 3) - 1)) - 1)
 
-#define DUAL_TIMESTAMP_NULL ((struct dual_timestamp) {})
-#define TRIPLE_TIMESTAMP_NULL ((struct triple_timestamp) {})
+#define DUAL_TIMESTAMP_NULL ((dual_timestamp) {})
+#define TRIPLE_TIMESTAMP_NULL ((triple_timestamp) {})
 
 usec_t now(clockid_t clock);
 nsec_t now_nsec(clockid_t clock);
 
+usec_t map_clock_usec_raw(usec_t from, usec_t from_base, usec_t to_base);
 usec_t map_clock_usec(usec_t from, clockid_t from_clock, clockid_t to_clock);
 
 dual_timestamp* dual_timestamp_now(dual_timestamp *ts);
@@ -218,6 +219,9 @@ static inline int usleep_safe(usec_t usec) {
          *
          * ⚠️ Note we are not using plain nanosleep() here, since that operates on CLOCK_REALTIME, not
          *    CLOCK_MONOTONIC! */
+
+        if (usec == 0)
+                return 0;
 
         // FIXME: use RET_NERRNO() macro here. Currently, this header cannot include errno-util.h.
         return clock_nanosleep(CLOCK_MONOTONIC, 0, TIMESPEC_STORE(usec), NULL) < 0 ? -errno : 0;

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 <refentry id="ukify" xmlns:xi="http://www.w3.org/2001/XInclude" conditional='ENABLE_UKIFY'>
 
@@ -67,6 +67,7 @@
 
       <para>Additional sections will be inserted into the UKI, either automatically or only if a specific
       option is provided. See the discussions of
+      <varname>Microcode=</varname>/<option>--microcode=</option>,
       <varname>Cmdline=</varname>/<option>--cmdline=</option>,
       <varname>OSRelease=</varname>/<option>--os-release=</option>,
       <varname>DeviceTree=</varname>/<option>--devicetree=</option>,
@@ -99,7 +100,10 @@
       the n-th boot phase path set will be signed by the n-th key. This can be used to build different trust
       policies for different phases of the boot. In the config file, <varname>PCRPrivateKey=</varname>,
       <varname>PCRPublicKey=</varname>, and <varname>Phases=</varname> are grouped into separate sections,
-      describing separate boot phases.</para>
+      describing separate boot phases. If <varname>SigningEngine=</varname>/<option>--signing-engine=</option>
+      is specified, then the private keys arguments will be passed verbatim to OpenSSL as URIs, and the public
+      key arguments will be loaded as X.509 certificates, so that signing can be performed with an OpenSSL
+      engine.</para>
 
       <para>If a SecureBoot signing key is provided via the
       <varname>SecureBootPrivateKey=</varname>/<option>--secureboot-private-key=</option> option, the resulting
@@ -140,6 +144,12 @@
 
       <para>Also see the description of <option>-j</option>/<option>--json=</option> and
       <option>--section=</option>.</para>
+
+      <para>Other tools that may be useful for inspect UKIs:
+      <citerefentry project='man-pages'><refentrytitle>llvm-objdump</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+      <option>-p</option> and <command>pe-inspect</command>.
+      <!-- TODO: add link to pe-inspect man page when it gets one -->
+      </para>
     </refsect2>
   </refsect1>
 
@@ -157,7 +167,7 @@
 
     <para>If no config file is provided via the option <option>--config=<replaceable>PATH</replaceable></option>,
     <command>ukify</command> will try to look for a default configuration file in the following paths in this
-    order: <filename>/run/systemd/ukify.conf</filename>, <filename>/etc/systemd/ukify.conf</filename>,
+    order: <filename>/etc/systemd/ukify.conf</filename>, <filename>/run/systemd/ukify.conf</filename>,
     <filename>/usr/local/lib/systemd/ukify.conf</filename>, and <filename>/usr/lib/systemd/ukify.conf</filename>,
     and then load the first one found. <command>ukify</command> will proceed normally if no configuration file
     is specified and no default one is found.</para>
@@ -197,7 +207,7 @@
 
         <varlistentry>
           <term><option>--section=<replaceable>NAME</replaceable>:<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
-          <term><option>--section=<replaceable>NAME</replaceable>:<arg choice="plain">text|binary</arg><optional>@<replaceable>PATH</replaceable></optional></option></term>
+          <term><option>--section=<replaceable>NAME</replaceable>:text|binary<optional>@<replaceable>PATH</replaceable></optional></option></term>
 
           <listitem><para>For all verbs except <command>inspect</command>, the first syntax is used.
           Specify an arbitrary additional section <literal><replaceable>NAME</replaceable></literal>.
@@ -291,6 +301,16 @@
           the config file first.</para>
 
           <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>Microcode=<replaceable>UCODE</replaceable></varname></term>
+          <term><option>--microcode=<replaceable>UCODE</replaceable></option></term>
+
+          <listitem><para>Path to initrd containing microcode updates. If not specified, the section
+          will not be present.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -476,8 +496,10 @@
           <listitem><para>SBAT metadata associated with the UKI or addon. SBAT policies are useful to revoke
           whole groups of UKIs or addons with a single, static policy update that does not take space in
           DBX/MOKX. If not specified manually, a default metadata entry consisting of
-          <literal>uki,1,UKI,uki,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html</literal>
-          will be used, to ensure it is always possible to revoke UKIs and addons. For more information on
+          <literal>uki,1,UKI,uki,1,https://uapi-group.org/specifications/specs/unified_kernel_image/</literal>
+          for UKIs and
+          <literal>uki-addon,1,UKI Addon,addon,1,https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html</literal>
+          for addons will be used, to ensure it is always possible to revoke them. For more information on
           SBAT see <ulink url="https://github.com/rhboot/shim/blob/main/SBAT.md">Shim documentation</ulink>.
           </para>
 
@@ -560,7 +582,7 @@
       --initrd=early_cpio \
       --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
       --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
-      uki.author.myimage,1,UKI for System,uki.author.myimage,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html' \
+      uki.author.myimage,1,UKI for System,uki.author.myimage,1,https://uapi-group.org/specifications/specs/unified_kernel_image/' \
       --pcr-private-key=pcr-private-initrd-key.pem \
       --pcr-public-key=pcr-public-initrd-key.pem \
       --phases='enter-initrd' \
@@ -633,7 +655,7 @@ $ ukify -c ukify.conf build \
       --secureboot-certificate=sb.cert \
       --cmdline='debug' \
       --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
-      uki.addon.author,1,UKI Addon for System,uki.addon.author,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html'
+      uki-addon.author,1,UKI Addon for System,uki-addon.author,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html'
       --output=debug.cmdline
       </programlisting>
 
@@ -674,13 +696,13 @@ Writing public key for PCR signing to /etc/kernel/pcr-system.pub.pem
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-pcrphase.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-     </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-pcrphase.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+     </simplelist></para>
   </refsect1>
 
 </refentry>

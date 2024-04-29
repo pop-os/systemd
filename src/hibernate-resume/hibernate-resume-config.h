@@ -5,11 +5,9 @@
 
 #include "sd-id128.h"
 
-typedef struct KernelHibernateLocation {
-        char *device;
-        uint64_t offset;
-        bool offset_set;
-} KernelHibernateLocation;
+#include "macro.h"
+
+typedef struct KernelHibernateLocation KernelHibernateLocation;
 
 typedef struct EFIHibernateLocation {
         char *device;
@@ -24,6 +22,11 @@ typedef struct EFIHibernateLocation {
         char *image_version;
 } EFIHibernateLocation;
 
+EFIHibernateLocation* efi_hibernate_location_free(EFIHibernateLocation *e);
+DEFINE_TRIVIAL_CLEANUP_FUNC(EFIHibernateLocation*, efi_hibernate_location_free);
+
+int get_efi_hibernate_location(EFIHibernateLocation **ret);
+
 typedef struct HibernateInfo {
         const char *device;
         uint64_t offset; /* in memory pages */
@@ -36,20 +39,4 @@ void hibernate_info_done(HibernateInfo *info);
 
 int acquire_hibernate_info(HibernateInfo *ret);
 
-#if ENABLE_EFI
-
 void compare_hibernate_location_and_warn(const HibernateInfo *info);
-
-void clear_efi_hibernate_location(void);
-
-#else
-
-static inline void compare_hibernate_location_and_warn(const HibernateInfo *info) {
-        return;
-}
-
-static inline void clear_efi_hibernate_location(void) {
-        return;
-}
-
-#endif

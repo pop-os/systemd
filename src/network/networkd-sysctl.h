@@ -6,6 +6,7 @@
 #include "conf-parser.h"
 
 typedef struct Link Link;
+typedef struct Manager Manager;
 
 typedef enum IPv6PrivacyExtensions {
         /* These values map to the kernel's /proc/sys/net/ipv6/conf/xxx/use_tempaddr values. Do not reorder! */
@@ -26,8 +27,11 @@ typedef enum IPReversePathFilter {
         _IP_REVERSE_PATH_FILTER_INVALID = -EINVAL,
 } IPReversePathFilter;
 
+void manager_set_sysctl(Manager *manager);
+
+int link_get_ip_forwarding(Link *link, int family);
 int link_set_sysctl(Link *link);
-int link_set_ipv6_mtu(Link *link);
+int link_set_ipv6_mtu(Link *link, int log_level);
 
 const char* ipv6_privacy_extensions_to_string(IPv6PrivacyExtensions i) _const_;
 IPv6PrivacyExtensions ipv6_privacy_extensions_from_string(const char *s) _pure_;
@@ -37,3 +41,4 @@ IPReversePathFilter ip_reverse_path_filter_from_string(const char *s) _pure_;
 
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_privacy_extensions);
 CONFIG_PARSER_PROTOTYPE(config_parse_ip_reverse_path_filter);
+CONFIG_PARSER_PROTOTYPE(config_parse_ip_forward_deprecated);

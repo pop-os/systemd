@@ -14,16 +14,24 @@
 #include "virt.h"
 
 TEST(uid_range) {
-        _cleanup_(uid_range_freep) UidRange *p = NULL;
+        _cleanup_(uid_range_freep) UIDRange *p = NULL;
         uid_t search;
 
         assert_se(uid_range_covers(p, 0, 0));
         assert_se(!uid_range_covers(p, 0, 1));
         assert_se(!uid_range_covers(p, 100, UINT32_MAX));
+        assert_se(!uid_range_covers(p, UINT32_MAX, 1));
+        assert_se(!uid_range_covers(p, UINT32_MAX - 10, 11));
+
+        assert_se(uid_range_entries(p) == 0);
+        assert_se(uid_range_size(p) == 0);
+        assert_se(uid_range_is_empty(p));
 
         assert_se(uid_range_add_str(&p, "500-999") >= 0);
         assert_se(p);
-        assert_se(p->n_entries == 1);
+        assert_se(uid_range_entries(p) == 1);
+        assert_se(uid_range_size(p) == 500);
+        assert_se(!uid_range_is_empty(p));
         assert_se(p->entries[0].start == 500);
         assert_se(p->entries[0].nr == 500);
 
@@ -54,19 +62,23 @@ TEST(uid_range) {
         assert_se(uid_range_next_lower(p, &search) == -EBUSY);
 
         assert_se(uid_range_add_str(&p, "1000") >= 0);
-        assert_se(p->n_entries == 1);
+        assert_se(uid_range_entries(p) == 1);
         assert_se(p->entries[0].start == 500);
         assert_se(p->entries[0].nr == 501);
 
         assert_se(uid_range_add_str(&p, "30-40") >= 0);
-        assert_se(p->n_entries == 2);
+        assert_se(uid_range_entries(p) == 2);
+        assert_se(uid_range_size(p) == 500 + 1 + 11);
+        assert_se(!uid_range_is_empty(p));
         assert_se(p->entries[0].start == 30);
         assert_se(p->entries[0].nr == 11);
         assert_se(p->entries[1].start == 500);
         assert_se(p->entries[1].nr == 501);
 
         assert_se(uid_range_add_str(&p, "60-70") >= 0);
-        assert_se(p->n_entries == 3);
+        assert_se(uid_range_entries(p) == 3);
+        assert_se(uid_range_size(p) == 500 + 1 + 11 + 11);
+        assert_se(!uid_range_is_empty(p));
         assert_se(p->entries[0].start == 30);
         assert_se(p->entries[0].nr == 11);
         assert_se(p->entries[1].start == 60);
@@ -75,31 +87,44 @@ TEST(uid_range) {
         assert_se(p->entries[2].nr == 501);
 
         assert_se(uid_range_add_str(&p, "20-2000") >= 0);
-        assert_se(p->n_entries == 1);
+        assert_se(uid_range_entries(p) == 1);
+        assert_se(uid_range_size(p) == 1981);
         assert_se(p->entries[0].start == 20);
         assert_se(p->entries[0].nr == 1981);
 
         assert_se(uid_range_add_str(&p, "2002") >= 0);
-        assert_se(p->n_entries == 2);
+        assert_se(uid_range_entries(p) == 2);
+        assert_se(uid_range_size(p) == 1982);
         assert_se(p->entries[0].start == 20);
         assert_se(p->entries[0].nr == 1981);
         assert_se(p->entries[1].start == 2002);
         assert_se(p->entries[1].nr == 1);
 
+        _cleanup_(uid_range_freep) UIDRange *q = NULL;
+        assert_se(!uid_range_equal(p, q));
+        assert_se(uid_range_add_str(&q, "20-2000") >= 0);
+        assert_se(!uid_range_equal(p, q));
+        assert_se(uid_range_add_str(&q, "2002") >= 0);
+        assert_se(uid_range_equal(p, q));
+
         assert_se(uid_range_add_str(&p, "2001") >= 0);
-        assert_se(p->n_entries == 1);
+        assert_se(uid_range_entries(p) == 1);
+        assert_se(uid_range_size(p) == 1983);
         assert_se(p->entries[0].start == 20);
         assert_se(p->entries[0].nr == 1983);
+
+        assert_se(uid_range_add_str(&q, "2001") >= 0);
+        assert_se(uid_range_equal(p, q));
 }
 
 TEST(load_userns) {
-        _cleanup_(uid_range_freep) UidRange *p = NULL;
+        _cleanup_(uid_range_freep) UIDRange *p = NULL;
         _cleanup_(unlink_and_freep) char *fn = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
-        r = uid_range_load_userns(&p, NULL);
-        if (r < 0 && ERRNO_IS_NOT_SUPPORTED(r))
+        r = uid_range_load_userns(NULL, UID_RANGE_USERNS_INSIDE, &p);
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                 return;
 
         assert_se(r >= 0);
@@ -121,7 +146,7 @@ TEST(load_userns) {
 
         p = uid_range_free(p);
 
-        assert_se(uid_range_load_userns(&p, fn) >= 0);
+        assert_se(uid_range_load_userns(fn, UID_RANGE_USERNS_INSIDE, &p) >= 0);
 
         assert_se(uid_range_contains(p, 0));
         assert_se(uid_range_contains(p, 19));
@@ -134,7 +159,7 @@ TEST(load_userns) {
 }
 
 TEST(uid_range_coalesce) {
-        _cleanup_(uid_range_freep) UidRange *p = NULL;
+        _cleanup_(uid_range_freep) UIDRange *p = NULL;
 
         for (size_t i = 0; i < 10; i++) {
                 assert_se(uid_range_add_internal(&p, i * 10, 10, /* coalesce = */ false) >= 0);

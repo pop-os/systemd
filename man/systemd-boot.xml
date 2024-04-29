@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-boot" conditional='ENABLE_BOOTLOADER'
@@ -380,7 +380,7 @@
     similar, to extend the native firmware support.</para>
 
     <para>Enrollment of Secure Boot variables can be performed manually or automatically if files are available
-    under <filename>/loader/keys/<replaceable>NAME</replaceable>/{db,KEK,PK}.auth</filename>, <replaceable>NAME</replaceable>
+    under <filename>/loader/keys/<replaceable>NAME</replaceable>/{db,dbx,KEK,PK}.auth</filename>, <replaceable>NAME</replaceable>
     being the display name for the set of variables in the menu. If one of the sets is named <filename>auto</filename>
     then it might be enrolled automatically depending on whether <literal>secure-boot-enroll</literal> is set
     to force or not.</para>
@@ -562,6 +562,27 @@
   </refsect1>
 
   <refsect1>
+    <title>SMBIOS Type 11 Strings</title>
+
+    <para><command>systemd-boot</command> can be configured using SMBIOS Type 11 strings. Applicable strings
+    consist of a name, followed by <literal>=</literal>, followed by the value. Unless
+    <command>systemd-boot</command> detects it is running inside a confidential computing environment,
+    <command>systemd-boot</command> will search the table for a string with a specific name, and if found,
+    use its value. The following strings are read:</para>
+
+    <variablelist>
+      <varlistentry>
+        <term><varname>io.systemd.boot.kernel-cmdline-extra</varname></term>
+        <listitem><para>If set, the value of this string is added to the list of kernel command line
+        arguments for Boot Loader Specification Type 1 entries that are measured in PCR12 and passed to the
+        kernel.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>Boot Counting</title>
 
     <para><command>systemd-boot</command> implements a simple boot counting mechanism on top of the <ulink
@@ -635,16 +656,16 @@
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>loader.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-bless-boot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>kernel-install</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink>,
-      <ulink url="https://systemd.io/BOOT_LOADER_INTERFACE">Boot Loader Interface</ulink>,
-      <ulink url="https://systemd.io/TPM2_PCR_MEASUREMENTS">TPM2 PCR Measurements Made by systemd</ulink>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>loader.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-bless-boot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>kernel-install</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      <member><ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink></member>
+      <member><ulink url="https://systemd.io/BOOT_LOADER_INTERFACE">Boot Loader Interface</ulink></member>
+      <member><ulink url="https://systemd.io/TPM2_PCR_MEASUREMENTS">TPM2 PCR Measurements Made by systemd</ulink></member>
+    </simplelist></para>
   </refsect1>
 </refentry>

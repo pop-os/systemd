@@ -12,6 +12,7 @@ usr/lib/systemd/system/sysinit.target.wants/systemd-udev-trigger.service
 usr/lib/systemd/system/systemd-hwdb-update.service
 usr/lib/systemd/system/systemd-udevd-control.socket
 usr/lib/systemd/system/systemd-udevd-kernel.socket
+usr/lib/systemd/system/systemd-udev-load-credentials.service
 usr/lib/systemd/system/systemd-udevd.service
 usr/lib/systemd/system/systemd-udev-settle.service
 usr/lib/systemd/system/systemd-udev-trigger.service

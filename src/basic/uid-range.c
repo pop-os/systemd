@@ -10,12 +10,13 @@
 #include "format-util.h"
 #include "macro.h"
 #include "path-util.h"
+#include "process-util.h"
 #include "sort-util.h"
 #include "stat-util.h"
 #include "uid-range.h"
 #include "user-util.h"
 
-UidRange *uid_range_free(UidRange *range) {
+UIDRange *uid_range_free(UIDRange *range) {
         if (!range)
                 return NULL;
 
@@ -23,14 +24,14 @@ UidRange *uid_range_free(UidRange *range) {
         return mfree(range);
 }
 
-static bool uid_range_entry_intersect(const UidRangeEntry *a, const UidRangeEntry *b) {
+static bool uid_range_entry_intersect(const UIDRangeEntry *a, const UIDRangeEntry *b) {
         assert(a);
         assert(b);
 
         return a->start <= b->start + b->nr && a->start + a->nr >= b->start;
 }
 
-static int uid_range_entry_compare(const UidRangeEntry *a, const UidRangeEntry *b) {
+static int uid_range_entry_compare(const UIDRangeEntry *a, const UIDRangeEntry *b) {
         int r;
 
         assert(a);
@@ -43,7 +44,7 @@ static int uid_range_entry_compare(const UidRangeEntry *a, const UidRangeEntry *
         return CMP(a->nr, b->nr);
 }
 
-static void uid_range_coalesce(UidRange *range) {
+static void uid_range_coalesce(UIDRange *range) {
         assert(range);
 
         if (range->n_entries <= 0)
@@ -52,10 +53,10 @@ static void uid_range_coalesce(UidRange *range) {
         typesafe_qsort(range->entries, range->n_entries, uid_range_entry_compare);
 
         for (size_t i = 0; i < range->n_entries; i++) {
-                UidRangeEntry *x = range->entries + i;
+                UIDRangeEntry *x = range->entries + i;
 
                 for (size_t j = i + 1; j < range->n_entries; j++) {
-                        UidRangeEntry *y = range->entries + j;
+                        UIDRangeEntry *y = range->entries + j;
                         uid_t begin, end;
 
                         if (!uid_range_entry_intersect(x, y))
@@ -68,7 +69,7 @@ static void uid_range_coalesce(UidRange *range) {
                         x->nr = end - begin;
 
                         if (range->n_entries > j + 1)
-                                memmove(y, y + 1, sizeof(UidRangeEntry) * (range->n_entries - j - 1));
+                                memmove(y, y + 1, sizeof(UIDRangeEntry) * (range->n_entries - j - 1));
 
                         range->n_entries--;
                         j--;
@@ -76,9 +77,9 @@ static void uid_range_coalesce(UidRange *range) {
         }
 }
 
-int uid_range_add_internal(UidRange **range, uid_t start, uid_t nr, bool coalesce) {
-        _cleanup_(uid_range_freep) UidRange *range_new = NULL;
-        UidRange *p;
+int uid_range_add_internal(UIDRange **range, uid_t start, uid_t nr, bool coalesce) {
+        _cleanup_(uid_range_freep) UIDRange *range_new = NULL;
+        UIDRange *p;
 
         assert(range);
 
@@ -91,7 +92,7 @@ int uid_range_add_internal(UidRange **range, uid_t start, uid_t nr, bool coalesc
         if (*range)
                 p = *range;
         else {
-                range_new = new0(UidRange, 1);
+                range_new = new0(UIDRange, 1);
                 if (!range_new)
                         return -ENOMEM;
 
@@ -101,7 +102,7 @@ int uid_range_add_internal(UidRange **range, uid_t start, uid_t nr, bool coalesc
         if (!GREEDY_REALLOC(p->entries, p->n_entries + 1))
                 return -ENOMEM;
 
-        p->entries[p->n_entries++] = (UidRangeEntry) {
+        p->entries[p->n_entries++] = (UIDRangeEntry) {
                 .start = start,
                 .nr = nr,
         };
@@ -115,7 +116,7 @@ int uid_range_add_internal(UidRange **range, uid_t start, uid_t nr, bool coalesc
         return 0;
 }
 
-int uid_range_add_str(UidRange **range, const char *s) {
+int uid_range_add_str(UIDRange **range, const char *s) {
         uid_t start, end;
         int r;
 
@@ -129,7 +130,7 @@ int uid_range_add_str(UidRange **range, const char *s) {
         return uid_range_add_internal(range, start, end - start + 1, /* coalesce = */ true);
 }
 
-int uid_range_next_lower(const UidRange *range, uid_t *uid) {
+int uid_range_next_lower(const UIDRange *range, uid_t *uid) {
         uid_t closest = UID_INVALID, candidate;
 
         assert(range);
@@ -162,7 +163,7 @@ int uid_range_next_lower(const UidRange *range, uid_t *uid) {
         return 1;
 }
 
-bool uid_range_covers(const UidRange *range, uid_t start, uid_t nr) {
+bool uid_range_covers(const UIDRange *range, uid_t start, uid_t nr) {
         if (nr == 0) /* empty range? always covered... */
                 return true;
 
@@ -172,16 +173,40 @@ bool uid_range_covers(const UidRange *range, uid_t start, uid_t nr) {
         if (!range)
                 return false;
 
-        for (size_t i = 0; i < range->n_entries; i++)
-                if (start >= range->entries[i].start &&
-                    start + nr <= range->entries[i].start + range->entries[i].nr)
+        FOREACH_ARRAY(i, range->entries, range->n_entries)
+                if (start >= i->start &&
+                    start + nr <= i->start + i->nr)
                         return true;
 
         return false;
 }
 
-int uid_range_load_userns(UidRange **ret, const char *path) {
-        _cleanup_(uid_range_freep) UidRange *range = NULL;
+int uid_map_read_one(FILE *f, uid_t *ret_base, uid_t *ret_shift, uid_t *ret_range) {
+        uid_t uid_base, uid_shift, uid_range;
+        int r;
+
+        assert(f);
+        assert(ret_base);
+        assert(ret_shift);
+        assert(ret_range);
+
+        errno = 0;
+        r = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT "\n", &uid_base, &uid_shift, &uid_range);
+        if (r == EOF)
+                return errno_or_else(ENOMSG);
+        assert(r >= 0);
+        if (r != 3)
+                return -EBADMSG;
+
+        *ret_base = uid_base;
+        *ret_shift = uid_shift;
+        *ret_range = uid_range;
+
+        return 0;
+}
+
+int uid_range_load_userns(const char *path, UIDRangeUsernsMode mode, UIDRange **ret) {
+        _cleanup_(uid_range_freep) UIDRange *range = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -191,10 +216,12 @@ int uid_range_load_userns(UidRange **ret, const char *path) {
          *
          * To simplify things this will modify the passed array in case of later failure. */
 
+        assert(mode >= 0);
+        assert(mode < _UID_RANGE_USERNS_MODE_MAX);
         assert(ret);
 
         if (!path)
-                path = "/proc/self/uid_map";
+                path = IN_SET(mode, UID_RANGE_USERNS_INSIDE, UID_RANGE_USERNS_OUTSIDE) ? "/proc/self/uid_map" : "/proc/self/gid_map";
 
         f = fopen(path, "re");
         if (!f) {
@@ -206,26 +233,24 @@ int uid_range_load_userns(UidRange **ret, const char *path) {
                 return r;
         }
 
-        range = new0(UidRange, 1);
+        range = new0(UIDRange, 1);
         if (!range)
                 return -ENOMEM;
 
         for (;;) {
                 uid_t uid_base, uid_shift, uid_range;
-                int k;
 
-                errno = 0;
-                k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT "\n", &uid_base, &uid_shift, &uid_range);
-                if (k == EOF) {
-                        if (ferror(f))
-                                return errno_or_else(EIO);
-
+                r = uid_map_read_one(f, &uid_base, &uid_shift, &uid_range);
+                if (r == -ENOMSG)
                         break;
-                }
-                if (k != 3)
-                        return -EBADMSG;
+                if (r < 0)
+                        return r;
 
-                r = uid_range_add_internal(&range, uid_base, uid_range, /* coalesce = */ false);
+                r = uid_range_add_internal(
+                                &range,
+                                IN_SET(mode, UID_RANGE_USERNS_INSIDE, GID_RANGE_USERNS_INSIDE) ? uid_base : uid_shift,
+                                uid_range,
+                                /* coalesce = */ false);
                 if (r < 0)
                         return r;
         }
@@ -234,4 +259,104 @@ int uid_range_load_userns(UidRange **ret, const char *path) {
 
         *ret = TAKE_PTR(range);
         return 0;
+}
+
+int uid_range_load_userns_by_fd(int userns_fd, UIDRangeUsernsMode mode, UIDRange **ret) {
+        _cleanup_(close_pairp) int pfd[2] = EBADF_PAIR;
+        _cleanup_(sigkill_waitp) pid_t pid = 0;
+        ssize_t n;
+        char x;
+        int r;
+
+        assert(userns_fd >= 0);
+        assert(mode >= 0);
+        assert(mode < _UID_RANGE_USERNS_MODE_MAX);
+        assert(ret);
+
+        if (pipe2(pfd, O_CLOEXEC) < 0)
+                return -errno;
+
+        r = safe_fork_full(
+                        "(sd-mkuserns)",
+                        /* stdio_fds= */ NULL,
+                        (int[]) { pfd[1], userns_fd }, 2,
+                        FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGKILL,
+                        &pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                /* Child. */
+
+                if (setns(userns_fd, CLONE_NEWUSER) < 0) {
+                        log_debug_errno(errno, "Failed to join userns: %m");
+                        _exit(EXIT_FAILURE);
+                }
+
+                userns_fd = safe_close(userns_fd);
+
+                n = write(pfd[1], &(const char) { 'x' }, 1);
+                if (n < 0) {
+                        log_debug_errno(errno, "Failed to write to fifo: %m");
+                        _exit(EXIT_FAILURE);
+                }
+                assert(n == 1);
+
+                freeze();
+        }
+
+        pfd[1] = safe_close(pfd[1]);
+
+        n = read(pfd[0], &x, 1);
+        if (n < 0)
+                return -errno;
+        if (n == 0)
+                return -EPROTO;
+        assert(n == 1);
+        assert(x == 'x');
+
+        const char *p = procfs_file_alloca(
+                        pid,
+                        IN_SET(mode, UID_RANGE_USERNS_INSIDE, UID_RANGE_USERNS_OUTSIDE) ? "uid_map" : "gid_map");
+
+        return uid_range_load_userns(p, mode, ret);
+}
+
+bool uid_range_overlaps(const UIDRange *range, uid_t start, uid_t nr) {
+
+        if (!range)
+                return false;
+
+        /* Avoid overflow */
+        if (start > UINT32_MAX - nr)
+                nr = UINT32_MAX - start;
+
+        if (nr == 0)
+                return false;
+
+        FOREACH_ARRAY(entry, range->entries, range->n_entries)
+                if (start < entry->start + entry->nr &&
+                    start + nr >= entry->start)
+                        return true;
+
+        return false;
+}
+
+bool uid_range_equal(const UIDRange *a, const UIDRange *b) {
+        if (a == b)
+                return true;
+
+        if (!a || !b)
+                return false;
+
+        if (a->n_entries != b->n_entries)
+                return false;
+
+        for (size_t i = 0; i < a->n_entries; i++) {
+                if (a->entries[i].start != b->entries[i].start)
+                        return false;
+                if (a->entries[i].nr != b->entries[i].nr)
+                        return false;
+        }
+
+        return true;
 }

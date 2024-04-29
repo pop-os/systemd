@@ -221,7 +221,7 @@ int get_locales(char ***ret) {
         locales = set_free(locales);
 
         r = getenv_bool("SYSTEMD_LIST_NON_UTF8_LOCALES");
-        if (r == -ENXIO || r == 0) {
+        if (IN_SET(r, -ENXIO, 0)) {
                 char **a, **b;
 
                 /* Filter out non-UTF-8 locales, because it's 2019, by default */
@@ -260,7 +260,10 @@ bool locale_is_valid(const char *name) {
         if (!filename_is_valid(name))
                 return false;
 
-        if (!string_is_safe(name))
+        /* Locales look like: ll_CC.ENC@variant, where ll and CC are alphabetic, ENC is alphanumeric with
+         * dashes, and variant seems to be alphabetic.
+         * See: https://www.gnu.org/software/gettext/manual/html_node/Locale-Names.html */
+        if (!in_charset(name, ALPHANUMERICAL "_.-@"))
                 return false;
 
         return true;
@@ -292,7 +295,7 @@ bool is_locale_utf8(void) {
         if (cached_answer >= 0)
                 goto out;
 
-        r = getenv_bool_secure("SYSTEMD_UTF8");
+        r = secure_getenv_bool("SYSTEMD_UTF8");
         if (r >= 0) {
                 cached_answer = r;
                 goto out;

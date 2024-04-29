@@ -47,6 +47,7 @@ sources = files(
         'networkd-dhcp4.c',
         'networkd-dhcp6-bus.c',
         'networkd-dhcp6.c',
+        'networkd-dns.c',
         'networkd-ipv4acd.c',
         'networkd-ipv4ll.c',
         'networkd-ipv6-proxy-ndp.c',
@@ -56,18 +57,22 @@ sources = files(
         'networkd-link.c',
         'networkd-lldp-rx.c',
         'networkd-lldp-tx.c',
-        'networkd-manager-bus.c',
         'networkd-manager.c',
+        'networkd-manager-bus.c',
+        'networkd-manager-varlink.c',
         'networkd-ndisc.c',
         'networkd-neighbor.c',
         'networkd-netlabel.c',
         'networkd-network-bus.c',
         'networkd-network.c',
         'networkd-nexthop.c',
+        'networkd-ntp.c',
         'networkd-queue.c',
         'networkd-radv.c',
-        'networkd-route-util.c',
         'networkd-route.c',
+        'networkd-route-metric.c',
+        'networkd-route-nexthop.c',
+        'networkd-route-util.c',
         'networkd-routing-policy-rule.c',
         'networkd-setlink.c',
         'networkd-speed-meter.c',
@@ -109,7 +114,10 @@ systemd_networkd_wait_online_sources = files(
         'wait-online/wait-online.c',
 )
 
-networkctl_sources = files('networkctl.c')
+networkctl_sources = files(
+        'networkctl.c',
+        'networkctl-config-file.c'
+)
 
 network_generator_sources = files(
         'generator/main.c',
@@ -141,8 +149,7 @@ if get_option('link-networkd-shared')
         networkd_link_with = [libshared]
 else
         networkd_link_with = [libsystemd_static,
-                              libshared_static,
-                              libbasic_gcrypt]
+                              libshared_static]
 endif
 
 network_includes = [libsystemd_network_includes, include_directories(['.', 'netdev', 'tc'])]

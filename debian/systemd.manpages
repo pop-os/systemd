@@ -5,6 +5,7 @@ debian/tmp/usr/share/man/man1/journalctl.1
 debian/tmp/usr/share/man/man1/localectl.1
 debian/tmp/usr/share/man/man1/loginctl.1
 debian/tmp/usr/share/man/man1/networkctl.1
+debian/tmp/usr/share/man/man1/run0.1
 debian/tmp/usr/share/man/man1/systemctl.1
 debian/tmp/usr/share/man/man1/systemd.1
 debian/tmp/usr/share/man/man1/systemd-ac-power.1
@@ -23,21 +24,22 @@ debian/tmp/usr/share/man/man1/systemd-firstboot.service.1
 debian/tmp/usr/share/man/man1/systemd-id128.1
 debian/tmp/usr/share/man/man1/systemd-inhibit.1
 debian/tmp/usr/share/man/man1/systemd-machine-id-setup.1
-[amd64 i386 arm64 armhf riscv64] <!stage1> debian/tmp/usr/share/man/man1/systemd-measure.1
+[amd64 i386 arm64 armhf riscv64] <!stage1 !pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-measure.1
+debian/tmp/usr/share/man/man1/systemd-measure.1
 debian/tmp/usr/share/man/man1/systemd-mount.1
 debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
 debian/tmp/usr/share/man/man1/systemd-run.1
 debian/tmp/usr/share/man/man1/systemd-socket-activate.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-ssh-proxy.1
+debian/tmp/usr/share/man/man1/systemd-ssh-proxy.1
 debian/tmp/usr/share/man/man1/systemd-stdio-bridge.1
 debian/tmp/usr/share/man/man1/systemd-tty-ask-password-agent.1
 debian/tmp/usr/share/man/man1/systemd-umount.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-vpick.1
+debian/tmp/usr/share/man/man1/systemd-vpick.1
 debian/tmp/usr/share/man/man1/timedatectl.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/uid0.1
 debian/tmp/usr/share/man/man1/varlinkctl.1
 debian/tmp/usr/share/man/man5/binfmt.d.5
+debian/tmp/usr/share/man/man5/capsule@.service.5
 debian/tmp/usr/share/man/man5/dnssec-trust-anchors.d.5
 debian/tmp/usr/share/man/man5/environment.d.5
 debian/tmp/usr/share/man/man5/extension-release.5
@@ -127,7 +129,7 @@ debian/tmp/usr/share/man/man7/systemd.special.7
 debian/tmp/usr/share/man/man7/systemd.syntax.7
 debian/tmp/usr/share/man/man7/systemd.system-credentials.7
 debian/tmp/usr/share/man/man7/systemd.time.7
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man7/systemd.v.7
+debian/tmp/usr/share/man/man7/systemd.v.7
 debian/tmp/usr/share/man/man8/30-systemd-environment-d-generator.8
 debian/tmp/usr/share/man/man8/kernel-install.8
 debian/tmp/usr/share/man/man8/pam_systemd_loadkey.8
@@ -167,6 +169,7 @@ debian/tmp/usr/share/man/man8/systemd-growfs.8
 debian/tmp/usr/share/man/man8/systemd-growfs-root.service.8
 debian/tmp/usr/share/man/man8/systemd-growfs@.service.8
 debian/tmp/usr/share/man/man8/systemd-halt.service.8
+debian/tmp/usr/share/man/man8/systemd-hibernate-clear.service.8
 debian/tmp/usr/share/man/man8/systemd-hibernate-resume.8
 debian/tmp/usr/share/man/man8/systemd-hibernate-resume-generator.8
 debian/tmp/usr/share/man/man8/systemd-hibernate-resume.service.8
@@ -244,7 +247,7 @@ debian/tmp/usr/share/man/man8/systemd-shutdown.8
 debian/tmp/usr/share/man/man8/systemd-sleep.8
 debian/tmp/usr/share/man/man8/systemd-socket-proxyd.8
 debian/tmp/usr/share/man/man8/systemd-soft-reboot.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-ssh-generator.8
+debian/tmp/usr/share/man/man8/systemd-ssh-generator.8
 debian/tmp/usr/share/man/man8/systemd-storagetm.8
 debian/tmp/usr/share/man/man8/systemd-storagetm.service.8
 debian/tmp/usr/share/man/man8/systemd-suspend.service.8
@@ -272,7 +275,7 @@ debian/tmp/usr/share/man/man8/systemd-tmpfiles-clean.timer.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev-early.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
+debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
 [amd64 i386 arm64 armhf riscv64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup.8
 [amd64 i386 arm64 armhf riscv64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup-early.service.8
 [amd64 i386 arm64 armhf riscv64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup.service.8

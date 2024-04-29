@@ -16,7 +16,7 @@ test "$(cat /sys/fs/cgroup/init.scope/memory.high)" != "max"
 [[ "$(get_cgroup_hierarchy)" == "unified" ]] || echo "no cgroupsv2" >>/skipped
 [[ -x /usr/lib/systemd/systemd-oomd ]] || echo "no oomd" >>/skipped
 if [[ -s /skipped ]]; then
-    exit 0
+    exit 77
 fi
 
 rm -rf /run/systemd/system/testsuite-55-testbloat.service.d
@@ -78,8 +78,7 @@ if [[ -v ASAN_OPTIONS || -v UBSAN_OPTIONS ]]; then
     # go on a killing spree. This fact is exacerbated further on Arch Linux which ships unstripped gcc-libs,
     # so sd-executor pulls in over 30M of libs on startup. Let's make the MemoryHigh= limit a bit more
     # generous when running with sanitizers to make the test happy.
-    mkdir -p /run/systemd/system/testsuite-55-testchill.service.d/
-    cat >/run/systemd/system/testsuite-55-testchill.service.d/99-MemoryHigh.conf <<EOF
+    systemctl edit --runtime --stdin --drop-in=99-MemoryHigh.conf testsuite-55-testchill.service <<EOF
 [Service]
 MemoryHigh=60M
 EOF

@@ -86,7 +86,7 @@ mkdir -p debian/tmp
  if  [ -n "${UPSTREAM_PULL_REQUEST:-}" ] && [ "${UPSTREAM_REPO}" != "https://github.com/systemd/systemd-stable.git" ]; then
      git rebase main
  fi
- git submodule update --init --recursive)
+)
 UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//;s/-/./g')
 
 # clean out original upstream sources
@@ -99,10 +99,6 @@ if grep -q default-timeout-sec debian/tmp/upstream/meson_options.txt; then
 fi
 if grep -q log-trace debian/tmp/upstream/meson_options.txt; then
     sed -i "s/option('log-trace', type : 'boolean', value : false/option('log-trace', type : 'boolean', value : true/" debian/tmp/upstream/meson_options.txt
-fi
-# TODO: drop when Jammy is no longer used
-if grep -q sshdconfdir debian/tmp/upstream/meson_options.txt; then
-    sed -i "s/option('sshdconfdir',/option('sshdconfdir', value : 'no',/" debian/tmp/upstream/meson_options.txt
 fi
 
 # replace with checkout

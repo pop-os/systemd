@@ -333,6 +333,28 @@ static void init_watchdog(void) {
         }
 }
 
+static void notify_supervisor(void) {
+        /* Notify VMM/container manager of the desired mode of reboot and the boot parameter */
+        _cleanup_free_ char *reboot_parameter = NULL;
+        int r;
+
+        r = read_reboot_parameter(&reboot_parameter);
+        if (r < 0 && r != -ENOENT)
+                log_debug_errno(r, "Failed to read reboot parameter, ignoring: %m");
+
+        if (reboot_parameter)
+                (void) sd_notifyf(/* unset_environment= */ false,
+                                  "EXIT_STATUS=%i\n"
+                                  "X_SYSTEMD_SHUTDOWN=%s\n"
+                                  "X_SYSTEMD_REBOOT_PARAMETER=%s",
+                                  arg_exit_code, arg_verb, reboot_parameter);
+        else
+                (void) sd_notifyf(/* unset_environment= */ false,
+                                  "EXIT_STATUS=%i\n"
+                                  "X_SYSTEMD_SHUTDOWN=%s",
+                                  arg_exit_code, arg_verb);
+}
+
 int main(int argc, char *argv[]) {
         static const char* const dirs[] = {
                 SYSTEM_SHUTDOWN_PATH,
@@ -386,13 +408,6 @@ int main(int argc, char *argv[]) {
                 r = log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown action '%s'.", arg_verb);
                 goto error;
         }
-
-        /* This is primarily useful when running systemd in a VM, as it provides the user running the VM with
-         * a mechanism to pick up systemd's exit status in the VM. Note that we execute this as early as
-         * possible since otherwise we might shut down the VM before the AF_VSOCK buffers have been flushed.
-         * While this doesn't guarantee the message will arrive, in practice we do enough work after this
-         * that the message should always arrive on the host */
-        (void) sd_notifyf(0, "EXIT_STATUS=%i", arg_exit_code);
 
         (void) cg_get_root_path(&cgroup);
         bool in_container = detect_container() > 0;
@@ -588,6 +603,8 @@ int main(int argc, char *argv[]) {
          * will result. */
         if (!in_container)
                 sync_with_progress();
+
+        notify_supervisor();
 
         if (streq(arg_verb, "exit")) {
                 if (in_container) {

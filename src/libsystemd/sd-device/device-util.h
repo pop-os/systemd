@@ -10,6 +10,7 @@
 #include "alloc-util.h"
 #include "log.h"
 #include "macro.h"
+#include "strv.h"
 
 #define device_unref_and_replace(a, b)                                  \
         unref_and_replace_full(a, b, sd_device_ref, sd_device_unref)
@@ -99,6 +100,16 @@ static inline int devname_from_stat_rdev(const struct stat *st, char **ret) {
         assert(st);
         return devname_from_devnum(st->st_mode, st->st_rdev, ret);
 }
-int device_open_from_devnum(mode_t mode, dev_t devnum, int flags, char **ret);
+int device_open_from_devnum(mode_t mode, dev_t devnum, int flags, char **ret_devname);
 
 char** device_make_log_fields(sd_device *device);
+
+bool device_in_subsystem(sd_device *device, const char *subsystem);
+bool device_is_devtype(sd_device *device, const char *devtype);
+
+static inline bool device_property_can_set(const char *property) {
+        return property &&
+                !STR_IN_SET(property,
+                            "ACTION", "DEVLINKS", "DEVNAME", "DEVPATH", "DEVTYPE", "DRIVER",
+                            "IFINDEX", "MAJOR", "MINOR", "SEQNUM", "SUBSYSTEM", "TAGS");
+}

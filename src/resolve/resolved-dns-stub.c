@@ -27,10 +27,10 @@ static int manager_dns_stub_fd(Manager *m, int family, const union in_addr_union
 static void dns_stub_listener_extra_hash_func(const DnsStubListenerExtra *a, struct siphash *state) {
         assert(a);
 
-        siphash24_compress(&a->mode, sizeof(a->mode), state);
-        siphash24_compress(&a->family, sizeof(a->family), state);
-        siphash24_compress(&a->address, FAMILY_ADDRESS_SIZE(a->family), state);
-        siphash24_compress(&a->port, sizeof(a->port), state);
+        siphash24_compress_typesafe(a->mode, state);
+        siphash24_compress_typesafe(a->family, state);
+        in_addr_hash_func(&a->address, a->family, state);
+        siphash24_compress_typesafe(a->port, state);
 }
 
 static int dns_stub_listener_extra_compare_func(const DnsStubListenerExtra *a, const DnsStubListenerExtra *b) {
@@ -94,11 +94,11 @@ DnsStubListenerExtra *dns_stub_listener_extra_free(DnsStubListenerExtra *p) {
 static void stub_packet_hash_func(const DnsPacket *p, struct siphash *state) {
         assert(p);
 
-        siphash24_compress(&p->protocol, sizeof(p->protocol), state);
-        siphash24_compress(&p->family, sizeof(p->family), state);
-        siphash24_compress(&p->sender, sizeof(p->sender), state);
-        siphash24_compress(&p->ipproto, sizeof(p->ipproto), state);
-        siphash24_compress(&p->sender_port, sizeof(p->sender_port), state);
+        siphash24_compress_typesafe(p->protocol, state);
+        siphash24_compress_typesafe(p->family, state);
+        siphash24_compress_typesafe(p->sender, state);
+        siphash24_compress_typesafe(p->ipproto, state);
+        siphash24_compress_typesafe(p->sender_port, state);
         siphash24_compress(DNS_PACKET_HEADER(p), sizeof(DnsPacketHeader), state);
 
         /* We don't bother hashing the full packet here, just the header */
@@ -837,12 +837,20 @@ static void dns_stub_query_complete(DnsQuery *query) {
                 break;
 
         case DNS_TRANSACTION_NO_SERVERS:
+                /* We're not configured to give answers for this question. Refuse it. */
+                (void) dns_stub_send_reply(q, DNS_RCODE_REFUSED);
+                break;
+
+        case DNS_TRANSACTION_RR_TYPE_UNSUPPORTED:
+                /* This RR Type is not implemented */
+                (void) dns_stub_send_reply(q, DNS_RCODE_NOTIMP);
+                break;
+
         case DNS_TRANSACTION_INVALID_REPLY:
         case DNS_TRANSACTION_ERRNO:
         case DNS_TRANSACTION_ABORTED:
         case DNS_TRANSACTION_DNSSEC_FAILED:
         case DNS_TRANSACTION_NO_TRUST_ANCHOR:
-        case DNS_TRANSACTION_RR_TYPE_UNSUPPORTED:
         case DNS_TRANSACTION_NETWORK_DOWN:
         case DNS_TRANSACTION_NO_SOURCE:
         case DNS_TRANSACTION_STUB_LOOP:
@@ -929,7 +937,7 @@ static void dns_stub_process_query(Manager *m, DnsStubListenerExtra *l, DnsStrea
                 return;
         }
 
-        if (dns_type_is_zone_transer(dns_question_first_key(p->question)->type)) {
+        if (dns_type_is_zone_transfer(dns_question_first_key(p->question)->type)) {
                 log_debug("Got request for zone transfer, refusing.");
                 dns_stub_send_failure(m, l, s, p, DNS_RCODE_REFUSED, false);
                 return;
@@ -958,8 +966,8 @@ static void dns_stub_process_query(Manager *m, DnsStubListenerExtra *l, DnsStrea
                 log_debug("Got request to DNS proxy address 127.0.0.54, enabling bypass logic.");
                 bypass = true;
                 protocol_flags = SD_RESOLVED_DNS|SD_RESOLVED_NO_ZONE; /* Turn off mDNS/LLMNR for proxy stub. */
-        } else if ((DNS_PACKET_DO(p) && DNS_PACKET_CD(p))) {
-                log_debug("Got request with DNSSEC checking disabled, enabling bypass logic.");
+        } else if (DNS_PACKET_DO(p)) {
+                log_debug("Got request with DNSSEC enabled, enabling bypass logic.");
                 bypass = true;
         }
 
@@ -970,7 +978,8 @@ static void dns_stub_process_query(Manager *m, DnsStubListenerExtra *l, DnsStrea
                                   SD_RESOLVED_NO_SEARCH|
                                   SD_RESOLVED_NO_VALIDATE|
                                   SD_RESOLVED_REQUIRE_PRIMARY|
-                                  SD_RESOLVED_CLAMP_TTL);
+                                  SD_RESOLVED_CLAMP_TTL|
+                                  SD_RESOLVED_RELAX_SINGLE_LABEL);
         else
                 r = dns_query_new(m, &q, p->question, p->question, NULL, 0,
                                   protocol_flags|

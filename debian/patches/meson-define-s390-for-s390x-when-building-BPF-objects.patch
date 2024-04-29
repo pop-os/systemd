@@ -1,0 +1,39 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Sat, 27 Apr 2024 18:06:42 +0100
+Subject: meson: define 's390' for 's390x' when building BPF objects
+
+The kernel headers match on __s390__ so the build fails
+
+../src/nsresourced/bpf/userns_restrict/userns-restrict.bpf.c:159:6: error: Must specify a BPF target arch via __TARGET_ARCH_xxx
+void BPF_KPROBE(userns_restrict_free_user_ns, struct work_struct *work) {
+     ^
+/usr/include/bpf/bpf_tracing.h:817:20: note: expanded from macro 'BPF_KPROBE'
+        return ____##name(___bpf_kprobe_args(args));                        \
+                          ^
+/usr/include/bpf/bpf_tracing.h:797:41: note: expanded from macro '___bpf_kprobe_args'
+                                        ^
+/usr/include/bpf/bpf_helpers.h:195:29: note: expanded from macro '___bpf_apply'
+                            ^
+note: (skipping 2 expansions in backtrace; use -fmacro-backtrace-limit=0 to see all)
+/usr/include/bpf/bpf_tracing.h:789:72: note: expanded from macro '___bpf_kprobe_args1'
+                                                                       ^
+/usr/include/bpf/bpf_tracing.h:563:29: note: expanded from macro 'PT_REGS_PARM1'
+                            ^
+<scratch space>:125:6: note: expanded from here
+ GCC error "Must specify a BPF target arch via __TARGET_ARCH_xxx"
+---
+ meson.build | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/meson.build b/meson.build
+index bbee90f..79cbe13 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1738,6 +1738,7 @@ if conf.get('BPF_FRAMEWORK') == 1
+                 'riscv32' : ['-D__riscv', '-D__riscv_xlen=32'],
+                 'riscv64' : ['-D__riscv', '-D__riscv_xlen=64'],
+                 'x86'     : ['-D__i386__'],
++                's390x'   : ['-D__s390__', '-D__s390x__'],
+ 
+                 # For arm, assume hardware fp is available.
+                 'arm'     : ['-D__arm__', '-D__ARM_PCS_VFP'],

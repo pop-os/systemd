@@ -61,6 +61,8 @@ struct DnsTransaction {
 
         DnsAnswer *answer;
         int answer_rcode;
+        int answer_ede_rcode;
+        char *answer_ede_msg;
         DnssecResult answer_dnssec_result;
         DnsTransactionSource answer_source;
         uint32_t answer_nsec_ttl;
@@ -133,6 +135,11 @@ struct DnsTransaction {
         unsigned n_picked_servers;
 
         unsigned block_gc;
+
+        /* Set when we're willing to let this transaction live beyond it's usefulness for the original query,
+         * for caching purposes. This blocks gc while there is still a chance we might still receive an
+         * answer. */
+        bool wait_for_answer;
 
         LIST_FIELDS(DnsTransaction, transactions_by_scope);
         LIST_FIELDS(DnsTransaction, transactions_by_stream);

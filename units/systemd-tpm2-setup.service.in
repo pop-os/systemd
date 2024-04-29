@@ -8,11 +8,11 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=TPM2 SRK Setup
+Description=TPM SRK Setup
 Documentation=man:systemd-tpm2-setup.service(8)
 DefaultDependencies=no
 Conflicts=shutdown.target
-After=systemd-tpm2-setup-early.service systemd-remount-fs.service
+After=tpm2.target systemd-tpm2-setup-early.service systemd-remount-fs.service
 Before=sysinit.target shutdown.target
 RequiresMountsFor=/var/lib/systemd/tpm2-srk-public-key.pem
 ConditionSecurity=measured-uki
@@ -21,4 +21,4 @@ ConditionPathExists=!/etc/initrd-release
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart={{LIBEXECDIR}}/systemd-tpm2-setup
+ExecStart={{LIBEXECDIR}}/systemd-tpm2-setup --graceful

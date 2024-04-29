@@ -1,3 +1,80 @@
+systemd (256~rc1-1~exp2) experimental; urgency=medium
+
+  * Backport patch to fix test-build-path on RISC-V/MIPS
+  * Backport patch to fix build reproducibility
+  * Backport patch to fix BPF build on s390x
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 27 Apr 2024 18:14:25 +0100
+
+systemd (256~rc1-1~exp) experimental; urgency=medium
+
+  * d/watch: switch to main repository
+  * New upstream version 256~rc1
+  * Drop Downgrade-a-couple-of-warnings-to-debug.patch. It is time to
+    start noticeably warning about these legacy setups
+  * Refresh patches for v256
+  * Build depend on libarchive-dev
+  * Install new tools, units and manpages
+  * Enable bpf and new nsresourced/mountfsd services. Requires vmlinux.h
+    from linux-headers-$ARCH, disable if not found
+  * Backport patch to fix unit test failure in build environment
+  * Update libsystemd symbols file
+  * Update Lintian overrides
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 26 Apr 2024 12:22:04 +0100
+
+systemd (255.5-1) sid; urgency=medium
+
+  [ Michael Biebl ]
+  * autopkgtest: depend on pkgconf rather than pkg-config
+  * Stop setting default-hierarchy to unified explicitly. It is already
+    the default and the meson option has been deprecated and is expected
+    to be removed in a future release. See https://github.com/systemd/syst
+    emd/commit/31323f21bb0ae7c712f43500c42997c91a6d20bf
+  * Replace Skip-flaky-test_resolved_domain_restricted_dns-in-
+    network.patch with a proper upstream fix.
+  * Remove myself from Uploaders
+
+  [ Luca Boccassi ]
+  * autopkgtest: add dhcpcd5 as alternative dependency to dhcpcd-base
+    dhcpcd-base is not available in Jammy
+  * d/e/checkout-upstream: stop overriding sshconfdir. It actually works
+    after some upstream test fixes, and it is necessary for TEST-46-HOMED
+    to work
+  * autopkgtest: install systemd-resolved for all suites. Necessary to
+    avoid breaking the network on Ubuntu, in the upstream jammy-based CI
+    jobs. Can be dropped once jammy is no longer tested.
+  * autopkgtest: add breaks-testbed to more tests. Given resolved is
+    installed, the testbed needs to be reset to switch back to the default
+    network stack, otherwise installing packages in the salsa-ci
+    autopkgtest job fails
+  * autopkgtest: restrict systemd-boot-efi to architectures where it's
+    built
+  * Enable libpwquality support. Suggest it from systemd (used by
+    firstboot and cryptenroll) and depend on it from homed (user creation
+    is a core part of it). It's a dlopen() dependency. (Closes: #1063391)
+  * d/e/checkout-upstream: do not initialize submodules. They are used by
+    mkosi, not needed for CI builds
+  * Autopkgtest: add dependency on libkmod-dev to upstream suite.
+  * Switch build-depend form liblz4-tool to lz4. The former is deprecated
+    and now dropped, the latter is available since buster. (Closes: #1068730)
+  * initramfs hooks: pull in libkmod manually udev now opens it with
+    dlopen, so the ldd-based resolver will not see it, pull it in the
+    initramfs manually
+  * New upstream version 255.5
+  * Drop resolve-skip-IP_UNICAST_IF-for-local-sockets.patch, merged
+    upstream
+  * Refresh patches for v255.5
+  * Bump Standards-Version to 4.7.0, no changes
+
+  [ Daan De Meyer ]
+  * Build in developer mode when building for upstream. Developer mode
+    enables some helpful debugging options and enables various
+    experimental components such as systemd-vmspawn which we want to be
+    enabled when testing upstream.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 24 Apr 2024 16:34:40 +0100
+
 systemd (255.4-1ubuntu8) noble; urgency=medium
 
   * copy: ignore -EOPNOTSUPP from copy_file_range() (LP: #2058179)

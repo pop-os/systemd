@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="kernel-install" conditional='ENABLE_KERNEL_INSTALL'
@@ -29,6 +29,11 @@
       <arg choice="plain"><replaceable>KERNEL-VERSION</replaceable></arg>
       <arg choice="plain"><replaceable>KERNEL-IMAGE</replaceable></arg>
       <arg choice="opt" rep="repeat"><replaceable>INITRD-FILE</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>kernel-install</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">add-all</arg>
     </cmdsynopsis>
     <cmdsynopsis>
       <command>kernel-install</command>
@@ -510,8 +515,12 @@
 
       <para><varname>$KERNEL_INSTALL_CONF_ROOT</varname> can be set to override the location of the
       configuration files read by <command>kernel-install</command>. When set,
-      <filename>install.conf</filename>, <filename>entry-token</filename>, and other files will be
-      read from this directory.</para>
+      <filename>install.conf</filename>, <filename>entry-token</filename>, and other files will be read from
+      this directory only. Note that this path is relative to the host, and in particular <emphasis>symlinks
+      in this directory are resolved relative to the host</emphasis>, even if
+      <option>--root=<replaceable>root</replaceable></option> is used. This means that it is generally
+      <emphasis>not</emphasis> correct to use this variable to specify a directory underneath
+      <replaceable>root</replaceable> if symlinks are used there.</para>
 
       <para><varname>$KERNEL_INSTALL_PLUGINS</varname> can be set to override the list of plugins executed by
       <command>kernel-install</command>. The argument is a whitespace-separated list of paths.
@@ -639,14 +648,23 @@
       </varlistentry>
       <varlistentry>
         <term><filename>/etc/kernel/install.conf</filename></term>
+        <term><filename>/run/kernel/install.conf</filename></term>
+        <term><filename>/usr/local/lib/kernel/install.conf</filename></term>
         <term><filename>/usr/lib/kernel/install.conf</filename></term>
+        <term><filename>/etc/kernel/install.conf.d/*.conf</filename></term>
+        <term><filename>/run/kernel/install.conf.d/*.conf</filename></term>
+        <term><filename>/usr/local/lib/kernel/install.conf.d/*.conf</filename></term>
+        <term><filename>/usr/lib/kernel/install.conf.d/*.conf</filename></term>
         <listitem>
           <para>Configuration file with options for <command>kernel-install</command>, as a series of
           <varname>KEY=</varname><replaceable>VALUE</replaceable> assignments, compatible with shell syntax,
           following the same rules as described in
           <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry>. The
           first of the files that is found will be used. <varname>$KERNEL_INSTALL_CONF_ROOT</varname> may be
-          used to override the search path; see below for details.</para>
+          used to override the search path; see below for details. Drop-in files may also be used
+          to extend the configuration with overrides, see
+          <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          </para>
 
           <para>Currently, the following keys are supported:
           <varname>MACHINE_ID=</varname>,
@@ -709,14 +727,14 @@
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>depmod</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>ukify</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>depmod</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>ukify</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader Specification</ulink></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

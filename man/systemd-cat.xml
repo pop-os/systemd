@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-cat"
@@ -23,10 +23,10 @@
 
   <refsynopsisdiv>
     <cmdsynopsis>
-      <command>systemd-cat <arg choice="opt" rep="repeat">OPTIONS</arg> <arg>COMMAND</arg> <arg choice="opt" rep="repeat">ARGUMENTS</arg></command>
+      <command>systemd-cat</command> <arg choice="opt" rep="repeat">OPTIONS</arg> <arg>COMMAND</arg> <arg choice="opt" rep="repeat">ARGUMENTS</arg>
     </cmdsynopsis>
     <cmdsynopsis>
-      <command>systemd-cat <arg choice="opt" rep="repeat">OPTIONS</arg></command>
+      <command>systemd-cat</command> <arg choice="opt" rep="repeat">OPTIONS</arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -123,6 +123,17 @@
         boolean argument.</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--namespace=</option></term>
+
+        <listitem><para>Specifies the journal namespace to which the standard IO should be connected.
+        For details about journal namespaces, see
+        <citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
     </variablelist>
 
   </refsect1>
@@ -130,8 +141,7 @@
   <refsect1>
     <title>Exit status</title>
 
-    <para>On success, 0 is returned, a non-zero failure code
-    otherwise.</para>
+    <para>On success, 0 is returned, a non-zero failure code otherwise.</para>
   </refsect1>
 
   <refsect1>
@@ -163,11 +173,11 @@
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>logger</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>logger</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

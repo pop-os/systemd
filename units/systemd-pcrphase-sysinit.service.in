@@ -8,11 +8,11 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=TPM2 PCR Barrier (Initialization)
+Description=TPM PCR Barrier (Initialization)
 Documentation=man:systemd-pcrphase-sysinit.service(8)
 DefaultDependencies=no
 Conflicts=shutdown.target
-After=sysinit.target
+After=sysinit.target tpm2.target
 Before=basic.target shutdown.target
 ConditionPathExists=!/etc/initrd-release
 ConditionSecurity=measured-uki

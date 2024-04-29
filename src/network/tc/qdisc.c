@@ -155,8 +155,8 @@ static void qdisc_hash_func(const QDisc *qdisc, struct siphash *state) {
         assert(qdisc);
         assert(state);
 
-        siphash24_compress(&qdisc->handle, sizeof(qdisc->handle), state);
-        siphash24_compress(&qdisc->parent, sizeof(qdisc->parent), state);
+        siphash24_compress_typesafe(qdisc->handle, state);
+        siphash24_compress_typesafe(qdisc->parent, state);
         siphash24_compress_string(qdisc_get_tca_kind(qdisc), state);
 }
 
@@ -293,14 +293,20 @@ QDisc* qdisc_drop(QDisc *qdisc) {
 
         link = ASSERT_PTR(qdisc->link);
 
+        qdisc_mark(qdisc); /* To avoid stack overflow. */
+
         /* also drop all child classes assigned to the qdisc. */
         SET_FOREACH(tclass, link->tclasses) {
+                if (tclass_is_marked(tclass))
+                        continue;
+
                 if (TC_H_MAJ(tclass->classid) != qdisc->handle)
                         continue;
 
                 tclass_drop(tclass);
         }
 
+        qdisc_unmark(qdisc);
         qdisc_enter_removed(qdisc);
 
         if (qdisc->state == 0) {

@@ -58,9 +58,10 @@ struct ImagePolicy {
 extern const ImagePolicy image_policy_allow;
 extern const ImagePolicy image_policy_deny;
 extern const ImagePolicy image_policy_ignore;
-extern const ImagePolicy image_policy_sysext;        /* No verity required */
-extern const ImagePolicy image_policy_sysext_strict; /* Signed verity required */
-extern const ImagePolicy image_policy_confext;       /* No verity required */
+extern const ImagePolicy image_policy_sysext;         /* No verity required */
+extern const ImagePolicy image_policy_sysext_strict;  /* Signed verity required */
+extern const ImagePolicy image_policy_confext;        /* No verity required */
+extern const ImagePolicy image_policy_confext_strict; /* Signed verity required */
 extern const ImagePolicy image_policy_container;
 extern const ImagePolicy image_policy_service;
 extern const ImagePolicy image_policy_host;
@@ -79,6 +80,7 @@ static inline size_t image_policy_n_entries(const ImagePolicy *policy) {
 }
 
 PartitionPolicyFlags partition_policy_flags_extend(PartitionPolicyFlags flags);
+PartitionPolicyFlags partition_policy_flags_reduce(PartitionPolicyFlags flags);
 
 PartitionPolicyFlags partition_policy_flags_from_string(const char *s);
 int partition_policy_flags_to_string(PartitionPolicyFlags flags, bool simplify, char **ret);
@@ -93,6 +95,8 @@ bool image_policy_equiv_deny(const ImagePolicy *policy);
 
 bool image_policy_equal(const ImagePolicy *a, const ImagePolicy *b);       /* checks if defined the same way, i.e. has literally the same ruleset */
 int image_policy_equivalent(const ImagePolicy *a, const ImagePolicy *b);   /* checks if the outcome is the same, i.e. for all partitions results in the same decisions. */
+
+int image_policy_intersect(const ImagePolicy *a, const ImagePolicy *b, ImagePolicy **ret);
 
 static inline ImagePolicy* image_policy_free(ImagePolicy *p) {
         return mfree(p);

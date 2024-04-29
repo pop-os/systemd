@@ -226,20 +226,23 @@ static int run(int argc, char *argv[]) {
         usec_t timeout;
         int r;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
                 return r;
 
-        if (arg_timeout > 0)
-                timeout = usec_add(now(CLOCK_MONOTONIC), arg_timeout);
-        else
-                timeout = 0;
+        timeout = arg_timeout > 0 ? usec_add(now(CLOCK_MONOTONIC), arg_timeout) : 0;
 
-        r = ask_password_auto(arg_message, arg_icon, arg_id, arg_key_name, arg_credential_name ?: "password", timeout, arg_flags, &l);
+        AskPasswordRequest req = {
+                .message = arg_message,
+                .icon = arg_icon,
+                .id = arg_id,
+                .keyring = arg_key_name,
+                .credential = arg_credential_name ?: "password",
+        };
+
+        r = ask_password_auto(&req, timeout, arg_flags, &l);
         if (r < 0)
                 return log_error_errno(r, "Failed to query password: %m");
 

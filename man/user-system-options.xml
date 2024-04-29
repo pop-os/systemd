@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+<!DOCTYPE variablelist PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
@@ -53,6 +53,17 @@
       made as root user. If the <literal>@</literal> syntax is used either the left hand side or the right hand
       side may be omitted (but not both) in which case the local user name and <literal>.host</literal> are
       implied.</para>
+    </listitem>
+  </varlistentry>
+
+  <varlistentry id='capsule'>
+    <term><option>-C</option></term>
+    <term><option>--capsule=</option></term>
+
+    <listitem id='capsule-text'>
+      <para>Execute operation on a capsule. Specify a capsule name to connect to. See
+      <citerefentry><refentrytitle>capsule@.service</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+      details about capsules.</para>
     </listitem>
   </varlistentry>
 </variablelist>

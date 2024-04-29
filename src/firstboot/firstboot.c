@@ -89,6 +89,8 @@ STATIC_DESTRUCTOR_REGISTER(arg_keymap, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_timezone, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_hostname, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root_password, erase_and_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_root_shell, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_kernel_cmdline, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
 
 static bool press_any_key(void) {
@@ -166,7 +168,7 @@ static int show_menu(char **x, unsigned n_columns, unsigned width, unsigned perc
 
         for (i = 0; i < per_column; i++) {
 
-                for (j = 0; j < n_columns; j ++) {
+                for (j = 0; j < n_columns; j++) {
                         _cleanup_free_ char *e = NULL;
 
                         if (j * per_column + i >= n)
@@ -795,7 +797,11 @@ static int prompt_root_password(int rfd) {
                 _cleanup_strv_free_erase_ char **a = NULL, **b = NULL;
                 _cleanup_free_ char *error = NULL;
 
-                r = ask_password_tty(-1, msg1, NULL, 0, 0, NULL, &a);
+                AskPasswordRequest req = {
+                        .message = msg1,
+                };
+
+                r = ask_password_tty(-EBADF, &req, /* until= */ 0, /* flags= */ 0, /* flag_file= */ NULL, &a);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query root password: %m");
                 if (strv_length(a) != 1)
@@ -815,7 +821,9 @@ static int prompt_root_password(int rfd) {
                 else if (r == 0)
                         log_warning("Password is weak, accepting anyway: %s", error);
 
-                r = ask_password_tty(-1, msg2, NULL, 0, 0, NULL, &b);
+                req.message = msg2;
+
+                r = ask_password_tty(-EBADF, &req, /* until= */ 0, /* flags= */ 0, /* flag_file= */ NULL, &b);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query root password: %m");
                 if (strv_length(b) != 1)
@@ -1058,10 +1066,8 @@ static int process_root_account(int rfd) {
 
         FOREACH_STRING(s, "passwd", "shadow") {
                 r = verify_regular_at(pfd, s, /* follow = */ false);
-                if (IN_SET(r, -EISDIR, -ELOOP, -EBADFD))
-                        return log_error_errno(r, "/etc/%s is not a regular file", s);
                 if (r < 0 && r != -ENOENT)
-                        return log_error_errno(r, "Failed to check whether /etc/%s is a regular file: %m", s);
+                        return log_error_errno(r, "Verification of /etc/%s being regular file failed: %m", s);
 
                 r = should_configure(pfd, s);
                 if (r < 0)
@@ -1091,12 +1097,11 @@ static int process_root_account(int rfd) {
                 return log_error_errno(k, "Failed to check if directory file descriptor is root: %m");
 
         if (arg_copy_root_shell && k == 0) {
-                struct passwd *p;
+                _cleanup_free_ struct passwd *p = NULL;
 
-                errno = 0;
-                p = getpwnam("root");
-                if (!p)
-                        return log_error_errno(errno_or_else(EIO), "Failed to find passwd entry for root: %m");
+                r = getpwnam_malloc("root", &p);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to find passwd entry for root: %m");
 
                 r = free_and_strdup(&arg_root_shell, p->pw_shell);
                 if (r < 0)
@@ -1638,7 +1643,7 @@ static int reload_vconsole(sd_bus **bus) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        r = bus_wait_for_jobs_one(w, object, false, NULL);
+        r = bus_wait_for_jobs_one(w, object, BUS_WAIT_JOBS_LOG_ERROR, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to wait for systemd-vconsole-setup.service/restart: %m");
         return 0;
@@ -1671,8 +1676,8 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse systemd.firstboot= kernel command line argument, ignoring: %m");
                 if (r > 0 && !enabled) {
-                        log_debug("Found systemd.firstboot=no kernel command line argument, terminating.");
-                        return 0; /* disabled */
+                        log_debug("Found systemd.firstboot=no kernel command line argument, turning off all prompts.");
+                        arg_prompt_locale = arg_prompt_keymap = arg_prompt_timezone = arg_prompt_hostname = arg_prompt_root_password = arg_prompt_root_shell = false;
                 }
         }
 
@@ -1687,7 +1692,8 @@ static int run(int argc, char *argv[]) {
                                 DISSECT_IMAGE_VALIDATE_OS |
                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
                                 DISSECT_IMAGE_FSCK |
-                                DISSECT_IMAGE_GROWFS,
+                                DISSECT_IMAGE_GROWFS |
+                                DISSECT_IMAGE_ALLOW_USERSPACE_VERITY,
                                 &mounted_dir,
                                 &rfd,
                                 &loop_device);

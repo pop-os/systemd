@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="sd_bus_can_send"
@@ -58,28 +58,21 @@
         <varlistentry>
           <term><constant>-ENOPKG</constant></term>
 
-          <listitem><para>The bus object <parameter>bus</parameter> could not be resolved.</para>
-
-          <xi:include href="version-info.xml" xpointer="v246"/>
-          </listitem>
+          <listitem><para>The bus object <parameter>bus</parameter> could not be resolved.</para></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><constant>-ENOTCONN</constant></term>
 
           <listitem><para>The input parameter <parameter>bus</parameter> is
-          <constant>NULL</constant> or the bus is not connected.</para>
-
-          <xi:include href="version-info.xml" xpointer="v246"/></listitem>
+          <constant>NULL</constant> or the bus is not connected.</para></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><constant>-ECHILD</constant></term>
 
           <listitem><para>The bus object <parameter>bus</parameter> was created in a different
-          process.</para>
-
-          <xi:include href="version-info.xml" xpointer="v246"/></listitem>
+          process.</para></listitem>
         </varlistentry>
       </variablelist>
     </refsect2>
@@ -89,16 +82,16 @@
 
   <refsect1>
     <title>History</title>
-    <para><function>sd_bus_can_send()</function> was added in version 246.</para>
+    <para><function>sd_bus_can_send()</function> was added in version 221.</para>
   </refsect1>
 
   <refsect1>
     <title>See Also</title>
 
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>sd-bus</refentrytitle><manvolnum>3</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>sd-bus</refentrytitle><manvolnum>3</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

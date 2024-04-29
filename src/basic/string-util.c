@@ -11,6 +11,7 @@
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "glyph-util.h"
 #include "gunicode.h"
 #include "locale-util.h"
 #include "macro.h"
@@ -282,16 +283,9 @@ bool string_has_cc(const char *p, const char *ok) {
 }
 
 static int write_ellipsis(char *buf, bool unicode) {
-        if (unicode || is_locale_utf8()) {
-                buf[0] = 0xe2; /* tri-dot ellipsis: … */
-                buf[1] = 0x80;
-                buf[2] = 0xa6;
-        } else {
-                buf[0] = '.';
-                buf[1] = '.';
-                buf[2] = '.';
-        }
-
+        const char *s = special_glyph_full(SPECIAL_GLYPH_ELLIPSIS, unicode);
+        assert(strlen(s) == 3);
+        memcpy(buf, s, 3);
         return 3;
 }
 
@@ -398,8 +392,7 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
         x = ((new_length - need_space) * percent + 50) / 100;
         assert(x <= new_length - need_space);
 
-        memcpy(t, s, x);
-        write_ellipsis(t + x, false);
+        write_ellipsis(mempcpy(t, s, x), /* unicode = */ false);
         suffix_len = new_length - x - need_space;
         memcpy(t + x + 3, s + old_length - suffix_len, suffix_len);
         *(t + x + 3 + suffix_len) = '\0';
@@ -520,13 +513,8 @@ char *ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigne
         if (!e)
                 return NULL;
 
-        /*
-        printf("old_length=%zu new_length=%zu x=%zu len=%zu len2=%zu k=%zu\n",
-               old_length, new_length, x, len, len2, k);
-        */
-
         memcpy_safe(e, s, len);
-        write_ellipsis(e + len, true);
+        write_ellipsis(e + len, /* unicode = */ true);
 
         char *dst = e + len + 3;
 
@@ -562,7 +550,9 @@ char *cellescape(char *buf, size_t len, const char *s) {
 
         size_t i = 0, last_char_width[4] = {}, k = 0;
 
+        assert(buf);
         assert(len > 0); /* at least a terminating NUL */
+        assert(s);
 
         for (;;) {
                 char four[4];
@@ -603,7 +593,7 @@ char *cellescape(char *buf, size_t len, const char *s) {
         }
 
         if (i + 4 <= len) /* yay, enough space */
-                i += write_ellipsis(buf + i, false);
+                i += write_ellipsis(buf + i, /* unicode = */ false);
         else if (i + 3 <= len) { /* only space for ".." */
                 buf[i++] = '.';
                 buf[i++] = '.';
@@ -612,13 +602,16 @@ char *cellescape(char *buf, size_t len, const char *s) {
         else
                 assert(i + 1 <= len);
 
- done:
+done:
         buf[i] = '\0';
         return buf;
 }
 
 char* strshorten(char *s, size_t l) {
         assert(s);
+
+        if (l >= SIZE_MAX-1) /* Would not change anything */
+                return s;
 
         if (strnlen(s, l+1) > l)
                 s[l] = 0;
@@ -993,7 +986,7 @@ int strextendf_with_separator(char **x, const char *separator, const char *forma
         return 0;
 
 oom:
-        /* truncate the bytes added after the first vsnprintf() attempt again */
+        /* truncate the bytes added after memcpy_safe() again */
         (*x)[m] = 0;
         return -ENOMEM;
 }
@@ -1123,6 +1116,24 @@ int free_and_strndup(char **p, const char *s, size_t l) {
         return 1;
 }
 
+int strdup_to_full(char **ret, const char *src) {
+        if (!src) {
+                if (ret)
+                        *ret = NULL;
+
+                return 0;
+        } else {
+                if (ret) {
+                        char *t = strdup(src);
+                        if (!t)
+                                return -ENOMEM;
+                        *ret = t;
+                }
+
+                return 1;
+        }
+};
+
 bool string_is_safe(const char *p) {
         if (!p)
                 return false;
@@ -1232,54 +1243,31 @@ int string_extract_line(const char *s, size_t i, char **ret) {
                                         return -ENOMEM;
 
                                 *ret = m;
-                                return !isempty(q + 1); /* more coming? */
-                        } else {
-                                if (p == s)
-                                        *ret = NULL; /* Just use the input string */
-                                else {
-                                        char *m;
-
-                                        m = strdup(p);
-                                        if (!m)
-                                                return -ENOMEM;
-
-                                        *ret = m;
-                                }
-
-                                return 0; /* The end */
-                        }
+                                return !isempty(q + 1); /* More coming? */
+                        } else
+                                /* Tell the caller to use the input string if equal */
+                                return strdup_to(ret, p != s ? p : NULL);
                 }
 
-                if (!q) {
-                        char *m;
-
+                if (!q)
                         /* No more lines, return empty line */
-
-                        m = strdup("");
-                        if (!m)
-                                return -ENOMEM;
-
-                        *ret = m;
-                        return 0; /* The end */
-                }
+                        return strdup_to(ret, "");
 
                 p = q + 1;
                 c++;
         }
 }
 
-int string_contains_word_strv(const char *string, const char *separators, char **words, const char **ret_word) {
-        /* In the default mode with no separators specified, we split on whitespace and
-         * don't coalesce separators. */
+int string_contains_word_strv(const char *string, const char *separators, char * const *words, const char **ret_word) {
+        /* In the default mode with no separators specified, we split on whitespace and coalesce separators. */
         const ExtractFlags flags = separators ? EXTRACT_DONT_COALESCE_SEPARATORS : 0;
-
         const char *found = NULL;
+        int r;
 
-        for (const char *p = string;;) {
+        for (;;) {
                 _cleanup_free_ char *w = NULL;
-                int r;
 
-                r = extract_first_word(&p, &w, separators, flags);
+                r = extract_first_word(&string, &w, separators, flags);
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -1420,18 +1408,6 @@ char *find_line_startswith(const char *haystack, const char *needle) {
         return p + strlen(needle);
 }
 
-char *startswith_strv(const char *string, char **strv) {
-        char *found = NULL;
-
-        STRV_FOREACH(i, strv) {
-                found = startswith(string, *i);
-                if (found)
-                        break;
-        }
-
-        return found;
-}
-
 bool version_is_valid(const char *s) {
         if (isempty(s))
                 return false;
@@ -1518,4 +1494,23 @@ ssize_t strlevenshtein(const char *x, const char *y) {
         }
 
         return t1[yl];
+}
+
+char *strrstr(const char *haystack, const char *needle) {
+        /* Like strstr() but returns the last rather than the first occurrence of "needle" in "haystack". */
+
+        if (!haystack || !needle)
+                return NULL;
+
+        /* Special case: for the empty string we return the very last possible occurrence, i.e. *after* the
+         * last char, not before. */
+        if (*needle == 0)
+                return strchr(haystack, 0);
+
+        for (const char *p = strstr(haystack, needle), *q; p; p = q) {
+                q = strstr(p + 1, needle);
+                if (!q)
+                        return (char *) p;
+        }
+        return NULL;
 }

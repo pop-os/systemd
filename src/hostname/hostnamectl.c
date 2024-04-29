@@ -24,6 +24,7 @@
 #include "main-func.h"
 #include "parse-argument.h"
 #include "pretty-print.h"
+#include "socket-util.h"
 #include "spawn-polkit-agent.h"
 #include "terminal-util.h"
 #include "verbs.h"
@@ -58,6 +59,9 @@ typedef struct StatusInfo {
         usec_t firmware_date;
         sd_id128_t machine_id;
         sd_id128_t boot_id;
+        const char *hardware_serial;
+        sd_id128_t product_uuid;
+        uint32_t vsock_cid;
 } StatusInfo;
 
 static const char* chassis_string_to_glyph(const char *chassis) {
@@ -191,6 +195,22 @@ static int print_status_info(StatusInfo *i) {
                         return table_log_add_error(r);
         }
 
+        if (!sd_id128_is_null(i->product_uuid)) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Product UUID",
+                                   TABLE_UUID, i->product_uuid);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        if (i->vsock_cid != VMADDR_CID_ANY) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "AF_VSOCK CID",
+                                   TABLE_UINT32, i->vsock_cid);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
         if (!isempty(i->virtualization)) {
                 r = table_add_many(table,
                                    TABLE_FIELD, "Virtualization",
@@ -216,7 +236,7 @@ static int print_status_info(StatusInfo *i) {
                         return table_log_add_error(r);
         }
 
-        if (i->os_support_end != USEC_INFINITY) {
+        if (timestamp_is_set(i->os_support_end)) {
                 usec_t n = now(CLOCK_REALTIME);
 
                 r = table_add_many(table,
@@ -260,6 +280,14 @@ static int print_status_info(StatusInfo *i) {
                 r = table_add_many(table,
                                    TABLE_FIELD, "Hardware Model",
                                    TABLE_STRING, i->hardware_model);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
+        if (!isempty(i->hardware_serial)) {
+                r = table_add_many(table,
+                                   TABLE_FIELD, "Hardware Serial",
+                                   TABLE_STRING, i->hardware_serial);
                 if (r < 0)
                         return table_log_add_error(r);
         }
@@ -332,7 +360,11 @@ static int get_one_name(sd_bus *bus, const char* attr, char **ret) {
 }
 
 static int show_all_names(sd_bus *bus) {
-        StatusInfo info = {};
+        StatusInfo info = {
+                .vsock_cid = VMADDR_CID_ANY,
+                .os_support_end = USEC_INFINITY,
+                .firmware_date = USEC_INFINITY,
+        };
 
         static const struct bus_properties_map hostname_map[]  = {
                 { "Hostname",                  "s",  NULL,          offsetof(StatusInfo, hostname)         },
@@ -354,6 +386,7 @@ static int show_all_names(sd_bus *bus) {
                 { "FirmwareDate",              "t",  NULL,          offsetof(StatusInfo, firmware_date)    },
                 { "MachineID",                 "ay", bus_map_id128, offsetof(StatusInfo, machine_id)       },
                 { "BootID",                    "ay", bus_map_id128, offsetof(StatusInfo, boot_id)          },
+                { "VSockCID",                  "u",  NULL,          offsetof(StatusInfo, vsock_cid)        },
                 {}
         }, manager_map[] = {
                 { "Virtualization",            "s",  NULL,          offsetof(StatusInfo, virtualization)   },
@@ -386,6 +419,49 @@ static int show_all_names(sd_bus *bus) {
                                    &info);
         if (r < 0)
                 return log_error_errno(r, "Failed to query system properties: %s", bus_error_message(&error, r));
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *product_uuid_reply = NULL;
+        r = bus_call_method(bus,
+                            bus_hostname,
+                            "GetProductUUID",
+                            &error,
+                            &product_uuid_reply,
+                            "b",
+                            false);
+        if (r < 0) {
+                log_full_errno(sd_bus_error_has_names(
+                                               &error,
+                                               BUS_ERROR_NO_PRODUCT_UUID,
+                                               SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED,
+                                               SD_BUS_ERROR_UNKNOWN_METHOD) ? LOG_DEBUG : LOG_WARNING,
+                               r, "Failed to query product UUID, ignoring: %s", bus_error_message(&error, r));
+                sd_bus_error_free(&error);
+        } else {
+                r = bus_message_read_id128(product_uuid_reply, &info.product_uuid);
+                if (r < 0)
+                        return bus_log_parse_error(r);
+        }
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *hardware_serial_reply = NULL;
+        r = bus_call_method(bus,
+                            bus_hostname,
+                            "GetHardwareSerial",
+                            &error,
+                            &hardware_serial_reply,
+                            NULL);
+        if (r < 0)
+                log_full_errno(sd_bus_error_has_names(
+                                               &error,
+                                               BUS_ERROR_NO_HARDWARE_SERIAL,
+                                               SD_BUS_ERROR_INTERACTIVE_AUTHORIZATION_REQUIRED,
+                                               SD_BUS_ERROR_UNKNOWN_METHOD) ||
+                               ERRNO_IS_DEVICE_ABSENT(r) ? LOG_DEBUG : LOG_WARNING, /* old hostnamed used to send ENOENT/ENODEV back to client as is, handle that gracefully */
+                               r, "Failed to query hardware serial, ignoring: %s", bus_error_message(&error, r));
+        else {
+                r = sd_bus_message_read_basic(hardware_serial_reply, 's', &info.hardware_serial);
+                if (r < 0)
+                        return bus_log_parse_error(r);
+        }
 
         /* For older version of hostnamed. */
         if (!arg_host) {
@@ -603,6 +679,7 @@ static int help(void) {
                "     --pretty            Only set pretty hostname\n"
                "     --json=pretty|short|off\n"
                "                         Generate JSON output\n"
+               "  -j                     Same as --json=pretty on tty, --json=short otherwise\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                ansi_highlight(),
@@ -645,7 +722,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hH:M:", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hH:M:j", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -686,6 +763,10 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r <= 0)
                                 return r;
 
+                        break;
+
+                case 'j':
+                        arg_json_format_flags = JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO;
                         break;
 
                 case '?':

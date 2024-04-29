@@ -297,15 +297,12 @@ int allocate_scope(
 
         description = strjoina("Container ", machine_name);
 
-        if (allow_pidfd) {
-                _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
-                r = pidref_set_pid(&pidref, pid);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to allocate PID reference: %m");
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        r = pidref_set_pid(&pidref, pid);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate PID reference: %m");
 
-                r = bus_append_scope_pidref(m, &pidref);
-        } else
-                r = sd_bus_message_append(m, "(sv)", "PIDs", "au", 1, pid);
+        r = bus_append_scope_pidref(m, &pidref, allow_pidfd);
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -368,7 +365,11 @@ int allocate_scope(
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        r = bus_wait_for_jobs_one(w, object, false, NULL);
+        r = bus_wait_for_jobs_one(
+                        w,
+                        object,
+                        BUS_WAIT_JOBS_LOG_ERROR,
+                        /* extra_args= */ NULL);
         if (r < 0)
                 return r;
 

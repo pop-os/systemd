@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 <refentry id="systemd-tpm2-setup.service" conditional='ENABLE_BOOTLOADER'
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -37,7 +37,7 @@
 
     <para>The services will store the public key of the SRK key pair in a PEM file in
     <filename>/run/systemd/tpm2-srk-public-key.pem</filename> and
-    <filename>/var/lib/systemd/tpm2-srk-public-key.pem</filename>. It will also store it in TPM2B_PUBLIC
+    <filename>/var/lib/systemd/tpm2-srk-public-key.pem</filename>. They will also store it in TPM2B_PUBLIC
     format in <filename>/run/systemd/tpm2-srk-public-key.tpm2_public</filename> and
     <filename>/var/lib/systemd/tpm2-srk-public-key.tpm2b_public</filename>.</para>
 

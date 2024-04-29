@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="repart.d" conditional='ENABLE_REPART'
@@ -22,10 +22,11 @@
   </refnamediv>
 
   <refsynopsisdiv>
-    <para><literallayout><filename>/etc/repart.d/*.conf</filename>
-<filename>/run/repart.d/*.conf</filename>
-<filename>/usr/lib/repart.d/*.conf</filename>
-    </literallayout></para>
+    <para><simplelist>
+      <member><filename>/etc/repart.d/*.conf</filename></member>
+      <member><filename>/run/repart.d/*.conf</filename></member>
+      <member><filename>/usr/lib/repart.d/*.conf</filename></member>
+    </simplelist></para>
   </refsynopsisdiv>
 
   <refsect1>
@@ -382,7 +383,7 @@
 
         <para>The file specified here must have a size that is a multiple of the basic block size 512 and not
         be empty. If this option is used, the size allocation algorithm is slightly altered: the partition is
-        created as least as big as required to fit the data in, i.e. the data size is an additional minimum
+        created at least as big as required to fit the data in, i.e. the data size is an additional minimum
         size value taken into consideration for the allocation algorithm, similar to and in addition to the
         <varname>SizeMin=</varname> value configured above.</para>
 
@@ -406,7 +407,7 @@
         <literal>squashfs</literal> or the special value <literal>swap</literal>. If specified and the partition
         is newly created it is formatted with the specified file system (or as swap device). The file system
         UUID and label are automatically derived from the partition UUID and label. If this option is used,
-        the size allocation algorithm is slightly altered: the partition is created as least as big as
+        the size allocation algorithm is slightly altered: the partition is created at least as big as
         required for the minimal file system of the specified type (or 4KiB if the minimal size is not
         known).</para>
 
@@ -548,6 +549,22 @@
         when running with <option>--offline=no</option>.</para>
 
         <xi:include href="version-info.xml" xpointer="v255"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DefaultSubvolume=</varname></term>
+
+        <listitem><para>Takes an absolute path specifying the default subvolume within the new filesystem.
+        Note that this setting does not create the subvolume itself, that can be configured with
+        <varname>Subvolumes=</varname>.</para>
+
+        <para>Note that this option only takes effect if the target filesystem supports subvolumes, such as
+        <literal>btrfs</literal>.</para>
+
+        <para>Note that due to limitations of <literal>mkfs.btrfs</literal>, this option is only supported
+        when running with <option>--offline=no</option>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -733,6 +750,42 @@
 
         <xi:include href="version-info.xml" xpointer="v253"/></listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>MountPoint=</varname></term>
+
+        <listitem><para>Specifies where and how the partition should be mounted. Takes at least one and at
+        most two fields separated with a colon (<literal>:</literal>). The first field specifies where the
+        partition should be mounted. The second field specifies extra mount options to append to the default
+        mount options. These fields correspond to the second and fourth column of the
+        <citerefentry project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        format. This setting may be specified multiple times to mount the partition multiple times. This can
+        be used to add mounts for different btrfs subvolumes located on the same btrfs partition.</para>
+
+        <para>Note that this setting is only taken into account when <option>--generate-fstab=</option> is
+        specified on the <command>systemd-repart</command> command line.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>EncryptedVolume=</varname></term>
+
+        <listitem><para>Specify how the encrypted partition should be set up. Takes at least one and at most
+        three fields separated with a colon (<literal>:</literal>). The first field specifies the encrypted
+        volume name under <filename>/dev/mapper/</filename>. If not specified, <literal>luks-UUID</literal>
+        will be used where <literal>UUID</literal> is the LUKS UUID. The second field specifies the keyfile
+        to use following the same format as specified in crypttab. The third field specifies a
+        comma-delimited list of crypttab options. These fields correspond to the first, third and fourth
+        column of the
+        <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry> format.
+        </para>
+
+        <para>Note that this setting is only taken into account when <option>--generate-crypttab=</option>
+        is specified on the <command>systemd-repart</command> command line.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -814,6 +867,19 @@
           </tbody>
         </tgroup>
       </table>
+  </refsect1>
+
+  <refsect1>
+    <title>Environment</title>
+
+    <para>Extra filesystem formatting options can be provided using filesystem-specific environment variables:
+    <varname>$SYSTEMD_REPART_MKFS_OPTIONS_BTRFS</varname>, <varname>$SYSTEMD_REPART_MKFS_OPTIONS_XFS</varname>,
+    <varname>$SYSTEMD_REPART_MKFS_OPTIONS_VFAT</varname>, <varname>$SYSTEMD_REPART_MKFS_OPTIONS_EROFS</varname>,
+    and <varname>$SYSTEMD_REPART_MKFS_OPTIONS_SQUASHFS</varname>. Each variable accepts valid
+    <command>mkfs.<replaceable>filesystem</replaceable></command> command-line arguments.
+    The content of those variables is passed as-is to the command, without any verification.
+    </para>
+
   </refsect1>
 
   <refsect1>
@@ -925,12 +991,12 @@ VerityMatchKey=root
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>sfdisk</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-repart</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>sfdisk</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

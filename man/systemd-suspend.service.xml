@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-suspend.service"
@@ -26,11 +26,13 @@
   </refnamediv>
 
   <refsynopsisdiv>
-    <para><filename>systemd-suspend.service</filename></para>
-    <para><filename>systemd-hibernate.service</filename></para>
-    <para><filename>systemd-hybrid-sleep.service</filename></para>
-    <para><filename>systemd-suspend-then-hibernate.service</filename></para>
-    <para><filename>/usr/lib/systemd/system-sleep</filename></para>
+    <para><simplelist>
+      <member><filename>systemd-suspend.service</filename></member>
+      <member><filename>systemd-hibernate.service</filename></member>
+      <member><filename>systemd-hybrid-sleep.service</filename></member>
+      <member><filename>systemd-suspend-then-hibernate.service</filename></member>
+      <member><filename>/usr/lib/systemd/system-sleep</filename></member>
+    </simplelist></para>
   </refsynopsisdiv>
 
   <refsect1>
@@ -64,7 +66,9 @@
     same executables are run, but the first argument is now
     <literal>post</literal>. All executables in this directory are
     executed in parallel, and execution of the action is not continued
-    until all executables have finished.</para>
+    until all executables have finished. Note that <filename>user.slice</filename> will
+    be frozen while the executables are running, so they should not attempt to
+    communicate with any user services expecting a reply.</para>
 
     <para>Note that scripts or binaries dropped in
     <filename>/usr/lib/systemd/system-sleep/</filename> are intended
@@ -88,6 +92,11 @@
     <filename>sleep.conf.d</filename> file. See
     <citerefentry><refentrytitle>systemd-sleep.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
     </para>
+
+    <para>Note that by default these services freeze <filename>user.slice</filename> while they run. This prevents
+    the execution of any process in any of the user sessions while the system is entering into and resuming from
+    sleep. Thus, this prevents the hooks in <filename>/usr/lib/systemd/system-sleep/</filename>, or any other process
+    for that matter, from communicating with any user session process during sleep.</para>
   </refsect1>
 
   <refsect1>
@@ -117,13 +126,13 @@
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd-sleep.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.special</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-halt.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd-sleep.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd.special</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-halt.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

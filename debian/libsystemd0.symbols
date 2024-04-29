@@ -36,6 +36,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_253@LIBSYSTEMD_253 253
  LIBSYSTEMD_254@LIBSYSTEMD_254 254
  LIBSYSTEMD_255@LIBSYSTEMD_255 255
+ LIBSYSTEMD_256@LIBSYSTEMD_256 256~rc1
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -72,6 +73,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_creds_get_mask@LIBSYSTEMD_221 221
  sd_bus_creds_get_owner_uid@LIBSYSTEMD_221 221
  sd_bus_creds_get_pid@LIBSYSTEMD_221 221
+ sd_bus_creds_get_pidfd_dup@LIBSYSTEMD_256 256~rc1
  sd_bus_creds_get_ppid@LIBSYSTEMD_221 221
  sd_bus_creds_get_selinux_context@LIBSYSTEMD_221 221
  sd_bus_creds_get_session@LIBSYSTEMD_221 221
@@ -93,6 +95,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_creds_has_inheritable_cap@LIBSYSTEMD_221 221
  sd_bus_creds_has_permitted_cap@LIBSYSTEMD_221 221
  sd_bus_creds_new_from_pid@LIBSYSTEMD_221 221
+ sd_bus_creds_new_from_pidfd@LIBSYSTEMD_256 256~rc1
  sd_bus_creds_ref@LIBSYSTEMD_221 221
  sd_bus_creds_unref@LIBSYSTEMD_221 221
  sd_bus_default@LIBSYSTEMD_221 221
@@ -468,6 +471,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_get_exit_on_failure@LIBSYSTEMD_247 247
  sd_event_source_get_floating@LIBSYSTEMD_240 240
  sd_event_source_get_inotify_mask@LIBSYSTEMD_239 239
+ sd_event_source_get_inotify_path@LIBSYSTEMD_256 256~rc1
  sd_event_source_get_io_events@LIBSYSTEMD_221 221
  sd_event_source_get_io_fd@LIBSYSTEMD_221 221
  sd_event_source_get_io_fd_own@LIBSYSTEMD_237 237
@@ -524,6 +528,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_id128_get_boot@LIBSYSTEMD_209 0
  sd_id128_get_boot_app_specific@LIBSYSTEMD_240 240
  sd_id128_get_invocation@LIBSYSTEMD_232 232
+ sd_id128_get_invocation_app_specific@LIBSYSTEMD_256 256~rc1
  sd_id128_get_machine@LIBSYSTEMD_209 0
  sd_id128_get_machine_app_specific@LIBSYSTEMD_233 233
  sd_id128_randomize@LIBSYSTEMD_209 0
@@ -598,6 +603,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_journal_set_data_threshold@LIBSYSTEMD_209 0
  sd_journal_step_one@LIBSYSTEMD_254 254
  sd_journal_stream_fd@LIBSYSTEMD_209 0
+ sd_journal_stream_fd_with_namespace@LIBSYSTEMD_256 256~rc1
  sd_journal_test_cursor@LIBSYSTEMD_209 0
  sd_journal_wait@LIBSYSTEMD_209 0
  sd_listen_fds@LIBSYSTEMD_209 0

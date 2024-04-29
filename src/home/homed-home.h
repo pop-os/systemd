@@ -3,6 +3,7 @@
 
 typedef struct Home Home;
 
+#include "hashmap.h"
 #include "homed-manager.h"
 #include "homed-operation.h"
 #include "list.h"
@@ -185,21 +186,31 @@ int home_save_record(Home *h);
 int home_unlink_record(Home *h);
 
 int home_fixate(Home *h, UserRecord *secret, sd_bus_error *error);
-int home_activate(Home *h, UserRecord *secret, sd_bus_error *error);
+int home_activate(Home *h, bool if_referenced, UserRecord *secret, sd_bus_error *error);
 int home_authenticate(Home *h, UserRecord *secret, sd_bus_error *error);
 int home_deactivate(Home *h, bool force, sd_bus_error *error);
-int home_create(Home *h, UserRecord *secret, sd_bus_error *error);
+int home_create(Home *h, UserRecord *secret, Hashmap *blobs, uint64_t flags, sd_bus_error *error);
 int home_remove(Home *h, sd_bus_error *error);
-int home_update(Home *h, UserRecord *new_record, sd_bus_error *error);
-int home_resize(Home *h, uint64_t disk_size, UserRecord *secret, bool automatic, sd_bus_error *error);
+int home_update(Home *h, UserRecord *new_record, Hashmap *blobs, uint64_t flags, sd_bus_error *error);
+int home_resize(Home *h, uint64_t disk_size, UserRecord *secret, sd_bus_error *error);
 int home_passwd(Home *h, UserRecord *new_secret, UserRecord *old_secret, sd_bus_error *error);
 int home_unregister(Home *h, sd_bus_error *error);
 int home_lock(Home *h, sd_bus_error *error);
 int home_unlock(Home *h, UserRecord *secret, sd_bus_error *error);
 
+bool home_is_referenced(Home *h);
+bool home_shall_suspend(Home *h);
 HomeState home_get_state(Home *h);
 
-int home_get_disk_status(Home *h, uint64_t *ret_disk_size,uint64_t *ret_disk_usage, uint64_t *ret_disk_free, uint64_t *ret_disk_ceiling, uint64_t *ret_disk_floor, statfs_f_type_t *ret_fstype, mode_t *ret_access_mode);
+int home_get_disk_status(
+                Home *h,
+                uint64_t *ret_disk_size,
+                uint64_t *ret_disk_usage,
+                uint64_t *ret_disk_free,
+                uint64_t *ret_disk_ceiling,
+                uint64_t *ret_disk_floor,
+                statfs_f_type_t *ret_fstype,
+                mode_t *ret_access_mode);
 
 void home_process_notify(Home *h, char **l, int fd);
 

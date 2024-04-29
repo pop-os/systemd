@@ -40,7 +40,7 @@ static void *fake_pressure_thread(void *p) {
         assert_se(cfd >= 0);
         char buf[STRLEN("hello")+1] = {};
         assert_se(read(cfd, buf, sizeof(buf)-1) == sizeof(buf)-1);
-        assert_se(streq(buf, "hello"));
+        ASSERT_STREQ(buf, "hello");
         assert_se(write(cfd, &(const char) { 'z' }, 1) == 1);
 
         return 0;
@@ -220,7 +220,7 @@ TEST(real_pressure) {
 
         assert_se(sd_bus_message_read(reply, "o", &object) >= 0);
 
-        assert_se(bus_wait_for_jobs_one(w, object, /* quiet= */ false, /* extra_args= */ NULL) >= 0);
+        assert_se(bus_wait_for_jobs_one(w, object, /* flags= */ BUS_WAIT_JOBS_LOG_ERROR, /* extra_args= */ NULL) >= 0);
 
         assert_se(sd_event_default(&e) >= 0);
 
@@ -233,7 +233,7 @@ TEST(real_pressure) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD) >= 0);
         assert_se(sd_event_add_child(e, &cs, pid, WEXITED, real_pressure_child_callback, NULL) >= 0);
         assert_se(sd_event_source_set_child_process_own(cs, true) >= 0);
 

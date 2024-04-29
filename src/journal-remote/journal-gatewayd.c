@@ -22,6 +22,8 @@
 #include "fileio.h"
 #include "glob-util.h"
 #include "hostname-util.h"
+#include "journal-internal.h"
+#include "journal-remote.h"
 #include "log.h"
 #include "logs-show.h"
 #include "main-func.h"
@@ -32,6 +34,7 @@
 #include "pretty-print.h"
 #include "sigbus.h"
 #include "signal-util.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 
 #define JOURNAL_WAIT_TIMEOUT (10*USEC_PER_SEC)
@@ -47,6 +50,7 @@ static char **arg_file = NULL;
 STATIC_DESTRUCTOR_REGISTER(arg_key_pem, erase_and_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_cert_pem, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_trust_pem, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_file, strv_freep);
 
 typedef struct RequestMeta {
         sd_journal *journal;
@@ -54,9 +58,10 @@ typedef struct RequestMeta {
         OutputMode mode;
 
         char *cursor;
+        usec_t since, until;
         int64_t n_skip;
         uint64_t n_entries;
-        bool n_entries_set;
+        bool n_entries_set, since_set, until_set;
 
         FILE *tmp;
         uint64_t delta, size;
@@ -211,6 +216,17 @@ static ssize_t request_reader_entries(
                                 return MHD_CONTENT_READER_END_OF_STREAM;
                 }
 
+                if (m->until_set) {
+                        usec_t usec;
+
+                        r = sd_journal_get_realtime_usec(m->journal, &usec);
+                        if (r < 0) {
+                                log_error_errno(r, "Failed to determine timestamp: %m");
+                                return MHD_CONTENT_READER_END_WITH_ERROR;
+                        }
+                        if (usec > m->until)
+                                return MHD_CONTENT_READER_END_OF_STREAM;
+                }
                 pos -= m->size;
                 m->delta += m->size;
 
@@ -292,12 +308,130 @@ static int request_parse_accept(
         return 0;
 }
 
+static int request_parse_range_skip_and_n_entries(
+                RequestMeta *m,
+                const char *colon) {
+
+        const char *p, *colon2;
+        int r;
+
+        colon2 = strchr(colon + 1, ':');
+        if (colon2) {
+                _cleanup_free_ char *t = NULL;
+
+                t = strndup(colon + 1, colon2 - colon - 1);
+                if (!t)
+                        return -ENOMEM;
+
+                r = safe_atoi64(t, &m->n_skip);
+                if (r < 0)
+                        return r;
+        }
+
+        p = (colon2 ?: colon) + 1;
+        r = safe_atou64(p, &m->n_entries);
+        if (r < 0)
+                return r;
+
+        if (m->n_entries <= 0)
+                return -EINVAL;
+
+        m->n_entries_set = true;
+
+        return 0;
+}
+
+static int request_parse_range_entries(
+                RequestMeta *m,
+                const char *entries_request) {
+
+        const char *colon;
+        int r;
+
+        assert(m);
+        assert(entries_request);
+
+        colon = strchr(entries_request, ':');
+        if (!colon)
+                m->cursor = strdup(entries_request);
+        else {
+                r = request_parse_range_skip_and_n_entries(m, colon);
+                if (r < 0)
+                        return r;
+
+                m->cursor = strndup(entries_request, colon - entries_request);
+        }
+        if (!m->cursor)
+                return -ENOMEM;
+
+        m->cursor[strcspn(m->cursor, WHITESPACE)] = 0;
+        if (isempty(m->cursor))
+                m->cursor = mfree(m->cursor);
+
+        return 0;
+}
+
+static int request_parse_range_time(
+                RequestMeta *m,
+                const char *time_request) {
+
+        _cleanup_free_ char *until = NULL;
+        const char *colon;
+        int r;
+
+        assert(m);
+        assert(time_request);
+
+        colon = strchr(time_request, ':');
+        if (!colon)
+                return -EINVAL;
+
+        if (colon - time_request > 0) {
+                _cleanup_free_ char *t = NULL;
+
+                t = strndup(time_request, colon - time_request);
+                if (!t)
+                        return -ENOMEM;
+
+                r = parse_sec(t, &m->since);
+                if (r < 0)
+                        return r;
+
+                m->since_set = true;
+        }
+
+        time_request = colon + 1;
+        colon = strchr(time_request, ':');
+        if (!colon)
+                until = strdup(time_request);
+        else {
+                r = request_parse_range_skip_and_n_entries(m, colon);
+                if (r < 0)
+                        return r;
+
+                until = strndup(time_request, colon - time_request);
+        }
+        if (!until)
+                return -ENOMEM;
+
+        if (!isempty(until)) {
+                r = parse_sec(until, &m->until);
+                if (r < 0)
+                        return r;
+
+                m->until_set = true;
+                if (m->until < m->since)
+                        return -EINVAL;
+        }
+
+        return 0;
+}
+
 static int request_parse_range(
                 RequestMeta *m,
                 struct MHD_Connection *connection) {
 
-        const char *range, *colon, *colon2;
-        int r;
+        const char *range, *range_after_eq;
 
         assert(m);
         assert(connection);
@@ -306,52 +440,20 @@ static int request_parse_range(
         if (!range)
                 return 0;
 
-        if (!startswith(range, "entries="))
-                return 0;
+        /* Safety upper bound to make Coverity happy. Apache2 has a default limit of 8KB:
+         * https://httpd.apache.org/docs/2.2/mod/core.html#limitrequestfieldsize */
+        if (strlen(range) > JOURNAL_SERVER_MEMORY_MAX)
+                return -EINVAL;
 
-        range += 8;
-        range += strspn(range, WHITESPACE);
+        m->n_skip = 0;
 
-        colon = strchr(range, ':');
-        if (!colon)
-                m->cursor = strdup(range);
-        else {
-                const char *p;
+        range_after_eq = startswith(range, "entries=");
+        if (range_after_eq)
+                return request_parse_range_entries(m, skip_leading_chars(range_after_eq, /* bad = */ NULL));
 
-                colon2 = strchr(colon + 1, ':');
-                if (colon2) {
-                        _cleanup_free_ char *t = NULL;
-
-                        t = strndup(colon + 1, colon2 - colon - 1);
-                        if (!t)
-                                return -ENOMEM;
-
-                        r = safe_atoi64(t, &m->n_skip);
-                        if (r < 0)
-                                return r;
-                }
-
-                p = (colon2 ?: colon) + 1;
-                if (*p) {
-                        r = safe_atou64(p, &m->n_entries);
-                        if (r < 0)
-                                return r;
-
-                        if (m->n_entries <= 0)
-                                return -EINVAL;
-
-                        m->n_entries_set = true;
-                }
-
-                m->cursor = strndup(range, colon - range);
-        }
-
-        if (!m->cursor)
-                return -ENOMEM;
-
-        m->cursor[strcspn(m->cursor, WHITESPACE)] = 0;
-        if (isempty(m->cursor))
-                m->cursor = mfree(m->cursor);
+        range_after_eq = startswith(range, "realtime=");
+        if (range_after_eq)
+                return request_parse_range_time(m, skip_leading_chars(range_after_eq, /* bad = */ NULL));
 
         return 0;
 }
@@ -363,7 +465,6 @@ static mhd_result request_parse_arguments_iterator(
                 const char *value) {
 
         RequestMeta *m = ASSERT_PTR(cls);
-        _cleanup_free_ char *p = NULL;
         int r;
 
         if (isempty(key)) {
@@ -415,17 +516,7 @@ static mhd_result request_parse_arguments_iterator(
                 }
 
                 if (r) {
-                        char match[9 + 32 + 1] = "_BOOT_ID=";
-                        sd_id128_t bid;
-
-                        r = sd_id128_get_boot(&bid);
-                        if (r < 0) {
-                                log_error_errno(r, "Failed to get boot ID: %m");
-                                return MHD_NO;
-                        }
-
-                        sd_id128_to_string(bid, match + 9);
-                        r = sd_journal_add_match(m->journal, match, sizeof(match)-1);
+                        r = add_match_boot_id(m->journal, SD_ID128_NULL);
                         if (r < 0) {
                                 m->argument_parse_error = r;
                                 return MHD_NO;
@@ -435,13 +526,7 @@ static mhd_result request_parse_arguments_iterator(
                 return MHD_YES;
         }
 
-        p = strjoin(key, "=", strempty(value));
-        if (!p) {
-                m->argument_parse_error = log_oom();
-                return MHD_NO;
-        }
-
-        r = sd_journal_add_match(m->journal, p, 0);
+        r = journal_add_match_pair(m->journal, key, strempty(value));
         if (r < 0) {
                 m->argument_parse_error = r;
                 return MHD_NO;
@@ -496,10 +581,15 @@ static int request_handler_entries(
 
         if (m->cursor)
                 r = sd_journal_seek_cursor(m->journal, m->cursor);
+        else if (m->since_set)
+                r = sd_journal_seek_realtime_usec(m->journal, m->since);
         else if (m->n_skip >= 0)
                 r = sd_journal_seek_head(m->journal);
+        else if (m->until_set && m->n_skip < 0)
+                r = sd_journal_seek_realtime_usec(m->journal, m->until);
         else if (m->n_skip < 0)
                 r = sd_journal_seek_tail(m->journal);
+
         if (r < 0)
                 return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to seek in journal.");
 
@@ -777,7 +867,7 @@ static int request_handler_machine(
                      SD_ID128_FORMAT_VAL(bid),
                      hostname_cleanup(hostname),
                      os_release_pretty_name(pretty_name, os_name),
-                     v ? v : "bare",
+                     v ?: "bare",
                      usage,
                      cutoff_from,
                      cutoff_to);

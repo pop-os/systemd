@@ -2,6 +2,7 @@
 
 systemd_homework_sources = files(
         'home-util.c',
+        'homework-blob.c',
         'homework-cifs.c',
         'homework-directory.c',
         'homework-fscrypt.c',
@@ -105,6 +106,11 @@ executables += [
                         threads,
                 ],
         },
+        test_template + {
+                'sources' : files('test-homed-regression-31896.c'),
+                'conditions' : ['ENABLE_HOMED'],
+                'type' : 'manual',
+        },
 ]
 
 modules += [
@@ -137,4 +143,8 @@ if conf.get('ENABLE_HOMED') == 1
                 install_data('homed.conf',
                              install_dir : pkgconfigfiledir)
         endif
+
+        meson.add_install_script(sh, '-c',
+                                 ln_s.format(bindir / 'homectl',
+                                             bindir / 'systemd-home-fallback-shell'))
 endif

@@ -807,7 +807,7 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
                 return r;
 
         STRV_FOREACH(p, sysvrcnd_path)
-                for (unsigned i = 0; i < ELEMENTSOF(rcnd_table); i ++) {
+                for (unsigned i = 0; i < ELEMENTSOF(rcnd_table); i++) {
                         _cleanup_closedir_ DIR *d = NULL;
                         _cleanup_free_ char *path = NULL;
 
@@ -894,7 +894,7 @@ finish:
 
 static int run(const char *dest, const char *dest_early, const char *dest_late) {
         _cleanup_(free_sysvstub_hashmapp) Hashmap *all_services = NULL;
-        _cleanup_(lookup_paths_free) LookupPaths lp = {};
+        _cleanup_(lookup_paths_done) LookupPaths lp = {};
         SysvStub *service;
         int r;
 

@@ -6,12 +6,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "sd-device.h"
+
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "constants.h"
+#include "daemon-util.h"
 #include "env-file-label.h"
 #include "env-file.h"
 #include "env-util.h"
@@ -28,14 +31,16 @@
 #include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
-#include "sd-device.h"
 #include "selinux-util.h"
 #include "service-util.h"
 #include "signal-util.h"
+#include "socket-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "strv.h"
 #include "user-util.h"
+#include "utf8.h"
+#include "varlink-io.systemd.Hostname.h"
 #include "virt.h"
 
 #define VALID_DEPLOYMENT_CHARS (DIGITS LETTERS "-.:")
@@ -73,6 +78,9 @@ typedef struct Context {
         struct stat etc_os_release_stat;
         struct stat etc_machine_info_stat;
 
+        sd_event *event;
+        sd_bus *bus;
+        VarlinkServer *varlink_server;
         Hashmap *polkit_registry;
 } Context;
 
@@ -91,7 +99,10 @@ static void context_destroy(Context *c) {
         assert(c);
 
         context_reset(c, UINT64_MAX);
-        bus_verify_polkit_async_registry_free(c->polkit_registry);
+        hashmap_free(c->polkit_registry);
+        sd_event_unref(c->event);
+        sd_bus_flush_close_unref(c->bus);
+        varlink_server_unref(c->varlink_server);
 }
 
 static void context_read_etc_hostname(Context *c) {
@@ -200,7 +211,6 @@ static bool use_dmi_data(void) {
 
 static int get_dmi_data(const char *database_key, const char *regular_key, char **ret) {
         _cleanup_(sd_device_unrefp) sd_device *device = NULL;
-        _cleanup_free_ char *b = NULL;
         const char *s = NULL;
         int r;
 
@@ -216,17 +226,7 @@ static int get_dmi_data(const char *database_key, const char *regular_key, char 
         if (!s && regular_key)
                 (void) sd_device_get_property_value(device, regular_key, &s);
 
-        if (!ret)
-                return !!s;
-
-        if (s) {
-                b = strdup(s);
-                if (!b)
-                        return -ENOMEM;
-        }
-
-        *ret = TAKE_PTR(b);
-        return !!s;
+        return strdup_to_full(ret, s);
 }
 
 static int get_hardware_vendor(char **ret) {
@@ -239,7 +239,6 @@ static int get_hardware_model(char **ret) {
 
 static int get_hardware_firmware_data(const char *sysattr, char **ret) {
         _cleanup_(sd_device_unrefp) sd_device *device = NULL;
-        _cleanup_free_ char *b = NULL;
         const char *s = NULL;
         int r;
 
@@ -253,94 +252,105 @@ static int get_hardware_firmware_data(const char *sysattr, char **ret) {
                 return log_debug_errno(r, "Failed to open /sys/class/dmi/id device, ignoring: %m");
 
         (void) sd_device_get_sysattr_value(device, sysattr, &s);
-        if (!isempty(s)) {
-                b = strdup(s);
-                if (!b)
-                        return -ENOMEM;
+
+        return strdup_to_full(ret, empty_to_null(s));
+}
+
+static int get_hardware_serial(char **ret) {
+        _cleanup_free_ char *b = NULL;
+        int r = 0;
+
+        FOREACH_STRING(attr, "product_serial", "board_serial") {
+                r = get_hardware_firmware_data(attr, &b);
+                if (r != 0 && !ERRNO_IS_NEG_DEVICE_ABSENT(r))
+                        break;
         }
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return -ENOENT;
+
+        /* Do some superficial validation: do not allow CCs and make sure D-Bus won't kick us off the bus
+         * because we send invalid UTF-8 data */
+
+        if (string_has_cc(b, /* ok= */ NULL))
+                return -ENOENT;
+
+        if (!utf8_is_valid(b))
+                return -ENOENT;
 
         if (ret)
                 *ret = TAKE_PTR(b);
 
-        return !isempty(s);
-}
-
-static int get_hardware_serial(char **ret) {
-         int r;
-
-         r = get_hardware_firmware_data("product_serial", ret);
-         if (r <= 0)
-                return get_hardware_firmware_data("board_serial", ret);
-
-         return r;
+        return 0;
 }
 
 static int get_firmware_version(char **ret) {
-         return get_hardware_firmware_data("bios_version", ret);
+        return get_hardware_firmware_data("bios_version", ret);
 }
 
 static int get_firmware_vendor(char **ret) {
-         return get_hardware_firmware_data("bios_vendor", ret);
+        return get_hardware_firmware_data("bios_vendor", ret);
 }
 
 static int get_firmware_date(usec_t *ret) {
-         _cleanup_free_ char *bios_date = NULL, *month = NULL, *day = NULL, *year = NULL;
-         int r;
+        _cleanup_free_ char *bios_date = NULL, *month = NULL, *day = NULL, *year = NULL;
+        int r;
 
-         assert(ret);
+        assert(ret);
 
-         r = get_hardware_firmware_data("bios_date", &bios_date);
-         if (r < 0)
+        r = get_hardware_firmware_data("bios_date", &bios_date);
+        if (r < 0)
                 return r;
-         if (r == 0) {
+        if (r == 0) {
                 *ret = USEC_INFINITY;
                 return 0;
-         }
+        }
 
-         const char *p = bios_date;
-         r = extract_many_words(&p, "/", EXTRACT_DONT_COALESCE_SEPARATORS, &month, &day, &year, NULL);
-         if (r < 0)
+        const char *p = bios_date;
+        r = extract_many_words(&p, "/", EXTRACT_DONT_COALESCE_SEPARATORS, &month, &day, &year);
+        if (r < 0)
                 return r;
-         if (r != 3) /* less than three args read? */
+        if (r != 3) /* less than three args read? */
                 return -EINVAL;
-         if (!isempty(p)) /* more left in the string? */
+        if (!isempty(p)) /* more left in the string? */
                 return -EINVAL;
 
-         unsigned m, d, y;
-         r = safe_atou_full(month, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &m);
-         if (r < 0)
+        unsigned m, d, y;
+        r = safe_atou_full(month, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &m);
+        if (r < 0)
                 return r;
-         if (m < 1 || m > 12)
+        if (m < 1 || m > 12)
                 return -EINVAL;
-         m -= 1;
+        m -= 1;
 
-         r = safe_atou_full(day, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &d);
-         if (r < 0)
+        r = safe_atou_full(day, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &d);
+        if (r < 0)
                 return r;
-         if (d < 1 || d > 31)
+        if (d < 1 || d > 31)
                 return -EINVAL;
 
-         r = safe_atou_full(year, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &y);
-         if (r < 0)
+        r = safe_atou_full(year, 10 | SAFE_ATO_REFUSE_PLUS_MINUS | SAFE_ATO_REFUSE_LEADING_WHITESPACE, &y);
+        if (r < 0)
                 return r;
-         if (y < 1970 || y > (unsigned) INT_MAX)
+        if (y < 1970 || y > (unsigned) INT_MAX)
                 return -EINVAL;
-         y -= 1900;
+        y -= 1900;
 
-         struct tm tm = {
+        struct tm tm = {
                 .tm_mday = d,
                 .tm_mon = m,
                 .tm_year = y,
-         };
-         time_t v = timegm(&tm);
-         if (v == (time_t) -1)
+        };
+        time_t v = timegm(&tm);
+        if (v == (time_t) -1)
                 return -errno;
-         if (tm.tm_mday != (int) d || tm.tm_mon != (int) m || tm.tm_year != (int) y)
+        if (tm.tm_mday != (int) d || tm.tm_mon != (int) m || tm.tm_year != (int) y)
                 return -EINVAL; /* date was not normalized? (e.g. "30th of feb") */
 
-         *ret = (usec_t) v * USEC_PER_SEC;
+        *ret = (usec_t) v * USEC_PER_SEC;
 
-         return 0;
+        return 0;
 }
 
 static const char* valid_chassis(const char *chassis) {
@@ -1033,6 +1043,22 @@ static int property_get_boot_id(
         return bus_property_get_id128(bus, path, interface, property, reply, &id, error);
 }
 
+static int property_get_vsock_cid(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        unsigned local_cid = VMADDR_CID_ANY;
+
+        (void) vsock_get_local_cid(&local_cid);
+
+        return sd_bus_message_append(reply, "u", (uint32_t) local_cid);
+}
+
 static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *error) {
         Context *c = ASSERT_PTR(userdata);
         const char *name;
@@ -1054,13 +1080,12 @@ static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *
 
         context_read_etc_hostname(c);
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         m,
-                        CAP_SYS_ADMIN,
                         "org.freedesktop.hostname1.set-hostname",
-                        NULL,
-                        interactive,
-                        UID_INVALID,
+                        /* details= */ NULL,
+                        /* good_user= */ UID_INVALID,
+                        interactive ? POLKIT_ALLOW_INTERACTIVE : 0,
                         &c->polkit_registry,
                         error);
         if (r < 0)
@@ -1101,13 +1126,12 @@ static int method_set_static_hostname(sd_bus_message *m, void *userdata, sd_bus_
         if (name && !hostname_is_valid(name, 0))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid static hostname '%s'", name);
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         m,
-                        CAP_SYS_ADMIN,
                         "org.freedesktop.hostname1.set-static-hostname",
-                        NULL,
-                        interactive,
-                        UID_INVALID,
+                        /* details= */ NULL,
+                        /* good_user= */ UID_INVALID,
+                        interactive ? POLKIT_ALLOW_INTERACTIVE : 0,
                         &c->polkit_registry,
                         error);
         if (r < 0)
@@ -1177,17 +1201,15 @@ static int set_machine_info(Context *c, sd_bus_message *m, int prop, sd_bus_mess
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid location '%s'", name);
         }
 
-        /* Since the pretty hostname should always be changed at the
-         * same time as the static one, use the same policy action for
-         * both... */
+        /* Since the pretty hostname should always be changed at the same time as the static one, use the
+         * same policy action for both... */
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         m,
-                        CAP_SYS_ADMIN,
                         prop == PROP_PRETTY_HOSTNAME ? "org.freedesktop.hostname1.set-static-hostname" : "org.freedesktop.hostname1.set-machine-info",
-                        NULL,
-                        interactive,
-                        UID_INVALID,
+                        /* details= */ NULL,
+                        /* good_user= */ UID_INVALID,
+                        interactive ? POLKIT_ALLOW_INTERACTIVE : 0,
                         &c->polkit_registry,
                         error);
         if (r < 0)
@@ -1259,13 +1281,12 @@ static int method_get_product_uuid(sd_bus_message *m, void *userdata, sd_bus_err
         if (r < 0)
                 return r;
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         m,
-                        CAP_SYS_ADMIN,
                         "org.freedesktop.hostname1.get-product-uuid",
-                        NULL,
-                        interactive,
-                        UID_INVALID,
+                        /* details= */ NULL,
+                        /* good_user= */ UID_INVALID,
+                        interactive ? POLKIT_ALLOW_INTERACTIVE : 0,
                         &c->polkit_registry,
                         error);
         if (r < 0)
@@ -1297,7 +1318,6 @@ static int method_get_product_uuid(sd_bus_message *m, void *userdata, sd_bus_err
 }
 
 static int method_get_hardware_serial(sd_bus_message *m, void *userdata, sd_bus_error *error) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ char *serial = NULL;
         Context *c = ASSERT_PTR(userdata);
         int r;
@@ -1306,11 +1326,8 @@ static int method_get_hardware_serial(sd_bus_message *m, void *userdata, sd_bus_
 
         r = bus_verify_polkit_async(
                         m,
-                        CAP_SYS_ADMIN,
                         "org.freedesktop.hostname1.get-hardware-serial",
-                        NULL,
-                        false,
-                        UID_INVALID,
+                        /* details= */ NULL,
                         &c->polkit_registry,
                         error);
         if (r < 0)
@@ -1320,49 +1337,26 @@ static int method_get_hardware_serial(sd_bus_message *m, void *userdata, sd_bus_
 
         r = get_hardware_serial(&serial);
         if (r < 0)
-                return r;
+                return sd_bus_error_set(error, BUS_ERROR_NO_HARDWARE_SERIAL,
+                                        "Failed to read hardware serial from firmware.");
 
-        r = sd_bus_message_new_method_return(m, &reply);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_append(reply, "s", serial);
-        if (r < 0)
-                return r;
-
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_reply_method_return(m, "s", serial);
 }
 
-static int method_describe(sd_bus_message *m, void *userdata, sd_bus_error *error) {
-        _cleanup_free_ char *hn = NULL, *dhn = NULL, *in = NULL, *text = NULL,
+static int build_describe_response(Context *c, bool privileged, JsonVariant **ret) {
+        _cleanup_free_ char *hn = NULL, *dhn = NULL, *in = NULL,
                 *chassis = NULL, *vendor = NULL, *model = NULL, *serial = NULL, *firmware_version = NULL,
                 *firmware_vendor = NULL;
+        _cleanup_strv_free_ char **os_release_pairs = NULL, **machine_info_pairs = NULL;
         usec_t firmware_date = USEC_INFINITY, eol = USEC_INFINITY;
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
         sd_id128_t machine_id, boot_id, product_uuid = SD_ID128_NULL;
-        Context *c = ASSERT_PTR(userdata);
-        bool privileged;
+        unsigned local_cid = VMADDR_CID_ANY;
         struct utsname u;
         int r;
 
-        assert(m);
-
-        r = bus_verify_polkit_async(
-                        m,
-                        CAP_SYS_ADMIN,
-                        "org.freedesktop.hostname1.get-description",
-                        NULL,
-                        false,
-                        UID_INVALID,
-                        &c->polkit_registry,
-                        error);
-        if (r == 0)
-                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
-
-        /* We ignore all authentication errors here, since most data is unprivileged, the one exception being
-         * the product ID which we'll check explicitly. */
-        privileged = r > 0;
+        assert(c);
+        assert(ret);
 
         context_read_etc_hostname(c);
         context_read_machine_info(c);
@@ -1415,6 +1409,11 @@ static int method_describe(sd_bus_message *m, void *userdata, sd_bus_error *erro
         if (r < 0)
                 return log_error_errno(r, "Failed to get boot ID: %m");
 
+        (void) vsock_get_local_cid(&local_cid);
+
+        (void) load_os_release_pairs(/* root= */ NULL, &os_release_pairs);
+        (void) load_env_file_pairs(/* f=*/ NULL, "/etc/machine-info", &machine_info_pairs);
+
         r = json_build(&v, JSON_BUILD_OBJECT(
                                        JSON_BUILD_PAIR("Hostname", JSON_BUILD_STRING(hn)),
                                        JSON_BUILD_PAIR("StaticHostname", JSON_BUILD_STRING(c->data[PROP_STATIC_HOSTNAME])),
@@ -1432,6 +1431,8 @@ static int method_describe(sd_bus_message *m, void *userdata, sd_bus_error *erro
                                        JSON_BUILD_PAIR("OperatingSystemCPEName", JSON_BUILD_STRING(c->data[PROP_OS_CPE_NAME])),
                                        JSON_BUILD_PAIR("OperatingSystemHomeURL", JSON_BUILD_STRING(c->data[PROP_OS_HOME_URL])),
                                        JSON_BUILD_PAIR_FINITE_USEC("OperatingSystemSupportEnd", eol),
+                                       JSON_BUILD_PAIR("OperatingSystemReleaseData", JSON_BUILD_STRV_ENV_PAIR(os_release_pairs)),
+                                       JSON_BUILD_PAIR("MachineInformationData", JSON_BUILD_STRV_ENV_PAIR(machine_info_pairs)),
                                        JSON_BUILD_PAIR("HardwareVendor", JSON_BUILD_STRING(vendor ?: c->data[PROP_HARDWARE_VENDOR])),
                                        JSON_BUILD_PAIR("HardwareModel", JSON_BUILD_STRING(model ?: c->data[PROP_HARDWARE_MODEL])),
                                        JSON_BUILD_PAIR("HardwareSerial", JSON_BUILD_STRING(serial)),
@@ -1441,24 +1442,47 @@ static int method_describe(sd_bus_message *m, void *userdata, sd_bus_error *erro
                                        JSON_BUILD_PAIR_ID128("MachineID", machine_id),
                                        JSON_BUILD_PAIR_ID128("BootID", boot_id),
                                        JSON_BUILD_PAIR_CONDITION(!sd_id128_is_null(product_uuid), "ProductUUID", JSON_BUILD_ID128(product_uuid)),
-                                       JSON_BUILD_PAIR_CONDITION(sd_id128_is_null(product_uuid), "ProductUUID", JSON_BUILD_NULL)));
-
+                                       JSON_BUILD_PAIR_CONDITION(sd_id128_is_null(product_uuid), "ProductUUID", JSON_BUILD_NULL),
+                                       JSON_BUILD_PAIR_CONDITION(local_cid != VMADDR_CID_ANY, "VSockCID", JSON_BUILD_UNSIGNED(local_cid)),
+                                       JSON_BUILD_PAIR_CONDITION(local_cid == VMADDR_CID_ANY, "VSockCID", JSON_BUILD_NULL)));
         if (r < 0)
                 return log_error_errno(r, "Failed to build JSON data: %m");
+
+        *ret = TAKE_PTR(v);
+        return 0;
+}
+
+static int method_describe(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+        Context *c = ASSERT_PTR(userdata);
+        _cleanup_free_ char *text = NULL;
+        bool privileged;
+        int r;
+
+        assert(m);
+
+        r = bus_verify_polkit_async(
+                        m,
+                        "org.freedesktop.hostname1.get-description",
+                        /* details= */ NULL,
+                        &c->polkit_registry,
+                        error);
+        if (r == 0)
+                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+
+        /* We ignore all authentication errors here, since most data is unprivileged, the one exception being
+         * the product ID which we'll check explicitly. */
+        privileged = r > 0;
+
+        r = build_describe_response(c, privileged, &v);
+        if (r < 0)
+                return r;
 
         r = json_variant_format(v, 0, &text);
         if (r < 0)
                 return log_error_errno(r, "Failed to format JSON data: %m");
 
-        r = sd_bus_message_new_method_return(m, &reply);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_append(reply, "s", text);
-        if (r < 0)
-                return r;
-
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_reply_method_return(m, "s", text);
 }
 
 static const sd_bus_vtable hostname_vtable[] = {
@@ -1486,6 +1510,7 @@ static const sd_bus_vtable hostname_vtable[] = {
         SD_BUS_PROPERTY("FirmwareDate", "t", property_get_firmware_date, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("MachineID", "ay", property_get_machine_id, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("BootID", "ay", property_get_boot_id, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("VSockCID", "u", property_get_vsock_cid, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 
         SD_BUS_METHOD_WITH_ARGS("SetHostname",
                                 SD_BUS_ARGS("s", hostname, "b", interactive),
@@ -1547,35 +1572,113 @@ static const BusObjectImplementation manager_object = {
         .vtables = BUS_VTABLES(hostname_vtable),
 };
 
-static int connect_bus(Context *c, sd_event *event, sd_bus **ret) {
-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+static int connect_bus(Context *c) {
         int r;
 
         assert(c);
-        assert(event);
-        assert(ret);
+        assert(c->event);
+        assert(!c->bus);
 
-        r = sd_bus_default_system(&bus);
+        r = sd_bus_default_system(&c->bus);
         if (r < 0)
                 return log_error_errno(r, "Failed to get system bus connection: %m");
 
-        r = bus_add_implementation(bus, &manager_object, c);
+        r = bus_add_implementation(c->bus, &manager_object, c);
         if (r < 0)
                 return r;
 
-        r = bus_log_control_api_register(bus);
+        r = bus_log_control_api_register(c->bus);
         if (r < 0)
                 return r;
 
-        r = sd_bus_request_name_async(bus, NULL, "org.freedesktop.hostname1", 0, NULL, NULL);
+        r = sd_bus_request_name_async(c->bus, NULL, "org.freedesktop.hostname1", 0, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request name: %m");
 
-        r = sd_bus_attach_event(bus, event, 0);
+        r = sd_bus_attach_event(c->bus, c->event, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to attach bus to event loop: %m");
 
-        *ret = TAKE_PTR(bus);
+        return 0;
+}
+
+static int vl_method_describe(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+        static const JsonDispatch dispatch_table[] = {
+                VARLINK_DISPATCH_POLKIT_FIELD,
+                {}
+        };
+
+        Context *c = ASSERT_PTR(userdata);
+        bool privileged;
+        int r;
+
+        assert(link);
+        assert(parameters);
+
+        r = varlink_dispatch(link, parameters, dispatch_table, /* userdata= */ NULL);
+        if (r != 0)
+                return r;
+
+        r = varlink_verify_polkit_async(
+                        link,
+                        c->bus,
+                        "org.freedesktop.hostname1.get-hardware-serial",
+                        /* details= */ NULL,
+                        &c->polkit_registry);
+        if (r == 0)
+                return 0; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+
+        /* We ignore all authentication errors here, since most data is unprivileged, the one exception being
+         * the product ID which we'll check explicitly. */
+        privileged = r > 0;
+
+        if (json_variant_elements(parameters) > 0)
+                return varlink_error_invalid_parameter(link, parameters);
+
+        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+        r = build_describe_response(c, privileged, &v);
+        if (r < 0)
+                return r;
+
+        return varlink_reply(link, v);
+}
+
+static int connect_varlink(Context *c) {
+        int r;
+
+        assert(c);
+        assert(c->event);
+        assert(!c->varlink_server);
+
+        r = varlink_server_new(&c->varlink_server, VARLINK_SERVER_ACCOUNT_UID|VARLINK_SERVER_INHERIT_USERDATA);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate Varlink server: %m");
+
+        varlink_server_set_userdata(c->varlink_server, c);
+
+        r = varlink_server_add_interface(c->varlink_server, &vl_interface_io_systemd_Hostname);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add Hostname interface to varlink server: %m");
+
+        r = varlink_server_bind_method_many(
+                        c->varlink_server,
+                        "io.systemd.Hostname.Describe", vl_method_describe);
+        if (r < 0)
+                return log_error_errno(r, "Failed to bind Varlink method calls: %m");
+
+        r = varlink_server_attach_event(c->varlink_server, c->event, SD_EVENT_PRIORITY_NORMAL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to attach Varlink server to event loop: %m");
+
+        r = varlink_server_listen_auto(c->varlink_server);
+        if (r < 0)
+                return log_error_errno(r, "Failed to bind to passed Varlink sockets: %m");
+        if (r == 0) {
+                r = varlink_server_listen_address(c->varlink_server, "/run/systemd/io.systemd.Hostname", 0666);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to bind to Varlink socket: %m");
+        }
+
         return 0;
 }
 
@@ -1583,8 +1686,6 @@ static int run(int argc, char *argv[]) {
         _cleanup_(context_destroy) Context context = {
                 .hostname_source = _HOSTNAME_INVALID, /* appropriate value will be set later */
         };
-        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         log_setup();
@@ -1603,27 +1704,35 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return r;
 
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, -1) >= 0);
-
-        r = sd_event_default(&event);
+        r = sd_event_default(&context.event);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate event loop: %m");
 
-        (void) sd_event_set_watchdog(event, true);
+        (void) sd_event_set_watchdog(context.event, true);
 
-        r = sd_event_add_signal(event, NULL, SIGINT, NULL, NULL);
+        r = sd_event_set_signal_exit(context.event, true);
         if (r < 0)
-                return log_error_errno(r, "Failed to install SIGINT handler: %m");
+                return log_error_errno(r, "Failed to install SIGINT/SIGTERM handlers: %m");
 
-        r = sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL);
-        if (r < 0)
-                return log_error_errno(r, "Failed to install SIGTERM handler: %m");
-
-        r = connect_bus(&context, event, &bus);
+        r = connect_bus(&context);
         if (r < 0)
                 return r;
 
-        r = bus_event_loop_with_idle(event, bus, "org.freedesktop.hostname1", DEFAULT_EXIT_USEC, NULL, NULL);
+        r = connect_varlink(&context);
+        if (r < 0)
+                return r;
+
+        r = sd_notify(false, NOTIFY_READY);
+        if (r < 0)
+                log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
+
+        r = bus_event_loop_with_idle(
+                        context.event,
+                        context.bus,
+                        "org.freedesktop.hostname1",
+                        DEFAULT_EXIT_USEC,
+                        /* check_idle= */ NULL,
+                        /* userdata= */ NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
 

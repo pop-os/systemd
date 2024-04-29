@@ -55,7 +55,7 @@ static int manager_add_dns_server_by_string(Manager *m, DnsServerType type, cons
                 return 0;
         }
 
-        return dns_server_new(m, NULL, type, NULL, family, &address, port, ifindex, server_name);
+        return dns_server_new(m, NULL, type, NULL, family, &address, port, ifindex, server_name, RESOLVE_CONFIG_SOURCE_FILE);
 }
 
 int manager_parse_dns_server_string_and_warn(Manager *m, DnsServerType type, const char *string) {
@@ -299,6 +299,37 @@ int config_parse_dnssd_service_type(
         return 0;
 }
 
+int config_parse_dnssd_service_subtype(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        DnssdService *s = ASSERT_PTR(userdata);
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                s->subtype = mfree(s->subtype);
+                return 0;
+        }
+
+        if (!dns_subtype_name_is_valid(rvalue)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Service subtype is invalid. Ignoring.");
+                return 0;
+        }
+
+        return free_and_strdup_warn(&s->subtype, rvalue);
+}
+
 int config_parse_dnssd_txt(
                 const char *unit,
                 const char *filename,
@@ -362,7 +393,7 @@ int config_parse_dnssd_txt(
 
                 case DNS_TXT_ITEM_DATA:
                         if (value) {
-                                r = unbase64mem(value, strlen(value), &decoded, &length);
+                                r = unbase64mem(value, &decoded, &length);
                                 if (r == -ENOMEM)
                                         return log_oom();
                                 if (r < 0) {
@@ -570,9 +601,12 @@ int manager_parse_config_file(Manager *m) {
 
         assert(m);
 
-        r = config_parse_config_file("resolved.conf", "Resolve\0",
-                                     config_item_perf_lookup, resolved_gperf_lookup,
-                                     CONFIG_PARSE_WARN, m);
+        r = config_parse_standard_file_with_dropins(
+                        "systemd/resolved.conf",
+                        "Resolve\0",
+                        config_item_perf_lookup, resolved_gperf_lookup,
+                        CONFIG_PARSE_WARN,
+                        /* userdata= */ m);
         if (r < 0)
                 return r;
 

@@ -3,6 +3,7 @@
 #include <getopt.h>
 
 #include "build.h"
+#include "creds-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "generator.h"
@@ -13,7 +14,7 @@
 #include "path-util.h"
 #include "proc-cmdline.h"
 
-#define NETWORKD_UNIT_DIRECTORY "/run/systemd/network"
+#define NETWORK_UNIT_DIRECTORY "/run/systemd/network/"
 
 static const char *arg_root = NULL;
 
@@ -25,7 +26,13 @@ static int network_save(Network *network, const char *dest_dir) {
 
         assert(network);
 
-        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
+        r = generator_open_unit_file_full(
+                        dest_dir,
+                        /* source= */ NULL,
+                        /* name= */ NULL,
+                        &f,
+                        /* ret_final_path= */ NULL,
+                        &temp_path);
         if (r < 0)
                 return r;
 
@@ -39,7 +46,7 @@ static int network_save(Network *network, const char *dest_dir) {
 
         r = conservative_rename(temp_path, p);
         if (r < 0)
-                return r;
+                return log_error_errno(r, "Failed to rename '%s' to '%s': %m", temp_path, p);
 
         temp_path = mfree(temp_path);
         return 0;
@@ -53,7 +60,13 @@ static int netdev_save(NetDev *netdev, const char *dest_dir) {
 
         assert(netdev);
 
-        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
+        r = generator_open_unit_file_full(
+                        dest_dir,
+                        /* source= */ NULL,
+                        /* name= */ NULL,
+                        &f,
+                        /* ret_final_path= */ NULL,
+                        &temp_path);
         if (r < 0)
                 return r;
 
@@ -64,7 +77,7 @@ static int netdev_save(NetDev *netdev, const char *dest_dir) {
 
         r = conservative_rename(temp_path, p);
         if (r < 0)
-                return r;
+                return log_error_errno(r, "Failed to rename '%s' to '%s': %m", temp_path, p);
 
         temp_path = mfree(temp_path);
         return 0;
@@ -78,7 +91,13 @@ static int link_save(Link *link, const char *dest_dir) {
 
         assert(link);
 
-        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
+        r = generator_open_unit_file_full(
+                        dest_dir,
+                        /* source= */ NULL,
+                        /* name= */ NULL,
+                        &f,
+                        /* ret_final_path= */ NULL,
+                        &temp_path);
         if (r < 0)
                 return r;
 
@@ -92,7 +111,7 @@ static int link_save(Link *link, const char *dest_dir) {
 
         r = conservative_rename(temp_path, p);
         if (r < 0)
-                return r;
+                return log_error_errno(r, "Failed to rename '%s' to '%s': %m", temp_path, p);
 
         temp_path = mfree(temp_path);
         return 0;
@@ -104,11 +123,11 @@ static int context_save(Context *context) {
         Link *link;
         int r;
 
-        const char *p = prefix_roota(arg_root, NETWORKD_UNIT_DIRECTORY);
+        const char *p = prefix_roota(arg_root, NETWORK_UNIT_DIRECTORY);
 
         r = mkdir_p(p, 0755);
         if (r < 0)
-                return log_error_errno(r, "Failed to create directory " NETWORKD_UNIT_DIRECTORY ": %m");
+                return log_error_errno(r, "Failed to create directory " NETWORK_UNIT_DIRECTORY ": %m");
 
         HASHMAP_FOREACH(network, context->networks_by_name)
                 RET_GATHER(r, network_save(network, p));
@@ -174,7 +193,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(context_clear) Context context = {};
-        int r;
+        int r, ret = 0;
 
         log_setup();
 
@@ -212,7 +231,17 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_warning_errno(r, "Failed to merge multiple command line options: %m");
 
-        return context_save(&context);
+        RET_GATHER(ret, context_save(&context));
+
+        static const PickUpCredential table[] = {
+                { "network.conf.",    "/run/systemd/networkd.conf.d/", ".conf"    },
+                { "network.link.",    NETWORK_UNIT_DIRECTORY,          ".link"    },
+                { "network.netdev.",  NETWORK_UNIT_DIRECTORY,          ".netdev"  },
+                { "network.network.", NETWORK_UNIT_DIRECTORY,          ".network" },
+        };
+        RET_GATHER(ret, pick_up_credentials(table, ELEMENTSOF(table)));
+
+        return ret;
 }
 
 DEFINE_MAIN_FUNCTION(run);

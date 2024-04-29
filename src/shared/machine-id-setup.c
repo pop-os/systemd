@@ -5,6 +5,7 @@
 #include <sys/mount.h>
 #include <unistd.h>
 
+#include "sd-daemon.h"
 #include "sd-id128.h"
 
 #include "alloc-util.h"
@@ -12,6 +13,7 @@
 #include "creds-util.h"
 #include "fd-util.h"
 #include "id128-util.h"
+#include "initrd-util.h"
 #include "io-util.h"
 #include "log.h"
 #include "machine-id-setup.h"
@@ -141,8 +143,8 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
         if (sd_id128_is_null(machine_id)) {
 
                 /* Try to read any existing machine ID */
-                if (id128_read_fd(fd, ID128_FORMAT_PLAIN, ret) >= 0)
-                        return 0;
+                if (id128_read_fd(fd, ID128_FORMAT_PLAIN, &machine_id) >= 0)
+                        goto finish;
 
                 /* Hmm, so, the id currently stored is not useful, then let's generate one */
                 r = generate_machine_id(root, &machine_id);
@@ -207,6 +209,9 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
                 return r;
 
 finish:
+        if (!in_initrd())
+                (void) sd_notifyf(/* unset_environment= */ false, "X_SYSTEMD_MACHINE_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(machine_id));
+
         if (ret)
                 *ret = machine_id;
 
@@ -237,7 +242,7 @@ int machine_id_commit(const char *root) {
 
         etc_machine_id = prefix_roota(root, "/etc/machine-id");
 
-        r = path_is_mount_point(etc_machine_id, NULL, 0);
+        r = path_is_mount_point(etc_machine_id);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine whether %s is a mount point: %m", etc_machine_id);
         if (r == 0) {
@@ -265,7 +270,12 @@ int machine_id_commit(const char *root) {
         fd = safe_close(fd);
 
         /* Store current mount namespace */
-        r = namespace_open(0, NULL, &initial_mntns_fd, NULL, NULL, NULL);
+        r = namespace_open(0,
+                           /* ret_pidns_fd = */ NULL,
+                           &initial_mntns_fd,
+                           /* ret_netns_fd = */ NULL,
+                           /* ret_userns_fd = */ NULL,
+                           /* ret_root_fd = */ NULL);
         if (r < 0)
                 return log_error_errno(r, "Can't fetch current mount namespace: %m");
 
@@ -284,7 +294,11 @@ int machine_id_commit(const char *root) {
                 return log_error_errno(r, "Cannot write %s. This is mandatory to get a persistent machine ID: %m", etc_machine_id);
 
         /* Return to initial namespace and proceed a lazy tmpfs unmount */
-        r = namespace_enter(-1, initial_mntns_fd, -1, -1, -1);
+        r = namespace_enter(/* pidns_fd = */ -EBADF,
+                            initial_mntns_fd,
+                            /* netns_fd = */ -EBADF,
+                            /* userns_fd = */ -EBADF,
+                            /* root_fd = */ -EBADF);
         if (r < 0)
                 return log_warning_errno(r, "Failed to switch back to initial mount namespace: %m.\nWe'll keep transient %s file until next reboot.", etc_machine_id);
 

@@ -32,6 +32,7 @@
 #include "string-table.h"
 #include "terminal-util.h"
 #include "tmpfile-util.h"
+#include "uid-range.h"
 #include "unit-name.h"
 #include "user-util.h"
 
@@ -87,20 +88,25 @@ Machine* machine_free(Machine *m) {
         while (m->operations)
                 operation_free(m->operations);
 
-        if (m->in_gc_queue)
+        if (m->in_gc_queue) {
+                assert(m->manager);
                 LIST_REMOVE(gc_queue, m->manager->machine_gc_queue, m);
+        }
 
         machine_release_unit(m);
 
         free(m->scope_job);
 
-        (void) hashmap_remove(m->manager->machines, m->name);
+        if (m->manager) {
+                (void) hashmap_remove(m->manager->machines, m->name);
 
-        if (m->manager->host_machine == m)
-                m->manager->host_machine = NULL;
+                if (m->manager->host_machine == m)
+                        m->manager->host_machine = NULL;
+        }
 
         if (pidref_is_set(&m->leader)) {
-                (void) hashmap_remove_value(m->manager->machine_leaders, PID_TO_PTR(m->leader.pid), m);
+                if (m->manager)
+                        (void) hashmap_remove_value(m->manager->machine_leaders, PID_TO_PTR(m->leader.pid), m);
                 pidref_done(&m->leader);
         }
 
@@ -384,7 +390,7 @@ static int machine_start_scope(
         if (r < 0)
                 return r;
 
-        r = bus_append_scope_pidref(m, &machine->leader);
+        r = bus_append_scope_pidref(m, &machine->leader, /* allow_pidfd = */ true);
         if (r < 0)
                 return r;
 
@@ -658,7 +664,7 @@ int machine_get_uid_shift(Machine *m, uid_t *ret) {
         uid_t uid_base, uid_shift, uid_range;
         gid_t gid_base, gid_shift, gid_range;
         _cleanup_fclose_ FILE *f = NULL;
-        int k, r;
+        int r;
 
         assert(m);
         assert(ret);
@@ -690,14 +696,9 @@ int machine_get_uid_shift(Machine *m, uid_t *ret) {
         }
 
         /* Read the first line. There's at least one. */
-        errno = 0;
-        k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT "\n", &uid_base, &uid_shift, &uid_range);
-        if (k != 3) {
-                if (ferror(f))
-                        return errno_or_else(EIO);
-
-                return -EBADMSG;
-        }
+        r = uid_map_read_one(f, &uid_base, &uid_shift, &uid_range);
+        if (r < 0)
+                return r;
 
         /* Not a mapping starting at 0? Then it's a complex mapping we can't expose here. */
         if (uid_base != 0)
@@ -722,13 +723,12 @@ int machine_get_uid_shift(Machine *m, uid_t *ret) {
 
         /* Read the first line. There's at least one. */
         errno = 0;
-        k = fscanf(f, GID_FMT " " GID_FMT " " GID_FMT "\n", &gid_base, &gid_shift, &gid_range);
-        if (k != 3) {
-                if (ferror(f))
-                        return errno_or_else(EIO);
-
+        r = fscanf(f, GID_FMT " " GID_FMT " " GID_FMT "\n", &gid_base, &gid_shift, &gid_range);
+        if (r == EOF)
+                return errno_or_else(ENOMSG);
+        assert(r >= 0);
+        if (r != 3)
                 return -EBADMSG;
-        }
 
         /* If there's more than one line, then we don't support this file. */
         r = safe_fgetc(f, NULL);
@@ -757,6 +757,7 @@ static int machine_owns_uid_internal(
 
         _cleanup_fclose_ FILE *f = NULL;
         const char *p;
+        int r;
 
         /* This is a generic implementation for both uids and gids, under the assumptions they have the same types and semantics. */
         assert_cc(sizeof(uid_t) == sizeof(gid_t));
@@ -778,18 +779,12 @@ static int machine_owns_uid_internal(
 
         for (;;) {
                 uid_t uid_base, uid_shift, uid_range, converted;
-                int k;
 
-                errno = 0;
-                k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT, &uid_base, &uid_shift, &uid_range);
-                if (k < 0 && feof(f))
+                r = uid_map_read_one(f, &uid_base, &uid_shift, &uid_range);
+                if (r == -ENOMSG)
                         break;
-                if (k != 3) {
-                        if (ferror(f))
-                                return errno_or_else(EIO);
-
-                        return -EIO;
-                }
+                if (r < 0)
+                        return r;
 
                 /* The private user namespace is disabled, ignoring. */
                 if (uid_shift == 0)
@@ -831,6 +826,7 @@ static int machine_translate_uid_internal(
 
         _cleanup_fclose_ FILE *f = NULL;
         const char *p;
+        int r;
 
         /* This is a generic implementation for both uids and gids, under the assumptions they have the same types and semantics. */
         assert_cc(sizeof(uid_t) == sizeof(gid_t));
@@ -850,18 +846,12 @@ static int machine_translate_uid_internal(
 
         for (;;) {
                 uid_t uid_base, uid_shift, uid_range, converted;
-                int k;
 
-                errno = 0;
-                k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT, &uid_base, &uid_shift, &uid_range);
-                if (k < 0 && feof(f))
+                r = uid_map_read_one(f, &uid_base, &uid_shift, &uid_range);
+                if (r == -ENOMSG)
                         break;
-                if (k != 3) {
-                        if (ferror(f))
-                                return errno_or_else(EIO);
-
-                        return -EIO;
-                }
+                if (r < 0)
+                        return r;
 
                 if (uid < uid_base || uid >= uid_base + uid_range)
                         continue;
@@ -872,6 +862,7 @@ static int machine_translate_uid_internal(
 
                 if (ret_host_uid)
                         *ret_host_uid = converted;
+
                 return 0;
         }
 

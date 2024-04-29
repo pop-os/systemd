@@ -76,7 +76,7 @@ _public_ int sd_listen_fds(int unset_environment) {
                 goto finish;
         }
 
-        for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd ++) {
+        for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd++) {
                 r = fd_cloexec(fd, true);
                 if (r < 0)
                         goto finish;
@@ -513,6 +513,16 @@ static int pid_notify_with_fds_internal(
         }
 
         if (address.sockaddr.sa.sa_family == AF_VSOCK) {
+                /* If we shut down a virtual machine the kernel might not flush the buffers of the vsock
+                 * socket before shutting down. Set SO_LINGER so that we wait until the buffers are flushed
+                 * when the socket is closed. */
+                struct linger l = {
+                        .l_onoff = true,
+                        .l_linger = 10,
+                };
+                if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l)) < 0)
+                        log_debug_errno(errno, "Failed to set SO_LINGER on vsock notify socket, ignoring: %m");
+
                 r = vsock_bind_privileged_port(fd);
                 if (r < 0 && !ERRNO_IS_PRIVILEGE(r))
                         return log_debug_errno(r, "Failed to bind socket to privileged port: %m");
@@ -650,7 +660,7 @@ _public_ int sd_notify(int unset_environment, const char *state) {
 
 _public_ int sd_pid_notifyf(pid_t pid, int unset_environment, const char *format, ...) {
         _cleanup_free_ char *p = NULL;
-        int r;
+        int r = 0, k;
 
         if (format) {
                 va_list ap;
@@ -659,16 +669,20 @@ _public_ int sd_pid_notifyf(pid_t pid, int unset_environment, const char *format
                 r = vasprintf(&p, format, ap);
                 va_end(ap);
 
-                if (r < 0 || !p)
-                        return -ENOMEM;
+                if (r < 0 || !p) {
+                        r = -ENOMEM;
+                        p = mfree(p);  /* If vasprintf failed, do not use the string,
+                                        * even if something was returned. */
+                }
         }
 
-        return sd_pid_notify(pid, unset_environment, p);
+        k = sd_pid_notify(pid, unset_environment, p);
+        return r < 0 ? r : k;
 }
 
 _public_ int sd_notifyf(int unset_environment, const char *format, ...) {
         _cleanup_free_ char *p = NULL;
-        int r;
+        int r = 0, k;
 
         if (format) {
                 va_list ap;
@@ -677,11 +691,15 @@ _public_ int sd_notifyf(int unset_environment, const char *format, ...) {
                 r = vasprintf(&p, format, ap);
                 va_end(ap);
 
-                if (r < 0 || !p)
-                        return -ENOMEM;
+                if (r < 0 || !p) {
+                        r = -ENOMEM;
+                        p = mfree(p);  /* If vasprintf failed, do not use the string,
+                                        * even if something was returned. */
+                }
         }
 
-        return sd_pid_notify(0, unset_environment, p);
+        k = sd_pid_notify(0, unset_environment, p);
+        return r < 0 ? r : k;
 }
 
 _public_ int sd_pid_notifyf_with_fds(
@@ -691,27 +709,31 @@ _public_ int sd_pid_notifyf_with_fds(
                 const char *format, ...) {
 
         _cleanup_free_ char *p = NULL;
-        int r;
+        int r = 0, k;
 
         /* Paranoia check: we traditionally used 'unsigned' as array size, but we nowadays more correctly use
          * 'size_t'. sd_pid_notifyf_with_fds() and sd_pid_notify_with_fds() are from different eras, hence
          * differ in this. Let's catch resulting incompatibilites early, even though they are pretty much
          * theoretic only */
         if (n_fds > UINT_MAX)
-                return -E2BIG;
+                r = -E2BIG;
 
-        if (format) {
+        else if (format) {
                 va_list ap;
 
                 va_start(ap, format);
                 r = vasprintf(&p, format, ap);
                 va_end(ap);
 
-                if (r < 0 || !p)
-                        return -ENOMEM;
+                if (r < 0 || !p) {
+                        r = -ENOMEM;
+                        p = mfree(p);  /* If vasprintf failed, do not use the string,
+                                        * even if something was returned. */
+                }
         }
 
-        return sd_pid_notify_with_fds(pid, unset_environment, p, fds, n_fds);
+        k = sd_pid_notify_with_fds(pid, unset_environment, p, fds, n_fds);
+        return r < 0 ? r : k;
 }
 
 _public_ int sd_booted(void) {

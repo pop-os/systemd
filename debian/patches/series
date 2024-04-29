@@ -4,7 +4,6 @@ debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
-debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
@@ -23,3 +22,7 @@ test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
 lp2058179-copy-ignore-EOPNOTSUPP-from-copy_file_range.patch
+test-do-not-fail-if-mknod-fails-in-a-build-system.patch
+build-path-fix-SIGEGV-on-RISC-V.patch
+meson-copy-prefix-mapping-CFLAGS-when-building-BPF-object.patch
+meson-define-s390-for-s390x-when-building-BPF-objects.patch

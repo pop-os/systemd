@@ -14,6 +14,7 @@
 #include "id128-util.h"
 #include "log.h"
 #include "macro.h"
+#include "missing_threads.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "signal-util.h"
@@ -22,43 +23,35 @@
 #include "udev-util.h"
 #include "utf8.h"
 
-int udev_set_max_log_level(char *str) {
-        size_t n;
+int udev_parse_config_full(const ConfigTableItem config_table[]) {
+        int r;
 
-        /* This may modify input string. */
+        assert(config_table);
 
-        if (isempty(str))
+        r = config_parse_standard_file_with_dropins(
+                        "udev/udev.conf",
+                        /* sections = */ NULL,
+                        config_item_table_lookup, config_table,
+                        CONFIG_PARSE_WARN,
+                        /* userdata = */ NULL);
+        if (r == -ENOENT)
                 return 0;
-
-        /* unquote */
-        n = strlen(str);
-        if (n >= 2 &&
-            ((str[0] == '"' && str[n - 1] == '"') ||
-             (str[0] == '\'' && str[n - 1] == '\''))) {
-                str[n - 1] = '\0';
-                str++;
-        }
-
-        /* we set the udev log level here explicitly, this is supposed
-         * to regulate the code in libudev/ and udev/. */
-        return log_set_max_level_from_string(str);
+        return r;
 }
 
 int udev_parse_config(void) {
-        _cleanup_free_ char *log_val = NULL;
-        int r;
+        int r, log_val = -1;
+        const ConfigTableItem config_table[] = {
+                { NULL, "udev_log", config_parse_log_level, 0, &log_val },
+                {}
+        };
 
-        r = parse_env_file(NULL, "/etc/udev/udev.conf",
-                           "udev_log", &log_val);
-        if (r == -ENOENT)
-                return 0;
+        r = udev_parse_config_full(config_table);
         if (r < 0)
                 return r;
 
-        r = udev_set_max_log_level(log_val);
-        if (r < 0)
-                log_syntax(NULL, LOG_WARNING, "/etc/udev/udev.conf", 0, r,
-                           "Failed to set udev log level '%s', ignoring: %m", log_val);
+        if (log_val >= 0)
+                log_set_max_level(log_val);
 
         return 0;
 }
@@ -146,7 +139,7 @@ static int device_wait_for_initialization_internal(
         }
 
         if (device) {
-                if (sd_device_get_is_initialized(device) > 0) {
+                if (device_is_processed(device) > 0) {
                         if (ret)
                                 *ret = sd_device_ref(device);
                         return 0;
@@ -209,7 +202,7 @@ static int device_wait_for_initialization_internal(
                 if (r < 0 && !ERRNO_IS_DEVICE_ABSENT(r))
                         return log_error_errno(r, "Failed to create sd-device object from %s: %m", devlink);
         }
-        if (device && sd_device_get_is_initialized(device) > 0) {
+        if (device && device_is_processed(device) > 0) {
                 if (ret)
                         *ret = sd_device_ref(device);
                 return 0;
@@ -237,13 +230,34 @@ int device_is_renaming(sd_device *dev) {
 
         assert(dev);
 
-        r = sd_device_get_property_value(dev, "ID_RENAMING", NULL);
+        r = device_get_property_bool(dev, "ID_RENAMING");
         if (r == -ENOENT)
-                return false;
+                return false; /* defaults to false */
+
+        return r;
+}
+
+int device_is_processed(sd_device *dev) {
+        int r;
+
+        assert(dev);
+
+        /* sd_device_get_is_initialized() only checks if the udev database file exists. However, even if the
+         * database file exist, systemd-udevd may be still processing the device, e.g. when the udev rules
+         * for the device have RUN tokens. See issue #30056. Hence, to check if the device is really
+         * processed by systemd-udevd, we also need to read ID_PROCESSING property. */
+
+        r = sd_device_get_is_initialized(dev);
+        if (r <= 0)
+                return r;
+
+        r = device_get_property_bool(dev, "ID_PROCESSING");
+        if (r == -ENOENT)
+                return true; /* If the property does not exist, then it means that the device is processed. */
         if (r < 0)
                 return r;
 
-        return true;
+        return !r;
 }
 
 bool device_for_action(sd_device *dev, sd_device_action_t a) {
@@ -369,18 +383,22 @@ int udev_queue_is_empty(void) {
                 (errno == ENOENT ? true : -errno) : false;
 }
 
-bool udev_available(void) {
-        static int cache = -1;
+static int cached_udev_availability = -1;
 
+void reset_cached_udev_availability(void) {
+        cached_udev_availability = -1;
+}
+
+bool udev_available(void) {
         /* The service systemd-udevd is started only when /sys is read write.
          * See systemd-udevd.service: ConditionPathIsReadWrite=/sys
          * Also, our container interface (http://systemd.io/CONTAINER_INTERFACE/) states that /sys must
          * be mounted in read-only mode in containers. */
 
-        if (cache >= 0)
-                return cache;
+        if (cached_udev_availability >= 0)
+                return cached_udev_availability;
 
-        return (cache = (path_is_read_only_fs("/sys/") <= 0));
+        return (cached_udev_availability = (path_is_read_only_fs("/sys/") <= 0));
 }
 
 int device_get_vendor_string(sd_device *device, const char **ret) {

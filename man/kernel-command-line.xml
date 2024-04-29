@@ -1,6 +1,6 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="kernel-command-line" xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -40,10 +40,8 @@
     and
     <citerefentry project='man-pages'><refentrytitle>bootparam</refentrytitle><manvolnum>7</manvolnum></citerefentry>.</para>
 
-    <para>For command line parameters understood by the initrd, see
-    <citerefentry project='man-pages'><refentrytitle>dracut.cmdline</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-    or the documentation of the specific initrd implementation of your
-    installation.</para>
+    <para>For command line parameters understood by the initrd, see the documentation of the specific initrd
+    implementation of your installation.</para>
   </refsect1>
 
   <refsect1>
@@ -88,6 +86,7 @@
         <term><varname>systemd.mask=</varname></term>
         <term><varname>systemd.wants=</varname></term>
         <term><varname>systemd.debug_shell</varname></term>
+        <term><varname>systemd.default_debug_tty=</varname></term>
         <listitem>
           <para>Additional parameters understood by
           <citerefentry><refentrytitle>systemd-debug-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
@@ -135,6 +134,18 @@
           </para>
 
           <xi:include href="version-info.xml" xpointer="v209"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.ssh_auto=</varname></term>
+        <term><varname>systemd.ssh_listen=</varname></term>
+        <listitem>
+          <para>These parameters are interpreted by
+          <citerefentry><refentrytitle>systemd-ssh-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          and may be used to control SSH sockets the system shall be reachable on.</para>
+
+          <xi:include href="version-info.xml" xpointer="v256"/>
         </listitem>
       </varlistentry>
 
@@ -306,7 +317,7 @@
         <term><varname>udev.blockdev_read_only</varname></term>
         <term><varname>rd.udev.blockdev_read_only</varname></term>
         <term><varname>net.ifnames=</varname></term>
-        <term><varname>net.naming-scheme=</varname></term>
+        <term><varname>net.naming_scheme=</varname></term>
 
         <listitem>
           <para>Parameters understood by the device event managing
@@ -579,10 +590,9 @@
         <term><varname>resumeflags=</varname></term>
 
         <listitem>
-          <para>Enables resume from hibernation using the specified
-          device and mount options. All
-          <citerefentry project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>-like
-          paths are supported. For details, see
+          <para>Enable resume from hibernation using the specified device and timeout options. All
+          <citerefentry project='man-pages'><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>-style
+          device identifiers are supported. For details, see
           <citerefentry><refentrytitle>systemd-hibernate-resume-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
 
           <xi:include href="version-info.xml" xpointer="v217"/>
@@ -590,13 +600,25 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>resume_offset=</varname></term>
+
+        <listitem><para>Configure the page offset of the swap space from the resume device. For details, see
+        <citerefentry><refentrytitle>systemd-hibernate-resume-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+        </para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>systemd.firstboot=</varname></term>
 
         <listitem><para>Takes a boolean argument, defaults to on. If off,
         <citerefentry><refentrytitle>systemd-firstboot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        and
+        <citerefentry><refentrytitle>systemd-homed-firstboot.service</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         will not query the user for basic system settings, even if the system boots up for the first time and
         the relevant settings are not initialized yet. Not to be confused with
-        <varname>systemd.condition-first-boot=</varname> (see below), which overrides the result of the
+        <varname>systemd.condition_first_boot=</varname> (see below), which overrides the result of the
         <varname>ConditionFirstBoot=</varname> unit file condition, and thus controls more than just
         <filename>systemd-firstboot.service</filename> behaviour.</para>
 
@@ -604,7 +626,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>systemd.condition-needs-update=</varname></term>
+        <term><varname>systemd.condition_needs_update=</varname></term>
 
         <listitem><para>Takes a boolean argument. If specified, overrides the result of
         <varname>ConditionNeedsUpdate=</varname> unit condition checks. See
@@ -615,7 +637,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>systemd.condition-first-boot=</varname></term>
+        <term><varname>systemd.condition_first_boot=</varname></term>
 
         <listitem><para>Takes a boolean argument. If specified, overrides the result of
         <varname>ConditionFirstBoot=</varname> unit condition checks. See
@@ -628,7 +650,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>systemd.clock-usec=</varname></term>
+        <term><varname>systemd.clock_usec=</varname></term>
 
         <listitem><para>Takes a decimal, numeric timestamp in μs since January 1st 1970, 00:00am, to set the
         system clock to. The system time is set to the specified timestamp early during boot. It is not
@@ -638,7 +660,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>systemd.random-seed=</varname></term>
+        <term><varname>systemd.random_seed=</varname></term>
 
         <listitem><para>Takes a base64 encoded random seed value to credit with full entropy to the kernel's
         random pool during early service manager initialization. This option is useful in testing
@@ -661,6 +683,17 @@
 
         <xi:include href="version-info.xml" xpointer="v246"/>
         </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.allow_userspace_verity=</varname></term>
+
+        <listitem><para>Takes a boolean argument. Controls whether disk images that are Verity protected may
+        be authenticated in userspace signature checks via <filename>/etc/verity.d/</filename> (and related
+        directories) public key drop-ins, or whether in-kernel signature checking only. Defaults to
+        on.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -688,6 +721,37 @@
 
         <xi:include href="version-info.xml" xpointer="v254"/></listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.battery_check=</varname></term>
+
+        <listitem><para>Accepts a boolean argument. If false the boot-time battery charge check implemented
+        by
+        <citerefentry><refentrytitle>systemd-battery-check.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        is disabled.</para>
+
+        <xi:include href="version-info.xml" xpointer="v254"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ifname=</varname></term>
+        <term><varname>net.ifname_policy=</varname></term>
+
+        <listitem><para>Controls interface naming policies, implemented by
+        <citerefentry><refentrytitle>systemd-network-generator.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v245"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.tpm2_wait=</varname></term>
+
+        <listitem><para>Controls whether to wait for a TPM2 device at boot, implemented by
+        <citerefentry><refentrytitle>systemd-tpm2-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
     </variablelist>
   </refsect1>
 
@@ -708,33 +772,32 @@
 
   <refsect1>
       <title>See Also</title>
-      <para>
-        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry project='man-pages'><refentrytitle>bootparam</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.system-credentials</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        <citerefentry><refentrytitle>smbios-type-11</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-        <citerefentry project='man-pages'><refentrytitle>dracut.cmdline</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-debug-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-fsck@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-quotacheck.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-vconsole-setup.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-udevd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry project='die-net'><refentrytitle>plymouth</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-cryptsetup-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-veritysetup-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-getty-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-volatile-root.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-modules-load.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-backlight@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-rfkill.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-hibernate-resume-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd-firstboot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-      </para>
+      <para><simplelist type="inline">
+        <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+        <member><citerefentry project='man-pages'><refentrytitle>bootparam</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd.system-credentials</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>smbios-type-11</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-debug-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-fsck@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-quotacheck.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-vconsole-setup.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-udevd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry project='die-net'><refentrytitle>plymouth</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-cryptsetup-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-veritysetup-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-getty-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-volatile-root.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-modules-load.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-backlight@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-rfkill.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-hibernate-resume-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>systemd-firstboot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+        <member><citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      </simplelist></para>
   </refsect1>
 
 </refentry>

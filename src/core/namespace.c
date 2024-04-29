@@ -47,6 +47,7 @@
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "user-util.h"
+#include "vpick.h"
 
 #define DEV_MOUNT_OPTIONS (MS_NOSUID|MS_STRICTATIME|MS_NOEXEC)
 
@@ -500,8 +501,23 @@ static int append_extensions(
         /* First, prepare a mount for each image, but these won't be visible to the unit, instead
          * they will be mounted in our propagate directory, and used as a source for the overlay. */
         for (size_t i = 0; i < n; i++) {
+                _cleanup_(pick_result_done) PickResult result = PICK_RESULT_NULL;
                 _cleanup_free_ char *mount_point = NULL;
                 const MountImage *m = mount_images + i;
+
+                r = path_pick(/* toplevel_path= */ NULL,
+                              /* toplevel_fd= */ AT_FDCWD,
+                              m->source,
+                              &pick_filter_image_raw,
+                              PICK_ARCHITECTURE|PICK_TRIES,
+                              &result);
+                if (r < 0)
+                        return r;
+                if (!result.path)
+                        return log_debug_errno(
+                                        SYNTHETIC_ERRNO(ENOENT),
+                                        "No matching entry in .v/ directory %s found.",
+                                        m->source);
 
                 if (asprintf(&mount_point, "%s/%zu", extension_dir, i) < 0)
                         return -ENOMEM;
@@ -524,7 +540,7 @@ static int append_extensions(
                         .path_malloc = TAKE_PTR(mount_point),
                         .image_options_const = m->mount_options,
                         .ignore = m->ignore_enoent,
-                        .source_const = m->source,
+                        .source_malloc = TAKE_PTR(result.path),
                         .mode = MOUNT_EXTENSION_IMAGE,
                         .has_prefix = true,
                 };
@@ -534,7 +550,8 @@ static int append_extensions(
          * Bind mount them in the same location as the ExtensionImages, so that we
          * can check that they are valid trees (extension-release.d). */
         STRV_FOREACH(extension_directory, extension_directories) {
-                _cleanup_free_ char *mount_point = NULL, *source = NULL;
+                _cleanup_(pick_result_done) PickResult result = PICK_RESULT_NULL;
+                _cleanup_free_ char *mount_point = NULL;
                 const char *e = *extension_directory;
                 bool ignore_enoent = false;
 
@@ -551,9 +568,19 @@ static int append_extensions(
                 if (startswith(e, "+"))
                         e++;
 
-                source = strdup(e);
-                if (!source)
-                        return -ENOMEM;
+                r = path_pick(/* toplevel_path= */ NULL,
+                              /* toplevel_fd= */ AT_FDCWD,
+                              e,
+                              &pick_filter_image_dir,
+                              PICK_ARCHITECTURE|PICK_TRIES,
+                              &result);
+                if (r < 0)
+                        return r;
+                if (!result.path)
+                        return log_debug_errno(
+                                        SYNTHETIC_ERRNO(ENOENT),
+                                        "No matching entry in .v/ directory %s found.",
+                                        e);
 
                 for (size_t j = 0; hierarchies && hierarchies[j]; ++j) {
                         char *prefixed_hierarchy = path_join(mount_point, hierarchies[j]);
@@ -571,7 +598,7 @@ static int append_extensions(
 
                 *me = (MountEntry) {
                         .path_malloc = TAKE_PTR(mount_point),
-                        .source_malloc = TAKE_PTR(source),
+                        .source_malloc = TAKE_PTR(result.path),
                         .mode = MOUNT_EXTENSION_DIRECTORY,
                         .ignore = ignore_enoent,
                         .has_prefix = true,
@@ -626,8 +653,7 @@ static int append_tmpfs_mounts(MountList *ml, const TemporaryFileSystem *tmpfs, 
                         return log_debug_errno(r, "Failed to parse mount option '%s': %m", str);
 
                 ro = flags & MS_RDONLY;
-                if (ro)
-                        flags ^= MS_RDONLY;
+                flags &= ~MS_RDONLY;
 
                 MountEntry *me = mount_list_extend(ml);
                 if (!me)
@@ -1118,7 +1144,7 @@ static int mount_bind_dev(const MountEntry *m) {
 
         (void) mkdir_p_label(mount_entry_path(m), 0755);
 
-        r = path_is_mount_point(mount_entry_path(m), NULL, 0);
+        r = path_is_mount_point(mount_entry_path(m));
         if (r < 0)
                 return log_debug_errno(r, "Unable to determine whether /dev is already mounted: %m");
         if (r > 0) /* make this a NOP if /dev is already a mount point */
@@ -1138,7 +1164,7 @@ static int mount_bind_sysfs(const MountEntry *m) {
 
         (void) mkdir_p_label(mount_entry_path(m), 0755);
 
-        r = path_is_mount_point(mount_entry_path(m), NULL, 0);
+        r = path_is_mount_point(mount_entry_path(m));
         if (r < 0)
                 return log_debug_errno(r, "Unable to determine whether /sys is already mounted: %m");
         if (r > 0) /* make this a NOP if /sys is already a mount point */
@@ -1185,7 +1211,7 @@ static int mount_private_apivfs(
                 /* When we do not have enough privileges to mount a new instance, fall back to use an
                  * existing mount. */
 
-                r = path_is_mount_point(entry_path, /* root = */ NULL, /* flags = */ 0);
+                r = path_is_mount_point(entry_path);
                 if (r < 0)
                         return log_debug_errno(r, "Unable to determine whether '%s' is already mounted: %m", entry_path);
                 if (r > 0)
@@ -1300,7 +1326,7 @@ static int mount_run(const MountEntry *m) {
 
         assert(m);
 
-        r = path_is_mount_point(mount_entry_path(m), NULL, 0);
+        r = path_is_mount_point(mount_entry_path(m));
         if (r < 0 && r != -ENOENT)
                 return log_debug_errno(r, "Unable to determine whether /run is already mounted: %m");
         if (r > 0) /* make this a NOP if /run is already a mount point */
@@ -1469,7 +1495,7 @@ static int follow_symlink(
 
         mount_entry_consume_prefix(m, TAKE_PTR(target));
 
-        m->n_followed ++;
+        m->n_followed++;
 
         return 0;
 }
@@ -1534,7 +1560,7 @@ static int apply_one_mount(
         case MOUNT_READ_WRITE_IMPLICIT:
         case MOUNT_EXEC:
         case MOUNT_NOEXEC:
-                r = path_is_mount_point(mount_entry_path(m), root_directory, 0);
+                r = path_is_mount_point_full(mount_entry_path(m), root_directory, /* flags = */ 0);
                 if (r == -ENOENT && m->ignore)
                         return 0;
                 if (r < 0)
@@ -2088,6 +2114,7 @@ int setup_namespace(const NamespaceParameters *p, char **error_path) {
         _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
         _cleanup_strv_free_ char **hierarchies = NULL;
         _cleanup_(mount_list_done) MountList ml = {};
+        _cleanup_close_ int userns_fd = -EBADF;
         bool require_prefix = false;
         const char *root;
         DissectImageFlags dissect_image_flags =
@@ -2099,7 +2126,8 @@ int setup_namespace(const NamespaceParameters *p, char **error_path) {
                 DISSECT_IMAGE_USR_NO_ROOT |
                 DISSECT_IMAGE_GROWFS |
                 DISSECT_IMAGE_ADD_PARTITION_DEVICES |
-                DISSECT_IMAGE_PIN_PARTITION_DEVICES;
+                DISSECT_IMAGE_PIN_PARTITION_DEVICES |
+                DISSECT_IMAGE_ALLOW_USERSPACE_VERITY;
         int r;
 
         assert(p);
@@ -2123,40 +2151,57 @@ int setup_namespace(const NamespaceParameters *p, char **error_path) {
 
                 SET_FLAG(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE, p->verity && p->verity->data_path);
 
-                r = loop_device_make_by_path(
-                                p->root_image,
-                                FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
-                                /* sector_size= */ UINT32_MAX,
-                                FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
-                                LOCK_SH,
-                                &loop_device);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to create loop device for root image: %m");
+                if (p->runtime_scope == RUNTIME_SCOPE_SYSTEM) {
+                        /* In system mode we mount directly */
 
-                r = dissect_loop_device(
-                                loop_device,
-                                p->verity,
-                                p->root_image_options,
-                                p->root_image_policy,
-                                dissect_image_flags,
-                                &dissected_image);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to dissect image: %m");
+                        r = loop_device_make_by_path(
+                                        p->root_image,
+                                        FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
+                                        /* sector_size= */ UINT32_MAX,
+                                        FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                        LOCK_SH,
+                                        &loop_device);
+                        if (r < 0)
+                                return log_debug_errno(r, "Failed to create loop device for root image: %m");
 
-                r = dissected_image_load_verity_sig_partition(
-                                dissected_image,
-                                loop_device->fd,
-                                p->verity);
-                if (r < 0)
-                        return r;
+                        r = dissect_loop_device(
+                                        loop_device,
+                                        p->verity,
+                                        p->root_image_options,
+                                        p->root_image_policy,
+                                        dissect_image_flags,
+                                        &dissected_image);
+                        if (r < 0)
+                                return log_debug_errno(r, "Failed to dissect image: %m");
 
-                r = dissected_image_decrypt(
-                                dissected_image,
-                                NULL,
-                                p->verity,
-                                dissect_image_flags);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to decrypt dissected image: %m");
+                        r = dissected_image_load_verity_sig_partition(
+                                        dissected_image,
+                                        loop_device->fd,
+                                        p->verity);
+                        if (r < 0)
+                                return r;
+
+                        r = dissected_image_decrypt(
+                                        dissected_image,
+                                        NULL,
+                                        p->verity,
+                                        dissect_image_flags);
+                        if (r < 0)
+                                return log_debug_errno(r, "Failed to decrypt dissected image: %m");
+                } else {
+                        userns_fd = namespace_open_by_type(NAMESPACE_USER);
+                        if (userns_fd < 0)
+                                return log_debug_errno(userns_fd, "Failed to open our own user namespace: %m");
+
+                        r = mountfsd_mount_image(
+                                        p->root_image,
+                                        userns_fd,
+                                        p->root_image_policy,
+                                        dissect_image_flags,
+                                        &dissected_image);
+                        if (r < 0)
+                                return r;
+                }
         }
 
         if (p->root_directory)
@@ -2520,16 +2565,18 @@ int setup_namespace(const NamespaceParameters *p, char **error_path) {
                                 root,
                                 /* uid_shift= */ UID_INVALID,
                                 /* uid_range= */ UID_INVALID,
-                                /* userns_fd= */ -EBADF,
+                                userns_fd,
                                 dissect_image_flags);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to mount root image: %m");
 
                 /* Now release the block device lock, so that udevd is free to call BLKRRPART on the device
                  * if it likes. */
-                r = loop_device_flock(loop_device, LOCK_UN);
-                if (r < 0)
-                        return log_debug_errno(r, "Failed to release lock on loopback block device: %m");
+                if (loop_device) {
+                        r = loop_device_flock(loop_device, LOCK_UN);
+                        if (r < 0)
+                                return log_debug_errno(r, "Failed to release lock on loopback block device: %m");
+                }
 
                 r = dissected_image_relinquish(dissected_image);
                 if (r < 0)
@@ -2538,7 +2585,7 @@ int setup_namespace(const NamespaceParameters *p, char **error_path) {
         } else if (p->root_directory) {
 
                 /* A root directory is specified. Turn its directory into bind mount, if it isn't one yet. */
-                r = path_is_mount_point(root, NULL, AT_SYMLINK_FOLLOW);
+                r = path_is_mount_point_full(root, /* root = */ NULL, AT_SYMLINK_FOLLOW);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to detect that %s is a mount point or not: %m", root);
                 if (r == 0) {
@@ -2625,7 +2672,7 @@ int bind_mount_add(BindMount **b, size_t *n, const BindMount *item) {
 
         *b = c;
 
-        c[(*n) ++] = (BindMount) {
+        c[(*n)++] = (BindMount) {
                 .source = TAKE_PTR(s),
                 .destination = TAKE_PTR(d),
                 .read_only = item->read_only,
@@ -2694,7 +2741,7 @@ int mount_image_add(MountImage **m, size_t *n, const MountImage *item) {
 
         *m = c;
 
-        c[(*n) ++] = (MountImage) {
+        c[(*n)++] = (MountImage) {
                 .source = TAKE_PTR(s),
                 .destination = TAKE_PTR(d),
                 .mount_options = TAKE_PTR(options),
@@ -2745,7 +2792,7 @@ int temporary_filesystem_add(
 
         *t = c;
 
-        c[(*n) ++] = (TemporaryFileSystem) {
+        c[(*n)++] = (TemporaryFileSystem) {
                 .path = TAKE_PTR(p),
                 .options = TAKE_PTR(o),
         };

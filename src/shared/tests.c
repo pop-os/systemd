@@ -21,6 +21,7 @@
 #include "fd-util.h"
 #include "fs-util.h"
 #include "log.h"
+#include "mountpoint-util.h"
 #include "namespace-util.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -113,9 +114,9 @@ bool slow_tests_enabled(void) {
 }
 
 void test_setup_logging(int level) {
+        log_set_assert_return_is_critical(true);
         log_set_max_level(level);
-        log_parse_environment();
-        log_open();
+        log_setup();
 }
 
 int write_tmpfile(char *pattern, const char *contents) {
@@ -188,12 +189,16 @@ static int allocate_scope(void) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *w = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        _cleanup_free_ char *scope = NULL;
+        _cleanup_free_ char *scope = NULL, *cgroup_root = NULL;
         const char *object;
         int r;
 
         /* Let's try to run this test in a scope of its own, with delegation turned on, so that PID 1 doesn't
          * interfere with our cgroup management. */
+        if (cg_pid_get_path(NULL, 0, &cgroup_root) >= 0 && cg_is_delegated(cgroup_root) && stderr_is_journal()) {
+                log_debug("Already running as a unit with delegated cgroup, not allocating a cgroup subroot.");
+                return 0;
+        }
 
         r = sd_bus_default_system(&bus);
         if (r < 0)
@@ -249,7 +254,7 @@ static int allocate_scope(void) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        r = bus_wait_for_jobs_one(w, object, false, NULL);
+        r = bus_wait_for_jobs_one(w, object, BUS_WAIT_JOBS_LOG_ERROR, NULL);
         if (r < 0)
                 return r;
 
@@ -266,7 +271,7 @@ static int enter_cgroup(char **ret_cgroup, bool enter_subroot) {
                 log_warning_errno(r, "Couldn't allocate a scope unit for this test, proceeding without.");
 
         r = cg_pid_get_path(NULL, 0, &cgroup_root);
-        if (r == -ENOMEDIUM)
+        if (IN_SET(r, -ENOMEDIUM, -ENOENT))
                 return log_warning_errno(r, "cg_pid_get_path(NULL, 0, ...) failed: %m");
         assert(r >= 0);
 

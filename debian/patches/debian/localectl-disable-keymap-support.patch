@@ -51,10 +51,10 @@ index 3235402..c4fb1f2 100644
                  { "list-x11-keymap-layouts",  VERB_ANY, 1,        0,            list_x11_keymaps      },
                  { "list-x11-keymap-variants", VERB_ANY, 2,        0,            list_x11_keymaps      },
 diff --git a/test/units/testsuite-73.sh b/test/units/testsuite-73.sh
-index df5af4b..ec3fa6c 100755
+index 59f84f2..106fe45 100755
 --- a/test/units/testsuite-73.sh
 +++ b/test/units/testsuite-73.sh
-@@ -227,6 +227,9 @@ wait_vconsole_setup() {
+@@ -231,6 +231,9 @@ wait_vconsole_setup() {
  testcase_vc_keymap() {
      local i output vc
  
@@ -64,7 +64,7 @@ index df5af4b..ec3fa6c 100755
      if [[ -z "$(localectl list-keymaps)" ]]; then
          echo "No vconsole keymap installed, skipping test."
          return
-@@ -297,6 +300,9 @@ testcase_vc_keymap() {
+@@ -301,6 +304,9 @@ testcase_vc_keymap() {
  testcase_x11_keymap() {
      local output
  

@@ -15,6 +15,7 @@
 #include "networkd-manager-bus.h"
 #include "networkd-manager.h"
 #include "networkd-network.h"
+#include "networkd-ntp.h"
 #include "networkd-state-file.h"
 #include "ordered-set.h"
 #include "set.h"
@@ -101,7 +102,7 @@ static int link_put_dns(Link *link, OrderedSet **s) {
         if (r < 0)
                 return r;
 
-        if (link->dhcp_lease && link->network->dhcp_use_dns) {
+        if (link->dhcp_lease && link_get_use_dns(link, NETWORK_CONFIG_SOURCE_DHCP4)) {
                 const struct in_addr *addresses;
 
                 r = sd_dhcp_lease_get_dns(link->dhcp_lease, &addresses);
@@ -112,7 +113,7 @@ static int link_put_dns(Link *link, OrderedSet **s) {
                 }
         }
 
-        if (link->dhcp6_lease && link->network->dhcp6_use_dns) {
+        if (link->dhcp6_lease && link_get_use_dns(link, NETWORK_CONFIG_SOURCE_DHCP6)) {
                 const struct in6_addr *addresses;
 
                 r = sd_dhcp6_lease_get_dns(link->dhcp6_lease, &addresses);
@@ -123,11 +124,11 @@ static int link_put_dns(Link *link, OrderedSet **s) {
                 }
         }
 
-        if (link->network->ipv6_accept_ra_use_dns) {
+        if (link_get_use_dns(link, NETWORK_CONFIG_SOURCE_NDISC)) {
                 NDiscRDNSS *a;
 
                 SET_FOREACH(a, link->ndisc_rdnss) {
-                        r = ordered_set_put_in6_addrv(s, &a->router, 1);
+                        r = ordered_set_put_in6_addrv(s, &a->address, 1);
                         if (r < 0)
                                 return r;
                 }
@@ -150,7 +151,7 @@ static int link_put_ntp(Link *link, OrderedSet **s) {
         if (r < 0)
                 return r;
 
-        if (link->dhcp_lease && link->network->dhcp_use_ntp) {
+        if (link->dhcp_lease && link_get_use_ntp(link, NETWORK_CONFIG_SOURCE_DHCP4)) {
                 const struct in_addr *addresses;
 
                 r = sd_dhcp_lease_get_ntp(link->dhcp_lease, &addresses);
@@ -161,7 +162,7 @@ static int link_put_ntp(Link *link, OrderedSet **s) {
                 }
         }
 
-        if (link->dhcp6_lease && link->network->dhcp6_use_ntp) {
+        if (link->dhcp6_lease && link_get_use_ntp(link, NETWORK_CONFIG_SOURCE_DHCP6)) {
                 const struct in6_addr *addresses;
                 char **fqdn;
 
@@ -190,7 +191,7 @@ static int link_put_sip(Link *link, OrderedSet **s) {
         assert(link->network);
         assert(s);
 
-        if (link->dhcp_lease && link->network->dhcp_use_ntp) {
+        if (link->dhcp_lease && link->network->dhcp_use_sip) {
                 const struct in_addr *addresses;
 
                 r = sd_dhcp_lease_get_sip(link->dhcp_lease, &addresses);
@@ -206,7 +207,7 @@ static int link_put_sip(Link *link, OrderedSet **s) {
 
 static int link_put_domains(Link *link, bool is_route, OrderedSet **s) {
         OrderedSet *link_domains, *network_domains;
-        DHCPUseDomains use_domains;
+        UseDomains use_domains;
         int r;
 
         assert(link);
@@ -215,7 +216,7 @@ static int link_put_domains(Link *link, bool is_route, OrderedSet **s) {
 
         link_domains = is_route ? link->route_domains : link->search_domains;
         network_domains = is_route ? link->network->route_domains : link->network->search_domains;
-        use_domains = is_route ? DHCP_USE_DOMAINS_ROUTE : DHCP_USE_DOMAINS_YES;
+        use_domains = is_route ? USE_DOMAINS_ROUTE : USE_DOMAINS_YES;
 
         if (link_domains)
                 return ordered_set_put_string_set(s, link_domains);
@@ -224,7 +225,7 @@ static int link_put_domains(Link *link, bool is_route, OrderedSet **s) {
         if (r < 0)
                 return r;
 
-        if (link->dhcp_lease && link->network->dhcp_use_domains == use_domains) {
+        if (link->dhcp_lease && link_get_use_domains(link, NETWORK_CONFIG_SOURCE_DHCP4) == use_domains) {
                 const char *domainname;
                 char **domains;
 
@@ -243,7 +244,7 @@ static int link_put_domains(Link *link, bool is_route, OrderedSet **s) {
                 }
         }
 
-        if (link->dhcp6_lease && link->network->dhcp6_use_domains == use_domains) {
+        if (link->dhcp6_lease && link_get_use_domains(link, NETWORK_CONFIG_SOURCE_DHCP6) == use_domains) {
                 char **domains;
 
                 r = sd_dhcp6_lease_get_domains(link->dhcp6_lease, &domains);
@@ -254,7 +255,7 @@ static int link_put_domains(Link *link, bool is_route, OrderedSet **s) {
                 }
         }
 
-        if (link->network->ipv6_accept_ra_use_domains == use_domains) {
+        if (link_get_use_domains(link, NETWORK_CONFIG_SOURCE_NDISC) == use_domains) {
                 NDiscDNSSL *a;
 
                 SET_FOREACH(a, link->ndisc_dnssl) {
@@ -528,7 +529,7 @@ static void serialize_addresses(
                 fputc('\n', f);
 }
 
-static void link_save_domains(Link *link, FILE *f, OrderedSet *static_domains, DHCPUseDomains use_domains) {
+static void link_save_domains(Link *link, FILE *f, OrderedSet *static_domains, UseDomains use_domains) {
         bool space = false;
         const char *p;
 
@@ -537,33 +538,33 @@ static void link_save_domains(Link *link, FILE *f, OrderedSet *static_domains, D
         assert(f);
 
         ORDERED_SET_FOREACH(p, static_domains)
-                fputs_with_space(f, p, NULL, &space);
+                fputs_with_separator(f, p, NULL, &space);
 
-        if (use_domains == DHCP_USE_DOMAINS_NO)
+        if (use_domains == USE_DOMAINS_NO)
                 return;
 
-        if (link->dhcp_lease && link->network->dhcp_use_domains == use_domains) {
+        if (link->dhcp_lease && link_get_use_domains(link, NETWORK_CONFIG_SOURCE_DHCP4) == use_domains) {
                 const char *domainname;
                 char **domains;
 
                 if (sd_dhcp_lease_get_domainname(link->dhcp_lease, &domainname) >= 0)
-                        fputs_with_space(f, domainname, NULL, &space);
+                        fputs_with_separator(f, domainname, NULL, &space);
                 if (sd_dhcp_lease_get_search_domains(link->dhcp_lease, &domains) >= 0)
                         fputstrv(f, domains, NULL, &space);
         }
 
-        if (link->dhcp6_lease && link->network->dhcp6_use_domains == use_domains) {
+        if (link->dhcp6_lease && link_get_use_domains(link, NETWORK_CONFIG_SOURCE_DHCP6) == use_domains) {
                 char **domains;
 
                 if (sd_dhcp6_lease_get_domains(link->dhcp6_lease, &domains) >= 0)
                         fputstrv(f, domains, NULL, &space);
         }
 
-        if (link->network->ipv6_accept_ra_use_domains == use_domains) {
+        if (link_get_use_domains(link, NETWORK_CONFIG_SOURCE_NDISC) == use_domains) {
                 NDiscDNSSL *dd;
 
                 SET_FOREACH(dd, link->ndisc_dnssl)
-                        fputs_with_space(f, NDISC_DNSSL_DOMAIN(dd), NULL, &space);
+                        fputs_with_separator(f, NDISC_DNSSL_DOMAIN(dd), NULL, &space);
         }
 }
 
@@ -582,8 +583,6 @@ static int link_save(Link *link) {
 
         if (link->state == LINK_STATE_LINGER)
                 return 0;
-
-        link_lldp_save(link);
 
         admin_state = link_state_to_string(link->state);
         assert(admin_state);
@@ -630,14 +629,14 @@ static int link_save(Link *link) {
                 fprintf(f, "REQUIRED_FOR_ONLINE=%s\n",
                         yes_no(link->network->required_for_online));
 
-                LinkOperationalStateRange st = link->network->required_operstate_for_online;
-                fprintf(f, "REQUIRED_OPER_STATE_FOR_ONLINE=%s%s%s\n",
-                        strempty(link_operstate_to_string(st.min)),
-                        st.max != LINK_OPERSTATE_RANGE_DEFAULT.max ? ":" : "",
-                        st.max != LINK_OPERSTATE_RANGE_DEFAULT.max ? strempty(link_operstate_to_string(st.max)) : "");
+                LinkOperationalStateRange st;
+                link_required_operstate_for_online(link, &st);
+
+                fprintf(f, "REQUIRED_OPER_STATE_FOR_ONLINE=%s:%s\n",
+                        link_operstate_to_string(st.min), link_operstate_to_string(st.max));
 
                 fprintf(f, "REQUIRED_FAMILY_FOR_ONLINE=%s\n",
-                        link_required_address_family_to_string(link->network->required_family_for_online));
+                        link_required_address_family_to_string(link_required_family_for_online(link)));
 
                 fprintf(f, "ACTIVATION_POLICY=%s\n",
                         activation_policy_to_string(link->network->activation_policy));
@@ -652,7 +651,7 @@ static int link_save(Link *link) {
                         if (!escaped)
                                 return -ENOMEM;
 
-                        fputs_with_space(f, escaped, ":", &space);
+                        fputs_with_separator(f, escaped, ":", &space);
                 }
                 fputs("\"\n", f);
 
@@ -668,14 +667,14 @@ static int link_save(Link *link) {
                         serialize_addresses(f, NULL, &space,
                                             NULL,
                                             link->dhcp_lease,
-                                            link->network->dhcp_use_dns,
+                                            link_get_use_dns(link, NETWORK_CONFIG_SOURCE_DHCP4),
                                             SD_DHCP_LEASE_DNS,
                                             link->dhcp6_lease,
-                                            link->network->dhcp6_use_dns,
+                                            link_get_use_dns(link, NETWORK_CONFIG_SOURCE_DHCP6),
                                             sd_dhcp6_lease_get_dns,
                                             NULL);
 
-                        if (link->network->ipv6_accept_ra_use_dns) {
+                        if (link_get_use_dns(link, NETWORK_CONFIG_SOURCE_NDISC)) {
                                 NDiscRDNSS *dd;
 
                                 SET_FOREACH(dd, link->ndisc_rdnss)
@@ -695,10 +694,10 @@ static int link_save(Link *link) {
                         serialize_addresses(f, "NTP", NULL,
                                             link->network->ntp,
                                             link->dhcp_lease,
-                                            link->network->dhcp_use_ntp,
+                                            link_get_use_ntp(link, NETWORK_CONFIG_SOURCE_DHCP4),
                                             SD_DHCP_LEASE_NTP,
                                             link->dhcp6_lease,
-                                            link->network->dhcp6_use_ntp,
+                                            link_get_use_ntp(link, NETWORK_CONFIG_SOURCE_DHCP6),
                                             sd_dhcp6_lease_get_ntp_addrs,
                                             sd_dhcp6_lease_get_ntp_fqdn);
 
@@ -722,18 +721,18 @@ static int link_save(Link *link) {
 
                 fputs("DOMAINS=", f);
                 if (link->search_domains)
-                        link_save_domains(link, f, link->search_domains, DHCP_USE_DOMAINS_NO);
+                        link_save_domains(link, f, link->search_domains, USE_DOMAINS_NO);
                 else
-                        link_save_domains(link, f, link->network->search_domains, DHCP_USE_DOMAINS_YES);
+                        link_save_domains(link, f, link->network->search_domains, USE_DOMAINS_YES);
                 fputc('\n', f);
 
                 /************************************************************/
 
                 fputs("ROUTE_DOMAINS=", f);
                 if (link->route_domains)
-                        link_save_domains(link, f, link->route_domains, DHCP_USE_DOMAINS_NO);
+                        link_save_domains(link, f, link->route_domains, USE_DOMAINS_NO);
                 else
-                        link_save_domains(link, f, link->network->route_domains, DHCP_USE_DOMAINS_ROUTE);
+                        link_save_domains(link, f, link->network->route_domains, USE_DOMAINS_ROUTE);
                 fputc('\n', f);
 
                 /************************************************************/
@@ -782,7 +781,7 @@ static int link_save(Link *link) {
                         fputs("DNSSEC_NTA=", f);
                         space = false;
                         SET_FOREACH(n, nta_anchors)
-                                fputs_with_space(f, n, NULL, &space);
+                                fputs_with_separator(f, n, NULL, &space);
                         fputc('\n', f);
                 }
         }
@@ -860,4 +859,27 @@ int link_save_and_clean_full(Link *link, bool also_save_manager) {
 
         link_clean(link);
         return k;
+}
+
+int manager_clean_all(Manager *manager) {
+        int r, ret = 0;
+
+        assert(manager);
+
+        if (manager->dirty) {
+                r = manager_save(manager);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to update state file %s, ignoring: %m", manager->state_file);
+                RET_GATHER(ret, r);
+        }
+
+        Link *link;
+        SET_FOREACH(link, manager->dirty_links) {
+                r = link_save_and_clean(link);
+                if (r < 0)
+                        log_link_warning_errno(link, r, "Failed to update link state file %s, ignoring: %m", link->state_file);
+                RET_GATHER(ret, r);
+        }
+
+        return ret;
 }

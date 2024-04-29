@@ -120,7 +120,7 @@ def test_apply_config(tmp_path):
     assert ns.sign_kernel is False
 
     assert ns._groups == ['NAME']
-    assert ns.pcr_private_keys == [pathlib.Path('some/path7')]
+    assert ns.pcr_private_keys == ['some/path7']
     assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
     assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
 
@@ -143,7 +143,7 @@ def test_apply_config(tmp_path):
     assert ns.sign_kernel is False
 
     assert ns._groups == ['NAME']
-    assert ns.pcr_private_keys == [pathlib.Path('some/path7')]
+    assert ns.pcr_private_keys == ['some/path7']
     assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
     assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
 
@@ -189,7 +189,7 @@ def test_parse_args_many_deprecated():
     assert opts.pcrpkey == pathlib.Path('PATH')
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
-    assert opts.pcr_private_keys == [pathlib.Path('PKEY1')]
+    assert opts.pcr_private_keys == ['PKEY1']
     assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
@@ -235,7 +235,7 @@ def test_parse_args_many():
     assert opts.pcrpkey == pathlib.Path('PATH')
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
-    assert opts.pcr_private_keys == [pathlib.Path('PKEY1')]
+    assert opts.pcr_private_keys == ['PKEY1']
     assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
@@ -342,8 +342,7 @@ def test_config_priority(tmp_path):
     assert opts.pcrpkey == pathlib.Path('PATH')
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
-    assert opts.pcr_private_keys == [pathlib.Path('PKEY1'),
-                                     pathlib.Path('some/path7')]
+    assert opts.pcr_private_keys == ['PKEY1', 'some/path7']
     assert opts.pcr_public_keys == [pathlib.Path('PKEY2'),
                                     pathlib.Path('some/path8')]
     assert opts.pcr_banks == ['SHA1', 'SHA256']
@@ -522,13 +521,11 @@ baz,3
 
     assert found is True
 
-
 def unbase64(filename):
     tmp = tempfile.NamedTemporaryFile()
     base64.decode(filename.open('rb'), tmp)
     tmp.flush()
     return tmp
-
 
 def test_uname_scraping(kernel_initrd):
     if kernel_initrd is None:
@@ -539,7 +536,8 @@ def test_uname_scraping(kernel_initrd):
     assert re.match(r'\d+\.\d+\.\d+', uname)
 
 @pytest.mark.skipif(not slow_tests, reason='slow')
-def test_efi_signing_sbsign(kernel_initrd, tmp_path):
+@pytest.mark.parametrize("days", [365*10, None])
+def test_efi_signing_sbsign(days, kernel_initrd, tmp_path):
     if kernel_initrd is None:
         pytest.skip('linux+initrd not found')
     if not shutil.which('sbsign'):
@@ -550,7 +548,7 @@ def test_efi_signing_sbsign(kernel_initrd, tmp_path):
     key = unbase64(ourdir / 'example.signing.key.base64')
 
     output = f'{tmp_path}/signed.efi'
-    opts = ukify.parse_args([
+    args = [
         'build',
         *kernel_initrd,
         f'--output={output}',
@@ -558,7 +556,11 @@ def test_efi_signing_sbsign(kernel_initrd, tmp_path):
         '--cmdline=ARG1 ARG2 ARG3',
         f'--secureboot-certificate={cert.name}',
         f'--secureboot-private-key={key.name}',
-    ])
+    ]
+    if days is not None:
+        args += [f'--secureboot-certificate-validity={days}']
+
+    opts = ukify.parse_args(args)
 
     try:
         ukify.check_inputs(opts)
@@ -701,8 +703,9 @@ def test_pcr_signing(kernel_initrd, tmp_path):
         f'--pcr-private-key={priv.name}',
     ] + arg_tools
 
-    # If the public key is not explicitly specified, it is derived automatically. Let's make sure everything
-    # works as expected both when the public keys is specified explicitly and when it is derived from the
+    # If the public key is not explicitly specified, it is derived
+    # automatically. Let's make sure everything works as expected both when the
+    # public keys is specified explicitly and when it is derived from the
     # private key.
     for extra in ([f'--pcrpkey={pub.name}', f'--pcr-public-key={pub.name}'], []):
         opts = ukify.parse_args(args + extra)

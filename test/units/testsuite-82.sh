@@ -27,6 +27,8 @@ if [ -f /run/testsuite82.touch3 ]; then
     echo "This is the fourth boot!"
     systemd-notify --status="Fourth Boot"
 
+    test "$(busctl -j get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager SoftRebootsCount | jq -r '.data')" -eq 3
+
     rm /run/testsuite82.touch3
     mount
     rmdir /original-root /run/nextroot
@@ -51,6 +53,8 @@ if [ -f /run/testsuite82.touch3 ]; then
 elif [ -f /run/testsuite82.touch2 ]; then
     echo "This is the third boot!"
     systemd-notify --status="Third Boot"
+
+    test "$(busctl -j get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager SoftRebootsCount | jq -r '.data')" -eq 2
 
     rm /run/testsuite82.touch2
 
@@ -94,6 +98,8 @@ elif [ -f /run/testsuite82.touch2 ]; then
 elif [ -f /run/testsuite82.touch ]; then
     echo "This is the second boot!"
     systemd-notify --status="Second Boot"
+
+    test "$(busctl -j get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager SoftRebootsCount | jq -r '.data')" -eq 1
 
     # Clean up what we created earlier
     rm /run/testsuite82.touch
@@ -140,6 +146,11 @@ elif [ -f /run/testsuite82.touch ]; then
     # Restart the unit that is not supposed to survive
     systemd-run --collect --service-type=exec --unit=testsuite-82-nosurvive.service sleep infinity
 
+    # Now ensure there are no naming clashes and a bunch of transient units all succeed
+    for _ in $(seq 1 25); do
+        systemd-run --wait true
+    done
+
     # Now issue the soft reboot. We should be right back soon. Given /run/nextroot exists, we should
     # automatically do a softreboot instead of normal reboot.
     touch /run/testsuite82.touch2
@@ -150,6 +161,8 @@ elif [ -f /run/testsuite82.touch ]; then
 else
     # This is the first boot
     systemd-notify --status="First Boot"
+
+    test "$(busctl -j get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager SoftRebootsCount | jq -r '.data')" -eq 0
 
     # Let's upload an fd to the fdstore, so that we can verify fdstore passing works correctly
     T="/dev/shm/fdstore.$RANDOM"
@@ -181,6 +194,11 @@ EOF
     systemd-run --collect --service-type=notify -p DefaultDependencies=no -p IgnoreOnIsolate=yes --unit=testsuite-82-nosurvive-sigterm.service "$survive_sigterm"
     systemd-run --collect --service-type=exec -p DefaultDependencies=no -p IgnoreOnIsolate=yes --unit=testsuite-82-nosurvive.service sleep infinity
 
+    # Ensure that the unit doesn't get deactivated by dependencies on the source file. Given it's a verity
+    # image that is already open, even if the tmpfs with the image goes away, the file will be pinned by the
+    # kernel and will keep working.
+    cp /usr/share/minimal_0.* /tmp/
+
     # Configure these transient units to survive the soft reboot - they will not conflict with shutdown.target
     # and it will be ignored on the isolate that happens in the next boot. The first will use argv[0][0] =
     # '@', and the second will use SurviveFinalKillSignal=yes. Both should survive.
@@ -193,6 +211,11 @@ EOF
         --property "Before=reboot.target kexec.target poweroff.target halt.target emergency.target rescue.target" \
          "$survive_argv"
     systemd-run --service-type=exec --unit=testsuite-82-survive.service \
+        --property TemporaryFileSystem="/run /tmp /var" \
+        --property RootImage=/tmp/minimal_0.raw \
+        --property BindReadOnlyPaths=/dev/log \
+        --property BindReadOnlyPaths=/run/systemd/journal/socket \
+        --property BindReadOnlyPaths=/run/systemd/journal/stdout \
         --property SurviveFinalKillSignal=yes \
         --property IgnoreOnIsolate=yes \
         --property DefaultDependencies=no \
@@ -208,6 +231,14 @@ EOF
     systemd-run --unit inhibit.service --service-type=exec \
         systemd-inhibit --what=shutdown --who=test --why=test --mode=delay \
             sleep infinity
+
+    # Enqueue a bunch of failing units to try and trigger the transient name clash that happens due to D-Bus
+    # being restarted and the "unique" bus IDs not being unique across restarts
+    for _ in $(seq 1 25); do
+        # Use --wait to ensure we connect to the system bus instead of the private bus (otherwise a UUID is
+        # used instead of the bus ID)
+        systemd-run --wait false || true
+    done
 
     # Now issue the soft reboot. We should be right back soon.
     touch /run/testsuite82.touch

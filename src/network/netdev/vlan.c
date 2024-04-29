@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+/* Make sure the net/if.h header is included before any linux/ one */
 #include <net/if.h>
+#include <errno.h>
 #include <linux/if_arp.h>
 #include <linux/if_vlan.h>
 
@@ -91,8 +92,8 @@ static int netdev_vlan_fill_message_create(NetDev *netdev, Link *link, sd_netlin
 }
 
 static void vlan_qos_maps_hash_func(const struct ifla_vlan_qos_mapping *x, struct siphash *state) {
-        siphash24_compress(&x->from, sizeof(x->from), state);
-        siphash24_compress(&x->to, sizeof(x->to), state);
+        siphash24_compress_typesafe(x->from, state);
+        siphash24_compress_typesafe(x->to, state);
 }
 
 static int vlan_qos_maps_compare_func(const struct ifla_vlan_qos_mapping *a, const struct ifla_vlan_qos_mapping *b) {

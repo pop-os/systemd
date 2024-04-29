@@ -125,8 +125,8 @@ static void tclass_hash_func(const TClass *tclass, struct siphash *state) {
         assert(tclass);
         assert(state);
 
-        siphash24_compress(&tclass->classid, sizeof(tclass->classid), state);
-        siphash24_compress(&tclass->parent, sizeof(tclass->parent), state);
+        siphash24_compress_typesafe(tclass->classid, state);
+        siphash24_compress_typesafe(tclass->parent, state);
         siphash24_compress_string(tclass_get_tca_kind(tclass), state);
 }
 
@@ -260,14 +260,20 @@ TClass* tclass_drop(TClass *tclass) {
 
         link = ASSERT_PTR(tclass->link);
 
+        tclass_mark(tclass); /* To avoid stack overflow. */
+
         /* Also drop all child qdiscs assigned to the class. */
         SET_FOREACH(qdisc, link->qdiscs) {
+                if (qdisc_is_marked(qdisc))
+                        continue;
+
                 if (qdisc->parent != tclass->classid)
                         continue;
 
                 qdisc_drop(qdisc);
         }
 
+        tclass_unmark(tclass);
         tclass_enter_removed(tclass);
 
         if (tclass->state == 0) {

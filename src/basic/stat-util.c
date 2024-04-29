@@ -25,43 +25,130 @@
 #include "stat-util.h"
 #include "string-util.h"
 
-int is_symlink(const char *path) {
-        struct stat info;
+static int verify_stat_at(
+                int fd,
+                const char *path,
+                bool follow,
+                int (*verify_func)(const struct stat *st),
+                bool verify) {
 
-        assert(path);
-
-        if (lstat(path, &info) < 0)
-                return -errno;
-
-        return !!S_ISLNK(info.st_mode);
-}
-
-int is_dir_full(int atfd, const char* path, bool follow) {
         struct stat st;
         int r;
 
-        assert(atfd >= 0 || atfd == AT_FDCWD);
-        assert(atfd >= 0 || path);
+        assert(fd >= 0 || fd == AT_FDCWD);
+        assert(!isempty(path) || !follow);
+        assert(verify_func);
 
-        if (path)
-                r = fstatat(atfd, path, &st, follow ? 0 : AT_SYMLINK_NOFOLLOW);
-        else
-                r = fstat(atfd, &st);
-        if (r < 0)
+        if (fstatat(fd, strempty(path), &st,
+                    (isempty(path) ? AT_EMPTY_PATH : 0) | (follow ? 0 : AT_SYMLINK_NOFOLLOW)) < 0)
                 return -errno;
 
-        return !!S_ISDIR(st.st_mode);
+        r = verify_func(&st);
+        return verify ? r : r >= 0;
+}
+
+int stat_verify_regular(const struct stat *st) {
+        assert(st);
+
+        /* Checks whether the specified stat() structure refers to a regular file. If not returns an
+         * appropriate error code. */
+
+        if (S_ISDIR(st->st_mode))
+                return -EISDIR;
+
+        if (S_ISLNK(st->st_mode))
+                return -ELOOP;
+
+        if (!S_ISREG(st->st_mode))
+                return -EBADFD;
+
+        return 0;
+}
+
+int verify_regular_at(int fd, const char *path, bool follow) {
+        return verify_stat_at(fd, path, follow, stat_verify_regular, true);
+}
+
+int fd_verify_regular(int fd) {
+        assert(fd >= 0);
+        return verify_regular_at(fd, NULL, false);
+}
+
+int stat_verify_directory(const struct stat *st) {
+        assert(st);
+
+        if (S_ISLNK(st->st_mode))
+                return -ELOOP;
+
+        if (!S_ISDIR(st->st_mode))
+                return -ENOTDIR;
+
+        return 0;
+}
+
+int fd_verify_directory(int fd) {
+        assert(fd >= 0);
+        return verify_stat_at(fd, NULL, false, stat_verify_directory, true);
+}
+
+int is_dir_at(int fd, const char *path, bool follow) {
+        return verify_stat_at(fd, path, follow, stat_verify_directory, false);
+}
+
+int is_dir(const char *path, bool follow) {
+        assert(!isempty(path));
+        return is_dir_at(AT_FDCWD, path, follow);
+}
+
+int stat_verify_symlink(const struct stat *st) {
+        assert(st);
+
+        if (S_ISDIR(st->st_mode))
+                return -EISDIR;
+
+        if (!S_ISLNK(st->st_mode))
+                return -ENOLINK;
+
+        return 0;
+}
+
+int is_symlink(const char *path) {
+        assert(!isempty(path));
+        return verify_stat_at(AT_FDCWD, path, false, stat_verify_symlink, false);
+}
+
+int stat_verify_linked(const struct stat *st) {
+        assert(st);
+
+        if (st->st_nlink <= 0)
+                return -EIDRM; /* recognizable error. */
+
+        return 0;
+}
+
+int fd_verify_linked(int fd) {
+        assert(fd >= 0);
+        return verify_stat_at(fd, NULL, false, stat_verify_linked, true);
+}
+
+int stat_verify_device_node(const struct stat *st) {
+        assert(st);
+
+        if (S_ISLNK(st->st_mode))
+                return -ELOOP;
+
+        if (S_ISDIR(st->st_mode))
+                return -EISDIR;
+
+        if (!S_ISBLK(st->st_mode) && !S_ISCHR(st->st_mode))
+                return -ENOTTY;
+
+        return 0;
 }
 
 int is_device_node(const char *path) {
-        struct stat info;
-
-        assert(path);
-
-        if (lstat(path, &info) < 0)
-                return -errno;
-
-        return !!(S_ISBLK(info.st_mode) || S_ISCHR(info.st_mode));
+        assert(!isempty(path));
+        return verify_stat_at(AT_FDCWD, path, false, stat_verify_device_node, false);
 }
 
 int dir_is_empty_at(int dir_fd, const char *path, bool ignore_hidden_or_backup) {
@@ -142,7 +229,7 @@ int null_or_empty_path_with_root(const char *fn, const char *root) {
          * When looking under root_dir, we can't expect /dev/ to be mounted,
          * so let's see if the path is a (possibly dangling) symlink to /dev/null. */
 
-        if (path_equal_ptr(path_startswith(fn, root ?: "/"), "dev/null"))
+        if (path_equal(path_startswith(fn, root ?: "/"), "dev/null"))
                 return true;
 
         r = chase_and_stat(fn, root, CHASE_PREFIX_ROOT, NULL, &st);
@@ -152,7 +239,7 @@ int null_or_empty_path_with_root(const char *fn, const char *root) {
         return null_or_empty(&st);
 }
 
-static int fd_is_read_only_fs(int fd) {
+int fd_is_read_only_fs(int fd) {
         struct statvfs st;
 
         assert(fd >= 0);
@@ -187,14 +274,12 @@ int inode_same_at(int fda, const char *filea, int fdb, const char *fileb, int fl
         struct stat a, b;
 
         assert(fda >= 0 || fda == AT_FDCWD);
-        assert(filea);
         assert(fdb >= 0 || fdb == AT_FDCWD);
-        assert(fileb);
 
-        if (fstatat(fda, filea, &a, flags) < 0)
+        if (fstatat(fda, strempty(filea), &a, flags) < 0)
                 return log_debug_errno(errno, "Cannot stat %s: %m", filea);
 
-        if (fstatat(fdb, fileb, &b, flags) < 0)
+        if (fstatat(fdb, strempty(fileb), &b, flags) < 0)
                 return log_debug_errno(errno, "Cannot stat %s: %m", fileb);
 
         return stat_inode_same(&a, &b);
@@ -262,70 +347,6 @@ int path_is_network_fs(const char *path) {
         return is_network_fs(&s);
 }
 
-int stat_verify_regular(const struct stat *st) {
-        assert(st);
-
-        /* Checks whether the specified stat() structure refers to a regular file. If not returns an appropriate error
-         * code. */
-
-        if (S_ISDIR(st->st_mode))
-                return -EISDIR;
-
-        if (S_ISLNK(st->st_mode))
-                return -ELOOP;
-
-        if (!S_ISREG(st->st_mode))
-                return -EBADFD;
-
-        return 0;
-}
-
-int fd_verify_regular(int fd) {
-        struct stat st;
-
-        assert(fd >= 0);
-
-        if (fstat(fd, &st) < 0)
-                return -errno;
-
-        return stat_verify_regular(&st);
-}
-
-int verify_regular_at(int dir_fd, const char *path, bool follow) {
-        struct stat st;
-
-        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
-        assert(path);
-
-        if (fstatat(dir_fd, path, &st, (isempty(path) ? AT_EMPTY_PATH : 0) | (follow ? 0 : AT_SYMLINK_NOFOLLOW)) < 0)
-                return -errno;
-
-        return stat_verify_regular(&st);
-}
-
-int stat_verify_directory(const struct stat *st) {
-        assert(st);
-
-        if (S_ISLNK(st->st_mode))
-                return -ELOOP;
-
-        if (!S_ISDIR(st->st_mode))
-                return -ENOTDIR;
-
-        return 0;
-}
-
-int fd_verify_directory(int fd) {
-        struct stat st;
-
-        assert(fd >= 0);
-
-        if (fstat(fd, &st) < 0)
-                return -errno;
-
-        return stat_verify_directory(&st);
-}
-
 int proc_mounted(void) {
         int r;
 
@@ -343,8 +364,7 @@ bool stat_inode_same(const struct stat *a, const struct stat *b) {
         /* Returns if the specified stat structure references the same (though possibly modified) inode. Does
          * a thorough check, comparing inode nr, backing device and if the inode is still of the same type. */
 
-        return a && b &&
-                (a->st_mode & S_IFMT) != 0 && /* We use the check for .st_mode if the structure was ever initialized */
+        return stat_is_set(a) && stat_is_set(b) &&
                 ((a->st_mode ^ b->st_mode) & S_IFMT) == 0 &&  /* same inode type */
                 a->st_dev == b->st_dev &&
                 a->st_ino == b->st_ino;
@@ -372,9 +392,8 @@ bool statx_inode_same(const struct statx *a, const struct statx *b) {
 
         /* Same as stat_inode_same() but for struct statx */
 
-        return a && b &&
+        return statx_is_set(a) && statx_is_set(b) &&
                 FLAGS_SET(a->stx_mask, STATX_TYPE|STATX_INO) && FLAGS_SET(b->stx_mask, STATX_TYPE|STATX_INO) &&
-                (a->stx_mode & S_IFMT) != 0 &&
                 ((a->stx_mode ^ b->stx_mode) & S_IFMT) == 0 &&
                 a->stx_dev_major == b->stx_dev_major &&
                 a->stx_dev_minor == b->stx_dev_minor &&
@@ -382,7 +401,7 @@ bool statx_inode_same(const struct statx *a, const struct statx *b) {
 }
 
 bool statx_mount_same(const struct new_statx *a, const struct new_statx *b) {
-        if (!a || !b)
+        if (!new_statx_is_set(a) || !new_statx_is_set(b))
                 return false;
 
         /* if we have the mount ID, that's all we need */
@@ -470,7 +489,7 @@ int xstatfsat(int dir_fd, const char *path, struct statfs *ret) {
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
         assert(ret);
 
-        fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
+        fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY);
         if (fd < 0)
                 return fd;
 
@@ -478,8 +497,8 @@ int xstatfsat(int dir_fd, const char *path, struct statfs *ret) {
 }
 
 void inode_hash_func(const struct stat *q, struct siphash *state) {
-        siphash24_compress(&q->st_dev, sizeof(q->st_dev), state);
-        siphash24_compress(&q->st_ino, sizeof(q->st_ino), state);
+        siphash24_compress_typesafe(q->st_dev, state);
+        siphash24_compress_typesafe(q->st_ino, state);
 }
 
 int inode_compare_func(const struct stat *a, const struct stat *b) {
@@ -516,5 +535,29 @@ const char* inode_type_to_string(mode_t m) {
                 return "sock";
         }
 
+        /* Note anonymous inodes in the kernel will have a zero type. Hence fstat() of an eventfd() will
+         * return an .st_mode where we'll return NULL here! */
         return NULL;
+}
+
+mode_t inode_type_from_string(const char *s) {
+        if (!s)
+                return MODE_INVALID;
+
+        if (streq(s, "reg"))
+                return S_IFREG;
+        if (streq(s, "dir"))
+                return S_IFDIR;
+        if (streq(s, "lnk"))
+                return S_IFLNK;
+        if (streq(s, "chr"))
+                return S_IFCHR;
+        if (streq(s, "blk"))
+                return S_IFBLK;
+        if (streq(s, "fifo"))
+                return S_IFIFO;
+        if (streq(s, "sock"))
+                return S_IFSOCK;
+
+        return MODE_INVALID;
 }

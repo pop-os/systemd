@@ -40,6 +40,8 @@ static inline bool in_addr_data_is_set(const struct in_addr_data *a) {
         return in_addr_data_is_null(a);
 }
 
+bool in4_addr_is_multicast(const struct in_addr *a);
+bool in6_addr_is_multicast(const struct in6_addr *a);
 int in_addr_is_multicast(int family, const union in_addr_union *u);
 
 bool in4_addr_is_link_local(const struct in_addr *a);
@@ -59,7 +61,22 @@ bool in6_addr_is_ipv4_mapped_address(const struct in6_addr *a);
 bool in4_addr_equal(const struct in_addr *a, const struct in_addr *b);
 bool in6_addr_equal(const struct in6_addr *a, const struct in6_addr *b);
 int in_addr_equal(int family, const union in_addr_union *a, const union in_addr_union *b);
-int in_addr_prefix_intersect(int family, const union in_addr_union *a, unsigned aprefixlen, const union in_addr_union *b, unsigned bprefixlen);
+bool in4_addr_prefix_intersect(
+                const struct in_addr *a,
+                unsigned aprefixlen,
+                const struct in_addr *b,
+                unsigned bprefixlen);
+bool in6_addr_prefix_intersect(
+                const struct in6_addr *a,
+                unsigned aprefixlen,
+                const struct in6_addr *b,
+                unsigned bprefixlen);
+int in_addr_prefix_intersect(
+                int family,
+                const union in_addr_union *a,
+                unsigned aprefixlen,
+                const union in_addr_union *b,
+                unsigned bprefixlen);
 int in_addr_prefix_next(int family, union in_addr_union *u, unsigned prefixlen);
 int in_addr_prefix_nth(int family, union in_addr_union *u, unsigned prefixlen, uint64_t nth);
 int in_addr_random_prefix(int family, union in_addr_union *u, unsigned prefixlen_fixed_part, unsigned prefixlen);
@@ -185,6 +202,7 @@ static inline size_t FAMILY_ADDRESS_SIZE(int family) {
  * See also oss-fuzz#11344. */
 #define IN_ADDR_NULL ((union in_addr_union) { .in6 = {} })
 
+void in_addr_hash_func(const union in_addr_union *u, int family, struct siphash *state);
 void in_addr_data_hash_func(const struct in_addr_data *a, struct siphash *state);
 int in_addr_data_compare_func(const struct in_addr_data *x, const struct in_addr_data *y);
 void in6_addr_hash_func(const struct in6_addr *addr, struct siphash *state);

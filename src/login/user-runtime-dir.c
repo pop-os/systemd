@@ -67,7 +67,7 @@ static int user_mkdir_runtime_path(
         if (r < 0)
                 return log_error_errno(r, "Failed to create /run/user: %m");
 
-        if (path_is_mount_point(runtime_path, NULL, 0) > 0)
+        if (path_is_mount_point(runtime_path) > 0)
                 log_debug("%s is already a mount point", runtime_path);
         else {
                 char options[sizeof("mode=0700,uid=,gid=,size=,nr_inodes=,smackfsroot=*")
@@ -190,8 +190,7 @@ static int do_umount(const char *user) {
 static int run(int argc, char *argv[]) {
         int r;
 
-        log_parse_environment();
-        log_open();
+        log_setup();
 
         if (argc != 3)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),

@@ -1,10 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
 set -e
-
-if [ "$1" = "build" ]; then
-    exit 0
-fi
 
 if [ -n "$SANITIZERS" ]; then
     LD_PRELOAD=$(ldd /usr/lib/systemd/systemd | grep libasan.so | awk '{print $3}')
@@ -48,22 +44,6 @@ EOF
     systemctl mask systemd-hwdb-update.service
 fi
 
-if [ -n "$IMAGE_ID" ] ; then
-    sed -n \
-        -i \
-        -e '/^IMAGE_ID=/!p' \
-        -e "\$aIMAGE_ID=$IMAGE_ID" \
-        /usr/lib/os-release
-fi
-
-if [ -n "$IMAGE_VERSION" ] ; then
-    sed -n \
-        -i \
-        -e '/^IMAGE_VERSION=/!p' \
-        -e "\$aIMAGE_VERSION=$IMAGE_VERSION" \
-        /usr/lib/os-release
-fi
-
 if command -v authselect >/dev/null; then
     # authselect 1.5.0 renamed the minimal profile to the local profile without keeping backwards compat so
     # let's use the new name if it exists.
@@ -85,9 +65,15 @@ fi
 mountpoint -q /etc/resolv.conf && umount /etc/resolv.conf
 rm -f /etc/resolv.conf
 
-. /usr/lib/os-release
-
-if [ "$ID" = "centos" ] && [ "$VERSION" = "8" ]; then
-    alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
-    alternatives --set python3 /usr/bin/python3.9
+# sbsign is not available on CentOS Stream
+if command -v sbsign &>/dev/null; then
+    # Ensure that side-loaded PE addons are loaded if signed, and ignored if not
+    addons_dir=/efi/loader/addons
+    mkdir -p "$addons_dir"
+    ukify build --secureboot-private-key mkosi.key --secureboot-certificate mkosi.crt --cmdline this_should_be_here -o "$addons_dir/good.addon.efi"
+    ukify build --cmdline this_should_not_be_here -o "$addons_dir/bad.addon.efi"
 fi
+
+for f in "$BUILDROOT"/usr/share/*.verity.sig; do
+    jq --join-output '.rootHash' "$f" >"${f%.verity.sig}.roothash"
+done

@@ -5,6 +5,16 @@
 #include "macro.h"
 #include "sha256.h"
 
+typedef enum KeySourceType {
+        OPENSSL_KEY_SOURCE_FILE,
+        OPENSSL_KEY_SOURCE_ENGINE,
+        OPENSSL_KEY_SOURCE_PROVIDER,
+        _OPENSSL_KEY_SOURCE_MAX,
+        _OPENSSL_KEY_SOURCE_INVALID = -EINVAL,
+} KeySourceType;
+
+int parse_openssl_key_source_argument(const char *argument, char **private_key_source, KeySourceType *private_key_source_type);
+
 #define X509_FINGERPRINT_SIZE SHA256_DIGEST_SIZE
 
 #if HAVE_OPENSSL
@@ -25,6 +35,8 @@
 #    include <openssl/core_names.h>
 #    include <openssl/kdf.h>
 #    include <openssl/param_build.h>
+#    include <openssl/provider.h>
+#    include <openssl/store.h>
 #  endif
 
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL_MACRO(void*, OPENSSL_free, NULL);
@@ -40,6 +52,8 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(PKCS7*, PKCS7_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(SSL*, SSL_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(BIO*, BIO_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MD_CTX*, EVP_MD_CTX_free, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(ASN1_OCTET_STRING*, ASN1_OCTET_STRING_free, NULL);
+
 #if OPENSSL_VERSION_MAJOR >= 3
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_CIPHER*, EVP_CIPHER_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_KDF*, EVP_KDF_free, NULL);
@@ -49,6 +63,8 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MAC_CTX*, EVP_MAC_CTX_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MD*, EVP_MD_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(OSSL_PARAM*, OSSL_PARAM_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(OSSL_PARAM_BLD*, OSSL_PARAM_BLD_free, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(OSSL_STORE_CTX*, OSSL_STORE_close, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(OSSL_STORE_INFO*, OSSL_STORE_INFO_free, NULL);
 #else
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EC_KEY*, EC_KEY_free, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(HMAC_CTX*, HMAC_CTX_free, NULL);
@@ -108,9 +124,13 @@ int ecc_pkey_new(int curve_id, EVP_PKEY **ret);
 
 int ecc_ecdh(const EVP_PKEY *private_pkey, const EVP_PKEY *peer_pkey, void **ret_shared_secret, size_t *ret_shared_secret_size);
 
+int pkey_generate_volume_keys(EVP_PKEY *pkey, void **ret_decrypted_key, size_t *ret_decrypted_key_size, void **ret_saved_key, size_t *ret_saved_key_size);
+
 int pubkey_fingerprint(EVP_PKEY *pk, const EVP_MD *md, void **ret, size_t *ret_size);
 
 int digest_and_sign(const EVP_MD *md, EVP_PKEY *privkey, const void *data, size_t size, void **ret, size_t *ret_size);
+
+int openssl_load_key_from_token(KeySourceType private_key_source_type, const char *private_key_source, const char *private_key, EVP_PKEY **ret);
 
 #else
 
@@ -125,6 +145,15 @@ static inline void *X509_free(X509 *p) {
 static inline void *EVP_PKEY_free(EVP_PKEY *p) {
         assert(p == NULL);
         return NULL;
+}
+
+static inline int openssl_load_key_from_token(
+                KeySourceType private_key_source_type,
+                const char *private_key_source,
+                const char *private_key,
+                EVP_PKEY **ret) {
+
+        return -EOPNOTSUPP;
 }
 
 #endif

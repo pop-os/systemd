@@ -29,8 +29,8 @@ struct RemoteServer {
         RemoteSource **sources;
         size_t active;
 
-        sd_event *events;
-        sd_event_source *sigterm_event, *sigint_event, *listen_event;
+        sd_event *event;
+        sd_event_source *listen_event;
 
         Hashmap *writers;
         Writer *_single_writer;
@@ -47,6 +47,9 @@ struct RemoteServer {
         JournalMetrics metrics;
 };
 extern RemoteServer *journal_remote_server_global;
+
+/* Used for MHD_OPTION_CONNECTION_MEMORY_LIMIT and header parsing cap */
+#define JOURNAL_SERVER_MEMORY_MAX 128U * 1024U
 
 int journal_remote_server_init(
                 RemoteServer *s,

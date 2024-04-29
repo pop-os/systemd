@@ -13,6 +13,7 @@
 #include "bus-type.h"
 #include "bus-util.h"
 #include "busctl-introspect.h"
+#include "capsule-util.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -72,6 +73,7 @@ static int json_transform_message(sd_bus_message *m, JsonVariant **ret);
 
 static int acquire_bus(bool set_monitor, sd_bus **ret) {
         _cleanup_(sd_bus_close_unrefp) sd_bus *bus = NULL;
+        _cleanup_close_ int pin_fd = -EBADF;
         int r;
 
         r = sd_bus_new(&bus);
@@ -138,10 +140,13 @@ static int acquire_bus(bool set_monitor, sd_bus **ret) {
                         r = bus_set_address_machine(bus, arg_runtime_scope, arg_host);
                         break;
 
+                case BUS_TRANSPORT_CAPSULE:
+                        r = bus_set_address_capsule_bus(bus, arg_host, &pin_fd);
+                        break;
+
                 default:
                         assert_not_reached();
                 }
-
         if (r < 0)
                 return bus_log_address_error(r, arg_transport);
 
@@ -1366,10 +1371,10 @@ static int verb_monitor(int argc, char **argv, void *userdata) {
 static int verb_capture(int argc, char **argv, void *userdata) {
         _cleanup_free_ char *osname = NULL;
         static const char info[] =
-                "busctl (systemd) " STRINGIFY(PROJECT_VERSION) " (Git " GIT_VERSION ")";
+                "busctl (systemd) " PROJECT_VERSION_FULL " (Git " GIT_VERSION ")";
         int r;
 
-        if (isatty(fileno(stdout)) > 0)
+        if (isatty(STDOUT_FILENO))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Refusing to write message data to console, please redirect output to a file.");
 
@@ -2021,6 +2026,15 @@ static int call(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return r;
 
+        if (!service_name_is_valid(argv[1]))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid service name: %s", argv[1]);
+        if (!object_path_is_valid(argv[2]))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid object path: %s", argv[2]);
+        if (!interface_name_is_valid(argv[3]))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid interface name: %s", argv[3]);
+        if (!member_name_is_valid(argv[4]))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid member name: %s", argv[4]);
+
         r = sd_bus_message_new_method_call(bus, &m, argv[1], argv[2], argv[3], argv[4]);
         if (r < 0)
                 return bus_log_create_error(r);
@@ -2376,6 +2390,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "match",                           required_argument, NULL, ARG_MATCH                           },
                 { "host",                            required_argument, NULL, 'H'                                 },
                 { "machine",                         required_argument, NULL, 'M'                                 },
+                { "capsule",                         required_argument, NULL, 'C'                                 },
                 { "size",                            required_argument, NULL, ARG_SIZE                            },
                 { "list",                            no_argument,       NULL, ARG_LIST                            },
                 { "quiet",                           no_argument,       NULL, 'q'                                 },
@@ -2397,7 +2412,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hH:M:qjl", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hH:M:C:J:qjl", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -2479,6 +2494,17 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'M':
                         arg_transport = BUS_TRANSPORT_MACHINE;
                         arg_host = optarg;
+                        break;
+
+                case 'C':
+                        r = capsule_name_is_valid(optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Unable to validate capsule name '%s': %m", optarg);
+                        if (r == 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid capsule name: %s", optarg);
+
+                        arg_host = optarg;
+                        arg_transport = BUS_TRANSPORT_CAPSULE;
                         break;
 
                 case 'q':

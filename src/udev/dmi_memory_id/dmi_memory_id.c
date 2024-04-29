@@ -96,7 +96,7 @@ static const char *dmi_string(const struct dmi_header *dm, uint8_t s) {
                 return "Not Specified";
 
         bp += dm->length;
-        for (;s > 1 && !isempty(bp); s--)
+        for (; s > 1 && !isempty(bp); s--)
                 bp += strlen(bp) + 1;
 
         if (isempty(bp))
@@ -685,10 +685,8 @@ static int run(int argc, char* const* argv) {
         size_t size;
         int r;
 
-        log_set_target(LOG_TARGET_AUTO);
-        udev_parse_config();
-        log_parse_environment();
-        log_open();
+        (void) udev_parse_config();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

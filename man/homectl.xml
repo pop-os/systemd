@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="homectl" conditional='ENABLE_HOMED'
@@ -18,6 +18,7 @@
 
   <refnamediv>
     <refname>homectl</refname>
+    <refname>systemd-homed-firstboot.service</refname>
     <refpurpose>Create, remove, change or inspect home directories</refpurpose>
   </refnamediv>
 
@@ -116,7 +117,7 @@
     <variablelist>
 
       <varlistentry>
-        <term><option>--identity=</option><replaceable>FILE</replaceable></term>
+        <term><option>--identity=<replaceable>FILE</replaceable></option></term>
 
         <listitem><para>Read the user's JSON record from the specified file. If passed as
         <literal>-</literal> read the user record from standard input. The supplied JSON object must follow
@@ -129,7 +130,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--json=</option><replaceable>FORMAT</replaceable></term>
+        <term><option>--json=<replaceable>FORMAT</replaceable></option></term>
         <term><option>-j</option></term>
 
         <listitem><para>Controls whether to output the user record in JSON format, if the
@@ -145,7 +146,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--export-format=</option><replaceable>FORMAT</replaceable></term>
+        <term><option>--export-format=<replaceable>FORMAT</replaceable></option></term>
         <term><option>-E</option></term>
         <term><option>-EE</option></term>
 
@@ -166,6 +167,16 @@
         machine and may be updated there without any private key replication.</para>
 
         <xi:include href="version-info.xml" xpointer="v245"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--offline</option></term>
+
+        <listitem><para>Do not attempt to update the copy of the user record and blob directory that is embedded inside
+        of the home area. This allows for operation on home areas that are absent, or without needing to authenticate as
+        the user being modified.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="host" />
@@ -190,7 +201,7 @@
     <variablelist>
 
       <varlistentry>
-        <term><option>--real-name=</option><replaceable>NAME</replaceable></term>
+        <term><option>--real-name=<replaceable>NAME</replaceable></option></term>
         <term><option>-c</option> <replaceable>NAME</replaceable></term>
 
         <listitem><para>The real name for the user. This corresponds with the GECOS field on classic UNIX NSS
@@ -200,7 +211,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--realm=</option><replaceable>REALM</replaceable></term>
+        <term><option>--realm=<replaceable>REALM</replaceable></option></term>
 
         <listitem><para>The realm for the user. The realm associates a user with a specific organization or
         installation, and allows distinguishing users of the same name defined in different contexts. The
@@ -216,7 +227,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--email-address=</option><replaceable>EMAIL</replaceable></term>
+        <term><option>--email-address=<replaceable>EMAIL</replaceable></option></term>
 
         <listitem><para>Takes an electronic mail address to associate with the user. On log-in the
         <varname>$EMAIL</varname> environment variable is initialized from this value.</para>
@@ -225,7 +236,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--location=</option><replaceable>TEXT</replaceable></term>
+        <term><option>--location=<replaceable>TEXT</replaceable></option></term>
 
         <listitem><para>Takes location specification for this user. This is free-form text, which might or
         might not be usable by geo-location applications. Example: <option>--location="Berlin,
@@ -235,7 +246,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--icon-name=</option><replaceable>ICON</replaceable></term>
+        <term><option>--icon-name=<replaceable>ICON</replaceable></option></term>
 
         <listitem><para>Takes an icon name to associate with the user, following the scheme defined by the <ulink
         url="https://standards.freedesktop.org/icon-naming-spec/icon-naming-spec-latest.html">Icon Naming
@@ -245,8 +256,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--home-dir=</option><replaceable>PATH</replaceable></term>
-        <term><option>-d</option><replaceable>PATH</replaceable></term>
+        <term><option>--home-dir=<replaceable>PATH</replaceable></option></term>
+        <term><option>-d<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>Takes a path to use as home directory for the user. Note that this is the directory
         the user's home directory is mounted to while the user is logged in. This is not where the user's
@@ -257,7 +268,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--uid=</option><replaceable>UID</replaceable></term>
+        <term><option>--uid=<replaceable>UID</replaceable></option></term>
 
         <listitem><para>Takes a preferred numeric UNIX UID to assign this user. If a user is to be created
         with the specified UID and it is already taken by a different user on the local system then creation
@@ -282,7 +293,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--member-of=</option><replaceable>GROUP</replaceable></term>
+        <term><option>--member-of=<replaceable>GROUP</replaceable></option></term>
         <term><option>-G</option> <replaceable>GROUP</replaceable></term>
 
         <listitem><para>Takes a comma-separated list of auxiliary UNIX groups this user shall belong
@@ -299,8 +310,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--capability-bounding-set=</option><replaceable>CAPABILITIES</replaceable></term>
-        <term><option>--capability-ambient-set=</option><replaceable>CAPABILITIES</replaceable></term>
+        <term><option>--capability-bounding-set=<replaceable>CAPABILITIES</replaceable></option></term>
+        <term><option>--capability-ambient-set=<replaceable>CAPABILITIES</replaceable></option></term>
 
         <listitem><para>These options take a space separated list of process capabilities
         (e.g. <constant>CAP_WAKE_ALARM</constant>, <constant>CAP_BLOCK_SUSPEND</constant>, …) that shall be
@@ -314,7 +325,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--skel=</option><replaceable>PATH</replaceable></term>
+        <term><option>--skel=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>Takes a file system path to a directory. Specifies the skeleton directory to
         initialize the home directory with. All files and directories in the specified path are copied into
@@ -325,7 +336,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--shell=</option><replaceable>SHELL</replaceable></term>
+        <term><option>--shell=<replaceable>SHELL</replaceable></option></term>
 
         <listitem><para>Takes a file system path. Specifies the shell binary to execute on terminal
         logins. If not specified defaults to <filename>/bin/bash</filename>.</para>
@@ -334,7 +345,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--setenv=</option><replaceable>VARIABLE</replaceable>[=<replaceable>VALUE</replaceable>]</term>
+        <term><option>--setenv=<replaceable>VARIABLE</replaceable>[=<replaceable>VALUE</replaceable>]</option></term>
 
         <listitem><para>Takes an environment variable assignment to set for all user processes. May be used
         multiple times to set multiple environment variables. When <literal>=</literal> and
@@ -349,7 +360,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--timezone=</option><replaceable>TIMEZONE</replaceable></term>
+        <term><option>--timezone=<replaceable>TIMEZONE</replaceable></option></term>
 
         <listitem><para>Takes a time zone location name that sets the timezone for the specified user. When
         the user logs in the <varname>$TZ</varname> environment variable is initialized from this
@@ -363,18 +374,19 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--language=</option><replaceable>LANG</replaceable></term>
+        <term><option>--language=<replaceable>LANG</replaceable></option></term>
 
-        <listitem><para>Takes a specifier indicating the preferred language of the user. The
-        <varname>$LANG</varname> environment variable is initialized from this value on login, and thus a
-        value suitable for this environment variable is accepted here, for example
-        <option>--language=de_DE.UTF8</option>.</para>
+        <listitem><para>Takes a comma- or colon-separated list of languages preferred by the user, ordered
+        by descending priority. The <varname>$LANG</varname> and <varname>$LANGUAGE</varname> environment
+        variables are initialized from this value on login, and thus values suitible for these environment
+        variables are accepted here, for example <option>--language=de_DE.UTF-8</option>. This option may
+        be used more than once, in which case the language lists are concatenated.</para>
 
         <xi:include href="version-info.xml" xpointer="v245"/></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><option>--ssh-authorized-keys=</option><replaceable>KEYS</replaceable></term>
+        <term><option>--ssh-authorized-keys=<replaceable>KEYS</replaceable></option></term>
         <listitem><para>Either takes a SSH authorized key line to associate with the user record or a
         <literal>@</literal> character followed by a path to a file to read one or more such lines from. SSH
         keys configured this way are made available to SSH to permit access to this home directory and user
@@ -384,7 +396,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--pkcs11-token-uri=</option><replaceable>URI</replaceable></term>
+        <term><option>--pkcs11-token-uri=<replaceable>URI</replaceable></option></term>
         <listitem><para>Takes an RFC 7512 PKCS#11 URI referencing a security token (e.g. YubiKey or PIV
         smartcard) that shall be able to unlock the user account. The security token URI should reference a
         security token with exactly one pair of X.509 certificate and private key. A random secret key is
@@ -413,7 +425,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fido2-credential-algorithm=</option><replaceable>STRING</replaceable></term>
+        <term><option>--fido2-credential-algorithm=<replaceable>STRING</replaceable></option></term>
         <listitem><para>Specify COSE algorithm used in credential generation. The default value is
         <literal>es256</literal>. Supported values are <literal>es256</literal>, <literal>rs256</literal>
         and <literal>eddsa</literal>.</para>
@@ -428,7 +440,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fido2-device=</option><replaceable>PATH</replaceable></term>
+        <term><option>--fido2-device=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>Takes a path to a Linux <literal>hidraw</literal> device
         (e.g. <filename>/dev/hidraw1</filename>), referring to a FIDO2 security token implementing the
@@ -459,7 +471,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fido2-with-client-pin=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--fido2-with-client-pin=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>When enrolling a FIDO2 security token, controls whether to require the user to enter
         a PIN when unlocking the account (the FIDO2 <literal>clientPin</literal> feature). Defaults to
@@ -471,7 +483,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fido2-with-user-presence=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--fido2-with-user-presence=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>When enrolling a FIDO2 security token, controls whether to require the user to
         verify presence (tap the token, the FIDO2 <literal>up</literal> feature) when unlocking the account.
@@ -483,7 +495,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fido2-with-user-verification=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--fido2-with-user-verification=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>When enrolling a FIDO2 security token, controls whether to require user verification
         when unlocking the account (the FIDO2 <literal>uv</literal> feature). Defaults to
@@ -494,7 +506,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--recovery-key=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--recovery-key=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Accepts a boolean argument. If enabled a recovery key is configured for the
         account. A recovery key is a computer generated access key that may be used to regain access to an
@@ -505,8 +517,42 @@
         <xi:include href="version-info.xml" xpointer="v247"/></listitem>
       </varlistentry>
 
+    <varlistentry>
+        <term><option>--blob=<replaceable>PATH</replaceable></option></term>
+        <term><option>-b</option> <replaceable>PATH</replaceable></term>
+        <term><option>--blob=<replaceable>FILENAME</replaceable>=<replaceable>PATH</replaceable></option></term>
+        <term><option>-b</option> <replaceable>FILENAME</replaceable>=<replaceable>PATH</replaceable></term>
+
+        <listitem><para>Accepts either a directory path, or a file name followed by a file path. If just a
+        directory path is specified, then the user's entire blob directory is replaced the specified path.
+        Note that this replacement is performed before per-file manipulations are applied, which means these per-file
+        manipulations will be applied on top of the specified directory. If a filename and file path are specified, then
+        the single specified blob file will be overwritten with the specified path. If completely blank, the entire blob
+        directory is emptied out (which also resets all previous blob-related flags up to this point). If a filename is
+        specified but the corresponding path is blank, that single file will be deleted from the blob directory. All changes
+        are performed in temporary copies of the specified files in directories, which means that the originals specified on
+        the command line are not modified. See <ulink url="https://systemd.io/USER_RECORD_BLOB_DIRS">User Record Blob Directories</ulink>
+        for more information about blob directories.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+    <varlistentry>
+        <term><option>--avatar=<replaceable>PATH</replaceable></option></term>
+        <term><option>--login-background=<replaceable>PATH</replaceable></option></term>
+
+        <listitem><para>Accept a file path. If set, the specified file is used to overwrite the
+        corresponding file in the user's blob directory. If blank, the corresponding file is deleted
+        from the blob directory. Essentially, these options are shortcuts to
+        <option>--blob=<replaceable>FILENAME</replaceable>=<replaceable>PATH</replaceable></option>
+        for the known filenames defined in
+        <ulink url="https://systemd.io/USER_RECORD_BLOB_DIRS">User Record Blob Directories</ulink>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
       <varlistentry>
-        <term><option>--locked=</option><replaceable>BOOLEAN</replaceable></term>
+        <term><option>--locked=<replaceable>BOOLEAN</replaceable></option></term>
 
         <listitem><para>Takes a boolean argument. Specifies whether this user account shall be locked. If
         true logins into this account are prohibited, if false (the default) they are permitted (of course,
@@ -516,8 +562,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--not-before=</option><replaceable>TIMESTAMP</replaceable></term>
-        <term><option>--not-after=</option><replaceable>TIMESTAMP</replaceable></term>
+        <term><option>--not-before=<replaceable>TIMESTAMP</replaceable></option></term>
+        <term><option>--not-after=<replaceable>TIMESTAMP</replaceable></option></term>
 
         <listitem><para>These options take a timestamp string, in the format documented in
         <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry> and
@@ -528,8 +574,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--rate-limit-interval=</option><replaceable>SECS</replaceable></term>
-        <term><option>--rate-limit-burst=</option><replaceable>NUMBER</replaceable></term>
+        <term><option>--rate-limit-interval=<replaceable>SECS</replaceable></option></term>
+        <term><option>--rate-limit-burst=<replaceable>NUMBER</replaceable></option></term>
 
         <listitem><para>Configures a rate limit on authentication attempts for this user. If the user
         attempts to authenticate more often than the specified number, on a specific system, within the
@@ -540,7 +586,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--password-hint=</option><replaceable>TEXT</replaceable></term>
+        <term><option>--password-hint=<replaceable>TEXT</replaceable></option></term>
 
         <listitem><para>Takes a password hint to store alongside the user record. This string is stored
         accessible only to privileged users and the user itself and may not be queried by other users.
@@ -550,7 +596,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--enforce-password-policy=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--enforce-password-policy=<replaceable>BOOL</replaceable></option></term>
         <term><option>-P</option></term>
 
         <listitem><para>Takes a boolean argument. Configures whether to enforce the system's password policy
@@ -562,7 +608,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--password-change-now=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--password-change-now=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Takes a boolean argument. If true the user is asked to change their password on next
         login.</para>
@@ -571,10 +617,10 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--password-change-min=</option><replaceable>TIME</replaceable></term>
-        <term><option>--password-change-max=</option><replaceable>TIME</replaceable></term>
-        <term><option>--password-change-warn=</option><replaceable>TIME</replaceable></term>
-        <term><option>--password-change-inactive=</option><replaceable>TIME</replaceable></term>
+        <term><option>--password-change-min=<replaceable>TIME</replaceable></option></term>
+        <term><option>--password-change-max=<replaceable>TIME</replaceable></option></term>
+        <term><option>--password-change-warn=<replaceable>TIME</replaceable></option></term>
+        <term><option>--password-change-inactive=<replaceable>TIME</replaceable></option></term>
 
         <listitem><para>Each of these options takes a time span specification as argument (in the syntax
         documented in
@@ -597,7 +643,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--disk-size=</option><replaceable>BYTES</replaceable></term>
+        <term><option>--disk-size=<replaceable>BYTES</replaceable></option></term>
         <listitem><para>Either takes a size in bytes as argument (possibly using the usual K, M, G, …
         suffixes for 1024 base values), a percentage value, or the special strings <literal>min</literal> or
         <literal>max</literal>, and configures the disk space to assign to the user. If a percentage value is
@@ -614,7 +660,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--access-mode=</option><replaceable>MODE</replaceable></term>
+        <term><option>--access-mode=<replaceable>MODE</replaceable></option></term>
 
         <listitem><para>Takes a UNIX file access mode written in octal. Configures the access mode of the
         home directory itself. Note that this is only used when the directory is first created, and the user
@@ -625,7 +671,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--umask=</option><replaceable>MASK</replaceable></term>
+        <term><option>--umask=<replaceable>MASK</replaceable></option></term>
 
         <listitem><para>Takes the access mode mask (in octal syntax) to apply to newly created files and
         directories of the user ("umask"). If set this controls the initial umask set for all login sessions of
@@ -635,7 +681,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--nice=</option><replaceable>NICE</replaceable></term>
+        <term><option>--nice=<replaceable>NICE</replaceable></option></term>
 
         <listitem><para>Takes the numeric scheduling priority ("nice level") to apply to the processes of the user at login
         time. Takes a numeric value in the range -20 (highest priority) to 19 (lowest priority).</para>
@@ -644,7 +690,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--rlimit=</option><replaceable>LIMIT</replaceable>=<replaceable>VALUE</replaceable><optional>:<replaceable>VALUE</replaceable></optional></term>
+        <term><option>--rlimit=<replaceable>LIMIT</replaceable>=<replaceable>VALUE</replaceable><optional>:<replaceable>VALUE</replaceable></optional></option></term>
 
         <listitem><para>Allows configuration of resource limits for processes of this user, see <citerefentry
         project='man-pages'><refentrytitle>getrlimit</refentrytitle><manvolnum>2</manvolnum></citerefentry>
@@ -657,7 +703,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--tasks-max=</option><replaceable>TASKS</replaceable></term>
+        <term><option>--tasks-max=<replaceable>TASKS</replaceable></option></term>
 
         <listitem><para>Takes a non-zero unsigned integer as argument. Configures the maximum number of tasks
         (i.e. threads, where each process is at least one thread) the user may have at any given time. This
@@ -674,8 +720,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--memory-high=</option><replaceable>BYTES</replaceable></term>
-        <term><option>--memory-max=</option><replaceable>BYTES</replaceable></term>
+        <term><option>--memory-high=<replaceable>BYTES</replaceable></option></term>
+        <term><option>--memory-max=<replaceable>BYTES</replaceable></option></term>
 
         <listitem><para>Set a limit on the memory a user may take up on a system at any given time in bytes
         (the usual K, M, G, … suffixes are supported, to the base of 1024). This includes all memory used by
@@ -689,8 +735,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--cpu-weight=</option><replaceable>WEIGHT</replaceable></term>
-        <term><option>--io-weight=</option><replaceable>WEIGHT</replaceable></term>
+        <term><option>--cpu-weight=<replaceable>WEIGHT</replaceable></option></term>
+        <term><option>--io-weight=<replaceable>WEIGHT</replaceable></option></term>
 
         <listitem><para>Set CPU and IO scheduling weights of the processes of the user, including those of
         processes forked off by the user that changed user credentials. Takes a numeric value in the range
@@ -703,7 +749,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--storage=</option><replaceable>STORAGE</replaceable></term>
+        <term><option>--storage=<replaceable>STORAGE</replaceable></option></term>
 
         <listitem><para>Selects the storage mechanism to use for this home directory. Takes one of
         <literal>luks</literal>, <literal>fscrypt</literal>, <literal>directory</literal>,
@@ -716,7 +762,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--image-path=</option><replaceable>PATH</replaceable></term>
+        <term><option>--image-path=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>Takes a file system path. Configures where to place the user's home directory. When
         LUKS2 storage is used refers to the path to the loopback file, otherwise to the path to the home
@@ -732,7 +778,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--drop-caches=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--drop-caches=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Automatically flush OS file system caches on logout. This is useful in combination
         with the fscrypt storage backend to ensure the OS does not keep decrypted versions of the files and
@@ -745,7 +791,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--fs-type=</option><replaceable>TYPE</replaceable></term>
+        <term><option>--fs-type=<replaceable>TYPE</replaceable></option></term>
 
         <listitem><para>When LUKS2 storage is used configures the file system type to use inside the home
         directory LUKS2 container. One of <literal>btrfs</literal>, <literal>ext4</literal>,
@@ -758,7 +804,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--luks-discard=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--luks-discard=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>When LUKS2 storage is used configures whether to enable the
         <literal>discard</literal> feature of the file system. If enabled the file system on top of the LUKS2
@@ -774,7 +820,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--luks-offline-discard=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--luks-offline-discard=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Similar to <option>--luks-discard=</option>, controls the trimming of the file
         system. However, while <option>--luks-discard=</option> controls what happens when the home directory
@@ -786,7 +832,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--luks-extra-mount-options=</option><replaceable>OPTIONS</replaceable></term>
+        <term><option>--luks-extra-mount-options=<replaceable>OPTIONS</replaceable></option></term>
 
         <listitem><para>Takes a string containing additional mount options to use when mounting the LUKS
         volume. If specified, this string will be appended to the default, built-in mount
@@ -796,16 +842,16 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--luks-cipher=</option><replaceable>CIPHER</replaceable></term>
-        <term><option>--luks-cipher-mode=</option><replaceable>MODE</replaceable></term>
-        <term><option>--luks-volume-key-size=</option><replaceable>BYTES</replaceable></term>
-        <term><option>--luks-pbkdf-type=</option><replaceable>TYPE</replaceable></term>
-        <term><option>--luks-pbkdf-hash-algorithm=</option><replaceable>ALGORITHM</replaceable></term>
-        <term><option>--luks-pbkdf-force-iterations=</option><replaceable>ITERATIONS</replaceable></term>
-        <term><option>--luks-pbkdf-time-cost=</option><replaceable>SECONDS</replaceable></term>
-        <term><option>--luks-pbkdf-memory-cost=</option><replaceable>BYTES</replaceable></term>
-        <term><option>--luks-pbkdf-parallel-threads=</option><replaceable>THREADS</replaceable></term>
-        <term><option>--luks-sector-size=</option><replaceable>BYTES</replaceable></term>
+        <term><option>--luks-cipher=<replaceable>CIPHER</replaceable></option></term>
+        <term><option>--luks-cipher-mode=<replaceable>MODE</replaceable></option></term>
+        <term><option>--luks-volume-key-size=<replaceable>BYTES</replaceable></option></term>
+        <term><option>--luks-pbkdf-type=<replaceable>TYPE</replaceable></option></term>
+        <term><option>--luks-pbkdf-hash-algorithm=<replaceable>ALGORITHM</replaceable></option></term>
+        <term><option>--luks-pbkdf-force-iterations=<replaceable>ITERATIONS</replaceable></option></term>
+        <term><option>--luks-pbkdf-time-cost=<replaceable>SECONDS</replaceable></option></term>
+        <term><option>--luks-pbkdf-memory-cost=<replaceable>BYTES</replaceable></option></term>
+        <term><option>--luks-pbkdf-parallel-threads=<replaceable>THREADS</replaceable></option></term>
+        <term><option>--luks-sector-size=<replaceable>BYTES</replaceable></option></term>
 
         <listitem><para>Configures various cryptographic parameters for the LUKS2 storage mechanism. See
         <citerefentry
@@ -863,9 +909,9 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--nosuid=</option><replaceable>BOOL</replaceable></term>
-        <term><option>--nodev=</option><replaceable>BOOL</replaceable></term>
-        <term><option>--noexec=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--nosuid=<replaceable>BOOL</replaceable></option></term>
+        <term><option>--nodev=<replaceable>BOOL</replaceable></option></term>
+        <term><option>--noexec=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Configures the <literal>nosuid</literal>, <literal>nodev</literal> and
         <literal>noexec</literal> mount options for the home directories. By default <literal>nodev</literal>
@@ -877,10 +923,10 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--cifs-domain=</option><replaceable>DOMAIN</replaceable></term>
-        <term><option>--cifs-user-name=</option><replaceable>USER</replaceable></term>
-        <term><option>--cifs-service=</option><replaceable>SERVICE</replaceable></term>
-        <term><option>--cifs-extra-mount-options=</option><replaceable>OPTIONS</replaceable></term>
+        <term><option>--cifs-domain=<replaceable>DOMAIN</replaceable></option></term>
+        <term><option>--cifs-user-name=<replaceable>USER</replaceable></option></term>
+        <term><option>--cifs-service=<replaceable>SERVICE</replaceable></option></term>
+        <term><option>--cifs-extra-mount-options=<replaceable>OPTIONS</replaceable></option></term>
 
         <listitem><para>Configures the Windows File Sharing (CIFS) domain and user to associate with the home
         directory/user account, as well as the file share ("service") to mount as directory. The latter is
@@ -896,7 +942,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--stop-delay=</option><replaceable>SECS</replaceable></term>
+        <term><option>--stop-delay=<replaceable>SECS</replaceable></option></term>
 
         <listitem><para>Configures the time the per-user service manager shall continue to run after the all
         sessions of the user ended. The default is configured in
@@ -909,7 +955,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--kill-processes=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--kill-processes=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Configures whether to kill all processes of the user on logout. The default is
         configured in
@@ -919,13 +965,35 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--auto-login=</option><replaceable>BOOL</replaceable></term>
+        <term><option>--auto-login=<replaceable>BOOL</replaceable></option></term>
 
         <listitem><para>Takes a boolean argument. Configures whether the graphical UI of the system should
         automatically log this user in if possible. Defaults to off. If less or more than one user is marked
         this way automatic login is disabled.</para>
 
         <xi:include href="version-info.xml" xpointer="v245"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--session-launcher=<replaceable>LAUNCHER</replaceable></option></term>
+
+        <listitem><para>Takes a string argument. Configures the user's preferred session launcher
+        .desktop entry file (i.e. <literal>gnome</literal>, <literal>plasma</literal>, or other names that
+        appear in <filename>/usr/share/xesssions/</filename> or <filename>/usr/share/wayland-sessions</filename>).
+        This is read by the display manager to pick the default session that is launched when the user logs in.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--session-type=<replaceable>TYPE</replaceable></option></term>
+
+        <listitem><para>Takes a string argument. Configures the user's preferred session type
+        (i.e. <literal>x11</literal>, <literal>wayland</literal>, and other values accepted by
+        <varname>$XDG_SESSION_TYPE</varname>). This is read by the display manage to pick the
+        default session type the user is logged into.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -1002,7 +1070,7 @@
 
       <varlistentry>
         <term><command>create</command> <replaceable>USER</replaceable></term>
-        <term><command>create</command> <option>--identity=</option><replaceable>PATH</replaceable> <optional><replaceable>USER</replaceable></optional></term>
+        <term><command>create</command> <option>--identity=<replaceable>PATH</replaceable></option> <optional><replaceable>USER</replaceable></optional></term>
 
         <listitem><para>Create a new home directory/user account of the specified name. Use the various
         user record property options (as documented above) to control various aspects of the home directory
@@ -1026,7 +1094,7 @@
 
       <varlistentry>
         <term><command>update</command> <replaceable>USER</replaceable></term>
-        <term><command>update</command> <option>--identity=</option><replaceable>PATH</replaceable> <optional><replaceable>USER</replaceable></optional></term>
+        <term><command>update</command> <option>--identity=<replaceable>PATH</replaceable></option> <optional><replaceable>USER</replaceable></optional></term>
 
         <listitem><para>Update a home directory/user account. Use the various user record property options
         (as documented above) to make changes to the account, or alternatively provide a full, updated JSON
@@ -1138,6 +1206,59 @@
 
         <xi:include href="version-info.xml" xpointer="v250"/></listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><command>firstboot</command></term>
+
+        <listitem><para>This command is supposed to be invoked during the initial boot of the system. It
+        checks whether any regular home area exists so far, and if not queries the user interactively on the
+        console for user name and password and creates one. Alternatively, if one or more service credentials
+        whose name starts with <literal>home.create.</literal> are passed to the command (containing a user
+        record in JSON format) these users are automatically created at boot.</para>
+
+        <para>This command is invoked by the <filename>systemd-homed-firstboot.service</filename> service
+        unit.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>Credentials</title>
+
+    <para>When invoked with the <command>firstboot</command> command, <command>homectl</command> supports the
+    service credentials logic as implemented by
+    <varname>ImportCredential=</varname>/<varname>LoadCredential=</varname>/<varname>SetCredential=</varname>
+    (see <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+    details). The following credentials are used when passed in:</para>
+
+    <variablelist class='system-credentials'>
+      <varlistentry>
+        <term><varname>home.create.*</varname></term>
+
+        <listitem><para>If one or more credentials whose names begin with <literal>home.create.</literal>,
+        followed by a valid UNIX username are passed, a new home area is created, one for each specified user
+        record.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>Kernel Command Line</title>
+
+    <variablelist class='kernel-commandline-options'>
+      <varlistentry>
+        <term><varname>systemd.firstboot=</varname></term>
+
+        <listitem><para>This boolean will disable the effect of <command>homectl firstboot</command>
+        command. It's primarily interpreted by
+        <citerefentry><refentrytitle>systemd-firstboot</refentrytitle><manvolnum>1</manvolnum></citerefentry>.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -1206,14 +1327,14 @@ homectl update nihilbaxter --fido2-device=auto</programlisting>
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-homed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>homed.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>userdbctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>useradd</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry project='man-pages'><refentrytitle>cryptsetup</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-homed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>homed.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>userdbctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>useradd</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry project='man-pages'><refentrytitle>cryptsetup</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

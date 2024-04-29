@@ -120,6 +120,9 @@ typedef enum ManagerTimestamp {
         MANAGER_TIMESTAMP_INITRD_GENERATORS_FINISH,
         MANAGER_TIMESTAMP_INITRD_UNITS_LOAD_START,
         MANAGER_TIMESTAMP_INITRD_UNITS_LOAD_FINISH,
+
+        MANAGER_TIMESTAMP_SHUTDOWN_START,
+
         _MANAGER_TIMESTAMP_MAX,
         _MANAGER_TIMESTAMP_INVALID = -EINVAL,
 } ManagerTimestamp;
@@ -137,6 +140,7 @@ typedef enum WatchdogType {
 #include "path-lookup.h"
 #include "show-status.h"
 #include "unit-name.h"
+#include "unit.h"
 
 typedef enum ManagerTestRunFlags {
         MANAGER_TEST_NORMAL                  = 0,       /* run normally */
@@ -282,6 +286,9 @@ struct Manager {
         int user_lookup_fds[2];
         sd_event_source *user_lookup_event_source;
 
+        int handoff_timestamp_fds[2];
+        sd_event_source *handoff_timestamp_event_source;
+
         RuntimeScope runtime_scope;
 
         LookupPaths lookup_paths;
@@ -375,6 +382,8 @@ struct Manager {
         bool etc_localtime_accessible;
 
         ManagerObjective objective;
+        /* Objective as it was before serialization, mostly to detect soft-reboots */
+        ManagerObjective previous_objective;
 
         /* Flags */
         bool dispatching_load_queue;
@@ -438,10 +447,9 @@ struct Manager {
         /* This is true before and after switching root. */
         bool switching_root;
 
-        /* This maps all possible path prefixes to the units needing
-         * them. It's a hashmap with a path string as key and a Set as
-         * value where Unit objects are contained. */
-        Hashmap *units_requiring_mounts_for;
+        /* These map all possible path prefixes to the units needing them. They are hashmaps with a path
+         * string as key, and a Set as value where Unit objects are contained. */
+        Hashmap *units_needing_mounts_for[_UNIT_MOUNT_DEPENDENCY_TYPE_MAX];
 
         /* Used for processing polkit authorization responses */
         Hashmap *polkit_registry;
@@ -488,8 +496,8 @@ struct Manager {
         /* Reference to RestrictFileSystems= BPF program */
         struct restrict_fs_bpf *restrict_fs;
 
-        /* Allow users to configure a rate limit for Reload() operations */
-        RateLimit reload_ratelimit;
+        /* Allow users to configure a rate limit for Reload()/Reexecute() operations */
+        RateLimit reload_reexec_ratelimit;
         /* Dump*() are slow, so always rate limit them to 10 per 10 minutes */
         RateLimit dump_ratelimit;
 
@@ -501,6 +509,8 @@ struct Manager {
         /* Pin the systemd-executor binary, so that it never changes until re-exec, ensuring we don't have
          * serialization/deserialization compatibility issues during upgrades. */
         int executor_fd;
+
+        unsigned soft_reboots_count;
 };
 
 static inline usec_t manager_default_timeout_abort_usec(Manager *m) {
@@ -550,7 +560,7 @@ int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error 
 
 void manager_clear_jobs(Manager *m);
 
-void manager_unwatch_pidref(Manager *m, PidRef *pid);
+void manager_unwatch_pidref(Manager *m, const PidRef *pid);
 
 unsigned manager_dispatch_load_queue(Manager *m);
 
@@ -575,6 +585,7 @@ void manager_reset_failed(Manager *m);
 
 void manager_send_unit_audit(Manager *m, Unit *u, int type, bool success);
 void manager_send_unit_plymouth(Manager *m, Unit *u);
+void manager_send_unit_supervisor(Manager *m, Unit *u, bool active);
 
 bool manager_unit_inactive_or_pending(Manager *m, const char *name);
 
@@ -596,7 +607,7 @@ double manager_get_progress(Manager *m);
 
 void manager_status_printf(Manager *m, StatusType type, const char *status, const char *format, ...) _printf_(4,5);
 
-Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
+Set* manager_get_units_needing_mounts_for(Manager *m, const char *path, UnitMountDependencyType t);
 
 ManagerState manager_state(Manager *m);
 
@@ -608,8 +619,6 @@ int manager_ref_uid(Manager *m, uid_t uid, bool clean_ipc);
 void manager_unref_gid(Manager *m, gid_t gid, bool destroy_now);
 int manager_ref_gid(Manager *m, gid_t gid, bool clean_ipc);
 
-char* manager_taint_string(const Manager *m);
-
 void manager_ref_console(Manager *m);
 void manager_unref_console(Manager *m);
 
@@ -619,13 +628,16 @@ void manager_restore_original_log_level(Manager *m);
 void manager_override_log_target(Manager *m, LogTarget target);
 void manager_restore_original_log_target(Manager *m);
 
-const char *manager_state_to_string(ManagerState m) _const_;
-ManagerState manager_state_from_string(const char *s) _pure_;
-
-const char *manager_get_confirm_spawn(Manager *m);
+const char* manager_get_confirm_spawn(Manager *m);
 void manager_disable_confirm_spawn(void);
 
-const char *manager_timestamp_to_string(ManagerTimestamp m) _const_;
+const char* manager_state_to_string(ManagerState m) _const_;
+ManagerState manager_state_from_string(const char *s) _pure_;
+
+const char* manager_objective_to_string(ManagerObjective m) _const_;
+ManagerObjective manager_objective_from_string(const char *s) _pure_;
+
+const char* manager_timestamp_to_string(ManagerTimestamp m) _const_;
 ManagerTimestamp manager_timestamp_from_string(const char *s) _pure_;
 ManagerTimestamp manager_timestamp_initrd_mangle(ManagerTimestamp s);
 
@@ -644,3 +656,26 @@ OOMPolicy oom_policy_from_string(const char *s) _pure_;
 
 void unit_defaults_init(UnitDefaults *defaults, RuntimeScope scope);
 void unit_defaults_done(UnitDefaults *defaults);
+
+enum {
+        /* most important … */
+        EVENT_PRIORITY_USER_LOOKUP       = SD_EVENT_PRIORITY_NORMAL-11,
+        EVENT_PRIORITY_MOUNT_TABLE       = SD_EVENT_PRIORITY_NORMAL-10,
+        EVENT_PRIORITY_SWAP_TABLE        = SD_EVENT_PRIORITY_NORMAL-10,
+        EVENT_PRIORITY_CGROUP_AGENT      = SD_EVENT_PRIORITY_NORMAL-9, /* cgroupv1 */
+        EVENT_PRIORITY_CGROUP_INOTIFY    = SD_EVENT_PRIORITY_NORMAL-9, /* cgroupv2 */
+        EVENT_PRIORITY_CGROUP_OOM        = SD_EVENT_PRIORITY_NORMAL-8,
+        EVENT_PRIORITY_HANDOFF_TIMESTAMP = SD_EVENT_PRIORITY_NORMAL-7,
+        EVENT_PRIORITY_EXEC_FD           = SD_EVENT_PRIORITY_NORMAL-6,
+        EVENT_PRIORITY_NOTIFY            = SD_EVENT_PRIORITY_NORMAL-5,
+        EVENT_PRIORITY_SIGCHLD           = SD_EVENT_PRIORITY_NORMAL-4,
+        EVENT_PRIORITY_SIGNALS           = SD_EVENT_PRIORITY_NORMAL-3,
+        EVENT_PRIORITY_CGROUP_EMPTY      = SD_EVENT_PRIORITY_NORMAL-2,
+        EVENT_PRIORITY_TIME_CHANGE       = SD_EVENT_PRIORITY_NORMAL-1,
+        EVENT_PRIORITY_TIME_ZONE         = SD_EVENT_PRIORITY_NORMAL-1,
+        EVENT_PRIORITY_IPC               = SD_EVENT_PRIORITY_NORMAL,
+        EVENT_PRIORITY_REWATCH_PIDS      = SD_EVENT_PRIORITY_IDLE,
+        EVENT_PRIORITY_SERVICE_WATCHDOG  = SD_EVENT_PRIORITY_IDLE+1,
+        EVENT_PRIORITY_RUN_QUEUE         = SD_EVENT_PRIORITY_IDLE+2,
+        /* … to least important */
+};

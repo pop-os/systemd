@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="varlinkctl"
@@ -50,7 +50,7 @@
       <arg choice="plain">call</arg>
       <arg choice="plain"><replaceable>ADDRESS</replaceable></arg>
       <arg choice="plain"><replaceable>METHOD</replaceable></arg>
-      <arg choice="opt"><replaceable>PARAMETERS</replaceable></arg>
+      <arg choice="opt"><replaceable>ARGUMENTS</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis>
@@ -71,11 +71,16 @@
 
     <itemizedlist>
       <listitem><para>A Varlink service reference starting with the <literal>unix:</literal> string, followed
-      by an absolute <constant>AF_UNIX</constant> path, or by <literal>@</literal> and an arbitrary string
+      by an absolute <constant>AF_UNIX</constant> socket path, or by <literal>@</literal> and an arbitrary string
       (the latter for referencing sockets in the abstract namespace).</para></listitem>
 
       <listitem><para>A Varlink service reference starting with the <literal>exec:</literal> string, followed
       by an absolute path of a binary to execute.</para></listitem>
+
+      <listitem><para>A Varlink service reference starting with the <literal>ssh:</literal> string, followed
+      by an SSH host specification, followed by <literal>:</literal>, followed by an absolute
+      <constant>AF_UNIX</constant> socket path. (This requires OpenSSH 9.4 or newer on the server side,
+      abstract namespace sockets are not supported.)</para></listitem>
     </itemizedlist>
 
     <para>For convenience these two simpler (redundant) service address syntaxes are also supported:</para>
@@ -100,7 +105,7 @@
         <term><command>info</command> <replaceable>ADDRESS</replaceable></term>
 
         <listitem><para>Show brief information about the specified service, including vendor name and list of
-        implemented interfaces. Expects a service address in the formats described above.</para>
+        implemented interfaces. Expects a service address in one of the formats described above.</para>
 
         <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
@@ -109,7 +114,7 @@
         <term><command>list-interfaces</command> <replaceable>ADDRESS</replaceable></term>
 
         <listitem><para>Show list of interfaces implemented by the specified service. Expects a service
-        address in the formats described above.</para>
+        address in one of the formats described above.</para>
 
         <xi:include href="version-info.xml" xpointer="v255"/></listitem>
       </varlistentry>
@@ -118,7 +123,7 @@
         <term><command>introspect</command> <replaceable>ADDRESS</replaceable> <replaceable>INTERFACE</replaceable></term>
 
         <listitem><para>Show interface definition of the specified interface provided by the specified
-        service. Expects a service address in the formats described above and a Varlink interface
+        service. Expects a service address in one of the formats described above and a Varlink interface
         name.</para>
 
         <xi:include href="version-info.xml" xpointer="v255"/></listitem>
@@ -180,6 +185,15 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>--collect</option></term>
+
+        <listitem><para>This is similar to <option>--more</option> but collects all responses in a JSON
+        array, and prints it, rather than in JSON_SEQ mode.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--oneway</option></term>
 
         <listitem><para>When used with <command>call</command>: do not expect a method reply. If this flag
@@ -190,7 +204,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--json=</option><replaceable>MODE</replaceable></term>
+        <term><option>--json=<replaceable>MODE</replaceable></option></term>
 
         <listitem>
           <para>Selects the JSON output formatting, one of <literal>pretty</literal> (for nicely indented,
@@ -307,9 +321,9 @@ method Extend(
   <refsect1>
     <title>See Also</title>
 
-    <para>
-      <citerefentry><refentrytitle>busctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <ulink url="https://varlink.org/">Varlink</ulink>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>busctl</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><ulink url="https://varlink.org/">Varlink</ulink></member>
+    </simplelist></para>
   </refsect1>
 </refentry>

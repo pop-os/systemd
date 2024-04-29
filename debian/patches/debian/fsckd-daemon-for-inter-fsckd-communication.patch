@@ -61,10 +61,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index 5dc3e08..5feb43d 100644
+index a9a2a25..eb55d6b 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -933,6 +933,7 @@ manpages = [
+@@ -939,6 +939,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service', 'systemd-fsck-usr.service'],
    ''],
@@ -241,10 +241,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index a577ac7..da723fa 100644
+index cecdbc3..711ea30 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2152,6 +2152,7 @@ subdir('src/environment-d-generator')
+@@ -2263,6 +2263,7 @@ subdir('src/environment-d-generator')
  subdir('src/escape')
  subdir('src/firstboot')
  subdir('src/fsck')
@@ -987,10 +987,10 @@ index 0000000..6d3c125
 +        },
 +]
 diff --git a/units/meson.build b/units/meson.build
-index e7bfb7f..0aee573 100644
+index 5b2410f..ea5cb13 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -288,6 +288,8 @@ units = [
+@@ -309,6 +309,8 @@ units = [
          },
          { 'file' : 'systemd-fsck-root.service.in' },
          { 'file' : 'systemd-fsck@.service.in' },

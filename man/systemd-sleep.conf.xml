@@ -1,6 +1,6 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-sleep.conf"
@@ -22,10 +22,14 @@
   </refnamediv>
 
   <refsynopsisdiv>
-    <para><filename>/etc/systemd/sleep.conf</filename></para>
-    <para><filename>/etc/systemd/sleep.conf.d/*.conf</filename></para>
-    <para><filename>/run/systemd/sleep.conf.d/*.conf</filename></para>
-    <para><filename>/usr/lib/systemd/sleep.conf.d/*.conf</filename></para>
+    <para><simplelist>
+      <member><filename>/etc/systemd/sleep.conf</filename></member>
+      <member><filename>/run/systemd/sleep.conf</filename></member>
+      <member><filename>/usr/lib/systemd/sleep.conf</filename></member>
+      <member><filename>/etc/systemd/sleep.conf.d/*.conf</filename></member>
+      <member><filename>/run/systemd/sleep.conf.d/*.conf</filename></member>
+      <member><filename>/usr/lib/systemd/sleep.conf.d/*.conf</filename></member>
+    </simplelist></para>
   </refsynopsisdiv>
 
   <refsect1>
@@ -150,27 +154,6 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>HibernateMode=</varname></term>
-
-        <listitem><para>The string to be written to <filename>/sys/power/disk</filename> by <citerefentry>
-        <refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
-        More than one value can be specified by separating multiple values with whitespace. They will be
-        tried in turn, until one is written without error. If none of the writes succeed, the operation will
-        be aborted.</para>
-
-        <para>The allowed set of values is determined by the kernel and is shown in the file itself (use
-        <command>cat /sys/power/disk</command> to display). See the kernel documentation page
-        <ulink url="https://www.kernel.org/doc/html/latest/admin-guide/pm/sleep-states.html#basic-sysfs-interfaces-for-system-suspend-and-hibernation">
-          Basic sysfs Interfaces for System Suspend and Hibernation</ulink> for more details.</para>
-
-        <para>
-        <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        uses the value of <varname>HibernateMode=</varname> when hibernating.</para>
-
-        <xi:include href="version-info.xml" xpointer="v203"/></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><varname>SuspendState=</varname></term>
 
         <listitem><para>The string to be written to <filename>/sys/power/state</filename> by <citerefentry>
@@ -181,7 +164,7 @@
 
         <para>The allowed set of values is determined by the kernel and is shown in the file itself (use
         <command>cat /sys/power/state</command> to display). See <ulink
-        url="https://www.kernel.org/doc/html/latest/admin-guide/pm/sleep-states.html#basic-sysfs-interfaces-for-system-suspend-and-hibernation">
+        url="https://docs.kernel.org/admin-guide/pm/sleep-states.html#basic-sysfs-interfaces-for-system-suspend-and-hibernation">
           Basic sysfs Interfaces for System Suspend and Hibernation</ulink> for more details.</para>
 
         <para>
@@ -189,6 +172,45 @@
         uses this value when suspending.</para>
 
         <xi:include href="version-info.xml" xpointer="v203"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>HibernateMode=</varname></term>
+
+        <listitem><para>The string to be written to <filename>/sys/power/disk</filename> by <citerefentry>
+        <refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+        More than one value can be specified by separating multiple values with whitespace. They will be
+        tried in turn, until one is written without error. If none of the writes succeed, the operation will
+        be aborted.</para>
+
+        <para>The allowed set of values is determined by the kernel and is shown in the file itself (use
+        <command>cat /sys/power/disk</command> to display). See the kernel documentation page
+        <ulink url="https://docs.kernel.org/admin-guide/pm/sleep-states.html#basic-sysfs-interfaces-for-system-suspend-and-hibernation">
+          Basic sysfs Interfaces for System Suspend and Hibernation</ulink> for more details.</para>
+
+        <para>
+        <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        uses the value of <varname>HibernateMode=</varname> when hibernating.</para>
+
+        <xi:include href="version-info.xml" xpointer="v203"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemorySleepMode=</varname></term>
+
+        <listitem><para>The string to be written to <filename>/sys/power/mem_sleep</filename>
+        when <option>SuspendState=mem</option> or <command>hybrid-sleep</command> is used.
+        More than one value can be specified by separating multiple values with whitespace. They will be
+        tried in turn, until one is written without error. If none of the writes succeed, the operation will
+        be aborted. Defaults to empty, i.e. the kernel default or kernel command line option
+        <varname>mem_sleep_default=</varname> is respected.</para>
+
+        <para>The allowed set of values is determined by the kernel and is shown in the file itself (use
+        <command>cat /sys/power/mem_sleep</command> to display). See the kernel documentation page
+        <ulink url="https://docs.kernel.org/admin-guide/pm/sleep-states.html#basic-sysfs-interfaces-for-system-suspend-and-hibernation">
+          Basic sysfs Interfaces for System Suspend and Hibernation</ulink> for more details.</para>
+
+        <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -232,15 +254,15 @@ SuspendState=freeze</programlisting></para>
 
   <refsect1>
     <title>See Also</title>
-    <para>
-      <citerefentry><refentrytitle>systemd-sleep</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-    </para>
+    <para><simplelist type="inline">
+      <member><citerefentry><refentrytitle>systemd-sleep</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
+    </simplelist></para>
   </refsect1>
 
 </refentry>

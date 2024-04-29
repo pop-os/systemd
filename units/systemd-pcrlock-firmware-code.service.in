@@ -8,11 +8,11 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=Lock Firmware Code to TPM2 PCR Policy
+Description=Lock Firmware Code to TPM PCR Policy
 Documentation=man:systemd-pcrlock(8)
 DefaultDependencies=no
 Conflicts=shutdown.target
-After=systemd-tpm2-setup.service
+After=systemd-tpm2-setup.service systemd-remount-fs.service var.mount
 Before=sysinit.target shutdown.target systemd-pcrlock-make-policy.service
 ConditionPathExists=!/etc/initrd-release
 ConditionSecurity=measured-uki

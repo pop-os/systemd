@@ -47,6 +47,7 @@
 #define SPECIAL_TIME_SYNC_TARGET "time-sync.target"       /* LSB's $time */
 #define SPECIAL_TIME_SET_TARGET "time-set.target"
 #define SPECIAL_BASIC_TARGET "basic.target"
+#define SPECIAL_TPM2_TARGET "tpm2.target"
 
 /* LSB compatibility */
 #define SPECIAL_NETWORK_TARGET "network.target"           /* LSB's $network */
@@ -83,8 +84,10 @@
 #define SPECIAL_FSCK_SERVICE "systemd-fsck@.service"
 #define SPECIAL_FSCK_ROOT_SERVICE "systemd-fsck-root.service"
 #define SPECIAL_FSCK_USR_SERVICE "systemd-fsck-usr.service"
-#define SPECIAL_QUOTACHECK_SERVICE "systemd-quotacheck.service"
-#define SPECIAL_QUOTAON_SERVICE "quotaon.service"
+#define SPECIAL_QUOTACHECK_SERVICE "systemd-quotacheck@.service"
+#define SPECIAL_QUOTACHECK_ROOT_SERVICE "systemd-quotacheck-root.service"
+#define SPECIAL_QUOTAON_SERVICE "quotaon@.service"
+#define SPECIAL_QUOTAON_ROOT_SERVICE "quotaon-root.service"
 #define SPECIAL_REMOUNT_FS_SERVICE "systemd-remount-fs.service"
 #define SPECIAL_VOLATILE_ROOT_SERVICE "systemd-volatile-root.service"
 #define SPECIAL_UDEVD_SERVICE "systemd-udevd.service"

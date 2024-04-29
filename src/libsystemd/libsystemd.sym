@@ -834,3 +834,12 @@ global:
         sd_id128_get_app_specific;
         sd_device_enumerator_add_match_property_required;
 } LIBSYSTEMD_254;
+
+LIBSYSTEMD_256 {
+global:
+        sd_bus_creds_get_pidfd_dup;
+        sd_bus_creds_new_from_pidfd;
+        sd_id128_get_invocation_app_specific;
+        sd_journal_stream_fd_with_namespace;
+        sd_event_source_get_inotify_path;
+} LIBSYSTEMD_255;

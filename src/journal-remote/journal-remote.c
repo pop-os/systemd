@@ -86,7 +86,6 @@ static int open_output(RemoteServer *s, Writer *w, const char* host) {
                         UINT64_MAX,
                         &w->metrics,
                         w->mmap,
-                        NULL,
                         &w->journal);
         if (r < 0)
                 return log_error_errno(r, "Failed to open output journal %s: %m", filename);
@@ -258,19 +257,19 @@ int journal_remote_add_source(RemoteServer *s, int fd, char* name, bool own_name
                 return r;
         }
 
-        r = sd_event_add_io(s->events, &source->event,
+        r = sd_event_add_io(s->event, &source->event,
                             fd, EPOLLIN|EPOLLRDHUP|EPOLLPRI,
                             dispatch_raw_source_event, source);
         if (r == 0) {
                 /* Add additional source for buffer processing. It will be
                  * enabled later. */
-                r = sd_event_add_defer(s->events, &source->buffer_event,
+                r = sd_event_add_defer(s->event, &source->buffer_event,
                                        dispatch_raw_source_until_block, source);
                 if (r == 0)
                         r = sd_event_source_set_enabled(source->buffer_event, SD_EVENT_OFF);
         } else if (r == -EPERM) {
                 log_debug("Falling back to sd_event_add_defer for fd:%d (%s)", fd, name);
-                r = sd_event_add_defer(s->events, &source->event,
+                r = sd_event_add_defer(s->event, &source->event,
                                        dispatch_blocking_source_event, source);
                 if (r == 0)
                         r = sd_event_source_set_enabled(source->event, SD_EVENT_ON);
@@ -302,7 +301,7 @@ int journal_remote_add_raw_socket(RemoteServer *s, int fd) {
         assert(s);
         assert(fd >= 0);
 
-        r = sd_event_add_io(s->events, &s->listen_event,
+        r = sd_event_add_io(s->event, &s->listen_event,
                             fd, EPOLLIN,
                             dispatch_raw_connection_event, s);
         if (r < 0)
@@ -348,7 +347,7 @@ int journal_remote_server_init(
         else
                 assert_not_reached();
 
-        r = sd_event_default(&s->events);
+        r = sd_event_default(&s->event);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate event loop: %m");
 
@@ -376,10 +375,8 @@ void journal_remote_server_destroy(RemoteServer *s) {
         writer_unref(s->_single_writer);
         hashmap_free(s->writers);
 
-        sd_event_source_unref(s->sigterm_event);
-        sd_event_source_unref(s->sigint_event);
         sd_event_source_unref(s->listen_event);
-        sd_event_unref(s->events);
+        sd_event_unref(s->event);
 
         if (s == journal_remote_server_global)
                 journal_remote_server_global = NULL;
@@ -517,7 +514,9 @@ static int accept_connection(
 
         switch (socket_address_family(addr)) {
         case AF_INET:
-        case AF_INET6: {
+        case AF_INET6:
+        case AF_VSOCK:
+        case AF_UNIX: {
                 _cleanup_free_ char *a = NULL;
                 char *b;
 
@@ -525,7 +524,7 @@ static int accept_connection(
                 if (r < 0)
                         return log_error_errno(r, "socket_address_print(): %m");
 
-                r = socknameinfo_pretty(&addr->sockaddr, addr->size, &b);
+                r = socknameinfo_pretty(&addr->sockaddr.sa, addr->size, &b);
                 if (r < 0)
                         return log_error_errno(r, "Resolving hostname failed: %m");
 

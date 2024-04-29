@@ -175,7 +175,7 @@ int unit_file_set_default(
 int unit_file_get_default(
                 RuntimeScope scope,
                 const char *root_dir,
-                char **name);
+                char **ret);
 int unit_file_add_dependency(
                 RuntimeScope scope,
                 UnitFileFlags flags,
@@ -193,7 +193,11 @@ int unit_file_lookup_state(
                 UnitFileState *ret);
 
 int unit_file_get_state(RuntimeScope scope, const char *root_dir, const char *filename, UnitFileState *ret);
-int unit_file_exists(RuntimeScope scope, const LookupPaths *paths, const char *name);
+
+int unit_file_exists_full(RuntimeScope scope, const LookupPaths *paths, const char *name, char **ret_path);
+static inline int unit_file_exists(RuntimeScope scope, const LookupPaths *paths, const char *name) {
+        return unit_file_exists_full(scope, paths, name, NULL);
+}
 
 int unit_file_get_list(RuntimeScope scope, const char *root_dir, Hashmap *h, char **states, char **patterns);
 
@@ -201,7 +205,14 @@ extern const struct hash_ops unit_file_list_hash_ops_free;
 
 InstallChangeType install_changes_add(InstallChange **changes, size_t *n_changes, InstallChangeType type, const char *path, const char *source);
 void install_changes_free(InstallChange *changes, size_t n_changes);
-void install_changes_dump(int r, const char *verb, const InstallChange *changes, size_t n_changes, bool quiet);
+
+int install_change_dump_error(const InstallChange *change, char **ret_errmsg, const char **ret_bus_error);
+void install_changes_dump(
+                int error,
+                const char *verb,
+                const InstallChange *changes,
+                size_t n_changes,
+                bool quiet);
 
 int unit_file_verify_alias(
                 const InstallInfo *info,

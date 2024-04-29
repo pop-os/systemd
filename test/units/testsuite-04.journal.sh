@@ -3,10 +3,6 @@
 set -eux
 set -o pipefail
 
-# This fails due to https://github.com/systemd/systemd/issues/30886
-# but it is too complex and risky to backport, so disable the test
-exit 0
-
 # Rotation/flush test, see https://github.com/systemd/systemd/issues/19895
 journalctl --relinquish-var
 [[ "$(systemd-detect-virt -v)" == "qemu" ]] && ITERATIONS=10 || ITERATIONS=50
@@ -111,6 +107,16 @@ systemctl start silent-success
 journalctl --sync
 [[ -z "$(journalctl -b -q -u silent-success.service)" ]]
 
+# Test syslog identifiers exclusion
+systemctl start verbose-success.service
+timeout 30 bash -xec 'while systemctl -q is-active verbose-success.service; do sleep 1; done'
+journalctl --sync
+[[ -n "$(journalctl -b -q -u verbose-success.service -t systemd)" ]]
+[[ -n "$(journalctl -b -q -u verbose-success.service -t echo)" ]]
+[[ -n "$(journalctl -b -q -u verbose-success.service -T systemd)" ]]
+[[ -n "$(journalctl -b -q -u verbose-success.service -T echo)" ]]
+[[ -z "$(journalctl -b -q -u verbose-success.service -T echo -T '(echo)' -T systemd -T '(systemd)' -T systemd-executor)" ]]
+
 # Exercise the matching machinery
 SYSTEMD_LOG_LEVEL=debug journalctl -b -n 1 /dev/null /dev/zero /dev/null /dev/null /dev/null
 journalctl -b -n 1 /bin/true /bin/false
@@ -127,6 +133,8 @@ journalctl -b -n 1 -r --user-unit "*"
 
 # Facilities & priorities
 journalctl --facility help
+journalctl --facility help | grep -F 'kern'
+journalctl --facility help | grep -F 'mail'
 journalctl --facility kern -n 1
 journalctl --facility syslog --priority 0..3 -n 1
 journalctl --facility syslog --priority 3..0 -n 1
@@ -138,6 +146,8 @@ journalctl --facility daemon --priority 5..crit -n 1
 
 # Assorted combinations
 journalctl -o help
+journalctl -o help | grep -F 'short'
+journalctl -o help | grep -F 'export'
 journalctl -q -n all -a | grep . >/dev/null
 journalctl -q --no-full | grep . >/dev/null
 journalctl -q --user --system | grep . >/dev/null
@@ -238,7 +248,7 @@ JOURNAL_DIR="$(mktemp -d)"
 while read -r file; do
     filename="${file##*/}"
     unzstd "$file" -o "$JOURNAL_DIR/${filename%*.zst}"
-done < <(find /test-journals/no-rtc -name "*.zst")
+done < <(find /usr/lib/systemd/tests/testdata/test-journals/no-rtc -name "*.zst")
 
 journalctl --directory="$JOURNAL_DIR" --list-boots --output=json >/tmp/lb1
 diff -u /tmp/lb1 - <<'EOF'
@@ -268,4 +278,12 @@ hello
 + echo world
 world
 EOF
+rm -f "$CURSOR_FILE"
+
+# Check that --until works with --after-cursor and --lines/-n
+# See: https://github.com/systemd/systemd/issues/31776
+CURSOR_FILE="$(mktemp)"
+journalctl -q -n 0 --cursor-file="$CURSOR_FILE"
+TIMESTAMP="$(journalctl -q -n 1 --cursor="$(<"$CURSOR_FILE")" --output=short-unix | cut -d ' ' -f 1 | cut -d '.' -f 1)"
+[[ -z "$(journalctl -q -n 10 --after-cursor="$(<"$CURSOR_FILE")" --until "@$((TIMESTAMP - 3))")" ]]
 rm -f "$CURSOR_FILE"

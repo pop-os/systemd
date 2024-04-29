@@ -99,7 +99,7 @@ static const char* const unit_load_state_table[_UNIT_LOAD_STATE_MAX] = {
         [UNIT_BAD_SETTING] = "bad-setting",
         [UNIT_ERROR]       = "error",
         [UNIT_MERGED]      = "merged",
-        [UNIT_MASKED]      = "masked"
+        [UNIT_MASKED]      = "masked",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(unit_load_state, UnitLoadState);
@@ -117,13 +117,32 @@ static const char* const unit_active_state_table[_UNIT_ACTIVE_STATE_MAX] = {
 DEFINE_STRING_TABLE_LOOKUP(unit_active_state, UnitActiveState);
 
 static const char* const freezer_state_table[_FREEZER_STATE_MAX] = {
-        [FREEZER_RUNNING]  = "running",
-        [FREEZER_FREEZING] = "freezing",
-        [FREEZER_FROZEN]   = "frozen",
-        [FREEZER_THAWING]  = "thawing",
+        [FREEZER_RUNNING]            = "running",
+        [FREEZER_FREEZING]           = "freezing",
+        [FREEZER_FREEZING_BY_PARENT] = "freezing-by-parent",
+        [FREEZER_FROZEN]             = "frozen",
+        [FREEZER_FROZEN_BY_PARENT]   = "frozen-by-parent",
+        [FREEZER_THAWING]            = "thawing",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(freezer_state, FreezerState);
+
+/* Maps in-progress freezer states to the corresponding finished state */
+static const FreezerState freezer_state_finish_table[_FREEZER_STATE_MAX] = {
+        [FREEZER_FREEZING]           = FREEZER_FROZEN,
+        [FREEZER_FREEZING_BY_PARENT] = FREEZER_FROZEN_BY_PARENT,
+        [FREEZER_THAWING]            = FREEZER_RUNNING,
+
+        /* Finished states trivially map to themselves */
+        [FREEZER_RUNNING]            = FREEZER_RUNNING,
+        [FREEZER_FROZEN]             = FREEZER_FROZEN,
+        [FREEZER_FROZEN_BY_PARENT]   = FREEZER_FROZEN_BY_PARENT,
+};
+
+FreezerState freezer_state_finish(FreezerState state) {
+        assert(state >= 0 && state < _FREEZER_STATE_MAX);
+        return freezer_state_finish_table[state];
+}
 
 static const char* const unit_marker_table[_UNIT_MARKER_MAX] = {
         [UNIT_MARKER_NEEDS_RELOAD]  = "needs-reload",
@@ -136,7 +155,7 @@ static const char* const automount_state_table[_AUTOMOUNT_STATE_MAX] = {
         [AUTOMOUNT_DEAD]    = "dead",
         [AUTOMOUNT_WAITING] = "waiting",
         [AUTOMOUNT_RUNNING] = "running",
-        [AUTOMOUNT_FAILED]  = "failed"
+        [AUTOMOUNT_FAILED]  = "failed",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(automount_state, AutomountState);
@@ -170,7 +189,7 @@ static const char* const path_state_table[_PATH_STATE_MAX] = {
         [PATH_DEAD]    = "dead",
         [PATH_WAITING] = "waiting",
         [PATH_RUNNING] = "running",
-        [PATH_FAILED]  = "failed"
+        [PATH_FAILED]  = "failed",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(path_state, PathState);
@@ -219,7 +238,7 @@ DEFINE_STRING_TABLE_LOOKUP(service_state, ServiceState);
 
 static const char* const slice_state_table[_SLICE_STATE_MAX] = {
         [SLICE_DEAD]   = "dead",
-        [SLICE_ACTIVE] = "active"
+        [SLICE_ACTIVE] = "active",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(slice_state, SliceState);
@@ -259,7 +278,7 @@ DEFINE_STRING_TABLE_LOOKUP(swap_state, SwapState);
 
 static const char* const target_state_table[_TARGET_STATE_MAX] = {
         [TARGET_DEAD]   = "dead",
-        [TARGET_ACTIVE] = "active"
+        [TARGET_ACTIVE] = "active",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(target_state, TargetState);
@@ -269,7 +288,7 @@ static const char* const timer_state_table[_TIMER_STATE_MAX] = {
         [TIMER_WAITING] = "waiting",
         [TIMER_RUNNING] = "running",
         [TIMER_ELAPSED] = "elapsed",
-        [TIMER_FAILED]  = "failed"
+        [TIMER_FAILED]  = "failed",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(timer_state, TimerState);
@@ -314,7 +333,7 @@ static const char* const notify_access_table[_NOTIFY_ACCESS_MAX] = {
         [NOTIFY_NONE] = "none",
         [NOTIFY_MAIN] = "main",
         [NOTIFY_EXEC] = "exec",
-        [NOTIFY_ALL]  = "all"
+        [NOTIFY_ALL]  = "all",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(notify_access, NotifyAccess);
