@@ -13,12 +13,6 @@ if ! grep -E -q "^[^[:space:]]+ /dev devtmpfs" /proc/mounts; then
     [ ! -h /dev/stderr ] && ln -s /proc/self/fd/2 /dev/stderr
 fi
 
-# This covers the same case as lib/modprobe.d/scsi-mod-scan-sync.conf
-# in the event that scsi_mod is built in to the kernel, not a module:
-if [ -f /sys/module/scsi_mod/parameters/scan ]; then
-    echo sync > /sys/module/scsi_mod/parameters/scan
-fi
-
 SYSTEMD_LOG_LEVEL=notice /usr/lib/systemd/systemd-udevd --daemon --resolve-names=never
 
 udevadm trigger --action=add
