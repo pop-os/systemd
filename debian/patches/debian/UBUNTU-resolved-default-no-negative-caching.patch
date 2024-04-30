@@ -13,10 +13,10 @@ Co-authored-by: Dan Streetman <ddstreet@canonical.com>
  4 files changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
-index d153865..93c8ac4 100644
+index 95b3553..f89552a 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
-@@ -276,10 +276,10 @@
+@@ -278,10 +278,10 @@
        <varlistentry>
          <term><varname>Cache=</varname></term>
          <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If
@@ -43,18 +43,18 @@ index 6883935..3a8d35e 100644
  Resolve.ReadEtcHosts,              config_parse_bool,                    0,                   offsetof(Manager, read_etc_hosts)
  Resolve.ResolveUnicastSingleLabel, config_parse_bool,                    0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index b52619e..1221bb9 100644
+index 99787f7..d0c7e9f 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -588,7 +588,7 @@ int manager_new(Manager **ret) {
-                 .mdns_support = DEFAULT_MDNS_MODE,
-                 .dnssec_mode = DEFAULT_DNSSEC_MODE,
-                 .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
--                .enable_cache = DNS_CACHE_MODE_YES,
-+                .enable_cache = DNS_CACHE_MODE_NO_NEGATIVE,
-                 .dns_stub_listener_mode = DNS_STUB_LISTENER_YES,
-                 .read_resolv_conf = true,
-                 .need_builtin_fallbacks = true,
+@@ -573,7 +573,7 @@ static void manager_set_defaults(Manager *m) {
+         m->mdns_support = DEFAULT_MDNS_MODE;
+         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+         m->dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE;
+-        m->enable_cache = DNS_CACHE_MODE_YES;
++        m->enable_cache = DNS_CACHE_MODE_NO_NEGATIVE;
+         m->dns_stub_listener_mode = DNS_STUB_LISTENER_YES;
+         m->read_etc_hosts = true;
+         m->resolve_unicast_single_label = false;
 diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
 index 0031b15..ba9e687 100644
 --- a/src/resolve/resolved.conf.in

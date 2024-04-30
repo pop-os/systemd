@@ -12,18 +12,18 @@ LP: #1857123
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 4ef1be4..cb60048 100644
+index 61e0e16..88e3f74 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -69,6 +69,7 @@
+@@ -70,6 +70,7 @@
  #include "tmpfile-util.h"
  #include "tuntap.h"
  #include "udev-util.h"
 +#include "virt.h"
  #include "vrf.h"
  
- bool link_ipv6_enabled(Link *link) {
-@@ -1433,7 +1434,7 @@ static int link_check_initialized(Link *link) {
+ void link_required_operstate_for_online(Link *link, LinkOperationalStateRange *ret) {
+@@ -1621,7 +1622,7 @@ static int link_check_initialized(Link *link) {
  
          assert(link);
  

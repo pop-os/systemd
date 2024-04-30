@@ -10,7 +10,7 @@ Follow-up for 6a57d86bf9d7f8d6f5d339f57665dfb2e1d191c5
  1 file changed, 14 insertions(+), 7 deletions(-)
 
 diff --git a/src/test/test-dirent-util.c b/src/test/test-dirent-util.c
-index 8192a53e6f..5d4886241d 100644
+index 8192a53..5d48862 100644
 --- a/src/test/test-dirent-util.c
 +++ b/src/test/test-dirent-util.c
 @@ -136,7 +136,11 @@ TEST (test_dirent_is_file_with_suffix) {

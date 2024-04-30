@@ -8,10 +8,10 @@ Otherwise the filenames will contain variable paths and break reproducibility
  1 file changed, 9 insertions(+)
 
 diff --git a/meson.build b/meson.build
-index 711ea30..bbee90f 100644
+index 5cd22b2..f6090d4 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -1717,6 +1717,15 @@ if conf.get('BPF_FRAMEWORK') == 1
+@@ -1722,6 +1722,15 @@ if conf.get('BPF_FRAMEWORK') == 1
                  '-c',
          ]
  

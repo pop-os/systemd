@@ -22,17 +22,17 @@ Last-Update: 2023-04-27
  create mode 100644 src/basic/ro-etc-hack.h
 
 diff --git a/src/basic/meson.build b/src/basic/meson.build
-index d7450d8..22c93de 100644
+index d71c9d8..3533243 100644
 --- a/src/basic/meson.build
 +++ b/src/basic/meson.build
-@@ -78,6 +78,7 @@ basic_sources = files(
+@@ -82,6 +82,7 @@ basic_sources = files(
          'recurse-dir.c',
          'replace-var.c',
          'rlimit-util.c',
 +        'ro-etc-hack.c',
          'runtime-scope.c',
+         'sha256.c',
          'sigbus.c',
-         'signal-util.c',
 diff --git a/src/basic/ro-etc-hack.c b/src/basic/ro-etc-hack.c
 new file mode 100644
 index 0000000..f1db71c
@@ -79,7 +79,7 @@ index 0000000..2ef881f
 + * /etc/writable; if it is, update that instead */
 +const char *writable_filename(const char *path);
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index f9014dc..84a5b37 100644
+index b94f37c..f6f4894 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
 @@ -22,6 +22,7 @@
@@ -90,20 +90,20 @@ index f9014dc..84a5b37 100644
  #include "stat-util.h"
  #include "string-table.h"
  #include "string-util.h"
-@@ -1612,7 +1613,7 @@ int get_timezone(char **ret) {
+@@ -1610,7 +1611,7 @@ int get_timezone(char **ret) {
  
          assert(ret);
  
 -        r = readlink_malloc("/etc/localtime", &t);
 +        r = readlink_malloc(writable_filename("/etc/localtime"), &t);
-         if (r == -ENOENT) {
+         if (r == -ENOENT)
                  /* If the symlink does not exist, assume "UTC", like glibc does */
-                 z = strdup("UTC");
+                 return strdup_to(ret, "UTC");
 diff --git a/src/core/manager.c b/src/core/manager.c
-index 88eebfc..ea4ee6f 100644
+index 04103e0..f2b031f 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
-@@ -77,6 +77,7 @@
+@@ -79,6 +79,7 @@
  #include "ratelimit.h"
  #include "rlimit-util.h"
  #include "rm-rf.h"
@@ -111,7 +111,7 @@ index 88eebfc..ea4ee6f 100644
  #include "selinux-util.h"
  #include "signal-util.h"
  #include "socket-util.h"
-@@ -413,7 +414,7 @@ static int manager_read_timezone_stat(Manager *m) {
+@@ -416,7 +417,7 @@ static int manager_read_timezone_stat(Manager *m) {
          assert(m);
  
          /* Read the current stat() data of /etc/localtime so that we detect changes */
@@ -120,7 +120,7 @@ index 88eebfc..ea4ee6f 100644
                  log_debug_errno(errno, "Failed to stat /etc/localtime, ignoring: %m");
                  changed = m->etc_localtime_accessible;
                  m->etc_localtime_accessible = false;
-@@ -450,7 +451,7 @@ static int manager_setup_timezone_change(Manager *m) {
+@@ -453,7 +454,7 @@ static int manager_setup_timezone_change(Manager *m) {
           * Note that we create the new event source first here, before releasing the old one. This should optimize
           * behaviour as this way sd-event can reuse the old watch in case the inode didn't change. */
  
@@ -130,7 +130,7 @@ index 88eebfc..ea4ee6f 100644
          if (r == -ENOENT) {
                  /* If the file doesn't exist yet, subscribe to /etc instead, and wait until it is created either by
 diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
-index d402927..0dd1518 100644
+index 6afabef..1f2c655 100644
 --- a/src/firstboot/firstboot.c
 +++ b/src/firstboot/firstboot.c
 @@ -42,6 +42,7 @@
@@ -141,7 +141,7 @@ index d402927..0dd1518 100644
  #include "smack-util.h"
  #include "string-util.h"
  #include "strv.h"
-@@ -606,7 +607,7 @@ static int process_timezone(int rfd) {
+@@ -608,7 +609,7 @@ static int process_timezone(int rfd) {
  
          assert(rfd >= 0);
  
@@ -150,7 +150,7 @@ index d402927..0dd1518 100644
                                         CHASE_AT_RESOLVE_IN_ROOT|CHASE_MKDIR_0755|CHASE_WARN|CHASE_NOFOLLOW,
                                         &f);
          if (pfd < 0)
-@@ -625,7 +626,7 @@ static int process_timezone(int rfd) {
+@@ -627,7 +628,7 @@ static int process_timezone(int rfd) {
          if (arg_copy_timezone && r == 0) {
                  _cleanup_free_ char *s = NULL;
  
@@ -159,7 +159,7 @@ index d402927..0dd1518 100644
                  if (r != -ENOENT) {
                          if (r < 0)
                                  return log_error_errno(r, "Failed to read host's /etc/localtime: %m");
-@@ -646,7 +647,7 @@ static int process_timezone(int rfd) {
+@@ -648,7 +649,7 @@ static int process_timezone(int rfd) {
          if (isempty(arg_timezone))
                  return 0;
  
@@ -169,18 +169,18 @@ index d402927..0dd1518 100644
          r = symlinkat_atomic_full(e, pfd, f, /* make_relative= */ false);
          if (r < 0)
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index fc7a97f..064a8d1 100644
+index 82d0880..5b267fb 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -28,6 +28,7 @@
+@@ -31,6 +31,7 @@
  #include "os-util.h"
  #include "parse-util.h"
  #include "path-util.h"
 +#include "ro-etc-hack.h"
- #include "sd-device.h"
  #include "selinux-util.h"
  #include "service-util.h"
-@@ -119,7 +120,7 @@ static void context_read_machine_info(Context *c) {
+ #include "signal-util.h"
+@@ -130,7 +131,7 @@ static void context_read_machine_info(Context *c) {
  
          assert(c);
  
@@ -189,7 +189,7 @@ index fc7a97f..064a8d1 100644
              stat_inode_unmodified(&c->etc_machine_info_stat, &current_stat))
                  return;
  
-@@ -132,7 +133,7 @@ static void context_read_machine_info(Context *c) {
+@@ -143,7 +144,7 @@ static void context_read_machine_info(Context *c) {
                        (UINT64_C(1) << PROP_HARDWARE_VENDOR) |
                        (UINT64_C(1) << PROP_HARDWARE_MODEL));
  
@@ -198,7 +198,7 @@ index fc7a97f..064a8d1 100644
                             "PRETTY_HOSTNAME", &c->data[PROP_PRETTY_HOSTNAME],
                             "ICON_NAME", &c->data[PROP_ICON_NAME],
                             "CHASSIS", &c->data[PROP_CHASSIS],
-@@ -603,14 +604,14 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -613,14 +614,14 @@ static int context_write_data_static_hostname(Context *c) {
          s = &c->etc_hostname_stat;
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
@@ -215,7 +215,7 @@ index fc7a97f..064a8d1 100644
          if (r < 0)
                  return r;
  
-@@ -636,7 +637,7 @@ static int context_write_data_machine_info(Context *c) {
+@@ -646,7 +647,7 @@ static int context_write_data_machine_info(Context *c) {
           * already, even if we can't make it hit the disk. */
          s = &c->etc_machine_info_stat;
  
@@ -224,7 +224,7 @@ index fc7a97f..064a8d1 100644
          if (r < 0 && r != -ENOENT)
                  return r;
  
-@@ -649,14 +650,14 @@ static int context_write_data_machine_info(Context *c) {
+@@ -659,14 +660,14 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -242,10 +242,10 @@ index fc7a97f..064a8d1 100644
                  return r;
  
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index c7be30f..f896bd5 100644
+index e3b4367..a065ce3 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -32,6 +32,7 @@
+@@ -33,6 +33,7 @@
  #include "memory-util.h"
  #include "missing_capability.h"
  #include "path-util.h"
@@ -253,7 +253,7 @@ index c7be30f..f896bd5 100644
  #include "selinux-util.h"
  #include "service-util.h"
  #include "signal-util.h"
-@@ -302,22 +303,22 @@ static int context_write_data_timezone(Context *c) {
+@@ -306,22 +307,22 @@ static int context_write_data_timezone(Context *c) {
  
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
@@ -280,7 +280,7 @@ index c7be30f..f896bd5 100644
  }
  
  static int context_write_data_local_rtc(Context *c) {
-@@ -378,7 +379,7 @@ static int context_write_data_local_rtc(Context *c) {
+@@ -382,7 +383,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(stpcpy(mempcpy(w, s, a), prepend), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

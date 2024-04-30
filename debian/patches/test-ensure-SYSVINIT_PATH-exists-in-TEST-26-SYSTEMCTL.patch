@@ -8,10 +8,10 @@ Forwarded: no, support for systemd-sysv-generator will be dropped upstream soon
  1 file changed, 1 insertion(+)
 
 diff --git a/test/units/testsuite-26.sh b/test/units/testsuite-26.sh
-index 1e11c42..3a523ac 100755
+index 6734aee..8fc6f84 100755
 --- a/test/units/testsuite-26.sh
 +++ b/test/units/testsuite-26.sh
-@@ -347,6 +347,7 @@ if [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]; then
+@@ -385,6 +385,7 @@ if [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]; then
      # This is configurable via -Dsysvinit-path=, but we can't get the value
      # at runtime, so let's just support the two most common paths for now.
      [[ -d /etc/rc.d/init.d ]] && SYSVINIT_PATH="/etc/rc.d/init.d" || SYSVINIT_PATH="/etc/init.d"

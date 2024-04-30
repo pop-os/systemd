@@ -8,10 +8,10 @@ Forwarded: no, Ubuntu specific
  1 file changed, 5 insertions(+)
 
 diff --git a/meson.build b/meson.build
-index da723fa..4d8a2bd 100644
+index 711ea30..5cd22b2 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -414,6 +414,11 @@ if cc.get_id() == 'gcc'
+@@ -436,6 +436,11 @@ if cc.get_id() == 'gcc'
          possible_common_cc_flags += '-Wno-unused-result'
  endif
  
