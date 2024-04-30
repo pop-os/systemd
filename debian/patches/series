@@ -4,7 +4,6 @@ debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
-debian/Ubuntu-UseDomains-by-default.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
