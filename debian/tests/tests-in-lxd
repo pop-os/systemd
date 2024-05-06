@@ -12,13 +12,13 @@ IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
 # work around LP: #1878225 as fallback
 autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
     patch /usr/bin/autopkgtest-build-lxd <<'EOF'
-@@ -70,6 +70,8 @@
+@@ -115,6 +115,8 @@ setup() {
 
      sleep 5
-     if "$COMMAND" exec "$CONTAINER" -- systemctl mask serial-getty@getty.service; then
-+       "$COMMAND" exec "$CONTAINER" -- systemctl mask snapd.service
-+       "$COMMAND" exec "$CONTAINER" -- systemctl mask snapd.seeded.service
-        "$COMMAND" exec "$CONTAINER" -- reboot
+     if "$COMMAND" exec "${REMOTE:+$REMOTE:}$CONTAINER" -- systemctl mask serial-getty@getty.service; then
++        "$COMMAND" exec "${REMOTE:+$REMOTE:}$CONTAINER" -- systemctl mask snapd.service
++        "$COMMAND" exec "${REMOTE:+$REMOTE:}$CONTAINER" -- systemctl mask snapd.seeded.service
+         safe_reboot
      fi
 
 EOF
