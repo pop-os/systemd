@@ -1,4 +1,4 @@
-systemd (256~rc1-1~exp2ubuntu1) UNRELEASED; urgency=medium
+systemd (256~rc1-1~exp2ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -90,7 +90,7 @@ systemd (256~rc1-1~exp2ubuntu1) UNRELEASED; urgency=medium
     - debian/systemd.manpages: don't ship un-built manpages on i386
     - debian/tests: fix patching of autopkgtest-build-lxd
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 30 Apr 2024 14:12:09 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 10 May 2024 15:44:17 -0400
 
 systemd (256~rc1-1~exp2) experimental; urgency=medium
 
