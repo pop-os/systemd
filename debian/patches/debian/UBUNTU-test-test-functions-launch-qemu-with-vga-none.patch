@@ -10,10 +10,10 @@ really have no need for vga or seabios in this case.
  1 file changed, 1 insertion(+)
 
 diff --git a/test/test-functions b/test/test-functions
-index c5a7216..d35611c 100644
+index e1f65e2..5028d2e 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -590,6 +590,7 @@ run_qemu() {
+@@ -583,6 +583,7 @@ run_qemu() {
          -net none
          -m "${QEMU_MEM:-768M}"
          -nographic

@@ -241,10 +241,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index cecdbc3..711ea30 100644
+index 0d68f14..1f816a6 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2263,6 +2263,7 @@ subdir('src/environment-d-generator')
+@@ -2293,6 +2293,7 @@ subdir('src/environment-d-generator')
  subdir('src/escape')
  subdir('src/firstboot')
  subdir('src/fsck')
@@ -987,7 +987,7 @@ index 0000000..6d3c125
 +        },
 +]
 diff --git a/units/meson.build b/units/meson.build
-index 5b2410f..ea5cb13 100644
+index b231341..ee5cd74 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -309,6 +309,8 @@ units = [

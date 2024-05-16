@@ -8,7 +8,7 @@ Forwarded: no, Ubuntu specific
  1 file changed, 5 insertions(+)
 
 diff --git a/meson.build b/meson.build
-index 711ea30..5cd22b2 100644
+index 1f816a6..0712ecc 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -436,6 +436,11 @@ if cc.get_id() == 'gcc'
