@@ -1,3 +1,64 @@
+systemd (256~rc2-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * report-bug: add presubj template to recommend opening functionality
+    bugs upstream first
+  * report-bug: include runtime taints
+  * Recommend libzstd1 and suggest liblz4-1, liblzma5, libgcrypt20
+  * autopkgtest: install polkitd in upstream suite
+  * Build depend on rsync or meson >= 1.3.0 for follow-symlink workaround.
+  * Change links from freedesktop.org to systemd.io (Closes: #1070499)
+  * Add dependency on python3-psutil to systemd-tests, needed by networkd
+    test suite
+  * d/t/boot-and-services: drop tmp check. LXC now sets up a tmpfs on /tmp
+    as per upstream recommendation, so we cannot detect it via fstab
+    anymore. Just drop this test, as we are about to make /tmp a tmpfs
+    ourselves anyway.
+  * Set SBAT distro URL to tracker.d.o as suggested by EFI team
+  * Drop out-of-tree coredump patch and use config drop-ins instead. As
+    per: https://github.com/systemd/systemd/pull/27066 instead of carrying
+    an out-of-tree patch, use drop-ins to set the default pattern to
+    'core' and the default core limit to '0' in the systemd package, and a
+    higher priority drop-in to set the default core limit to 'infinity' in
+    the systemd-coredump package (it already ships a sysctl to set the
+    pattern). The end result is the same, but with config drop-ins instead
+    of patches.
+  * Drop out-of-tree fsckd daemon patch. This was dropped upstream long
+    ago, and Plymouth on Debian doesn't actually use this. A different
+    upstream change provides the required functionality.
+  * Drop out-of-tree systemctl scheduled shutdown fallback. This patch was
+    rejected upstream and there's no path to have it merged, so drop it
+    and restore the default behaviour in case of error.
+  * Drop out-of-tree fsck skip patch and use drop-in instead. Non-root
+    filesystems are only checked when mounted, so the other change is not
+    needed. The root one can be fixed with a drop-in instead of a patch.
+  * d/t/control: explicitly depend on systemd-dev for tests that run pkg-
+    config
+  * systemd.postinst: use DPKG_ROOT in one more place.
+  * NEWS: note scheduled shutdown failure case changes
+  * New upstream version 256~rc2
+  * Drop patches merged upstream
+  * Refresh patches for v256~rc2
+  * Install new files from v256~rc2
+  * Drop Lintian overrides for false positives that have been fixed
+  * Upload to unstable
+
+  [ Michael Marley ]
+  * Use absolute path when including libkmod in initramfs. The relative
+    path works fine when the hook is executed during a normal APT
+    install/update, but if the user runs "update-initramfs -u" from any
+    directory other than /, the relative path doesn't match anything,
+    libkmod is not included, and the system fails to boot due to not
+    loading the storage driver(s).
+
+  [ Michael Biebl ]
+  * Stop setting the build system explicitly. No longer necessary since
+    https://github.com/systemd/systemd/pull/31530
+  * Remove systemd-dev dependency from systemd and udev. This was a
+    temporary measure to ease the migration.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 15 May 2024 00:40:56 +0100
+
 systemd (256~rc1-1~exp2ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:

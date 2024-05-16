@@ -31,6 +31,8 @@ echo "$DIR/systemd-delta.txt" >&3
 if [ -d /run/systemd/system ]; then
     systemd-analyze --no-pager dump >$DIR/systemd-analyze-dump.txt 2>&1
     echo "$DIR/systemd-analyze-dump.txt" >&3
+    busctl --no-pager get-property org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager Tainted >$DIR/taints.txt 2>&1
+    echo "$DIR/taints.txt" >&3
 fi
 
 if [ -d /var/lib/systemd/deb-systemd-helper-enabled ]; then

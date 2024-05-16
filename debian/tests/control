@@ -13,6 +13,7 @@ Tests: unit-config
 Depends: systemd,
   udev,
   systemd-resolved,
+  systemd-dev,
   libpam-systemd,
   libnss-systemd,
   acl,
@@ -81,6 +82,7 @@ Depends: systemd-sysv,
   systemd-container,
   systemd-coredump,
   systemd-resolved,
+  systemd-dev,
   libpam-systemd,
   libdw-dev,
   libelf-dev,
@@ -236,6 +238,7 @@ Depends: systemd-tests,
   softhsm2,
   openssh-client,
   openssh-server,
+  polkitd,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke

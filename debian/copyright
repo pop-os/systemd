@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: systemd
 Upstream-Contact: systemd-devel@lists.freedesktop.org
-Source: https://www.freedesktop.org/wiki/Software/systemd/
+Source: https://github.com/systemd/systemd
 
 Files: *
 Copyright: 2008-2015 Kay Sievers <kay@vrfy.org>

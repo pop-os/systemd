@@ -1,3 +1,11 @@
+systemd (256~rc2-1) unstable; urgency=medium
+
+  In the rare case a scheduled shutdown fails to be enqueued (most
+  likely, D-Bus daemon/broker is not installed), the system will now
+  immediately reboot, restoring the default behaviour intended upstream.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 15 May 2024 00:40:56 +0100
+
 systemd (253~rc2-1) experimental; urgency=medium
 
   TuxOnIce is no longer supported directly (via an out-of-tree patch)

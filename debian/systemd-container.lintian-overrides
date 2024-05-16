@@ -4,4 +4,3 @@ systemd-container: systemd-service-file-refers-to-unusual-wantedby-target machin
 systemd-container: systemd-service-file-missing-install-key
 # Lintian is really bad at associating manpages
 systemd-container: spare-manual-page
-systemd-container: maintainer-script-calls-systemctl

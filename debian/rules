@@ -86,6 +86,7 @@ CONFFLAGS = \
 	-Dnobody-group=nogroup \
 	-Ddev-kvm-mode=0660 \
 	-Dgroup-render-mode=0660 \
+	-Dsbat-distro-url=https://tracker.debian.org/pkg/systemd \
 	-Drepart=enabled \
 	-Dfdisk=enabled \
 	-Dsysext=true \
@@ -347,4 +348,4 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@ --without autoreconf --buildsystem=meson
+	dh $@

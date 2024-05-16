@@ -94,32 +94,6 @@ class ServicesTest(unittest.TestCase):
         self.assertIn(b'\nP: /devices/', out)
         self.active_unit('systemd-udevd')
 
-    def test_tmp_mount(self):
-        # check if we want to mount /tmp in fstab
-        want_tmp_mount = False
-        try:
-            with open('/etc/fstab') as f:
-                for l in f:
-                    try:
-                        if not l.startswith('#') and l.split()[1] in ('/tmp', '/tmp/'):
-                            want_tmp_mount = True
-                            break
-                    except IndexError:
-                        pass
-        except FileNotFoundError:
-            pass
-
-        # ensure that we actually do/don't have a /tmp mount
-        (status, status_out) = subprocess.getstatusoutput('systemctl status tmp.mount')
-        findmnt = subprocess.call(['findmnt', '-n', '/tmp'], stdout=subprocess.PIPE)
-        if want_tmp_mount:
-            self.assertEqual(status, 0, status_out)
-            self.assertEqual(findmnt, 0)
-        else:
-            # 4 is correct (since upstream commit ca473d57), accept 3 for systemd <= 230
-            self.assertIn(status, [3, 4], status_out)
-            self.assertNotEqual(findmnt, 0)
-
     @unittest.skipIf('pkg.systemd.upstream' in os.environ.get('DEB_BUILD_PROFILES', ''),
                      'Debian specific configuration, N/A for upstream')
     def test_tmp_cleanup(self):

@@ -2008,7 +2008,7 @@ static int mount_partition(
         if (where) {
                 if (directory) {
                         /* Automatically create missing mount points inside the image, if necessary. */
-                        r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755, NULL);
+                        r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755);
                         if (r < 0 && r != -EROFS)
                                 return r;
 
@@ -2163,7 +2163,7 @@ int dissected_image_mount(
          * If 'where' is not NULL then we'll either mount the partitions to the right places ourselves,
          * or use DissectedPartition.fsmount_fd and bind it to the right places.
          *
-         * This allows splitting the setting up up the superblocks and the binding to file systems paths into
+         * This allows splitting the setting up the superblocks and the binding to file systems paths into
          * two distinct and differently privileged components: one that gets the fsmount fds, and the other
          * that then applies them.
          *

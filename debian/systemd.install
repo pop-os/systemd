@@ -116,7 +116,6 @@ usr/lib/systemd/system/dev-hugepages.mount
 usr/lib/systemd/system/dev-mqueue.mount
 usr/lib/systemd/systemd-executor
 usr/lib/systemd/systemd-fsck
-<!pkg.systemd.upstream> usr/lib/systemd/systemd-fsckd
 usr/lib/systemd/systemd-growfs
 usr/lib/systemd/systemd-hibernate-resume
 usr/lib/systemd/systemd-hostnamed
@@ -323,8 +322,6 @@ usr/lib/systemd/system/systemd-creds.socket
 usr/lib/systemd/system/systemd-creds@.service
 usr/lib/systemd/system/systemd-exit.service
 usr/lib/systemd/system/systemd-firstboot.service
-<!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.service
-<!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.socket
 usr/lib/systemd/system/systemd-fsck-root.service
 usr/lib/systemd/system/systemd-fsck@.service
 usr/lib/systemd/system/systemd-growfs-root.service
@@ -345,6 +342,7 @@ usr/lib/systemd/system/systemd-journald.service
 usr/lib/systemd/system/systemd-journald@.service
 usr/lib/systemd/system/systemd-journald.socket
 usr/lib/systemd/system/systemd-journald@.socket
+usr/lib/systemd/system/systemd-journald-sync@.service
 usr/lib/systemd/system/systemd-journald-varlink@.socket
 usr/lib/systemd/system/systemd-journal-flush.service
 usr/lib/systemd/system/systemd-kexec.service
@@ -482,11 +480,13 @@ usr/share/bash-completion/completions/kernel-install
 usr/share/bash-completion/completions/localectl
 usr/share/bash-completion/completions/loginctl
 usr/share/bash-completion/completions/networkctl
+usr/share/bash-completion/completions/run0
 usr/share/bash-completion/completions/systemctl
 usr/share/bash-completion/completions/systemd-analyze
 usr/share/bash-completion/completions/systemd-cat
 usr/share/bash-completion/completions/systemd-cgls
 usr/share/bash-completion/completions/systemd-cgtop
+usr/share/bash-completion/completions/systemd-confext
 <!stage1> usr/share/bash-completion/completions/systemd-cryptenroll
 usr/share/bash-completion/completions/systemd-delta
 usr/share/bash-completion/completions/systemd-detect-virt
@@ -495,6 +495,7 @@ usr/share/bash-completion/completions/systemd-id128
 usr/share/bash-completion/completions/systemd-path
 usr/share/bash-completion/completions/systemd-run
 usr/share/bash-completion/completions/systemd-sysext
+usr/share/bash-completion/completions/systemd-vpick
 usr/share/bash-completion/completions/timedatectl
 usr/share/dbus-1/services/org.freedesktop.systemd1.service
 usr/share/dbus-1/system.d/org.freedesktop.hostname1.conf
@@ -552,5 +553,8 @@ var/lib/systemd/
 ../extra/journald.conf.d usr/lib/systemd/
 ../extra/units/getty-static.service usr/lib/systemd/system/
 ../extra/units/rc-local.service.d usr/lib/systemd/system/
+../extra/units/systemd-fsck-root.service.d/ usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/
+../extra/system.conf.d/10-coredump-debian.conf usr/lib/systemd/system.conf.d/
+../extra/sysctl.d/10-coredump-debian.conf usr/lib/sysctl.d/

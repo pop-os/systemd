@@ -49,3 +49,4 @@ usr/share/zsh/vendor-completions/_machinectl
 usr/share/bash-completion/completions/machinectl
 usr/share/bash-completion/completions/portablectl
 usr/share/bash-completion/completions/systemd-nspawn
+usr/share/bash-completion/completions/importctl

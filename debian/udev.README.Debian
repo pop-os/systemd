@@ -31,8 +31,8 @@ You can disable these stable names and go back to the kernel-provided ones
     "ln -s /dev/null /etc/systemd/network/73-usb-net-by-mac.link"
     and rebuild the initrd with "update-initramfs -u".
 
-See this page for more information:
-http://www.freedesktop.org/wiki/Software/systemd/PredictableNetworkInterfaceNames/
+See this manpage for more information:
+https://www.freedesktop.org/software/systemd/man/latest/systemd.net-naming-scheme.html
 
 Legacy persistent network interface naming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
