@@ -9,7 +9,6 @@ debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/localectl-disable-keymap-support.patch
 debian/UBUNTU-read-only-etc-hacks.patch
-meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 test-deny-list-TEST-08-INITRD.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
