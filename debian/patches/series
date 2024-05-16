@@ -10,7 +10,6 @@ debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/localectl-disable-keymap-support.patch
 debian/UBUNTU-read-only-etc-hacks.patch
 meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
-test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch
 test-deny-list-TEST-08-INITRD.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
