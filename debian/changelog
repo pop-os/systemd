@@ -1,3 +1,12 @@
+systemd (255.4-1ubuntu8.1) noble; urgency=medium
+
+  * debian/systemd-resolved.postinst: ignore cp failure (LP: #2047975)
+  * debian/systemd.postinst: don't restart user managers if too old (LP: #2054761)
+  * switch-root: use MS_MOVE for /run when switchig from initrd (LP: #2064096)
+  * test: check for kernel.apparmor_restrict_unprivileged_userns (LP: #2065964)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 17 May 2024 10:47:34 +0200
+
 systemd (255.4-1ubuntu8) noble; urgency=medium
 
   * copy: ignore -EOPNOTSUPP from copy_file_range() (LP: #2058179)
