@@ -66,10 +66,21 @@ systemd-tmpfiles --create || :
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _systemctl daemon-reexec || true
-    # Re-exec user instances so that running user managers are updated too.
-    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
-    # D-Bus as dbus-user-session is not guaranteed to be available.
-    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
+
+    # Restarting user managers this way was added in v250. Upgrades to Noble
+    # are supported from Mantic (systemd released as 253.5-1ubuntu6), and
+    # Jammy (systemd released as 249.11-0ubuntu3). Do not try to restart user
+    # managers on upgrades from Jammy, as it will end up killing the whole user
+    # session.
+    #
+    # LP: #2054761
+    if dpkg --compare-versions "$2" ge "253.5-1ubuntu6~"; then
+        # Re-exec user instances so that running user managers are updated too.
+        # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
+        # D-Bus as dbus-user-session is not guaranteed to be available.
+        _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
+    fi
+
     # do not restart logind
     # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
     _systemctl try-restart systemd-networkd.service || true
