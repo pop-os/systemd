@@ -23,3 +23,4 @@ test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
 lp2058179-copy-ignore-EOPNOTSUPP-from-copy_file_range.patch
+lp2064096-switch-root-use-MS_MOVE-for-run-when-switchig-from-initrd.patch
