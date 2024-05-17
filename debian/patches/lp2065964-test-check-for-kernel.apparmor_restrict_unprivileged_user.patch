@@ -1,0 +1,58 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 4 Mar 2024 15:43:57 -0500
+Subject: test: check for kernel.apparmor_restrict_unprivileged_userns
+
+Origin: upstream, https://github.com/systemd/systemd/commit/70aece819311f7ab76abdf473bc8f316c5bc58c6
+Bug-Ubuntu: https://launchpad.net/bugs/2065964
+
+Some tests in test-execute are already skipped if we do not have
+unprivileged user namespaces. Extend this check to look for an apparmor
+specific sysctl indicating that unprivileged userns creation is
+restricted.
+---
+ src/test/test-execute.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 9e221ae..a0b9489 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -29,6 +29,7 @@
+ #include "signal-util.h"
+ #include "static-destruct.h"
+ #include "stat-util.h"
++#include "sysctl-util.h"
+ #include "tests.h"
+ #include "tmpfile-util.h"
+ #include "unit.h"
+@@ -219,10 +220,30 @@ static void start_parent_slices(Unit *unit) {
+         }
+ }
+ 
++static bool apparmor_restrict_unprivileged_userns(void) {
++        _cleanup_free_ char *v = NULL;
++        int r;
++
++        /* If kernel.apparmor_restrict_unprivileged_userns=1, then we cannot
++         * use unprivileged user namespaces. */
++        r = sysctl_read("kernel/apparmor_restrict_unprivileged_userns", &v);
++        if (r < 0) {
++                if (r != -ENOENT)
++                        log_debug_errno(r, "Failed to read kernel.apparmor_restrict_unprivileged_userns sysctl, ignoring: %m");
++
++                return false;
++        }
++
++        return streq(v, "1");
++}
++
+ static bool have_userns_privileges(void) {
+         pid_t pid;
+         int r;
+ 
++        if (apparmor_restrict_unprivileged_userns())
++                return false;
++
+         r = safe_fork("(sd-test-check-userns)",
+                       FORK_RESET_SIGNALS |
+                       FORK_CLOSE_ALL_FDS |
