@@ -1,4 +1,4 @@
-systemd (256~rc2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (256~rc2-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -80,7 +80,7 @@ systemd (256~rc2-1ubuntu1) UNRELEASED; urgency=medium
     - Drop test-ensure-SYSVINIT_PATH-exists-in-TEST-26-SYSTEMCTL.patch.
     - Drop meson.build-disable-Wformat-overflow-on-gcc-with-O3.patch
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 16 May 2024 13:27:40 +0200
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Sun, 19 May 2024 04:07:45 +0200
 
 systemd (256~rc2-1) unstable; urgency=medium
 
