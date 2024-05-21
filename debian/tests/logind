@@ -202,6 +202,12 @@ EOF
 # main
 #
 
+# Make sure we are running with the logind package under test instead of the one
+# from the base distro
+if [ -z "$AUTOPKGTEST_REBOOT_MARK" ]; then
+    /tmp/autopkgtest-reboot 1
+fi
+
 test_started
 test_properties
 test_in_logind_session

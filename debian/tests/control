@@ -143,6 +143,7 @@ Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-
 
 Tests: upstream-1, upstream-2
 Depends: systemd-tests,
+  systemd-dev,
   systemd-journal-remote,
   systemd-container,
   systemd-coredump,

@@ -1,0 +1,24 @@
+From: David Tardon <dtardon@redhat.com>
+Date: Thu, 16 May 2024 09:03:40 +0200
+Subject: journald-server: drop another invalid assert()
+
+config_parse_forward_to_socket() is not used for parsing unit files
+either.
+
+Follow-up-for: f31cff849d3db074d0d8157e4117d9b8372c03e8
+---
+ src/journal/journald-server.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index 950ec22..d1dc4b6 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -3057,7 +3057,6 @@ int config_parse_forward_to_socket(
+         SocketAddress* addr = ASSERT_PTR(data);
+         int r;
+ 
+-        assert(unit);
+         assert(filename);
+         assert(rvalue);
+ 
