@@ -107,18 +107,15 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          libsystemd0 (= ${binary:Version}),
          mount,
-Replaces: systemd-repart (<< 250.2-3~)
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
            opensysusers,
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
-        systemd-repart (<< 250.2-3~),
         dracut (<= 060+5-7),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
-          systemd-repart (= ${binary:Version}),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
