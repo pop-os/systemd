@@ -1,3 +1,74 @@
+systemd (256~rc3-1ubuntu1) oracular; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/storage: skip tests if scsi_debug module is not available
+    - debian/tests/boot-and-services:
+      + skip test_syslog on s390x
+      + skip coredump tests on s390x
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Set default user path
+      + Disable LLMNR by default
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf:
+      Set ManagedOOMSwap=auto, disabling swap kill by default
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Build-Depends: linux-tools-generic
+    - d/p/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch:
+      Set AssumedAppArmorLabel=unconfined in timedate1 dbus service file
+    - d/p/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch:
+      Launch QEMU with -vga none in test-functions
+    - d/p/debian/UBUNTU-resolved-default-no-negative-caching.patch:
+      Default to Cache=no-negative in systemd-resolved
+    - d/p/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch:
+      Revert "network: if /sys is rw, then udev should be around" upstream
+      commit
+    - d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
+      skip disk/by-uuid for bcache devices
+    - d/p/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch:
+      Don't override Ubuntu's default sysctl values
+    - debian/patches/debian/UBUNTU-read-only-etc-hacks.patch:
+      Workaround Ubuntu core's read-only etc
+    - debian/extra: use a dropin to configure Nice=-1 on systemd-journald.service.
+    - debian/tests/upstream: export QEMU_MEM="1024M" for all tests
+    - debian/systemd.links: mask systemd-gpt-auto-generator by default
+    - debian/systemd.install: exclude files that are not built for i386
+    - debian/systemd.manpages: do not ship un-built manpages on i386
+    - debian/tests/control: only install systemd-boot-efi for supported arches
+    - test: temporarily skip credentials tests in LXC.
+      This was already skipped in another patch, but now that we know what's
+      going on with it, split it out.
+    - test: skip test-execute in arhmf LXC containers
+    - test: skip exec-privatenetwork-yes-privatemounts-yes.service in LXC
+  * Dropped changes, no longer needed:
+    - Provide upgrade path (Replaces:) for Jammy's systemd-repart
+    - test: deny-list TEST-08-INITRD.
+  * New changes:
+    - debian/tests/tests-in-lxd: skip until credentials can be used in LXD
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 23 May 2024 10:45:03 -0400
+
 systemd (256~rc3-1) unstable; urgency=medium
 
   * Bump Breaks on dracut, on request of the maintainer (Closes: #1071278)
