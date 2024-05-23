@@ -13,5 +13,3 @@ test-deny-list-TEST-08-INITRD.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
-journald-server-drop-invalid-assert.patch
-journald-server-drop-another-invalid-assert.patch

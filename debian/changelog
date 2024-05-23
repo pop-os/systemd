@@ -1,3 +1,14 @@
+systemd (256~rc3-1) unstable; urgency=medium
+
+  * Bump Breaks on dracut, on request of the maintainer (Closes: #1071278)
+  * autopkgtest: reboot before logind test
+  * Disable D-Bus introspection XML generation with nodoc profile
+  * autopkgtest: install systemd-dev for upstream suite too
+  * New upstream version 256~rc3
+  * Drop patches merged upstream
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 22 May 2024 23:24:02 +0100
+
 systemd (256~rc2-3) unstable; urgency=medium
 
   * Explicitly enable systemd-boot only on supported architectures

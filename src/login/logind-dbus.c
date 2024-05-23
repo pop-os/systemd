@@ -907,7 +907,10 @@ static int create_session(
         /* Check if we are already in a logind session, and if so refuse. */
         r = manager_get_session_by_pidref(m, &leader, /* ret_session= */ NULL);
         if (r < 0)
-                return r;
+                return log_debug_errno(
+                                r,
+                                "Failed to check if process " PID_FMT " is already in a session: %m",
+                                leader.pid);
         if (r > 0)
                 return sd_bus_error_setf(error, BUS_ERROR_SESSION_BUSY,
                                          "Already running in a session or user slice");
@@ -1169,7 +1172,7 @@ static int method_create_session_pidfd(sd_bus_message *message, void *userdata, 
 
 static int method_release_session(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = ASSERT_PTR(userdata);
-        Session *session;
+        Session *session, *sender_session;
         const char *name;
         int r;
 
@@ -1182,6 +1185,14 @@ static int method_release_session(sd_bus_message *message, void *userdata, sd_bu
         r = manager_get_session_from_creds(m, message, name, error, &session);
         if (r < 0)
                 return r;
+
+        r = get_sender_session(m, message, /* consult_display= */ false, error, &sender_session);
+        if (r < 0)
+                return r;
+
+        if (session != sender_session)
+                return sd_bus_error_set(error, SD_BUS_ERROR_ACCESS_DENIED,
+                                        "Refused to release session, since it doesn't match the one of the client");
 
         r = session_release(session);
         if (r < 0)
@@ -3764,7 +3775,7 @@ static const sd_bus_vtable manager_vtable[] = {
                                 SD_BUS_ARGS("s", session_id),
                                 SD_BUS_NO_RESULT,
                                 method_release_session,
-                                0),
+                                SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_ARGS("ActivateSession",
                                 SD_BUS_ARGS("s", session_id),
                                 SD_BUS_NO_RESULT,

@@ -507,6 +507,7 @@ testcase_lock_idle_action() {
 
     create_session
 
+    journalctl --sync
     ts="$(date '+%H:%M:%S')"
 
     mkdir -p /run/systemd/logind.conf.d
@@ -522,7 +523,10 @@ EOF
     # session active again and next we slept for another 35s so sessions have
     # become idle again. 'Lock' signal is sent out for each session, we have at
     # least one session, so minimum of 2 "Lock" signals must have been sent.
-    timeout 35 bash -c "while [[ \"\$(journalctl -b -u systemd-logind.service --since=$ts | grep -c 'Sent message type=signal .* member=Lock')\" -lt 1 ]]; do sleep 1; done"
+    journalctl --sync
+    set +o pipefail
+    timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m 1 -q 'Sent message type=signal .* member=Lock'
+    set -o pipefail
 
     # We need to know that a new message was sent after waking up,
     # so we must track how many happened before sleeping to check we have extra.
@@ -532,12 +536,11 @@ EOF
     touch /dev/tty2
 
     # Wait again
-    timeout 35 bash -c "while [[ \"\$(journalctl -b -u systemd-logind.service --since=$ts | grep -c 'Sent message type=signal .* member=Lock')\" -lt $((locks + 1)) ]]; do sleep 1; done"
-
-    if [[ "$(journalctl -b -u systemd-logind.service --since="$ts" | grep -c 'System idle. Will be locked now.')" -lt 2 ]]; then
-        echo >&2 "System haven't entered idle state at least 2 times."
-        exit 1
-    fi
+    journalctl --sync
+    set +o pipefail
+    timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m "$((locks + 1))" -q 'Sent message type=signal .* member=Lock'
+    timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m 2 -q -F 'System idle. Will be locked now.'
+    set -o pipefail
 }
 
 testcase_session_properties() {
@@ -596,7 +599,7 @@ testcase_list_users_sessions_seats() {
         return
     fi
 
-    assert_eq "$(loginctl list-users --no-legend | awk '$2 == "logind-test-user" { print $4 }')" lingering
+    timeout 30 bash -c "until [[ \"\$(loginctl list-users --no-legend | awk '\$2 == \"logind-test-user\" { print \$4 }')\" == lingering ]]; do sleep 1; done"
 }
 
 teardown_stop_idle_session() (
@@ -620,6 +623,8 @@ testcase_stop_idle_session() {
     trap teardown_stop_idle_session RETURN
 
     id="$(loginctl --no-legend | grep tty | awk '$3 == "logind-test-user" { print $1; }')"
+
+    journalctl --sync
     ts="$(date '+%H:%M:%S')"
 
     mkdir -p /run/systemd/logind.conf.d
@@ -630,6 +635,7 @@ EOF
     systemctl restart systemd-logind.service
     sleep 5
 
+    journalctl --sync
     assert_eq "$(journalctl -b -u systemd-logind.service --since="$ts" --grep "Session \"$id\" of user \"logind-test-user\" is idle, stopping." | wc -l)" 1
     assert_eq "$(loginctl --no-legend | grep -v manager | grep -c "logind-test-user")" 0
 }

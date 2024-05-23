@@ -562,7 +562,7 @@ def link_exists(*links):
     return True
 
 def link_resolve(link):
-    return check_output(f'ip link show {link}').split(':')[1].strip()
+    return check_output(f'ip link show {link}').split(':')[1].strip().split('@')[0]
 
 def remove_link(*links, protect=False):
     for link in links:
@@ -3445,11 +3445,11 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertIn('dev dummy98 weight 10', output)
         self.assertIn('dev dummy98 weight 5', output)
 
-        print('### ip -6 route show 2001:1234:5:7fff:ff:ff:ff:ff')
-        output = check_output('ip -6 route show 2001:1234:5:7fff:ff:ff:ff:ff')
+        print('### ip -6 route show 2001:1234:5:bfff:ff:ff:ff:ff')
+        output = check_output('ip -6 route show 2001:1234:5:bfff:ff:ff:ff:ff')
         print(output)
         # old ip command does not show 'nexthop' keyword and weight...
-        self.assertIn('2001:1234:5:7fff:ff:ff:ff:ff', output)
+        self.assertIn('2001:1234:5:bfff:ff:ff:ff:ff', output)
         self.assertIn('via 2001:1234:5:6fff:ff:ff:ff:ff dev test1', output)
         self.assertIn('via 2001:1234:5:7fff:ff:ff:ff:ff dev test1', output)
         self.assertIn('via 2001:1234:5:8fff:ff:ff:ff:ff dev dummy98', output)
@@ -5268,22 +5268,28 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
     def tearDown(self):
         tear_down_common()
 
-    @expectedFailureIfNetdevsimWithSRIOVIsNotAvailable()
-    def test_sriov(self):
-        copy_network_unit('25-default.link', '25-sriov.network')
-
+    def setup_netdevsim(self, id=99, num_ports=1, num_vfs=0):
         call('modprobe netdevsim')
 
+        # Create netdevsim device.
         with open('/sys/bus/netdevsim/new_device', mode='w', encoding='utf-8') as f:
-            f.write('99 1')
+            f.write(f'{id} {num_ports}')
 
-        with open('/sys/bus/netdevsim/devices/netdevsim99/sriov_numvfs', mode='w', encoding='utf-8') as f:
-            f.write('3')
+        # Create VF.
+        if num_vfs > 0:
+            with open(f'/sys/bus/netdevsim/devices/netdevsim{id}/sriov_numvfs', mode='w', encoding='utf-8') as f:
+                f.write(f'{num_vfs}')
+
+    @expectedFailureIfNetdevsimWithSRIOVIsNotAvailable()
+    def test_sriov(self):
+        copy_network_unit('25-netdevsim.link', '25-sriov.network')
+
+        self.setup_netdevsim(num_vfs=3)
 
         start_networkd()
-        self.wait_online('eni99np1:routable')
+        self.wait_online('sim99:routable')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -5295,18 +5301,15 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
     def test_sriov_udev(self):
         copy_network_unit('25-sriov.link', '25-sriov-udev.network')
 
-        call('modprobe netdevsim')
-
-        with open('/sys/bus/netdevsim/new_device', mode='w', encoding='utf-8') as f:
-            f.write('99 1')
+        self.setup_netdevsim()
 
         start_networkd()
-        self.wait_online('eni99np1:routable')
+        self.wait_online('sim99:routable')
 
-        # the name eni99np1 may be an alternative name.
-        ifname = link_resolve('eni99np1')
+        # The name sim99 is an alternative name, and cannot be used by udevadm below.
+        ifname = link_resolve('sim99')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -5322,7 +5325,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         udevadm_reload()
         udevadm_trigger(f'/sys/devices/netdevsim99/net/{ifname}')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -5338,7 +5341,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         udevadm_reload()
         udevadm_trigger(f'/sys/devices/netdevsim99/net/{ifname}')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -5354,7 +5357,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         udevadm_reload()
         udevadm_trigger(f'/sys/devices/netdevsim99/net/{ifname}')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -5370,7 +5373,7 @@ class NetworkdSRIOVTests(unittest.TestCase, Utilities):
         udevadm_reload()
         udevadm_trigger(f'/sys/devices/netdevsim99/net/{ifname}')
 
-        output = check_output('ip link show dev eni99np1')
+        output = check_output('ip link show dev sim99')
         print(output)
         self.assertRegex(output,
                          'vf 0 .*00:11:22:33:44:55.*vlan 5, qos 1, vlan protocol 802.1ad, spoof checking on, link-state enable, trust on, query_rss on\n *'
@@ -7805,5 +7808,11 @@ if __name__ == '__main__':
     if enable_debug:
         wait_online_env.update({'SYSTEMD_LOG_LEVEL': 'debug'})
 
-    sys.argv[1:] = unknown_args
-    unittest.main(verbosity=3)
+    unittest.main(
+        verbosity=3,
+        argv=[
+            sys.argv[0],
+            *unknown_args,
+            *(["-k", match] if (match := os.getenv("TEST_MATCH_TESTCASE")) else [])
+        ],
+    )

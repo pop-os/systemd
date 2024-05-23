@@ -6921,8 +6921,8 @@ static int help(void) {
                "                          designation if --private-key-source= is used\n"
                "     --private-key-source=file|provider:PROVIDER|engine:ENGINE\n"
                "                          Specify how to use KEY for --private-key=. Allows\n"
-               "                          an OpenSSL engine/provider to be used for when\n"
-               "                          generating verity roothash signatures\n"
+               "                          an OpenSSL engine/provider to be used when generating\n"
+               "                          verity roothash signatures\n"
                "     --certificate=PATH   PEM certificate to use when generating verity\n"
                "                          roothash signatures\n"
                "     --tpm2-device=PATH   Path to TPM2 device node to use\n"
@@ -7819,7 +7819,7 @@ static int find_root(Context *context) {
                                 if (r == -EUCLEAN)
                                         return btrfs_log_dev_root(LOG_ERR, r, p);
                                 if (r != -ENODEV)
-                                        return log_error_errno(r, "Failed to determine backing device of %s: %m", p);
+                                        return log_error_errno(r, "Failed to determine backing device of %s%s: %m", strempty(arg_root), p);
                         } else
                                 return 0;
                 }

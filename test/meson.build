@@ -292,6 +292,7 @@ integration_test_template = {
         'cmdline' : [],
         'credentials' : [],
         'qemu-args' : [],
+        'exit-code' : 123,
 }
 testdata_subdirs = [
         'auxv',
@@ -372,6 +373,7 @@ foreach dirname : [
         'TEST-82-SOFTREBOOT',
         'TEST-83-BTRFS',
         'TEST-84-STORAGETM',
+        'TEST-85-NETWORK',
 ]
         subdir(dirname)
 endforeach
@@ -383,6 +385,7 @@ foreach integration_test : integration_tests
                 '--name', integration_test['name'],
                 '--storage', integration_test['storage'],
                 '--firmware', integration_test['firmware'],
+                '--exit-code', integration_test['exit-code'].to_string(),
         ]
 
         if 'unit' in integration_test

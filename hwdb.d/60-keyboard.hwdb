@@ -295,6 +295,7 @@ evdev:atkbd:dmi:bvn*:bvr*:svnNotebook:pnNS50_70MU:*
 evdev:atkbd:dmi:bvn*:bvr*:svnNotebook:pnNV4XMB,ME,MZ:*
 evdev:atkbd:dmi:bvn*:bvr*:svnNotebook:pnNS5x_NS7xPU:*
 evdev:atkbd:dmi:bvn*:bvr*:svnNotebook:pnNV4xPZ:*
+evdev:atkbd:dmi:bvn*:bvr*:svnNotebook:pnV54x_6x_TU:*
  KEYBOARD_KEY_f7=f21                                    # Touchpad Toggle
  KEYBOARD_KEY_f8=f21                                    # Touchpad Toggle
 
@@ -913,6 +914,14 @@ evdev:input:b0003v04B3p301[89]*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnINVENTEC:pnSYMPHONY*6.0/7.0:*
  KEYBOARD_KEY_f3=prog2
  KEYBOARD_KEY_f4=prog1
+
+###########################################################
+# JP-IK
+###########################################################
+
+# LEAP W502
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnJP-IK:pnLEAPW502:pvr*
+ KEYBOARD_KEY_76=f21                                    # touchpad toggle
 
 ###########################################################
 # Kvadra
