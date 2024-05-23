@@ -32,6 +32,19 @@ lxc image list | grep -q autopkgtest/ || autopkgtest-build-lxd ubuntu-daily:$(ls
 
 # push local apt configuration to match pinning
 lxc launch $IMAGE systemd-lxc
+
+# Temporarily skip until https://github.com/canonical/lxd/pull/12698 is merged.
+# Many services, including important ones like systemd-resolved, systemd-journald, etc.,
+# use credentials in some way. Skip if the AppArmor profile does not have any of the rules
+# required for this to work.
+if ! grep -q \
+    "mount options=(ro,remount,bind,nosuid,noexec,nodev,nosymfollow)" \
+    /var/snap/lxd/common/lxd/security/apparmor/profiles/systemd-lxc; then
+
+    echo "It does not look like the lxd snap contains https://github.com/canonical/lxd/pull/12698 yet, skipping"
+    exit 77
+fi
+
 lxc file push -r /etc/apt systemd-lxc/etc/
 lxc exec systemd-lxc -- sed -i 's|/tmp/autopkgtest.[^/]*/|/root/|' /etc/apt/sources.list.d/autopkgtest.list || true
 
