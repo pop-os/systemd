@@ -39,7 +39,7 @@ lxc launch $IMAGE systemd-lxc
 # required for this to work.
 if ! grep -q \
     "mount options=(ro,remount,bind,nosuid,noexec,nodev,nosymfollow)" \
-    /var/snap/lxd/common/lxd/security/apparmor/profiles/systemd-lxc; then
+    /var/snap/lxd/common/lxd/security/apparmor/profiles/lxd-systemd-lxc; then
 
     echo "It does not look like the lxd snap contains https://github.com/canonical/lxd/pull/12698 yet, skipping"
     exit 77
