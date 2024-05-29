@@ -77,7 +77,6 @@ CONFFLAGS = \
 	-Dgnutls=disabled \
 	-Dlink-udev-shared=false \
 	-Dlink-systemctl-shared=false \
-	-Dbump-proc-sys-fs-nr-open=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Ddns-servers='' \
 	-Dsystem-uid-max=999 \
@@ -273,11 +272,6 @@ endif
 	find debian/tmp -type d -empty -print
 
 execute_after_dh_install-arch:
-	# we don't want /tmp to be a tmpfs by default
-	mv debian/tmp/usr/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
-	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
-	rm debian/tmp/usr/lib/systemd/system/local-fs.target.wants/tmp.mount
-
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py

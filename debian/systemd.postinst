@@ -61,6 +61,20 @@ fi
 # Ignore if this fails, because e.g. %b will fail on WSL
 systemd-tmpfiles --create || :
 
+# On upgrade for now keep the current tmpfiles.d (as it used to be after patches),
+# drop in Forky
+if [ -n "$2" ] && dpkg --compare-versions "$2" lt 256~rc3-3 && [ ! -f "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf" ]; then
+    mkdir -p "$DPKG_ROOT/etc/tmpfiles.d/"
+    echo 'D /tmp 1777 root root -' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
+fi
+
+# Unless it's already running, ensure /tmp/ does not get overwritten by
+# the tmpfs from tmp.mount in case a unit is later activated that implicitly
+# depends on it (for example with PrivateTmp=yes) by runtime masking it
+if ! _systemctl is-active --quiet tmp.mount; then
+    _systemctl mask --runtime tmp.mount
+fi
+
 #DEBHELPER#
 
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391

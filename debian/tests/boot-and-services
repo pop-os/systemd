@@ -62,8 +62,9 @@ class ServicesTest(unittest.TestCase):
         self.active_unit('NetworkManager')
 
     def test_cron(self):
-        out = subprocess.check_output(['ps', 'u', '-C', 'cron'])
-        self.assertIn(b'root', out)
+        pid = subprocess.check_output(['pidof', 'cron'], universal_newlines=True).strip()
+        out = subprocess.check_output(['ps', 'u', pid], universal_newlines=True)
+        self.assertIn('root', out)
         self.active_unit('cron')
 
     def test_logind(self):
@@ -75,8 +76,9 @@ class ServicesTest(unittest.TestCase):
                      'Forwarding to rsyslog is a Debian patch')
     @unittest.skipIf(is_container and platform.machine() == 's390x', 'LP: #1895576')
     def test_rsyslog(self):
-        out = subprocess.check_output(['ps', 'u', '-C', 'rsyslogd'])
-        self.assertIn(b'bin/rsyslogd', out)
+        pid = subprocess.check_output(['pidof', 'rsyslogd'], universal_newlines=True).strip()
+        out = subprocess.check_output(['ps', 'u', pid], universal_newlines=True)
+        self.assertIn('bin/rsyslogd', out)
         self.active_unit('rsyslog')
         with open('/var/log/syslog') as f:
             log = f.read()
@@ -107,17 +109,16 @@ class ServicesTest(unittest.TestCase):
             # all files in /tmp/ should get cleaned up on boot
             self.assertFalse(os.path.exists('/tmp/oldfile.test'))
         self.assertFalse(os.path.exists('/tmp/newfile.test'))
-        # files in /var/tmp/ older than 30d should get cleaned up
-        # XXX FIXME: /var/tmp/ cleanup was disabled in #675422
-        # if not is_container:
-        #     self.assertFalse(os.path.exists('/var/tmp/oldfile.test'))
+        # files in /var/tmp/ older than 30d should get cleaned up, unless legacy
+        # compat tmpfiles.d is installed
+        if not is_container and not os.path.exists('/etc/tmpfiles.d/tmp.conf'):
+            self.assertFalse(os.path.exists('/var/tmp/oldfile.test'))
         self.assertTrue(os.path.exists('/var/tmp/newfile.test'))
 
         # next run should leave the recent ones
         os.close(os.open('/tmp/newfile.test',
                          os.O_CREAT | os.O_EXCL | os.O_WRONLY))
         subprocess.check_call(['systemctl', 'start', 'systemd-tmpfiles-clean'])
-        wait_unit_stop('systemd-tmpfiles-clean')
         self.assertTrue(os.path.exists('/tmp/newfile.test'))
 
     # Helper methods

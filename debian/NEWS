@@ -1,3 +1,49 @@
+systemd (256~rc3-3) unstable; urgency=medium
+
+  - /tmp/ is now by default a tmpfs, via the tmp.mount unit provided upstream.
+    The previous setup can be retained simply by masking the unit locally with:
+
+    systemctl mask tmp.mount
+
+    or:
+
+    touch /etc/systemd/system/tmp.mount
+
+  - /run/lock/ is no longer created with a patch before units start, but by
+    a standard early-boot run-lock.mount unit that is ordered before
+    local-fs.target. Any service needing to use /run/lock/ and running before
+    sysinit.target (ie, they likely define DefaultDependencies=no) will need
+    to be explicitly ordered with After=run-lock.mount. The two known cases
+    where this happens in the archive have a bug+MR filed already.
+
+  - On new installations, tmpfiles.d will now cleanup by default /tmp/ every
+    10 days, and /var/tmp/ every 30 days. The legacy behaviour can be configured
+    with a local override if needed:
+
+    echo 'D /tmp 1777' > /etc/tmpfiles.d/tmp.conf
+
+    This override will be automatically provided for upgrades of existing
+    systems from previous releases to Trixie. As a reminder, individual
+    files and directories can be marked for exclusion from cleanups with
+    the 'x' type configuration line as described in the tmpfiles.d manpage,
+    for example:
+
+    echo 'x /tmp/my-precious' > /etc/tmpfiles.d/precious.conf
+
+  - coredumps are now disabled by default via configuration files rather than
+    an out-of-tree patch (installing the optional systemd-coredump package
+    will enable them as before). As always, overriding via local drop-ins is
+    possible if desired. The configuration files that respectively affect
+    the system systemd instance, the user systemd instances and PAM sessions
+    are:
+
+    /usr/lib/systemd/system.conf.d/10-coredump-debian.conf
+    /usr/lib/systemd/user.conf.d/10-coredump-debian.conf
+    /usr/lib/sysctl.d/10-coredump-debian.conf
+    /etc/security/limits.d/10-coredump-debian.conf
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 28 May 2024 00:07:57 +0100
+
 systemd (256~rc2-1) unstable; urgency=medium
 
   In the rare case a scheduled shutdown fails to be enqueued (most

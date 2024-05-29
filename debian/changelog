@@ -1,3 +1,80 @@
+systemd (256~rc3-5) unstable; urgency=medium
+
+  * homed: fixup pam-auth-update file via trigger pam-auth-update assumes
+    nothing comes after a password module, but this is not true for
+    pam_systemd_home, which is a no-op for users not managed by homed.
+    Fixup common-password accordingly, using a trigger watching for pam-
+    auth-update files being installed.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 29 May 2024 01:04:53 +0100
+
+systemd (256~rc3-4) unstable; urgency=medium
+
+  * autopkgtest: take into account compat tmp.conf in tmpfiles.d test.
+  * Backport patch to fix TEST-64-UDEV-STORAGE autopkgtest.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 28 May 2024 12:11:36 +0100
+
+systemd (256~rc3-3) unstable; urgency=medium
+
+  [ Zbigniew Jędrzejewski-Szmek ]
+  * tests/boot-and-services: don't wait for systemd-tmpfiles-clean.service
+    to finish. It's a oneshot service, so the 'start' call above is
+    effectively synchronous.
+  * test/boot-and-services: use pidof instead of ps -C
+
+  [ Chris Hofstaedtler ]
+  * autopkgtest: install open-iscsi and tgt for upstream suite
+
+  [ Gioele Barabucci ]
+  * d/libnss-mymachines.nss: Install before `resolve` and `dns`. Installing
+    `mymachines` before `dns` and `resolve` (whatever comes first) is
+    suggested in the manpage. It also avoids leaking information about
+    local machines to the DNS resolver. (Closes: #825438, #851314)
+  * d/libnss-myhostname.nss: Install after `files`
+
+  [ Luca Boccassi ]
+  * Drop /bin/systemd legacy symlink. The systemd binary should not be in
+    the default PATH. This symlink was created due to some old
+    documentation (long since corrected) suggesting to use
+    init=/bin/systemd to test switching to systemd. (Closes: #913061)
+  * initramfs: call udevadm settle before control --exit to ensure workers
+    have stopped. Otherwise there might be lock files left under /run/
+    which will break 'nuke' and cause the boot to fail. (Closes: #1056564)
+  * Restore open files limit bump on boot. Broken packages ought to have
+    been fixed by now. (Closes: #1029152)
+  * Set default core limit to 0 via PAM for users. Otherwise it only
+    applies to services.
+  * Cleanup /var/tmp/ and /tmp/ on a timer by default. Remove the
+    downstream patch and restore the upstream behaviour set by the
+    tmpfiles.d which is to cleanup /var/tmp/ once a month and /tmp/ once
+    every 10 days. Can be overridden via: touch /etc/tmpfiles.d/tmp.conf
+    (Closes: #966621)
+  * Make /tmp/ a tmpfs by default. Restore the upstream default and make
+    /tmp/ a tmpfs. Can be overridden with: touch
+    /etc/systemd/system/tmp.mount or: systemctl mask tmp.mount
+  * Drop out-of-tree /run/lock patch and use a mount unit and tmpfiles.d
+    instead. Only lvm2 and open-iscsi have mentions of /run/lock and an
+    early-boot unit, so it's trivial to add ordering in those units
+    instead of maintaining an out-of-tree patch.
+  * homed: use standalone pam config file instead of pam-auth-config
+    pam_unix.so assumes that if anything comes before it then the password
+    has already been queried for sure. This doesn't work for homed, so
+    passwd breaks. pam-auth-config has this hard-coded assumption and it
+    cannot be disabled. Use an upstream standard pam config file instead.
+    (Closes: #1056166)
+  * NEWS: note recent changes
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 28 May 2024 00:07:57 +0100
+
+systemd (256~rc3-2) unstable; urgency=medium
+
+  * autopkgtest: do not install gdm3 on riscv64 tests. gnome-shell hasn't
+    built since last year for riscv64 due to #1058687 so the test fails as
+    it cannot be installed, skip it like on s390x.
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 23 May 2024 16:31:42 +0100
+
 systemd (256~rc3-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:

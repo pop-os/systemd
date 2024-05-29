@@ -8,3 +8,5 @@ usr/lib/sysusers.d/systemd-coredump.conf
 usr/share/bash-completion/completions/coredumpctl
 usr/share/zsh/vendor-completions/_coredumpctl
 ../extra/system.conf.d/20-coredump-debian.conf usr/lib/systemd/system.conf.d/
+../extra/user.conf.d/20-coredump-debian.conf usr/lib/systemd/user.conf.d/
+../extra/limits.d/20-coredump-debian.conf etc/security/limits.d/

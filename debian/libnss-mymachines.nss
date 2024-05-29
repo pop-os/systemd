@@ -1,1 +1,1 @@
-hosts	last	mymachines
+hosts	before=resolve,dns	mymachines

@@ -1,1 +1,1 @@
-hosts	last	myhostname
+hosts	after=files	myhostname

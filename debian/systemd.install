@@ -209,6 +209,7 @@ usr/lib/systemd/system/kmod-static-nodes.service
 usr/lib/systemd/system/ldconfig.service
 usr/lib/systemd/system/local-fs-pre.target
 usr/lib/systemd/system/local-fs.target
+usr/lib/systemd/system/local-fs.target.wants/tmp.mount
 usr/lib/systemd/system/machine.slice
 usr/lib/systemd/system/modprobe@.service
 usr/lib/systemd/system/multi-user.target
@@ -418,6 +419,7 @@ usr/lib/systemd/system/timers.target
 usr/lib/systemd/system/timers.target.wants/systemd-tmpfiles-clean.timer
 usr/lib/systemd/system/time-set.target
 usr/lib/systemd/system/time-sync.target
+usr/lib/systemd/system/tmp.mount
 usr/lib/systemd/system/tpm2.target
 usr/lib/systemd/system/umount.target
 usr/lib/systemd/system/usb-gadget.target
@@ -556,8 +558,11 @@ var/lib/systemd/
 ../extra/journald.conf.d usr/lib/systemd/
 ../extra/units/getty-static.service usr/lib/systemd/system/
 ../extra/units/rc-local.service.d usr/lib/systemd/system/
+../extra/units/run-lock.mount usr/lib/systemd/system/
 ../extra/units/systemd-fsck-root.service.d/ usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/
 ../extra/system.conf.d/10-coredump-debian.conf usr/lib/systemd/system.conf.d/
+../extra/user.conf.d/10-coredump-debian.conf usr/lib/systemd/user.conf.d/
 ../extra/sysctl.d/10-coredump-debian.conf usr/lib/sysctl.d/
+../extra/limits.d/10-coredump-debian.conf etc/security/limits.d/

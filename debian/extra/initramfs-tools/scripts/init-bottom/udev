@@ -12,6 +12,9 @@ case "$1" in
 esac
 
 # Stop udevd, we'll miss a few events while we run init, but we catch up
+# Wait for current workers to stop (at most for a minute to avoid deadlocks)
+# otherwise there will be lock files left under /run/ (see: #1056564)
+udevadm settle --timeout=60
 udevadm control --exit
 
 # move the /dev tmpfs to the rootfs; fall back to util-linux mount that does
