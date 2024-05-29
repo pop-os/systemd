@@ -11,3 +11,4 @@ usr/share/dbus-1/system.d/org.freedesktop.resolve1.conf
 usr/share/dbus-1/system-services/org.freedesktop.resolve1.service
 usr/share/polkit-1/actions/org.freedesktop.resolve1.policy
 usr/share/zsh/vendor-completions/_resolvectl
+../extra/resolved.conf.d usr/lib/systemd/
