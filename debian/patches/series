@@ -5,6 +5,5 @@ debian/fsckd-daemon-for-inter-fsckd-communication.patch
 test-fix-iscsi-TEST-64-UDEV-STORAGE-on-Debian.patch
 debian/localectl-disable-keymap-support.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
-test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
 tmpfiles.d-tmp.conf-make-cleanup-age-30d-on-Ubuntu.patch
