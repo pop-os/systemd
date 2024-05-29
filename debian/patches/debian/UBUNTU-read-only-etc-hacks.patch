@@ -100,7 +100,7 @@ index b94f37c..f6f4894 100644
                  /* If the symlink does not exist, assume "UTC", like glibc does */
                  return strdup_to(ret, "UTC");
 diff --git a/src/core/manager.c b/src/core/manager.c
-index 43fbd0e..bd3816a 100644
+index 90e72b0..60e6d7f 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
 @@ -79,6 +79,7 @@

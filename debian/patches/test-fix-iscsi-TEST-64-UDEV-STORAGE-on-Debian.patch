@@ -7,10 +7,10 @@ Subject: test: fix iscsi TEST-64-UDEV-STORAGE on Debian
  1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/test/test-functions b/test/test-functions
-index a34438b..be6eb1d 100644
+index c426304..b8b6567 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -1121,7 +1121,8 @@ install_iscsi() {
+@@ -1122,7 +1122,8 @@ install_iscsi() {
          image_install iscsi-iname iscsiadm iscsid iscsistart
          image_install -o "${ROOTLIBDIR:?}"/system/iscsi-{init,onboot,shutdown}.service
          image_install "${ROOTLIBDIR:?}"/system/iscsid.{service,socket}
@@ -20,7 +20,7 @@ index a34438b..be6eb1d 100644
          mkdir -p "${initdir:?}"/var/lib/iscsi/{ifaces,isns,nodes,send_targets,slp,static}
          mkdir -p "${initdir:?}/etc/iscsi"
          echo "iscsid.startup = /bin/systemctl start iscsid.socket" >"${initdir:?}/etc/iscsi/iscsid.conf"
-@@ -1151,7 +1152,11 @@ install_iscsi() {
+@@ -1152,7 +1153,11 @@ install_iscsi() {
      if [[ -z "$inst" || "$inst" =~ (server|target) ]]; then
          image_install tgt-admin tgt-setup-lun tgtadm tgtd tgtimg
          image_install -o /etc/sysconfig/tgtd
