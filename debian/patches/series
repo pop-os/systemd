@@ -7,7 +7,6 @@ debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 test-fix-iscsi-TEST-64-UDEV-STORAGE-on-Debian.patch
 debian/localectl-disable-keymap-support.patch
-debian/UBUNTU-read-only-etc-hacks.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
