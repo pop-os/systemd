@@ -11,3 +11,4 @@ debian/UBUNTU-read-only-etc-hacks.patch
 test-temporarily-skip-credentials-tests-in-LXC.patch
 test-skip-test-execute-in-arhmf-LXC-containers.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
+tmpfiles.d-tmp.conf-make-cleanup-age-30d-on-Ubuntu.patch

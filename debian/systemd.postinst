@@ -65,7 +65,7 @@ systemd-tmpfiles --create || :
 # drop in Forky
 if [ -n "$2" ] && dpkg --compare-versions "$2" lt 256~rc3-3 && [ ! -f "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf" ]; then
     mkdir -p "$DPKG_ROOT/etc/tmpfiles.d/"
-    echo 'D /tmp 1777 root root -' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
+    echo 'D /tmp 1777 root root 30d' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
 fi
 
 # Unless it's already running, ensure /tmp/ does not get overwritten by
