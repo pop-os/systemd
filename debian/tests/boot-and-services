@@ -74,7 +74,6 @@ class ServicesTest(unittest.TestCase):
 
     @unittest.skipIf('pkg.systemd.upstream' in os.environ.get('DEB_BUILD_PROFILES', ''),
                      'Forwarding to rsyslog is a Debian patch')
-    @unittest.skipIf(is_container and platform.machine() == 's390x', 'LP: #1895576')
     def test_rsyslog(self):
         pid = subprocess.check_output(['pidof', 'rsyslogd'], universal_newlines=True).strip()
         out = subprocess.check_output(['ps', 'u', pid], universal_newlines=True)
@@ -376,7 +375,6 @@ SystemCallFilter=access
 
 
 @unittest.skipIf(is_container, 'systemd-coredump does not work in containers')
-@unittest.skipIf(platform.machine() == 's390x', 'LP: #1980003')
 class CoredumpTest(unittest.TestCase):
     '''Check systemd-coredump'''
 
