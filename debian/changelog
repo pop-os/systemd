@@ -1,3 +1,77 @@
+systemd (256~rc3-5ubuntu1) oracular; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/storage: skip tests if scsi_debug module is not available
+    - debian/tests/boot-and-services:
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Set default user path
+      + Disable LLMNR by default
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf:
+      Set ManagedOOMSwap=auto, disabling swap kill by default
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Build-Depends: linux-tools-generic
+    - d/p/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch:
+      Revert "network: if /sys is rw, then udev should be around" upstream
+      commit
+    - d/p/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch:
+      Don't override Ubuntu's default sysctl values
+    - debian/extra: use a dropin to configure Nice=-1 on systemd-journald.service.
+    - debian/tests/upstream: export QEMU_MEM="1024M" for all tests
+    - debian/systemd.links: mask systemd-gpt-auto-generator by default
+    - debian/systemd.install: exclude files that are not built for i386
+    - debian/systemd.manpages: do not ship un-built manpages on i386
+    - debian/tests/control: only install systemd-boot-efi for supported arches
+    - test: skip exec-privatenetwork-yes-privatemounts-yes.service in LXC
+  * Dropped changes, no longer needed:
+    - Drop debian/UBUNTU-read-only-etc-hacks.patch
+    - Drop debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
+    - Drop debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
+    - Drop lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch.
+      As stated in the patch description, this is *not* the proper fix for the
+      issue. The proper fix was sent to bcache-tools upstream, but that
+      upstream is abandoned. However, that patch is now included in Debian
+      (shipped starting in 1.0.8-5). Hence, we can finally drop this patch
+      from systemd.
+    - Drop test-temporarily-skip-credentials-tests-in-LXC.patch
+      This is redundant with the current skip in tests-in-lxd, and skipping
+      on armhf all together.
+    - debian/tests/boot-and-services:
+      + skip test_syslog on s390x
+      + skip coredump tests on s390x
+  * New changes:
+    - Keep 30d cleanup for /tmp in Ubuntu
+    - debian/extra: use a drop-in resolved.conf to configure Cache=no-negative
+      This allows us to drop the current patch.
+    - debian/test/unit-tests: skip test-execute on armhf.
+      The run-unit-tests.py script supports a --skip flag for wholesale
+      skipping like this, so use that instead of a patch.
+    - debian/tests/tests-in-lxd: fix apparmor profile path
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 31 May 2024 15:52:20 -0400
+
 systemd (256~rc3-5) unstable; urgency=medium
 
   * homed: fixup pam-auth-update file via trigger pam-auth-update assumes
