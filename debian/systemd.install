@@ -553,3 +553,4 @@ var/lib/systemd/
 ../extra/units/rc-local.service.d usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/
+../extra/units/systemd-journald.service.d usr/lib/systemd/system/
