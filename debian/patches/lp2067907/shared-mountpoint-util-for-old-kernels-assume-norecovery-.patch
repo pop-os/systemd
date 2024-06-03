@@ -1,0 +1,32 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 21 May 2024 10:39:39 +0200
+Subject: shared/mountpoint-util: for old kernels,
+ assume "norecovery" is supported by btrfs
+
+Origin: upstream, https://github.com/systemd/systemd/commit/055b465a3f56f9d53370a47b91af9cc2ffad4470
+Bug-Ubuntu: https://launchpad.net/bugs/2067907
+
+Fixup for e3828d7103a99a15a1e947ba3063294ead590631, as requested in
+https://github.com/systemd/systemd/pull/32892#issuecomment-2117903328.
+---
+ src/basic/mountpoint-util.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/basic/mountpoint-util.c b/src/basic/mountpoint-util.c
+index ffd7a54..9897ca0 100644
+--- a/src/basic/mountpoint-util.c
++++ b/src/basic/mountpoint-util.c
+@@ -511,8 +511,12 @@ const char* fstype_norecovery_option(const char *fstype) {
+          * old name if the new name doesn't work. */
+         if (streq(fstype, "btrfs")) {
+                 r = mount_option_supported(fstype, "rescue=nologreplay", NULL);
++                if (r == -EAGAIN) {
++                        log_debug_errno(r, "Failed to check for btrfs 'rescue=nologreplay' option, assuming old kernel with 'norecovery': %m");
++                        return "norecovery";
++                }
+                 if (r < 0)
+-                        log_debug_errno(r, "Failed to check for btrfs rescue=nologreplay option, assuming it is not supported: %m");
++                        log_debug_errno(r, "Failed to check for btrfs 'rescue=nologreplay' option, assuming it is not supported: %m");
+                 if (r > 0)
+                         return "rescue=nologreplay";
+         }

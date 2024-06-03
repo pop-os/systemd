@@ -1,0 +1,113 @@
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Fri, 17 May 2024 10:46:12 +0200
+Subject: mountpoint-util: Deal with kernel API breakage in "norecovery" mount
+ option
+
+Origin: upstream, https://github.com/systemd/systemd/commit/e3828d7103a99a15a1e947ba3063294ead590631
+Bug-Ubuntu: https://launchpad.net/bugs/2067907
+
+"norecovery" was deprecated for btrfs in
+https://github.com/torvalds/linux/commit/74ef00185eb864252156022ff129b01549504175
+and removed in
+https://github.com/torvalds/linux/commit/a1912f712188291f9d7d434fba155461f1ebef66.
+
+Let's drop our assumption that btrfs supports "norecovery" and first query for the
+new name of the option followed by querying for the old name.
+---
+ src/basic/mountpoint-util.c     | 22 ++++++++++++++++++----
+ src/basic/mountpoint-util.h     |  3 ++-
+ src/shared/dissect-image.c      |  7 +++++--
+ src/test/test-mountpoint-util.c |  6 +++---
+ 4 files changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/src/basic/mountpoint-util.c b/src/basic/mountpoint-util.c
+index bf67f7e..ffd7a54 100644
+--- a/src/basic/mountpoint-util.c
++++ b/src/basic/mountpoint-util.c
+@@ -495,16 +495,30 @@ bool fstype_can_discard(const char *fstype) {
+         return mount_option_supported(fstype, "discard", NULL) > 0;
+ }
+ 
+-bool fstype_can_norecovery(const char *fstype) {
++const char* fstype_norecovery_option(const char *fstype) {
++        int r;
++
+         assert(fstype);
+ 
+         /* Use a curated list as first check, to avoid calling fsopen() which might load kmods, which might
+          * not be allowed in our MAC context. */
+-        if (STR_IN_SET(fstype, "ext3", "ext4", "xfs", "btrfs"))
+-                return true;
++        if (STR_IN_SET(fstype, "ext3", "ext4", "xfs"))
++                return "norecovery";
++
++        /* btrfs dropped support for the "norecovery" option in 6.8
++         * (https://github.com/torvalds/linux/commit/a1912f712188291f9d7d434fba155461f1ebef66) and replaced
++         * it with rescue=nologreplay, so we check for the new name first and fall back to checking for the
++         * old name if the new name doesn't work. */
++        if (streq(fstype, "btrfs")) {
++                r = mount_option_supported(fstype, "rescue=nologreplay", NULL);
++                if (r < 0)
++                        log_debug_errno(r, "Failed to check for btrfs rescue=nologreplay option, assuming it is not supported: %m");
++                if (r > 0)
++                        return "rescue=nologreplay";
++        }
+ 
+         /* On new kernels we can just ask the kernel */
+-        return mount_option_supported(fstype, "norecovery", NULL) > 0;
++        return mount_option_supported(fstype, "norecovery", NULL) > 0 ? "norecovery" : NULL;
+ }
+ 
+ bool fstype_can_umask(const char *fstype) {
+diff --git a/src/basic/mountpoint-util.h b/src/basic/mountpoint-util.h
+index 499403a..3ba0683 100644
+--- a/src/basic/mountpoint-util.h
++++ b/src/basic/mountpoint-util.h
+@@ -53,9 +53,10 @@ bool fstype_is_blockdev_backed(const char *fstype);
+ bool fstype_is_ro(const char *fsype);
+ bool fstype_can_discard(const char *fstype);
+ bool fstype_can_uid_gid(const char *fstype);
+-bool fstype_can_norecovery(const char *fstype);
+ bool fstype_can_umask(const char *fstype);
+ 
++const char* fstype_norecovery_option(const char *fstype);
++
+ int dev_is_devtmpfs(void);
+ 
+ int mount_fd(const char *source, int target_fd, const char *filesystemtype, unsigned long mountflags, const void *data);
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 84cfbcd..627b67c 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -1861,9 +1861,12 @@ int partition_pick_mount_options(
+          * access that actually modifies stuff work on such image files. Or to say this differently: if
+          * people want their file systems to be fixed up they should just open them in writable mode, where
+          * all these problems don't exist. */
+-        if (!rw && fstype && fstype_can_norecovery(fstype))
+-                if (!strextend_with_separator(&options, ",", "norecovery"))
++        if (!rw && fstype) {
++                const char *option = fstype_norecovery_option(fstype);
++
++                if (option && !strextend_with_separator(&options, ",", option))
+                         return -ENOMEM;
++        }
+ 
+         if (discard && fstype && fstype_can_discard(fstype))
+                 if (!strextend_with_separator(&options, ",", "discard"))
+diff --git a/src/test/test-mountpoint-util.c b/src/test/test-mountpoint-util.c
+index ff447c6..1f3c6be 100644
+--- a/src/test/test-mountpoint-util.c
++++ b/src/test/test-mountpoint-util.c
+@@ -359,9 +359,9 @@ TEST(fstype_can_discard) {
+ }
+ 
+ TEST(fstype_can_norecovery) {
+-        assert_se(fstype_can_norecovery("ext4"));
+-        assert_se(!fstype_can_norecovery("vfat"));
+-        assert_se(!fstype_can_norecovery("tmpfs"));
++        assert_se(streq(fstype_norecovery_option("ext4"), "norecovery"));
++        assert_se(!fstype_norecovery_option("vfat"));
++        assert_se(!fstype_norecovery_option("tmpfs"));
+ }
+ 
+ TEST(fstype_can_umask) {
