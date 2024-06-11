@@ -46,7 +46,6 @@ export DEB_BUILD_MAINT_OPTIONS = optimize=+lto hardening=+pie $(DEB_BUILD_OPTION
 CONFFLAGS = \
 	-Dstatic-libsystemd=true \
 	-Dmode=release \
-	-Duser-path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 	-Dversion-tag="$(VERSION_TAG)" \
 	-Dquotaon-path=/usr/sbin/quotaon \
 	-Dquotacheck-path=/usr/sbin/quotacheck \
@@ -67,8 +66,6 @@ CONFFLAGS = \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
 	-Ddefault-dnssec=no \
-	-Ddefault-llmnr=no \
-	-Ddefault-mdns=no \
 	-Dpamconfdir=no \
 	-Dpamlibdir=/usr/lib/$(DEB_HOST_MULTIARCH)/security \
 	-Drpmmacrosdir=no \
