@@ -49,4 +49,5 @@ usr/share/zsh/vendor-completions/_machinectl
 usr/share/bash-completion/completions/machinectl
 usr/share/bash-completion/completions/portablectl
 usr/share/bash-completion/completions/systemd-nspawn
+<pkg.systemd.upstream> usr/share/bash-completion/completions/systemd-vmspawn
 usr/share/bash-completion/completions/importctl

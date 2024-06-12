@@ -16,6 +16,18 @@ _update_binfmt() {
     _systemctl restart systemd-binfmt.service || true
 }
 
+_restart_managers() {
+    _systemctl daemon-reexec || true
+    # Re-exec user instances so that running user managers are updated too.
+    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
+    # D-Bus as dbus-user-session is not guaranteed to be available.
+    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
+    # do not restart logind
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
+    _systemctl try-restart systemd-networkd.service || true
+    _systemctl try-restart systemd-journald.service || true
+}
+
 # Update Message Catalogs database and binfmt registrations in response to dpkg triggers
 if [ "$1" = "triggered" ]; then
     shift
@@ -26,6 +38,9 @@ if [ "$1" = "triggered" ]; then
                 ;;
             /usr/lib/binfmt.d)
                 _update_binfmt
+                ;;
+            libc-upgrade)
+                _restart_managers
                 ;;
         esac
     done
@@ -68,6 +83,22 @@ if [ -n "$2" ] && dpkg --compare-versions "$2" lt 256~rc3-3 && [ ! -f "$DPKG_ROO
     echo 'D /tmp 1777 root root 30d' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
 fi
 
+# We used to ship tmp.mount in /usr/share as an example, and some users link it in /etc/,
+# remove the link as a workaround until Trixie ships. This method would also have created
+# a link in local-fs.target.wants, so remove that too.
+if [ -n "$2" ] && [ -L "$DPKG_ROOT/etc/systemd/system/tmp.mount" ] && [ "$(readlink "$DPKG_ROOT/etc/systemd/system/tmp.mount")" = "/usr/share/systemd/tmp.mount" ]; then
+    rm -f "$DPKG_ROOT/etc/systemd/system/tmp.mount"
+    rm -f "$DPKG_ROOT/etc/systemd/system/local-fs.target.wants/tmp.mount"
+fi
+
+# The user may have used 'systemctl enable /usr/share/systemd/tmp.mount', which
+# would have created a symlink in the local-fs.target.wants directory (as the
+# pre-Trixie tmp.mount included an [install] section for that purpose). If it
+# exists, remove it.
+if [ -n "$2" ] && [ -L "$DPKG_ROOT/etc/systemd/system/local-fs.target.wants/tmp.mount" ] && [ "$(readlink "$DPKG_ROOT/etc/systemd/system/local-fs.target.wants/tmp.mount")" = "/usr/share/systemd/tmp.mount" ]; then
+    rm -f "$DPKG_ROOT/etc/systemd/system/local-fs.target.wants/tmp.mount"
+fi
+
 # Unless it's already running, ensure /tmp/ does not get overwritten by
 # the tmpfs from tmp.mount in case a unit is later activated that implicitly
 # depends on it (for example with PrivateTmp=yes) by runtime masking it
@@ -79,13 +110,5 @@ fi
 
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
-    _systemctl daemon-reexec || true
-    # Re-exec user instances so that running user managers are updated too.
-    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
-    # D-Bus as dbus-user-session is not guaranteed to be available.
-    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
-    # do not restart logind
-    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
-    _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-journald.service || true
+    _restart_managers
 fi

@@ -1,13 +1,25 @@
 systemd (256~rc3-3) unstable; urgency=medium
 
   - /tmp/ is now by default a tmpfs, via the tmp.mount unit provided upstream.
-    The previous setup can be retained simply by masking the unit locally with:
+    The old default setup can be retained simply by masking the unit locally
+    with (do not do this if you are defining /tmp/ manually in /etc/fstab):
 
     systemctl mask tmp.mount
 
     or:
 
     touch /etc/systemd/system/tmp.mount
+
+    It is recommended to check /tmp/ for any leftover files before rebooting
+    after installing this update and manually cleaning up, as the directory
+    will longer be cleaned up automatically on boot, as it is overmounted. It
+    is always possible to remount the root filesystem in a local directory
+    and remove leftovers manually after rebooting, but this will not be done
+    automatically to avoid unintential removals. This situation can be easily
+    detected by checking the journal after a reboot, as there will be a log
+    message that says:
+
+    tmp.mount: Directory /tmp to mount over is not empty, mounting anyway
 
   - /run/lock/ is no longer created with a patch before units start, but by
     a standard early-boot run-lock.mount unit that is ordered before
@@ -16,9 +28,10 @@ systemd (256~rc3-3) unstable; urgency=medium
     to be explicitly ordered with After=run-lock.mount. The two known cases
     where this happens in the archive have a bug+MR filed already.
 
-  - On new installations, tmpfiles.d will now cleanup by default /tmp/ every
-    10 days, and /var/tmp/ every 30 days. The legacy behaviour can be configured
-    with a local override if needed:
+  - On new installations, tmpfiles.d will now cleanup by default files
+    that have not been changed or accessed on /tmp/ for 10 days, and /var/tmp/
+    for 30 days. The legacy behaviour can be configured with a local override
+    if needed:
 
     echo 'D /tmp 1777' > /etc/tmpfiles.d/tmp.conf
 

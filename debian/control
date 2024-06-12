@@ -17,7 +17,7 @@ Build-Depends: debhelper-compat (= 13),
                debhelper (>= 13.11.6),
                dh-exec,
                dh-package-notes,
-               dh-sequence-dlopenlibdeps <!stage1 !pkg.systemd.upstream>,
+               dh-sequence-dlopenlibdeps <!stage1>,
                dh-sequence-installnss,
                dh-sequence-installsysusers,
                pkgconf,
@@ -556,7 +556,7 @@ Description: simple UEFI boot manager - EFI binaries
  This package contains the EFI binaries.
 
 Package: systemd-ukify
-Build-Profiles: <!stage1>
+Build-Profiles: <!stage1 !pkg.systemd.noukify>
 Architecture: all
 Multi-Arch: foreign
 Depends: ${misc:Depends},
