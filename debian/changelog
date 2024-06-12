@@ -1,3 +1,72 @@
+systemd (256-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/boot-and-services:
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Build-Depends: linux-tools-generic
+    - d/p/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch:
+      Revert "network: if /sys is rw, then udev should be around" upstream
+      commit
+    - debian/tests/upstream: export QEMU_MEM="1024M" for all tests
+    - debian/systemd.links: mask systemd-gpt-auto-generator by default
+    - debian/systemd.install: exclude files that are not built for i386
+    - debian/systemd.manpages: do not ship un-built manpages on i386
+    - debian/tests/control: only install systemd-boot-efi for supported arches
+    - test: skip exec-privatenetwork-yes-privatemounts-yes.service in LXC
+    - debian/test/unit-tests: skip test-execute on armhf.
+  * Dropped changes, included in Debian:
+    - debian/extra: use a drop-in resolved.conf to configure Cache=no-negative
+    - debian/extra: use a dropin to configure Nice=-1 on systemd-journald.service.
+    - debian/extra/systemd-oomd-defaults/-.slice.d/10-oomd-root-slice-defaults.conf:
+      Set ManagedOOMSwap=auto, disabling swap kill by default
+    - debian/rules:
+      + Set default user path
+      + Disable LLMNR by default
+    - debian/tests/storage: skip tests if scsi_debug module is not available
+  * Dropped changes:
+    - debian/patches/tmpfiles.d-tmp.conf-make-cleanup-age-30d-on-Ubuntu.patch:
+      We want to stay aligned with Debian and upstream instead of keeping this
+      30d cleanup.
+    - debian/systemd-resolved.install: drop unnecessary delta
+    - d/p/debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch:
+      We do not actually ship sysctld.d/50-default.conf in Debian or Ubuntu.
+      When this patch was written, we did, but that change was lost in a merge
+      from Debian. The preferred package to set sysctl defaults is procps
+      anyways, so rather than restoring sysctl.d/50-default.conf to make this
+      patch relevant, drop the patch.
+  * New changes:
+    - debian/extra: remove systemd-logind.service.d/nice.conf (LP: #2067927)
+    - switch-root: use MS_MOVE for /run when switchig from initrd (LP: #2064096)
+    - debian/systemd.postinst: do not create /etc/tmpfiles.d/tmp.conf on upgrades.
+      We want the upgrades on Ubuntu to be aligned with what a new install
+      would look like.
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 12 Jun 2024 17:02:56 -0400
+
 systemd (256-1) unstable; urgency=medium
 
   [ Kevin Fleming ]
