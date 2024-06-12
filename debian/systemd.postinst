@@ -76,13 +76,6 @@ fi
 # Ignore if this fails, because e.g. %b will fail on WSL
 systemd-tmpfiles --create || :
 
-# On upgrade for now keep the current tmpfiles.d (as it used to be after patches),
-# drop in Forky
-if [ -n "$2" ] && dpkg --compare-versions "$2" lt 256~rc3-3 && [ ! -f "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf" ]; then
-    mkdir -p "$DPKG_ROOT/etc/tmpfiles.d/"
-    echo 'D /tmp 1777 root root 30d' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
-fi
-
 # We used to ship tmp.mount in /usr/share as an example, and some users link it in /etc/,
 # remove the link as a workaround until Trixie ships. This method would also have created
 # a link in local-fs.target.wants, so remove that too.
