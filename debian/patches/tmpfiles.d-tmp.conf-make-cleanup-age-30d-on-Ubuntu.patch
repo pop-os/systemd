@@ -4,7 +4,6 @@ Subject: tmpfiles.d/tmp.conf: make cleanup-age 30d on Ubuntu
 
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2019026
 Forwarded: no, 30d cleanup is Ubuntu specific
-
 ---
  tmpfiles.d/tmp.conf | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

@@ -1,6 +1,6 @@
+debian/localectl-disable-keymap-support.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
 debian/UBUNTU-Don-t-override-Ubuntu-s-default-sysctl-values-LP-1962038.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
-debian/localectl-disable-keymap-support.patch
 test-skip-exec-privatenetwork-yes-privatemounts-yes.servi.patch
 tmpfiles.d-tmp.conf-make-cleanup-age-30d-on-Ubuntu.patch
