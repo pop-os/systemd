@@ -1,4 +1,4 @@
-systemd (256-1ubuntu1) UNRELEASED; urgency=medium
+systemd (256-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/upstream{,-1,-2}: split upstream tests into two parts
@@ -65,7 +65,7 @@ systemd (256-1ubuntu1) UNRELEASED; urgency=medium
       We want the upgrades on Ubuntu to be aligned with what a new install
       would look like.
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 12 Jun 2024 17:02:56 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 13 Jun 2024 11:46:06 -0400
 
 systemd (256-1) unstable; urgency=medium
 
