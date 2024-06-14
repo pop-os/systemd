@@ -1,3 +1,14 @@
+systemd (255.4-1ubuntu8.2) noble; urgency=medium
+
+  * mountpoint-util: Deal with kernel API breakage in "norecovery" mount option.
+    Also include fixup commit
+    055b465a3f ("shared/mountpoint-util: for old kernels, assume "norecovery" is supported by btrfs").
+    (LP: #2067907)
+  * cgroup-util: allow cg_read_pid() to skip unmapped (zero) pids (LP: #2067922)
+  * debian/extra: ship nice.conf for journald, not logind (LP: #2067927)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 14 Jun 2024 17:03:19 -0400
+
 systemd (255.4-1ubuntu8.1) noble; urgency=medium
 
   * debian/systemd-resolved.postinst: ignore cp failure (LP: #2047975)
