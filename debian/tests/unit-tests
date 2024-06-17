@@ -2,11 +2,5 @@
 # run upstream unit tests
 set -e
 
-extra_args=
-
-if [ "$(dpkg --print-architecture)" = "armhf" ]; then
-    extra_args="--skip test-execute"
-fi
-
 export ARTIFACT_DIRECTORY=$AUTOPKGTEST_ARTIFACTS
-/usr/lib/systemd/tests/run-unit-tests.py $extra_args
+/usr/lib/systemd/tests/run-unit-tests.py
