@@ -1,3 +1,20 @@
+systemd (245.4-4ubuntu3.24) focal; urgency=medium
+
+  * network: add RouteMetric= setting in [Address] (LP: #2055397)
+    This consists of the following upstream commits:
+     * sd-netlink: introduce sd_netlink_message_append_s8() and friends
+     * sd-netlink: add missing address types
+     * network: add RouteMetric= setting in [Address] section
+     * network: dhcp4: also apply RouteMetric= setting in [DHCPv4] to prefix route
+    Files:
+    - debian/patches/lp2055397/0001-sd-netlink-introduce-sd_netlink_message_append_s8-an.patch
+    - debian/patches/lp2055397/0002-sd-netlink-add-missing-address-types.patch
+    - debian/patches/lp2055397/0003-network-add-RouteMetric-setting-in-Address-section.patch
+    - debian/patches/lp2055397/0004-network-dhcp4-also-apply-RouteMetric-setting-in-DHCP.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=10e86da62257cc03dc1d984478cb1c8efc45097d
+
+ -- Ioanna Alifieraki <ioanna-maria.alifieraki@canonical.com>  Mon, 17 Jun 2024 16:29:39 -0400
+
 systemd (245.4-4ubuntu3.23) focal; urgency=medium
 
   [ Nick Rosbrook ]
