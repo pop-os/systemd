@@ -8,6 +8,13 @@ export LC_ALL = C.UTF-8
 include /usr/share/dpkg/default.mk
 include /usr/share/debhelper/dh_package_notes/package-notes.mk
 
+ifeq (amd64,$(DEB_HOST_ARCH))
+export TEMPLATE_EFI_ARCH=x64
+else ifeq (arm64,$(DEB_HOST_ARCH))
+export TEMPLATE_EFI_ARCH=aa64
+endif
+
+
 ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
     SUPPORT_URL = http://www.ubuntu.com/support
@@ -265,9 +272,8 @@ execute_before_dh_install:
 	fi
 	# remove obsolete compat symlink
 	rm -f debian/tmp/usr/bin/systemd-resolve
-	# we don't want repart and shutdown standalone binaries for now
+	# we don't want the repart standalone binary for now
 	rm -f debian/tmp/usr/bin/systemd-repart.standalone
-	rm -f debian/tmp/usr/lib/systemd/systemd-shutdown.standalone
 	# files shipped by cryptsetup
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 	rm -f debian/tmp/usr/share/man/man5/crypttab.5
@@ -289,6 +295,14 @@ endif
 ifeq ($(DEB_HOST_ARCH),i386)
 	rm -f debian/systemd/usr/lib/systemd/boot/efi/linuxia32.elf.stub
 	rm -f debian/systemd-boot-efi/usr/lib/systemd/boot/efi/linuxia32.elf.stub
+endif
+
+ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+ifeq ($(DEB_VENDOR),Debian)
+ifneq ($(TEMPLATE_EFI_ARCH),)
+	debian/extra/gen-signing-template $(DEB_VERSION) $(DEB_HOST_ARCH) $(TEMPLATE_EFI_ARCH)
+endif
+endif
 endif
 
 	# Remove empty directories from /usr/lib.

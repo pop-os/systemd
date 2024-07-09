@@ -76,6 +76,7 @@ Build-Depends: debhelper-compat (= 13),
                python3-lxml:native,
                python3-pefile:native <!stage1 !nocheck> <!stage1 !noinsttest>,
                python3-pyelftools [amd64 i386 arm64 armhf riscv64] <!stage1>,
+               jq [amd64 arm64] <!stage1 !pkg.systemd.upstream>,
                python3-pyparsing <!nocheck>,
                python3-evdev:native <!nocheck>,
                tzdata-legacy <!nocheck> | tzdata (<< 2024a-1) <!nocheck>,
@@ -90,14 +91,17 @@ Architecture: linux-any
 Multi-Arch: foreign
 Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
+            linux-sysctl-defaults,
             networkd-dispatcher,
             systemd-timesyncd | time-daemon,
             systemd-resolved,
+            systemd-cryptsetup,
             ${dlopen:Recommends},
 Suggests: systemd-container,
           systemd-homed,
           systemd-userdbd,
           systemd-boot,
+          systemd-repart,
           libtss2-tcti-device0,
           polkitd,
           ${dlopen:Suggests},
@@ -113,7 +117,7 @@ Conflicts: consolekit,
            opensysusers,
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
-        dracut (<= 060+5-7),
+        dracut-core (<< 102-2~),
 Provides: systemd-sysusers (= ${binary:Version}),
           systemd-tmpfiles (= ${binary:Version}),
 Description: system and service manager
@@ -135,6 +139,9 @@ Conflicts: sysvinit-core,
            systemd-shim,
            initscripts,
            orphan-sysvinit-scripts,
+           sysv-rc,
+           insserv,
+           startpar,
            bfh-container (<< 20211009-22~),
            molly-guard (<< 0.8.2~),
            progress-linux-container (<< 20221002-11~),
@@ -161,6 +168,7 @@ Depends: ${shlibs:Depends},
 Recommends: libnss-mymachines,
             ${dlopen:Recommends},
 Suggests: ${dlopen:Suggests},
+Conflicts: systemd (<< 256-2~),
 Description: systemd container/nspawn tools
  This package provides systemd's tools for nspawn and container/VM management:
   * systemd-nspawn
@@ -472,6 +480,18 @@ Description: standalone tmpfiles binary for use in non-systemd systems
  This package conflicts with the main systemd package and is meant for use in
  non-systemd systems.
 
+Package: systemd-standalone-shutdown
+Architecture: linux-any
+Conflicts: systemd,
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Recommends: ${dlopen:Recommends},
+Suggests: ${dlopen:Suggests},
+Description: standalone shutdown binary for use in exitrds
+ Standalone shutdown binary with minimal dependencies.
+ This package conflicts with the main systemd package and is meant for use in
+ minimal exitrd images. Not intended for normal systems.
+
 Package: systemd-oomd
 Architecture: linux-any
 Depends: ${shlibs:Depends},
@@ -528,8 +548,7 @@ Recommends: efibootmgr,
             ${dlopen:Recommends},
 Suggests: systemd-ukify,
           ${dlopen:Suggests},
-Breaks: systemd (<< 251.2-3~)
-Replaces: systemd (<< 251.2-3~)
+Conflicts: systemd (<< 256-2~), systemd-boot-efi (<< 256-2~),
 Description: simple UEFI boot manager - tools and services
  systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
  textual menu to select the entry to boot and an editor for the kernel command
@@ -554,6 +573,22 @@ Description: simple UEFI boot manager - EFI binaries
  line. It supports systems with UEFI firmware only.
  .
  This package contains the EFI binaries.
+
+Package: systemd-boot-efi-amd64-signed-template
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+Build-Profiles: <!stage1 !pkg.systemd.upstream>
+Description: Template for signed systemd-boot-efi package (amd64)
+ This package is used to control code signing by the Debian signing
+ service (amd64 variant).
+
+Package: systemd-boot-efi-arm64-signed-template
+Architecture: arm64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+Build-Profiles: <!stage1 !pkg.systemd.upstream>
+Description: Template for signed systemd-boot-efi package (arm64)
+ This package is used to control code signing by the Debian signing
+ service (arm64 variant).
 
 Package: systemd-ukify
 Build-Profiles: <!stage1 !pkg.systemd.noukify>
@@ -610,3 +645,27 @@ Description: systemd development files
  are different from the libsystemd's and libudev's pkg-config files, which can
  still be found in the respective dev packages, but instead provide data such as
  the installation directories for units, and more.
+
+Package: systemd-repart
+Architecture: linux-any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Recommends: ${dlopen:Recommends},
+Suggests: ${dlopen:Suggests},
+Conflicts: systemd (<< 256-2~),
+Description: Provides the systemd-repart utility
+ systemd-repart is a configuration-driven system partitioning tool. It follows
+ the Discoverable Partitions Specification and provides support for encryption
+ and dm-verity among other things.
+
+Package: systemd-cryptsetup
+Build-Profiles: <!stage1>
+Architecture: linux-any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Recommends: ${dlopen:Recommends},
+Suggests: ${dlopen:Suggests},
+Conflicts: systemd (<< 256-2~),
+Description: Provides cryptsetup, integritysetup and veritysetup utilities
+ Utilities and units that integrated cryptsetup/integritysetup/veritysetup
+ support in systemd.

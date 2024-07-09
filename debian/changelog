@@ -1,3 +1,71 @@
+systemd (256.2-1) unstable; urgency=medium
+
+  * d/not-installed: fix shutdown.standalone path
+  * autopkgtest: skip qemu tests on arm64
+  * Add recommends on linux-sysctl-defaults. This package contains the
+    default sysctl settings, and is maintained by the kernel team. This is
+    not available in Ubuntu so keep it as a recommends for now, to avoid
+    breaking the upstream CI.
+    (Closes: #1027773)
+  * initramfs-tools: copy network drop-ins too (Closes: #1074564)
+  * d/e/checkout-upstream: fix shellcheck warnings
+  * d/e/checkout-upstream: do not fail if rebase fails
+  * d/e/checkout-upstream: switch packaging branch on upstream stable PRs.
+  * New upstream version 256.2 (Closes: #1074789)
+  * Install run0 zsh completion file
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 05 Jul 2024 19:15:59 +0100
+
+systemd (256.1-2) unstable; urgency=medium
+
+  * Bump breaks/replaces to conflicts for DEP17. Breaks/replaces are not
+    enough when moving files between packages and between locations as per
+    DEP17, so bump to Conflicts. (Closes: #1073922)
+  * autopkgtest: add dependency on libcryptsetup-dev in unit-tests suite
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 23 Jun 2024 13:33:33 +0100
+
+systemd (256.1-1) unstable; urgency=medium
+
+  * Bump versioned breaks against dracut to 102-2 (Closes: #1073290)
+  * autopkgtest: switch upstream suite to mkosi-based builds
+  * Add conflict against sysv-rc, insserv and startpar in systemd-sysv.
+    They are not needed, and having them installed causes problems.
+    (Closes: #1072562)
+  * New upstream version 256.1
+  * Drop section from binary packages where it matches the source package
+  * Override Lintian false positives about spare manpages
+  * Deduplicate template packages descriptions
+  * Add Lintian override for template package false positives
+  * Rename EFI architecture variable to avoid dpkg clash. Fixes Lintian
+    warning: debian-rules-sets-dpkg-architecture-variable
+  * Upload to unstable.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 18 Jun 2024 23:19:16 +0100
+
+systemd (256-2) experimental; urgency=medium
+
+  * Add templated packages for UEFI Secure Boot signing of systemd-boot.
+  * Add systemd-standalone-shutdown package for exitrds. Allows building
+    minimal exitrd images, used to gracefully cleanup complex root
+    filesystems storage. Not intended for normal systems.
+  * Add systemd-repart package to reduce dependencies sd-repart pulls in
+    several libraries that binaries in the main systemd package do not
+    need, so split it out to reduce the dependencies of the main package
+  * Add systemd-cryptsetup package to reduce dependencies sd-
+    cryptsetup/integritysetup/veritysetup pull in several libraries that
+    other files in the main systemd package do not need, so split them out
+    to reduce the dependencies of the main package
+  * Move sd-sysupdate to systemd-container
+  * Move importd manpages to systemd-container, where the binaries are.
+    Left behind when importd was moved
+  * Move systemd-boot/stub manpages to systemd-boot. The EFI packages
+    should just have the EFI binaries, no point in duplicating the docs.
+    And the stub manpage should also be in the boot package, not the main
+    package.
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 12 Jun 2024 01:30:51 +0100
+
 systemd (256-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:

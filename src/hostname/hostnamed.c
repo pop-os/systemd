@@ -1619,11 +1619,13 @@ static int vl_method_describe(Varlink *link, JsonVariant *parameters, VarlinkMet
         if (r != 0)
                 return r;
 
-        r = varlink_verify_polkit_async(
+        r = varlink_verify_polkit_async_full(
                         link,
                         c->bus,
                         "org.freedesktop.hostname1.get-hardware-serial",
                         /* details= */ NULL,
+                        UID_INVALID,
+                        POLKIT_DONT_REPLY,
                         &c->polkit_registry);
         if (r == 0)
                 return 0; /* No authorization for now, but the async polkit stuff will call us again when it has it */
@@ -1682,6 +1684,13 @@ static int connect_varlink(Context *c) {
         return 0;
 }
 
+static bool context_check_idle(void *userdata) {
+        Context *c = ASSERT_PTR(userdata);
+
+        return varlink_server_current_connections(c->varlink_server) == 0 &&
+                hashmap_isempty(c->polkit_registry);
+}
+
 static int run(int argc, char *argv[]) {
         _cleanup_(context_destroy) Context context = {
                 .hostname_source = _HOSTNAME_INVALID, /* appropriate value will be set later */
@@ -1731,8 +1740,8 @@ static int run(int argc, char *argv[]) {
                         context.bus,
                         "org.freedesktop.hostname1",
                         DEFAULT_EXIT_USEC,
-                        /* check_idle= */ NULL,
-                        /* userdata= */ NULL);
+                        context_check_idle,
+                        &context);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
 
