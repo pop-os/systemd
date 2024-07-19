@@ -1,4 +1,4 @@
-systemd (256.2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (256.2-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
@@ -50,7 +50,7 @@ systemd (256.2-1ubuntu1) UNRELEASED; urgency=medium
     - d/t/upstream: ensure correct ubuntu codename is used
     - d/t/control: add Depends: lib{systemd,udev}-dev for upstream
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 17 Jul 2024 12:28:09 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 19 Jul 2024 11:56:45 -0400
 
 systemd (256.2-1) unstable; urgency=medium
 
