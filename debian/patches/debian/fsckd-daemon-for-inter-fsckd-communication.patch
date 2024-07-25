@@ -60,11 +60,9 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.service.in
  create mode 100644 units/systemd-fsckd.socket
 
-diff --git a/man/rules/meson.build b/man/rules/meson.build
-index a9a2a25..eb55d6b 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -939,6 +939,7 @@ manpages = [
+@@ -939,6 +939,7 @@
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service', 'systemd-fsck-usr.service'],
    ''],
@@ -72,9 +70,6 @@ index a9a2a25..eb55d6b 100644
   ['systemd-fstab-generator', '8', [], ''],
   ['systemd-getty-generator', '8', [], ''],
   ['systemd-gpt-auto-generator', '8', [], 'HAVE_BLKID'],
-diff --git a/man/systemd-fsckd.service.xml b/man/systemd-fsckd.service.xml
-new file mode 100644
-index 0000000..b7ad58d
 --- /dev/null
 +++ b/man/systemd-fsckd.service.xml
 @@ -0,0 +1,162 @@
@@ -240,11 +235,9 @@ index 0000000..b7ad58d
 +  </refsect1>
 +
 +</refentry>
-diff --git a/meson.build b/meson.build
-index ea4e12a..9e45fcf 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2308,6 +2308,7 @@ subdir('src/environment-d-generator')
+@@ -2320,6 +2320,7 @@
  subdir('src/escape')
  subdir('src/firstboot')
  subdir('src/fsck')
@@ -252,18 +245,13 @@ index ea4e12a..9e45fcf 100644
  subdir('src/fstab-generator')
  subdir('src/getty-generator')
  subdir('src/gpt-auto-generator')
-diff --git a/po/POTFILES.in b/po/POTFILES.in
-index 16899fd..6bba341 100644
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -13,3 +13,4 @@ src/portable/org.freedesktop.portable1.policy
+@@ -13,3 +13,4 @@
  src/resolve/org.freedesktop.resolve1.policy
  src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
 +src/fsckd/fsckd.c
-diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
-new file mode 100644
-index 0000000..e9a8019
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,705 @@
@@ -972,9 +960,6 @@ index 0000000..e9a8019
 +finish:
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
-diff --git a/src/fsckd/meson.build b/src/fsckd/meson.build
-new file mode 100644
-index 0000000..6d3c125
 --- /dev/null
 +++ b/src/fsckd/meson.build
 @@ -0,0 +1,8 @@
@@ -986,11 +971,9 @@ index 0000000..6d3c125
 +                'sources' : files('fsckd.c'),
 +        },
 +]
-diff --git a/units/meson.build b/units/meson.build
-index b231341..ee5cd74 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -309,6 +309,8 @@ units = [
+@@ -309,6 +309,8 @@
          },
          { 'file' : 'systemd-fsck-root.service.in' },
          { 'file' : 'systemd-fsck@.service.in' },
@@ -999,11 +982,9 @@ index b231341..ee5cd74 100644
          { 'file' : 'systemd-growfs-root.service.in' },
          { 'file' : 'systemd-growfs@.service.in' },
          { 'file' : 'systemd-halt.service' },
-diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index ebe8262..ca9c7ce 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
-@@ -13,6 +13,8 @@ Documentation=man:systemd-fsck-root.service(8)
+@@ -13,6 +13,8 @@
  DefaultDependencies=no
  Conflicts=shutdown.target
  Before=local-fs.target shutdown.target
@@ -1012,23 +993,18 @@ index ebe8262..ca9c7ce 100644
  ConditionPathIsReadWrite=!/
  OnFailure=emergency.target
  OnFailureJobMode=replace-irreversibly
-diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 65521b1..cd8bac1 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
-@@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)
- DefaultDependencies=no
+@@ -14,7 +14,8 @@
  BindsTo=%i.device
- Conflicts=shutdown.target
+ IgnoreOnIsolate=yes
+ Conflicts=reboot.target kexec.target poweroff.target halt.target
 -After=%i.device systemd-fsck-root.service local-fs-pre.target
 +Wants=systemd-fsckd.socket
 +After=%i.device systemd-fsck-root.service local-fs-pre.target systemd-fsckd.socket
  Before=systemd-quotacheck.service shutdown.target
  
  [Service]
-diff --git a/units/systemd-fsckd.service.in b/units/systemd-fsckd.service.in
-new file mode 100644
-index 0000000..845788c
 --- /dev/null
 +++ b/units/systemd-fsckd.service.in
 @@ -0,0 +1,17 @@
@@ -1049,9 +1025,6 @@ index 0000000..845788c
 +[Service]
 +ExecStart={{LIBEXECDIR}}/systemd-fsckd
 +StandardOutput=journal+console
-diff --git a/units/systemd-fsckd.socket b/units/systemd-fsckd.socket
-new file mode 100644
-index 0000000..61fec97
 --- /dev/null
 +++ b/units/systemd-fsckd.socket
 @@ -0,0 +1,15 @@
