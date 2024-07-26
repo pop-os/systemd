@@ -1,3 +1,9 @@
+systemd (256.4-1ubuntu2) oracular; urgency=medium
+
+  * d/systemd.install: do not ship systemd-tpm2-setup on i386
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 26 Jul 2024 15:44:16 -0400
+
 systemd (256.4-1ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
