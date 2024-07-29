@@ -1,3 +1,12 @@
+systemd (256.4-1ubuntu3) oracular; urgency=medium
+
+  * d/systemd.install: remove systemd-time-wait-sync again
+    This was mistakenly added back when resolving a merge conflict.
+    This binary was moved to systemd-timesyncd in commit 9d74923dd7
+    ("Move systemd-time-wait-sync to systemd-timesyncd package").
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 29 Jul 2024 10:00:05 -0400
+
 systemd (256.4-1ubuntu2) oracular; urgency=medium
 
   * d/systemd.install: do not ship systemd-tpm2-setup on i386
