@@ -1,3 +1,45 @@
+systemd (256.4-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/boot-and-services:
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/rules:
+      + Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/rules,debian/control,debian/tests/control:
+      + Do not build with tpm libraries on i386
+      + Do not build with libqrencode on i386
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Build-Depends: linux-tools-generic
+    - debian/tests/upstream: export QEMU_MEM="1024M" for all tests
+    - debian/systemd.links: mask systemd-gpt-auto-generator by default
+    - debian/systemd.install: exclude files that are not built for i386
+    - debian/systemd.manpages: do not ship un-built manpages on i386
+    - debian/tests/control: only install systemd-boot-efi for supported arches
+    - switch-root: use MS_MOVE for /run when switchig from initrd
+    - debian/systemd.postinst: do not create /etc/tmpfiles.d/tmp.conf on upgrades.
+      We want the upgrades on Ubuntu to be aligned with what a new install
+      would look like.
+    - d/control: do not build systemd-boot-efi-{amd64,arm64}-signed-template
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 30 Jul 2024 09:59:38 -0400
+
 systemd (256.4-2) unstable; urgency=medium
 
   * autopkgtest: allow localectl in localed tests.
