@@ -1,4 +1,4 @@
-systemd (256.4-2ubuntu1) UNRELEASED; urgency=medium
+systemd (256.4-2ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
@@ -38,7 +38,7 @@ systemd (256.4-2ubuntu1) UNRELEASED; urgency=medium
       would look like.
     - d/control: do not build systemd-boot-efi-{amd64,arm64}-signed-template
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 30 Jul 2024 09:59:38 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 30 Jul 2024 10:44:28 -0400
 
 systemd (256.4-2) unstable; urgency=medium
 
