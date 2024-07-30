@@ -289,5 +289,8 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	env -u LD_PRELOAD meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
+override_dh_builddeb:
+	dh_builddeb -- -Zzstd -z3
+
 %:
 	dh $@ --without autoreconf --buildsystem=meson
