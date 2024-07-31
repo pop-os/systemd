@@ -28,3 +28,4 @@ lp2065964-test-check-for-kernel.apparmor_restrict_unprivileged_user.patch
 lp2067907/mountpoint-util-Deal-with-kernel-API-breakage-in-norecove.patch
 lp2067907/shared-mountpoint-util-for-old-kernels-assume-norecovery-.patch
 lp2067922-cgroup-util-allow-cg_read_pid-to-skip-unmapped-zero-pids.patch
+lp2055239-core-dbus-manager-mark-unit-file-state-as-outdated-only-i.patch
