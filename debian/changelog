@@ -1,3 +1,9 @@
+systemd (255.4-1ubuntu8.2pop0) noble; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Ian Douglas Scott <idscott@system76.com>  Fri, 02 Aug 2024 09:26:44 -0700
+
 systemd (255.4-1ubuntu8.2) noble; urgency=medium
 
   * mountpoint-util: Deal with kernel API breakage in "norecovery" mount option.
@@ -1951,7 +1957,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
