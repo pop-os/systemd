@@ -1,3 +1,10 @@
+systemd (255.4-1ubuntu8.3) noble; urgency=medium
+
+  * core/dbus-manager: mark unit file state as outdated only if some changes succeeded
+    (LP: #2055239)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 05 Aug 2024 14:02:31 -0400
+
 systemd (255.4-1ubuntu8.2) noble; urgency=medium
 
   * mountpoint-util: Deal with kernel API breakage in "norecovery" mount option.
