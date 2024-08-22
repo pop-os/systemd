@@ -146,6 +146,16 @@ Depends: systemd-tests,
   snapd,
 Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-not-installable, skippable
 
+# Dummy test so that changes to key packages trigger our autopkgtests on ci.debian.net
+Features: test-name=hint-testsuite-triggers
+Test-Command: /bin/true
+Depends: linux-image-generic,
+         linux-image-amd64 [amd64],
+         linux-image-arm64 [arm64],
+         qemu-system-x86 [amd64],
+         ovmf [amd64],
+Restrictions: hint-testsuite-triggers
+
 Tests: upstream
 Depends: systemd (>= 254~),
   systemd-container (>= 254~),
