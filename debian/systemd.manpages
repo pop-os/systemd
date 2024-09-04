@@ -23,7 +23,7 @@ debian/tmp/usr/share/man/man1/systemd-firstboot.service.1
 debian/tmp/usr/share/man/man1/systemd-id128.1
 debian/tmp/usr/share/man/man1/systemd-inhibit.1
 debian/tmp/usr/share/man/man1/systemd-machine-id-setup.1
-[!i386] <!stage1 !pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-measure.1
+[!i386] <!stage1> debian/tmp/usr/share/man/man1/systemd-measure.1
 debian/tmp/usr/share/man/man1/systemd-mount.1
 debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
@@ -256,9 +256,6 @@ debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
 debian/tmp/usr/share/man/man8/systemd-udev-settle.service.8
 debian/tmp/usr/share/man/man8/systemd-update-done.8
 debian/tmp/usr/share/man/man8/systemd-update-done.service.8
-debian/tmp/usr/share/man/man8/systemd-update-utmp.8
-debian/tmp/usr/share/man/man8/systemd-update-utmp-runlevel.service.8
-debian/tmp/usr/share/man/man8/systemd-update-utmp.service.8
 debian/tmp/usr/share/man/man8/systemd-user-sessions.8
 debian/tmp/usr/share/man/man8/systemd-user-sessions.service.8
 debian/tmp/usr/share/man/man8/systemd-volatile-root.8

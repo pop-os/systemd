@@ -111,6 +111,7 @@ CONFFLAGS = \
 	-Dresolve=true \
 	-Dstatus-unit-format-default=combined \
 	-Dstandalone-binaries=true \
+	-Dutmp=false \
 	-Dmode=$(if $(filter pkg.systemd.upstream,$(DEB_BUILD_PROFILES)),developer,release)
 
 ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
@@ -258,7 +259,7 @@ ifeq ($(DEB_HOST_ARCH),i386)
 	rm -f debian/systemd-boot-efi/usr/lib/systemd/boot/efi/linuxia32.elf.stub
 endif
 
-ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+ifeq (,$(filter stage1 pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 ifeq ($(DEB_VENDOR),Debian)
 ifneq ($(TEMPLATE_EFI_ARCH),)
 	debian/extra/gen-signing-template $(DEB_VERSION) $(DEB_HOST_ARCH) $(TEMPLATE_EFI_ARCH)
