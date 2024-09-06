@@ -1,4 +1,4 @@
-systemd (256.5-2ubuntu1) UNRELEASED; urgency=medium
+systemd (256.5-2ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
@@ -43,7 +43,7 @@ systemd (256.5-2ubuntu1) UNRELEASED; urgency=medium
     - Filter out zdev rules in the initramfs hook (LP: #2044104)
     - d/t/upstream: honor /etc/apt configured by autopkgtest
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 05 Sep 2024 16:45:30 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 06 Sep 2024 09:21:01 -0400
 
 systemd (256.5-2) unstable; urgency=medium
 
