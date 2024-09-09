@@ -1,3 +1,9 @@
+systemd (256.5-2ubuntu2) oracular; urgency=medium
+
+  * initramfs-tools: ensure rules file exists before invoking chzdev (LP: #2079993)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 09 Sep 2024 09:42:11 -0400
+
 systemd (256.5-2ubuntu1) oracular; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
