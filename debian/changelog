@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.12pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 03 Oct 2024 07:09:58 -0600
+
 systemd (249.11-0ubuntu3.12) jammy; urgency=medium
 
   * core/device: ignore DEVICE_FOUND_UDEV bit on switching root (LP: #2037281)
