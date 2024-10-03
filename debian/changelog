@@ -1,3 +1,9 @@
+systemd (255.4-1ubuntu8.4pop0) noble; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 03 Oct 2024 09:34:33 -0600
+
 systemd (255.4-1ubuntu8.4) noble; urgency=medium
 
   * No-change rebuild to pick up changed build flags on ppc64el and s390x.
