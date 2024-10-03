@@ -1,3 +1,10 @@
+systemd (255.4-1ubuntu8.4) noble; urgency=medium
+
+  * No-change rebuild to pick up changed build flags on ppc64el and s390x.
+    (LP: #2076340)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 08 Aug 2024 10:51:10 -0400
+
 systemd (255.4-1ubuntu8.3) noble; urgency=medium
 
   * core/dbus-manager: mark unit file state as outdated only if some changes succeeded
@@ -1958,7 +1965,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
