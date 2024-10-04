@@ -1,0 +1,23 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Fri, 4 Oct 2024 11:26:05 -0400
+Subject: test: skip TEST-69-SHUTDOWN on ubuntu too
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2083704
+
+---
+ test/units/TEST-69-SHUTDOWN.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/units/TEST-69-SHUTDOWN.py b/test/units/TEST-69-SHUTDOWN.py
+index d044164..4e55470 100755
+--- a/test/units/TEST-69-SHUTDOWN.py
++++ b/test/units/TEST-69-SHUTDOWN.py
+@@ -13,7 +13,7 @@ def main():
+     with open("/usr/lib/os-release") as f:
+         for line in f:
+             if line.startswith("ID="):
+-                if "debian" in line:
++                if "debian" in line or "ubuntu" in line:
+                     sys.exit(77)
+ 
+     logger = logging.getLogger("test-shutdown")
