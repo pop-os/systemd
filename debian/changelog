@@ -1,3 +1,10 @@
+systemd (256.5-2ubuntu3) oracular; urgency=medium
+
+  * d/control: demote systemd-cryptsetup from Recommends: to Suggests: of systemd
+  * test: skip TEST-69-SHUTDOWN on ubuntu too (LP: #2083704)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 04 Oct 2024 11:37:37 -0400
+
 systemd (256.5-2ubuntu2) oracular; urgency=medium
 
   * initramfs-tools: ensure rules file exists before invoking chzdev (LP: #2079993)
