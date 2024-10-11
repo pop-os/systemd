@@ -40,3 +40,4 @@ system76-micmute.patch
 pang13.patch
 pang14.patch
 disable-90-loaderentry.patch
+basic-add-PID_FS_MAGIC.patch
