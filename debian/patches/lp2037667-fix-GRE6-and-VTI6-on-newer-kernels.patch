@@ -1,0 +1,105 @@
+From: Lukas Märdian <slyon@ubuntu.com>
+Date: Tue, 23 Jan 2024 15:20:42 +0100
+Subject: Fixing GRE6 and VTI6 on newer kernels (LP: #2037667)
+
+Partial backport of upstream commit:
+https://github.com/systemd/systemd/commit/9f0cf80dd007491698978dbfe38158d74c1c9526
+
+---
+ src/network/netdev/tunnel.c    | 7 -------
+ src/network/netdev/vcan.c      | 1 -
+ src/network/netdev/vxcan.c     | 1 -
+ src/network/netdev/wireguard.c | 1 -
+ 4 files changed, 10 deletions(-)
+
+diff --git a/src/network/netdev/tunnel.c b/src/network/netdev/tunnel.c
+index 2371808..bc1bdbd 100644
+--- a/src/network/netdev/tunnel.c
++++ b/src/network/netdev/tunnel.c
+@@ -808,7 +808,6 @@ const NetDevVTable ipip_vtable = {
+         .fill_message_create = netdev_ipip_sit_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable sit_vtable = {
+@@ -818,7 +817,6 @@ const NetDevVTable sit_vtable = {
+         .fill_message_create = netdev_ipip_sit_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable vti_vtable = {
+@@ -828,7 +826,6 @@ const NetDevVTable vti_vtable = {
+         .fill_message_create = netdev_vti_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable vti6_vtable = {
+@@ -838,7 +835,6 @@ const NetDevVTable vti6_vtable = {
+         .fill_message_create = netdev_vti_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable gre_vtable = {
+@@ -848,7 +844,6 @@ const NetDevVTable gre_vtable = {
+         .fill_message_create = netdev_gre_erspan_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable gretap_vtable = {
+@@ -868,7 +863,6 @@ const NetDevVTable ip6gre_vtable = {
+         .fill_message_create = netdev_ip6gre_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable ip6gretap_vtable = {
+@@ -888,7 +882,6 @@ const NetDevVTable ip6tnl_vtable = {
+         .fill_message_create = netdev_ip6tnl_fill_message_create,
+         .create_type = NETDEV_CREATE_STACKED,
+         .config_verify = netdev_tunnel_verify,
+-        .generate_mac = true,
+ };
+ 
+ const NetDevVTable erspan_vtable = {
+diff --git a/src/network/netdev/vcan.c b/src/network/netdev/vcan.c
+index 3621d4c..6a3f3ce 100644
+--- a/src/network/netdev/vcan.c
++++ b/src/network/netdev/vcan.c
+@@ -6,5 +6,4 @@ const NetDevVTable vcan_vtable = {
+         .object_size = sizeof(VCan),
+         .sections = NETDEV_COMMON_SECTIONS,
+         .create_type = NETDEV_CREATE_INDEPENDENT,
+-        .generate_mac = true,
+ };
+diff --git a/src/network/netdev/vxcan.c b/src/network/netdev/vxcan.c
+index e4e32ff..72b11bc 100644
+--- a/src/network/netdev/vxcan.c
++++ b/src/network/netdev/vxcan.c
+@@ -70,5 +70,4 @@ const NetDevVTable vxcan_vtable = {
+         .fill_message_create = netdev_vxcan_fill_message_create,
+         .create_type = NETDEV_CREATE_INDEPENDENT,
+         .config_verify = netdev_vxcan_verify,
+-        .generate_mac = true,
+ };
+diff --git a/src/network/netdev/wireguard.c b/src/network/netdev/wireguard.c
+index b8fc492..ab294e7 100644
+--- a/src/network/netdev/wireguard.c
++++ b/src/network/netdev/wireguard.c
+@@ -937,5 +937,4 @@ const NetDevVTable wireguard_vtable = {
+         .done = wireguard_done,
+         .create_type = NETDEV_CREATE_INDEPENDENT,
+         .config_verify = wireguard_verify,
+-        .generate_mac = true,
+ };
+
