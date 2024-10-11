@@ -1,0 +1,42 @@
+From: Chengen Du <chengen.du@canonical.com>
+Date: Mon, 12 Aug 2024 11:41:52 +0800
+Subject: udev: Handle PTP device symlink properly on udev action 'change'
+
+Origin: upstream, https://github.com/systemd/systemd/commit/6bd12be3fa7761f190e17efdbdbff4440da7528b
+Bug-Ubuntu: https://launchpad.net/bugs/2077779
+
+PTP device symlink creation rules are currently executed only when the
+udev action is 'add'. If a user reloads the rules and runs the udevadm
+trigger command to reapply changes, the symlink may be deleted, which
+can prevent the chronyd service from restarting properly.
+
+Signed-off-by: Chengen Du <chengen.du@canonical.com>
+---
+ rules.d/50-udev-default.rules.in | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/rules.d/50-udev-default.rules.in b/rules.d/50-udev-default.rules.in
+index 685b59a..38f76dc 100644
+--- a/rules.d/50-udev-default.rules.in
++++ b/rules.d/50-udev-default.rules.in
+@@ -13,6 +13,9 @@ SUBSYSTEM=="rtc", KERNEL=="rtc0", SYMLINK+="rtc", OPTIONS+="link_priority=-100"
+ SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", IMPORT{builtin}="usb_id", IMPORT{builtin}="hwdb --subsystem=usb"
+ ENV{MODALIAS}!="", IMPORT{builtin}="hwdb --subsystem=$env{SUBSYSTEM}"
+ 
++SUBSYSTEM=="ptp", ATTR{clock_name}=="KVM virtual PTP", SYMLINK+="ptp_kvm"
++SUBSYSTEM=="ptp", ATTR{clock_name}=="hyperv", SYMLINK+="ptp_hyperv"
++
+ ACTION!="add", GOTO="default_end"
+ 
+ SUBSYSTEM=="tty", KERNEL=="ptmx", GROUP="tty", MODE="0666"
+@@ -101,10 +104,6 @@ KERNEL=="vhost-net", GROUP="kvm", MODE="{{DEV_KVM_MODE}}", OPTIONS+="static_node
+ 
+ KERNEL=="udmabuf", GROUP="kvm"
+ 
+-SUBSYSTEM=="ptp", ATTR{clock_name}=="KVM virtual PTP", SYMLINK += "ptp_kvm"
+-
+-SUBSYSTEM=="ptp", ATTR{clock_name}=="hyperv", SYMLINK += "ptp_hyperv"
+-
+ SUBSYSTEM=="dmi", ENV{ID_SYSFS_ATTRIBUTE_MODEL}=="", ENV{ID_VENDOR}="$attr{sys_vendor}", ENV{ID_MODEL}="$attr{product_name}"
+ SUBSYSTEM=="dmi", ENV{ID_SYSFS_ATTRIBUTE_MODEL}=="product_version", ENV{ID_VENDOR}="$attr{sys_vendor}", ENV{ID_MODEL}="$attr{product_version}"
+ 

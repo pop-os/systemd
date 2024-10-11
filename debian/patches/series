@@ -126,3 +126,4 @@ lp1999275/unit-check-more-specific-path-to-be-written-by-systemd-bi.patch
 lp2036358-wait-online-exit-early-if-all-links-are-ignored.patch
 lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
 lp2037667-fix-GRE6-and-VTI6-on-newer-kernels.patch
+lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
