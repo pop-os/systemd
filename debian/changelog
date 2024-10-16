@@ -1,3 +1,13 @@
+systemd (256.5-2ubuntu4) plucky; urgency=medium
+
+  * Make sure systemd-cryptsetup is pulled in by systemd on install/upgrade
+    (LP: #2084251)
+    - d/control: make systemd-cryptsetup Priority: important
+    - d/control: make systemd Recommends: systemd-cryptsetup again
+  * debian/gbp.conf: update for plucky
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 16 Oct 2024 16:30:52 -0400
+
 systemd (256.5-2ubuntu3) oracular; urgency=medium
 
   * d/control: demote systemd-cryptsetup from Recommends: to Suggests: of systemd
