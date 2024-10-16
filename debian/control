@@ -95,9 +95,9 @@ Recommends: default-dbus-system-bus | dbus-system-bus,
             networkd-dispatcher,
             systemd-timesyncd | time-daemon,
             systemd-resolved,
+            systemd-cryptsetup,
             ${dlopen:Recommends},
 Suggests: systemd-container,
-          systemd-cryptsetup,
           systemd-homed,
           systemd-userdbd,
           systemd-boot,
@@ -644,6 +644,7 @@ Description: Provides the systemd-repart utility
  and dm-verity among other things.
 
 Package: systemd-cryptsetup
+Priority: important
 Build-Profiles: <!stage1>
 Architecture: linux-any
 Depends: ${shlibs:Depends},
