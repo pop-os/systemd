@@ -1,0 +1,26 @@
+From: Vasiliy Stelmachenok <ventureo@yandex.ru>
+Date: Fri, 8 Mar 2024 17:58:18 +0300
+Subject: core/exec-invoke: Fix missing arguments for PR_SET_MEMORY_MERGE call
+
+Origin: upstream, https://github.com/systemd/systemd/commit/9bb89a55a235a3c64ec099bb86296d7fd1bb3302
+Bug-Ubuntu: https://launchpad.net/bugs/2081192
+
+Without it prctl will always fail, even if using a kernel version that
+supports the PR_SET_MEMORY_MERGE call.
+---
+ src/core/exec-invoke.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/exec-invoke.c b/src/core/exec-invoke.c
+index 28d6142..ed8f9f5 100644
+--- a/src/core/exec-invoke.c
++++ b/src/core/exec-invoke.c
+@@ -4670,7 +4670,7 @@ int exec_invoke(
+         }
+ 
+         if (context->memory_ksm >= 0)
+-                if (prctl(PR_SET_MEMORY_MERGE, context->memory_ksm) < 0) {
++                if (prctl(PR_SET_MEMORY_MERGE, context->memory_ksm, 0, 0, 0) < 0) {
+                         if (ERRNO_IS_NOT_SUPPORTED(errno))
+                                 log_exec_debug_errno(context,
+                                                      params,
