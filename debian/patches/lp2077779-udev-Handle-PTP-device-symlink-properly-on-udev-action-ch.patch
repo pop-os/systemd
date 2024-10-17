@@ -1,0 +1,39 @@
+From: Chengen Du <chengen.du@canonical.com>
+Date: Mon, 12 Aug 2024 11:41:52 +0800
+Subject: udev: Handle PTP device symlink properly on udev action 'change'
+
+Origin: upstream, https://github.com/systemd/systemd/commit/6bd12be3fa7761f190e17efdbdbff4440da7528b
+Bug-Ubuntu: https://launchpad.net/bugs/2077779
+
+PTP device symlink creation rules are currently executed only when the
+udev action is 'add'. If a user reloads the rules and runs the udevadm
+trigger command to reapply changes, the symlink may be deleted, which
+can prevent the chronyd service from restarting properly.
+
+Signed-off-by: Chengen Du <chengen.du@canonical.com>
+---
+ rules.d/50-udev-default.rules.in | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/rules.d/50-udev-default.rules.in b/rules.d/50-udev-default.rules.in
+index af4f594..8d659ad 100644
+--- a/rules.d/50-udev-default.rules.in
++++ b/rules.d/50-udev-default.rules.in
+@@ -30,6 +30,9 @@ SUBSYSTEM=="pci|usb|platform", IMPORT{builtin}="path_id"
+ 
+ SUBSYSTEM=="net", IMPORT{builtin}="net_driver"
+ 
++SUBSYSTEM=="ptp", ATTR{clock_name}=="KVM virtual PTP", SYMLINK+="ptp_kvm"
++SUBSYSTEM=="ptp", ATTR{clock_name}=="hyperv", SYMLINK+="ptp_hyperv"
++
+ ACTION!="add", GOTO="default_end"
+ 
+ SUBSYSTEM=="tty", KERNEL=="ptmx", GROUP="tty", MODE="0666"
+@@ -119,7 +122,4 @@ KERNEL=="vhost-net", GROUP="kvm", MODE="{{DEV_KVM_MODE}}", OPTIONS+="static_node
+ 
+ KERNEL=="udmabuf", GROUP="kvm"
+ 
+-SUBSYSTEM=="ptp", ATTR{clock_name}=="KVM virtual PTP", SYMLINK+="ptp_kvm"
+-SUBSYSTEM=="ptp", ATTR{clock_name}=="hyperv", SYMLINK+="ptp_hyperv"
+-
+ LABEL="default_end"
