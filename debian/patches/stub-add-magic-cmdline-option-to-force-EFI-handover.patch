@@ -1,0 +1,92 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Wed, 20 Nov 2024 12:32:19 -0500
+Subject: stub: add magic cmdline option to force EFI handover
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088069
+Origin: https://gist.github.com/valentindavid/7ab6247c8fe0d3a91d089d201e160ba4
+Forwarded: no, Ubuntu Core specific
+---
+ src/boot/efi/linux.c | 61 +++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 60 insertions(+), 1 deletion(-)
+
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 65bc176..62ff1c2 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -90,6 +90,64 @@ static EFI_STATUS load_image(EFI_HANDLE parent, const void *source, size_t len,
+         return ret;
+ }
+ 
++#if defined(__i386__) || defined(__x86_64__)
++
++#define FORCE_HANDOVER_PARAM u"ubuntu-core.force-old-efi-handover"
++#define FORCE_HANDOVER_PARAM_LEN ((sizeof(FORCE_HANDOVER_PARAM)/sizeof(char16_t))-1)
++
++static bool force_handover(const char16_t *cmdline) {
++        /* Kernel hanover was the old fashion to start the kernel from the systemd-stub. This had
++         * multiple issues:
++         *  * generic EFI zboot stub (for decompression) in the kernel expects LOADED_IMAGE_PROTOCOL.
++         *  * mixed mode only works with LoadImage/StartImage
++         *  * handover is only implemented for x86.
++         *  * handover is deprecated.
++         *
++         * The new approach is to use LoadImage/StartImage from UEFI boot services to load the .linux section
++         * from the memory. Doing so can cause firmware to re-verify signature and measure the load on PCR 4.
++         * To overcome the issue of re-verifying signature and extra measurements, overrides
++         * SECURITY_ARCH_PROTOCOL's FileAuthenticationState and SECURITY_ARCH2_PROTOCOL's FileAuthentication.
++         *
++         * SECURITY_ARCH_PROTOCOL and SECURITY_ARCH2_PROTOCOL are optional. Even if secure boot and measured
++         * boot is implemented. For the secure boot signature, we could work around this by signing the
++         * .linux payload within the UKI. Unfortunatly, we cannot prevent the measurement to happen.
++         *
++         * Some users have started to use measured boot with Ubuntu Core with old firmware that do not
++         * provide the necessary protocols. To allow them to continue to use systemd-stub, we need to provide
++         * a way to force handover to be used instead of LoadImage/StartImage. It is easy for Ubuntu Core
++         * users to set a kernel command line in the gadget snap. For that reason, we read the information
++         * from the the command line.
++         */
++
++        /* In this function we parse kernel parameters like the Linux does.
++         * See lib/cmdline.c in Linux.
++         * There are a few exceptions:
++         *  * While we care of quotes to parse, the argument we care about does should not be quoted.
++         *  * Dash (-) and underscore (_) characters are considered different.
++         */
++        bool in_quote = false;
++        size_t begin = 0;
++
++        for (size_t i = 0; ; i++) {
++                char16_t c = cmdline[i];
++                if (!in_quote && (((c == 0) || (c == u' ') || ((c >= '\t') && (c <= '\r'))))) {
++                        if (((i - begin) == FORCE_HANDOVER_PARAM_LEN) &&
++                            (strncmp16(cmdline + begin, FORCE_HANDOVER_PARAM, FORCE_HANDOVER_PARAM_LEN) == 0)) {
++                                return true;
++                        }
++                        begin = i + 1;
++                }
++                if (c == 0)
++                        break ;
++                if (c == u'"')
++                        in_quote = !in_quote;
++        }
++
++        return false;
++}
++
++#endif
++
+ EFI_STATUS linux_exec(
+                 EFI_HANDLE parent,
+                 const char16_t *cmdline,
+@@ -107,9 +165,10 @@ EFI_STATUS linux_exec(
+ 
+         err = pe_kernel_info(linux_buffer, &compat_address);
+ #if defined(__i386__) || defined(__x86_64__)
+-        if (err == EFI_UNSUPPORTED)
++        if ((err == EFI_UNSUPPORTED) || force_handover(cmdline))
+                 /* Kernel is too old to support LINUX_INITRD_MEDIA_GUID, try the deprecated EFI handover
+                  * protocol. */
++                /* Or kernel handover was forced through the command line */
+                 return linux_exec_efi_handover(
+                                 parent,
+                                 cmdline,
