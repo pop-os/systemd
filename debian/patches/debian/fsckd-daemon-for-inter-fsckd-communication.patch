@@ -62,7 +62,7 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
 
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -939,6 +939,7 @@
+@@ -946,6 +946,7 @@
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service', 'systemd-fsck-usr.service'],
    ''],
@@ -237,7 +237,7 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
 +</refentry>
 --- a/meson.build
 +++ b/meson.build
-@@ -2320,6 +2320,7 @@
+@@ -2363,6 +2363,7 @@
  subdir('src/escape')
  subdir('src/firstboot')
  subdir('src/fsck')
@@ -247,8 +247,8 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  subdir('src/gpt-auto-generator')
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -13,3 +13,4 @@
- src/resolve/org.freedesktop.resolve1.policy
+@@ -14,3 +14,4 @@
+ src/sysupdate/org.freedesktop.sysupdate1.policy
  src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
 +src/fsckd/fsckd.c
