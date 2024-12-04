@@ -29,6 +29,7 @@
 #include "strv.h"
 #include "tests.h"
 #include "tmpfile-util.h"
+#include "uid-range.h"
 
 char* setup_fake_runtime_dir(void) {
         char t[] = "/tmp/fake-xdg-runtime-XXXXXX", *p;
@@ -166,6 +167,24 @@ bool have_namespaces(void) {
         assert_not_reached();
 }
 
+bool userns_has_single_user(void) {
+        _cleanup_(uid_range_freep) UIDRange *uidrange = NULL, *gidrange = NULL;
+
+        /* Check if we're in a user namespace with only a single user mapped in. We special case this
+         * scenario in a few tests because it's the only kind of namespace that can be created unprivileged
+         * and as such happens more often than not, so we make sure to deal with it so that all tests pass
+         * in such environments. */
+
+        if (uid_range_load_userns(NULL, UID_RANGE_USERNS_INSIDE, &uidrange) < 0)
+                return false;
+
+        if (uid_range_load_userns(NULL, GID_RANGE_USERNS_INSIDE, &gidrange) < 0)
+                return false;
+
+        return uidrange->n_entries == 1 && uidrange->entries[0].nr == 1 &&
+                gidrange->n_entries == 1 && gidrange->entries[0].nr == 1;
+}
+
 bool can_memlock(void) {
         /* Let's see if we can mlock() a larger blob of memory. BPF programs are charged against
          * RLIMIT_MEMLOCK, hence let's first make sure we can lock memory at all, and skip the test if we
@@ -291,7 +310,7 @@ static int enter_cgroup(char **ret_cgroup, bool enter_subroot) {
         if (r < 0)
                 return r;
 
-        r = cg_attach_everywhere(supported, cgroup_subroot, 0, NULL, NULL);
+        r = cg_attach_everywhere(supported, cgroup_subroot, 0);
         if (r < 0)
                 return r;
 
@@ -309,7 +328,7 @@ int enter_cgroup_root(char **ret_cgroup) {
         return enter_cgroup(ret_cgroup, false);
 }
 
-const char *ci_environment(void) {
+const char* ci_environment(void) {
         /* We return a string because we might want to provide multiple bits of information later on: not
          * just the general CI environment type, but also whether we're sanitizing or not, etc. The caller is
          * expected to use strstr on the returned value. */

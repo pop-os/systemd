@@ -23,8 +23,10 @@ for library in /usr/lib/*/libkmod.so.*; do
   fi
 done
 
-mkdir -p "$DESTDIR/etc/udev"
-cp -p /etc/udev/udev.conf "$DESTDIR/etc/udev/"
+if [ -e /etc/udev/udev.conf ]; then
+  mkdir -p "$DESTDIR/etc/udev"
+  cp -p /etc/udev/udev.conf "$DESTDIR/etc/udev/"
+fi
 
 # copy .link files containing interface naming definitions
 mkdir -p "$DESTDIR/usr/lib/systemd/network/"
@@ -68,7 +70,7 @@ for rules in /etc/udev/rules.d/*.rules; do
     continue;
   fi
 
-  if [ -e "$rules" ] && [ ! -e "/usr/lib/${rules#/etc/}" ]; then
+  if [ ! -e "/usr/lib/${rules#/etc/}" ]; then
     cp -p "$rules" "$DESTDIR/usr/lib/udev/rules.d/"
   fi
 done

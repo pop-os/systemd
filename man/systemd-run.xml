@@ -106,15 +106,6 @@
 
     <variablelist>
       <varlistentry>
-        <term><option>--no-ask-password</option></term>
-
-        <listitem><para>Do not query the user for authentication for
-        privileged operations.</para>
-
-        <xi:include href="version-info.xml" xpointer="v226"/></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><option>--scope</option></term>
 
         <listitem>
@@ -528,8 +519,10 @@
       <xi:include href="user-system-options.xml" xpointer="machine" />
       <xi:include href="user-system-options.xml" xpointer="capsule" />
 
+      <xi:include href="standard-options.xml" xpointer="no-ask-password" />
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
+      <xi:include href="standard-options.xml" xpointer="json" />
     </variablelist>
 
     <para>All command line arguments after the first non-option argument become part of the command line of
@@ -654,7 +647,7 @@ There is a screen on:
 
       <programlisting>$ systemd-run -t echo "&lt;${INVOCATION_ID}>" '&lt;${INVOCATION_ID}>'
       &lt;> &lt;5d0149bfa2c34b79bccb13074001eb20>
-      </programlisting>
+</programlisting>
 
       <para>The first argument is expanded by the shell (double quotes), but the second one is not expanded
       by the shell (single quotes).
@@ -680,7 +673,7 @@ There is a screen on:
       <programlisting>$ systemd-run --expand-environment=no -t bash \
       -c 'echo $SHELL $$ >/dev/stdout'
 /bin/bash 12345
-      </programlisting>
+</programlisting>
 
       <para>The last argument is passed verbatim to the
       <citerefentry project='man-pages'><refentrytitle>bash</refentrytitle><manvolnum>1</manvolnum></citerefentry>

@@ -26,7 +26,7 @@ static const char* const geneve_df_table[_NETDEV_GENEVE_DF_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(geneve_df, GeneveDF, NETDEV_GENEVE_DF_YES);
-DEFINE_CONFIG_PARSE_ENUM(config_parse_geneve_df, geneve_df, GeneveDF, "Failed to parse Geneve IPDoNotFragment= setting");
+DEFINE_CONFIG_PARSE_ENUM(config_parse_geneve_df, geneve_df, GeneveDF);
 
 static int netdev_geneve_fill_message_create(NetDev *netdev, Link *link, sd_netlink_message *m) {
         assert(m);
@@ -254,6 +254,10 @@ static int netdev_geneve_verify(NetDev *netdev, const char *filename) {
         return 0;
 }
 
+static bool geneve_can_set_mac(NetDev *netdev, const struct hw_addr_data *hw_addr) {
+        return true;
+}
+
 static void geneve_init(NetDev *netdev) {
         Geneve *v = GENEVE(netdev);
 
@@ -272,6 +276,7 @@ const NetDevVTable geneve_vtable = {
         .fill_message_create = netdev_geneve_fill_message_create,
         .create_type = NETDEV_CREATE_INDEPENDENT,
         .config_verify = netdev_geneve_verify,
+        .can_set_mac = geneve_can_set_mac,
         .iftype = ARPHRD_ETHER,
         .generate_mac = true,
 };

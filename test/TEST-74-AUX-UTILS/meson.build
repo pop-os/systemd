@@ -4,5 +4,9 @@ integration_tests += [
         integration_test_template + {
                 'name' : fs.name(meson.current_source_dir()),
                 'storage': 'persistent',
+                'vm' : true,
+                'coredump-exclude-regex' : '/(test-usr-dump|test-dump|bash)$',
         },
 ]
+
+testdata_subdirs += [meson.current_source_dir() / 'TEST-74-AUX-UTILS.units']

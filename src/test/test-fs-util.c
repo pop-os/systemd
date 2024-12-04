@@ -368,8 +368,8 @@ TEST(chmod_and_chown) {
         struct stat st;
         const char *p;
 
-        if (geteuid() != 0)
-                return;
+        if (geteuid() != 0 || userns_has_single_user())
+                return (void) log_tests_skipped("not running as root or in userns with single user");
 
         BLOCK_WITH_UMASK(0000);
 
@@ -667,6 +667,20 @@ TEST(openat_report_new) {
         ASSERT_OK(fd);
         fd = safe_close(fd);
         ASSERT_TRUE(b);
+
+        ASSERT_OK_ERRNO(symlinkat("target", tfd, "link"));
+        fd = openat_report_new(tfd, "link", O_RDWR|O_CREAT, 0666, &b);
+        ASSERT_ERROR(fd, EEXIST);
+
+        fd = openat_report_new(tfd, "target", O_RDWR|O_CREAT, 0666, &b);
+        ASSERT_OK(fd);
+        fd = safe_close(fd);
+        ASSERT_TRUE(b);
+
+        fd = openat_report_new(tfd, "link", O_RDWR|O_CREAT, 0666, &b);
+        ASSERT_OK(fd);
+        fd = safe_close(fd);
+        ASSERT_FALSE(b);
 }
 
 TEST(xopenat_full) {

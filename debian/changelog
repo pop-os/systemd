@@ -1,3 +1,149 @@
+systemd (257~rc3-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * systemd-ukify: recommend systemd-boot-efi for the stub (Closes:
+    #1087808)
+  * Increase minimum sections in stub PE header on arm64/armhf/riscv64 to
+    500. Allows riscv64 to include all current DTBs with some room to grow
+    (Closes: #1087817)
+  * Bump version in tzdata dependency due to p-u upload
+  * Update to new upstream version v257~rc3. For a full list of changes:
+    https://github.com/systemd/systemd/releases/tag/v257-rc3
+  * Drop patches, merged upstream
+  * Update symbols for 257~rc3
+
+  [ Ben Hutchings ]
+  * sysctl: Add file trigger on /usr/lib/sysctl.d to restart systemd-
+    sysctl. (Closes: #1085160)
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 27 Nov 2024 21:21:02 +0000
+
+systemd (257~rc2-3) unstable; urgency=low
+
+  * Backport patch to remove faulty unit test assertion
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 16 Nov 2024 10:13:56 +0000
+
+systemd (257~rc2-2) unstable; urgency=low
+
+  * Backport patch to fix FTBFS due to failing unit test
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 16 Nov 2024 00:36:08 +0000
+
+systemd (257~rc2-1) unstable; urgency=low
+
+  * d/t/control: add more packages to dummy hint-testsuite-triggers. A
+    regression was introduced by nvme-cli in testing because the testsuite
+    doesn't depend on it anymore directly, as mkosi builds it in the
+    image. Add back all the tools/libraries that are only part of the
+    mkosi guest image, so that autopkgtest triggers when they get updated,
+    and regressions can be flagged before they migrate to testing.
+  * Update upstream source from tag 'upstream/257_rc2'
+  * Drop all patches, merged upstream
+  * Install new systemd-keyutil binary in the systemd-repart package
+  * systemd-ukify: downgrade dependency on systemd, not mandatory. It is
+    necessary for the systemd-measure binary, but its usage is optional
+    behind a specific argument, so the dependency can be downgraded
+    (Closes: #1087322)
+  * systemd-ukify: recommend systemd-repart. Needed for the systemd-sbsign
+    and systemd-keyutil binaries
+  * d/rules: adjust blhc override to account for source files being moved
+  * Update lintian override to ignore false positive typos
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 15 Nov 2024 19:49:02 +0000
+
+systemd (257~rc1-4) unstable; urgency=medium
+
+  * Backport patch to fix TEST-07-PID1 integration test
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 08 Nov 2024 01:09:19 +0000
+
+systemd (257~rc1-3) unstable; urgency=low
+
+  * Backport another patch to fix test failure on buildd
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 07 Nov 2024 11:13:25 +0000
+
+systemd (257~rc1-2) unstable; urgency=low
+
+  * Backport patch to fix unit test failure on buildd
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 07 Nov 2024 09:35:17 +0000
+
+systemd (257~rc1-1) unstable; urgency=low
+
+  * gbp.conf: switch upstream branch to full upstream history
+  * Update to new upstream version v257~rc1. For a full list of changes:
+    https://github.com/systemd/systemd/releases/tag/v257-rc1
+  * Drop all patches, merged upstream
+  * Install new files
+  * List new libsystemd0 symbols
+  * Ignore Lintian warning dh-exec-script-without-dh-exec-features
+  * d/copyright: remove pattern for directory that is no longer present
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 06 Nov 2024 23:58:55 +0000
+
+systemd (256.7-3) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Backport patch to fix test failures with tzdata 2024b-1
+  * systemd-boot: provide provisional integration with shim. Not yet
+    used, will be active once the signed packages are available.
+    https://wiki.debian.org/SecureBoot#Secure_Boot_setup_with_systemd-boot
+
+  [ Kirill Rekhov ]
+  * d/systemd.postrm: delete more internal state directories on purge
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 01 Nov 2024 18:13:09 +0000
+
+systemd (256.7-2) unstable; urgency=medium
+
+  [ Nick Rosbrook ]
+  * d/systemd.postinst: do not restart systemd-binfmt.service if masked
+    (LP: #2077869)
+
+  [ Luca Boccassi ]
+  * systemd-boot: depend on systemd for kernel-install (Closes: #1085012)
+  * Disable utmp support, not y2038 safe. utmp support in tmux has been
+    disabled, so autopkgtest should no longer break
+  * Backport fixes for upstream autopkgtest suite
+
+  [ Benjamin Drung ]
+  * initramfs-tools: support missing /etc/udev/udev.conf. Installing
+    initramfs-tools fails in case `/etc/udev/udev.conf` is removed
+    (LP: #2084592)
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 18 Oct 2024 15:47:12 +0100
+
+systemd (256.7-1) unstable; urgency=medium
+
+  * autopkgtest: skip gdm3 on armel for smoke tests. Gnome is no longer
+    built for armel. (Closes: #1082516)
+  * New upstream version 256.7
+  * Mark dependencies on clang and bpftool as :native (Closes: #1083064)
+  * Revert "autopkgtest: skip TEST-64-UDEV-STORAGE due to qemu crash". The
+    qemu crash is now detected in the upstream integration test script.
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 08 Oct 2024 18:37:53 +0100
+
+systemd (256.6-1) unstable; urgency=medium
+
+  [ Helmut Grohne ]
+  * salsa-ci: test the stage1 build profile
+
+  [ Simon Chopin ]
+  * Filter out zdev rules in the initramfs hook (LP: #2044104). s390-tools
+    has its own initramfs customization logic that deals with those files.
+
+  [ Luca Boccassi ]
+  * Re-enable utmp support, tmux's autopkgtests require it. This will
+    break as logind writing into utmp will wrap around, so Trixie won't be
+    y2038 ready after all
+  * New upstream version 256.6
+  * Note systemd-cryptsetup package split in NEWS (Closes: #1079644)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 10 Sep 2024 18:28:21 +0200
+
 systemd (256.5-2ubuntu4) plucky; urgency=medium
 
   * Make sure systemd-cryptsetup is pulled in by systemd on install/upgrade

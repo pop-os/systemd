@@ -13,7 +13,15 @@ _update_catalog() {
 }
 
 _update_binfmt() {
-    _systemctl restart systemd-binfmt.service || true
+    if [ "$(_systemctl show -P LoadState systemd-binfmt.service)" != "masked" ]; then
+        _systemctl restart systemd-binfmt.service || true
+    fi
+}
+
+_update_sysctl() {
+    if [ "$(_systemctl show -P LoadState systemd-sysctl.service)" != "masked" ]; then
+        _systemctl restart systemd-sysctl.service || true
+    fi
 }
 
 _restart_managers() {
@@ -38,6 +46,9 @@ if [ "$1" = "triggered" ]; then
                 ;;
             /usr/lib/binfmt.d)
                 _update_binfmt
+                ;;
+            /usr/lib/sysctl.d)
+                _update_sysctl
                 ;;
             libc-upgrade)
                 _restart_managers

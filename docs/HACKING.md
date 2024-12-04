@@ -44,9 +44,37 @@ or:
 $ mkosi qemu
 ```
 
-By default, the tools from your host system are used to build the image. To have
-`mkosi` use the systemd tools from the `build/` directory, add the following to
-`mkosi.local.conf`:
+By default, the tools from your host system are used to build the image.
+Sometimes we start using mkosi features that rely on functionality in systemd
+tools that's not in an official release yet. In that case, you'll need to build
+systemd from source on the host and configure mkosi to use the tools from the
+systemd build directory.
+
+To do a local build, most distributions provide very simple and convenient ways
+to install most development packages necessary to build systemd:
+
+```sh
+# Fedora
+$ sudo dnf builddep systemd
+# Debian/Ubuntu
+$ sudo apt-get build-dep systemd
+# Arch
+$ sudo pacman -S devtools
+$ pkgctl repo clone --protocol=https systemd
+$ cd systemd
+$ makepkg -seoc
+```
+
+After installing the development packages, systemd can be built from source as follows:
+
+```sh
+$ meson setup build <options>
+$ ninja -C build
+$ meson test -C build
+```
+
+To have `mkosi` use the systemd tools from the `build/` directory, add the
+following to `mkosi.local.conf`:
 
 ```conf
 [Host]
@@ -63,26 +91,15 @@ ToolsTree=default
 ```
 
 Every time you rerun the `mkosi` command a fresh image is built, incorporating
-all current changes you made to the project tree. To avoid having to build a new
-image all the time when iterating on a patch, add the following to
-`mkosi.local.conf`:
-
-```conf
-[Host]
-@RuntimeBuildSources=yes
-```
-
-After enabling this setting, the source and build directories will be mounted to
-`/work/src` and `/work/build` respectively when booting the image as a container
-or virtual machine. To build the latest changes and re-install after booting the
-image, run one of the following commands in another terminal on your host (
-choose the right one depending on the distribution of the container or virtual
-machine):
+all current changes you made to the project tree. To build the latest changes
+and re-install after booting the image, run one of the following commands in
+another terminal on your host (choose the right one depending on the
+distribution of the container or virtual machine):
 
 ```sh
-mkosi -t none && mkosi ssh dnf upgrade --disablerepo="*" --assumeyes "/work/build/*.rpm" # CentOS/Fedora
-mkosi -t none && mkosi ssh apt-get install "/work/build/*.deb" # Debian/Ubuntu
-mkosi -t none && mkosi ssh pacman --upgrade --needed --noconfirm "/work/build/*.pkg.tar" # Arch Linux
+mkosi -t none && mkosi ssh dnf upgrade --disablerepo="*" --assumeyes "/work/build/*.rpm"             # CentOS/Fedora
+mkosi -t none && mkosi ssh apt-get install "/work/build/*.deb"                                       # Debian/Ubuntu
+mkosi -t none && mkosi ssh pacman --upgrade --needed --noconfirm "/work/build/*.pkg.tar"             # Arch Linux
 mkosi -t none && mkosi ssh zypper --non-interactive install --allow-unsigned-rpm "/work/build/*.rpm" # OpenSUSE
 ```
 
@@ -108,29 +125,6 @@ $ git push -u <REMOTE>            # where REMOTE is your "fork" on GitHub
 
 And after that, head over to your repo on GitHub and click "Compare & pull request"
 
-If you want to do a local build without mkosi,
-most distributions also provide very simple and convenient ways to install most development packages necessary to build systemd:
-
-```sh
-# Fedora
-$ sudo dnf builddep systemd
-# Debian/Ubuntu
-$ sudo apt-get build-dep systemd
-# Arch
-$ sudo pacman -S devtools
-$ pkgctl repo clone --protocol=https systemd
-$ cd systemd
-$ makepkg -seoc
-```
-
-After installing the development packages, systemd can be built from source as follows:
-
-```sh
-$ meson setup build <options>
-$ ninja -C build
-$ meson test -C build
-```
-
 Happy hacking!
 
 ## Building distribution packages with mkosi
@@ -139,22 +133,25 @@ To build distribution packages for a specific distribution and release without
 building an actual image, the following command can be used:
 
 ```sh
-mkosi -d <distribution> -r <release> -t none -f
+mkosi -d <distribution> -r <release> -t none
 ```
 
-Afterwards the distribution packages will be located in `build/mkosi.output`. To
-also build debuginfo packages, the following command can be used:
+Afterwards the distribution packages will be located in
+`build/mkosi.builddir/<distribution>~<release>~<architecture>/`. To also build
+debuginfo packages, the following command can be used:
 
 ```sh
-mkosi -d <distribution> -r <release> -E WITH_DEBUG=1 -t none -f
+mkosi -d <distribution> -r <release> -E WITH_DEBUG=1 -t none
 ```
 
 To upgrade the systemd packages on the host system to the newer versions built
 by mkosi, run the following:
 
 ```sh
-dnf upgrade build/mkosi.output/*.rpm # Fedora/CentOS
-# TODO: Other distributions
+dnf upgrade build/mkosi.builddir/<distribution>~<release>~<architecture>/*.rpm                                           # Fedora/CentOS
+apt-get install build/mkosi.builddir/<distribution>~<release>~<architecture>/*.deb                                       # Debian/Ubuntu
+pacman --upgrade --needed --noconfirm build/mkosi.builddir/<distribution>~<release>~<architecture>/*.pkg.tar             # Arch Linux
+zypper --non-interactive install --allow-unsigned-rpm build/mkosi.builddir/<distribution>~<release>~<architecture>/*.rpm # OpenSUSE
 ```
 
 To downgrade back to the old version shipped by the distribution, run the
@@ -378,5 +375,21 @@ To debug systemd-boot in an IDE such as VSCode we can use a launch configuration
         { "text": "shell ${workspaceFolder}/tools/debug-sd-boot.sh ${workspaceFolder}/build/src/boot/efi/systemd-bootx64.efi /tmp/sdboot.out systemd-boot.gdb" },
         { "text": "source /tmp/systemd-boot.gdb" },
     ]
+}
+```
+
+## mkosi + clangd
+
+[clangd](https://clangd.llvm.org/) is a language server that provides code completion, diagnostics and more
+right in your editor of choice (with the right plugin installed). When using mkosi, we can run clangd in the
+mkosi build container to avoid needing to build systemd on the host machine just to make clangd work.
+
+All that is required is to run `mkosi` once to make sure cached images are available and to modify the path of the
+clangd binary used by your editor to the `mkosi.clangd` script included in the systemd repository. For example, for
+VScode, you'd have to add the following to the VSCode workspace settings of the systemd repository:
+
+```json
+{
+    "clangd.path": "<path-to-systemd-repository>/mkosi.clangd",
 }
 ```

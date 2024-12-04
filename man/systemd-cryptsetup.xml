@@ -32,7 +32,7 @@
       <arg choice="plain">VOLUME</arg>
       <arg choice="plain">SOURCE-DEVICE</arg>
       <arg choice="opt">KEY-FILE</arg>
-      <arg choice="opt">CONFIG</arg>
+      <arg choice="opt">CRYPTTAB-OPTIONS</arg>
     </cmdsynopsis>
 
     <cmdsynopsis>
@@ -94,8 +94,9 @@
       <listitem><para>If the <varname>try-empty-password</varname> option is specified then unlocking the
       volume with an empty password is attempted.</para></listitem>
 
-      <listitem><para>The kernel keyring is then checked for a suitable cached password from previous
-      attempts.</para></listitem>
+      <listitem><para>If the <varname>password-cache=</varname> option is set to <literal>yes</literal> or
+      <literal>read-only</literal>, the kernel keyring is then checked for a suitable cached password from
+      previous attempts.</para></listitem>
 
       <listitem><para>Finally, the user is queried for a password, possibly multiple times, unless
       the <varname>headless</varname> option is set.</para></listitem>
@@ -149,7 +150,7 @@
       <varlistentry>
         <term><varname>cryptsetup.luks2-pin</varname></term>
 
-        <listitem><para>This credential specifies the PIN requested by generic LUKS2 token modules.</para>
+        <listitem><para>This credential specifies the pin requested by generic LUKS2 token modules.</para>
 
         <xi:include href="version-info.xml" xpointer="v256"/></listitem>
       </varlistentry>

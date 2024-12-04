@@ -18,11 +18,7 @@ rm -rf "$SRCDIR"/debian/patches/*
 DEB_HOST_GNU_TYPE="$(dpkg-architecture --query DEB_HOST_GNU_TYPE)"
 mount --mkdir --bind "$BUILDDIR" "$SRCDIR/obj-$DEB_HOST_GNU_TYPE"
 
-if [[ -d .git/ ]] && [[ -z "$(git status --porcelain)" ]]; then
-    TS="$(git show --no-patch --format=%ct HEAD)"
-else
-    TS="${SOURCE_DATE_EPOCH:-$(date +%s)}"
-fi
+TS="${SOURCE_DATE_EPOCH:-$(date +%s)}"
 
 # Add a new changelog entry to update the version. We use a fixed date since a dynamic one causes a full
 # rebuild every time.
@@ -37,7 +33,7 @@ EOF
 cat debian/changelog >>debian/changelog.new
 mv debian/changelog.new debian/changelog
 
-MKOSI_CFLAGS="-O0"
+MKOSI_CFLAGS="-O0 -g"
 if ((LLVM)); then
     # TODO: Remove -fno-sanitize-function when https://github.com/systemd/systemd/issues/29972 is fixed.
     MKOSI_CFLAGS="$MKOSI_CFLAGS -shared-libasan -fno-sanitize=function"
@@ -137,8 +133,8 @@ fi
     rm -f "$BUILDDIR"/*.deb "$BUILDDIR"/*.ddeb
 
     cp ../*.deb ../*.ddeb "$PACKAGEDIR"
-    cp ../*.deb ../*.ddeb "$OUTPUTDIR"
     cp ../*.deb ../*.ddeb "$BUILDDIR"
+
     # These conflict with the packages that we actually want to install, so remove them
     rm -f "$BUILDDIR"/systemd-standalone-*.deb "$BUILDDIR"/systemd-standalone-*.ddeb
 )

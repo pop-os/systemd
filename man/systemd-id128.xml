@@ -48,6 +48,12 @@
     <cmdsynopsis>
       <command>systemd-id128</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">var-partition-uuid</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis>
+      <command>systemd-id128</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="plain">show</arg>
       <arg choice="opt" rep="repeat">NAME|UUID</arg>
     </cmdsynopsis>
@@ -88,6 +94,12 @@
     <citerefentry><refentrytitle>sd_id128_get_machine</refentrytitle><manvolnum>3</manvolnum></citerefentry>
     for the discussion when this is useful. Support for <command>show --app-specific=</command> was added in
     version 255.</para>
+
+    <para><command>var-partition-uuid</command> prints a UUID which, following the <ulink
+    url="https://uapi-group.org/specifications/specs/discoverable_partitions_specification">Discoverable
+    Partitions Specification</ulink>, should be used as the GPT partition UUID for
+    <filename>/var/</filename>, being derived from the GPT partition type, keyed by the local
+    <filename>/etc/machine-id</filename>. Added in version 257.</para>
   </refsect1>
 
   <refsect1>
@@ -174,7 +186,7 @@ $ systemd-id128 show --value --uuid user-home
 $ systemd-id128 show 773f91ef-66d4-49b5-bd83-d683bf40ad16
 NAME      ID
 user-home 773f91ef66d449b5bd83d683bf40ad16
-      </programlisting>
+</programlisting>
     </example>
 
     <example>
@@ -193,7 +205,7 @@ $ systemd-id128 machine-id -u -a 1fb8f24b-02df-458d-9659-cc8ace68e28a
 $ systemd-id128 -Pu show 3a9d668b-4db7-4939-8a4a-5e78a03bffb7 \
     -a 1fb8f24b-02df-458d-9659-cc8ace68e28a
 47b82cb1-5339-43da-b2a6-1c350aef1bd1
-      </programlisting>
+</programlisting>
 
       <para>On a given machine with the ID 3a9d668b-4db7-4939-8a4a-5e78a03bffb7, for the application
       1fb8f24b-02df-458d-9659-cc8ace68e28a, we generate an application-specific machine ID

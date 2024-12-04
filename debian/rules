@@ -217,6 +217,13 @@ ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += -Ddns-servers=''
 endif
 
+# Increase the minimum number of sections to keep free in stub PE header in
+# order to be able to create an UKI file with many DTBs (each of them is stored
+# in a different .dtbauto section)
+ifneq (,$(filter $(DEB_TARGET_ARCH), arm64 armhf riscv64))
+CONFFLAGS += -Defi-stub-extra-sections=500
+endif
+
 override_dh_auto_configure:
 	dh_auto_configure \
 		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
@@ -225,7 +232,7 @@ execute_before_dh_auto_build:
 	# blhc false positives: C++ fuzz test program, cc -E flags listing, PE-COFF EFI binaries
 	@echo 'blhc: ignore-line-regexp: .* -o test-bus-vtable-cc.*'
 	@echo 'blhc: ignore-line-regexp: .*cc -E.*'
-	@echo 'blhc: ignore-line-regexp: .* -o src/boot/efi.*'
+	@echo 'blhc: ignore-line-regexp: .* -o src/boot/.*'
 
 execute_before_dh_auto_clean:
 ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
@@ -308,5 +315,19 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	env -u LD_PRELOAD meson test -C obj-$(DEB_HOST_GNU_TYPE) --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
+ifeq ($(DEB_VENDOR),Ubuntu)
+ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+execute_after_dh_link:
+	# Mask systemd-gpt-auto-generator by default on Ubuntu
+	dh_link -psystemd /dev/null /etc/systemd/system-generators/systemd-gpt-auto-generator
+endif
+endif
+
 %:
 	dh $@
+
+# TODO: ideally it should be possible to disable this via an env var or DEB_BUILD_OPTIONS
+override_dh_strip_nondeterminism:
+ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
+	dh_strip_nondeterminism
+endif

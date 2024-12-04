@@ -18,36 +18,36 @@
 #define MODERN_LIBBPF 0
 #endif
 
-DLSYM_FUNCTION(bpf_link__destroy);
-DLSYM_FUNCTION(bpf_link__fd);
-DLSYM_FUNCTION(bpf_link__open);
-DLSYM_FUNCTION(bpf_link__pin);
-DLSYM_FUNCTION(bpf_map__fd);
-DLSYM_FUNCTION(bpf_map__name);
-DLSYM_FUNCTION(bpf_map__set_inner_map_fd);
-DLSYM_FUNCTION(bpf_map__set_max_entries);
-DLSYM_FUNCTION(bpf_map__set_pin_path);
-DLSYM_FUNCTION(bpf_map_delete_elem);
-DLSYM_FUNCTION(bpf_map_get_fd_by_id);
-DLSYM_FUNCTION(bpf_map_lookup_elem);
-DLSYM_FUNCTION(bpf_map_update_elem);
-DLSYM_FUNCTION(bpf_object__attach_skeleton);
-DLSYM_FUNCTION(bpf_object__destroy_skeleton);
-DLSYM_FUNCTION(bpf_object__detach_skeleton);
-DLSYM_FUNCTION(bpf_object__load_skeleton);
-DLSYM_FUNCTION(bpf_object__name);
-DLSYM_FUNCTION(bpf_object__open_skeleton);
-DLSYM_FUNCTION(bpf_object__pin_maps);
-DLSYM_FUNCTION(bpf_program__attach);
-DLSYM_FUNCTION(bpf_program__attach_cgroup);
-DLSYM_FUNCTION(bpf_program__attach_lsm);
-DLSYM_FUNCTION(bpf_program__name);
-DLSYM_FUNCTION(libbpf_get_error);
-DLSYM_FUNCTION(libbpf_set_print);
-DLSYM_FUNCTION(ring_buffer__epoll_fd);
-DLSYM_FUNCTION(ring_buffer__free);
-DLSYM_FUNCTION(ring_buffer__new);
-DLSYM_FUNCTION(ring_buffer__poll);
+DLSYM_PROTOTYPE(bpf_link__destroy) = NULL;
+DLSYM_PROTOTYPE(bpf_link__fd) = NULL;
+DLSYM_PROTOTYPE(bpf_link__open) = NULL;
+DLSYM_PROTOTYPE(bpf_link__pin) = NULL;
+DLSYM_PROTOTYPE(bpf_map__fd) = NULL;
+DLSYM_PROTOTYPE(bpf_map__name) = NULL;
+DLSYM_PROTOTYPE(bpf_map__set_inner_map_fd) = NULL;
+DLSYM_PROTOTYPE(bpf_map__set_max_entries) = NULL;
+DLSYM_PROTOTYPE(bpf_map__set_pin_path) = NULL;
+DLSYM_PROTOTYPE(bpf_map_delete_elem) = NULL;
+DLSYM_PROTOTYPE(bpf_map_get_fd_by_id) = NULL;
+DLSYM_PROTOTYPE(bpf_map_lookup_elem) = NULL;
+DLSYM_PROTOTYPE(bpf_map_update_elem) = NULL;
+DLSYM_PROTOTYPE(bpf_object__attach_skeleton) = NULL;
+DLSYM_PROTOTYPE(bpf_object__destroy_skeleton) = NULL;
+DLSYM_PROTOTYPE(bpf_object__detach_skeleton) = NULL;
+DLSYM_PROTOTYPE(bpf_object__load_skeleton) = NULL;
+DLSYM_PROTOTYPE(bpf_object__name) = NULL;
+DLSYM_PROTOTYPE(bpf_object__open_skeleton) = NULL;
+DLSYM_PROTOTYPE(bpf_object__pin_maps) = NULL;
+DLSYM_PROTOTYPE(bpf_program__attach) = NULL;
+DLSYM_PROTOTYPE(bpf_program__attach_cgroup) = NULL;
+DLSYM_PROTOTYPE(bpf_program__attach_lsm) = NULL;
+DLSYM_PROTOTYPE(bpf_program__name) = NULL;
+DLSYM_PROTOTYPE(libbpf_get_error) = NULL;
+DLSYM_PROTOTYPE(libbpf_set_print) = NULL;
+DLSYM_PROTOTYPE(ring_buffer__epoll_fd) = NULL;
+DLSYM_PROTOTYPE(ring_buffer__free) = NULL;
+DLSYM_PROTOTYPE(ring_buffer__new) = NULL;
+DLSYM_PROTOTYPE(ring_buffer__poll) = NULL;
 
 /* new symbols available from libbpf 0.7.0 */
 int (*sym_bpf_map_create)(enum bpf_map_type,  const char *, __u32, __u32, __u32, const struct bpf_map_create_opts *);
@@ -83,13 +83,13 @@ int dlopen_bpf(void) {
 
         DISABLE_WARNING_DEPRECATED_DECLARATIONS;
 
-        dl = dlopen("libbpf.so.1", RTLD_LAZY);
+        dl = dlopen("libbpf.so.1", RTLD_NOW|RTLD_NODELETE);
         if (!dl) {
                 /* libbpf < 1.0.0 (we rely on 0.1.0+) provide most symbols we care about, but
                  * unfortunately not all until 0.7.0. See bpf-compat.h for more details.
                  * Once we consider we can assume 0.7+ is present we can just use the same symbol
                  * list for both files, and when we assume 1.0+ is present we can remove this dlopen */
-                dl = dlopen("libbpf.so.0", RTLD_LAZY);
+                dl = dlopen("libbpf.so.0", RTLD_NOW|RTLD_NODELETE);
                 if (!dl)
                         return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
                                                "neither libbpf.so.1 nor libbpf.so.0 are installed: %s", dlerror());

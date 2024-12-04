@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/loop.h>
@@ -8,10 +9,11 @@
 #include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-varlink.h"
 
 #include "build.h"
-#include "bus-locator.h"
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-unit-util.h"
 #include "bus-util.h"
 #include "capability-util.h"
@@ -43,12 +45,12 @@
 #include "pretty-print.h"
 #include "process-util.h"
 #include "rm-rf.h"
+#include "selinux-util.h"
 #include "sort-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "terminal-util.h"
 #include "user-util.h"
-#include "varlink.h"
 #include "varlink-io.systemd.sysext.h"
 #include "verbs.h"
 
@@ -76,7 +78,7 @@ DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING_WITH_BOOLEAN(mutable_mode, Mutabl
 
 static char **arg_hierarchies = NULL; /* "/usr" + "/opt" by default for sysext and /etc by default for confext */
 static char *arg_root = NULL;
-static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
+static sd_json_format_flags_t arg_json_format_flags = SD_JSON_FORMAT_OFF;
 static PagerFlags arg_pager_flags = 0;
 static bool arg_legend = true;
 static bool arg_force = false;
@@ -273,6 +275,52 @@ static int need_reload(
         return false;
 }
 
+static int move_submounts(const char *src, const char *dst) {
+        SubMount *submounts = NULL;
+        size_t n_submounts = 0;
+        int r;
+
+        assert(src);
+        assert(dst);
+
+        CLEANUP_ARRAY(submounts, n_submounts, sub_mount_array_free);
+
+        r = get_sub_mounts(src, &submounts, &n_submounts);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get submounts for %s: %m", src);
+
+        FOREACH_ARRAY(m, submounts, n_submounts) {
+                _cleanup_free_ char *t = NULL;
+                const char *suffix;
+                struct stat st;
+
+                assert_se(suffix = path_startswith(m->path, src));
+
+                t = path_join(dst, suffix);
+                if (!t)
+                        return log_oom();
+
+                if (fstat(m->mount_fd, &st) < 0)
+                        return log_error_errno(errno, "Failed to stat %s: %m", m->path);
+
+                r = mkdir_parents(t, 0755);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to create parent directories of %s: %m", t);
+
+                r = make_mount_point_inode_from_stat(&st, t, 0755);
+                if (r < 0 && r != -EEXIST)
+                        return log_error_errno(r, "Failed to create mountpoint %s: %m", t);
+
+                r = mount_follow_verbose(LOG_ERR, m->path, t, NULL, MS_BIND|MS_REC, NULL);
+                if (r < 0)
+                        return r;
+
+                (void) umount_verbose(LOG_WARNING, m->path, MNT_DETACH);
+        }
+
+        return 0;
+}
+
 static int daemon_reload(void) {
          _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
@@ -284,11 +332,10 @@ static int daemon_reload(void) {
         return bus_service_manager_reload(bus);
 }
 
-static int unmerge_hierarchy(
-                ImageClass image_class,
-                const char *p) {
+static int unmerge_hierarchy(ImageClass image_class, const char *p, const char *submounts_path) {
 
         _cleanup_free_ char *dot_dir = NULL, *work_dir_info_file = NULL;
+        int n_unmerged = 0;
         int r;
 
         assert(p);
@@ -338,6 +385,12 @@ static int unmerge_hierarchy(
                                 return log_error_errno(r, "Failed to unmount '%s': %m", dot_dir);
                 }
 
+                /* After we've unmounted the metadata directory, save all other submounts so we can restore
+                 * them after unmerging the hierarchy. */
+                r = move_submounts(p, submounts_path);
+                if (r < 0)
+                        return r;
+
                 r = umount_verbose(LOG_ERR, p, MNT_DETACH|UMOUNT_NOFOLLOW);
                 if (r < 0)
                         return r;
@@ -349,9 +402,67 @@ static int unmerge_hierarchy(
                 }
 
                 log_info("Unmerged '%s'.", p);
+                n_unmerged++;
         }
 
-        return 0;
+        return n_unmerged;
+}
+
+static int unmerge_subprocess(
+                ImageClass image_class,
+                char **hierarchies,
+                const char *workspace) {
+
+        int r, ret = 0;
+
+        assert(workspace);
+        assert(path_startswith(workspace, "/run/"));
+
+        /* Mark the whole of /run as MS_SLAVE, so that we can mount stuff below it that doesn't show up on
+         * the host otherwise. */
+        r = mount_nofollow_verbose(LOG_ERR, NULL, "/run", NULL, MS_SLAVE|MS_REC, NULL);
+        if (r < 0)
+                return r;
+
+        /* Let's create the workspace if it's missing */
+        r = mkdir_p(workspace, 0700);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create '%s': %m", workspace);
+
+        STRV_FOREACH(h, hierarchies) {
+                _cleanup_free_ char *submounts_path = NULL, *resolved = NULL;
+
+                submounts_path = path_join(workspace, "submounts", *h);
+                if (!submounts_path)
+                        return log_oom();
+
+                r = chase(*h, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
+                if (r == -ENOENT) {
+                        log_debug_errno(r, "Hierarchy '%s%s' does not exist, ignoring.", strempty(arg_root), *h);
+                        continue;
+                }
+                if (r < 0) {
+                        RET_GATHER(ret, log_error_errno(r, "Failed to resolve path to hierarchy '%s%s': %m", strempty(arg_root), *h));
+                        continue;
+                }
+
+                r = unmerge_hierarchy(image_class, resolved, submounts_path);
+                if (r < 0) {
+                        RET_GATHER(ret, r);
+                        continue;
+                }
+                if (r == 0)
+                        continue;
+
+                /* If we unmerged something, then we have to move the submounts from the hierarchy back into
+                 * place in the host's original hierarchy. */
+
+                r = move_submounts(submounts_path, resolved);
+                if (r < 0)
+                        return r;
+        }
+
+        return ret;
 }
 
 static int unmerge(
@@ -359,33 +470,26 @@ static int unmerge(
                 char **hierarchies,
                 bool no_reload) {
 
-        int r, ret = 0;
         bool need_to_reload;
+        int r;
 
         r = need_reload(image_class, hierarchies, no_reload);
         if (r < 0)
                 return r;
         need_to_reload = r > 0;
 
-        STRV_FOREACH(p, hierarchies) {
-                _cleanup_free_ char *resolved = NULL;
+        r = safe_fork("(sd-unmerge)", FORK_WAIT|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_NEW_MOUNTNS, /* ret_pid= */ NULL);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                /* Child with its own mount namespace */
 
-                r = chase(*p, arg_root, CHASE_PREFIX_ROOT, &resolved, NULL);
-                if (r == -ENOENT) {
-                        log_debug_errno(r, "Hierarchy '%s%s' does not exist, ignoring.", strempty(arg_root), *p);
-                        continue;
-                }
-                if (r < 0) {
-                        log_error_errno(r, "Failed to resolve path to hierarchy '%s%s': %m", strempty(arg_root), *p);
-                        if (ret == 0)
-                                ret = r;
+                r = unmerge_subprocess(image_class, hierarchies, "/run/systemd/sysext");
 
-                        continue;
-                }
+                /* Our namespace ceases to exist here, also implicitly detaching all temporary mounts we
+                 * created below /run. Nice! */
 
-                r = unmerge_hierarchy(image_class, resolved);
-                if (r < 0 && ret == 0)
-                        ret = r;
+                _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
         }
 
         if (need_to_reload) {
@@ -394,7 +498,7 @@ static int unmerge(
                         return r;
         }
 
-        return ret;
+        return 0;
 }
 
 static int verb_unmerge(int argc, char **argv, void *userdata) {
@@ -411,7 +515,7 @@ static int verb_unmerge(int argc, char **argv, void *userdata) {
                        arg_no_reload);
 }
 
-static int parse_image_class_parameter(Varlink *link, const char *value, ImageClass *image_class, char ***hierarchies) {
+static int parse_image_class_parameter(sd_varlink *link, const char *value, ImageClass *image_class, char ***hierarchies) {
         _cleanup_strv_free_ char **h = NULL;
         ImageClass c;
         int r;
@@ -424,7 +528,7 @@ static int parse_image_class_parameter(Varlink *link, const char *value, ImageCl
 
         c = image_class_from_string(value);
         if (!IN_SET(c, IMAGE_SYSEXT, IMAGE_CONFEXT))
-                return varlink_error_invalid_parameter_name(link, "class");
+                return sd_varlink_error_invalid_parameter_name(link, "class");
 
         if (hierarchies) {
                 r = parse_env_extension_hierarchies(&h, image_class_info[c].name_env);
@@ -443,11 +547,11 @@ typedef struct MethodUnmergeParameters {
         int no_reload;
 } MethodUnmergeParameters;
 
-static int vl_method_unmerge(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+static int vl_method_unmerge(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
 
-        static const JsonDispatch dispatch_table[] = {
-                { "class",    JSON_VARIANT_STRING,  json_dispatch_const_string, offsetof(MethodUnmergeParameters, class),     0 },
-                { "noReload", JSON_VARIANT_BOOLEAN, json_dispatch_boolean,      offsetof(MethodUnmergeParameters, no_reload), 0 },
+        static const sd_json_dispatch_field dispatch_table[] = {
+                { "class",    SD_JSON_VARIANT_STRING,  sd_json_dispatch_const_string, offsetof(MethodUnmergeParameters, class),     0 },
+                { "noReload", SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_stdbool,      offsetof(MethodUnmergeParameters, no_reload), 0 },
                 {}
         };
         MethodUnmergeParameters p = {
@@ -459,7 +563,7 @@ static int vl_method_unmerge(Varlink *link, JsonVariant *parameters, VarlinkMeth
 
         assert(link);
 
-        r = varlink_dispatch(link, parameters, dispatch_table, &p);
+        r = sd_varlink_dispatch(link, parameters, dispatch_table, &p);
         if (r != 0)
                 return r;
 
@@ -473,7 +577,7 @@ static int vl_method_unmerge(Varlink *link, JsonVariant *parameters, VarlinkMeth
         if (r < 0)
                 return r;
 
-        return varlink_reply(link, NULL);
+        return sd_varlink_reply(link, NULL);
 }
 
 static int verb_status(int argc, char **argv, void *userdata) {
@@ -841,6 +945,14 @@ static int resolve_mutable_directory(
                 r = mkdir_p(path_in_root, 0700);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create a directory '%s': %m", path_in_root);
+
+                _cleanup_close_ int atfd = open(path_in_root, O_DIRECTORY|O_CLOEXEC);
+                if (atfd < 0)
+                        return log_error_errno(errno, "Failed to open directory '%s': %m", path_in_root);
+
+                r = mac_selinux_fix_full(atfd, /* inode_path= */ NULL, hierarchy, /* flags= */ 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to fix SELinux label for '%s': %m", path_in_root);
         }
 
         r = chase(path, root, CHASE_PREFIX_ROOT, &resolved_path, NULL);
@@ -1199,10 +1311,27 @@ static int mount_overlayfs_with_op(
         if (r < 0)
                 return log_error_errno(r, "Failed to make directory '%s': %m", meta_path);
 
+        _cleanup_close_ int atfd = open(meta_path, O_DIRECTORY|O_CLOEXEC);
+        if (atfd < 0)
+                return log_error_errno(errno, "Failed to open directory '%s': %m", meta_path);
+
+        r = mac_selinux_fix_full(atfd, /* inode_path= */ NULL, op->hierarchy, /* flags= */ 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to fix SELinux label for '%s': %m", meta_path);
+
         if (op->upper_dir && op->work_dir) {
                 r = mkdir_p(op->work_dir, 0700);
                 if (r < 0)
                         return log_error_errno(r, "Failed to make directory '%s': %m", op->work_dir);
+
+                _cleanup_close_ int dfd = open(op->work_dir, O_DIRECTORY|O_CLOEXEC);
+                if (dfd < 0)
+                        return log_error_errno(errno, "Failed to open directory '%s': %m", op->work_dir);
+
+                r = mac_selinux_fix_full(dfd, /* inode_path= */ NULL, op->hierarchy, /* flags= */ 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to fix SELinux label for '%s': %m", op->work_dir);
+
                 top_layer = op->upper_dir;
         } else {
                 assert(!strv_isempty(op->lower_dirs));
@@ -1223,7 +1352,7 @@ static int mount_overlayfs_with_op(
         return 0;
 }
 
-static int write_extensions_file(ImageClass image_class, char **extensions, const char *meta_path) {
+static int write_extensions_file(ImageClass image_class, char **extensions, const char *meta_path, const char *hierarchy) {
         _cleanup_free_ char *f = NULL, *buf = NULL;
         int r;
 
@@ -1241,14 +1370,18 @@ static int write_extensions_file(ImageClass image_class, char **extensions, cons
         if (!buf)
                 return log_oom();
 
-        r = write_string_file(f, buf, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MKDIR_0755);
+        _cleanup_free_ char *hierarchy_path = path_join(hierarchy, image_class_info[image_class].dot_directory_name, image_class_info[image_class].short_identifier_plural);
+        if (!hierarchy_path)
+                return log_oom();
+
+        r = write_string_file_full(AT_FDCWD,f, buf, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
         if (r < 0)
                 return log_error_errno(r, "Failed to write extension meta file '%s': %m", f);
 
         return 0;
 }
 
-static int write_dev_file(ImageClass image_class, const char *meta_path, const char *overlay_path) {
+static int write_dev_file(ImageClass image_class, const char *meta_path, const char *overlay_path, const char *hierarchy) {
         _cleanup_free_ char *f = NULL;
         struct stat st;
         int r;
@@ -1270,14 +1403,18 @@ static int write_dev_file(ImageClass image_class, const char *meta_path, const c
         /* Modifying the underlying layers while the overlayfs is mounted is technically undefined, but at
          * least it won't crash or deadlock, as per the kernel docs about overlayfs:
          * https://www.kernel.org/doc/html/latest/filesystems/overlayfs.html#changes-to-underlying-filesystems */
-        r = write_string_file(f, FORMAT_DEVNUM(st.st_dev), WRITE_STRING_FILE_CREATE);
+        _cleanup_free_ char *hierarchy_path = path_join(hierarchy, image_class_info[image_class].dot_directory_name, image_class_info[image_class].short_identifier_plural);
+        if (!hierarchy_path)
+                return log_oom();
+
+        r = write_string_file_full(AT_FDCWD, f, FORMAT_DEVNUM(st.st_dev), WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
         if (r < 0)
                 return log_error_errno(r, "Failed to write '%s': %m", f);
 
         return 0;
 }
 
-static int write_work_dir_file(ImageClass image_class, const char *meta_path, const char *work_dir) {
+static int write_work_dir_file(ImageClass image_class, const char *meta_path, const char *work_dir, const char* hierarchy) {
         _cleanup_free_ char *escaped_work_dir_in_root = NULL, *f = NULL;
         char *work_dir_in_root = NULL;
         int r;
@@ -1304,7 +1441,12 @@ static int write_work_dir_file(ImageClass image_class, const char *meta_path, co
         escaped_work_dir_in_root = cescape(work_dir_in_root);
         if (!escaped_work_dir_in_root)
                 return log_oom();
-        r = write_string_file(f, escaped_work_dir_in_root, WRITE_STRING_FILE_CREATE);
+
+        _cleanup_free_ char *hierarchy_path = path_join(hierarchy, image_class_info[image_class].dot_directory_name, "work_dir");
+        if (!hierarchy_path)
+                return log_oom();
+
+        r = write_string_file_full(AT_FDCWD, f, escaped_work_dir_in_root, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
         if (r < 0)
                 return log_error_errno(r, "Failed to write '%s': %m", f);
 
@@ -1316,7 +1458,8 @@ static int store_info_in_meta(
                 char **extensions,
                 const char *meta_path,
                 const char *overlay_path,
-                const char *work_dir) {
+                const char *work_dir,
+                const char *hierarchy) {
 
         int r;
 
@@ -1325,15 +1468,31 @@ static int store_info_in_meta(
         assert(overlay_path);
         /* work_dir may be NULL */
 
-        r = write_extensions_file(image_class, extensions, meta_path);
+        _cleanup_free_ char *f = path_join(meta_path, image_class_info[image_class].dot_directory_name);
+        if (!f)
+                return log_oom();
+
+        r = mkdir_p(f, 0755);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create directory '%s': %m", f);
+
+        _cleanup_close_ int atfd = open(f, O_DIRECTORY|O_CLOEXEC);
+        if (atfd < 0)
+                return log_error_errno(errno, "Failed to open directory '%s': %m", f);
+
+        r = mac_selinux_fix_full(atfd, /* inode_path= */ NULL, hierarchy, /* flags= */ 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to fix SELinux label for '%s': %m", hierarchy);
+
+        r = write_extensions_file(image_class, extensions, meta_path, hierarchy);
         if (r < 0)
                 return r;
 
-        r = write_dev_file(image_class, meta_path, overlay_path);
+        r = write_dev_file(image_class, meta_path, overlay_path, hierarchy);
         if (r < 0)
                 return r;
 
-        r = write_work_dir_file(image_class, meta_path, work_dir);
+        r = write_work_dir_file(image_class, meta_path, work_dir, hierarchy);
         if (r < 0)
                 return r;
 
@@ -1399,6 +1558,8 @@ static int merge_hierarchy(
         assert(overlay_path);
         assert(workspace_path);
 
+        mac_selinux_init();
+
         r = determine_used_extensions(hierarchy, paths, &used_paths, &extensions_used);
         if (r < 0)
                 return r;
@@ -1426,7 +1587,7 @@ static int merge_hierarchy(
         if (r < 0)
                 return r;
 
-        r = store_info_in_meta(image_class, extensions, meta_path, overlay_path, op->work_dir);
+        r = store_info_in_meta(image_class, extensions, meta_path, overlay_path, op->work_dir, op->hierarchy);
         if (r < 0)
                 return r;
 
@@ -1476,12 +1637,14 @@ static int merge_subprocess(
                 Hashmap *images,
                 const char *workspace) {
 
-        _cleanup_free_ char *host_os_release_id = NULL, *host_os_release_version_id = NULL, *host_os_release_api_level = NULL, *buf = NULL;
-        _cleanup_strv_free_ char **extensions = NULL, **paths = NULL;
+        _cleanup_free_ char *host_os_release_id = NULL, *host_os_release_version_id = NULL, *host_os_release_api_level = NULL, *buf = NULL, *filename = NULL;
+        _cleanup_strv_free_ char **extensions = NULL, **extensions_v = NULL, **paths = NULL;
         size_t n_extensions = 0;
         unsigned n_ignored = 0;
         Image *img;
         int r;
+
+        assert(path_startswith(workspace, "/run/"));
 
         /* Mark the whole of /run as MS_SLAVE, so that we can mount stuff below it that doesn't show up on
          * the host otherwise. */
@@ -1658,6 +1821,17 @@ static int merge_subprocess(
                 if (r < 0)
                         return log_oom();
 
+                /* Also get the absolute file name with version info for logging. */
+                r = path_extract_filename(img->path, &filename);
+                if (r == -ENOMEM)
+                        return log_oom();
+                if (r < 0)
+                        return log_error_errno(r, "Failed to extract filename from '%s': %m", img->path);
+
+                r = strv_extend(&extensions_v, filename);
+                if (r < 0)
+                        return log_oom();
+
                 n_extensions++;
         }
 
@@ -1672,8 +1846,9 @@ static int merge_subprocess(
 
         /* Order by version sort with strverscmp_improved() */
         typesafe_qsort(extensions, n_extensions, strverscmp_improvedp);
+        typesafe_qsort(extensions_v, n_extensions, strverscmp_improvedp);
 
-        buf = strv_join(extensions, "', '");
+        buf = strv_join(extensions_v, "', '");
         if (!buf)
                 return log_oom();
 
@@ -1699,20 +1874,33 @@ static int merge_subprocess(
         /* Let's now unmerge the status quo ante, since to build the new overlayfs we need a reference to the
          * underlying fs. */
         STRV_FOREACH(h, hierarchies) {
-                _cleanup_free_ char *resolved = NULL;
+                _cleanup_free_ char *submounts_path = NULL, *resolved = NULL;
+
+                submounts_path = path_join(workspace, "submounts", *h);
+                if (!submounts_path)
+                        return log_oom();
 
                 r = chase(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve hierarchy '%s%s': %m", strempty(arg_root), *h);
 
-                r = unmerge_hierarchy(image_class, resolved);
+                r = unmerge_hierarchy(image_class, resolved, submounts_path);
+                if (r < 0)
+                        return r;
+                if (r > 0)
+                        continue;
+
+                /* If we didn't unmerge anything, then we have to move the submounts from the host's
+                 * original hierarchy. */
+
+                r = move_submounts(resolved, submounts_path);
                 if (r < 0)
                         return r;
         }
 
         /* Create overlayfs mounts for all hierarchies */
         STRV_FOREACH(h, hierarchies) {
-                _cleanup_free_ char *meta_path = NULL, *overlay_path = NULL, *merge_hierarchy_workspace = NULL;
+                _cleanup_free_ char *meta_path = NULL, *overlay_path = NULL, *merge_hierarchy_workspace = NULL, *submounts_path = NULL;
 
                 meta_path = path_join(workspace, "meta", *h); /* The place where to store metadata about this instance */
                 if (!meta_path)
@@ -1727,6 +1915,10 @@ static int merge_subprocess(
                 if (!merge_hierarchy_workspace)
                         return log_oom();
 
+                submounts_path = path_join(workspace, "submounts", *h);
+                if (!submounts_path)
+                        return log_oom();
+
                 r = merge_hierarchy(
                                 image_class,
                                 *h,
@@ -1736,6 +1928,13 @@ static int merge_subprocess(
                                 meta_path,
                                 overlay_path,
                                 merge_hierarchy_workspace);
+                if (r < 0)
+                        return r;
+
+                /* After the new hierarchy is set up, move the submounts from the original hierarchy into
+                 * place. */
+
+                r = move_submounts(submounts_path, overlay_path);
                 if (r < 0)
                         return r;
         }
@@ -1748,13 +1947,11 @@ static int merge_subprocess(
                 if (!p)
                         return log_oom();
 
-                if (laccess(p, F_OK) < 0) {
-                        if (errno != ENOENT)
-                                return log_error_errno(errno, "Failed to check if '%s' exists: %m", p);
-
-                        /* Hierarchy apparently was empty in all extensions, and wasn't mounted, ignoring. */
+                r = access_nofollow(p, F_OK);
+                if (r == -ENOENT) /* Hierarchy apparently was empty in all extensions, and wasn't mounted, ignoring. */
                         continue;
-                }
+                if (r < 0)
+                        return log_error_errno(r, "Failed to check if '%s' exists: %m", p);
 
                 r = chase(*h, arg_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
                 if (r < 0)
@@ -1918,13 +2115,13 @@ typedef struct MethodMergeParameters {
         int noexec;
 } MethodMergeParameters;
 
-static int parse_merge_parameters(Varlink *link, JsonVariant *parameters, MethodMergeParameters *p) {
+static int parse_merge_parameters(sd_varlink *link, sd_json_variant *parameters, MethodMergeParameters *p) {
 
-        static const JsonDispatch dispatch_table[] = {
-                { "class",    JSON_VARIANT_STRING,  json_dispatch_const_string, offsetof(MethodMergeParameters, class),     0 },
-                { "force",    JSON_VARIANT_BOOLEAN, json_dispatch_tristate,     offsetof(MethodMergeParameters, force),     0 },
-                { "noReload", JSON_VARIANT_BOOLEAN, json_dispatch_tristate,     offsetof(MethodMergeParameters, no_reload), 0 },
-                { "noexec",   JSON_VARIANT_BOOLEAN, json_dispatch_tristate,     offsetof(MethodMergeParameters, noexec),    0 },
+        static const sd_json_dispatch_field dispatch_table[] = {
+                { "class",    SD_JSON_VARIANT_STRING,  sd_json_dispatch_const_string, offsetof(MethodMergeParameters, class),     0 },
+                { "force",    SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_tristate,     offsetof(MethodMergeParameters, force),     0 },
+                { "noReload", SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_tristate,     offsetof(MethodMergeParameters, no_reload), 0 },
+                { "noexec",   SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_tristate,     offsetof(MethodMergeParameters, noexec),    0 },
                 {}
         };
 
@@ -1932,10 +2129,10 @@ static int parse_merge_parameters(Varlink *link, JsonVariant *parameters, Method
         assert(parameters);
         assert(p);
 
-        return varlink_dispatch(link, parameters, dispatch_table, p);
+        return sd_varlink_dispatch(link, parameters, dispatch_table, p);
 }
 
-static int vl_method_merge(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+static int vl_method_merge(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
         _cleanup_hashmap_free_ Hashmap *images = NULL;
         MethodMergeParameters p = {
                 .force = -1,
@@ -1968,7 +2165,7 @@ static int vl_method_merge(Varlink *link, JsonVariant *parameters, VarlinkMethod
         if (r < 0)
                 return r;
         if (r > 0)
-                return varlink_errorb(link, "io.systemd.sysext.AlreadyMerged", JSON_BUILD_OBJECT(JSON_BUILD_PAIR_STRING("hierarchy", which)));
+                return sd_varlink_errorbo(link, "io.systemd.sysext.AlreadyMerged", SD_JSON_BUILD_PAIR_STRING("hierarchy", which));
 
         r = merge(image_class,
                   hierarchies ?: arg_hierarchies,
@@ -1979,7 +2176,7 @@ static int vl_method_merge(Varlink *link, JsonVariant *parameters, VarlinkMethod
         if (r < 0)
                 return r;
 
-        return varlink_reply(link, NULL);
+        return sd_varlink_reply(link, NULL);
 }
 
 static int refresh(
@@ -2038,7 +2235,7 @@ static int verb_refresh(int argc, char **argv, void *userdata) {
                        arg_noexec);
 }
 
-static int vl_method_refresh(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+static int vl_method_refresh(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
 
         MethodMergeParameters p = {
                 .force = -1,
@@ -2067,7 +2264,7 @@ static int vl_method_refresh(Varlink *link, JsonVariant *parameters, VarlinkMeth
         if (r < 0)
                 return r;
 
-        return varlink_reply(link, NULL);
+        return sd_varlink_reply(link, NULL);
 }
 
 static int verb_list(int argc, char **argv, void *userdata) {
@@ -2084,7 +2281,7 @@ static int verb_list(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to discover images: %m");
 
-        if ((arg_json_format_flags & JSON_FORMAT_OFF) && hashmap_isempty(images)) {
+        if (hashmap_isempty(images) && !sd_json_format_enabled(arg_json_format_flags)) {
                 log_info("No OS extensions found.");
                 return 0;
         }
@@ -2113,15 +2310,15 @@ typedef struct MethodListParameters {
         const char *class;
 } MethodListParameters;
 
-static int vl_method_list(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
+static int vl_method_list(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
 
-        static const JsonDispatch dispatch_table[] = {
-                { "class",    JSON_VARIANT_STRING,  json_dispatch_const_string, offsetof(MethodListParameters, class),     0 },
+        static const sd_json_dispatch_field dispatch_table[] = {
+                { "class", SD_JSON_VARIANT_STRING, sd_json_dispatch_const_string, offsetof(MethodListParameters, class), 0 },
                 {}
         };
         MethodListParameters p = {
         };
-        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+        _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
         _cleanup_hashmap_free_ Hashmap *images = NULL;
         ImageClass image_class = arg_image_class;
         Image *img;
@@ -2129,7 +2326,7 @@ static int vl_method_list(Varlink *link, JsonVariant *parameters, VarlinkMethodF
 
         assert(link);
 
-        r = varlink_dispatch(link, parameters, dispatch_table, &p);
+        r = sd_varlink_dispatch(link, parameters, dispatch_table, &p);
         if (r != 0)
                 return r;
 
@@ -2148,12 +2345,12 @@ static int vl_method_list(Varlink *link, JsonVariant *parameters, VarlinkMethodF
         HASHMAP_FOREACH(img, images) {
                 if (v) {
                         /* Send previous item with more=true */
-                        r = varlink_notify(link, v);
+                        r = sd_varlink_notify(link, v);
                         if (r < 0)
                                 return r;
                 }
 
-                v = json_variant_unref(v);
+                v = sd_json_variant_unref(v);
 
                 r = image_to_json(img, &v);
                 if (r < 0)
@@ -2161,9 +2358,9 @@ static int vl_method_list(Varlink *link, JsonVariant *parameters, VarlinkMethodF
         }
 
         if (v)  /* Send final item with more=false */
-                return varlink_reply(link, v);
+                return sd_varlink_reply(link, v);
 
-        return varlink_error(link, "io.systemd.sysext.NoImagesFound", NULL);
+        return sd_varlink_error(link, "io.systemd.sysext.NoImagesFound", NULL);
 }
 
 static int verb_help(int argc, char **argv, void *userdata) {
@@ -2313,7 +2510,7 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached();
                 }
 
-        r = varlink_invocation(VARLINK_ALLOW_ACCEPT);
+        r = sd_varlink_invocation(SD_VARLINK_ALLOW_ACCEPT);
         if (r < 0)
                 return log_error_errno(r, "Failed to check if invoked in Varlink mode: %m");
         if (r > 0)
@@ -2367,19 +2564,19 @@ static int run(int argc, char *argv[]) {
                 return log_error_errno(r, "Failed to parse environment variable: %m");
 
         if (arg_varlink) {
-                _cleanup_(varlink_server_unrefp) VarlinkServer *varlink_server = NULL;
+                _cleanup_(sd_varlink_server_unrefp) sd_varlink_server *varlink_server = NULL;
 
                 /* Invocation as Varlink service */
 
-                r = varlink_server_new(&varlink_server, VARLINK_SERVER_ROOT_ONLY);
+                r = sd_varlink_server_new(&varlink_server, SD_VARLINK_SERVER_ROOT_ONLY);
                 if (r < 0)
                         return log_error_errno(r, "Failed to allocate Varlink server: %m");
 
-                r = varlink_server_add_interface(varlink_server, &vl_interface_io_systemd_sysext);
+                r = sd_varlink_server_add_interface(varlink_server, &vl_interface_io_systemd_sysext);
                 if (r < 0)
                         return log_error_errno(r, "Failed to add Varlink interface: %m");
 
-                r = varlink_server_bind_method_many(
+                r = sd_varlink_server_bind_method_many(
                                 varlink_server,
                                 "io.systemd.sysext.Merge", vl_method_merge,
                                 "io.systemd.sysext.Unmerge", vl_method_unmerge,
@@ -2388,7 +2585,7 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to bind Varlink methods: %m");
 
-                r = varlink_server_loop_auto(varlink_server);
+                r = sd_varlink_server_loop_auto(varlink_server);
                 if (r == -EPERM)
                         return log_error_errno(r, "Invoked by unprivileged Varlink peer, refusing.");
                 if (r < 0)

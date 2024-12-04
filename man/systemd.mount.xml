@@ -217,6 +217,17 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>x-systemd.wants=</option></term>
+
+        <listitem><para>Configures a <varname>Wants=</varname> and
+        an <varname>After=</varname> dependency between the created
+        mount unit and another systemd unit, similar to the
+        <varname>x-systemd.requires=</varname> option.</para>
+
+        <xi:include href="version-info.xml" xpointer="v257"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>x-systemd.before=</option></term>
         <term><option>x-systemd.after=</option></term>
 
@@ -282,7 +293,7 @@
         comes from unit fragments, i.e. generated from <filename>/etc/fstab</filename> by <citerefentry>
         <refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry> or loaded from
         a manually configured mount unit, a combination of <varname>Requires=</varname> and <varname>StopPropagatedFrom=</varname>
-        dependencies is set on the backing device. If doesn't, only <varname>Requires=</varname> is used.</para>
+        dependencies is set on the backing device, otherwise only <varname>Requires=</varname> is used.</para>
 
         <xi:include href="version-info.xml" xpointer="v233"/></listitem>
       </varlistentry>
@@ -545,7 +556,7 @@
         for details. This setting is optional.</para>
 
         <para>If the type is <literal>overlay</literal>, and <literal>upperdir=</literal> or
-        <literal>workdir=</literal> are specified as options and they don't exist, they will be created.
+        <literal>workdir=</literal> are specified as options and the directories don't exist, they will be created.
         </para></listitem>
       </varlistentry>
 

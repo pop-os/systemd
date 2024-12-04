@@ -107,6 +107,18 @@ int link_queue_request_full(
                 request_netlink_handler_t netlink_handler,
                 Request **ret);
 
+int manager_queue_request_full(
+                Manager *manager,
+                RequestType type,
+                void *userdata,
+                mfree_func_t free_func,
+                hash_func_t hash_func,
+                compare_func_t compare_func,
+                request_process_func_t process,
+                unsigned *counter,
+                request_netlink_handler_t netlink_handler,
+                Request **ret);
+
 int link_requeue_request(Link *link, Request *req, void *userdata, Request **ret);
 
 static inline int link_queue_request(
@@ -172,11 +184,10 @@ int remove_request_add(
                 _r = remove_request_add(manager, link, _data,           \
                                         (mfree_func_t) name##_unref,    \
                                         nl, m, handler);                \
-                if (_r >= 0)                                            \
+                if (_r > 0)                                             \
                         name##_ref(_data);                              \
                 _r;                                                     \
         })
-
 
 #define link_remove_request_add(link, data, name, nl, m, handler)       \
         ({                                                              \

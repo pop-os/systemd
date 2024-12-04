@@ -9,11 +9,7 @@ if [[ ! -f "pkg/$PKG_SUBDIR/systemd.spec" ]]; then
     exit 1
 fi
 
-if [[ -d .git/ ]] && [[ -z "$(git status --porcelain)" ]]; then
-    TS="$(git show --no-patch --format=%ct HEAD)"
-else
-    TS="${SOURCE_DATE_EPOCH:-$(date +%s)}"
-fi
+TS="${SOURCE_DATE_EPOCH:-$(date +%s)}"
 
 # The openSUSE filelists hardcode the manpage compression extension. This causes rpmbuild errors since we
 # disable manpage compression as the files cannot be found. Fix the issue by removing the compression
@@ -32,7 +28,7 @@ fi
 VERSION="$(cat meson.version)"
 RELEASE="$(date "+%Y%m%d%H%M%S" --date "@$TS")"
 
-MKOSI_CFLAGS="-O0 -Wp,-U_FORTIFY_SOURCE"
+MKOSI_CFLAGS="-O0 -g -Wp,-U_FORTIFY_SOURCE"
 if ((WITH_DEBUG)); then
     MKOSI_CFLAGS="$MKOSI_CFLAGS -fdebug-prefix-map=../src=/usr/src/debug/systemd"
 fi
@@ -73,12 +69,13 @@ build() {
     CXX_LD="$( ((LLVM)) && echo lld)" \
     rpmbuild \
         -bb \
+        --noprep \
         --build-in-place \
         --with upstream \
         $( ((WITH_TESTS)) || echo "--nocheck") \
         --define "_topdir /var/tmp" \
-        --define "_sourcedir pkg/$PKG_SUBDIR" \
-        --define "_rpmdir $OUTPUTDIR" \
+        --define "_sourcedir $PWD/pkg/$PKG_SUBDIR" \
+        --define "_rpmdir $BUILDDIR" \
         ${BUILDDIR:+"--define=_vpath_builddir $BUILDDIR"} \
         --define "_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm" \
         --define "_binary_payload w.ufdio" \
@@ -97,7 +94,6 @@ build() {
         --define "__script_requires %{nil}" \
         --define "_find_debuginfo_dwz_opts %{nil}" \
         --define "_find_debuginfo_opts --unique-debug-src-base \"%{name}\"" \
-        --define "_fixperms true" \
         --noclean \
         "$@" \
         "pkg/$PKG_SUBDIR/systemd.spec"
@@ -109,6 +105,11 @@ build() {
 
     return $EXIT_STATUS
 }
+
+(
+    shopt -s nullglob
+    rm -f "$BUILDDIR"/*.rpm
+)
 
 if ! build; then
     if [[ ! -s /tmp/unpackaged-files ]]; then
@@ -123,12 +124,6 @@ if ! build; then
     build --noprep --nocheck
 fi
 
-(
-    shopt -s nullglob
-    rm -f "$BUILDDIR"/*.rpm
-)
-
-cp "$OUTPUTDIR"/*.rpm "$PACKAGEDIR"
-cp "$OUTPUTDIR"/*.rpm "$BUILDDIR"
+cp "$BUILDDIR"/*.rpm "$PACKAGEDIR"
 
 make_sysext_unsigned /var/tmp/BUILD/*/BUILDROOT

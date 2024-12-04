@@ -34,6 +34,28 @@ int asynchronous_sync(pid_t *ret_pid) {
         return 0;
 }
 
+int asynchronous_fsync(int fd, pid_t *ret_pid) {
+        int r;
+
+        assert(fd >= 0);
+        /* Same as asynchronous_sync() above, but calls fsync() on a specific fd */
+
+        r = safe_fork_full("(sd-fsync)",
+                           /* stdio_fds= */ NULL,
+                           /* except_fds= */ &fd,
+                           /* n_except_fds= */ 1,
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|(ret_pid ? 0 : FORK_DETACH), ret_pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                /* Child process */
+                fsync(fd);
+                _exit(EXIT_SUCCESS);
+        }
+
+        return 0;
+}
+
 /* We encode the fd to close in the userdata pointer as an unsigned value. The highest bit indicates whether
  * we need to fork again */
 #define NEED_DOUBLE_FORK (1U << (sizeof(unsigned) * 8 - 1))
@@ -124,6 +146,10 @@ int asynchronous_rm_rf(const char *p, RemoveFlags flags) {
                 return r;
 
         /* Child */
+
+        /* Let's block SIGTERM here, to grant the operation more time on e.g. final killing spree
+         * during shutdown. If this gets stalled pid1 would eventually send SIGKILL to us. */
+        BLOCK_SIGNALS(SIGTERM);
 
         r = rm_rf(p, flags);
         if (r < 0) {

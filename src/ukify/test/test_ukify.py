@@ -45,6 +45,13 @@ except ImportError as e:
 sys.path.append(os.path.dirname(__file__) + '/..')
 import ukify
 
+# Skip if we're running on an architecture that does not use UEFI.
+try:
+    ukify.guess_efi_arch()
+except ValueError as e:
+    print(str(e), file=sys.stderr)
+    sys.exit(77)
+
 build_root = os.getenv('PROJECT_BUILD_ROOT')
 try:
     slow_tests = bool(int(os.getenv('SYSTEMD_SLOW_TESTS', '1')))
@@ -131,7 +138,7 @@ def test_apply_config(tmp_path):
 
     assert ns._groups == ['NAME']
     assert ns.pcr_private_keys == ['some/path7']
-    assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
+    assert ns.pcr_public_keys == ['some/path8']
     assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
 
     ukify.finalize_options(ns)
@@ -149,12 +156,12 @@ def test_apply_config(tmp_path):
     assert ns.pcr_banks == ['sha512', 'sha1']
     assert ns.signing_engine == 'engine1'
     assert ns.sb_key == 'some/path5'
-    assert ns.sb_cert == 'some/path6'
+    assert ns.sb_cert == pathlib.Path('some/path6')
     assert ns.sign_kernel is False
 
     assert ns._groups == ['NAME']
     assert ns.pcr_private_keys == ['some/path7']
-    assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
+    assert ns.pcr_public_keys == ['some/path8']
     assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
 
 def test_parse_args_minimal():
@@ -200,11 +207,11 @@ def test_parse_args_many_deprecated():
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
     assert opts.pcr_private_keys == ['PKEY1']
-    assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
+    assert opts.pcr_public_keys == ['PKEY2']
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
     assert opts.sb_key == 'SBKEY'
-    assert opts.sb_cert == 'SBCERT'
+    assert opts.sb_cert == pathlib.Path('SBCERT')
     assert opts.sign_kernel is False
     assert opts.tools == [pathlib.Path('TOOLZ/')]
     assert opts.output == pathlib.Path('OUTPUT')
@@ -246,11 +253,11 @@ def test_parse_args_many():
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
     assert opts.pcr_private_keys == ['PKEY1']
-    assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
+    assert opts.pcr_public_keys == ['PKEY2']
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
     assert opts.sb_key == 'SBKEY'
-    assert opts.sb_cert == 'SBCERT'
+    assert opts.sb_cert == pathlib.Path('SBCERT')
     assert opts.sign_kernel is False
     assert opts.tools == [pathlib.Path('TOOLZ/')]
     assert opts.output == pathlib.Path('OUTPUT')
@@ -353,13 +360,12 @@ def test_config_priority(tmp_path):
     assert opts.uname == '1.2.3'
     assert opts.stub == pathlib.Path('STUBPATH')
     assert opts.pcr_private_keys == ['PKEY1', 'some/path7']
-    assert opts.pcr_public_keys == [pathlib.Path('PKEY2'),
-                                    pathlib.Path('some/path8')]
+    assert opts.pcr_public_keys == ['PKEY2', 'some/path8']
     assert opts.pcr_banks == ['SHA1', 'SHA256']
     assert opts.signing_engine == 'ENGINE'
     assert opts.signtool == 'sbsign' # from args
     assert opts.sb_key == 'SBKEY' # from args
-    assert opts.sb_cert == 'SBCERT' # from args
+    assert opts.sb_cert == pathlib.Path('SBCERT') # from args
     assert opts.sb_certdir == 'some/path5' # from config
     assert opts.sb_cert_name == 'some/name1' # from config
     assert opts.sign_kernel is False
@@ -403,7 +409,7 @@ def kernel_initrd():
     if not items:
         return None
 
-    # This doesn't necessarilly give us the latest version, since we're just
+    # This doesn't necessarily give us the latest version, since we're just
     # using alphanumeric ordering. But this is fine, a predictable result is
     # enough.
     linux = items[-1]
@@ -616,7 +622,7 @@ def test_efi_signing_pesign(kernel_initrd, tmp_path):
 
     ukify.make_uki(opts)
 
-    # let's check that sbverify likes the resulting file
+    # let's check that pesign likes the resulting file
     dump = subprocess.check_output([
         'pesign', '-S',
         '-i', output,
@@ -683,7 +689,9 @@ def test_inspect(kernel_initrd, tmp_path, capsys):
 def test_pcr_signing(kernel_initrd, tmp_path):
     if kernel_initrd is None:
         pytest.skip('linux+initrd not found')
-    if systemd_measure() is None:
+    try:
+        systemd_measure()
+    except ValueError:
         pytest.skip('systemd-measure not found')
 
     ourdir = pathlib.Path(__file__).parent
@@ -750,7 +758,9 @@ def test_pcr_signing(kernel_initrd, tmp_path):
 def test_pcr_signing2(kernel_initrd, tmp_path):
     if kernel_initrd is None:
         pytest.skip('linux+initrd not found')
-    if systemd_measure() is None:
+    try:
+        systemd_measure()
+    except ValueError:
         pytest.skip('systemd-measure not found')
 
     ourdir = pathlib.Path(__file__).parent

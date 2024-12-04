@@ -71,6 +71,8 @@
       <varname>Cmdline=</varname>/<option>--cmdline=</option>,
       <varname>OSRelease=</varname>/<option>--os-release=</option>,
       <varname>DeviceTree=</varname>/<option>--devicetree=</option>,
+      <varname>DeviceTreeAuto=</varname>/<option>--devicetree-auto=</option>,
+      <varname>HWIDs=</varname>/<option>--hwids=</option>,
       <varname>Splash=</varname>/<option>--splash=</option>,
       <varname>PCRPKey=</varname>/<option>--pcrpkey=</option>,
       <varname>Uname=</varname>/<option>--uname=</option>,
@@ -100,10 +102,12 @@
       the n-th boot phase path set will be signed by the n-th key. This can be used to build different trust
       policies for different phases of the boot. In the config file, <varname>PCRPrivateKey=</varname>,
       <varname>PCRPublicKey=</varname>, and <varname>Phases=</varname> are grouped into separate sections,
-      describing separate boot phases. If <varname>SigningEngine=</varname>/<option>--signing-engine=</option>
-      is specified, then the private keys arguments will be passed verbatim to OpenSSL as URIs, and the public
-      key arguments will be loaded as X.509 certificates, so that signing can be performed with an OpenSSL
-      engine.</para>
+      describing separate boot phases. If one of
+      <varname>SigningEngine=</varname>/<option>--signing-engine=</option> or
+      <varname>SigningProvider=</varname>/<option>--signing-provider=</option> is specified, then the private
+      key arguments will be passed verbatim to OpenSSL as URIs, and the public key arguments will be loaded
+      as X.509 certificates, so that signing can be performed with an OpenSSL engine or provider
+      respectively.</para>
 
       <para>If a SecureBoot signing key is provided via the
       <varname>SecureBootPrivateKey=</varname>/<option>--secureboot-private-key=</option> option, the resulting
@@ -218,7 +222,8 @@
           <para>For the <command>inspect</command> verb, the second syntax is used.
           The section <replaceable>NAME</replaceable> will be inspected (if found).
           If the second argument is <literal>text</literal>, the contents will be printed.
-          If the third argument is given, the contents will be saved to file <replaceable>PATH</replaceable>.
+          If the third argument is given, the contents will be saved to the file named
+          <replaceable>PATH</replaceable>.
           </para>
 
           <para>Note that the name is used as-is, and if the section name should start with a dot, it must be
@@ -226,6 +231,19 @@
 
           <xi:include href="version-info.xml" xpointer="v253"/>
           </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><option>--join-profile=<replaceable>PATH</replaceable></option></term>
+
+          <listitem><para>Takes a path to an existing PE file containing an additional profile to add to the
+          unified kernel image. The profile can be generated beforehand with <command>ukify</command>. The
+          profile does not need to be signed or contain PCR measurements. All UKI PE sections of the
+          specified PE file are copied into the generated UKI. This is useful for generating multi-profile
+          UKIs. Note that this only copies PE sections that are defined by the UKI specification, and ignores
+          any other, for example <literal>.text</literal> or similar.</para>
+
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -293,6 +311,29 @@
         </varlistentry>
 
         <varlistentry>
+          <term><varname>OSRelease=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
+          <term><option>--os-release=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
+
+          <listitem><para>The os-release description (the <literal>.osrel</literal> section). The argument
+          may be a literal string, or <literal>@</literal> followed by a path name. If not specified, the
+          <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry> file
+          will be picked up from the host system.</para>
+
+          <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>Cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
+          <term><option>--cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
+
+          <listitem><para>The kernel command line (the <literal>.cmdline</literal> section). The argument may
+          be a literal string, or <literal>@</literal> followed by a path name. If not specified, no command
+          line will be embedded.</para>
+
+          <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><varname>Initrd=<replaceable>INITRD</replaceable>...</varname></term>
           <term><option>--initrd=<replaceable>LINUX</replaceable></option></term>
 
@@ -314,24 +355,12 @@
         </varlistentry>
 
         <varlistentry>
-          <term><varname>Cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
-          <term><option>--cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
+          <term><varname>Splash=<replaceable>PATH</replaceable></varname></term>
+          <term><option>--splash=<replaceable>PATH</replaceable></option></term>
 
-          <listitem><para>The kernel command line (the <literal>.cmdline</literal> section). The argument may
-          be a literal string, or <literal>@</literal> followed by a path name. If not specified, no command
-          line will be embedded.</para>
-
-          <xi:include href="version-info.xml" xpointer="v253"/></listitem>
-        </varlistentry>
-
-        <varlistentry>
-          <term><varname>OSRelease=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
-          <term><option>--os-release=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
-
-          <listitem><para>The os-release description (the <literal>.osrel</literal> section). The argument
-          may be a literal string, or <literal>@</literal> followed by a path name. If not specified, the
-          <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry> file
-          will be picked up from the host system.</para>
+          <listitem><para>A picture to display during boot (the <literal>.splash</literal> section). The
+          argument is a path to a BMP file. If not specified, the section will not be present.
+          </para>
 
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
         </varlistentry>
@@ -348,14 +377,62 @@
         </varlistentry>
 
         <varlistentry>
-          <term><varname>Splash=<replaceable>PATH</replaceable></varname></term>
-          <term><option>--splash=<replaceable>PATH</replaceable></option></term>
+          <term><varname>DeviceTreeAuto=<replaceable>PATH</replaceable>...</varname></term>
+          <term><option>--devicetree-auto=<replaceable>PATH</replaceable></option></term>
 
-          <listitem><para>A picture to display during boot (the <literal>.splash</literal> section). The
-          argument is a path to a BMP file. If not specified, the section will not be present.
+          <listitem><para>Zero or more automatically selectable DeviceTree files. In the configuration file, items are separated by
+          whitespace. Each DeviceTree will be in a separate <literal>.dtbauto</literal> section.</para>
+
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>HWIDs=<replaceable>PATH</replaceable></varname></term>
+          <term><option>--hwids=<replaceable>PATH</replaceable></option></term>
+
+          <listitem><para>The hardware ID device table (the <literal>.hwids</literal> section). The argument is a
+          path to a directory with JSON HWID device description files. Each file needs to contain a single JSON object with a <literal>name</literal>, <literal>compatible</literal> and <literal>hwids</literal> keys. The <literal>name</literal> and <literal>compatible</literal> keys must have string values and the <literal>hwids</literal> key must have a list of strings as value, where the strings must be valid UUIDs that represent CHIDs/HWIDs.
+          Example:
+          <programlisting><xi:include href="ukify_hwid.json.example" parse="text" /></programlisting>
+          Here <literal>Example Laptop 16 Gen 7</literal> is the device <literal>name</literal> (as defined by the manufacturer),
+          <literal>example,laptop-16-g7</literal> is the <literal>compatible</literal> (as defined by the kernel) and <literal>hwids</literal>
+          is an array of CHIDs/HWIDs (extracted i.e. from <command>fwupdtool hwids</command> output).
+          If not specified, the section will not be present. It is recommended to specify this parameter if automatically
+          selectable DeviceTrees are to be used.
+
           </para>
 
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>Uname=<replaceable>VERSION</replaceable></varname></term>
+          <term><option>--uname=<replaceable>VERSION</replaceable></option></term>
+
+          <listitem><para>Specify the kernel version (as in <command>uname -r</command>, the
+          <literal>.uname</literal> section). If not specified, an attempt will be made to extract the
+          version string from the kernel image. It is recommended to pass this explicitly if known, because
+          the extraction is based on heuristics and not very reliable. If not specified and extraction fails,
+          the section will not be present.</para>
+
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>SBAT=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
+          <term><option>--sbat=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
+
+          <listitem><para>SBAT metadata associated with the UKI or addon. SBAT policies are useful to revoke
+          whole groups of UKIs or addons with a single, static policy update that does not take space in
+          DBX/MOKX. If not specified manually, a default metadata entry consisting of
+          <programlisting>uki,1,UKI,uki,1,https://uapi-group.org/specifications/specs/unified_kernel_image/</programlisting>
+          for UKIs and
+          <programlisting>uki-addon,1,UKI Addon,addon,1,https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html</programlisting>
+          for addons will be used, to ensure it is always possible to revoke them. For more information on
+          SBAT see <ulink url="https://github.com/rhboot/shim/blob/main/SBAT.md">Shim documentation</ulink>.
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -371,16 +448,14 @@
         </varlistentry>
 
         <varlistentry>
-          <term><varname>Uname=<replaceable>VERSION</replaceable></varname></term>
-          <term><option>--uname=<replaceable>VERSION</replaceable></option></term>
+          <term><varname>Profile=<replaceable>PATH</replaceable></varname></term>
+          <term><option>--profile=<replaceable>PATH</replaceable></option></term>
 
-          <listitem><para>Specify the kernel version (as in <command>uname -r</command>, the
-          <literal>.uname</literal> section). If not specified, an attempt will be made to extract the
-          version string from the kernel image. It is recommended to pass this explicitly if known, because
-          the extraction is based on heuristics and not very reliable. If not specified and extraction fails,
-          the section will not be present.</para>
+          <listitem><para>A path to a UKI profile to place in an <literal>.profile</literal> section. This
+          option is useful for creating multi-profile UKIs, and is typically used in combination with
+          <option>--extend=</option>, to extend the specified UKI with an additional profile.</para>
 
-          <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -399,9 +474,9 @@
           <term><varname>SecureBootSigningTool=<replaceable>SIGNER</replaceable></varname></term>
           <term><option>--signtool=<replaceable>SIGNER</replaceable></option></term>
 
-          <listitem><para>Whether to use <literal>sbsign</literal> or <literal>pesign</literal>.
-          Depending on this choice, different parameters are required in order to sign an image.
-          Defaults to <literal>sbsign</literal>.</para>
+          <listitem><para>Whether to use <literal>sbsign</literal>, <literal>pesign</literal>, or
+          <literal>systemd-sbsign</literal>. Depending on this choice, different parameters are required in
+          order to sign an image. Defaults to <literal>sbsign</literal>.</para>
 
           <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
@@ -411,8 +486,9 @@
           <term><option>--secureboot-private-key=<replaceable>SB_KEY</replaceable></option></term>
 
           <listitem><para>A path to a private key to use for signing of the resulting binary. If the
-          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> option is used, this may also be
-          an engine-specific designation. This option is required by
+          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> or
+          <varname>SigningProvider=</varname>/<option>--signing-provider=</option> option is used, this may
+          also be an engine or provider specific designation. This option is required by
           <varname>SecureBootSigningTool=sbsign</varname>/<option>--signtool=sbsign</option>. </para>
 
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
@@ -423,8 +499,9 @@
           <term><option>--secureboot-certificate=<replaceable>SB_CERT</replaceable></option></term>
 
           <listitem><para>A path to a certificate to use for signing of the resulting binary. If the
-          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> option is used, this may also
-          be an engine-specific designation. This option is required by
+          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> or
+          <varname>SigningProvider=</varname>/<option>--signing-provider=</option> option is used, this may
+          also be an engine or provider specific designation. This option is required by
           <varname>SecureBootSigningTool=sbsign</varname>/<option>--signtool=sbsign</option>. </para>
 
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
@@ -465,12 +542,32 @@
           <term><varname>SigningEngine=<replaceable>ENGINE</replaceable></varname></term>
           <term><option>--signing-engine=<replaceable>ENGINE</replaceable></option></term>
 
-          <listitem><para>An "engine" for signing of the resulting binary. This option is currently passed
-          verbatim to the <option>--engine=</option> option of
-          <citerefentry project='archlinux'><refentrytitle>sbsign</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
+          <listitem><para>An OpenSSL engine to be used for signing the resulting binary and PCR measurements.
           </para>
 
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>SigningProvider=<replaceable>PROVIDER</replaceable></varname></term>
+          <term><option>--signing-provider=<replaceable>PROVIDER</replaceable></option></term>
+
+          <listitem><para>An OpenSSL provider to be used for signing the resulting binary and PCR
+          measurements. This option can only be used when using <command>systemd-sbsign</command> as the
+          signing tool.</para>
+
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>CertificateProvider=<replaceable>PROVIDER</replaceable></varname></term>
+          <term><option>--certificate-provider=<replaceable>PROVIDER</replaceable></option></term>
+
+          <listitem><para>An OpenSSL provider to be used for loading the certificate used to sign the
+          resulting binary and PCR measurements. This option can only be used when using
+          <command>systemd-sbsign</command> as the signing tool.</para>
+
+          <xi:include href="version-info.xml" xpointer="v257"/></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -487,23 +584,6 @@
           been signed, the signature will be appended anyway.</para>
 
           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
-        </varlistentry>
-
-        <varlistentry>
-          <term><varname>SBAT=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
-          <term><option>--sbat=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
-
-          <listitem><para>SBAT metadata associated with the UKI or addon. SBAT policies are useful to revoke
-          whole groups of UKIs or addons with a single, static policy update that does not take space in
-          DBX/MOKX. If not specified manually, a default metadata entry consisting of
-          <literal>uki,1,UKI,uki,1,https://uapi-group.org/specifications/specs/unified_kernel_image/</literal>
-          for UKIs and
-          <literal>uki-addon,1,UKI Addon,addon,1,https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html</literal>
-          for addons will be used, to ensure it is always possible to revoke them. For more information on
-          SBAT see <ulink url="https://github.com/rhboot/shim/blob/main/SBAT.md">Shim documentation</ulink>.
-          </para>
-
-          <xi:include href="version-info.xml" xpointer="v254"/></listitem>
         </varlistentry>
       </variablelist>
     </refsect2>
@@ -569,7 +649,7 @@
       --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
       --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
       --cmdline='quiet rw'
-      </programlisting>
+</programlisting>
 
       <para>This creates an unsigned UKI <filename>./vmlinuz.unsigned.efi</filename>.</para>
     </example>
@@ -583,11 +663,11 @@
       --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
       --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
       uki.author.myimage,1,UKI for System,uki.author.myimage,1,https://uapi-group.org/specifications/specs/unified_kernel_image/' \
-      --pcr-private-key=pcr-private-initrd-key.pem \
-      --pcr-public-key=pcr-public-initrd-key.pem \
+      --pcr-private-key=tpm2-pcr-private-key-initrd.pem \
+      --pcr-public-key=tpm2-pcr-public-key-initrd.pem \
       --phases='enter-initrd' \
-      --pcr-private-key=pcr-private-system-key.pem \
-      --pcr-public-key=pcr-public-system-key.pem \
+      --pcr-private-key=tpm2-pcr-private-key-system.pem \
+      --pcr-public-key=tpm2-pcr-public-key-system.pem \
       --phases='enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit \
                 enter-initrd:leave-initrd:sysinit:ready' \
       --pcr-banks=sha384,sha512 \
@@ -595,16 +675,16 @@
       --secureboot-certificate=sb.cert \
       --sign-kernel \
       --cmdline='quiet rw rhgb'
-      </programlisting>
+</programlisting>
 
       <para>This creates a signed UKI <filename index='false'>./vmlinuz.signed.efi</filename>.
       The initrd section contains two concatenated parts, <filename index='false'>early_cpio</filename>
       and <filename index='false'>initramfs-6.0.9-300.fc37.x86_64.img</filename>.
       The policy embedded in the <literal>.pcrsig</literal> section will be signed for the initrd (the
       <constant>enter-initrd</constant> phase) with the key
-      <filename index='false'>pcr-private-initrd-key.pem</filename>, and for the main system (phases
+      <filename index='false'>tpm2-pcr-private-key-initrd.pem</filename>, and for the main system (phases
       <constant>leave-initrd</constant>, <constant>sysinit</constant>, <constant>ready</constant>) with the
-      key <filename index='false'>pcr-private-system-key.pem</filename>. The Linux binary and the resulting
+      key <filename index='false'>tpm2-pcr-private-key-system.pem</filename>. The Linux binary and the resulting
       combined image will be signed with the SecureBoot key <filename index='false'>sb.key</filename>.</para>
     </example>
 
@@ -619,19 +699,19 @@
 Initrd=early_cpio
 Cmdline=quiet rw rhgb
 
-SecureBootPrivateKey=sb.key
-SecureBootCertificate=sb.cert
+SecureBootPrivateKey=secure-boot-key.pem
+SecureBootCertificate=secure-boot-certificate.pem
 SignKernel=yes
 PCRBanks=sha384,sha512
 
 [PCRSignature:initrd]
-PCRPrivateKey=pcr-private-initrd-key.pem
-PCRPublicKey=pcr-public-initrd-key.pem
+PCRPrivateKey=tpm2-pcr-private-key-initrd.pem
+PCRPublicKey=tpm2-pcr-public-key-initrd.pem
 Phases=enter-initrd
 
 [PCRSignature:system]
-PCRPrivateKey=pcr-private-system-key.pem
-PCRPublicKey=pcr-public-system-key.pem
+PCRPrivateKey=tpm2-pcr-private-key-system.pem
+PCRPublicKey=tpm2-pcr-public-key-system.pem
 Phases=enter-initrd:leave-initrd
        enter-initrd:leave-initrd:sysinit
        enter-initrd:leave-initrd:sysinit:ready
@@ -639,7 +719,7 @@ Phases=enter-initrd:leave-initrd
 $ ukify -c ukify.conf build \
         --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
         --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img
-      </programlisting>
+</programlisting>
 
       <para>One "initrd" (<filename index='false'>early_cpio</filename>) is specified in the config file, and
       the other initrd (<filename index='false'>initramfs-6.0.9-300.fc37.x86_64.img</filename>) is specified
@@ -651,13 +731,13 @@ $ ukify -c ukify.conf build \
       <title>Kernel command line PE addon</title>
 
       <programlisting>ukify build \
-      --secureboot-private-key=sb.key \
-      --secureboot-certificate=sb.cert \
+      --secureboot-private-key=secure-boot-key.pem \
+      --secureboot-certificate=secure-boot-certificate.pem \
       --cmdline='debug' \
       --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
       uki-addon.author,1,UKI Addon for System,uki-addon.author,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html'
       --output=debug.addon.efi
-      </programlisting>
+</programlisting>
 
       <para>This creates a signed PE binary that contains the additional kernel command line parameter
       <literal>debug</literal> with SBAT metadata referring to the owner of the addon.</para>
@@ -673,12 +753,12 @@ $ ukify -c ukify.conf build \
 
       <para>Next, we can generate the certificate and keys:</para>
       <programlisting># ukify genkey --config=/etc/kernel/uki.conf
-Writing SecureBoot private key to /etc/kernel/secure-boot.key.pem
-Writing SecureBoot certificate to /etc/kernel/secure-boot.cert.pem
-Writing private key for PCR signing to /etc/kernel/pcr-initrd.key.pem
-Writing public key for PCR signing to /etc/kernel/pcr-initrd.pub.pem
-Writing private key for PCR signing to /etc/kernel/pcr-system.key.pem
-Writing public key for PCR signing to /etc/kernel/pcr-system.pub.pem
+Writing SecureBoot private key to /etc/kernel/secure-boot-key.pem
+Writing SecureBoot certificate to /etc/kernel/secure-boot-certificate.pem
+Writing private key for PCR signing to /etc/systemd/tpm2-pcr-private-key-initrd.pem
+Writing public key for PCR signing to /etc/systemd/tpm2-pcr-public-key-initrd.pem
+Writing private key for PCR signing to /etc/systemd/tpm2-pcr-private-key-system.pem
+Writing public key for PCR signing to /etc/systemd/tpm2-pcr-public-key-system.pem
 </programlisting>
 
       <para>(Both operations need to be done as root to allow write access
@@ -692,6 +772,50 @@ Writing public key for PCR signing to /etc/kernel/pcr-system.pub.pem
       by default, so after this file has been created, installations of kernels that create a UKI on the
       local machine using <command>kernel-install</command> will perform signing using this config.</para>
     </example>
+
+    <example>
+      <title>Multi-Profile UKI</title>
+
+      <para>First, create a few profiles:</para>
+
+      <programlisting>$ ukify build \
+      --profile='TITLE=Base' \
+      --output=profile0.efi
+</programlisting>
+
+      <para>Add a second profile (@1):</para>
+
+      <programlisting>$ ukify build \
+      --profile='TITLE=Boot into Storage Target Mode
+ID=storagetm' \
+      --cmdline='quiet rw rd.systemd.unit=stroage-target-mode.target' \
+      --output=profile1.efi
+</programlisting>
+
+      <para>Add a third profile (@2):</para>
+
+      <programlisting>$ ukify build \
+      --profile='TITLE=Factory Reset
+ID=factory-reset' \
+      --cmdline='quiet rw systemd.unit=factory-reset.target' \
+      --output=profile2.efi
+</programlisting>
+
+      <para>Then, create a UKI and include all the generated profiles:</para>
+
+      <programlisting>$ ukify build \
+      --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
+      --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
+      --cmdline='quiet rw' \
+      --join-profile=profile0.efi \
+      --join-profile=profile1.efi \
+      --join-profile=profile2.efi \
+      --output=base.efi
+</programlisting>
+
+      <para>The resulting UKI <filename>base-with-profile-0-1-2.efi</filename> will now contain three profiles.</para>
+    </example>
+
   </refsect1>
 
   <refsect1>
