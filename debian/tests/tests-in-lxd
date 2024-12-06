@@ -9,19 +9,7 @@ lxd init --auto
 
 IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
 
-# work around LP: #1878225 as fallback
-autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
-    patch /usr/bin/autopkgtest-build-lxd <<'EOF'
-@@ -70,6 +70,8 @@
- 
-     sleep 5
-     if "$COMMAND" exec "$CONTAINER" -- systemctl mask serial-getty@getty.service; then
-+       "$COMMAND" exec "$CONTAINER" -- systemctl mask snapd.service
-+       "$COMMAND" exec "$CONTAINER" -- systemctl mask snapd.seeded.service
-        "$COMMAND" exec "$CONTAINER" -- reboot
-     fi
- 
-EOF
+autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs)
 
 # help debugging if building lxd image still fails
 lxc image list | grep -q autopkgtest/ || autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
