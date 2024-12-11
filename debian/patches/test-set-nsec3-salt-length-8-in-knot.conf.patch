@@ -1,0 +1,28 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Tue, 10 Dec 2024 16:48:59 -0500
+Subject: test: set nsec3-salt-length=8 in knot.conf
+
+Origin: upstream, https://github.com/systemd/systemd/commit/59e5108fb4e61957cb40bb15ac7966d085d13af2
+
+TEST-75-RESOLVED fails on Ubuntu autopkgtest due to this warning from
+knot:
+
+ notice: config, policy 'auto_rollover_nsec3' depends on default nsec3-salt-length=8, since version 3.5 the default becomes 0
+
+Explicitly set nsec3-salt-length=8 to silence.
+---
+ test/knot-data/knot.conf | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/knot-data/knot.conf b/test/knot-data/knot.conf
+index b8b9e79..6d177d7 100644
+--- a/test/knot-data/knot.conf
++++ b/test/knot-data/knot.conf
+@@ -60,6 +60,7 @@ policy:
+       ksk-submission: parent_zone_sbm
+       nsec3-iterations: 0
+       nsec3: on
++      nsec3-salt-length: 8
+       propagation-delay: 1s
+       signing-threads: 4
+       zone-max-ttl: 1s
