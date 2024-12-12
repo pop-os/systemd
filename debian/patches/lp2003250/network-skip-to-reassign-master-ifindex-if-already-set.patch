@@ -1,0 +1,65 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 28 Oct 2022 06:40:07 +0900
+Subject: network: skip to reassign master ifindex if already set
+
+Origin: upstream, https://github.com/systemd/systemd/commit/9f913d37a0
+Bug-Ubuntu: https://launchpad.net/bugs/2003250
+
+Otherwise, the slave interface may go down, especially when the master
+is bond.
+
+Fixes #25067.
+
+This patch is modified to apply to v249. In particular, the message
+counter is decremented, and link_check_ready() is called before
+returning. This ensures that the link is not left in the "configuring"
+state indefinitely.
+---
+ src/network/networkd-setlink.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/src/network/networkd-setlink.c b/src/network/networkd-setlink.c
+index 13c4ced..27cd461 100644
+--- a/src/network/networkd-setlink.c
++++ b/src/network/networkd-setlink.c
+@@ -499,7 +499,7 @@ static bool netdev_is_ready(NetDev *netdev) {
+         return true;
+ }
+ 
+-static bool link_is_ready_to_call_set_link(Request *req) {
++static int link_is_ready_to_call_set_link(Request *req) {
+         SetLinkOperation op;
+         Link *link;
+         int r;
+@@ -577,6 +577,14 @@ static bool link_is_ready_to_call_set_link(Request *req) {
+                         m = link->network->vrf->ifindex;
+                 }
+ 
++                if (m == (uint32_t) link->master_ifindex) {
++                        /* The requested master is already set. */
++                        link->master_set = true;
++                        link->set_link_messages--;
++                        link_check_ready(link);
++                        return -EALREADY; /* indicate to cancel the request. */
++                }
++
+                 req->userdata = UINT32_TO_PTR(m);
+                 break;
+         }
+@@ -597,11 +605,13 @@ int request_process_set_link(Request *req) {
+         assert(req->netlink_handler);
+ 
+         op = PTR_TO_INT(req->set_link_operation_ptr);
+-
+         assert(op >= 0 && op < _SET_LINK_OPERATION_MAX);
+ 
+-        if (!link_is_ready_to_call_set_link(req))
+-                return 0;
++        r = link_is_ready_to_call_set_link(req);
++        if (r == -EALREADY)
++                return 1; /* Cancel the request. */
++        if (r <= 0)
++                return r;
+ 
+         r = link_configure(req->link, op, req->userdata, req->netlink_handler);
+         if (r < 0)
