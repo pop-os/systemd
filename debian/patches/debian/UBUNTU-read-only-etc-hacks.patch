@@ -7,7 +7,8 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1981042
 Bug-Ubuntu: https://bugs.launchpad.net/snappy/+bug/1953172
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 Bug-Ubuntu: https://bugs.launchpad.net/snappy/+bug/1650688
-Last-Update: 2023-04-27
+Bug-Ubuntu: https://launchpad.net/bugs/2091657
+Last-Update: 2025-02-20
 ---
  src/basic/meson.build     |  1 +
  src/basic/ro-etc-hack.c   | 27 +++++++++++++++++++++++++++
@@ -16,8 +17,10 @@ Last-Update: 2023-04-27
  src/core/manager.c        |  5 +++--
  src/firstboot/firstboot.c |  7 ++++---
  src/hostname/hostnamed.c  | 15 ++++++++-------
+ src/locale/localed-util.c | 11 ++++++-----
+ src/shared/locale-setup.c | 11 ++++++-----
  src/timedate/timedated.c  | 11 ++++++-----
- 8 files changed, 57 insertions(+), 18 deletions(-)
+ 10 files changed, 69 insertions(+), 28 deletions(-)
  create mode 100644 src/basic/ro-etc-hack.c
  create mode 100644 src/basic/ro-etc-hack.h
 
@@ -241,6 +244,116 @@ index fc7a97f..064a8d1 100644
          if (r < 0)
                  return r;
  
+diff --git a/src/locale/localed-util.c b/src/locale/localed-util.c
+index e4e57a0..54d3161 100644
+--- a/src/locale/localed-util.c
++++ b/src/locale/localed-util.c
+@@ -20,6 +20,7 @@
+ #include "mkdir-label.h"
+ #include "nulstr-util.h"
+ #include "process-util.h"
++#include "ro-etc-hack.h"
+ #include "stat-util.h"
+ #include "string-util.h"
+ #include "strv.h"
+@@ -350,7 +351,7 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
+                 c->vc_cache = sd_bus_message_ref(m);
+         }
+ 
+-        fd = RET_NERRNO(open("/etc/vconsole.conf", O_CLOEXEC | O_PATH));
++        fd = RET_NERRNO(open(writable_filename("/etc/vconsole.conf"), O_CLOEXEC | O_PATH));
+         if (fd == -ENOENT) {
+                 c->vc_stat = (struct stat) {};
+                 vc_context_clear(&c->vc);
+@@ -372,7 +373,7 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
+         x11_context_clear(&c->x11_from_vc);
+ 
+         r = parse_env_file_fd(
+-                        fd, "/etc/vconsole.conf",
++                        fd, writable_filename("/etc/vconsole.conf"),
+                         "KEYMAP",        &c->vc.keymap,
+                         "KEYMAP_TOGGLE", &c->vc.toggle,
+                         "XKBLAYOUT",     &c->x11_from_vc.layout,
+@@ -496,7 +497,7 @@ int vconsole_write_data(Context *c) {
+ 
+         xc = context_get_x11_context(c);
+ 
+-        r = load_env_file(NULL, "/etc/vconsole.conf", &l);
++        r = load_env_file(NULL, writable_filename("/etc/vconsole.conf"), &l);
+         if (r < 0 && r != -ENOENT)
+                 return r;
+ 
+@@ -525,7 +526,7 @@ int vconsole_write_data(Context *c) {
+                 return r;
+ 
+         if (strv_isempty(l)) {
+-                if (unlink("/etc/vconsole.conf") < 0)
++                if (unlink(writable_filename("/etc/vconsole.conf")) < 0)
+                         return errno == ENOENT ? 0 : -errno;
+ 
+                 c->vc_stat = (struct stat) {};
+@@ -536,7 +537,7 @@ int vconsole_write_data(Context *c) {
+         if (r < 0)
+                 return r;
+ 
+-        if (stat("/etc/vconsole.conf", &c->vc_stat) < 0)
++        if (stat(writable_filename("/etc/vconsole.conf"), &c->vc_stat) < 0)
+                 return -errno;
+ 
+         return 0;
+diff --git a/src/shared/locale-setup.c b/src/shared/locale-setup.c
+index 4e7f486..10e8d28 100644
+--- a/src/shared/locale-setup.c
++++ b/src/shared/locale-setup.c
+@@ -10,6 +10,7 @@
+ #include "fd-util.h"
+ #include "locale-setup.h"
+ #include "proc-cmdline.h"
++#include "ro-etc-hack.h"
+ #include "stat-util.h"
+ #include "strv.h"
+ 
+@@ -64,7 +65,7 @@ static int locale_context_load_conf(LocaleContext *c, LocaleLoadFlag flag) {
+         if (!FLAGS_SET(flag, LOCALE_LOAD_LOCALE_CONF))
+                 return 0;
+ 
+-        fd = RET_NERRNO(open("/etc/locale.conf", O_CLOEXEC | O_PATH));
++        fd = RET_NERRNO(open(writable_filename("/etc/locale.conf"), O_CLOEXEC | O_PATH));
+         if (fd == -ENOENT)
+                 return 0;
+         if (fd < 0)
+@@ -80,7 +81,7 @@ static int locale_context_load_conf(LocaleContext *c, LocaleLoadFlag flag) {
+         c->st = st;
+         locale_context_clear(c);
+ 
+-        r = parse_env_file_fd(fd, "/etc/locale.conf",
++        r = parse_env_file_fd(fd, writable_filename("/etc/locale.conf"),
+                               "LANG",              &c->locale[VARIABLE_LANG],
+                               "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
+                               "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
+@@ -196,7 +197,7 @@ int locale_context_save(LocaleContext *c, char ***ret_set, char ***ret_unset) {
+                 return r;
+ 
+         if (strv_isempty(set)) {
+-                if (unlink("/etc/locale.conf") < 0)
++                if (unlink(writable_filename("/etc/locale.conf")) < 0)
+                         return errno == ENOENT ? 0 : -errno;
+ 
+                 c->st = (struct stat) {};
+@@ -208,11 +209,11 @@ int locale_context_save(LocaleContext *c, char ***ret_set, char ***ret_unset) {
+                 return 0;
+         }
+ 
+-        r = write_env_file_label(AT_FDCWD, "/etc/locale.conf", NULL, set);
++        r = write_env_file_label(AT_FDCWD, writable_filename("/etc/locale.conf"), NULL, set);
+         if (r < 0)
+                 return r;
+ 
+-        if (stat("/etc/locale.conf", &c->st) < 0)
++        if (stat(writable_filename("/etc/locale.conf"), &c->st) < 0)
+                 return -errno;
+ 
+         if (ret_set)
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
 index c7be30f..f896bd5 100644
 --- a/src/timedate/timedated.c
