@@ -1,0 +1,57 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 2 Feb 2024 11:10:45 +0900
+Subject: network: do not bring down a bonding port interface when it is
+ already joined
+
+Origin: upstream, https://github.com/systemd/systemd/commit/c3e12de0a6
+Bug-Ubuntu: https://launchpad.net/bugs/2003250
+
+Follow-up for 9f913d37a01f71e559d099bff280827f8817d8c5.
+
+Fixes #31165.
+
+This patch has been modified to apply to v249.
+---
+ src/network/networkd-setlink.c | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/src/network/networkd-setlink.c b/src/network/networkd-setlink.c
+index 27cd461..cd775b6 100644
+--- a/src/network/networkd-setlink.c
++++ b/src/network/networkd-setlink.c
+@@ -556,17 +556,6 @@ static int link_is_ready_to_call_set_link(Request *req) {
+                         if (!netdev_is_ready(link->network->bond))
+                                 return false;
+                         m = link->network->bond->ifindex;
+-
+-                        /* Do not check link->set_flgas_messages here, as it is ok even if link->flags
+-                         * is outdated, and checking the counter causes a deadlock. */
+-                        if (FLAGS_SET(link->flags, IFF_UP)) {
+-                                /* link must be down when joining to bond master. */
+-                                r = link_down(link);
+-                                if (r < 0) {
+-                                        link_enter_failed(link);
+-                                        return false;
+-                                }
+-                        }
+                 } else if (link->network->bridge) {
+                         if (!netdev_is_ready(link->network->bridge))
+                                 return false;
+@@ -585,6 +574,17 @@ static int link_is_ready_to_call_set_link(Request *req) {
+                         return -EALREADY; /* indicate to cancel the request. */
+                 }
+ 
++                /* Do not check link->set_flags_messages here, as it is ok even if link->flags is outdated,
++                 * and checking the counter causes a deadlock. */
++                if (link->network->bond && FLAGS_SET(link->flags, IFF_UP)) {
++                        /* link must be down when joining to bond master. */
++                        r = link_down(link);
++                        if (r < 0) {
++                                link_enter_failed(link);
++                                return false;
++                        }
++                }
++
+                 req->userdata = UINT32_TO_PTR(m);
+                 break;
+         }

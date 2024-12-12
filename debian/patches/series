@@ -128,3 +128,4 @@ lp2037281-core-device-ignore-DEVICE_FOUND_UDEV-bit-on-switching-roo.patch
 lp2037667-fix-GRE6-and-VTI6-on-newer-kernels.patch
 lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
 lp2003250/network-skip-to-reassign-master-ifindex-if-already-set.patch
+lp2003250/network-do-not-bring-down-a-bonding-port-interface-when-i.patch
