@@ -1,3 +1,45 @@
+systemd (257-2ubuntu1) plucky; urgency=medium
+
+  * Merge with Debian unstable. Remaining changes:
+    - debian/tests/tests-in-lxd: run some autopkgtests in LXD too
+    - debian/tests/boot-and-services:
+      + skip apparmor tests on armhf
+      + consume stderr in systemctl status call in test_service
+      + drop test_no_failed
+    - debian/systemd.postinst:
+      + skip daemon-reexec and try-restarts during shutdown
+      + manually call systemd-tmpfiles --create in postinst
+      + Do not create /etc/tmpfiles.d/tmp.conf on upgrades
+    - debian/systemd-resolved.postinst: copy existing /etc/resolv.conf to
+      /run/systemd/resolve/stub-resolv.conf
+    - debian/gbp.conf,debian/extra/wrap_cl.py:
+      Use a customization script to add LP commit links to changelog
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Make systemd-cryptsetup Priority: important
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Add Breaks: systemd (<< ${binary:Version}) to udev package so that
+        systemd is upgraded as well when upgrading udev
+      + Make systemd-sysv Depends: on matching version of systemd
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Build-Depends: linux-tools-generic
+      + Do not build systemd-boot-efi-{amd64,arm64}-signed-template
+    - switch-root: use MS_MOVE for /run when switchig from initrd
+    - test: skip TEST-69-SHUTDOWN on ubuntu too (LP #2083704)
+    - Delta for i386:
+      + debian/systemd.install: exclude files that are not built for i386
+      + debian/systemd.manpages: do not ship un-built manpages on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with tpm libraries on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with libqrencode on i386
+      + debian/rules: Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - d/t/control: tests-in-lxd Depends: dnsmasq-base
+    - d/t/tests-in-lxd: drop patching workaround
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 12 Dec 2024 10:00:12 -0500
+
 systemd (257-2) unstable; urgency=medium
 
   [ Aurelien Jarno ]
