@@ -1,0 +1,23 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 16 Dec 2024 15:19:33 -0500
+Subject: networkd-test: skip test_resolved_domain_restricted_dns
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/jammy/+source/systemd/+bug/2009859
+Forwarded: no
+
+---
+ test/networkd-test.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index 6062207..6c76dde 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -616,6 +616,7 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
+         with open(self.dnsmasq_log) as f:
+             sys.stdout.write('\n\n---- dnsmasq log ----\n{}\n------\n\n'.format(f.read()))
+ 
++    @unittest.skip('LP: #2009859')
+     def test_resolved_domain_restricted_dns(self):
+         '''resolved: domain-restricted DNS servers'''
+ 
