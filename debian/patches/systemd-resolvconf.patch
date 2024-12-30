@@ -14,7 +14,7 @@ Index: systemd/debian/control
 +
 +Package: systemd-resolvconf
 +Section: admin
-+Architecture: amd64 arm64 i386
++Architecture: amd64 arm64 i386 armhf
 +Priority: optional
 +Depends: ${shlibs:Depends},
 +         ${misc:Depends},
