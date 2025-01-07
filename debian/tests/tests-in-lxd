@@ -1,8 +1,32 @@
 #!/bin/sh
 
 # run some autopkgtest tests in lxd
+set -eux
 
-set -eu
+RELEASE=$(
+    . /etc/os-release;
+    if [ "$ID" = "ubuntu" ]; then
+        echo "$VERSION_CODENAME"
+    elif [ "$ID" = "debian" ]; then
+        if [ -n "${VERSION_ID:-}" ] && [ -n "${VERSION_CODENAME:-}" ]; then
+            echo "$VERSION_CODENAME"
+        else
+            debian_version="$(cat /etc/debian_version)"
+            if [ "${debian_version#*/}" = sid ]; then
+                if [ ! -f /etc/apt/preferences.d/autopkgtest-unstable.pref ] && ( [ "$VERSION_CODENAME" = sid ] || grep -q -r sid /etc/apt/sources.list* || grep -q -r unstable /etc/apt/sources.list* ); then
+                    echo "sid"
+                else
+                    echo "$VERSION_CODENAME"
+                fi
+            fi
+        fi
+    fi
+)
+
+DISTRO=$(
+    . /etc/os-release;
+    echo "$ID"
+)
 
 snap install lxd
 lxd init --auto
@@ -11,26 +35,43 @@ lxd init --auto
 # https://github.com/canonical/lxd/issues/13631
 lxc profile set default security.nesting true
 
-IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
+IMAGE="autopkgtest/${DISTRO}/${RELEASE}/$(dpkg --print-architecture)"
+
+if [ "$DISTRO" = "ubuntu" ]; then
+    IMAGE_SERVER="ubuntu-daily"
+    IMAGE_ID="${RELEASE}"
+else
+    IMAGE_SERVER="images"
+    IMAGE_ID="${DISTRO}/${RELEASE}"
+fi
 
 # work around LP: #1878225 as fallback
-autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs)
+autopkgtest-build-lxd "${IMAGE_SERVER}:${IMAGE_ID}"
 
 # help debugging if building lxd image still fails
-lxc image list | grep -q autopkgtest/ || autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
-    (lxc launch ubuntu-daily:$(lsb_release -cs) systemd-lxc
+lxc image list | grep -q autopkgtest/ || autopkgtest-build-lxd "${IMAGE_SERVER}:${IMAGE_ID}" || \
+    (lxc launch "${IMAGE_SERVER}:${IMAGE_ID}" systemd-lxc
      sleep 60
      lxc exec systemd-lxc systemctl is-system-running || (lxc exec systemd-lxc -- systemctl list-units --failed ; lxc exec systemd-lxc systemctl list-jobs ; lxc exec systemd-lxc -- journalctl -a)
      exit 1)
 
 # push local apt configuration to match pinning
-lxc launch $IMAGE systemd-lxc
+lxc launch "$IMAGE" systemd-lxc
 
 lxc file push -r /etc/apt systemd-lxc/etc/
-lxc exec systemd-lxc -- sed -i 's|/tmp/autopkgtest.[^/]*/|/root/|' /etc/apt/sources.list.d/autopkgtest.list || true
+if [ -f /etc/apt/sources.list.d/autopkgtest.list ]; then
+    lxc exec systemd-lxc -- sed -i 's|/tmp/autopkgtest.[^/]*/|/root/|' /etc/apt/sources.list.d/autopkgtest.list || true
+fi
+# auto-apt-proxy cannot be installed until after apt-get update, but apt-get update
+# cannot be ran successfully until auto-apt-proxy is installed
+lxc exec systemd-lxc -- rm -f /etc/apt/apt.conf.d/auto-apt-proxy.conf
 
-if [ -d /tmp/autopkgtest.*/build.*/src ]; then
+if [ -d "${AUTOPKGTEST_TMP:-}/../tree" ]; then
+    cd "${AUTOPKGTEST_TMP:-}/../tree"
+elif [ -d /tmp/autopkgtest.*/build.*/src ]; then
     cd /tmp/autopkgtest.*/build.*/src
+elif [ -d /tmp/autopkgtest.*/build.*/systemd ]; then
+    cd /tmp/autopkgtest.*/build.*/systemd
 else
     cd /tmp/autopkgtest.*/build.*/real-tree
 fi
@@ -41,7 +82,7 @@ if [ -d ../../binaries ]; then
 fi
 
 lxc stop systemd-lxc
-lxc publish systemd-lxc --reuse --alias $IMAGE
+lxc publish systemd-lxc --reuse --alias "$IMAGE"
 
 # Only test unprivileged LXD containers, since privileged LXD containers cause LoadCredential= (LP: #1950787),
 # and other things to break. According to upstream LXD, we should not worry to much about privileged LXD
@@ -49,6 +90,4 @@ lxc publish systemd-lxc --reuse --alias $IMAGE
 #
 # We would like to have a simple boot smoke test for privileged LXD containers still, but cannot do
 # so until LP: #1998943 is fixed in autopkgtest.
-for t in unit-tests boot-and-services; do
-    autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
-done
+autopkgtest -U -B . --test-name=unit-tests --test-name=boot-and-services -- lxd "$IMAGE"

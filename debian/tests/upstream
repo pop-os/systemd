@@ -50,6 +50,9 @@ DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com 2606:4700:4700::1111#c
 EOF
 systemctl try-reload-or-restart systemd-resolved.service
 
+# We need to have a dependency the packages but no need to run them
+systemctl disable --now systemd-homed.service systemd-userdbd.service systemd-userdbd.socket
+
 workdir="$(mktemp --directory --tmpdir=/var/tmp integration-tests.XXXXXXXXXX)"
 trap cleanup EXIT
 
@@ -99,21 +102,40 @@ fi
 tee mkosi.local.conf <<EOF
 [Output]
 Format=disk
+
+[Build]
 WorkspaceDirectory=$workdir
 PackageCacheDirectory=$workdir/cache
+SandboxTrees=${apt_dir}:/etc/apt/
+ToolsTree=
+Environment=NO_BUILD=1 NO_SYNC=1 ARTIFACT_DIRECTORY="$AUTOPKGTEST_ARTIFACTS" TEST_SAVE_JOURNAL=fail TEST_SHOW_JOURNAL=warning
+Incremental=no
 
 [Distribution]
-PackageManagerTrees=${apt_dir}:/etc/apt/
 ${RELEASE:+"Release=${RELEASE}"}
 
 [Content]
-Environment=NO_BUILD=1 NO_SYNC=1 ARTIFACT_DIRECTORY="$AUTOPKGTEST_ARTIFACTS" TEST_SAVE_JOURNAL=fail TEST_SHOW_JOURNAL=warning
 ${local_binaries:+"PackageDirectories=${local_binaries}"}
 
 [Host]
 RuntimeBuildSources=no
-Incremental=no
 EOF
+
+# mkosi registers a pid with machined before it is assigned to a scope, so machined
+# associates it with the user session, and kills it later when the machine is shut down,
+# disable registration to avoid it. This is a workaround for versions older than 25, where
+# MachinedRegister=no does the same.
+if systemd-analyze compare-versions "$(git -C "$mkosi_tree" describe | tr -d 'v')" lt 25; then
+    sed -i "/  register_machine(/d" "$mkosi_tree/mkosi/qemu.py"
+else
+    tee -a mkosi.local.conf <<EOF
+[Runtime]
+Register=no
+EOF
+fi
+
+# kernel 6.12 broke mounting btrfs filesystems from loop devices, so switch to ext4
+sed -i "s/Format=btrfs/Format=ext4/" mkosi.repart/10-root.conf
 
 # Everything is already built and installed, but these dependencies will cause rebuilds which we want to
 # avoid, so patch them out
@@ -147,4 +169,4 @@ meson setup "${workdir}/btrfs/build" -Dintegration-tests=true -Dtests=true
 mkosi --debug genkey
 cp mkosi.key mkosi.crt "${workdir}/btrfs/build"
 meson compile -C "${workdir}/btrfs/build" mkosi
-meson test -C "${workdir}/btrfs/build" -v  --no-rebuild --suite integration-tests --print-errorlogs --no-stdsplit
+meson test -C "${workdir}/btrfs/build" --no-rebuild --suite integration-tests --print-errorlogs --no-stdsplit --num-processes "$(($(nproc) - 1))"

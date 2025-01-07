@@ -1,3 +1,78 @@
+systemd (257.1-7) unstable; urgency=medium
+
+  * Add missing d/copyright file to signed template packages
+  * d/t/tests-in-lxd: more fixes for debci compatibility
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 04 Jan 2025 01:55:59 +0000
+
+systemd (257.1-6) unstable; urgency=medium
+
+  * d/t/tests-in-lxd: drop auto-apt-proxy.conf from container
+  * Drop build dependency on libxen-dev on armhf, no longer available
+    (Closes: #1091545)
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 03 Jan 2025 11:39:41 +0000
+
+systemd (257.1-5) unstable; urgency=medium
+
+  * d/t/tests-in-lxd: install auto-apt-proxy in the nested container.
+  * d/t/upstream: do not use --verbose with 'meson test'
+  * d/t/upstream: do not mask machined and instead use mkosi workaround
+  * d/t/upstream: switch from btrfs to ext4 and use nspawn again. Kernel
+    6.12 broke mounting btrfs volumes from loop devices, switch to ext4 as
+    a workaround and use nspawn again, as it's faster
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 26 Dec 2024 18:59:19 +0000
+
+systemd (257.1-4) unstable; urgency=medium
+
+  * d/t/upstream: decrease parallelism to nproc - 1
+  * d/t/upstream: do not use nspawn for tests
+  * d/t/upstream: disable homed/userdbd in the test runner
+  * d/t/upstream: mask systemd-machined
+  * Backport patch to workaround issue in new mdadm
+
+ -- Luca Boccassi <bluca@debian.org>  Sun, 22 Dec 2024 13:57:12 +0000
+
+systemd (257.1-3) unstable; urgency=medium
+
+  * autopkgtest: mark tests-in-lxd as flaky
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 21 Dec 2024 01:19:14 +0000
+
+systemd (257.1-2) unstable; urgency=medium
+
+  * Various fixes for d/t/tests-in-lxd
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 20 Dec 2024 15:27:15 +0000
+
+systemd (257.1-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * test: fix flaky boot-and-services test.
+  * d/t/upstream: fix mkosi syntax warnings
+  * systemd-ukify: recommend python3-cryptography. One of the verbs uses
+    it, so add a recommend to pull it in by default (Closes: #1090759)
+  * d/watch: restrict to v257.x series
+  * Update upstream source from tag 'upstream/257.1' (Closes: #1087616)
+  * Drop patches, merged upstream
+  * Install systemd-creds bash completion
+
+  [ Nick Rosbrook ]
+  * d/t/tests-in-lxd: run some tests under LXD
+  * debian/tests/boot-and-services: drop test_no_failed
+  * debian/control: add Breaks: systemd (<< ${binary:Version}) for udev.
+    This ensures that systemd is also upgraded whenever udev is upgraded.
+  * d/control: make systemd-sysv Depends: on matching version of systemd
+  * d/systemd-resolved.postinst: copy existing /etc/resolv.conf on new
+    installs
+
+  [ Balint Reczey ]
+  * debian/systemd.postinst: Skip daemon-reexec and try-restarts during
+    shutdown. LP #1803391
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 19 Dec 2024 21:41:25 +0000
+
 systemd (257-2ubuntu1) plucky; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
