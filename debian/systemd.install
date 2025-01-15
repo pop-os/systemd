@@ -43,6 +43,7 @@ usr/bin/systemd-machine-id-setup
 usr/bin/systemd-mount
 usr/bin/systemd-notify
 usr/bin/systemd-path
+<pkg.systemd.upstream> usr/bin/systemd-pty-forward
 usr/bin/systemd-run
 usr/bin/systemd-socket-activate
 usr/bin/systemd-stdio-bridge
@@ -300,6 +301,7 @@ usr/lib/systemd/system/systemd-binfmt.service
 usr/lib/systemd/system/systemd-boot-check-no-failures.service
 [!i386] <!stage1> usr/lib/systemd/system/systemd-bsod.service
 usr/lib/systemd/system/systemd-confext.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-confext-initrd.service
 usr/lib/systemd/system/systemd-creds.socket
 usr/lib/systemd/system/systemd-creds@.service
 usr/lib/systemd/system/systemd-exit.service
@@ -369,6 +371,7 @@ usr/lib/systemd/system/systemd-suspend-then-hibernate.service
 usr/lib/systemd/system/systemd-sysctl.service
 usr/lib/systemd/system/systemd-sysext.service
 usr/lib/systemd/system/systemd-sysext@.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-sysext-initrd.service
 usr/lib/systemd/system/systemd-sysext.socket
 usr/lib/systemd/system/systemd-sysusers.service
 usr/lib/systemd/system/systemd-timedated.service
