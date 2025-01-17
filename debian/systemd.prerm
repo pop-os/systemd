@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+# Between 22.04 and 24.04, systemd-resolved was split into it's own package.
+# On upgrades from 22.04, update the systemd-resolved.service deb-systemd-helper
+# state. LP: #2078555
+if [ "$1" = "upgrade" ] && dpkg --compare-versions "$2" ge 255.4-1ubuntu8; then
+        deb-systemd-helper update-state 'systemd-resolved.service' >/dev/null || true
+fi
