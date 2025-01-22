@@ -1,3 +1,10 @@
+systemd (249.11-0ubuntu3.15) jammy; urgency=medium
+
+  * d/systemd.prerm: call d-s-h update-state for resolved on upgrades
+    (LP: #2078555)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 22 Jan 2025 14:50:32 -0500
+
 systemd (249.11-0ubuntu3.14) jammy; urgency=medium
 
   [ Ioanna Alifieraki ]
