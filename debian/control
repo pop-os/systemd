@@ -57,7 +57,7 @@ Build-Depends: debhelper-compat (= 13),
                libblkid-dev (>= 2.24),
                libmount-dev (>= 2.30),
                libfdisk-dev (>= 2.33),
-               libseccomp-dev (>= 2.3.1) [amd64 arm64 armel armhf i386 mips mipsel mips64 mips64el x32 powerpc ppc64 ppc64el riscv64 s390x],
+               libseccomp-dev (>= 2.3.1) [amd64 arm64 armel armhf i386 hppa loong64 mips mipsel mips64 mips64el x32 powerpc ppc64 ppc64el riscv64 s390x],
                libdw-dev (>= 0.158) <!stage1>,
                libpolkit-gobject-1-dev <!stage1>,
                libzstd-dev (>= 1.4.0),
@@ -75,8 +75,8 @@ Build-Depends: debhelper-compat (= 13),
                python3-jinja2:native,
                python3-lxml:native,
                python3-pefile:native <!stage1 !nocheck> <!stage1 !noinsttest>,
-               python3-pyelftools [amd64 i386 arm64 armhf riscv64] <!stage1>,
-               jq [amd64 arm64] <!stage1 !pkg.systemd.upstream>,
+               python3-pyelftools [amd64 i386 arm64 armhf loong64 riscv64] <!stage1>,
+               jq [amd64 arm64] <!stage1>,
                python3-pyparsing <!nocheck>,
                python3-evdev:native <!nocheck>,
                tzdata-legacy <!nocheck> | tzdata (<< 2024b-3) <!nocheck>,
@@ -353,6 +353,7 @@ Architecture: linux-any
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
+         libcap-dev,
          libsystemd0 (= ${binary:Version})
 Description: systemd utility library - development files
  This library provides APIs to interface with various system components such as
@@ -415,6 +416,7 @@ Architecture: linux-any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
+         libcap-dev,
          libudev1 (= ${binary:Version})
 Description: libudev development files
  This library provides APIs to introspect and enumerate devices on the local
@@ -422,32 +424,6 @@ Description: libudev development files
  .
  This package contains the files needed for developing applications that
  use libudev.
-
-Package: udev-udeb
-Build-Profiles: <!noudeb>
-Package-Type: udeb
-Section: debian-installer
-Architecture: linux-any
-Depends: ${shlibs:Depends},
-         ${misc:Depends},
-         util-linux-udeb
-Description: /dev/ and hotplug management daemon
- udev is a daemon which dynamically creates and removes device nodes from
- /dev/, handles hotplug events and loads drivers at boot time.
- .
- This is a minimal version, only for use in the installation system.
-
-Package: libudev1-udeb
-Build-Profiles: <!noudeb>
-Package-Type: udeb
-Section: debian-installer
-Architecture: linux-any
-Depends: ${shlibs:Depends},
-         ${misc:Depends}
-Description: libudev shared library
- This library provides access to udev device information.
- .
- This is a minimal version, only for use in the installation system.
 
 Package: systemd-standalone-sysusers
 Architecture: linux-any
@@ -541,7 +517,7 @@ Description: home area manager
 
 Package: systemd-boot
 Build-Profiles: <!stage1>
-Architecture: amd64 i386 arm64 armhf riscv64
+Architecture: amd64 i386 arm64 armhf loong64 riscv64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
@@ -565,7 +541,7 @@ Description: simple UEFI boot manager - tools and services
 
 Package: systemd-boot-efi
 Build-Profiles: <!stage1>
-Architecture: amd64 i386 arm64 armhf riscv64
+Architecture: amd64 i386 arm64 armhf loong64 riscv64
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends},
 Depends: ${misc:Depends},
