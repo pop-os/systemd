@@ -1,0 +1,30 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Wed, 23 Oct 2024 16:31:00 -0400
+Subject: test: cleanup after testcase_12_resolvectl2
+
+Origin: upstream, https://github.com/systemd/systemd/commit/266cfdfc77a0eee6d4df60d9795f381ced8a1e65
+
+---
+ test/units/TEST-75-RESOLVED.sh | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/test/units/TEST-75-RESOLVED.sh b/test/units/TEST-75-RESOLVED.sh
+index fd07fd8..25ab02a 100755
+--- a/test/units/TEST-75-RESOLVED.sh
++++ b/test/units/TEST-75-RESOLVED.sh
+@@ -936,6 +936,15 @@ testcase_11_nft() {
+ 
+ # Test resolvectl show-server-state
+ testcase_12_resolvectl2() {
++    # Cleanup
++    # shellcheck disable=SC2317
++    cleanup() {
++        rm -f /run/systemd/resolved.conf.d/reload.conf
++        systemctl reload systemd-resolved.service
++    }
++
++    trap cleanup RETURN
++
+     run resolvectl show-server-state
+     grep -qF "10.0.0.1" "$RUN_OUT"
+     grep -qF "Interface" "$RUN_OUT"
