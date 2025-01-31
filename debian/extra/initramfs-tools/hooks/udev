@@ -20,6 +20,12 @@ copy_exec /bin/udevadm    /bin
 mkdir -p "$DESTDIR/etc/udev"
 cp -p /etc/udev/udev.conf "$DESTDIR/etc/udev/"
 
+# copy hwdb.bin
+if [ -e /usr/lib/udev/hwdb.bin ]; then
+    mkdir -p "$DESTDIR/usr/lib/udev"
+    cp -p /usr/lib/udev/hwdb.bin "$DESTDIR/usr/lib/udev/hwdb.bin"
+fi
+
 # copy .link files containing interface naming definitions
 mkdir -p "$DESTDIR/lib/systemd/network/"
 find -L /lib/systemd/network -name '*.link' -execdir cp -pt "$DESTDIR/lib/systemd/network/" '{}' +
