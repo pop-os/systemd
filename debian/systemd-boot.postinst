@@ -119,7 +119,10 @@ install_shim() {
         echo "shim${efi_arch}.efi,${vendor},,This is the boot entry for ${vendor}" > "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV"
     fi
 
-    if command -v efibootmgr >/dev/null 2>&1 && ! efibootmgr | grep -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi"; then
+    # 730079007300740065006d0064002d0062006f006f007400 is 'systemd-boot' encoded in UTF-16-LE"
+    if ! command -v efibootmgr >/dev/null 2>&1; then
+        echo "efibootmgr not found, skipping boot entry creation"
+    elif ! efibootmgr | grep -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*systemd-boot${efi_arch}.efi\|Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*730079007300740065006d0064002d0062006f006f007400"; then
         blkpart="$(findmnt -nvo SOURCE "$esp_path")"
         if [ ! -L "/sys/class/block/${blkpart##*/}" ]; then
             return
@@ -128,7 +131,7 @@ install_shim() {
         drive="${drive%/*}"
         drive="/dev/${drive##*/}"
         partno="$(cat "/sys/class/block/${blkpart##*/}/partition")"
-        efibootmgr -q --create --disk "$drive" --part "$partno" --loader "EFI/${vendor}/shim${efi_arch}.efi" --label "${vendor_upper}" --unicode '\EFI\systemd\systemd-bootx64.efi \0'
+        efibootmgr -q --create --disk "$drive" --part "$partno" --loader "EFI/${vendor}/shim${efi_arch}.efi" --label "${vendor_upper}" --unicode "\EFI\systemd\systemd-boot${efi_arch}.efi \0"
     fi
 }
 

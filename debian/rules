@@ -180,10 +180,14 @@ endif
 ifeq (, $(filter $(DEB_BUILD_PROFILES), stage1 pkg.systemd.nobpf))
 ifneq (,$(filter $(DEB_TARGET_ARCH), amd64 arm64 ppc64el riscv64 s390x))
 CONFFLAGS += \
+	-Dvmlinux-h=provided \
 	-Dbpf-framework=enabled \
 	-Dbpf-compiler=clang
 
-ifeq ($(DEB_VENDOR),Ubuntu)
+ifneq ($(DEB_VENDOR),Ubuntu)
+CONFFLAGS += -Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h
+else
+CONFFLAGS += -Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/vmlinux.h
 # Source: https://git.launchpad.net/ubuntu/+source/xdp-tools/tree/debian/rules
 # On Ubuntu, the `bpftool` in path is a shell wrapper pointing at
 # the binary corresponding to runtime kernel version.
@@ -202,18 +206,6 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 bpftool_binary := $(shell find /usr/lib/linux-tools/ /usr/lib/linux-tools-* -name 'bpftool' -perm /u=x 2>/dev/null | sort -r | head -n1)
 ifneq ($(bpftool_binary),)
 export PATH := $(shell dirname $(bpftool_binary)):$(PATH)
-endif
-endif
-
-# TODO: once linux-bpf-dev is available in all releases that we build for, drop the
-# conditional on the wildcard and the alternative dependency on linux-headers-generic
-ifneq ("$(wildcard /usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h)","")
-CONFFLAGS += -Dvmlinux-h=provided -Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h
-else
-ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
-CONFFLAGS += -Dvmlinux-h=auto
-else
-CONFFLAGS += -Dvmlinux-h=disabled
 endif
 endif
 endif
