@@ -17,10 +17,10 @@ used for consistency.
  3 files changed, 18 insertions(+), 24 deletions(-)
 
 diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
-index 5e9e5bf..325ffdc 100644
+index 1c26dcb..b0c4b83 100644
 --- a/src/resolve/resolved-link-bus.c
 +++ b/src/resolve/resolved-link-bus.c
-@@ -24,6 +24,7 @@ static BUS_DEFINE_PROPERTY_GET(property_get_dnssec_supported, "b", Link, link_dn
+@@ -26,6 +26,7 @@ static BUS_DEFINE_PROPERTY_GET(property_get_dnssec_supported, "b", Link, link_dn
  static BUS_DEFINE_PROPERTY_GET2(property_get_dnssec_mode, "s", Link, link_get_dnssec_mode, dnssec_mode_to_string);
  static BUS_DEFINE_PROPERTY_GET2(property_get_llmnr_support, "s", Link, link_get_llmnr_support, resolve_support_to_string);
  static BUS_DEFINE_PROPERTY_GET2(property_get_mdns_support, "s", Link, link_get_mdns_support, resolve_support_to_string);
@@ -28,7 +28,7 @@ index 5e9e5bf..325ffdc 100644
  
  static int property_get_dns_over_tls_mode(
                  sd_bus *bus,
-@@ -160,30 +161,6 @@ static int property_get_domains(
+@@ -162,30 +163,6 @@ static int property_get_domains(
          return sd_bus_message_close_container(reply);
  }
  
@@ -60,7 +60,7 @@ index 5e9e5bf..325ffdc 100644
                  sd_bus *bus,
                  const char *path,
 diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
-index 19b8c76..df020fe 100644
+index 1c5ad08..df4b599 100644
 --- a/src/resolve/resolved-link.c
 +++ b/src/resolve/resolved-link.c
 @@ -14,6 +14,7 @@
@@ -71,7 +71,7 @@ index 19b8c76..df020fe 100644
  #include "resolved-link.h"
  #include "resolved-llmnr.h"
  #include "resolved-mdns.h"
-@@ -837,6 +838,20 @@ ResolveSupport link_get_mdns_support(Link *link) {
+@@ -834,6 +835,20 @@ ResolveSupport link_get_mdns_support(Link *link) {
          return MIN(link->mdns_support, link->manager->mdns_support);
  }
  

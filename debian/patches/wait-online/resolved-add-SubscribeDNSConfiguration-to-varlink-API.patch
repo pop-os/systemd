@@ -16,11 +16,11 @@ updated.
  src/resolve/resolved-dns-server.c               |  27 +++
  src/resolve/resolved-dns-server.h               |   1 +
  src/resolve/resolved-link-bus.c                 |   2 +
- src/resolve/resolved-manager.c                  | 222 ++++++++++++++++++++++++
+ src/resolve/resolved-manager.c                  | 223 ++++++++++++++++++++++++
  src/resolve/resolved-manager.h                  |  12 ++
  src/resolve/resolved-varlink.c                  |  54 +++++-
  src/shared/varlink-io.systemd.Resolve.Monitor.c |  56 +++++-
- 10 files changed, 406 insertions(+), 3 deletions(-)
+ 10 files changed, 407 insertions(+), 3 deletions(-)
 
 diff --git a/src/resolve/org.freedesktop.resolve1.policy b/src/resolve/org.freedesktop.resolve1.policy
 index b96c8c0..097e78e 100644
@@ -159,10 +159,10 @@ index 8915b87..0f066b1 100644
  int dns_server_is_accessible(DnsServer *s);
  static inline void dns_server_reset_accessible(DnsServer *s) {
 diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
-index 325ffdc..1ac72e3 100644
+index b0c4b83..77d2663 100644
 --- a/src/resolve/resolved-link-bus.c
 +++ b/src/resolve/resolved-link-bus.c
-@@ -270,6 +270,7 @@ static int bus_link_method_set_dns_servers_internal(sd_bus_message *message, voi
+@@ -272,6 +272,7 @@ static int bus_link_method_set_dns_servers_internal(sd_bus_message *message, voi
                  (void) link_save_user(l);
                  (void) manager_write_resolv_conf(l->manager);
                  (void) manager_send_changed(l->manager, "DNS");
@@ -170,16 +170,16 @@ index 325ffdc..1ac72e3 100644
  
                  if (j)
                          log_link_info(l, "Bus client set DNS server list to: %s", j);
-@@ -745,6 +746,7 @@ int bus_link_method_revert(sd_bus_message *message, void *userdata, sd_bus_error
+@@ -751,6 +752,7 @@ int bus_link_method_revert(sd_bus_message *message, void *userdata, sd_bus_error
          (void) link_save_user(l);
          (void) manager_write_resolv_conf(l->manager);
          (void) manager_send_changed(l->manager, "DNS");
 +        (void) manager_send_dns_configuration_changed(l->manager, l, /* reset= */ true);
  
-         return sd_bus_reply_method_return(message, NULL);
- }
+         manager_llmnr_maybe_stop(l->manager);
+         manager_mdns_maybe_stop(l->manager);
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 51faada..f8303c5 100644
+index 883bc09..e374978 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -22,6 +22,7 @@
@@ -190,10 +190,11 @@ index 51faada..f8303c5 100644
  #include "memstream-util.h"
  #include "missing_network.h"
  #include "missing_socket.h"
-@@ -105,6 +106,10 @@ static int manager_process_link(sd_netlink *rtnl, sd_netlink_message *mm, void *
-                 break;
-         }
- 
+@@ -108,6 +109,11 @@ static int manager_process_link(sd_netlink *rtnl, sd_netlink_message *mm, void *
+         /* Now check all the links, and if mDNS/llmr are disabled everywhere, stop them globally too. */
+         manager_llmnr_maybe_stop(m);
+         manager_mdns_maybe_stop(m);
++
 +        /* The accessible flag on link DNS servers will have been reset by
 +         * link_update(). Just reset the global DNS servers. */
 +        (void) manager_send_dns_configuration_changed(m, NULL, /* reset= */ true);
@@ -201,7 +202,7 @@ index 51faada..f8303c5 100644
          return 0;
  
  fail:
-@@ -189,6 +194,8 @@ static int manager_process_address(sd_netlink *rtnl, sd_netlink_message *mm, voi
+@@ -192,6 +198,8 @@ static int manager_process_address(sd_netlink *rtnl, sd_netlink_message *mm, voi
                  break;
          }
  
@@ -210,7 +211,7 @@ index 51faada..f8303c5 100644
          return 0;
  
  fail:
-@@ -196,6 +203,38 @@ fail:
+@@ -199,6 +207,38 @@ fail:
          return 0;
  }
  
@@ -249,15 +250,15 @@ index 51faada..f8303c5 100644
  static int manager_rtnl_listen(Manager *m) {
          _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL, *reply = NULL;
          int r;
-@@ -286,6 +325,7 @@ static int on_network_event(sd_event_source *s, int fd, uint32_t revents, void *
+@@ -289,6 +329,7 @@ static int on_network_event(sd_event_source *s, int fd, uint32_t revents, void *
  
          (void) manager_write_resolv_conf(m);
          (void) manager_send_changed(m, "DNS");
 +        (void) manager_send_dns_configuration_changed(m, NULL, /* reset= */ true);
  
-         return 0;
- }
-@@ -802,10 +842,14 @@ Manager *manager_free(Manager *m) {
+         /* Now check all the links, and if mDNS/llmr are disabled everywhere, stop them globally too. */
+         manager_llmnr_maybe_stop(m);
+@@ -808,10 +849,14 @@ Manager *manager_free(Manager *m) {
          sd_event_source_unref(m->network_event_source);
          sd_network_monitor_unref(m->network_monitor);
  
@@ -272,7 +273,7 @@ index 51faada..f8303c5 100644
          manager_llmnr_stop(m);
          manager_mdns_stop(m);
          manager_dns_stub_stop(m);
-@@ -1932,3 +1976,181 @@ void dns_manager_reset_statistics(Manager *m) {
+@@ -1938,3 +1983,181 @@ void dns_manager_reset_statistics(Manager *m) {
          m->n_failure_responses_served_stale_total = 0;
          zero(m->n_dnssec_verdict);
  }

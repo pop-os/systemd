@@ -9,7 +9,7 @@ Origin: upstream, https://github.com/systemd/systemd/commit/d6608da1e6a5993f3161
  1 file changed, 123 insertions(+), 1 deletion(-)
 
 diff --git a/test/test-network/systemd-networkd-tests.py b/test/test-network/systemd-networkd-tests.py
-index 000645c..f1ea284 100755
+index 4153cf1..30e7769 100755
 --- a/test/test-network/systemd-networkd-tests.py
 +++ b/test/test-network/systemd-networkd-tests.py
 @@ -1170,7 +1170,7 @@ class Utilities():
