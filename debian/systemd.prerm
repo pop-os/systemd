@@ -8,3 +8,5 @@ set -e
 if [ "$1" = "upgrade" ] && dpkg --compare-versions "$2" ge 255.4-1ubuntu8; then
         deb-systemd-helper update-state 'systemd-resolved.service' >/dev/null || true
 fi
+
+#DEBHELPER#
