@@ -1,3 +1,10 @@
+systemd (257.3-1ubuntu2) plucky; urgency=medium
+
+  * d/t/tests-in-lxd: skip test on any setup error
+  * d/rules: disable bpf support on riscv64 for now (LP: #2099864)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 24 Feb 2025 09:23:11 -0500
+
 systemd (257.3-1ubuntu1) plucky; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
