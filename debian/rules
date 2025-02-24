@@ -178,7 +178,7 @@ endif
 
 # BPF/BTF are only enabled and usable on a few architectures
 ifeq (, $(filter $(DEB_BUILD_PROFILES), stage1 pkg.systemd.nobpf))
-ifneq (,$(filter $(DEB_TARGET_ARCH), amd64 arm64 ppc64el riscv64 s390x))
+ifneq (,$(filter $(DEB_TARGET_ARCH), amd64 arm64 ppc64el s390x))
 CONFFLAGS += \
 	-Dvmlinux-h=provided \
 	-Dbpf-framework=enabled \
