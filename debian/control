@@ -134,6 +134,7 @@ Package: systemd-sysv
 Architecture: linux-any
 Multi-Arch: foreign
 Priority: important
+Protected: yes
 Conflicts: sysvinit-core,
            file-rc,
            systemd-shim,
@@ -584,6 +585,7 @@ Depends: ${shlibs:Depends},
          systemd (= ${binary:Version}),
          default-dbus-system-bus | dbus-system-bus
 Recommends: ${dlopen:Recommends},
+            libidn2-0,
 Suggests: polkitd,
           ${dlopen:Suggests},
 Provides: resolvconf

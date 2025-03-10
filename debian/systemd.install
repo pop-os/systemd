@@ -4,6 +4,7 @@ etc/credstore/
 etc/credstore.encrypted/
 etc/kernel/install.d/
 etc/profile.d/70-systemd-shell-extra.sh
+<pkg.systemd.upstream> etc/profile.d/80-systemd-osc-context.sh
 etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
 etc/systemd/journald.conf
 etc/systemd/logind.conf
@@ -82,6 +83,7 @@ usr/lib/systemd/network/80-wifi-ap.network.example
 usr/lib/systemd/network/80-wifi-station.network.example
 usr/lib/systemd/network/89-ethernet.network.example
 usr/lib/systemd/profile.d/70-systemd-shell-extra.sh
+<pkg.systemd.upstream> usr/lib/systemd/profile.d/80-systemd-osc-context.sh
 usr/lib/systemd/resolv.conf
 usr/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
 usr/lib/systemd/system/autovt@.service
@@ -110,6 +112,7 @@ usr/lib/systemd/system/default.target
 usr/lib/systemd/system/dev-hugepages.mount
 usr/lib/systemd/system/dev-mqueue.mount
 usr/lib/systemd/systemd-executor
+<pkg.systemd.upstream> usr/lib/systemd/systemd-factory-reset
 usr/lib/systemd/systemd-fsck
 <!pkg.systemd.upstream> usr/lib/systemd/systemd-fsckd
 usr/lib/systemd/systemd-growfs
@@ -142,6 +145,7 @@ usr/lib/systemd/systemd-sulogin-shell
 usr/lib/systemd/systemd-sysctl
 usr/lib/systemd/systemd-sysroot-fstab-check
 usr/lib/systemd/systemd-timedated
+[amd64 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/systemd-tpm2-clear
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/systemd-tpm2-setup
 usr/lib/systemd/systemd-update-done
 usr/lib/systemd/systemd-user-runtime-dir
@@ -152,9 +156,11 @@ usr/lib/systemd/system/emergency.service
 usr/lib/systemd/system/emergency.target
 usr/lib/systemd/system/exit.target
 usr/lib/systemd/system/factory-reset.target
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/system/factory-reset.target.wants/systemd-pcrphase-factory-reset.service
 usr/lib/systemd/system/final.target
 usr/lib/systemd/system/first-boot-complete.target
 usr/lib/systemd/system-generators/systemd-debug-generator
+<pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-factory-reset-generator
 usr/lib/systemd/system-generators/systemd-fstab-generator
 usr/lib/systemd/system-generators/systemd-getty-generator
 usr/lib/systemd/system-generators/systemd-gpt-auto-generator
@@ -169,6 +175,8 @@ usr/lib/systemd/system-generators/systemd-tpm2-generator
 <pkg.systemd.upstream> usr/lib/systemd/system/breakpoint-pre-mount.service
 <pkg.systemd.upstream> usr/lib/systemd/system/breakpoint-pre-switch-root.service
 <pkg.systemd.upstream> usr/lib/systemd/system/breakpoint-pre-udev.service
+<pkg.systemd.upstream> usr/lib/systemd/system/factory-reset-now.target
+<pkg.systemd.upstream> usr/lib/systemd/system/factory-reset.target.wants/systemd-factory-reset-request.service
 usr/lib/systemd/system/getty-pre.target
 usr/lib/systemd/system/getty@.service
 usr/lib/systemd/system/getty.target
@@ -176,6 +184,8 @@ usr/lib/systemd/system/graphical.target
 usr/lib/systemd/system/halt.target
 usr/lib/systemd/system/hibernate.target
 usr/lib/systemd/system/hybrid-sleep.target
+<pkg.systemd.upstream> usr/lib/systemd/system/imports-pre.target
+<pkg.systemd.upstream> usr/lib/systemd/system/imports.target
 usr/lib/systemd/system/initrd-cleanup.service
 usr/lib/systemd/system/initrd-fs.target
 usr/lib/systemd/system/initrd-parse-etc.service
@@ -239,6 +249,7 @@ usr/lib/systemd/system/smartcard.target
 usr/lib/systemd/system/sockets.target
 <pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-ask-password.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-creds.socket
+<pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-factory-reset.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-initctl.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-hostnamed.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket
@@ -250,6 +261,7 @@ usr/lib/systemd/system/soft-reboot.target
 usr/lib/systemd/system/sound.target
 usr/lib/systemd/system/ssh-access.target
 usr/lib/systemd/system/storage-target-mode.target
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/system/storage-target-mode.target.wants/systemd-pcrphase-storage-target-mode.service
 usr/lib/systemd/system/suspend.target
 usr/lib/systemd/system/suspend-then-hibernate.target
 usr/lib/systemd/system/swap.target
@@ -285,6 +297,7 @@ usr/lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup-early.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-tpm2-setup.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-update-done.service
+<pkg.systemd.upstream> usr/lib/systemd/system/sysinit.target.wants/imports.target
 usr/lib/systemd/system/sys-kernel-config.mount
 usr/lib/systemd/system/sys-kernel-debug.mount
 usr/lib/systemd/system/sys-kernel-tracing.mount
@@ -305,6 +318,11 @@ usr/lib/systemd/system/systemd-confext.service
 usr/lib/systemd/system/systemd-creds.socket
 usr/lib/systemd/system/systemd-creds@.service
 usr/lib/systemd/system/systemd-exit.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-factory-reset-complete.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-factory-reset-reboot.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-factory-reset-request.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-factory-reset.socket
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-factory-reset@.service
 usr/lib/systemd/system/systemd-firstboot.service
 <!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.service
 <!pkg.systemd.upstream> usr/lib/systemd/system/systemd-fsckd.socket
@@ -334,6 +352,7 @@ usr/lib/systemd/system/systemd-journal-flush.service
 usr/lib/systemd/system/systemd-kexec.service
 usr/lib/systemd/system/systemd-localed.service
 usr/lib/systemd/system/systemd-logind.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-loop@.service
 usr/lib/systemd/system/systemd-machine-id-commit.service
 usr/lib/systemd/system/systemd-modules-load.service
 usr/lib/systemd/system/systemd-networkd*.service
@@ -353,8 +372,10 @@ usr/lib/systemd/system/systemd-network-generator.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-secureboot-authority.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrlock-secureboot-policy.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrmachine.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/system/systemd-pcrphase-factory-reset.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-initrd.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/system/systemd-pcrphase-storage-target-mode.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-sysinit.service
 usr/lib/systemd/system/systemd-poweroff.service
 usr/lib/systemd/system/systemd-pstore.service
@@ -380,6 +401,7 @@ usr/lib/systemd/system/systemd-tmpfiles-clean.timer
 usr/lib/systemd/system/systemd-tmpfiles-setup-dev-early.service
 usr/lib/systemd/system/systemd-tmpfiles-setup-dev.service
 usr/lib/systemd/system/systemd-tmpfiles-setup.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> usr/lib/systemd/system/systemd-tpm2-clear.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-tpm2-setup-early.service
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-tpm2-setup.service
 usr/lib/systemd/system/systemd-update-done.service
@@ -433,6 +455,7 @@ usr/lib/systemd/user/xdg-desktop-autostart.target
 usr/lib/sysusers.d/basic.conf
 usr/lib/sysusers.d/systemd-journal.conf
 usr/lib/sysusers.d/systemd-network.conf
+<pkg.systemd.upstream> usr/lib/tmpfiles.d/20-systemd-osc-context.conf
 usr/lib/tmpfiles.d/20-systemd-shell-extra.conf
 usr/lib/tmpfiles.d/20-systemd-ssh-generator.conf
 usr/lib/tmpfiles.d/20-systemd-stub.conf

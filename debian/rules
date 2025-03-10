@@ -114,6 +114,7 @@ CONFFLAGS = \
 	-Dstatus-unit-format-default=combined \
 	-Dstandalone-binaries=true \
 	-Dutmp=false \
+	-Dtty-mode=0600 \
 	-Dmode=$(if $(filter pkg.systemd.upstream,$(DEB_BUILD_PROFILES)),developer,release)
 
 ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
@@ -236,6 +237,7 @@ execute_before_dh_auto_build:
 	@echo 'blhc: ignore-line-regexp: .* -o test-bus-vtable-cc.*'
 	@echo 'blhc: ignore-line-regexp: .*cc -E.*'
 	@echo 'blhc: ignore-line-regexp: .* -o src/boot/.*'
+	@echo 'blhc: ignore-line-regexp: .* Compiling C object fuzz.*'
 
 execute_before_dh_auto_clean:
 ifneq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
