@@ -1,3 +1,9 @@
+systemd (255.4-1ubuntu8.6pop0) noble; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 20 Mar 2025 10:08:28 -0600
+
 systemd (255.4-1ubuntu8.6) noble; urgency=medium
 
   * stub: add magic cmdline option to force EFI handover
@@ -1986,7 +1992,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
