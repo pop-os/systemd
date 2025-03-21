@@ -1,3 +1,18 @@
+systemd (257.4-1ubuntu2) plucky; urgency=medium
+
+  [ Frank Heimes ]
+  * Fix d/extra/initramfs-tools/hooks/udev, so that udev rules that are
+    specific to s390x ccw devices are only prevented from being copied if
+    zdev_early=0 is set, but copy rules in case of zdev_early=1 or if
+    zdev_early is not specified at all. (LP: #2102236)
+
+  [ Nick Rosbrook ]
+  * d/extra/polkit-1: let root ignore inhibitors on reboot etc (LP: #2092438)
+  * d/control: remove Build-Depends: linux-tools-generic.
+    The src:linux package now ships a bpftool binary package.
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 21 Mar 2025 17:48:15 -0400
+
 systemd (257.4-1ubuntu1) plucky; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
