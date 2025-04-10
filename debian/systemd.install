@@ -524,6 +524,7 @@ usr/share/polkit-1/actions/org.freedesktop.network1.policy
 usr/share/polkit-1/actions/org.freedesktop.systemd1.policy
 usr/share/polkit-1/actions/org.freedesktop.timedate1.policy
 usr/share/polkit-1/actions/org.freedesktop.timesync1.policy
+<pkg.systemd.upstream> usr/share/polkit-1/rules.d/10-systemd-logind-root-ignore-inhibitors.rules.example
 usr/share/polkit-1/rules.d/systemd-networkd.rules
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
