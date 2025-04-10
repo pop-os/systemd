@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.15pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 10 Apr 2025 10:01:40 -0600
+
 systemd (249.11-0ubuntu3.15) jammy; urgency=medium
 
   * d/systemd.prerm: call d-s-h update-state for resolved on upgrades
