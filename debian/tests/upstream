@@ -169,7 +169,11 @@ export NO_SYNC=1
 mkosi --debug genkey
 mkosi summary
 meson setup "${workdir}/btrfs/build" -Dintegration-tests=true -Dtests=true
-cp mkosi.key mkosi.crt "${workdir}/btrfs/build"
+if [ -f mkosi/mkosi.key ]; then
+    cp mkosi/mkosi.key mkosi/mkosi.crt "${workdir}/btrfs/build"
+else
+    cp mkosi.key mkosi.crt "${workdir}/btrfs/build"
+fi
 ln -sf "${workdir}/btrfs/build" build
 mkosi -f
 meson test -C "${workdir}/btrfs/build" --no-rebuild --suite integration-tests --print-errorlogs --no-stdsplit --num-processes "$(($(nproc) - 1))"
