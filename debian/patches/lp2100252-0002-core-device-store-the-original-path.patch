@@ -1,0 +1,83 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat Apr 30 02:35:16 2022 +0900
+Subject: core/device: store the original path
+
+The unit name may be hashed. Hence, we cannot obtain the original path
+from the unit name.
+
+The path will be used in the later commits.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2100252
+Origin: upstream, https://github.com/systemd/systemd/commit/367a2597c35140fb325e2f94235961257130dfe1
+
+--- systemd-249.11.orig/src/core/device.c
++++ systemd-249.11/src/core/device.c
+@@ -116,6 +116,7 @@ static void device_done(Unit *u) {
+ 
+         device_unset_sysfs(d);
+         d->wants_property = strv_free(d->wants_property);
++        d->path = mfree(d->path);
+ }
+ 
+ static int device_load(Unit *u) {
+@@ -296,6 +297,9 @@ static int device_serialize(Unit *u, FIL
+         assert(f);
+         assert(fds);
+ 
++        if (d->path)
++                (void) serialize_item(f, "path", d->path);
++
+         (void) serialize_item(f, "state", device_state_to_string(d->state));
+ 
+         if (device_found_to_string_many(d->found, &s) >= 0)
+@@ -313,7 +317,14 @@ static int device_deserialize_item(Unit
+         assert(value);
+         assert(fds);
+ 
+-        if (streq(key, "state")) {
++        if (streq(key, "path")) {
++                if (!d->path) {
++                        d->path = strdup(value);
++                        if (!d->path)
++                                log_oom_debug();
++                }
++
++        } else if (streq(key, "state")) {
+                 DeviceState state;
+ 
+                 state = device_state_from_string(value);
+@@ -343,9 +354,11 @@ static void device_dump(Unit *u, FILE *f
+ 
+         fprintf(f,
+                 "%sDevice State: %s\n"
++                "%sDevice Path: %s\n"
+                 "%sSysfs Path: %s\n"
+                 "%sFound: %s\n",
+                 prefix, device_state_to_string(d->state),
++                prefix, strna(d->path),
+                 prefix, strna(d->sysfs),
+                 prefix, strna(s));
+ 
+@@ -604,6 +617,12 @@ static int device_setup_unit(Manager *m,
+                 unit_add_to_load_queue(u);
+         }
+ 
++        if (!DEVICE(u)->path) {
++                DEVICE(u)->path = strdup(path);
++                if (!DEVICE(u)->path)
++                        return log_oom();
++        }
++
+         /* If this was created via some dependency and has not actually been seen yet ->sysfs will not be
+          * initialized. Hence initialize it if necessary. */
+         if (sysfs) {
+--- systemd-249.11.orig/src/core/device.h
++++ systemd-249.11/src/core/device.h
+@@ -21,6 +21,7 @@ struct Device {
+         Unit meta;
+ 
+         char *sysfs;
++        char *path; /* syspath, device node, alias, or devlink */
+ 
+         /* In order to be able to distinguish dependencies on different device nodes we might end up creating multiple
+          * devices for the same sysfs path. We chain them up here. */

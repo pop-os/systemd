@@ -133,3 +133,6 @@ networkd-test-skip-test_resolved_domain_restricted_dns.patch
 CVE_2025_4598_1.patch
 CVE_2025_4598_2.patch
 CVE_2025_4598_3.patch
+lp2100252-0001-sd-device-introduce-sd_device_new_from_devname.patch
+lp2100252-0002-core-device-store-the-original-path.patch
+lp2100252-0003-core-device-always-accept-syspath-change.patch

@@ -1,0 +1,68 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun Mar 27 23:38:36 2022 +0900
+Subject: sd-device: introduce sd_device_new_from_devname()
+
+and sd_device_new_from_path() which takes devname or syspath.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2100252
+Origin: backport, https://github.com/systemd/systemd/commit/e418f9658b9e9803945de5686d5ab0d42eb2dfb6
+[chengen - remove unused sd_device_new_from_path function / move sd_device_new_from_devname to device-private.h 
+to avoid adding symbols to libsystemd / replace ERRNO_IS_DEVICE_ABSENT due to the absence of commit #3f2ada89f3a2.]
+
+--- systemd-249.11.orig/src/libsystemd/sd-device/device-private.c
++++ systemd-249.11/src/libsystemd/sd-device/device-private.c
+@@ -20,6 +20,7 @@
+ #include "parse-util.h"
+ #include "path-util.h"
+ #include "set.h"
++#include "stat-util.h"
+ #include "stdio-util.h"
+ #include "string-table.h"
+ #include "string-util.h"
+@@ -849,6 +850,36 @@ int device_new_from_synthetic_event(sd_d
+         return 0;
+ }
+ 
++int device_new_from_devname(sd_device **ret, const char *devname) {
++        struct stat st;
++
++        assert_return(ret, -EINVAL);
++        assert_return(devname, -EINVAL);
++
++        /* This function actually accepts both devlinks and devnames, i.e. both symlinks and device
++         * nodes below /dev/. */
++
++        /* Also ignore when the specified path is "/dev". */
++        if (isempty(path_startswith(devname, "/dev")))
++                return -EINVAL;
++
++        if (device_path_parse_major_minor(devname, NULL, NULL) >= 0) {
++                _cleanup_free_ char *syspath = NULL;
++
++                /* Let's shortcut when "/dev/block/maj:min" or "/dev/char/maj:min" is specified.
++                 * In that case, we directly convert the path to syspath, hence it is not necessary
++                 * that the specified path exists. So, this works fine without udevd being running. */
++
++                syspath = path_join("/sys", devname);
++                return sd_device_new_from_syspath(ret, syspath);
++        }
++
++        if (stat(devname, &st) < 0)
++                return IN_SET(errno, ENODEV, ENXIO, ENOENT) ? -ENODEV : -errno;
++
++        return sd_device_new_from_stat_rdev(ret, &st);
++}
++
+ int device_copy_properties(sd_device *device_dst, sd_device *device_src) {
+         const char *property, *value;
+         int r;
+--- systemd-249.11.orig/src/libsystemd/sd-device/device-private.h
++++ systemd-249.11/src/libsystemd/sd-device/device-private.h
+@@ -16,6 +16,7 @@ int device_new_from_watch_handle_at(sd_d
+ static inline int device_new_from_watch_handle(sd_device **ret, int wd) {
+         return device_new_from_watch_handle_at(ret, -1, wd);
+ }
++int device_new_from_devname(sd_device **ret, const char *devname);
+ 
+ int device_get_property_int(sd_device *device, const char *key, int *ret);
+ int device_get_device_id(sd_device *device, const char **ret);
