@@ -42,3 +42,4 @@ lp2098183/0007-json-util-generalize-json_dispatch_ifindex.patch
 lp2098183/0008-daemon-util-expose-notify_push_fd.patch
 lp2098183/0009-network-json-add-missing-entries-for-route-propertie.patch
 lp2098183/0010-network-introduce-network_config_source_from_string.patch
+lp2098183/0011-network-expose-log_route_debug-and-log_address_debug.patch
