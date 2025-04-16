@@ -1,0 +1,80 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri Nov 1 18:01:08 2024 +0100
+Subject: json-util: generalize json_dispatch_ifindex()
+
+Let's move the helper from nss-resolve.c to generic code, as it's going
+to be useful in #34640.
+
+Also, let's tighten the rules, and refuse negative ifindexes, because
+they are invalid.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2098183
+Origin: backport, https://github.com/systemd/systemd/commit/dfaff662a08e97ff2e3ad640594b40c3c5adb82b
+[chengen - apply changes to src/shared/json.[ch] / replace all `sd_*` functions with
+the original `json_*` functions.]
+
+--- systemd-255.4.orig/src/nss-resolve/nss-resolve.c
++++ systemd-255.4/src/nss-resolve/nss-resolve.c
+@@ -94,23 +94,6 @@ static uint32_t ifindex_to_scopeid(int f
+         return in6_addr_is_link_local(&in6) ? ifindex : 0;
+ }
+ 
+-static int json_dispatch_ifindex(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+-        int *ifi = ASSERT_PTR(userdata);
+-        int64_t t;
+-
+-        assert(variant);
+-
+-        if (!json_variant_is_integer(variant))
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an integer.", strna(name));
+-
+-        t = json_variant_integer(variant);
+-        if (t > INT_MAX)
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is out of bounds for an interface index.", strna(name));
+-
+-        *ifi = (int) t;
+-        return 0;
+-}
+-
+ static int json_dispatch_family(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+         int *family = ASSERT_PTR(userdata);
+         int64_t t;
+--- systemd-255.4.orig/src/shared/json.c
++++ systemd-255.4/src/shared/json.c
+@@ -5084,6 +5084,26 @@ static int json_cmp_strings(const void *
+         return strcmp(json_variant_string(*a), json_variant_string(*b));
+ }
+ 
++int json_dispatch_ifindex(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
++        int *ifi = ASSERT_PTR(userdata), r, t;
++
++        if (json_variant_is_null(variant)) {
++                *ifi = 0;
++                return 0;
++        }
++
++        r = json_dispatch_int(name, variant, flags, &t);
++        if (r < 0)
++                return r;
++
++        /* If JSON_RELAX is set allow a zero interface index, otherwise refuse. */
++        if (t < (FLAGS_SET(flags, JSON_RELAX) ? 0 : 1))
++                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is out of bounds for an interface index.", strna(name));
++
++        *ifi = t;
++        return 0;
++}
++
+ int json_variant_sort(JsonVariant **v) {
+         _cleanup_free_ JsonVariant **a = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *n = NULL;
+--- systemd-255.4.orig/src/shared/json.h
++++ systemd-255.4/src/shared/json.h
+@@ -427,6 +427,7 @@ int json_dispatch_unsupported(const char
+ int json_dispatch_unbase64_iovec(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+ int json_dispatch_byte_array_iovec(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+ int json_dispatch_in_addr(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
++int json_dispatch_ifindex(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+ 
+ assert_cc(sizeof(uint32_t) == sizeof(unsigned));
+ #define json_dispatch_uint json_dispatch_uint32
