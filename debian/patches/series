@@ -32,3 +32,4 @@ lp2055239-core-dbus-manager-mark-unit-file-state-as-outdated-only-i.patch
 lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
 lp2081192-core-exec-invoke-Fix-missing-arguments-for-PR_SET_MEMORY_.patch
 stub-add-magic-cmdline-option-to-force-EFI-handover.patch
+lp2098183/0001-network-use-json_variant_append_arrayb.patch
