@@ -44,3 +44,4 @@ lp2098183/0009-network-json-add-missing-entries-for-route-propertie.patch
 lp2098183/0010-network-introduce-network_config_source_from_string.patch
 lp2098183/0011-network-expose-log_route_debug-and-log_address_debug.patch
 lp2098183/0012-network-introduce-manager_serialize-deserialize.patch
+lp2098183/0013-network-keep-all-dynamically-acquired-configurations.patch
