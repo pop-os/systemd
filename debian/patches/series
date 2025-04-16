@@ -40,3 +40,4 @@ lp2098183/0005-json-introduce-json_dispatch_int8-and-json_dispatch_.patch
 lp2098183/0006-json-extend-JsonDispatch-flags-with-nullable-and-ref.patch
 lp2098183/0007-json-util-generalize-json_dispatch_ifindex.patch
 lp2098183/0008-daemon-util-expose-notify_push_fd.patch
+lp2098183/0009-network-json-add-missing-entries-for-route-propertie.patch
