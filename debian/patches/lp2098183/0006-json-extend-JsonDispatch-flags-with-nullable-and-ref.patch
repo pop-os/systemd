@@ -1,0 +1,159 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed May 8 09:42:12 2024 +0200
+Subject: json: extend JsonDispatch flags with nullable and refuse-null flags
+
+currently when dispatching json objects into C structs we either insist
+on the field type or we don't. Let's extend this model a bit: depending
+on two new fields either allow or refuse null types in addition to the
+specified type.
+
+This is useful for example when dispatch enums as this allows us
+explicitly refuse null in various scenarios where we allow multiple
+types.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2098183
+Origin: backport, https://github.com/systemd/systemd/commit/3d6c2c918bdf59eab8edd6eda4e7ffd4efb09d33
+[chengen - apply changes to src/shared/json.[ch] / replace all `sd_*` functions/`SD_*` macros with
+the original `json_*` functions/`JSON_*` macros.]
+
+--- systemd-255.4.orig/src/shared/json.c
++++ systemd-255.4/src/shared/json.c
+@@ -4533,8 +4533,10 @@ int json_dispatch_full(
+ 
+                         merged_flags = flags | p->flags;
+ 
++                        /* If an explicit type is specified, verify it matches */
+                         if (p->type != _JSON_VARIANT_TYPE_INVALID &&
+-                            !json_variant_has_type(value, p->type)) {
++                            !json_variant_has_type(value, p->type) &&
++                            !(FLAGS_SET(merged_flags, JSON_NULLABLE) && json_variant_is_null(value))) {
+ 
+                                 json_log(value, merged_flags, 0,
+                                          "Object field '%s' has wrong type %s, expected %s.", json_variant_string(key),
+@@ -4542,6 +4544,22 @@ int json_dispatch_full(
+ 
+                                 if (merged_flags & JSON_PERMISSIVE)
+                                         continue;
++
++                                if (reterr_bad_field)
++                                        *reterr_bad_field = p->name;
++
++                                return -EINVAL;
++                        }
++
++                        /* If the JSON_REFUSE_NULL flag is specified, insist the field is not "null". Note
++                         * that this provides overlapping functionality with the type check above. */
++                        if (FLAGS_SET(merged_flags, JSON_REFUSE_NULL) && json_variant_is_null(value)) {
++
++                                json_log(value, merged_flags, 0,
++                                         "Object field '%s' may not be null.", json_variant_string(key));
++
++                                if (merged_flags & JSON_PERMISSIVE)
++                                        continue;
+ 
+                                 if (reterr_bad_field)
+                                         *reterr_bad_field = p->name;
+--- systemd-255.4.orig/src/shared/json.h
++++ systemd-255.4/src/shared/json.h
+@@ -381,10 +381,12 @@ typedef enum JsonDispatchFlags {
+         JSON_SAFE             = 1 << 3, /* Don't accept "unsafe" strings in json_dispatch_string() + json_dispatch_string() */
+         JSON_RELAX            = 1 << 4, /* Use relaxed user name checking in json_dispatch_user_group_name */
+         JSON_ALLOW_EXTENSIONS = 1 << 5, /* Subset of JSON_PERMISSIVE: allow additional fields, but no other permissive handling */
++        JSON_NULLABLE         = 1 << 6, /* Allow both specified type and null for this field */
++        JSON_REFUSE_NULL      = 1 << 7, /* Never allow null, even if type is otherwise not specified */
+ 
+         /* The following two may be passed into log_json() in addition to those above */
+-        JSON_DEBUG            = 1 << 6, /* Indicates that this log message is a debug message */
+-        JSON_WARNING          = 1 << 7, /* Indicates that this log message is a warning message */
++        JSON_DEBUG            = 1 << 8, /* Indicates that this log message is a debug message */
++        JSON_WARNING          = 1 << 9, /* Indicates that this log message is a warning message */
+ } JsonDispatchFlags;
+ 
+ typedef int (*JsonDispatchCallback)(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+--- systemd-255.4.orig/src/test/test-json.c
++++ systemd-255.4/src/test/test-json.c
+@@ -813,4 +813,84 @@ TEST(json_dispatch) {
+         assert_se(foobar.l == INT16_MIN);
+ }
+ 
++TEST(json_dispatch_nullable) {
++
++        _cleanup_(json_variant_unrefp) JsonVariant *j = NULL;
++
++        assert_se(json_build(&j, JSON_BUILD_OBJECT(
++                                             JSON_BUILD_PAIR("x1", JSON_BUILD_CONST_STRING("foo")),
++                                             JSON_BUILD_PAIR("x2", JSON_BUILD_CONST_STRING("bar")),
++                                             JSON_BUILD_PAIR("x3", JSON_BUILD_CONST_STRING("waldo")),
++                                             JSON_BUILD_PAIR("x4", JSON_BUILD_CONST_STRING("foo2")),
++                                             JSON_BUILD_PAIR("x5", JSON_BUILD_CONST_STRING("bar2")),
++                                             JSON_BUILD_PAIR("x6", JSON_BUILD_CONST_STRING("waldo2")),
++                                             JSON_BUILD_PAIR("x7", JSON_BUILD_NULL),
++                                             JSON_BUILD_PAIR("x8", JSON_BUILD_NULL),
++                                             JSON_BUILD_PAIR("x9", JSON_BUILD_NULL))) >= 0);
++
++        struct data {
++                const char *x1, *x2, *x3, *x4, *x5, *x6, *x7, *x8, *x9;
++        } data = {
++                .x1 = POINTER_MAX,
++                .x2 = POINTER_MAX,
++                .x3 = POINTER_MAX,
++                .x4 = POINTER_MAX,
++                .x5 = POINTER_MAX,
++                .x6 = POINTER_MAX,
++                .x7 = POINTER_MAX,
++                .x8 = POINTER_MAX,
++                .x9 = POINTER_MAX,
++        };
++
++        assert_se(json_dispatch(j,
++                                (const JsonDispatch[]) {
++                                        { "x1", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x1), JSON_NULLABLE    },
++                                        { "x2", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x2), JSON_REFUSE_NULL },
++                                        { "x3", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x3), 0                },
++                                        { "x4", JSON_VARIANT_STRING,        json_dispatch_const_string, offsetof(struct data, x4), JSON_NULLABLE    },
++                                        { "x5", JSON_VARIANT_STRING,        json_dispatch_const_string, offsetof(struct data, x5), JSON_REFUSE_NULL },
++                                        { "x6", JSON_VARIANT_STRING,        json_dispatch_const_string, offsetof(struct data, x6), 0                },
++                                        { "x7", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x7), JSON_NULLABLE    },
++                                        { "x8", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x8), 0                },
++                                        { "x9", JSON_VARIANT_STRING,        json_dispatch_const_string, offsetof(struct data, x9), JSON_NULLABLE    },
++                                        {},
++                                },
++                                /* flags= */ 0,
++                                &data) >= 0);
++
++        assert_se(streq_ptr(data.x1, "foo"));
++        assert_se(streq_ptr(data.x2, "bar"));
++        assert_se(streq_ptr(data.x3, "waldo"));
++        assert_se(streq_ptr(data.x4, "foo2"));
++        assert_se(streq_ptr(data.x5, "bar2"));
++        assert_se(streq_ptr(data.x6, "waldo2"));
++        assert_se(!data.x7);
++        assert_se(!data.x8);
++        assert_se(!data.x9);
++
++        assert_se(json_dispatch(j,
++                                (const JsonDispatch[]) {
++                                        { "x7", _JSON_VARIANT_TYPE_INVALID, json_dispatch_const_string, offsetof(struct data, x7), JSON_REFUSE_NULL },
++                                        {},
++                                },
++                                /* flags= */ JSON_ALLOW_EXTENSIONS,
++                                &data) == -EINVAL);
++
++        assert_se(json_dispatch(j,
++                                (const JsonDispatch[]) {
++                                        { "x7", JSON_VARIANT_STRING, json_dispatch_const_string, offsetof(struct data, x7), JSON_REFUSE_NULL },
++                                        {},
++                                },
++                                /* flags= */ JSON_ALLOW_EXTENSIONS,
++                                &data) == -EINVAL);
++
++        assert_se(json_dispatch(j,
++                                (const JsonDispatch[]) {
++                                        { "x7", JSON_VARIANT_STRING, json_dispatch_const_string, offsetof(struct data, x7), 0 },
++                                        {},
++                                },
++                                /* flags= */ JSON_ALLOW_EXTENSIONS,
++                                &data) == -EINVAL);
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);
