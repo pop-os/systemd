@@ -35,3 +35,4 @@ stub-add-magic-cmdline-option-to-force-EFI-handover.patch
 lp2098183/0001-network-use-json_variant_append_arrayb.patch
 lp2098183/0002-json-add-new-dispatch-flag-JSON_ALLOW_EXTENSIONS.patch
 lp2098183/0003-json-add-macro-for-automatically-defining-a-dispatch.patch
+lp2098183/0004-json-introduce-json_dispatch_byte_array_iovec-and-js.patch
