@@ -92,6 +92,10 @@ Note that interfaces brought up/down will *not* run hooks in
 It is recommended to use networkd together with systemd-resolved(8) to
 dynamically manage /etc/resolv.conf by installing the systemd-resolved package.
 
+Note that changes to physical network device configurations are commonly made
+using /etc/systemd/network/*.link files. Please see the important note in
+udev.README.Debian regarding changes to .link files on Debian.
+
 KillUserProcesses behavior in Debian
 ====================================
 
