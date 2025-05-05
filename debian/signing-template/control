@@ -12,7 +12,7 @@ Vcs-Browser: https://salsa.debian.org/systemd-team/systemd
 Package: systemd-boot-efi-${DEB_HOST_ARCH}-signed
 Architecture: ${DEB_HOST_ARCH}
 Depends: ${misc:Depends},
-Provides: systemd-boot-efi-signed
+Provides: systemd-boot-efi-signed (= ${DEB_VERSION_SOURCE})
 Built-Using: systemd (= ${DEB_VERSION_SOURCE})
 Description: Tools to manage UEFI firmware updates (signed)
  systemd is a system and service manager for Linux. It provides aggressive
