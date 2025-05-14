@@ -510,6 +510,7 @@ Depends: ${shlibs:Depends},
          systemd-userdbd (= ${binary:Version}),
          systemd (= ${binary:Version}),
          libpam-runtime,
+         polkitd,
 Recommends: ${dlopen:Recommends},
 Suggests: ${dlopen:Suggests},
 Description: home area manager
