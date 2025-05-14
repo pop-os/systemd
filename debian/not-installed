@@ -10,5 +10,7 @@ usr/lib/tmpfiles.d/etc.conf
 usr/share/factory/
 usr/bin/systemd-resolve
 usr/share/man/man5/crypttab.5
+# TODO: move this to systemd-boot when merging v258
+usr/share/man/man8/systemd-boot-clear-sysfail.service.8
 etc/init.d/
 etc/X11/xinit/xinitrc.d/
