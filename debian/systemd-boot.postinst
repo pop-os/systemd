@@ -115,8 +115,12 @@ install_shim() {
         install -p -D "/usr/lib/shim/shim${efi_arch}.efi.signed" "${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi"
     fi
 
-    if [ ! -f "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV" ]; then
-        echo "shim${efi_arch}.efi,${vendor},,This is the boot entry for ${vendor}" > "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV"
+    if [ ! -f "${esp_path}/EFI/BOOT/fb${efi_arch}.efi" ] || [ "$(<"${esp_path}/EFI/BOOT/fb${efi_arch}.efi" sha256sum)" != "$(<"/usr/lib/shim/fb${efi_arch}.efi.signed" sha256sum)" ]; then
+        install -p -D "/usr/lib/shim/fb${efi_arch}.efi.signed" "${esp_path}/EFI/BOOT/fb${efi_arch}.efi"
+    fi
+
+    if [ ! -f "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV" ] && command -v iconv >/dev/null 2>&1; then
+        printf "shim%s.efi,%s,\\\\EFI\\\\systemd\\\\systemd-boot%s.efi \\\\0,This is the boot entry for %s\n" "${efi_arch}" "${vendor_upper}" "${efi_arch}" "${vendor_upper}" | iconv -t UCS-2LE > "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV"
     fi
 
     # 730079007300740065006d0064002d0062006f006f007400 is 'systemd-boot' encoded in UTF-16-LE"
