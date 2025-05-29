@@ -1,3 +1,30 @@
+systemd (257.6-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * d/copyright: use GPL URL instead of old FSF postal address.
+  * d/signing-template/copyright: use GPL URL instead of old FSF postal
+    address.
+  * d/control: bump Standards-Version to 4.7.2, no changes
+  * Add version to systemd-boot-efi-signed virtual package. Otherwise
+    dependency on systemd-boot-efi-signed (>= 257.5-2) is not satisfiable
+    (Closes: #1104663)
+  * systemd-homed: add dependency on polkitd (Closes: #1105743)
+  * systemd-boot: fix BOOT.CSV usage (Closes: #1106024)
+  * Update upstream source from tag 'upstream/257.6' Update to upstream
+    version '257.6' with Debian dir
+    907f7fd2ae07adbab0ffd7b9235fc25435f12bab
+    (Fixes CVE-2025-4598)
+  * Drop patches, merged upstream
+
+  [ Tim Small ]
+  * document requirement to sync *.link files with initrd (Closes:
+    #1005282)
+
+  [ Kirill Rekhov ]
+  * Set upstream metadata fields: Security-Contact
+
+ -- Luca Boccassi <bluca@debian.org>  Thu, 29 May 2025 17:52:48 +0100
+
 systemd (257.5-2) unstable; urgency=medium
 
   * Backport new patch to workaround /lib64 symlink incompatibility
