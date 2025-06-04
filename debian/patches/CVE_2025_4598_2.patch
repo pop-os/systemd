@@ -1,0 +1,109 @@
+From 0c49e0049b7665bb7769a13ef346fef92e1ad4d6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 29 Apr 2025 14:47:59 +0200
+Subject: [PATCH] coredump: use %d in kernel core pattern
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The kernel provides %d which is documented as
+"dump mode—same as value returned by prctl(2) PR_GET_DUMPABLE".
+
+We already query /proc/pid/auxv for this information, but unfortunately this
+check is subject to a race, because the crashed process may be replaced by an
+attacker before we read this data, for example replacing a SUID process that
+was killed by a signal with another process that is not SUID, tricking us into
+making the coredump of the original process readable by the attacker.
+
+With this patch, we effectively add one more check to the list of conditions
+that need be satisfied if we are to make the coredump accessible to the user.
+
+Reportedy-by: Qualys Security Advisory <qsa@qualys.com>
+
+In principle, %d might return a value other than 0, 1, or 2 in the future.
+Thus, we accept those, but emit a notice.
+---
+ man/systemd-coredump.xml                    | 12 ++++++++++++
+ src/coredump/coredump.c                     | 21 ++++++++++++++++++---
+ sysctl.d/50-coredump.conf.in                |  2 +-
+ test/units/TEST-87-AUX-UTILS-VM.coredump.sh |  5 +++++
+ 4 files changed, 36 insertions(+), 4 deletions(-)
+
+Index: systemd-249.11/src/coredump/coredump.c
+===================================================================
+--- systemd-249.11.orig/src/coredump/coredump.c
++++ systemd-249.11/src/coredump/coredump.c
+@@ -89,6 +89,7 @@ typedef enum {
+         META_ARGV_TIMESTAMP,    /* %t: time of dump, expressed as seconds since the Epoch (we expand this to µs granularity) */
+         META_ARGV_RLIMIT,       /* %c: core file size soft resource limit */
+         META_ARGV_HOSTNAME,     /* %h: hostname */
++        META_ARGV_DUMPABLE,     /* %d: as set by the kernel */
+         _META_ARGV_MAX,
+ 
+         /* The following indexes are cached for a couple of special fields we use (and
+@@ -115,6 +116,7 @@ static const char * const meta_field_nam
+         [META_ARGV_TIMESTAMP]    = "COREDUMP_TIMESTAMP=",
+         [META_ARGV_RLIMIT]       = "COREDUMP_RLIMIT=",
+         [META_ARGV_HOSTNAME]     = "COREDUMP_HOSTNAME=",
++        [META_ARGV_DUMPABLE]     = "COREDUMP_DUMPABLE=",
+         [META_COMM]              = "COREDUMP_COMM=",
+         [META_EXE]               = "COREDUMP_EXE=",
+         [META_UNIT]              = "COREDUMP_UNIT=",
+@@ -125,6 +127,7 @@ typedef struct Context {
+         const char *meta[_META_MAX];
+         size_t meta_size[_META_MAX];
+         pid_t pid;
++        unsigned dumpable;
+         bool is_pid1;
+         bool is_journald;
+ } Context;
+@@ -471,14 +474,16 @@ static int grant_user_access(int core_fd
+         if (r < 0)
+                 return r;
+ 
+-        /* We allow access if we got all the data and at_secure is not set and
+-         * the uid/gid matches euid/egid. */
++        /* We allow access if %d/dumpable on the command line was exactly 1, we got all the data,
++         * at_secure is not set, and the uid/gid match euid/egid. */
+         bool ret =
++                context->dumpable == 1 &&
+                 at_secure == 0 &&
+                 uid != UID_INVALID && euid != UID_INVALID && uid == euid &&
+                 gid != GID_INVALID && egid != GID_INVALID && gid == egid;
+-        log_debug("Will %s access (uid="UID_FMT " euid="UID_FMT " gid="GID_FMT " egid="GID_FMT " at_secure=%s)",
++        log_debug("Will %s access (dumpable=%u uid="UID_FMT " euid="UID_FMT " gid="GID_FMT " egid="GID_FMT " at_secure=%s)",
+                   ret ? "permit" : "restrict",
++                  context->dumpable,
+                   uid, euid, gid, egid, yes_no(at_secure));
+         return ret;
+ }
+@@ -1096,6 +1101,16 @@ static int save_context(Context *context
+         if (r < 0)
+                 return log_error_errno(r, "Failed to parse PID \"%s\": %m", context->meta[META_ARGV_PID]);
+ 
++        /* The value is set to contents of /proc/sys/fs/suid_dumpable, which we set to 2,
++         * if the process is marked as not dumpable, see PR_SET_DUMPABLE(2const). */
++        if (context->meta[META_ARGV_DUMPABLE]) {
++                r = safe_atou(context->meta[META_ARGV_DUMPABLE], &context->dumpable);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to parse dumpable field \"%s\": %m", context->meta[META_ARGV_DUMPABLE]);
++                if (context->dumpable > 2)
++                        log_notice("Got unexpected %%d/dumpable value %u.", context->dumpable);
++        }
++
+         unit = context->meta[META_UNIT];
+         context->is_pid1 = streq(context->meta[META_ARGV_PID], "1") || streq_ptr(unit, SPECIAL_INIT_SCOPE);
+         context->is_journald = streq_ptr(unit, SPECIAL_JOURNALD_SERVICE);
+Index: systemd-249.11/sysctl.d/50-coredump.conf.in
+===================================================================
+--- systemd-249.11.orig/sysctl.d/50-coredump.conf.in
++++ systemd-249.11/sysctl.d/50-coredump.conf.in
+@@ -13,7 +13,7 @@
+ # the core dump.
+ #
+ # See systemd-coredump(8) and core(5).
+-kernel.core_pattern=|{{ROOTLIBEXECDIR}}/systemd-coredump %P %u %g %s %t 9223372036854775808 %h
++kernel.core_pattern=|{{ROOTLIBEXECDIR}}/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d
+ 
+ # Allow 16 coredumps to be dispatched in parallel by the kernel.
+ # We collect metadata from /proc/%P/, and thus need to make sure the crashed

@@ -130,3 +130,6 @@ lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
 lp2003250/network-skip-to-reassign-master-ifindex-if-already-set.patch
 lp2003250/network-do-not-bring-down-a-bonding-port-interface-when-i.patch
 networkd-test-skip-test_resolved_domain_restricted_dns.patch
+CVE_2025_4598_1.patch
+CVE_2025_4598_2.patch
+CVE_2025_4598_3.patch

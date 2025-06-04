@@ -1,0 +1,38 @@
+From 13902e025321242b1d95c6d8b4e482b37f58cdef Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 26 May 2025 15:24:04 +0200
+Subject: [PATCH] coredump: get rid of a bogus assertion
+
+The check looks plausible, but when I started checking whether it needs
+to be lowered for the recent changes, I realized that it doesn't make
+much sense.
+
+context_parse_iovw() is called from a few places, e.g.:
+- process_socket(), where the other side controls the contents of the
+  message. We already do other checks on the correctness of the message
+  and this assert is not needed.
+- gather_pid_metadata_from_argv(), which is called after
+  inserting MESSAGE_ID= and PRIORITY= into the array, so there is no
+  direct relation between _META_ARGV_MAX and the number of args in the
+  iovw.
+- gather_pid_metadata_from_procfs(), where we insert a bazillion fields,
+  but without any relation to _META_ARGV_MAX.
+
+Since we already separately check if the required stuff was set, drop this
+misleading check.
+---
+ src/coredump/coredump.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+Index: systemd-249.11/src/coredump/coredump.c
+===================================================================
+--- systemd-249.11.orig/src/coredump/coredump.c
++++ systemd-249.11/src/coredump/coredump.c
+@@ -1070,7 +1070,6 @@ static int save_context(Context *context
+ 
+         assert(context);
+         assert(iovw);
+-        assert(iovw->count >= _META_ARGV_MAX);
+ 
+         /* The context does not allocate any memory on its own */
+ 

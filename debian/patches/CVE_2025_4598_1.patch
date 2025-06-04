@@ -1,0 +1,94 @@
+From 49f1f2d4a7612bbed5211a73d11d6a94fbe3bb69 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 26 May 2025 12:04:44 +0200
+Subject: [PATCH] coredump: get rid of _META_MANDATORY_MAX
+
+No functional change. This change is done in preparation for future changes.
+Currently, the list of fields which are received on the command line is a
+strict subset of the fields which are always expected to be received on a
+socket. But when we add new kernel args in the future, we'll have two
+non-overlapping sets and this approach will not work. Get rid of the variable
+and enumerate the required fields. This set will never change, so this is
+actually more maintainable.
+
+The message with the hint where to add new fields is switched with
+_META_ARGV_MAX. The new order is more correct.
+---
+ src/coredump/coredump.c | 29 +++++++++++++++++++++--------
+ 1 file changed, 21 insertions(+), 8 deletions(-)
+
+Index: systemd-249.11/src/coredump/coredump.c
+===================================================================
+--- systemd-249.11.orig/src/coredump/coredump.c
++++ systemd-249.11/src/coredump/coredump.c
+@@ -75,7 +75,7 @@
+  * size. See DATA_SIZE_MAX in journal-importer.h. */
+ assert_cc(JOURNAL_SIZE_MAX <= DATA_SIZE_MAX);
+ 
+-enum {
++typedef enum {
+         /* We use these as array indexes for our process metadata cache.
+          *
+          * The first indices of the cache stores the same metadata as the ones passed by
+@@ -97,16 +97,15 @@ enum {
+          * environment. */
+ 
+         META_COMM = _META_ARGV_MAX,
+-        _META_MANDATORY_MAX,
+ 
+         /* The rest are similar to the previous ones except that we won't fail if one of
+          * them is missing. */
+ 
+-        META_EXE = _META_MANDATORY_MAX,
++        META_EXE,
+         META_UNIT,
+         META_PROC_AUXV,
+         _META_MAX
+-};
++} meta_argv_t;
+ 
+ static const char * const meta_field_names[_META_MAX] = {
+         [META_ARGV_PID]          = "COREDUMP_PID=",
+@@ -1186,12 +1185,20 @@ static int process_socket(int fd) {
+         if (r < 0)
+                 goto finish;
+ 
+-        /* Make sure we received at least all fields we need. */
+-        for (int i = 0; i < _META_MANDATORY_MAX; i++)
++        meta_argv_t i;
++        FOREACH_ARGUMENT(i,
++                         META_ARGV_PID,
++                         META_ARGV_UID,
++                         META_ARGV_GID,
++                         META_ARGV_SIGNAL,
++                         META_ARGV_TIMESTAMP,
++                         META_ARGV_RLIMIT,
++                         META_ARGV_HOSTNAME,
++                         META_COMM)
+                 if (!context.meta[i]) {
+                         r = log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+-                                            "A mandatory argument (%i) has not been sent, aborting.",
+-                                            i);
++                                            "Mandatory argument (%s) not received on socket, aborting.",
++                                            meta_field_names[i]);
+                         goto finish;
+                 }
+ 
+Index: systemd-249.11/src/basic/macro.h
+===================================================================
+--- systemd-249.11.orig/src/basic/macro.h
++++ systemd-249.11/src/basic/macro.h
+@@ -482,4 +482,13 @@ static inline size_t size_add(size_t x,
+         return y >= SIZE_MAX - x ? SIZE_MAX : x + y;
+ }
+ 
++/* Iterate through each argument passed. All must be the same type as 'entry' or must be implicitly
++ * convertible. The iteration variable 'entry' must already be defined. */
++#define FOREACH_ARGUMENT(entry, ...)                                     \
++        _FOREACH_ARGUMENT(entry, UNIQ_T(_entries_, UNIQ), UNIQ_T(_current_, UNIQ), UNIQ_T(_va_sentinel_, UNIQ), ##__VA_ARGS__)
++#define _FOREACH_ARGUMENT(entry, _entries_, _current_, _va_sentinel_, ...)      \
++        for (typeof(entry) _va_sentinel_[1] = {}, _entries_[] = { __VA_ARGS__ __VA_OPT__(,) _va_sentinel_[0] }, *_current_ = _entries_; \
++             ((long)(_current_ - _entries_) < (long)(ELEMENTSOF(_entries_) - 1)) && ({ entry = *_current_; true; }); \
++             _current_++)
++
+ #include "log.h"
