@@ -1,22 +1,18 @@
-systemd (255.4-1ubuntu8.7) noble; urgency=medium
+systemd (255.4-1ubuntu8.8) noble-security; urgency=medium
 
-  * Preserve IPv6 configurations when `KeepConfiguration=dhcp-on-stop` is set
-    (LP: #2098183)
-    - d/p/lp2098183/0001-network-use-json_variant_append_arrayb.patch
-    - d/p/lp2098183/0002-json-add-new-dispatch-flag-JSON_ALLOW_EXTENSIONS.patch
-    - d/p/lp2098183/0003-json-add-macro-for-automatically-defining-a-dispatch.patch
-    - d/p/lp2098183/0004-json-introduce-json_dispatch_byte_array_iovec-and-js.patch
-    - d/p/lp2098183/0005-json-introduce-json_dispatch_int8-and-json_dispatch_.patch
-    - d/p/lp2098183/0006-json-extend-JsonDispatch-flags-with-nullable-and-ref.patch
-    - d/p/lp2098183/0007-json-util-generalize-json_dispatch_ifindex.patch
-    - d/p/lp2098183/0008-daemon-util-expose-notify_push_fd.patch
-    - d/p/lp2098183/0009-network-json-add-missing-entries-for-route-propertie.patch
-    - d/p/lp2098183/0010-network-introduce-network_config_source_from_string.patch
-    - d/p/lp2098183/0011-network-expose-log_route_debug-and-log_address_debug.patch
-    - d/p/lp2098183/0012-network-introduce-manager_serialize-deserialize.patch
-    - d/p/lp2098183/0013-network-keep-all-dynamically-acquired-configurations.patch
+  * SECURITY UPDATE: race condition in systemd-coredump
+    - debian/patches/CVE_2025_4598_1.patch: coredump: get rid of
+      _META_MANDATORY_MAX.
+    - debian/patches/CVE_2025_4598_2.patch: coredump: use %d in kernel core
+      pattern.
+    - debian/patches/CVE_2025_4598_3.patch: coredump: also stop forwarding
+      non-dumpable processes.
+    - debian/patches/CVE_2025_4598_4.patch: coredump: get rid of a bogus
+      assertion.
+    - CVE-2025-4598
+  * this update does not include the changes from 255.4-1ubuntu8.7 as included in noble-proposed
 
- -- Chengen Du <chengen.du@canonical.com>  Thu, 13 Mar 2025 13:30:42 +0000
+ -- Octavio Galland <octavio.galland@canonical.com>  Wed, 04 Jun 2025 09:24:15 -0300
 
 systemd (255.4-1ubuntu8.6) noble; urgency=medium
 

@@ -1,0 +1,48 @@
+From 8fc7b2a211eb13ef1a94250b28e1c79cab8bdcb9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 5 May 2025 15:48:40 +0200
+Subject: [PATCH] coredump: also stop forwarding non-dumpable processes
+
+See the comment in the patch for details.
+
+Suggested-by: Qualys Security Advisory <qsa@qualys.com>
+---
+ src/coredump/coredump.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+Index: systemd-255.4/src/coredump/coredump.c
+===================================================================
+--- systemd-255.4.orig/src/coredump/coredump.c
++++ systemd-255.4/src/coredump/coredump.c
+@@ -1400,10 +1400,21 @@ static int receive_ucred(int transport_f
+         return 0;
+ }
+ 
+-static int can_forward_coredump(pid_t pid) {
++static int can_forward_coredump(Context *context, pid_t pid) {
+         _cleanup_free_ char *cgroup = NULL, *path = NULL, *unit = NULL;
+         int r;
+ 
++        assert(context);
++
++        /* We don't use %F/pidfd to pin down the crashed process yet. We need to avoid a situation where the
++         * attacker crashes a SUID process or a root daemon and quickly replaces it with a namespaced process
++         * and we forward the initial part of the coredump to the attacker, inside the namespace.
++         *
++         * TODO: relax this check when %F is implemented and used.
++         */
++        if (context->dumpable != 1)
++                return false;
++
+         r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, pid, &cgroup);
+         if (r < 0)
+                 return r;
+@@ -1445,7 +1456,7 @@ static int forward_coredump_to_container
+         if (r < 0)
+                 return log_debug_errno(r, "Failed to get namespace leader: %m");
+ 
+-        r = can_forward_coredump(pid);
++        r = can_forward_coredump(context, pid);
+         if (r < 0)
+                 return log_debug_errno(r, "Failed to check if coredump can be forwarded: %m");
+         if (r == 0)
