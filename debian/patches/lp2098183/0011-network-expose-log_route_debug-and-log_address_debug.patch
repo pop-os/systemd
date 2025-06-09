@@ -1,0 +1,54 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat Nov 2 18:32:02 2024 +0900
+Subject: network: expose log_route_debug() and log_address_debug()
+
+They will be used in another file in a later commit.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2098183
+Origin: backport, https://github.com/systemd/systemd/commit/2afd12e0a1c5710c4b380067a6a022efcbfacf99
+[chengen - retain the original `log_route_debug` function signature.]
+
+--- systemd-255.4.orig/src/network/networkd-address.c
++++ systemd-255.4/src/network/networkd-address.c
+@@ -1001,7 +1001,7 @@ const char* format_lifetime(char *buf, s
+         return buf;
+ }
+ 
+-static void log_address_debug(const Address *address, const char *str, const Link *link) {
++void log_address_debug(const Address *address, const char *str, const Link *link) {
+         _cleanup_free_ char *state = NULL, *flags_str = NULL, *scope_str = NULL;
+ 
+         assert(address);
+--- systemd-255.4.orig/src/network/networkd-address.h
++++ systemd-255.4/src/network/networkd-address.h
+@@ -66,6 +66,8 @@ struct Address {
+         NFTSetContext nft_set_context;
+ };
+ 
++void log_address_debug(const Address *address, const char *str, const Link *link);
++
+ const char* format_lifetime(char *buf, size_t l, usec_t lifetime_usec) _warn_unused_result_;
+ /* Note: the lifetime of the compound literal is the immediately surrounding block,
+  * see C11 §6.5.2.5, and
+--- systemd-255.4.orig/src/network/networkd-route.c
++++ systemd-255.4/src/network/networkd-route.c
+@@ -547,7 +547,7 @@ void link_mark_routes(Link *link, Networ
+         }
+ }
+ 
+-static void log_route_debug(const Route *route, const char *str, const Link *link, const Manager *manager) {
++void log_route_debug(const Route *route, const char *str, const Link *link, const Manager *manager) {
+         _cleanup_free_ char *state = NULL, *gw_alloc = NULL, *prefsrc = NULL,
+                 *table = NULL, *scope = NULL, *proto = NULL, *flags = NULL;
+         const char *gw = NULL, *dst, *src;
+--- systemd-255.4.orig/src/network/networkd-route.h
++++ systemd-255.4/src/network/networkd-route.h
+@@ -78,6 +78,8 @@ struct Route {
+         sd_event_source *expire;
+ };
+ 
++void log_route_debug(const Route *route, const char *str, const Link *link, const Manager *manager);
++
+ extern const struct hash_ops route_hash_ops;
+ 
+ int route_new(Route **ret);
