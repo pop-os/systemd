@@ -1,3 +1,16 @@
+systemd (249.11-0ubuntu3.16) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: race condition in systemd-coredump
+    - debian/patches/CVE_2025_4598_1.patch: coredump: get rid of
+      _META_MANDATORY_MAX.
+    - debian/patches/CVE_2025_4598_2.patch: coredump: use %d in kernel core
+      pattern.
+    - debian/patches/CVE_2025_4598_3.patch: coredump: get rid of a bogus
+      assertion.
+    - CVE-2025-4598
+
+ -- Octavio Galland <octavio.galland@canonical.com>  Wed, 04 Jun 2025 11:17:43 -0300
+
 systemd (249.11-0ubuntu3.15) jammy; urgency=medium
 
   * d/systemd.prerm: call d-s-h update-state for resolved on upgrades
