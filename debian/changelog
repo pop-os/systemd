@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.16pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Wed, 11 Jun 2025 08:39:25 -0600
+
 systemd (249.11-0ubuntu3.16) jammy-security; urgency=medium
 
   * SECURITY UPDATE: race condition in systemd-coredump
