@@ -51,6 +51,10 @@ remove_shim() {
         rm -f "${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi"
     fi
 
+    if [ -f "${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi" ] && [ "$(<"${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi" sha256sum)" = "$(<"${esp_path}/EFI/${vendor}/fb${efi_arch}.efi" sha256sum)" ]; then
+        rm -f "${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi"
+    fi
+
     for f in shim fb mm; do
         rm -f "${esp_path}/EFI/${vendor}/${f}${efi_arch}.efi"
     done
