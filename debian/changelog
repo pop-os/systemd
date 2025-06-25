@@ -1,3 +1,14 @@
+systemd (257.7-1) unstable; urgency=medium
+
+  * udev: add 'clock' system group for PTP rules
+  * systemd-boot: remove fb too on removal
+  * systemd-boot: reduce harmless noise on cleanup (Closes: #1108264)
+  * Update upstream source from tag 'upstream/257.7' Update to upstream
+    version '257.7' with Debian dir
+    ef416841c96628293f494812ad2d395cf865f7b5
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 25 Jun 2025 13:40:07 +0100
+
 systemd (257.6-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
