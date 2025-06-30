@@ -1,4 +1,4 @@
-systemd (257.7-1ubuntu1) UNRELEASED; urgency=medium
+systemd (257.7-1ubuntu1) questing; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
     - debian/tests/boot-and-services: skip apparmor tests on armhf
@@ -31,7 +31,7 @@ systemd (257.7-1ubuntu1) UNRELEASED; urgency=medium
         Do not build with libqrencode on i386
       + debian/rules: Remove unneeded efi artifacts on i386 to avoid debugedit errors
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 30 Jun 2025 11:32:00 -0400
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 30 Jun 2025 15:11:21 -0400
 
 systemd (257.7-1) unstable; urgency=medium
 
