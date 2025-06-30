@@ -5,8 +5,8 @@ usr/bin/importctl
 <pkg.systemd.upstream> usr/lib/systemd/system/systemd-vmspawn@.service
 usr/bin/machinectl
 usr/bin/portablectl
-usr/lib/systemd/import-pubring.gpg
-usr/lib/systemd/network/80-namespace-ns.*
+usr/lib/systemd/import-pubring.*
+usr/lib/systemd/network/80-namespace-ns*
 usr/lib/systemd/portable
 usr/lib/systemd/systemd-machined
 usr/lib/systemd/systemd-export

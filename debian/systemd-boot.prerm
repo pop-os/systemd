@@ -36,8 +36,16 @@ remove_shim() {
         return
     fi
 
-    if [ -f "${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi" ] && [ "$(<"${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi" sha256sum)" = "$(<"${esp_path}/EFI/${vendor}/shim${efi_arch}.efi" sha256sum)" ]; then
+    if [ -f "${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi" ] && \
+            [ -f "${esp_path}/EFI/${vendor}/shim${efi_arch}.efi" ] && \
+            [ "$(<"${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi" sha256sum)" = "$(<"${esp_path}/EFI/${vendor}/shim${efi_arch}.efi" sha256sum)" ]; then
         rm -f "${esp_path}/EFI/BOOT/BOOT${efi_arch_upper}.efi"
+    fi
+
+    if [ -f "${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi" ] && \
+            [ -f "${esp_path}/EFI/${vendor}/fb${efi_arch}.efi" ] && \
+            [ "$(<"${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi" sha256sum)" = "$(<"${esp_path}/EFI/${vendor}/fb${efi_arch}.efi" sha256sum)" ]; then
+        rm -f "${esp_path}/EFI/BOOT/fb${efi_arch_upper}.efi"
     fi
 
     for f in shim fb mm; do
@@ -45,7 +53,7 @@ remove_shim() {
     done
 
     rm -f "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV"
-    rmdir --ignore-fail-on-non-empty "${esp_path}/EFI/${vendor}" || true
+    rmdir --ignore-fail-on-non-empty "${esp_path}/EFI/${vendor}" 2>/dev/null || true
 
     if command -v efibootmgr >/dev/null 2>&1 && efibootmgr | grep -i -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi"; then
         bootentry="$(efibootmgr | grep -i "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi" | cut -d' ' -f1 | sed -e 's/Boot//' -e 's/*//')"

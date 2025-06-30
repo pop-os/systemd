@@ -1,6 +1,7 @@
 # System groups used by udev rules
 g input  -
 g sgx    -
+g clock  -
 
 # Group for /dev/kvm
 g kvm    -
