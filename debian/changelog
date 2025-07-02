@@ -1,6 +1,6 @@
 systemd (255.4-1ubuntu8.10) noble; urgency=medium
 
-  * networkctl: Unable to generate JSON output.
+  * Fix regression in networkctl caused by previous upload:
     A regression was introduced due to an incorrect manager reference being passed to
     manager_get_route_table_to_string() within route_append_json(), resulting in an
     error when executing the `networkctl --json=pretty` command.
