@@ -235,7 +235,7 @@ due to the absence of commit #db68e990467f.]
 +                if (r < 0)
 +                        return r;
 +
-+                r = manager_get_route_table_to_string(route->manager, route->table, /* append_num = */ false, &table);
++                r = manager_get_route_table_to_string(manager, route->table, /* append_num = */ false, &table);
 +                if (r < 0)
 +                        return r;
 +
