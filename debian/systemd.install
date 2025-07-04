@@ -222,6 +222,7 @@ usr/lib/systemd/system/nss-user-lookup.target
 usr/lib/systemd/system/paths.target
 usr/lib/systemd/system/poweroff.target
 <pkg.systemd.upstream> usr/lib/systemd/initrd-preset/90-systemd.preset
+<pkg.systemd.upstream> usr/lib/systemd/initrd-preset/99-default.preset
 usr/lib/systemd/system-preset/90-systemd.preset
 usr/lib/systemd/system/printer.target
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.automount
