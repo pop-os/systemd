@@ -137,6 +137,7 @@ usr/lib/systemd/systemd-rfkill
 usr/lib/systemd/systemd-shutdown
 usr/lib/systemd/systemd-sleep
 usr/lib/systemd/systemd-socket-proxyd
+<pkg.systemd.upstream> usr/lib/systemd/systemd-ssh-issue
 usr/lib/systemd/systemd-ssh-proxy
 usr/lib/systemd/systemd-storagetm
 usr/lib/systemd/systemd-sulogin-shell
@@ -220,6 +221,7 @@ usr/lib/systemd/system/nss-lookup.target
 usr/lib/systemd/system/nss-user-lookup.target
 usr/lib/systemd/system/paths.target
 usr/lib/systemd/system/poweroff.target
+<pkg.systemd.upstream> usr/lib/systemd/initrd-preset/90-systemd.preset
 usr/lib/systemd/system-preset/90-systemd.preset
 usr/lib/systemd/system/printer.target
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.automount
@@ -253,6 +255,7 @@ usr/lib/systemd/system/sockets.target.wants/systemd-initctl.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-hostnamed.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald.socket
+<pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-logind-varlink.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrlock.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-sysext.socket
@@ -349,11 +352,12 @@ usr/lib/systemd/system/systemd-journal-flush.service
 usr/lib/systemd/system/systemd-kexec.service
 usr/lib/systemd/system/systemd-localed.service
 usr/lib/systemd/system/systemd-logind.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-logind-varlink.socket
 <pkg.systemd.upstream> usr/lib/systemd/system/systemd-loop@.service
 usr/lib/systemd/system/systemd-machine-id-commit.service
 usr/lib/systemd/system/systemd-modules-load.service
 usr/lib/systemd/system/systemd-networkd*.service
-usr/lib/systemd/system/systemd-networkd.socket
+usr/lib/systemd/system/systemd-networkd*.socket
 usr/lib/systemd/system/systemd-network-generator.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrextend@.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrextend.socket
