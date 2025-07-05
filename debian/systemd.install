@@ -358,7 +358,7 @@ usr/lib/systemd/system/systemd-logind.service
 usr/lib/systemd/system/systemd-machine-id-commit.service
 usr/lib/systemd/system/systemd-modules-load.service
 usr/lib/systemd/system/systemd-networkd*.service
-usr/lib/systemd/system/systemd-networkd*.socket
+usr/lib/systemd/system/systemd-networkd.socket
 usr/lib/systemd/system/systemd-network-generator.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrextend@.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrextend.socket
