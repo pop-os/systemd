@@ -1,3 +1,13 @@
+systemd (257.7-2) UNRELEASED; urgency=medium
+
+  * ukify: recommend sbsigntool | pesign for signing (Closes: #1108803)
+  * Move bootctl zsh completion file too to new package
+  * systemd-boot-tools: change architecture to linux-any. The tool can be
+    used for cross-building, and it's available on all architectures, not
+    just EFI ones
+
+ -- Luca Boccassi <bluca@debian.org>  Sat, 05 Jul 2025 13:19:15 +0100
+
 systemd (257.7-1) unstable; urgency=medium
 
   * udev: add 'clock' system group for PTP rules
