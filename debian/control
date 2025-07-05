@@ -546,7 +546,7 @@ Description: simple UEFI boot manager - integration and services
 
 Package: systemd-boot-tools
 Build-Profiles: <!stage1>
-Architecture: amd64 i386 arm64 armhf loong64 riscv64
+Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
 Recommends: ${dlopen:Recommends},
