@@ -533,7 +533,6 @@ usr/share/polkit-1/actions/org.freedesktop.timesync1.policy
 usr/share/polkit-1/rules.d/systemd-networkd.rules
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
-usr/share/zsh/vendor-completions/_bootctl
 usr/share/zsh/vendor-completions/_busctl
 usr/share/zsh/vendor-completions/_hostnamectl
 usr/share/zsh/vendor-completions/_journalctl
