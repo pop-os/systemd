@@ -1,3 +1,16 @@
+systemd (249.11-0ubuntu3.17) jammy; urgency=medium
+
+  [ Nick Rosbrook ]
+  * initramfs-tools: copy hwdb.bin to initramfs (LP: #2112237)
+  * d/t/tests-in-lxd: drop patching workaround (LP: #2115263)
+    - d/t/control: add Depends: dnsmasq-base
+      (Revealed by test progressing past previous failure)
+
+  [ Chengen Du ]
+  * core/device: fix devlink handling (LP: #2100252)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 26 Aug 2025 11:23:06 -0400
+
 systemd (249.11-0ubuntu3.16) jammy-security; urgency=medium
 
   * SECURITY UPDATE: race condition in systemd-coredump
