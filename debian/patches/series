@@ -51,3 +51,4 @@ lp2098183/0012-network-introduce-manager_serialize-deserialize.patch
 lp2098183/0013-network-keep-all-dynamically-acquired-configurations.patch
 lp2110585-drop-support-actual-brightness.patch
 lp2115391-pcrlock-handle-measurement-logs-where-hash-algs-in-header.patch
+lp2115418-network-dhcp6-consider-the-DHCPv6-protocol-as-finish.patch
