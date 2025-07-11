@@ -50,3 +50,4 @@ lp2098183/0011-network-expose-log_route_debug-and-log_address_debug.patch
 lp2098183/0012-network-introduce-manager_serialize-deserialize.patch
 lp2098183/0013-network-keep-all-dynamically-acquired-configurations.patch
 lp2110585-drop-support-actual-brightness.patch
+lp2115391-pcrlock-handle-measurement-logs-where-hash-algs-in-header.patch
