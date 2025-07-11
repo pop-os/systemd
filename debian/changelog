@@ -1,3 +1,31 @@
+systemd (255.4-1ubuntu8.11) noble; urgency=medium
+
+  [ Nick Rosbrook ]
+  * initramfs-tools: copy hwdb.bin to initramfs (LP: #2112237)
+  * d/t/tests-in-lxd: drop patching workaround (LP: #2115263)
+    - d/t/control: add Depends: dnsmasq-base
+      (Revealed by test progressing past previous failure)
+  * initramfs-tools: filter out zdev rules in the initramfs hook (LP: #2044104)
+    Backport the logic from plucky onward, but adjust the version string for
+    noble.
+  * test: fall back to SYSLOG_IDENTIFIER= matching in TEST-75-RESOLVED
+    Partially backport the test fix from 49a954b08654dd06bab71224a2398a65c2555549,
+    only targeting TEST-75-RESOLVED.
+
+  [ Matthew Ruffell ]
+  * pcrlock: handle measurement logs where hash algs in header.
+    Fix pcrlock log to function correctly reading the TPM eventlog on hyper-v VMs
+    (LP: #2115391)
+
+  [ Chengen Du ]
+  * network/dhcp6: consider the DHCPv6 protocol as finished when conflict addresses exist
+    (LP: #2115418)
+
+  [ Mario Limonciello ]
+  * Drop support for using actual brightness (LP: #2110585)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 11 Jul 2025 14:52:59 -0400
+
 systemd (255.4-1ubuntu8.10) noble; urgency=medium
 
   * Fix regression in networkctl caused by previous upload:
