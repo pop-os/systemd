@@ -1,6 +1,7 @@
+#!/usr/bin/dh-exec
 usr/sbin/init
-usr/sbin/telinit
-usr/sbin/runlevel
+<!pkg.systemd.upstream> usr/sbin/telinit
+<!pkg.systemd.upstream> usr/sbin/runlevel
 usr/sbin/shutdown
 usr/sbin/poweroff
 usr/sbin/reboot
