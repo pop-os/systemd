@@ -1,0 +1,76 @@
+From 9a224c307b36610e3675390eb2620e74d0f4efb0 Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Fri, 28 Mar 2025 09:19:23 -0500
+Subject: [PATCH] backlight: Drop support for actual_brightness
+
+Some AMD systems have support for features like custom brightness
+curve or adaptive backlight management.  These features allow the
+display driver to adjust the brightness based upon other factors
+than just the user brightness request.
+
+The user's brightness request is indicated in the 'brightness' file
+but the effective result of the logic in the display driver is stored
+in the 'actual_brightness' file.
+
+This leads to problems when shutting the system down because the value
+of 'actual_brightness' may be lower than 'brightness' and the wrong value
+gets stored for the next boot.
+
+For example if the brightness a user requested was 150, the actual_brightness
+might be 130. So the next boot the brightness will be "set" to 130, but the
+actual brightness might be 115. If the user reboots again it will be set to 115
+for the next boot but the actual brightness might be 100. That is this gets worse
+and worse each reboot cycle until the system eventually boots up at minimum
+brightness.
+
+Furthermore the kernel documentation indicates that the brightness and
+actual_brightness files are not guaranteed to be the same values.
+
+Due to this; drop the use of 'actual_brightness' when saving/restoring brightness
+and instead rely only upon 'brightness'.
+
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+ src/backlight/backlight.c | 29 -----------------------------
+ 1 file changed, 29 deletions(-)
+
+Index: systemd-ubuntu/src/backlight/backlight.c
+===================================================================
+--- systemd-ubuntu.orig/src/backlight/backlight.c
++++ systemd-ubuntu/src/backlight/backlight.c
+@@ -412,35 +412,6 @@ static int read_brightness(sd_device *de
+         if (r < 0)
+                 return log_device_debug_errno(device, r, "Failed to get subsystem: %m");
+ 
+-        if (streq(subsystem, "backlight")) {
+-                r = sd_device_get_sysattr_value(device, "actual_brightness", &value);
+-                if (r == -ENOENT) {
+-                        log_device_debug_errno(device, r, "Failed to read 'actual_brightness' attribute, "
+-                                               "fall back to use 'brightness' attribute: %m");
+-                        goto use_brightness;
+-                }
+-                if (r < 0)
+-                        return log_device_debug_errno(device, r, "Failed to read 'actual_brightness' attribute: %m");
+-
+-                r = safe_atou(value, &brightness);
+-                if (r < 0) {
+-                        log_device_debug_errno(device, r, "Failed to parse 'actual_brightness' attribute, "
+-                                               "fall back to use 'brightness' attribute: %s", value);
+-                        goto use_brightness;
+-                }
+-
+-                if (brightness > max_brightness) {
+-                        log_device_debug(device, "actual_brightness=%u is larger than max_brightness=%u, "
+-                                         "fall back to use 'brightness' attribute", brightness, max_brightness);
+-                        goto use_brightness;
+-                }
+-
+-                log_device_debug(device, "Current actual_brightness is %u", brightness);
+-                *ret_brightness = brightness;
+-                return 0;
+-        }
+-
+-use_brightness:
+         r = sd_device_get_sysattr_value(device, "brightness", &value);
+         if (r < 0)
+                 return log_device_debug_errno(device, r, "Failed to read 'brightness' attribute: %m");
