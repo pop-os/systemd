@@ -8,3 +8,4 @@ wait-online/wait-online-add-support-for-waiting-for-DNS-configuration.patch
 wait-online/test-add-test-for-resolved-SubscribeDNSConfiguration-API.patch
 wait-online/networkd-test-add-basic-tests-for-systemd-networkd-wait-o.patch
 lp2104943-test-network-add-handling-for-Ubuntu-FAN-patches.patch
+test-ignore-coredumps-for-gnusleep-in-addition-to-sleep-L.patch
