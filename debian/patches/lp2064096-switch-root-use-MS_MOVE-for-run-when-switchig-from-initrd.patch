@@ -34,7 +34,7 @@ just go back to MS_MOVE when switching from the initrd.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/shared/switch-root.c b/src/shared/switch-root.c
-index e64b6f6..9fc848d 100644
+index 621161a..a1c53ba 100644
 --- a/src/shared/switch-root.c
 +++ b/src/shared/switch-root.c
 @@ -42,7 +42,7 @@ int switch_root(const char *new_root,

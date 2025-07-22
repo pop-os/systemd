@@ -179,7 +179,7 @@ index b0c4b83..77d2663 100644
          manager_llmnr_maybe_stop(l->manager);
          manager_mdns_maybe_stop(l->manager);
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 883bc09..e374978 100644
+index f25ec5b..06635a8 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -22,6 +22,7 @@
@@ -258,7 +258,7 @@ index 883bc09..e374978 100644
  
          /* Now check all the links, and if mDNS/llmr are disabled everywhere, stop them globally too. */
          manager_llmnr_maybe_stop(m);
-@@ -808,10 +849,14 @@ Manager *manager_free(Manager *m) {
+@@ -813,10 +854,14 @@ Manager *manager_free(Manager *m) {
          sd_event_source_unref(m->network_event_source);
          sd_network_monitor_unref(m->network_monitor);
  
@@ -273,7 +273,7 @@ index 883bc09..e374978 100644
          manager_llmnr_stop(m);
          manager_mdns_stop(m);
          manager_dns_stub_stop(m);
-@@ -1938,3 +1983,181 @@ void dns_manager_reset_statistics(Manager *m) {
+@@ -1943,3 +1988,181 @@ void dns_manager_reset_statistics(Manager *m) {
          m->n_failure_responses_served_stale_total = 0;
          zero(m->n_dnssec_verdict);
  }

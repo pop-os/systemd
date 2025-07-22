@@ -1,6 +1,7 @@
 From: Nick Rosbrook <enr0n@ubuntu.com>
 Date: Mon, 7 Oct 2024 11:39:57 -0400
-Subject: resolve: rename varlink_subscription -> varlink_query_results_subscription
+Subject: resolve: rename varlink_subscription ->
+ varlink_query_results_subscription
 
 Origin: upstream, https://github.com/systemd/systemd/commit/cf22b5c5ad6c879055ccbdc182897be1771cb676
 
@@ -14,10 +15,10 @@ to the varlink API.
  3 files changed, 7 insertions(+), 7 deletions(-)
 
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 5ec9467..883bc09 100644
+index 5ca4072..f25ec5b 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -1190,7 +1190,7 @@ int manager_monitor_send(Manager *m, DnsQuery *q) {
+@@ -1195,7 +1195,7 @@ int manager_monitor_send(Manager *m, DnsQuery *q) {
  
          assert(m);
  
@@ -26,7 +27,7 @@ index 5ec9467..883bc09 100644
                  return 0;
  
          /* Merge all questions into one */
-@@ -1240,7 +1240,7 @@ int manager_monitor_send(Manager *m, DnsQuery *q) {
+@@ -1245,7 +1245,7 @@ int manager_monitor_send(Manager *m, DnsQuery *q) {
          }
  
          r = varlink_many_notifybo(

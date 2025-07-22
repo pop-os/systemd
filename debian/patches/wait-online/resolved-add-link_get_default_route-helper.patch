@@ -60,7 +60,7 @@ index 1c26dcb..b0c4b83 100644
                  sd_bus *bus,
                  const char *path,
 diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
-index 1c5ad08..df4b599 100644
+index 08ab240..8594d90 100644
 --- a/src/resolve/resolved-link.c
 +++ b/src/resolve/resolved-link.c
 @@ -14,6 +14,7 @@
@@ -71,7 +71,7 @@ index 1c5ad08..df4b599 100644
  #include "resolved-link.h"
  #include "resolved-llmnr.h"
  #include "resolved-mdns.h"
-@@ -834,6 +835,20 @@ ResolveSupport link_get_mdns_support(Link *link) {
+@@ -858,6 +859,20 @@ ResolveSupport link_get_mdns_support(Link *link) {
          return MIN(link->mdns_support, link->manager->mdns_support);
  }
  
@@ -93,7 +93,7 @@ index 1c5ad08..df4b599 100644
                  LinkAddress **ret,
                  int family,
 diff --git a/src/resolve/resolved-link.h b/src/resolve/resolved-link.h
-index 482a4b4..712a81d 100644
+index e101ca1..7726e09 100644
 --- a/src/resolve/resolved-link.h
 +++ b/src/resolve/resolved-link.h
 @@ -109,6 +109,8 @@ DnsOverTlsMode link_get_dns_over_tls_mode(Link *l);

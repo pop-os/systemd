@@ -122,7 +122,7 @@ index 7d7d294..8915b87 100644
 +}
 +void dns_server_reset_accessible_all(DnsServer *first);
 diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
-index 928137b..1c5ad08 100644
+index 7d57263..08ab240 100644
 --- a/src/resolve/resolved-link.c
 +++ b/src/resolve/resolved-link.c
 @@ -299,6 +299,9 @@ static int link_update_dns_servers(Link *l) {

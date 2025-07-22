@@ -3,16 +3,15 @@ Date: Tue, 22 Oct 2024 10:06:11 -0400
 Subject: test: add test for resolved SubscribeDNSConfiguration API
 
 Origin: upstream, https://github.com/systemd/systemd/commit/5ee20919a2f2b2168d2fcf92021afe92eb6d8d1d
-
 ---
  test/units/TEST-75-RESOLVED.sh | 77 ++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 77 insertions(+)
 
 diff --git a/test/units/TEST-75-RESOLVED.sh b/test/units/TEST-75-RESOLVED.sh
-index 25ab02a..431b37a 100755
+index fe8f22a..062d1d4 100755
 --- a/test/units/TEST-75-RESOLVED.sh
 +++ b/test/units/TEST-75-RESOLVED.sh
-@@ -1007,6 +1007,83 @@ testcase_12_resolvectl2() {
+@@ -1038,6 +1038,83 @@ testcase_12_resolvectl2() {
      restart_resolved
  }
  
