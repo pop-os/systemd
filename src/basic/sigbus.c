@@ -1,14 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <signal.h>
-#include <stddef.h>
 #include <sys/mman.h>
 
-#include "macro.h"
 #include "memory-util.h"
-#include "missing_syscall.h"
-#include "process-util.h"
 #include "sigbus.h"
 #include "signal-util.h"
 
@@ -121,7 +116,7 @@ static void sigbus_handler(int sn, siginfo_t *si, void *data) {
 }
 
 void sigbus_install(void) {
-        struct sigaction sa = {
+        static const struct sigaction sa = {
                 .sa_sigaction = sigbus_handler,
                 .sa_flags = SA_SIGINFO,
         };

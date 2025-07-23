@@ -4,19 +4,16 @@
 ***/
 
 #include <arpa/inet.h>
-#include <errno.h>
-#include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 #include "sd-dhcp-lease.h"
-#include "dns-resolver-internal.h"
 
 #include "alloc-util.h"
 #include "dhcp-lease-internal.h"
 #include "dhcp-option.h"
+#include "dns-def.h"
 #include "dns-domain.h"
+#include "dns-resolver-internal.h"
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -1076,7 +1073,6 @@ int dhcp_lease_parse_options(uint8_t code, uint8_t len, const void *option, void
 
         default:
                 log_debug("Ignoring DHCP option %"PRIu8" while parsing.", code);
-                break;
         }
 
         return 0;

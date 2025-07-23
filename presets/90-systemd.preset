@@ -13,10 +13,13 @@
 
 enable remote-fs.target
 enable remote-cryptsetup.target
+enable remote-integritysetup.target
+enable remote-veritysetup.target
 enable machines.target
 
 enable getty@.service
 
+enable systemd-boot-clear-sysfail.service
 enable systemd-boot-update.service
 enable systemd-confext.service
 enable systemd-homed.service
@@ -31,6 +34,7 @@ enable systemd-pstore.service
 enable systemd-resolved.service
 enable systemd-sysext.service
 enable systemd-timesyncd.service
+enable systemd-tpm2-clear.service
 enable systemd-userdbd.socket
 
 disable console-getty.service

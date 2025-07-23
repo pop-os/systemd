@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <inttypes.h>
-#include <stdbool.h>
-#include <sys/types.h>
+#include <sys/sysmacros.h>
 
-#include "stdio-util.h"
+#include "forward.h"
 
 int parse_devnum(const char *s, dev_t *ret);
+
+#define DEVNUM_MAJOR_MAX ((UINT32_C(1) << 12) - 1U)
+#define DEVNUM_MINOR_MAX ((UINT32_C(1) << 20) - 1U)
 
 /* glibc and the Linux kernel have different ideas about the major/minor size. These calls will check whether the
  * specified major is valid by the Linux kernel's standards, not by glibc's. Linux has 20bits of minor, and 12 bits of
@@ -18,14 +19,14 @@ int parse_devnum(const char *s, dev_t *ret);
 #define DEVICE_MAJOR_VALID(x)                                           \
         ({                                                              \
                 typeof(x) _x = (x), _y = 0;                             \
-                _x >= _y && _x < (UINT32_C(1) << 12);                   \
+                _x >= _y && _x <= DEVNUM_MAJOR_MAX;                     \
                                                                         \
         })
 
 #define DEVICE_MINOR_VALID(x)                                           \
         ({                                                              \
                 typeof(x) _x = (x), _y = 0;                             \
-                _x >= _y && _x < (UINT32_C(1) << 20);                   \
+                _x >= _y && _x <= DEVNUM_MINOR_MAX;                     \
         })
 
 int device_path_make_major_minor(mode_t mode, dev_t devnum, char **ret);
@@ -45,12 +46,13 @@ static inline bool devnum_set_and_equal(dev_t a, dev_t b) {
 #define DEVNUM_FORMAT_STR "%u:%u"
 #define DEVNUM_FORMAT_VAL(d) major(d), minor(d)
 
-static inline char *format_devnum(dev_t d, char buf[static DEVNUM_STR_MAX]) {
-        return ASSERT_PTR(snprintf_ok(buf, DEVNUM_STR_MAX, DEVNUM_FORMAT_STR, DEVNUM_FORMAT_VAL(d)));
-}
+char *format_devnum(dev_t d, char buf[static DEVNUM_STR_MAX]);
 
 #define FORMAT_DEVNUM(d) format_devnum((d), (char[DEVNUM_STR_MAX]) {})
 
 static inline bool devnum_is_zero(dev_t d) {
         return major(d) == 0 && minor(d) == 0;
 }
+
+#define DEVNUM_TO_PTR(u) ((void*) (uintptr_t) (u))
+#define PTR_TO_DEVNUM(p) ((dev_t) ((uintptr_t) (p)))

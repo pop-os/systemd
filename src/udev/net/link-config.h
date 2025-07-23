@@ -2,20 +2,17 @@
 #pragma once
 
 #include "sd-device.h"
-#include "sd-netlink.h"
 
-#include "condition.h"
-#include "conf-parser.h"
 #include "cpu-set-util.h"
+#include "ether-addr-util.h"
 #include "ethtool-util.h"
-#include "hashmap.h"
+#include "forward.h"
 #include "list.h"
 #include "net-condition.h"
-#include "netif-naming-scheme.h"
-#include "udev-event.h"
 
 typedef struct LinkConfigContext LinkConfigContext;
 typedef struct LinkConfig LinkConfig;
+typedef struct UdevEvent UdevEvent;
 
 typedef enum MACAddressPolicy {
         MAC_ADDRESS_POLICY_PERSISTENT,
@@ -26,16 +23,15 @@ typedef enum MACAddressPolicy {
 } MACAddressPolicy;
 
 typedef struct Link {
-        int ifindex;
-        const char *ifname;
-        const char *new_name;
-        char **altnames;
-
+        UdevEvent *event;
         LinkConfig *config;
-        sd_device *device;
-        sd_device *device_db_clone;
+
+        /* from sd_device */
+        const char *ifname;
+        int ifindex;
         sd_device_action_t action;
 
+        /* from rtnl */
         char *kind;
         const char *driver;
         uint16_t iftype;
@@ -44,6 +40,9 @@ typedef struct Link {
         struct hw_addr_data permanent_hw_addr;
         unsigned name_assign_type;
         unsigned addr_assign_type;
+
+        /* generated name */
+        const char *new_name;
 } Link;
 
 struct LinkConfig {
@@ -54,9 +53,13 @@ struct LinkConfig {
         LIST_HEAD(Condition, conditions);
 
         char *description;
+
+        /* udev property */
         char **properties;
         char **import_properties;
         char **unset_properties;
+
+        /* rtnl setlink */
         struct hw_addr_data hw_addr;
         MACAddressPolicy mac_address_policy;
         NamePolicy *name_policy;
@@ -70,24 +73,47 @@ struct LinkConfig {
         uint32_t mtu;
         uint32_t gso_max_segments;
         size_t gso_max_size;
+
+        /* ethtool link settings */
         uint64_t speed;
         Duplex duplex;
         int autonegotiation;
         uint32_t advertise[N_ADVERTISE];
+        NetDevPort port;
+        uint8_t mdi;
+
+        /* ethtool WoL */
         uint32_t wol;
         char *wol_password_file;
         uint8_t *wol_password;
-        NetDevPort port;
+
+        /* ethtool features */
         int features[_NET_DEV_FEAT_MAX];
+
+        /* ethtool channels */
         netdev_channels channels;
+
+        /* ethtool ring parameters */
         netdev_ring_param ring;
+
+        /* ethtool pause parameters */
         int rx_flow_control;
         int tx_flow_control;
         int autoneg_flow_control;
-        netdev_coalesce_param coalesce;
-        uint8_t mdi;
-        CPUSet *rps_cpu_mask;
 
+        /* ethtool coalesce settings */
+        netdev_coalesce_param coalesce;
+
+        /* ethtool energy efficient ethernet settings */
+        int eee_enabled;
+        int eee_tx_lpi_enabled;
+        usec_t eee_tx_lpi_timer_usec;
+        uint32_t eee_advertise[N_ADVERTISE];
+
+        /* Rx RPS CPU mask */
+        CPUSet rps_cpu_mask;
+
+        /* SR-IOV */
         uint32_t sr_iov_num_vfs;
         OrderedHashmap *sr_iov_by_section;
 
@@ -102,12 +128,12 @@ int link_load_one(LinkConfigContext *ctx, const char *filename);
 int link_config_load(LinkConfigContext *ctx);
 bool link_config_should_reload(LinkConfigContext *ctx);
 
-int link_new(LinkConfigContext *ctx, sd_netlink **rtnl, sd_device *device, sd_device *device_db_clone, Link **ret);
-Link *link_free(Link *link);
+int link_new(LinkConfigContext *ctx, UdevEvent *event, Link **ret);
+Link* link_free(Link *link);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_free);
 
 int link_get_config(LinkConfigContext *ctx, Link *link);
-int link_apply_config(LinkConfigContext *ctx, sd_netlink **rtnl, Link *link, EventMode mode);
+int link_apply_config(LinkConfigContext *ctx, Link *link);
 
 const char* mac_address_policy_to_string(MACAddressPolicy p) _const_;
 MACAddressPolicy mac_address_policy_from_string(const char *p) _pure_;

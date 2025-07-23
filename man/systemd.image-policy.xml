@@ -149,7 +149,7 @@
     included in the image, regardless whether the configured image policy would allow access to it or
     not. Similar,
     <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry> is not
-    going to make use of any discovered swap device, regardless if the policy would allow that or not.</para>
+    going to make use of any discovered swap device, regardless of whether the policy would allow that or not.</para>
 
     <para>Use the <command>image-policy</command> command of the
     <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry> tool
@@ -185,6 +185,7 @@
       <member><citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
       <member><citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry></member>
       <member><citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry></member>
+      <member><citerefentry><refentrytitle>systemd.filter</refentrytitle><manvolnum>7</manvolnum></citerefentry></member>
     </simplelist></para>
   </refsect1>
 

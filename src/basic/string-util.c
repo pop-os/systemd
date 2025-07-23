@@ -1,20 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <stdarg.h>
-#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "alloc-util.h"
 #include "escape.h"
 #include "extract-word.h"
-#include "fd-util.h"
-#include "fileio.h"
 #include "glyph-util.h"
 #include "gunicode.h"
 #include "locale-util.h"
-#include "macro.h"
+#include "log.h"
 #include "memory-util.h"
 #include "memstream-util.h"
 #include "path-util.h"
@@ -46,67 +40,28 @@ char* first_word(const char *s, const char *word) {
         return (char*) nw;
 }
 
-char* strnappend(const char *s, const char *suffix, size_t b) {
-        size_t a;
-        char *r;
+char* strextendn(char **x, const char *s, size_t l) {
+        assert(x);
+        assert(s || l == 0);
 
-        if (!s && !suffix)
-                return strdup("");
+        if (l > 0)
+                l = strnlen(s, l); /* ignore trailing noise */
 
-        if (!s)
-                return strndup(suffix, b);
+        if (l > 0 || !*x) {
+                size_t q;
+                char *m;
 
-        if (!suffix)
-                return strdup(s);
-
-        assert(s);
-        assert(suffix);
-
-        a = strlen(s);
-        if (b > SIZE_MAX - a)
-                return NULL;
-
-        r = new(char, a+b+1);
-        if (!r)
-                return NULL;
-
-        memcpy(r, s, a);
-        memcpy(r+a, suffix, b);
-        r[a+b] = 0;
-
-        return r;
-}
-
-char* strjoin_real(const char *x, ...) {
-        va_list ap;
-        size_t l = 1;
-        char *r, *p;
-
-        va_start(ap, x);
-        for (const char *t = x; t; t = va_arg(ap, const char *)) {
-                size_t n;
-
-                n = strlen(t);
-                if (n > SIZE_MAX - l) {
-                        va_end(ap);
+                q = strlen_ptr(*x);
+                m = realloc(*x, q + l + 1);
+                if (!m)
                         return NULL;
-                }
-                l += n;
+
+                *mempcpy_typesafe(m + q, s, l) = 0;
+
+                *x = m;
         }
-        va_end(ap);
 
-        p = r = new(char, l);
-        if (!r)
-                return NULL;
-
-        va_start(ap, x);
-        for (const char *t = x; t; t = va_arg(ap, const char *))
-                p = stpcpy(p, t);
-        va_end(ap);
-
-        *p = 0;
-
-        return r;
+        return *x;
 }
 
 char* strstrip(char *s) {
@@ -272,7 +227,7 @@ bool string_has_cc(const char *p, const char *ok) {
 }
 
 static int write_ellipsis(char *buf, bool unicode) {
-        const char *s = special_glyph_full(SPECIAL_GLYPH_ELLIPSIS, unicode);
+        const char *s = glyph_full(GLYPH_ELLIPSIS, unicode);
         assert(strlen(s) == 3);
         memcpy(buf, s, 3);
         return 3;
@@ -360,10 +315,6 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
         case 2:
                 if (!is_locale_utf8())
                         return strdup("..");
-
-                break;
-
-        default:
                 break;
         }
 
@@ -732,10 +683,12 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
 
         for (const char *i = *ibuf; i < *ibuf + isz + 1; i++) {
 
+                bool eot = i >= *ibuf + isz;
+
                 switch (state) {
 
                 case STATE_OTHER:
-                        if (i >= *ibuf + isz) /* EOT */
+                        if (eot)
                                 break;
 
                         if (*i == '\r') {
@@ -760,7 +713,7 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                 case STATE_ESCAPE:
                         assert(n_carriage_returns == 0);
 
-                        if (i >= *ibuf + isz) { /* EOT */
+                        if (eot) {
                                 fputc('\x1B', f);
                                 advance_offsets(i - *ibuf, highlight, shift, 1);
                                 break;
@@ -782,8 +735,7 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                 case STATE_CSI:
                         assert(n_carriage_returns == 0);
 
-                        if (i >= *ibuf + isz || /* EOT … */
-                            !strchr("01234567890;m", *i)) { /* … or invalid chars in sequence */
+                        if (eot || !strchr("01234567890;m", *i)) { /* EOT or invalid chars in sequence */
                                 fputc('\x1B', f);
                                 fputc('[', f);
                                 advance_offsets(i - *ibuf, highlight, shift, 2);
@@ -800,8 +752,7 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                         /* There are three kinds of OSC terminators: \x07, \x1b\x5c or \x9c. We only support
                          * the first two, because the last one is a valid UTF-8 codepoint and hence creates
                          * an ambiguity (many Terminal emulators refuse to support it as well). */
-                        if (i >= *ibuf + isz || /* EOT … */
-                            (!IN_SET(*i, '\x07', '\x1b') && (uint8_t) *i < 32U) || (uint8_t) *i > 126U) { /* … or invalid chars in sequence */
+                        if (eot || (!IN_SET(*i, '\x07', '\x1b') && !osc_char_is_valid(*i))) { /* EOT or invalid chars in sequence */
                                 fputc('\x1B', f);
                                 fputc(']', f);
                                 advance_offsets(i - *ibuf, highlight, shift, 2);
@@ -815,8 +766,7 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
                         break;
 
                 case STATE_OSC_CLOSING:
-                        if (i >= *ibuf + isz || /* EOT … */
-                            *i != '\x5c') { /* … or incomplete two-byte ST in sequence */
+                        if (eot || *i != '\x5c') { /* EOT or incomplete two-byte ST in sequence */
                                 fputc('\x1B', f);
                                 fputc(']', f);
                                 advance_offsets(i - *ibuf, highlight, shift, 2);
@@ -844,12 +794,14 @@ char* strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
 }
 
 char* strextend_with_separator_internal(char **x, const char *separator, ...) {
+        _cleanup_free_ char *buffer = NULL;
         size_t f, l, l_separator;
         bool need_separator;
         char *nr, *p;
         va_list ap;
 
-        assert(x);
+        if (!x)
+                x = &buffer;
 
         l = f = strlen_ptr(*x);
 
@@ -857,13 +809,14 @@ char* strextend_with_separator_internal(char **x, const char *separator, ...) {
         l_separator = strlen_ptr(separator);
 
         va_start(ap, separator);
-        for (;;) {
-                const char *t;
+        for (const char *t;;) {
                 size_t n;
 
                 t = va_arg(ap, const char *);
                 if (!t)
                         break;
+                if (t == POINTER_MAX)
+                        continue;
 
                 n = strlen(t);
 
@@ -896,6 +849,8 @@ char* strextend_with_separator_internal(char **x, const char *separator, ...) {
                 t = va_arg(ap, const char *);
                 if (!t)
                         break;
+                if (t == POINTER_MAX)
+                        continue;
 
                 if (need_separator && separator)
                         p = stpcpy(p, separator);
@@ -907,9 +862,13 @@ char* strextend_with_separator_internal(char **x, const char *separator, ...) {
         va_end(ap);
 
         assert(p == nr + l);
-
         *p = 0;
 
+        /* If no buffer to extend was passed in return the start of the buffer */
+        if (buffer)
+                return TAKE_PTR(buffer);
+
+        /* Otherwise we extended the buffer: return the end */
         return p;
 }
 
@@ -999,33 +958,6 @@ oom:
         return -ENOMEM;
 }
 
-char* strextendn(char **x, const char *s, size_t l) {
-        assert(x);
-        assert(s || l == 0);
-
-        if (l == SIZE_MAX)
-                l = strlen_ptr(s);
-        else if (l > 0)
-                l = strnlen(s, l); /* ignore trailing noise */
-
-        if (l > 0 || !*x) {
-                size_t q;
-                char *m;
-
-                q = strlen_ptr(*x);
-                m = realloc(*x, q + l + 1);
-                if (!m)
-                        return NULL;
-
-                memcpy_safe(m + q, s, l);
-                m[q + l] = 0;
-
-                *x = m;
-        }
-
-        return *x;
-}
-
 char* strrep(const char *s, unsigned n) {
         char *r, *p;
         size_t l;
@@ -1044,34 +976,26 @@ char* strrep(const char *s, unsigned n) {
         return r;
 }
 
-int split_pair(const char *s, const char *sep, char **l, char **r) {
-        char *x, *a, *b;
-
+int split_pair(const char *s, const char *sep, char **ret_first, char **ret_second) {
         assert(s);
-        assert(sep);
-        assert(l);
-        assert(r);
+        assert(!isempty(sep));
+        assert(ret_first);
+        assert(ret_second);
 
-        if (isempty(sep))
-                return -EINVAL;
-
-        x = strstr(s, sep);
+        const char *x = strstr(s, sep);
         if (!x)
                 return -EINVAL;
 
-        a = strndup(s, x - s);
+        _cleanup_free_ char *a = strndup(s, x - s);
         if (!a)
                 return -ENOMEM;
 
-        b = strdup(x + strlen(sep));
-        if (!b) {
-                free(a);
+        _cleanup_free_ char *b = strdup(x + strlen(sep));
+        if (!b)
                 return -ENOMEM;
-        }
 
-        *l = a;
-        *r = b;
-
+        *ret_first = TAKE_PTR(a);
+        *ret_second = TAKE_PTR(b);
         return 0;
 }
 
@@ -1096,6 +1020,15 @@ int free_and_strdup(char **p, const char *s) {
         free_and_replace(*p, t);
 
         return 1;
+}
+
+int free_and_strdup_warn(char **p, const char *s) {
+        int r;
+
+        r = free_and_strdup(p, s);
+        if (r < 0)
+                return log_oom();
+        return r;
 }
 
 int free_and_strndup(char **p, const char *s, size_t l) {
@@ -1157,6 +1090,19 @@ bool string_is_safe(const char *p) {
         }
 
         return true;
+}
+
+bool string_is_safe_ascii(const char *p) {
+        return ascii_is_valid(p) && string_is_safe(p);
+}
+
+char* str_realloc(char *p) {
+        /* Reallocate *p to actual size. Ignore failure, and return the original string on error. */
+
+        if (!p)
+                return NULL;
+
+        return realloc(p, strlen(p) + 1) ?: p;
 }
 
 char* string_erase(char *x) {
@@ -1416,6 +1362,46 @@ char* find_line_startswith(const char *haystack, const char *needle) {
         return p + strlen(needle);
 }
 
+char* find_line(const char *haystack, const char *needle) {
+        char *p;
+
+        assert(haystack);
+        assert(needle);
+
+        /* Finds the first line in 'haystack' that match the specified string. Returns a pointer to the
+         * beginning of the line */
+
+        p = find_line_startswith(haystack, needle);
+        if (!p)
+                return NULL;
+
+        if (*p == 0 || strchr(NEWLINE, *p))
+                return p - strlen(needle);
+
+        return NULL;
+}
+
+char* find_line_after(const char *haystack, const char *needle) {
+        char *p;
+
+        assert(haystack);
+        assert(needle);
+
+        /* Finds the first line in 'haystack' that match the specified string. Returns a pointer to the
+         * next line after it */
+
+        p = find_line_startswith(haystack, needle);
+        if (!p)
+                return NULL;
+
+        if (*p == 0)
+                return p;
+        if (strchr(NEWLINE, *p))
+                return p + 1;
+
+        return NULL;
+}
+
 bool version_is_valid(const char *s) {
         if (isempty(s))
                 return false;
@@ -1521,4 +1507,20 @@ char* strrstr(const char *haystack, const char *needle) {
                         return (char *) p;
         }
         return NULL;
+}
+
+size_t str_common_prefix(const char *a, const char *b) {
+        assert(a);
+        assert(b);
+
+        /* Returns the length of the common prefix of the two specified strings, or SIZE_MAX in case the
+         * strings are fully identical. */
+
+        for (size_t n = 0;; n++) {
+                char c = a[n];
+                if (c != b[n])
+                        return n;
+                if (c == 0)
+                        return SIZE_MAX;
+        }
 }

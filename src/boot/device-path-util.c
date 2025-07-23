@@ -1,7 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "device-path-util.h"
+#include "efi-string.h"
+#include "string-util-fundamental.h"
 #include "util.h"
+
+static const EFI_DEVICE_PATH *device_path_find_end_node(const EFI_DEVICE_PATH *dp) {
+        while (!device_path_is_end(dp))
+                dp = device_path_next_node(dp);
+        return dp;
+}
 
 EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DEVICE_PATH **ret_dp) {
         EFI_STATUS err;
@@ -14,9 +22,7 @@ EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DE
         if (err != EFI_SUCCESS)
                 return err;
 
-        EFI_DEVICE_PATH *end_node = dp;
-        while (!device_path_is_end(end_node))
-                end_node = device_path_next_node(end_node);
+        const EFI_DEVICE_PATH *end_node = device_path_find_end_node(dp);
 
         size_t file_size = strsize16(file);
         size_t dp_size = (uint8_t *) end_node - (uint8_t *) dp;
@@ -35,6 +41,38 @@ EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DE
 
         dp = device_path_next_node(dp);
         *dp = DEVICE_PATH_END_NODE;
+        return EFI_SUCCESS;
+}
+
+EFI_STATUS make_url_device_path(const char16_t *url, EFI_DEVICE_PATH **ret) {
+        assert(url);
+        assert(ret);
+
+        /* Turns a URL into a simple one-element URL device path. */
+
+        _cleanup_free_ char* u = xstr16_to_ascii(url);
+        if (!u)
+                return EFI_INVALID_PARAMETER;
+
+        size_t l = strlen8(u);
+
+        size_t t = offsetof(URI_DEVICE_PATH, Uri) + l + sizeof(EFI_DEVICE_PATH);
+        EFI_DEVICE_PATH *dp = xmalloc(t);
+
+        URI_DEVICE_PATH *udp = (URI_DEVICE_PATH*) dp;
+        udp->Header = (EFI_DEVICE_PATH) {
+                .Type = MESSAGING_DEVICE_PATH,
+                .SubType = MSG_URI_DP,
+                .Length = offsetof(URI_DEVICE_PATH, Uri) + l,
+        };
+        memcpy(udp->Uri, u, l);
+
+        EFI_DEVICE_PATH *end = device_path_next_node(dp);
+        *end = DEVICE_PATH_END_NODE;
+
+        assert(((uint8_t*) end + sizeof(EFI_DEVICE_PATH)) == ((uint8_t*) dp + t));
+
+        *ret = TAKE_PTR(dp);
         return EFI_SUCCESS;
 }
 
@@ -90,7 +128,7 @@ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
                 return EFI_SUCCESS;
         }
 
-        str = dp_to_text->ConvertDevicePathToText(dp, false, false);
+        str = dp_to_text->ConvertDevicePathToText(dp, /* DisplayOnly=*/ false, /* AllowShortcuts= */ false);
         if (!str)
                 return EFI_OUT_OF_RESOURCES;
 
@@ -124,7 +162,9 @@ EFI_DEVICE_PATH *device_path_replace_node(
          * node. If new_node is provided, it is appended at the end of the new path. */
 
         assert(path);
-        assert(node);
+
+        if (!node)
+                node = device_path_find_end_node(path);
 
         size_t len = (uint8_t *) node - (uint8_t *) path;
         EFI_DEVICE_PATH *ret = xmalloc(len + (new_node ? new_node->Length : 0) + sizeof(EFI_DEVICE_PATH));
@@ -135,4 +175,17 @@ EFI_DEVICE_PATH *device_path_replace_node(
 
         *end = DEVICE_PATH_END_NODE;
         return ret;
+}
+
+size_t device_path_size(const EFI_DEVICE_PATH *dp) {
+        const EFI_DEVICE_PATH *i = ASSERT_PTR(dp);
+
+        for (; !device_path_is_end(i); i = device_path_next_node(i))
+                ;
+
+        return (const uint8_t*) i - (const uint8_t*) dp + sizeof(EFI_DEVICE_PATH);
+}
+
+EFI_DEVICE_PATH *device_path_dup(const EFI_DEVICE_PATH *dp) {
+        return xmemdup(ASSERT_PTR(dp), device_path_size(dp));
 }

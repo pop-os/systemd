@@ -3,10 +3,12 @@
 #include <getopt.h>
 #include <sys/mman.h>
 
-#include "ask-password-api.h"
+#include "sd-device.h"
+
 #include "blockdev-list.h"
 #include "blockdev-util.h"
 #include "build.h"
+#include "cryptenroll.h"
 #include "cryptenroll-fido2.h"
 #include "cryptenroll-list.h"
 #include "cryptenroll-password.h"
@@ -14,25 +16,21 @@
 #include "cryptenroll-recovery.h"
 #include "cryptenroll-tpm2.h"
 #include "cryptenroll-wipe.h"
-#include "cryptenroll.h"
 #include "cryptsetup-util.h"
-#include "devnum-util.h"
-#include "env-util.h"
-#include "escape.h"
+#include "extract-word.h"
 #include "fileio.h"
 #include "libfido2-util.h"
+#include "log.h"
 #include "main-func.h"
-#include "memory-util.h"
 #include "pager.h"
 #include "parse-argument.h"
 #include "parse-util.h"
-#include "path-util.h"
 #include "pkcs11-util.h"
 #include "pretty-print.h"
 #include "string-table.h"
-#include "strv.h"
-#include "terminal-util.h"
+#include "string-util.h"
 #include "tpm2-pcr.h"
+#include "tpm2-util.h"
 
 static EnrollType arg_enroll_type = _ENROLL_TYPE_INVALID;
 static char *arg_unlock_keyfile = NULL;
@@ -308,7 +306,7 @@ static int parse_argv(int argc, char *argv[]) {
                 {}
         };
 
-        bool auto_hash_pcr_values = true, auto_public_key_pcr_mask = true, auto_pcrlock = true;
+        bool auto_public_key_pcr_mask = true, auto_pcrlock = true;
         int c, r;
 
         assert(argc >= 0);
@@ -493,7 +491,7 @@ static int parse_argv(int argc, char *argv[]) {
                         _cleanup_free_ char *device = NULL;
 
                         if (streq(optarg, "list"))
-                                return tpm2_list_devices();
+                                return tpm2_list_devices(/* legend = */ true, /* quiet = */ false);
 
                         if (arg_enroll_type >= 0 || arg_tpm2_device)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -530,7 +528,6 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TPM2_PCRS:
-                        auto_hash_pcr_values = false;
                         r = tpm2_parse_pcr_argument_append(optarg, &arg_tpm2_hash_pcr_values, &arg_tpm2_n_hash_pcr_values);
                         if (r < 0)
                                 return r;
@@ -699,16 +696,12 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_tpm2_public_key_pcr_mask = INDEX_TO_MASK(uint32_t, TPM2_PCR_KERNEL_BOOT);
                 }
 
-                if (auto_hash_pcr_values && !arg_tpm2_pcrlock) { /* Only lock to PCR 7 by default if no pcrlock policy is around (which is a better replacement) */
-                        assert(arg_tpm2_n_hash_pcr_values == 0);
-
-                        if (!GREEDY_REALLOC_APPEND(
-                                            arg_tpm2_hash_pcr_values,
-                                            arg_tpm2_n_hash_pcr_values,
-                                            &TPM2_PCR_VALUE_MAKE(TPM2_PCR_INDEX_DEFAULT, /* hash= */ 0, /* value= */ {}),
-                                            1))
-                                return log_oom();
-                }
+                if (arg_tpm2_n_hash_pcr_values == 0 &&
+                    !arg_tpm2_pin &&
+                    arg_tpm2_public_key_pcr_mask == 0 &&
+                    !arg_tpm2_pcrlock)
+                        log_notice("Notice: enrolling TPM2 with an empty policy, i.e. without any state or access restrictions.\n"
+                                   "Use --tpm2-public-key=, --tpm2-pcrlock=, --tpm2-with-pin= or --tpm2-pcrs= to enable one or more restrictions.");
         }
 
         return 1;

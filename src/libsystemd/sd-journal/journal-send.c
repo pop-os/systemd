@@ -1,10 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <fcntl.h>
-#include <printf.h>
-#include <stddef.h>
-#include <sys/un.h>
 #include <unistd.h>
 #if HAVE_VALGRIND_VALGRIND_H
 #  include <valgrind/valgrind.h>
@@ -21,13 +16,12 @@
 #include "io-util.h"
 #include "iovec-util.h"
 #include "journal-send.h"
+#include "log.h"
 #include "memfd-util.h"
-#include "missing_syscall.h"
 #include "process-util.h"
 #include "socket-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
-#include "tmpfile-util.h"
 
 #define SNDBUF_SIZE (8*1024*1024)
 
@@ -87,7 +81,7 @@ void close_journal_fd(void) {
         if (!RUNNING_ON_VALGRIND)
                 return;
 
-        if (getpid_cached() != gettid())
+        if (!is_main_thread())
                 return;
 
         if (fd_plus_one <= 0)
@@ -229,11 +223,10 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         };
         struct msghdr mh = {
                 .msg_name = (struct sockaddr*) &sa.sa,
-                .msg_namelen = SOCKADDR_UN_LEN(sa.un),
+                .msg_namelen = sockaddr_un_len(&sa.un),
         };
         ssize_t k;
         bool have_syslog_identifier = false;
-        bool seal = true;
 
         assert_return(iov, -EINVAL);
         assert_return(n > 0, -EINVAL);
@@ -312,35 +305,19 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         if (!IN_SET(errno, EMSGSIZE, ENOBUFS, EAGAIN))
                 return -errno;
 
-        /* Message doesn't fit... Let's dump the data in a memfd or
-         * temporary file and just pass a file descriptor of it to the
-         * other side.
-         *
-         * For the temporary files we use /dev/shm instead of /tmp
-         * here, since we want this to be a tmpfs, and one that is
-         * available from early boot on and where unprivileged users
-         * can create files. */
-        buffer_fd = memfd_new(NULL);
-        if (buffer_fd < 0) {
-                if (buffer_fd == -ENOSYS) {
-                        buffer_fd = open_tmpfile_unlinkable("/dev/shm", O_RDWR | O_CLOEXEC);
-                        if (buffer_fd < 0)
-                                return buffer_fd;
-
-                        seal = false;
-                } else
-                        return buffer_fd;
-        }
+        /* Message doesn't fit... Let's dump the data in a memfd or temporary file and just pass a file
+         * descriptor of it to the other side. */
+        buffer_fd = memfd_new_full("journal-data", MFD_ALLOW_SEALING);
+        if (buffer_fd < 0)
+                return buffer_fd;
 
         n = writev(buffer_fd, w, j);
         if (n < 0)
                 return -errno;
 
-        if (seal) {
-                r = memfd_set_sealed(buffer_fd);
-                if (r < 0)
-                        return r;
-        }
+        r = memfd_set_sealed(buffer_fd);
+        if (r < 0)
+                return r;
 
         r = send_one_fd_sa(fd, buffer_fd, mh.msg_name, mh.msg_namelen, 0);
         if (r == -ENOENT)

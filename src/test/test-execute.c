@@ -1,24 +1,27 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <fnmatch.h>
+#include <linux/prctl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
-#include <sys/types.h>
+#include <unistd.h>
 
 #include "sd-event.h"
 
+#include "argv-util.h"
 #include "build-path.h"
 #include "capability-util.h"
-#include "cpu-set-util.h"
 #include "copy.h"
+#include "cpu-set-util.h"
 #include "dropin.h"
 #include "errno-list.h"
+#include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
-#include "macro.h"
 #include "manager.h"
-#include "missing_prctl.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "path-util.h"
@@ -27,11 +30,11 @@
 #include "seccomp-util.h"
 #include "service.h"
 #include "signal-util.h"
-#include "static-destruct.h"
 #include "stat-util.h"
+#include "static-destruct.h"
+#include "strv.h"
 #include "sysctl-util.h"
 #include "tests.h"
-#include "tmpfile-util.h"
 #include "unit.h"
 #include "user-util.h"
 #include "virt.h"
@@ -54,39 +57,39 @@ static int cld_dumped_to_killed(int code) {
         return code == CLD_DUMPED ? CLD_KILLED : code;
 }
 
+_noreturn_
+static int time_handler(sd_event_source *s, uint64_t usec, void *userdata) {
+        Unit *unit = ASSERT_PTR(userdata);
+        int r;
+
+        log_error("Test timeout when testing %s", unit->id);
+        r = unit_kill(unit, KILL_ALL, /* subgroup= */ NULL, SIGKILL, SI_USER, /* value= */ 0, /* ret_error= */ NULL);
+        if (r < 0)
+                log_error_errno(r, "Failed to kill %s, ignoring: %m", unit->id);
+
+        abort();
+}
+
 static void wait_for_service_finish(Manager *m, Unit *unit) {
-        Service *service = NULL;
-        usec_t ts;
+        Service *service = SERVICE(ASSERT_PTR(unit));
         usec_t timeout = 2 * USEC_PER_MINUTE;
 
         ASSERT_NOT_NULL(m);
-        ASSERT_NOT_NULL(unit);
 
         /* Bump the timeout when running in plain QEMU, as some more involved tests might start hitting the
          * default 2m timeout (like exec-dynamicuser-statedir.service) */
         if (detect_virtualization() == VIRTUALIZATION_QEMU)
                 timeout *= 2;
 
-        service = SERVICE(unit);
         printf("%s\n", unit->id);
         exec_context_dump(&service->exec_context, stdout, "\t");
-        ts = now(CLOCK_MONOTONIC);
-        while (!IN_SET(service->state, SERVICE_DEAD, SERVICE_FAILED)) {
-                int r;
-                usec_t n;
 
-                r = sd_event_run(m->event, 100 * USEC_PER_MSEC);
-                ASSERT_OK(r);
+        _cleanup_(sd_event_source_unrefp) sd_event_source *s = NULL;
+        ASSERT_OK(sd_event_add_time_relative(m->event, &s, CLOCK_MONOTONIC, timeout, 0, time_handler, unit));
 
-                n = now(CLOCK_MONOTONIC);
-                if (ts + timeout < n) {
-                        log_error("Test timeout when testing %s", unit->id);
-                        r = unit_kill(unit, KILL_ALL, SIGKILL, SI_USER, 0, NULL);
-                        if (r < 0)
-                                log_error_errno(r, "Failed to kill %s: %m", unit->id);
-                        exit(EXIT_FAILURE);
-                }
-        }
+        /* Here, sd_event_loop() cannot be used, as the sd_event object will be reused in the next test case. */
+        while (!IN_SET(service->state, SERVICE_DEAD, SERVICE_FAILED))
+                ASSERT_OK(sd_event_run(m->event, 100 * USEC_PER_MSEC));
 }
 
 static void check_main_result(const char *file, unsigned line, const char *func,
@@ -220,9 +223,7 @@ static void start_parent_slices(Unit *unit) {
         slice = UNIT_GET_SLICE(unit);
         if (slice) {
                 start_parent_slices(slice);
-                int r = unit_start(slice, NULL);
-                if (r != -EALREADY)
-                        ASSERT_OK(r);
+                ASSERT_OK_OR(unit_start(slice, NULL), -EALREADY);
         }
 }
 
@@ -329,7 +330,7 @@ static void test_exec_bindpaths(Manager *m) {
 }
 
 static void test_exec_cpuaffinity(Manager *m) {
-        _cleanup_(cpu_set_reset) CPUSet c = {};
+        _cleanup_(cpu_set_done) CPUSet c = {};
 
         ASSERT_OK(cpu_set_realloc(&c, 8192)); /* just allocate the maximum possible size */
         ASSERT_OK_ERRNO(sched_getaffinity(0, c.allocated, c.set));
@@ -490,6 +491,24 @@ static void test_exec_privatetmp(Manager *m) {
         if (MANAGER_IS_SYSTEM(m) || have_userns_privileges()) {
                 test(m, "exec-privatetmp-yes.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
                 test(m, "exec-privatetmp-disabled-by-prefix.service", can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
+
+                (void) unlink("/tmp/test-exec_privatetmp_disconnected");
+                test(m, "exec-privatetmp-disconnected-nodefaultdeps-nor-sandboxing.service", 0, CLD_EXITED);
+                ASSERT_OK_ERRNO(access("/tmp/test-exec_privatetmp_disconnected", F_OK));
+
+                FOREACH_STRING(s,
+                               "exec-privatetmp-disconnected.service",
+                               "exec-privatetmp-disconnected-defaultdependencies-no.service",
+                               "exec-privatetmp-disconnected-requires-mounts-for-var.service",
+                               "exec-privatetmp-disconnected-wants-mounts-for-var.service",
+                               "exec-privatetmp-disconnected-after-and-requires-for-var.service",
+                               "exec-privatetmp-disconnected-after-and-wants-for-var.service") {
+                        (void) unlink("/tmp/test-exec_privatetmp_disconnected");
+                        (void) unlink("/var/tmp/test-exec_privatetmp_disconnected");
+                        test(m, s, can_unshare ? 0 : MANAGER_IS_SYSTEM(m) ? EXIT_FAILURE : EXIT_NAMESPACE, CLD_EXITED);
+                        ASSERT_FAIL(access("/tmp/test-exec_privatetmp_disconnected", F_OK));
+                        ASSERT_FAIL(access("/var/tmp/test-exec_privatetmp_disconnected", F_OK));
+                }
         }
 
         test(m, "exec-privatetmp-no.service", 0, CLD_EXITED);
@@ -788,13 +807,13 @@ static void test_exec_mount_apivfs(Manager *m) {
         ASSERT_OK(strv_extend_strv(&libraries, libraries_test, true));
 
         ASSERT_NOT_NULL(strextend(&data, "[Service]\n"));
-        ASSERT_NOT_NULL(strextend(&data, "ExecStart=", fullpath_touch, " /aaa\n"));
-        ASSERT_NOT_NULL(strextend(&data, "ExecStart=", fullpath_test, " -f /aaa\n"));
-        ASSERT_NOT_NULL(strextend(&data, "BindReadOnlyPaths=", fullpath_touch, "\n"));
-        ASSERT_NOT_NULL(strextend(&data, "BindReadOnlyPaths=", fullpath_test, "\n"));
+        ASSERT_NOT_NULL((strextend(&data, "ExecStart=", fullpath_touch, " /aaa\n")));
+        ASSERT_NOT_NULL((strextend(&data, "ExecStart=", fullpath_test, " -f /aaa\n")));
+        ASSERT_NOT_NULL((strextend(&data, "BindReadOnlyPaths=", fullpath_touch, "\n")));
+        ASSERT_NOT_NULL((strextend(&data, "BindReadOnlyPaths=", fullpath_test, "\n")));
 
         STRV_FOREACH(p, libraries)
-                ASSERT_NOT_NULL(strextend(&data, "BindReadOnlyPaths=", *p, "\n"));
+                ASSERT_NOT_NULL((strextend(&data, "BindReadOnlyPaths=", *p, "\n")));
 
         ASSERT_OK(write_drop_in(user_runtime_unit_dir, "exec-mount-apivfs-no.service", 10, "bind-mount", data));
 
@@ -981,7 +1000,7 @@ static char* private_directory_bad(Manager *m) {
                 _cleanup_free_ char *p = NULL;
                 struct stat st;
 
-                ASSERT_NOT_NULL(p = path_join(m->prefix[dt], "private"));
+                ASSERT_NOT_NULL((p = path_join(m->prefix[dt], "private")));
 
                 if (stat(p, &st) >= 0 &&
                     (st.st_mode & (S_IRWXG|S_IRWXO)))
@@ -1393,10 +1412,14 @@ static void run_tests(RuntimeScope scope, char **patterns) {
         ASSERT_OK_ERRNO(unsetenv("VAR4"));
         ASSERT_OK_ERRNO(unsetenv("VAR5"));
 
-        ASSERT_NOT_NULL(runtime_dir = setup_fake_runtime_dir());
-        ASSERT_NOT_NULL(user_runtime_unit_dir = path_join(runtime_dir, "systemd/user"));
-        ASSERT_NOT_NULL(unit_paths = strjoin(PRIVATE_UNIT_DIR, ":", user_runtime_unit_dir));
+        ASSERT_NOT_NULL((runtime_dir = setup_fake_runtime_dir()));
+        ASSERT_NOT_NULL((user_runtime_unit_dir = path_join(runtime_dir, "systemd/user")));
+        ASSERT_NOT_NULL((unit_paths = strjoin(PRIVATE_UNIT_DIR, ":", user_runtime_unit_dir)));
         ASSERT_OK(setenv_unit_path(unit_paths));
+
+        /* Write credential for test-execute-load-credential to the fake runtime dir, too */
+        _cleanup_free_ char *j = ASSERT_PTR(path_join(runtime_dir, "credstore/test-execute.load-credential"));
+        ASSERT_OK(write_string_file(j, "foo", WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MKDIR_0755));
 
         r = manager_new(scope, MANAGER_TEST_RUN_BASIC, &m);
         if (manager_errno_skip_test(r))
@@ -1447,7 +1470,6 @@ static int prepare_ns(const char *process_name) {
         ASSERT_OK(r);
         if (r == 0) {
                 _cleanup_free_ char *unit_dir = NULL, *build_dir = NULL, *build_dir_mount = NULL;
-                int ret;
 
                 const char *coverage = getenv("COVERAGE_BUILD_DIR");
                 if (!coverage)
@@ -1469,16 +1491,14 @@ static int prepare_ns(const char *process_name) {
                 ASSERT_OK(copy_directory_at(AT_FDCWD, unit_dir, AT_FDCWD, PRIVATE_UNIT_DIR, COPY_MERGE_EMPTY));
 
                 /* Mount tmpfs on the following directories to make not StateDirectory= or friends disturb the host. */
-                ret = get_build_exec_dir(&build_dir);
-                if (ret != -ENOEXEC)
-                        ASSERT_OK(ret);
+                ASSERT_OK_OR(get_build_exec_dir(&build_dir), -ENOEXEC);
 
                 if (build_dir) {
                         /* Account for a build directory being in one of the soon-to-be-tmpfs directories. If we
                          * overmount it with an empty tmpfs, manager_new() will pin the wrong systemd-executor binary,
                          * which can then lead to unexpected (and painful to debug) test fails. */
                         ASSERT_OK_ERRNO(access(build_dir, F_OK));
-                        ASSERT_NOT_NULL(build_dir_mount = path_join(PRIVATE_UNIT_DIR, "build_dir"));
+                        ASSERT_NOT_NULL((build_dir_mount = path_join(PRIVATE_UNIT_DIR, "build_dir")));
                         ASSERT_OK(mkdir_p(build_dir_mount, 0755));
                         ASSERT_OK(mount_nofollow_verbose(LOG_DEBUG, build_dir, build_dir_mount, NULL, MS_BIND, NULL));
                 }
@@ -1487,11 +1507,11 @@ static int prepare_ns(const char *process_name) {
                         ASSERT_OK(mount_nofollow_verbose(LOG_DEBUG, "tmpfs", p, "tmpfs", MS_NOSUID|MS_NODEV, NULL));
 
                 if (build_dir_mount) {
-                        ret = RET_NERRNO(access(build_dir, F_OK));
-                        if (ret != -ENOENT)
-                                ASSERT_OK(ret);
+                        int k;
 
-                        if (ret == -ENOENT) {
+                        ASSERT_OK_OR(k = RET_NERRNO(access(build_dir, F_OK)), -ENOENT);
+
+                        if (k == -ENOENT) {
                                 /* The build directory got overmounted by tmpfs, so let's use the "backup" bind mount to
                                  * bring it back. */
                                 ASSERT_OK(mkdir_p(build_dir, 0755));
@@ -1518,7 +1538,7 @@ TEST(run_tests_root) {
                 return (void) log_tests_skipped("unshare() is disabled");
 
         /* safe_fork() clears saved_argv in the child process. Let's copy it. */
-        ASSERT_NOT_NULL(filters = strv_copy(strv_skip(saved_argv, 1)));
+        ASSERT_NOT_NULL((filters = strv_copy(strv_skip(saved_argv, 1))));
 
         if (prepare_ns("(test-execute-root)") == 0) {
                 can_unshare = true;
@@ -1544,7 +1564,7 @@ TEST(run_tests_without_unshare) {
                 return (void) log_tests_skipped("Seccomp not available, cannot run unshare() filtered tests");
 
         /* safe_fork() clears saved_argv in the child process. Let's copy it. */
-        ASSERT_NOT_NULL(filters = strv_copy(strv_skip(saved_argv, 1)));
+        ASSERT_NOT_NULL((filters = strv_copy(strv_skip(saved_argv, 1))));
 
         if (prepare_ns("(test-execute-without-unshare)") == 0) {
                 _cleanup_hashmap_free_ Hashmap *s = NULL;
@@ -1573,7 +1593,7 @@ TEST(run_tests_unprivileged) {
                 return (void) log_tests_skipped("unshare() is disabled");
 
         /* safe_fork() clears saved_argv in the child process. Let's copy it. */
-        ASSERT_NOT_NULL(filters = strv_copy(strv_skip(saved_argv, 1)));
+        ASSERT_NOT_NULL((filters = strv_copy(strv_skip(saved_argv, 1))));
 
         if (prepare_ns("(test-execute-unprivileged)") == 0) {
                 ASSERT_OK(capability_bounding_set_drop(0, /* right_now = */ true));

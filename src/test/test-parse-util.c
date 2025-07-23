@@ -1,15 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+#include <linux/netfilter/nf_tables.h>
 #include <locale.h>
 #include <math.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 
-#include "alloc-util.h"
-#include "errno-list.h"
-#include "log.h"
 #include "parse-util.h"
-#include "string-util.h"
 #include "tests.h"
 
 TEST(parse_boolean) {
@@ -894,6 +891,23 @@ TEST(parse_loadavg_fixed_point) {
         ASSERT_ERROR(parse_loadavg_fixed_point("1.2.3", &fp), EINVAL);
         ASSERT_ERROR(parse_loadavg_fixed_point(".", &fp), EINVAL);
         ASSERT_ERROR(parse_loadavg_fixed_point("", &fp), EINVAL);
+}
+
+TEST(nft_identifier_valid) {
+        ASSERT_TRUE(nft_identifier_valid("a"));
+        ASSERT_TRUE(nft_identifier_valid("abc"));
+        ASSERT_TRUE(nft_identifier_valid("abc"));
+        ASSERT_TRUE(nft_identifier_valid("a012/_\\."));
+
+        ASSERT_FALSE(nft_identifier_valid(NULL));
+        ASSERT_FALSE(nft_identifier_valid(""));
+        ASSERT_FALSE(nft_identifier_valid("1234"));
+        ASSERT_FALSE(nft_identifier_valid("1xyz"));
+        ASSERT_FALSE(nft_identifier_valid("abc?&*"));
+
+        char s[NFT_NAME_MAXLEN+1];
+        *(char*) mempset(s, 'a', NFT_NAME_MAXLEN) = '\0';
+        ASSERT_FALSE(nft_identifier_valid(s));
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

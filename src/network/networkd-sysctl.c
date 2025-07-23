@@ -1,17 +1,18 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <netinet/in.h>
-#include <linux/if.h>
 #include <linux/if_arp.h>
 
 #include "sd-messages.h"
 
 #include "af-list.h"
+#include "conf-parser.h"
+#include "alloc-util.h"
 #include "cgroup-util.h"
+#include "errno-util.h"
 #include "event-util.h"
 #include "fd-util.h"
 #include "format-util.h"
-#include "missing_network.h"
+#include "hashmap.h"
 #include "networkd-link.h"
 #include "networkd-lldp-tx.h"
 #include "networkd-manager.h"
@@ -19,16 +20,17 @@
 #include "networkd-network.h"
 #include "networkd-sysctl.h"
 #include "path-util.h"
+#include "set.h"
 #include "socket-util.h"
 #include "string-table.h"
+#include "string-util.h"
 #include "sysctl-util.h"
 
 #if HAVE_VMLINUX_H
 
 #include "bpf-link.h"
-
-#include "bpf/sysctl_monitor/sysctl-monitor-skel.h"
-#include "bpf/sysctl_monitor/sysctl-write-event.h"
+#include "bpf/sysctl-monitor/sysctl-monitor-skel.h"
+#include "bpf/sysctl-monitor/sysctl-write-event.h"
 
 static struct sysctl_monitor_bpf* sysctl_monitor_bpf_free(struct sysctl_monitor_bpf *obj) {
         sysctl_monitor_bpf__destroy(obj);
@@ -47,7 +49,7 @@ static int sysctl_event_handler(void *ctx, void *data, size_t data_sz) {
          * so do it only in case of a fatal error like a version mismatch. */
         if (we->version != 1)
                 return log_warning_errno(SYNTHETIC_ERRNO(EINVAL),
-                                "Unexpected sysctl event, disabling sysctl monitoring: %d", we->version);
+                                         "Unexpected sysctl event, disabling sysctl monitoring: %d", we->version);
 
         if (we->errorcode != 0) {
                 log_warning_errno(we->errorcode, "Sysctl monitor BPF returned error: %m");
@@ -56,7 +58,7 @@ static int sysctl_event_handler(void *ctx, void *data, size_t data_sz) {
 
         path = path_join("/proc/sys", we->path);
         if (!path) {
-                log_oom();
+                log_oom_warning();
                 return 0;
         }
 
@@ -67,13 +69,13 @@ static int sysctl_event_handler(void *ctx, void *data, size_t data_sz) {
 
         if (!strneq(value, we->newvalue, sizeof(we->newvalue)))
                 log_struct(LOG_WARNING,
-                           "MESSAGE_ID=" SD_MESSAGE_SYSCTL_CHANGED_STR,
-                           "OBJECT_PID=" PID_FMT, we->pid,
-                           "OBJECT_COMM=%s", we->comm,
-                           "SYSCTL=%s", path,
-                           "OLDVALUE=%s", we->current,
-                           "NEWVALUE=%s", we->newvalue,
-                           "OURVALUE=%s", value,
+                           LOG_MESSAGE_ID(SD_MESSAGE_SYSCTL_CHANGED_STR),
+                           LOG_ITEM("OBJECT_PID=" PID_FMT, we->pid),
+                           LOG_ITEM("OBJECT_COMM=%s", we->comm),
+                           LOG_ITEM("SYSCTL=%s", path),
+                           LOG_ITEM("OLDVALUE=%s", we->current),
+                           LOG_ITEM("NEWVALUE=%s", we->newvalue),
+                           LOG_ITEM("OURVALUE=%s", value),
                            LOG_MESSAGE("Foreign process '%s[" PID_FMT "]' changed sysctl '%s' from '%s' to '%s', conflicting with our setting to '%s'.",
                                        we->comm, we->pid, path, we->current, we->newvalue, value));
 
@@ -91,7 +93,7 @@ static int on_ringbuf_io(sd_event_source *s, int fd, uint32_t revents, void *use
         return 0;
 }
 
-int sysctl_add_monitor(Manager *manager) {
+int manager_install_sysctl_monitor(Manager *manager) {
         _cleanup_(sysctl_monitor_bpf_freep) struct sysctl_monitor_bpf *obj = NULL;
         _cleanup_(bpf_link_freep) struct bpf_link *sysctl_link = NULL;
         _cleanup_(bpf_ring_buffer_freep) struct ring_buffer *sysctl_buffer = NULL;
@@ -102,10 +104,10 @@ int sysctl_add_monitor(Manager *manager) {
         assert(manager);
 
         r = dlopen_bpf();
-        if (r < 0) {
-                log_info_errno(r, "sysctl monitor disabled, as BPF support is not available.");
-                return 0;
-        }
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                return log_debug_errno(r, "sysctl monitor disabled, as BPF support is not available.");
+        if (r < 0)
+                return log_warning_errno(r, "Failed to load libbpf, not installing sysctl monitor: %m");
 
         r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
         if (r < 0)
@@ -113,13 +115,12 @@ int sysctl_add_monitor(Manager *manager) {
 
         root_cgroup_fd = cg_path_open(SYSTEMD_CGROUP_CONTROLLER, "/");
         if (root_cgroup_fd < 0)
-                return log_warning_errno(root_cgroup_fd, "Failed to open cgroup, ignoring: %m.");
+                return log_warning_errno(root_cgroup_fd, "Failed to open cgroup, ignoring: %m");
 
         obj = sysctl_monitor_bpf__open_and_load();
-        if (!obj) {
-                log_info_errno(errno, "Unable to load sysctl monitor BPF program, ignoring: %m.");
-                return 0;
-        }
+        if (!obj)
+                return log_full_errno(errno == EINVAL ? LOG_DEBUG : LOG_INFO, errno,
+                                      "Unable to load sysctl monitor BPF program, ignoring: %m");
 
         cgroup_fd = cg_path_open(SYSTEMD_CGROUP_CONTROLLER, cgroup);
         if (cgroup_fd < 0)
@@ -130,10 +131,8 @@ int sysctl_add_monitor(Manager *manager) {
 
         sysctl_link = sym_bpf_program__attach_cgroup(obj->progs.sysctl_monitor, root_cgroup_fd);
         r = bpf_get_error_translated(sysctl_link);
-        if (r < 0) {
-                log_info_errno(r, "Unable to attach sysctl monitor BPF program to cgroup, ignoring: %m.");
-                return 0;
-        }
+        if (r < 0)
+                return log_warning_errno(r, "Unable to attach sysctl monitor BPF program to cgroup, ignoring: %m");
 
         fd = sym_bpf_map__fd(obj->maps.written_sysctls);
         if (fd < 0)
@@ -160,7 +159,7 @@ int sysctl_add_monitor(Manager *manager) {
         return 0;
 }
 
-void sysctl_remove_monitor(Manager *manager) {
+void manager_remove_sysctl_monitor(Manager *manager) {
         assert(manager);
 
         manager->sysctl_event_source = sd_event_source_disable_unref(manager->sysctl_event_source);
@@ -171,7 +170,7 @@ void sysctl_remove_monitor(Manager *manager) {
         manager->sysctl_shadow = hashmap_free(manager->sysctl_shadow);
 }
 
-int sysctl_clear_link_shadows(Link *link) {
+int link_clear_sysctl_shadows(Link *link) {
         _cleanup_free_ char *ipv4 = NULL, *ipv6 = NULL;
         char *key = NULL, *value = NULL;
 
@@ -188,7 +187,7 @@ int sysctl_clear_link_shadows(Link *link) {
 
         HASHMAP_FOREACH_KEY(value, key, link->manager->sysctl_shadow)
                 if (path_startswith(key, ipv4) || path_startswith(key, ipv6)) {
-                        assert_se(hashmap_remove_value(link->manager->sysctl_shadow, key, value) == value);
+                        assert_se(hashmap_remove_value(link->manager->sysctl_shadow, key, value));
                         free(key);
                         free(value);
                 }
@@ -243,7 +242,7 @@ static bool link_is_configured_for_family(Link *link, int family) {
         /* CAN devices do not support IP layer. Most of the functions below are never called for CAN devices,
          * but link_set_ipv6_mtu() may be called after setting interface MTU, and warn about the failure. For
          * safety, let's unconditionally check if the interface is not a CAN device. */
-        if (IN_SET(family, AF_INET, AF_INET6) && link->iftype == ARPHRD_CAN)
+        if (IN_SET(family, AF_INET, AF_INET6, AF_MPLS) && link->iftype == ARPHRD_CAN)
                 return false;
 
         if (family == AF_INET6 && !socket_ipv6_is_supported())
@@ -592,7 +591,7 @@ static int link_set_ipv6_mtu_async_impl(Link *link) {
                         link->manager->event, &link->ipv6_mtu_wait_synced_event_source,
                         CLOCK_BOOTTIME, 100 * USEC_PER_MSEC, 0,
                         ipv6_mtu_wait_synced_handler, link,
-                        /* priority = */ 0, "ipv6-mtu-wait-synced", /* force = */ true);
+                        /* priority = */ 0, "ipv6-mtu-wait-synced", /* force_reset = */ true);
         if (r < 0)
                 return log_link_warning_errno(link, r, "Failed to configure timer event source for waiting for IPv6 MTU being synced: %m");
 
@@ -671,6 +670,19 @@ static int link_set_ipv4_promote_secondaries(Link *link) {
         return sysctl_write_ip_property_boolean(AF_INET, link->ifname, "promote_secondaries", true, manager_get_sysctl_shadow(link->manager));
 }
 
+static int link_set_mpls_input(Link *link) {
+        assert(link);
+        assert(link->manager);
+
+        if (!link_is_configured_for_family(link, AF_MPLS))
+                return 0;
+
+        if (link->network->mpls_input < 0)
+                return 0;
+
+        return sysctl_write_ip_property_boolean(AF_MPLS, link->ifname, "input", link->network->mpls_input > 0, manager_get_sysctl_shadow(link->manager));
+}
+
 int link_set_sysctl(Link *link) {
         int r;
 
@@ -743,6 +755,10 @@ int link_set_sysctl(Link *link) {
         if (r < 0)
                 log_link_warning_errno(link, r, "Cannot enable promote_secondaries for interface, ignoring: %m");
 
+        r = link_set_mpls_input(link);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Cannot set MPLS input, ignoring: %m");
+
         return 0;
 }
 
@@ -767,7 +783,7 @@ DEFINE_STRING_TABLE_LOOKUP(ip_reverse_path_filter, IPReversePathFilter);
 DEFINE_CONFIG_PARSE_ENUM(config_parse_ip_reverse_path_filter, ip_reverse_path_filter, IPReversePathFilter);
 
 int config_parse_ip_forward_deprecated(
-                const char* unit,
+                const char *unit,
                 const char *filename,
                 unsigned line,
                 const char *section,

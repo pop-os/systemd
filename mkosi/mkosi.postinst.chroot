@@ -5,14 +5,6 @@ set -o nounset
 
 find "$BUILDDIR" \( -name "*.rpm" -o -name "*.deb" -o -name "*.pkg.tar" -o -name systemd.raw \) -exec cp -t "$OUTPUTDIR" {} \;
 
-useradd \
-    --uid 4711 \
-    --user-group \
-    --create-home \
-    --password "$(openssl passwd -1 testuser)" \
-    --shell /bin/bash \
-    testuser
-
 if command -v authselect >/dev/null; then
     # authselect 1.5.0 renamed the minimal profile to the local profile without keeping backwards compat so
     # let's use the new name if it exists.
@@ -42,8 +34,9 @@ done
 # systemd-journald.
 rm -rf "$BUILDROOT/var/log/journal"
 
+# Make sure our own nsswitch.conf from the repository is used instead of the distribution's by deleting the
+# distribution's and relying on tmpfiles to put ours in place during boot.
 rm -f /etc/nsswitch.conf
-cp "$SRCDIR/factory/etc/nsswitch.conf" /etc/nsswitch.conf
 
 # Remove to make TEST-73-LOCALE pass on Ubuntu.
 rm -f /etc/default/keyboard
@@ -51,6 +44,12 @@ rm -f /etc/default/keyboard
 # These don't ship proper units with [Install] directives so we have to mask them instead.
 systemctl mask isc-dhcp-server.service
 systemctl mask mdmonitor.service
+
+# Fedora disables the userdb ssh dropin by default, but helpfully leaves it available in
+# the package so that we can just symlink it to a name that will be picked up by systemd-tmpfiles.
+if [[ -f /usr/lib/tmpfiles.d/20-systemd-userdb.conf.example ]]; then
+    ln --symbolic 20-systemd-userdb.conf.example /usr/lib/tmpfiles.d/20-systemd-userdb.conf
+fi
 
 # This is executed inside the chroot so no need to disable any features as the default features will match
 # the kernel's supported features.

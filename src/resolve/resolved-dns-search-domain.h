@@ -2,24 +2,22 @@
 #pragma once
 
 #include "list.h"
-#include "macro.h"
-
-typedef struct DnsSearchDomain DnsSearchDomain;
-typedef struct Link Link;
-typedef struct Manager Manager;
+#include "resolved-forward.h"
 
 typedef enum DnsSearchDomainType {
         DNS_SEARCH_DOMAIN_SYSTEM,
         DNS_SEARCH_DOMAIN_LINK,
+        DNS_SEARCH_DOMAIN_DELEGATE,
 } DnsSearchDomainType;
 
-struct DnsSearchDomain {
+typedef struct DnsSearchDomain {
         Manager *manager;
 
         unsigned n_ref;
 
         DnsSearchDomainType type;
         Link *link;
+        DnsDelegate *delegate;
 
         char *name;
 
@@ -28,13 +26,14 @@ struct DnsSearchDomain {
 
         bool linked:1;
         LIST_FIELDS(DnsSearchDomain, domains);
-};
+} DnsSearchDomain;
 
 int dns_search_domain_new(
                 Manager *m,
                 DnsSearchDomain **ret,
                 DnsSearchDomainType type,
                 Link *link,
+                DnsDelegate *delegate,
                 const char *name);
 
 DnsSearchDomain* dns_search_domain_ref(DnsSearchDomain *d);
@@ -54,3 +53,5 @@ static inline const char* DNS_SEARCH_DOMAIN_NAME(DnsSearchDomain *d) {
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsSearchDomain*, dns_search_domain_unref);
+
+int dns_search_domain_dump_to_json(DnsSearchDomain *domain, sd_json_variant **ret);

@@ -1,28 +1,27 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/loop.h>
+#include <stdlib.h>
 #include <sys/file.h>
 #include <sys/mount.h>
 #include <unistd.h>
 
-#include "sd-bus.h"
 #include "sd-varlink.h"
 
+#include "argv-util.h"
+#include "blockdev-util.h"
 #include "build.h"
-#include "bus-error.h"
-#include "bus-locator.h"
 #include "bus-unit-util.h"
 #include "bus-util.h"
 #include "capability-util.h"
 #include "chase.h"
-#include "constants.h"
 #include "devnum-util.h"
 #include "discover-image.h"
 #include "dissect-image.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "escape.h"
 #include "extension-util.h"
 #include "fd-util.h"
@@ -30,10 +29,12 @@
 #include "format-table.h"
 #include "fs-util.h"
 #include "hashmap.h"
+#include "image-policy.h"
 #include "initrd-util.h"
+#include "label-util.h"
 #include "log.h"
+#include "loop-util.h"
 #include "main-func.h"
-#include "missing_magic.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -45,12 +46,14 @@
 #include "pretty-print.h"
 #include "process-util.h"
 #include "rm-rf.h"
+#include "runtime-scope.h"
 #include "selinux-util.h"
 #include "sort-util.h"
+#include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "terminal-util.h"
-#include "user-util.h"
+#include "strv.h"
+#include "time-util.h"
 #include "varlink-io.systemd.sysext.h"
 #include "varlink-util.h"
 #include "verbs.h"
@@ -251,7 +254,7 @@ static int need_reload(
                         const char *extension_reload_manager = NULL;
                         int b;
 
-                        r = load_extension_release_pairs(arg_root, image_class, *extension, /* relax_extension_release_check */ true, &extension_release);
+                        r = load_extension_release_pairs(arg_root, image_class, *extension, /* relax_extension_release_check = */ true, &extension_release);
                         if (r < 0) {
                                 log_debug_errno(r, "Failed to parse extension-release metadata of %s, ignoring: %m", *extension);
                                 continue;
@@ -297,22 +300,28 @@ static int move_submounts(const char *src, const char *dst) {
 
                 assert_se(suffix = path_startswith(m->path, src));
 
+                if (fstat(m->mount_fd, &st) < 0)
+                        return log_error_errno(errno, "Failed to stat %s: %m", m->path);
+
                 t = path_join(dst, suffix);
                 if (!t)
                         return log_oom();
 
-                if (fstat(m->mount_fd, &st) < 0)
-                        return log_error_errno(errno, "Failed to stat %s: %m", m->path);
-
-                r = mkdir_parents(t, 0755);
+                _cleanup_free_ char *fn = NULL;
+                _cleanup_close_ int fd = -EBADF;
+                r = chase(t, /* root= */ NULL, CHASE_PARENT|CHASE_EXTRACT_FILENAME|CHASE_PROHIBIT_SYMLINKS|CHASE_MKDIR_0755, &fn, &fd);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to create parent directories of %s: %m", t);
+                        return log_error_errno(r, "Failed to create and pin parent directory of %s: %m", t);
 
-                r = make_mount_point_inode_from_stat(&st, t, 0755);
+                r = make_mount_point_inode_from_mode(fd, fn, st.st_mode, 0755);
                 if (r < 0 && r != -EEXIST)
                         return log_error_errno(r, "Failed to create mountpoint %s: %m", t);
 
-                r = mount_follow_verbose(LOG_ERR, m->path, t, NULL, MS_BIND|MS_REC, NULL);
+                _cleanup_close_ int child_fd = openat(fd, fn, O_PATH|O_CLOEXEC);
+                if (child_fd < 0)
+                        return log_error_errno(errno, "Failed to pin mountpoint %s: %m", t);
+
+                r = mount_follow_verbose(LOG_ERR, m->path, FORMAT_PROC_FD_PATH(child_fd), /* fstype= */ NULL, MS_BIND|MS_REC, /* options= */ NULL);
                 if (r < 0)
                         return r;
 
@@ -729,8 +738,8 @@ static int mount_overlayfs(
                 if (r < 0)
                         return r;
                 /* redirect_dir=on and noatime prevent unnecessary upcopies, metacopy=off prevents broken
-                 * files from partial upcopies after umount. */
-                if (!strextend(&options, ",redirect_dir=on,noatime,metacopy=off"))
+                 * files from partial upcopies after umount, index=off allows reuse of the upper/work dirs */
+                if (!strextend(&options, ",redirect_dir=on,noatime,metacopy=off,index=off"))
                         return log_oom();
         }
 
@@ -1039,7 +1048,7 @@ static int determine_used_extensions(const char *hierarchy, char **paths, char *
                         continue;
                 }
 
-                r = strv_consume_with_size (&used_paths, &n, TAKE_PTR(resolved));
+                r = strv_consume_with_size(&used_paths, &n, TAKE_PTR(resolved));
                 if (r < 0)
                         return log_oom();
         }
@@ -1137,15 +1146,11 @@ static int determine_top_lower_dirs(OverlayFSPaths *op, const char *meta_path) {
 }
 
 static int determine_middle_lower_dirs(OverlayFSPaths *op, char **paths) {
-        int r;
-
         assert(op);
-        assert(paths);
 
         /* The paths were already determined in determine_used_extensions, so we just take them as is. */
-        r = strv_extend_strv(&op->lower_dirs, paths, false);
-        if (r < 0)
-                return log_oom ();
+        if (strv_extend_strv(&op->lower_dirs, paths, /* filter_duplicates= */ false) < 0)
+                return log_oom();
 
         return 0;
 }
@@ -1196,19 +1201,24 @@ static int hierarchy_as_lower_dir(OverlayFSPaths *op) {
         return 0;
 }
 
-static int determine_bottom_lower_dirs(OverlayFSPaths *op) {
+static int determine_bottom_lower_dirs(OverlayFSPaths *op, dev_t *ret_backing_devnum) {
         int r;
 
         assert(op);
+        assert(ret_backing_devnum);
 
         r = hierarchy_as_lower_dir(op);
         if (r < 0)
                 return r;
         if (!r) {
-                r = strv_extend(&op->lower_dirs, op->resolved_hierarchy);
-                if (r < 0)
+                if (strv_extend(&op->lower_dirs, op->resolved_hierarchy) < 0)
                         return log_oom();
-        }
+
+                r = get_block_device(op->resolved_hierarchy, ret_backing_devnum);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get block device of '%s': %m", op->resolved_hierarchy);
+        } else
+                *ret_backing_devnum = 0;
 
         return 0;
 }
@@ -1216,13 +1226,14 @@ static int determine_bottom_lower_dirs(OverlayFSPaths *op) {
 static int determine_lower_dirs(
                 OverlayFSPaths *op,
                 char **paths,
-                const char *meta_path) {
+                const char *meta_path,
+                dev_t *ret_backing_devnum) {
 
         int r;
 
         assert(op);
-        assert(paths);
         assert(meta_path);
+        assert(ret_backing_devnum);
 
         r = determine_top_lower_dirs(op, meta_path);
         if (r < 0)
@@ -1232,7 +1243,7 @@ static int determine_lower_dirs(
         if (r < 0)
                 return r;
 
-        r = determine_bottom_lower_dirs(op);
+        r = determine_bottom_lower_dirs(op, ret_backing_devnum);
         if (r < 0)
                 return r;
 
@@ -1357,7 +1368,6 @@ static int write_extensions_file(ImageClass image_class, char **extensions, cons
         _cleanup_free_ char *f = NULL, *buf = NULL;
         int r;
 
-        assert(extensions);
         assert(meta_path);
 
         /* Let's generate a metadata file that lists all extensions we took into account for this
@@ -1367,15 +1377,20 @@ static int write_extensions_file(ImageClass image_class, char **extensions, cons
         if (!f)
                 return log_oom();
 
-        buf = strv_join(extensions, "\n");
-        if (!buf)
-                return log_oom();
+        if (!strv_isempty(extensions)) {
+                buf = strv_join(extensions, "\n");
+                if (!buf)
+                        return log_oom();
+
+                if (!strextend(&buf, "\n")) /* manually append newline since we want to suppress newline if zero extensions are applied */
+                        return log_oom();
+        }
 
         _cleanup_free_ char *hierarchy_path = path_join(hierarchy, image_class_info[image_class].dot_directory_name, image_class_info[image_class].short_identifier_plural);
         if (!hierarchy_path)
                 return log_oom();
 
-        r = write_string_file_full(AT_FDCWD,f, buf, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
+        r = write_string_file_full(AT_FDCWD, f, strempty(buf), WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_LABEL|WRITE_STRING_FILE_AVOID_NEWLINE, /* ts= */ NULL, hierarchy_path);
         if (r < 0)
                 return log_error_errno(r, "Failed to write extension meta file '%s': %m", f);
 
@@ -1409,6 +1424,35 @@ static int write_dev_file(ImageClass image_class, const char *meta_path, const c
                 return log_oom();
 
         r = write_string_file_full(AT_FDCWD, f, FORMAT_DEVNUM(st.st_dev), WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write '%s': %m", f);
+
+        return 0;
+}
+
+static int write_backing_file(ImageClass image_class, const char *meta_path, const char *overlay_path, const char *hierarchy, dev_t backing) {
+        int r;
+
+        assert(meta_path);
+        assert(overlay_path);
+        assert(hierarchy);
+
+        if (backing == 0)
+                return 0;
+
+        /* Let's also store away the backing file system dev_t, so that applications can trace back what they are looking at here */
+        _cleanup_free_ char *f = path_join(meta_path, image_class_info[image_class].dot_directory_name, "backing");
+        if (!f)
+                return log_oom();
+
+        /* Modifying the underlying layers while the overlayfs is mounted is technically undefined, but at
+         * least it won't crash or deadlock, as per the kernel docs about overlayfs:
+         * https://www.kernel.org/doc/html/latest/filesystems/overlayfs.html#changes-to-underlying-filesystems */
+        _cleanup_free_ char *hierarchy_path = path_join(hierarchy, image_class_info[image_class].dot_directory_name, image_class_info[image_class].short_identifier_plural);
+        if (!hierarchy_path)
+                return log_oom();
+
+        r = write_string_file_full(AT_FDCWD, f, FORMAT_DEVNUM(backing), WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_LABEL, /* ts= */ NULL, hierarchy_path);
         if (r < 0)
                 return log_error_errno(r, "Failed to write '%s': %m", f);
 
@@ -1460,11 +1504,11 @@ static int store_info_in_meta(
                 const char *meta_path,
                 const char *overlay_path,
                 const char *work_dir,
-                const char *hierarchy) {
+                const char *hierarchy,
+                dev_t backing) {
 
         int r;
 
-        assert(extensions);
         assert(meta_path);
         assert(overlay_path);
         /* work_dir may be NULL */
@@ -1497,9 +1541,13 @@ static int store_info_in_meta(
         if (r < 0)
                 return r;
 
+        r = write_backing_file(image_class, meta_path, overlay_path, hierarchy, backing);
+        if (r < 0)
+                return r;
+
         /* Make sure the top-level dir has an mtime marking the point we established the merge */
         if (utimensat(AT_FDCWD, meta_path, NULL, AT_SYMLINK_NOFOLLOW) < 0)
-                return log_error_errno(r, "Failed fix mtime of '%s': %m", meta_path);
+                return log_error_errno(r, "Failed to fix mtime of '%s': %m", meta_path);
 
         return 0;
 }
@@ -1553,7 +1601,6 @@ static int merge_hierarchy(
         int r;
 
         assert(hierarchy);
-        assert(extensions);
         assert(paths);
         assert(meta_path);
         assert(overlay_path);
@@ -1565,14 +1612,15 @@ static int merge_hierarchy(
         if (r < 0)
                 return r;
 
-        if (extensions_used == 0) /* No extension with files in this hierarchy? Then don't do anything. */
+        if (extensions_used == 0 && arg_mutable == MUTABLE_NO) /* No extension with files in this hierarchy? Then don't do anything. */
                 return 0;
 
         r = overlayfs_paths_new(hierarchy, workspace_path, &op);
         if (r < 0)
                 return r;
 
-        r = determine_lower_dirs(op, used_paths, meta_path);
+        dev_t backing;
+        r = determine_lower_dirs(op, used_paths, meta_path, &backing);
         if (r < 0)
                 return r;
 
@@ -1588,7 +1636,7 @@ static int merge_hierarchy(
         if (r < 0)
                 return r;
 
-        r = store_info_in_meta(image_class, extensions, meta_path, overlay_path, op->work_dir, op->hierarchy);
+        r = store_info_in_meta(image_class, extensions, meta_path, overlay_path, op->work_dir, op->hierarchy, backing);
         if (r < 0)
                 return r;
 
@@ -1612,14 +1660,18 @@ static const ImagePolicy *pick_image_policy(const Image *img) {
         if (arg_image_policy)
                 return arg_image_policy;
 
-        /* If located in /.extra/sysext/ in the initrd, then it was placed there by systemd-stub, and was
+        /* If located in /.extra/ in the initrd, then it was placed there by systemd-stub, and was
          * picked up from an untrusted ESP. Thus, require a stricter policy by default for them. (For the
          * other directories we assume the appropriate level of trust was already established already.  */
 
         if (in_initrd()) {
                 if (path_startswith(img->path, "/.extra/sysext/"))
                         return &image_policy_sysext_strict;
+                if (path_startswith(img->path, "/.extra/global_sysext/"))
+                        return &image_policy_sysext_strict;
                 if (path_startswith(img->path, "/.extra/confext/"))
+                        return &image_policy_confext_strict;
+                if (path_startswith(img->path, "/.extra/global_confext/"))
                         return &image_policy_confext_strict;
 
                 /* Better safe than sorry, refuse everything else passed in via the untrusted /.extra/ dir */
@@ -1638,7 +1690,9 @@ static int merge_subprocess(
                 Hashmap *images,
                 const char *workspace) {
 
-        _cleanup_free_ char *host_os_release_id = NULL, *host_os_release_version_id = NULL, *host_os_release_api_level = NULL, *buf = NULL, *filename = NULL;
+        _cleanup_free_ char *host_os_release_id = NULL, *host_os_release_id_like = NULL,
+                        *host_os_release_version_id = NULL, *host_os_release_api_level = NULL,
+                        *filename = NULL;
         _cleanup_strv_free_ char **extensions = NULL, **extensions_v = NULL, **paths = NULL;
         size_t n_extensions = 0;
         unsigned n_ignored = 0;
@@ -1670,13 +1724,14 @@ static int merge_subprocess(
         r = parse_os_release(
                         arg_root,
                         "ID", &host_os_release_id,
+                        "ID_LIKE", &host_os_release_id_like,
                         "VERSION_ID", &host_os_release_version_id,
                         image_class_info[image_class].level_env, &host_os_release_api_level);
         if (r < 0)
                 return log_error_errno(r, "Failed to acquire 'os-release' data of OS tree '%s': %m", empty_to_root(arg_root));
         if (isempty(host_os_release_id))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "'ID' field not found or empty in 'os-release' data of OS tree '%s': %m",
+                                       "'ID' field not found or empty in 'os-release' data of OS tree '%s'.",
                                        empty_to_root(arg_root));
 
         /* Let's now mount all images */
@@ -1756,6 +1811,7 @@ static int merge_subprocess(
                                         &verity_settings,
                                         /* mount_options= */ NULL,
                                         pick_image_policy(img),
+                                        /* image_filter= */ NULL,
                                         flags,
                                         &m);
                         if (r < 0)
@@ -1764,6 +1820,12 @@ static int merge_subprocess(
                         r = dissected_image_load_verity_sig_partition(
                                         m,
                                         d->fd,
+                                        &verity_settings);
+                        if (r < 0)
+                                return r;
+
+                        r = dissected_image_guess_verity_roothash(
+                                        m,
                                         &verity_settings);
                         if (r < 0)
                                 return r;
@@ -1804,6 +1866,7 @@ static int merge_subprocess(
                         r = extension_release_validate(
                                         img->name,
                                         host_os_release_id,
+                                        host_os_release_id_like,
                                         host_os_release_version_id,
                                         host_os_release_api_level,
                                         in_initrd() ? "initrd" : "system",
@@ -1837,7 +1900,7 @@ static int merge_subprocess(
         }
 
         /* Nothing left? Then shortcut things */
-        if (n_extensions == 0) {
+        if (n_extensions == 0 && arg_mutable == MUTABLE_NO) {
                 if (n_ignored > 0)
                         log_info("No suitable extensions found (%u ignored due to incompatible image(s)).", n_ignored);
                 else
@@ -1849,11 +1912,16 @@ static int merge_subprocess(
         typesafe_qsort(extensions, n_extensions, strverscmp_improvedp);
         typesafe_qsort(extensions_v, n_extensions, strverscmp_improvedp);
 
-        buf = strv_join(extensions_v, "', '");
-        if (!buf)
-                return log_oom();
+        if (n_extensions == 0) {
+                assert(arg_mutable != MUTABLE_NO);
+                log_info("No extensions found, proceeding in mutable mode.");
+        } else {
+                _cleanup_free_ char *buf = strv_join(extensions_v, "', '");
+                if (!buf)
+                        return log_oom();
 
-        log_info("Using extensions '%s'.", buf);
+                log_info("Using extensions '%s'.", buf);
+        }
 
         /* Build table of extension paths (in reverse order) */
         paths = new0(char*, n_extensions + 1);
@@ -2018,20 +2086,14 @@ static int merge(ImageClass image_class,
         return 1;
 }
 
-static int image_discover_and_read_metadata(
-                ImageClass image_class,
-                Hashmap **ret_images) {
+static int image_discover_and_read_metadata(ImageClass image_class, Hashmap **ret_images) {
         _cleanup_hashmap_free_ Hashmap *images = NULL;
         Image *img;
         int r;
 
         assert(ret_images);
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return log_oom();
-
-        r = image_discover(image_class, arg_root, images);
+        r = image_discover(RUNTIME_SCOPE_SYSTEM, image_class, arg_root, &images);
         if (r < 0)
                 return log_error_errno(r, "Failed to discover images: %m");
 
@@ -2041,7 +2103,8 @@ static int image_discover_and_read_metadata(
                         return log_error_errno(r, "Failed to read metadata for image %s: %m", img->name);
         }
 
-        *ret_images = TAKE_PTR(images);
+        if (ret_images)
+                *ret_images = TAKE_PTR(images);
 
         return 0;
 }
@@ -2274,11 +2337,7 @@ static int verb_list(int argc, char **argv, void *userdata) {
         Image *img;
         int r;
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return log_oom();
-
-        r = image_discover(arg_image_class, arg_root, images);
+        r = image_discover(RUNTIME_SCOPE_SYSTEM, arg_image_class, arg_root, &images);
         if (r < 0)
                 return log_error_errno(r, "Failed to discover images: %m");
 
@@ -2307,42 +2366,33 @@ static int verb_list(int argc, char **argv, void *userdata) {
         return table_print_with_pager(t, arg_json_format_flags, arg_pager_flags, arg_legend);
 }
 
-typedef struct MethodListParameters {
-        const char *class;
-} MethodListParameters;
-
 static int vl_method_list(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
 
         static const sd_json_dispatch_field dispatch_table[] = {
-                { "class", SD_JSON_VARIANT_STRING, sd_json_dispatch_const_string, offsetof(MethodListParameters, class), 0 },
+                { "class", SD_JSON_VARIANT_STRING, sd_json_dispatch_const_string, 0, 0 },
                 {}
         };
-        MethodListParameters p = {
-        };
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
-        _cleanup_hashmap_free_ Hashmap *images = NULL;
-        ImageClass image_class = arg_image_class;
-        Image *img;
         int r;
 
         assert(link);
 
-        r = sd_varlink_dispatch(link, parameters, dispatch_table, &p);
+        const char *class = NULL;
+        r = sd_varlink_dispatch(link, parameters, dispatch_table, &class);
         if (r != 0)
                 return r;
 
-        r = parse_image_class_parameter(link, p.class, &image_class, NULL);
+        ImageClass image_class = arg_image_class;
+        r = parse_image_class_parameter(link, class, &image_class, NULL);
         if (r < 0)
                 return r;
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return -ENOMEM;
-
-        r = image_discover(image_class, arg_root, images);
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
+        r = image_discover(RUNTIME_SCOPE_SYSTEM, image_class, arg_root, &images);
         if (r < 0)
                 return r;
 
+        Image *img;
         HASHMAP_FOREACH(img, images) {
                 if (v) {
                         /* Send previous item with more=true */

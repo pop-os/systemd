@@ -1,24 +1,26 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <unistd.h>
 
-#include "sd-daemon.h"
 #include "sd-event.h"
 #include "sd-messages.h"
 
 #include "bus-log-control-api.h"
+#include "bus-object.h"
 #include "capability-util.h"
 #include "clock-util.h"
 #include "daemon-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
+#include "format-util.h"
 #include "fs-util.h"
+#include "log.h"
 #include "main-func.h"
 #include "mkdir-label.h"
 #include "network-util.h"
 #include "process-util.h"
 #include "service-util.h"
-#include "signal-util.h"
 #include "timesyncd-bus.h"
 #include "timesyncd-conf.h"
 #include "timesyncd-manager.h"
@@ -126,9 +128,9 @@ static int load_clock_timestamp(uid_t uid, gid_t gid) {
         }
 
         log_struct(LOG_INFO,
-                   "MESSAGE_ID=" SD_MESSAGE_TIME_BUMP_STR,
-                   "REALTIME_USEC=" USEC_FMT, epoch + 1,
-                   "DIRECTION=forwards",
+                   LOG_MESSAGE_ID(SD_MESSAGE_TIME_BUMP_STR),
+                   LOG_ITEM("REALTIME_USEC=" USEC_FMT, epoch + 1),
+                   LOG_ITEM("DIRECTION=forwards"),
                    LOG_MESSAGE("System clock time advanced to %s: %s",
                                epoch > TIME_EPOCH * USEC_PER_SEC ? "recorded timestamp" : "built-in epoch",
                                FORMAT_TIMESTAMP(epoch + 1)));
@@ -205,7 +207,7 @@ static int run(int argc, char *argv[]) {
 
         notify_message = notify_start("READY=1\n"
                                       "STATUS=Daemon is running",
-                                      NOTIFY_STOPPING);
+                                      NOTIFY_STOPPING_MESSAGE);
 
         r = manager_setup_save_time_event(m);
         if (r < 0)
@@ -221,12 +223,10 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
 
-        /* if we got an authoritative time, store it in the file system */
-        if (m->save_on_exit) {
-                r = touch(TIMESYNCD_CLOCK_FILE);
-                if (r < 0)
-                        log_debug_errno(r, "Failed to touch "TIMESYNCD_CLOCK_FILE", ignoring: %m");
-        }
+        /* Save the current time in the file system on exit. */
+        r = touch(TIMESYNCD_CLOCK_FILE);
+        if (r < 0)
+                log_debug_errno(r, "Failed to touch "TIMESYNCD_CLOCK_FILE", ignoring: %m");
 
         return 0;
 }

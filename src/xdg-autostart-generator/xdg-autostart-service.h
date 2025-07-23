@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include "macro.h"
+#include "forward.h"
 
 typedef struct XdgAutostartService {
         char *name;
@@ -23,7 +23,6 @@ typedef struct XdgAutostartService {
 
         bool hidden;
         bool systemd_skip;
-
 } XdgAutostartService;
 
 XdgAutostartService * xdg_autostart_service_free(XdgAutostartService *s);

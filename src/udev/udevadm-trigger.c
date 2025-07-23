@@ -1,54 +1,90 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <errno.h>
 #include <getopt.h>
+#include <stdio.h>
 
 #include "sd-device.h"
 #include "sd-event.h"
 
+#include "alloc-util.h"
 #include "device-enumerator-private.h"
 #include "device-private.h"
 #include "device-util.h"
-#include "fd-util.h"
-#include "fileio.h"
 #include "id128-util.h"
-#include "parse-util.h"
-#include "path-util.h"
-#include "process-util.h"
 #include "set.h"
 #include "static-destruct.h"
-#include "string-util.h"
+#include "string-table.h"
 #include "strv.h"
+#include "time-util.h"
 #include "udevadm.h"
 #include "udevadm-util.h"
-#include "udev-ctrl.h"
 #include "virt.h"
+
+typedef enum {
+        SCAN_TYPE_DEVICES,
+        SCAN_TYPE_SUBSYSTEMS,
+        SCAN_TYPE_ALL,
+        _SCAN_TYPE_MAX,
+        _SCAN_TYPE_INVALID = -EINVAL,
+} ScanType;
 
 static bool arg_verbose = false;
 static bool arg_dry_run = false;
 static bool arg_quiet = false;
 static bool arg_uuid = false;
 static bool arg_settle = false;
+static ScanType arg_scan_type = SCAN_TYPE_DEVICES;
+static sd_device_action_t arg_action = SD_DEVICE_CHANGE;
+static char **arg_devices = NULL;
+static char **arg_attr_match = NULL;
+static char **arg_attr_nomatch = NULL;
+static char **arg_name_match = NULL;
+static char **arg_parent_match = NULL;
+static char **arg_property_match = NULL;
+static char **arg_subsystem_match = NULL;
+static char **arg_subsystem_nomatch = NULL;
+static char **arg_sysname_match = NULL;
+static char **arg_tag_match = NULL;
+static char **arg_prioritized_subsystems = NULL;
+static int arg_initialized_match = -1;
+static bool arg_include_parents = false;
+static bool arg_ping = false;
+static usec_t arg_ping_timeout_usec = 5 * USEC_PER_SEC;
+
+STATIC_DESTRUCTOR_REGISTER(arg_devices, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_attr_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_attr_nomatch, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_name_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_parent_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_property_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_subsystem_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_subsystem_nomatch, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_sysname_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_tag_match, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_prioritized_subsystems, strv_freep);
+
+static const char *scan_type_table[_SCAN_TYPE_MAX] = {
+        [SCAN_TYPE_DEVICES]    = "devices",
+        [SCAN_TYPE_SUBSYSTEMS] = "subsystems",
+        [SCAN_TYPE_ALL]        = "all",
+};
+
+DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(scan_type, ScanType);
 
 static int exec_list(
                 sd_device_enumerator *e,
                 sd_device_action_t action,
-                Set **ret_settle_path_or_ids) {
+                Set *settle_ids) {
 
-        _cleanup_set_free_ Set *settle_path_or_ids = NULL;
-        int uuid_supported = -1;
-        const char *action_str;
-        sd_device *d;
+        const char *action_str = device_action_to_string(action);
         int r, ret = 0;
 
         assert(e);
 
-        action_str = device_action_to_string(action);
-
+        sd_device *d;
         FOREACH_DEVICE_AND_SUBSYSTEM(e, d) {
-                sd_id128_t id = SD_ID128_NULL;
-                const char *syspath;
 
+                const char *syspath;
                 r = sd_device_get_syspath(d, &syspath);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to get syspath of enumerated devices, ignoring: %m");
@@ -61,18 +97,8 @@ static int exec_list(
                 if (arg_dry_run)
                         continue;
 
-                /* Use the UUID mode if the user explicitly asked for it, or if --settle has been specified,
-                 * so that we can recognize our own uevent. */
-                r = sd_device_trigger_with_uuid(d, action, (arg_uuid || arg_settle) && uuid_supported != 0 ? &id : NULL);
-                if (r == -EINVAL && !arg_uuid && arg_settle && uuid_supported < 0) {
-                        /* If we specified a UUID because of the settling logic, and we got EINVAL this might
-                         * be caused by an old kernel which doesn't know the UUID logic (pre-4.13). Let's try
-                         * if it works without the UUID logic then. */
-                        r = sd_device_trigger(d, action);
-                        if (r != -EINVAL)
-                                uuid_supported = false; /* dropping the uuid stuff changed the return code,
-                                                         * hence don't bother next time */
-                }
+                sd_id128_t id;
+                r = sd_device_trigger_with_uuid(d, action, &id);
                 if (r < 0) {
                         /* ENOENT may be returned when a device does not have /uevent or is already
                          * removed. Hence, this is logged at debug level and ignored.
@@ -109,139 +135,188 @@ static int exec_list(
 
                         if (r == -EROFS)
                                 return r;
-                        if (ret == 0 && !ignore)
-                                ret = r;
+                        if (!ignore)
+                                RET_GATHER(ret, r);
                         continue;
                 } else
                         log_device_debug(d, "Triggered device with action '%s'.", action_str);
-
-                if (uuid_supported < 0)
-                        uuid_supported = true;
 
                 /* If the user asked for it, write event UUID to stdout */
                 if (arg_uuid)
                         printf(SD_ID128_UUID_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(id));
 
-                if (arg_settle) {
-                        if (uuid_supported) {
-                                sd_id128_t *dup;
+                if (settle_ids) {
+                        sd_id128_t *dup = newdup(sd_id128_t, &id, 1);
+                        if (!dup)
+                                return log_oom();
 
-                                dup = newdup(sd_id128_t, &id, 1);
-                                if (!dup)
-                                        return log_oom();
-
-                                r = set_ensure_consume(&settle_path_or_ids, &id128_hash_ops_free, dup);
-                        } else {
-                                char *dup;
-
-                                dup = strdup(syspath);
-                                if (!dup)
-                                        return log_oom();
-
-                                r = set_ensure_consume(&settle_path_or_ids, &path_hash_ops_free, dup);
-                        }
+                        r = set_consume(settle_ids, dup);
                         if (r < 0)
                                 return log_oom();
                 }
         }
 
-        if (ret_settle_path_or_ids)
-                *ret_settle_path_or_ids = TAKE_PTR(settle_path_or_ids);
-
         return ret;
 }
 
 static int device_monitor_handler(sd_device_monitor *m, sd_device *dev, void *userdata) {
-        Set *settle_path_or_ids = * (Set**) ASSERT_PTR(userdata);
-        const char *syspath;
-        sd_id128_t id;
+        Set *settle_ids = ASSERT_PTR(userdata);
         int r;
 
         assert(dev);
 
-        r = sd_device_get_syspath(dev, &syspath);
+        sd_id128_t id;
+        r = sd_device_get_trigger_uuid(dev, &id);
         if (r < 0) {
-                log_device_debug_errno(dev, r, "Failed to get syspath of device event, ignoring: %m");
+                log_device_debug_errno(dev, r, "Got uevent without UUID, ignoring: %m");
                 return 0;
         }
 
-        if (sd_device_get_trigger_uuid(dev, &id) >= 0) {
-                _cleanup_free_ sd_id128_t *saved = NULL;
-
-                saved = set_remove(settle_path_or_ids, &id);
-                if (!saved) {
-                        log_device_debug(dev, "Got uevent not matching expected UUID, ignoring.");
-                        return 0;
-                }
-        } else {
-                _cleanup_free_ char *saved = NULL;
-
-                saved = set_remove(settle_path_or_ids, syspath);
-                if (!saved) {
-                        const char *old_sysname;
-
-                        /* When the device is renamed, the new name is broadcast, and the old name is saved
-                         * in INTERFACE_OLD.
-                         *
-                         * TODO: remove support for INTERFACE_OLD when kernel baseline is bumped to 4.13 or
-                         * higher. See 1193448cb68e5a90cab027e16a093bbd367e9494.
-                         */
-
-                        if (sd_device_get_property_value(dev, "INTERFACE_OLD", &old_sysname) >= 0) {
-                                _cleanup_free_ char *dir = NULL, *old_syspath = NULL;
-
-                                r = path_extract_directory(syspath, &dir);
-                                if (r < 0) {
-                                        log_device_debug_errno(dev, r,
-                                                               "Failed to extract directory from '%s', ignoring: %m",
-                                                               syspath);
-                                        return 0;
-                                }
-
-                                old_syspath = path_join(dir, old_sysname);
-                                if (!old_syspath) {
-                                        log_oom_debug();
-                                        return 0;
-                                }
-
-                                saved = set_remove(settle_path_or_ids, old_syspath);
-                        }
-                }
-                if (!saved) {
-                        log_device_debug(dev, "Got uevent for unexpected device, ignoring.");
-                        return 0;
-                }
+        _cleanup_free_ sd_id128_t *saved = set_remove(settle_ids, &id);
+        if (!saved) {
+                log_device_debug(dev, "Got uevent with unexpected UUID, ignoring.");
+                return 0;
         }
 
-        if (arg_verbose)
-                printf("settle %s\n", syspath);
+        if (arg_verbose) {
+                const char *syspath;
+
+                r = sd_device_get_syspath(dev, &syspath);
+                if (r < 0)
+                        log_device_debug_errno(dev, r, "Failed to get syspath of device event, ignoring: %m");
+                else
+                        printf("settle %s\n", syspath);
+        }
 
         if (arg_uuid)
                 printf("settle " SD_ID128_UUID_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(id));
 
-        if (set_isempty(settle_path_or_ids))
+        if (set_isempty(settle_ids))
                 return sd_event_exit(sd_device_monitor_get_event(m), 0);
 
         return 0;
 }
 
-static char* keyval(const char *str, const char **key, const char **val) {
-        char *buf, *pos;
+static int add_device_match(sd_device_enumerator *e, const char *s, const char *prefix) {
+        _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
+        int r;
 
-        buf = strdup(str);
-        if (!buf)
-                return NULL;
+        assert(e);
+        assert(s);
 
-        pos = strchr(buf, '=');
-        if (pos) {
-                pos[0] = 0;
-                pos++;
+        r = find_device(s, prefix, &dev);
+        if (r < 0)
+                return log_error_errno(r, "Failed to open the device '%s': %m", s);
+
+        r = device_enumerator_add_match_parent_incremental(e, dev);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add parent match '%s': %m", s);
+
+        return 0;
+}
+
+static int setup_matches(sd_device_enumerator *e) {
+        int r;
+
+        assert(e);
+
+        STRV_FOREACH(d, arg_devices) {
+                r = add_device_match(e, *d, /* prefix = */ NULL);
+                if (r < 0)
+                        return r;
         }
 
-        *key = buf;
-        *val = pos;
+        STRV_FOREACH(n, arg_name_match) {
+                r = add_device_match(e, *n, "/dev/");
+                if (r < 0)
+                        return r;
+        }
 
-        return buf;
+        STRV_FOREACH(p, arg_parent_match) {
+                r = add_device_match(e, *p, "/sys/");
+                if (r < 0)
+                        return r;
+        }
+
+        STRV_FOREACH(s, arg_subsystem_match) {
+                r = sd_device_enumerator_add_match_subsystem(e, *s, /* match= */ true);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add subsystem match '%s': %m", *s);
+        }
+
+        STRV_FOREACH(s, arg_subsystem_nomatch) {
+                r = sd_device_enumerator_add_match_subsystem(e, *s, /* match= */ false);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add negative subsystem match '%s': %m", *s);
+        }
+
+        STRV_FOREACH(a, arg_attr_match) {
+                _cleanup_free_ char *k = NULL, *v = NULL;
+
+                r = parse_key_value_argument(*a, /* require_value= */ false, &k, &v);
+                if (r < 0)
+                        return r;
+
+                r = sd_device_enumerator_add_match_sysattr(e, k, v, /* match= */ true);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add sysattr match '%s=%s': %m", k, v);
+        }
+
+        STRV_FOREACH(a, arg_attr_nomatch) {
+                _cleanup_free_ char *k = NULL, *v = NULL;
+
+                r = parse_key_value_argument(*a, /* require_value= */ false, &k, &v);
+                if (r < 0)
+                        return r;
+
+                r = sd_device_enumerator_add_match_sysattr(e, k, v, /* match= */ false);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add negative sysattr match '%s=%s': %m", k, v);
+        }
+
+        STRV_FOREACH(p, arg_property_match) {
+                _cleanup_free_ char *k = NULL, *v = NULL;
+
+                r = parse_key_value_argument(*p, /* require_value= */ true, &k, &v);
+                if (r < 0)
+                        return r;
+
+                r = sd_device_enumerator_add_match_property(e, k, v);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add property match '%s=%s': %m", k, v);
+        }
+
+        STRV_FOREACH(t, arg_tag_match) {
+                r = sd_device_enumerator_add_match_tag(e, *t);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add tag match '%s': %m", *t);
+        }
+
+        STRV_FOREACH(s, arg_sysname_match) {
+                r = sd_device_enumerator_add_match_sysname(e, *s);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add sysname match '%s': %m", *s);
+        }
+
+        STRV_FOREACH(p, arg_prioritized_subsystems) {
+                r = device_enumerator_add_prioritized_subsystem(e, *p);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to add prioritized subsystem '%s': %m", *p);
+        }
+
+        if (arg_initialized_match != -1) {
+                r = device_enumerator_add_match_is_initialized(e, arg_initialized_match);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to set initialized filter: %m");
+        }
+
+        if (arg_include_parents) {
+                r = sd_device_enumerator_add_all_parents(e);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to always include all parents: %m");
+        }
+
+        return 0;
 }
 
 static int help(void) {
@@ -266,6 +341,7 @@ static int help(void) {
                "  -y --sysname-match=NAME           Trigger devices with this /sys path\n"
                "     --name-match=NAME              Trigger devices with this /dev name\n"
                "  -b --parent-match=NAME            Trigger devices with that parent device\n"
+               "     --include-parents              Trigger parent devices of found devices\n"
                "     --initialized-match            Trigger devices that are already initialized\n"
                "     --initialized-nomatch          Trigger devices that are not initialized yet\n"
                "  -w --settle                       Wait for the triggered events to complete\n"
@@ -279,7 +355,7 @@ static int help(void) {
         return 0;
 }
 
-int trigger_main(int argc, char *argv[], void *userdata) {
+static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_NAME = 0x100,
                 ARG_PING,
@@ -287,6 +363,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 ARG_PRIORITIZED_SUBSYSTEM,
                 ARG_INITIALIZED_MATCH,
                 ARG_INITIALIZED_NOMATCH,
+                ARG_INCLUDE_PARENTS,
         };
 
         static const struct option options[] = {
@@ -304,6 +381,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 { "sysname-match",         required_argument, NULL, 'y'                       },
                 { "name-match",            required_argument, NULL, ARG_NAME                  },
                 { "parent-match",          required_argument, NULL, 'b'                       },
+                { "include-parents",       no_argument,       NULL, ARG_INCLUDE_PARENTS       },
                 { "initialized-match",     no_argument,       NULL, ARG_INITIALIZED_MATCH     },
                 { "initialized-nomatch",   no_argument,       NULL, ARG_INITIALIZED_NOMATCH   },
                 { "settle",                no_argument,       NULL, 'w'                       },
@@ -314,141 +392,104 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 { "prioritized-subsystem", required_argument, NULL, ARG_PRIORITIZED_SUBSYSTEM },
                 {}
         };
-        enum {
-                TYPE_DEVICES,
-                TYPE_SUBSYSTEMS,
-                TYPE_ALL,
-        } device_type = TYPE_DEVICES;
-        sd_device_action_t action = SD_DEVICE_CHANGE;
-        _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
-        _cleanup_(sd_device_monitor_unrefp) sd_device_monitor *m = NULL;
-        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        _cleanup_set_free_ Set *settle_path_or_ids = NULL;
-        usec_t ping_timeout_usec = 5 * USEC_PER_SEC;
-        bool ping = false;
+
         int c, r;
 
-        if (running_in_chroot() > 0) {
-                log_info("Running in chroot, ignoring request.");
-                return 0;
-        }
-
-        r = sd_device_enumerator_new(&e);
-        if (r < 0)
-                return r;
-
-        r = sd_device_enumerator_allow_uninitialized(e);
-        if (r < 0)
-                return r;
+        assert(argc >= 0);
+        assert(argv);
 
         while ((c = getopt_long(argc, argv, "vnqt:c:s:S:a:A:p:g:y:b:wVh", options, NULL)) >= 0) {
-                _cleanup_free_ char *buf = NULL;
-                const char *key, *val;
-
                 switch (c) {
                 case 'v':
                         arg_verbose = true;
                         break;
+
                 case 'n':
                         arg_dry_run = true;
                         break;
+
                 case 'q':
                         arg_quiet = true;
                         break;
+
                 case 't':
-                        if (streq(optarg, "devices"))
-                                device_type = TYPE_DEVICES;
-                        else if (streq(optarg, "subsystems"))
-                                device_type = TYPE_SUBSYSTEMS;
-                        else if (streq(optarg, "all"))
-                                device_type = TYPE_ALL;
-                        else
+                        arg_scan_type = scan_type_from_string(optarg);
+                        if (arg_scan_type < 0)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown type --type=%s", optarg);
                         break;
+
                 case 'c':
-                        r = parse_device_action(optarg, &action);
-                        if (r < 0)
-                                return log_error_errno(r, "Unknown action '%s'", optarg);
-                        if (r == 0)
-                                return 0;
+                        r = parse_device_action(optarg, &arg_action);
+                        if (r <= 0)
+                                return r;
                         break;
+
                 case 's':
-                        r = sd_device_enumerator_add_match_subsystem(e, optarg, true);
+                        r = strv_extend(&arg_subsystem_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add subsystem match '%s': %m", optarg);
+                                return log_oom();
                         break;
+
                 case 'S':
-                        r = sd_device_enumerator_add_match_subsystem(e, optarg, false);
+                        r = strv_extend(&arg_subsystem_nomatch, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add negative subsystem match '%s': %m", optarg);
+                                return log_oom();
                         break;
+
                 case 'a':
-                        buf = keyval(optarg, &key, &val);
-                        if (!buf)
-                                return log_oom();
-                        r = sd_device_enumerator_add_match_sysattr(e, key, val, true);
+                        r = strv_extend(&arg_attr_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add sysattr match '%s=%s': %m", key, val);
+                                return log_oom();
                         break;
+
                 case 'A':
-                        buf = keyval(optarg, &key, &val);
-                        if (!buf)
-                                return log_oom();
-                        r = sd_device_enumerator_add_match_sysattr(e, key, val, false);
+                        r = strv_extend(&arg_attr_nomatch, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add negative sysattr match '%s=%s': %m", key, val);
+                                return log_oom();
                         break;
+
                 case 'p':
-                        buf = keyval(optarg, &key, &val);
-                        if (!buf)
+                        r = strv_extend(&arg_property_match, optarg);
+                        if (r < 0)
                                 return log_oom();
-                        r = sd_device_enumerator_add_match_property(e, key, val);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to add property match '%s=%s': %m", key, val);
                         break;
+
                 case 'g':
-                        r = sd_device_enumerator_add_match_tag(e, optarg);
+                        r = strv_extend(&arg_tag_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add tag match '%s': %m", optarg);
+                                return log_oom();
                         break;
+
                 case 'y':
-                        r = sd_device_enumerator_add_match_sysname(e, optarg);
+                        r = strv_extend(&arg_sysname_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to add sysname match '%s': %m", optarg);
+                                return log_oom();
                         break;
-                case 'b': {
-                        _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
 
-                        r = find_device(optarg, "/sys", &dev);
+                case 'b':
+                        r = strv_extend(&arg_parent_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to open the device '%s': %m", optarg);
-
-                        r = device_enumerator_add_match_parent_incremental(e, dev);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to add parent match '%s': %m", optarg);
+                                return log_oom();
                         break;
-                }
+
+                case ARG_INCLUDE_PARENTS:
+                        arg_include_parents = true;
+                        break;
+
                 case 'w':
                         arg_settle = true;
                         break;
 
-                case ARG_NAME: {
-                        _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
-
-                        r = find_device(optarg, "/dev", &dev);
+                case ARG_NAME:
+                        r = strv_extend(&arg_name_match, optarg);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to open the device '%s': %m", optarg);
-
-                        r = device_enumerator_add_match_parent_incremental(e, dev);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to add parent match '%s': %m", optarg);
+                                return log_oom();
                         break;
-                }
 
                 case ARG_PING:
-                        ping = true;
+                        arg_ping = true;
                         if (optarg) {
-                                r = parse_sec(optarg, &ping_timeout_usec);
+                                r = parse_sec(optarg, &arg_ping_timeout_usec);
                                 if (r < 0)
                                         log_error_errno(r, "Failed to parse timeout value '%s', ignoring: %m", optarg);
                         }
@@ -458,63 +499,74 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                         arg_uuid = true;
                         break;
 
-                case ARG_PRIORITIZED_SUBSYSTEM: {
-                        _cleanup_strv_free_ char **subsystems = NULL;
-
-                        subsystems = strv_split(optarg, ",");
-                        if (!subsystems)
-                                return log_error_errno(r, "Failed to parse prioritized subsystem '%s': %m", optarg);
-
-                        STRV_FOREACH(p, subsystems) {
-                                r = device_enumerator_add_prioritized_subsystem(e, *p);
-                                if (r < 0)
-                                        return log_error_errno(r, "Failed to add prioritized subsystem '%s': %m", *p);
-                        }
-                        break;
-                }
-                case ARG_INITIALIZED_MATCH:
-                case ARG_INITIALIZED_NOMATCH:
-                        r = device_enumerator_add_match_is_initialized(e, c == ARG_INITIALIZED_MATCH ? MATCH_INITIALIZED_YES : MATCH_INITIALIZED_NO);
+                case ARG_PRIORITIZED_SUBSYSTEM:
+                        r = strv_split_and_extend(&arg_prioritized_subsystems, optarg, ",", /* filter_duplicates= */ false);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to set initialized filter: %m");
+                                return log_oom();
                         break;
+
+                case ARG_INITIALIZED_MATCH:
+                        arg_initialized_match = MATCH_INITIALIZED_YES;
+                        break;
+
+                case ARG_INITIALIZED_NOMATCH:
+                        arg_initialized_match = MATCH_INITIALIZED_NO;
+                        break;
+
                 case 'V':
                         return print_version();
+
                 case 'h':
                         return help();
+
                 case '?':
                         return -EINVAL;
+
                 default:
                         assert_not_reached();
                 }
         }
 
-        if (ping) {
-                _cleanup_(udev_ctrl_unrefp) UdevCtrl *uctrl = NULL;
+        r = strv_extend_strv(&arg_devices, argv + optind, /* filter_duplicates= */ false);
+        if (r < 0)
+                return log_error_errno(r, "Failed to build argument list: %m");
 
-                r = udev_ctrl_new(&uctrl);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to initialize udev control: %m");
+        return 1;
+}
 
-                r = udev_ctrl_send_ping(uctrl);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to connect to udev daemon: %m");
+int trigger_main(int argc, char *argv[], void *userdata) {
+        _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
+        _cleanup_(sd_device_monitor_unrefp) sd_device_monitor *m = NULL;
+        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
+        _cleanup_set_free_ Set *settle_ids = NULL;
+        int r;
 
-                r = udev_ctrl_wait(uctrl, ping_timeout_usec);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to wait for daemon to reply: %m");
+        if (running_in_chroot() > 0) {
+                log_info("Running in chroot, ignoring request.");
+                return 0;
         }
 
-        for (; optind < argc; optind++) {
-                _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
+        r = parse_argv(argc, argv);
+        if (r <= 0)
+                return r;
 
-                r = find_device(argv[optind], NULL, &dev);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to open the device '%s': %m", argv[optind]);
+        r = sd_device_enumerator_new(&e);
+        if (r < 0)
+                return r;
 
-                r = device_enumerator_add_match_parent_incremental(e, dev);
+        r = sd_device_enumerator_allow_uninitialized(e);
+        if (r < 0)
+                return r;
+
+        r = setup_matches(e);
+        if (r < 0)
+                return r;
+
+        if (arg_ping) {
+                r = udev_ping(arg_ping_timeout_usec, /* ignore_connection_failure = */ false);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add parent match '%s': %m", argv[optind]);
+                        return r;
+                assert(r > 0);
         }
 
         if (arg_settle) {
@@ -530,23 +582,27 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to attach event to device monitor: %m");
 
-                r = sd_device_monitor_start(m, device_monitor_handler, &settle_path_or_ids);
+                settle_ids = set_new(&id128_hash_ops_free);
+                if (!settle_ids)
+                        return log_oom();
+
+                r = sd_device_monitor_start(m, device_monitor_handler, settle_ids);
                 if (r < 0)
                         return log_error_errno(r, "Failed to start device monitor: %m");
         }
 
-        switch (device_type) {
-        case TYPE_SUBSYSTEMS:
+        switch (arg_scan_type) {
+        case SCAN_TYPE_SUBSYSTEMS:
                 r = device_enumerator_scan_subsystems(e);
                 if (r < 0)
                         return log_error_errno(r, "Failed to scan subsystems: %m");
                 break;
-        case TYPE_DEVICES:
+        case SCAN_TYPE_DEVICES:
                 r = device_enumerator_scan_devices(e);
                 if (r < 0)
                         return log_error_errno(r, "Failed to scan devices: %m");
                 break;
-        case TYPE_ALL:
+        case SCAN_TYPE_ALL:
                 r = device_enumerator_scan_devices_and_subsystems(e);
                 if (r < 0)
                         return log_error_errno(r, "Failed to scan devices and subsystems: %m");
@@ -555,15 +611,16 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 assert_not_reached();
         }
 
-        r = exec_list(e, action, arg_settle ? &settle_path_or_ids : NULL);
+        r = exec_list(e, arg_action, settle_ids);
         if (r < 0)
                 return r;
 
-        if (!set_isempty(settle_path_or_ids)) {
-                r = sd_event_loop(event);
-                if (r < 0)
-                        return log_error_errno(r, "Event loop failed: %m");
-        }
+        if (set_isempty(settle_ids))
+                return 0;
+
+        r = sd_event_loop(event);
+        if (r < 0)
+                return log_error_errno(r, "Event loop failed: %m");
 
         return 0;
 }

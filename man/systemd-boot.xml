@@ -442,6 +442,16 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>LoaderDeviceURL</varname></term>
+
+        <listitem><para>If the boot loader has been invoked via network booting this variable contains the
+        originating URL. This may be used to automatically acquire additional resources from the same
+        source.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>LoaderEntries</varname></term>
 
         <listitem><para>A list of the identifiers of all discovered boot loader entries. Set by the boot
@@ -452,6 +462,7 @@
 
       <varlistentry>
         <term><varname>LoaderEntryDefault</varname></term>
+        <term><varname>LoaderEntrySysFail</varname></term>
         <term><varname>LoaderEntryOneShot</varname></term>
 
         <listitem><para>The identifier of the default boot loader entry. Set primarily by the OS and read by the boot
@@ -514,6 +525,18 @@
         data.</para>
 
         <xi:include href="version-info.xml" xpointer="v240"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>LoaderTpm2ActivePcrBanks</varname></term>
+
+        <listitem><para>Hexadecimal string representation of a bitmask with values defined by the TCG EFI
+        Protocol Specification for TPM 2.0 as EFI_TCG2_BOOT_HASH_ALG_*. If no TPM2 support or no active
+        banks were detected, will be set to <constant>0</constant>. Set by the boot loader. Use
+        <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        to view this data.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -584,6 +607,28 @@
         kernel.</para>
 
         <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>io.systemd.boot-entries.extra:</varname><replaceable>ID=DEFINITION</replaceable></term>
+
+        <listitem><para>This allows inserting additional entries into the <command>systemd-boot</command>
+        menu. Take a pair of menu entry identifier and menu entry definition string. The former should be
+        suitable for use as a filename of a Boot Loader Specification Type #1 entry filename (note that it is
+        used for identification purposes only, no file of this name is actually accessed), the latter shall
+        follow the syntax of the contents of a Type #1 entry. Any menu entry defined this way is processed
+        and shown in pretty much the same way as a Type #1 entry read from the ESP or XBOOTLDR
+        partition. Example:</para>
+
+        <programlisting>io.systemd.boot-entries.extra:fooos-current.conf=title FooOS (Current)
+uki-url http://example.com/somedir/fooos.efi</programlisting>
+
+        <para>Note that this example contains a newline character. When generating this string from a shell
+        care must be taken to encode it correctly.</para>
+
+        <para>Pass multiple strings formatted this way to generate multiple menu entries.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

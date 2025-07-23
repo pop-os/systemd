@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <mntent.h>
-#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "alloc-util.h"
 #include "env-util.h"
 #include "exit-status.h"
+#include "format-util.h"
 #include "fstab-util.h"
+#include "hashmap.h"
 #include "log.h"
 #include "main-func.h"
 #include "mount-setup.h"
@@ -17,10 +18,9 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "signal-util.h"
-#include "strv.h"
 
-/* Goes through /etc/fstab and remounts all API file systems, applying options that are in /etc/fstab that systemd
- * might not have respected */
+/* Goes through /etc/fstab and remounts all API file systems, applying options that are in /etc/fstab that
+ * systemd might not have respected. */
 
 static int track_pid(Hashmap **h, const char *path, pid_t pid) {
         _cleanup_free_ char *c = NULL;
@@ -34,7 +34,7 @@ static int track_pid(Hashmap **h, const char *path, pid_t pid) {
         if (!c)
                 return log_oom();
 
-        r = hashmap_ensure_put(h, NULL, PID_TO_PTR(pid), c);
+        r = hashmap_ensure_put(h, &trivial_hash_ops_value_free, PID_TO_PTR(pid), c);
         if (r == -ENOMEM)
                 return log_oom();
         if (r < 0)
@@ -70,7 +70,7 @@ static int do_remount(const char *path, bool force_rw, Hashmap **pids) {
 }
 
 static int remount_by_fstab(Hashmap **ret_pids) {
-        _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
+        _cleanup_hashmap_free_ Hashmap *pids = NULL;
         _cleanup_endmntent_ FILE *f = NULL;
         bool has_root = false;
         struct mntent* me;
@@ -108,7 +108,7 @@ static int remount_by_fstab(Hashmap **ret_pids) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
+        _cleanup_hashmap_free_ Hashmap *pids = NULL;
         int r;
 
         log_setup();

@@ -20,6 +20,7 @@
     <refname>systemd-udevd.service</refname>
     <refname>systemd-udevd-control.socket</refname>
     <refname>systemd-udevd-kernel.socket</refname>
+    <refname>systemd-udevd-varlink.socket</refname>
     <refname>systemd-udevd</refname>
     <refpurpose>Device event managing daemon</refpurpose>
   </refnamediv>
@@ -28,6 +29,7 @@
     <para><filename>systemd-udevd.service</filename></para>
     <para><filename>systemd-udevd-control.socket</filename></para>
     <para><filename>systemd-udevd-kernel.socket</filename></para>
+    <para><filename>systemd-udevd-varlink.socket</filename></para>
 
     <cmdsynopsis>
       <command>/usr/lib/systemd/systemd-udevd</command>
@@ -163,6 +165,16 @@
           <para>Set the log level.</para>
 
         <xi:include href="version-info.xml" xpointer="v247"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>udev.trace[=<replaceable>BOOL</replaceable>]</varname></term>
+        <term><varname>rd.udev.trace[=<replaceable>BOOL</replaceable>]</varname></term>
+        <listitem>
+          <para>Enable/disable trace logging. When enabled, <varname>udev.log_level=</varname> will be
+          ignored, and <literal>debug</literal> level is assumed.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
         </listitem>
       </varlistentry>
       <varlistentry>

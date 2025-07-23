@@ -1,10 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-
-#include "macro.h"
+#include "forward.h"
 
 bool fstab_enabled_full(int enabled);
 static inline bool fstab_enabled(void) {
@@ -25,7 +22,7 @@ static inline int fstab_has_node(const char *path) {
         return fstab_is_mount_point_full(NULL, path);
 }
 
-int fstab_has_mount_point_prefix_strv(char **prefixes);
+int fstab_has_mount_point_prefix_strv(char * const *prefixes);
 
 int fstab_filter_options(
                 const char *opts,
@@ -51,8 +48,6 @@ int fstab_find_pri(const char *opts, int *ret);
 
 char* fstab_node_to_udev_node(const char *p);
 
-static inline const char* fstab_path(void) {
-        return secure_getenv("SYSTEMD_FSTAB") ?: "/etc/fstab";
-}
+const char* fstab_path(void);
 
 bool fstab_is_bind(const char *options, const char *fstype);

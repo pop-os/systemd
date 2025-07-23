@@ -1,19 +1,21 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/rtnetlink.h>
+#include <threads.h>
 
 #include "alloc-util.h"
+#include "bitfield.h"
+#include "extract-word.h"
 #include "logarithm.h"
-#include "missing_threads.h"
 #include "networkd-address.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
-#include "networkd-route-util.h"
 #include "networkd-route.h"
+#include "networkd-route-util.h"
 #include "parse-util.h"
+#include "set.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "strv.h"
 #include "sysctl-util.h"
 
 #define ROUTES_DEFAULT_MAX_PER_FAMILY 4096
@@ -405,7 +407,7 @@ int route_flags_to_string_alloc(uint32_t flags, char **ret) {
         assert(ret);
 
         for (size_t i = 0; i < ELEMENTSOF(map); i++)
-                if (FLAGS_SET(flags, 1 << i) && map[i])
+                if (BIT_SET(flags, i) && map[i])
                         if (!strextend_with_separator(&str, ",", map[i]))
                                 return -ENOMEM;
 

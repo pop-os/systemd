@@ -19,6 +19,7 @@ RequiresMountsFor=/var/lib/machines/%i
 [Service]
 # Make sure the DeviceAllow= lines below can properly resolve the 'block-loop' expression (and others)
 ExecStart=systemd-nspawn --quiet --keep-unit --boot --link-journal=try-guest --network-veth -U --settings=override --machine=%i
+ExecStopPost=systemd-nspawn --cleanup --machine=%i
 KillMode=mixed
 Type=notify
 RestartForceExitStatus=133
@@ -28,6 +29,7 @@ Delegate=yes
 DelegateSubgroup=supervisor
 CoredumpReceive=yes
 TasksMax=16384
+TimeoutSec=2min
 {{SERVICE_WATCHDOG}}
 
 {# Enforce a strict device policy, similar to the one nspawn configures (in

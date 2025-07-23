@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "cpio.h"
-#include "device-path-util.h"
+#include "efi-log.h"
+#include "iovec-util-fundamental.h"
 #include "measure.h"
-#include "proto/device-path.h"
+#include "string-util-fundamental.h"
 #include "util.h"
 
 static char *write_cpio_word(char *p, uint32_t v) {
@@ -314,11 +315,11 @@ EFI_STATUS pack_cpio(
                 struct iovec *ret_buffer,
                 bool *ret_measured) {
 
-        _cleanup_(file_closep) EFI_FILE *root = NULL, *extra_dir = NULL;
+        _cleanup_file_close_ EFI_FILE *root = NULL, *extra_dir = NULL;
         size_t dirent_size = 0, buffer_size = 0, n_items = 0, n_allocated = 0;
         _cleanup_free_ char16_t *rel_dropin_dir = NULL;
         _cleanup_free_ EFI_FILE_INFO *dirent = NULL;
-        _cleanup_(strv_freep) char16_t **items = NULL;
+        _cleanup_strv_free_ char16_t **items = NULL;
         _cleanup_free_ void *buffer = NULL;
         uint32_t inode = 1; /* inode counter, so that each item gets a new inode */
         EFI_STATUS err;

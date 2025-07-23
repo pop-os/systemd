@@ -6,7 +6,6 @@
 #include <linux/major.h>
 #include <linux/raid/md_u.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
 
 #include "sd-device.h"
 
@@ -17,6 +16,7 @@
 #include "devnum-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
+#include "list.h"
 #include "shutdown.h"
 #include "string-util.h"
 

@@ -42,8 +42,8 @@ label:gpt
 name="loop${1?}-part1"
 EOF
     LOOP=$(losetup -P --show -f "/tmp/TEST-60-MOUNT-RATELIMIT-dependencies-${1?}.img")
-    udevadm wait --settle --timeout=10 "${LOOP}"
-    udevadm lock --device="${LOOP}" mkfs.ext4 -L "partname${1?}-1" "${LOOP}p1"
+    udevadm wait --settle --timeout=30 "${LOOP}"
+    udevadm lock --timeout=30 --device="${LOOP}" mkfs.ext4 -L "partname${1?}-1" "${LOOP}p1"
 }
 
 check_dependencies() {
@@ -243,9 +243,9 @@ EOF
 
         sleep 1
 
-        if [[ "$(systemctl is-failed tmp-hoge.mount)" == "failed" ]] || \
+        if [[ "$(systemctl is-failed tmp-hoge.mount)" == "failed" ]] ||
            journalctl --since="$since" -u tmp-hoge.mount -q --grep "but there is no mount"; then
-                exit 1
+            exit 1
         fi
 
         systemctl stop tmp-hoge.mount
@@ -305,13 +305,11 @@ testcase_mount_ratelimit() {
 
     # Figure out if we have entered the rate limit state.
     # If the infra is slow we might not enter the rate limit state; in that case skip the exit check.
-    set +o pipefail
     journalctl --sync
     if timeout 2m journalctl -u init.scope --since="$ts" -n all --follow | grep -m 1 -q -F '(mount-monitor-dispatch) entered rate limit'; then
         journalctl --sync
         timeout 2m journalctl -u init.scope --since="$ts" -n all --follow | grep -m 1 -q -F '(mount-monitor-dispatch) left rate limit'
     fi
-    set -o pipefail
 
     # Verify that the mount units are always cleaned up at the end.
     # Give some time for units to settle so we don't race between exiting the rate limit state and cleaning up the units.

@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <pwd.h>
 #include <sys/file.h>
+#include <unistd.h>
+#include "efivars.h"
+#include "time-util.h"
 
 #if HAVE_OPENSSL
 #include <openssl/err.h>
@@ -10,14 +14,14 @@
 #include "sd-json.h"
 #include "sd-varlink.h"
 
+#include "alloc-util.h"
 #include "blockdev-util.h"
-#include "capability-util.h"
 #include "chattr-util.h"
-#include "constants.h"
 #include "copy.h"
 #include "creds-util.h"
 #include "efi-api.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "find-esp.h"
@@ -25,6 +29,7 @@
 #include "fs-util.h"
 #include "io-util.h"
 #include "json-util.h"
+#include "log.h"
 #include "memory-util.h"
 #include "mkdir-label.h"
 #include "openssl-util.h"
@@ -34,6 +39,7 @@
 #include "recurse-dir.h"
 #include "sparse-endian.h"
 #include "stat-util.h"
+#include "string-util.h"
 #include "tmpfile-util.h"
 #include "tpm2-util.h"
 #include "user-util.h"
@@ -172,7 +178,7 @@ int read_credential_with_decryption(const char *name, void **ret, size_t *ret_si
         if (r >= 0)
                 return 1; /* found */
         if (!IN_SET(r, -ENXIO, -ENOENT))
-                return log_error_errno(r, "Failed read unencrypted credential '%s': %m", name);
+                return log_error_errno(r, "Failed to read unencrypted credential '%s': %m", name);
 
         r = get_encrypted_credentials_dir(&d);
         if (r == -ENXIO)
@@ -804,7 +810,9 @@ int encrypt_credential_and_warn(
         _cleanup_(iovec_done_erase) struct iovec tpm2_key = {}, output = {}, host_key = {};
         _cleanup_(EVP_CIPHER_CTX_freep) EVP_CIPHER_CTX *context = NULL;
         _cleanup_free_ struct metadata_credential_header *m = NULL;
+#if HAVE_TPM2
         uint16_t tpm2_pcr_bank = 0, tpm2_primary_alg = 0;
+#endif
         struct encrypted_credential_header *h;
         int ksz, bsz, ivsz, tsz, added, r;
         uint8_t md[SHA256_DIGEST_LENGTH];
@@ -912,7 +920,7 @@ int encrypt_credential_and_warn(
                         r = tpm2_load_pcr_public_key(tpm2_pubkey_path, &pubkey.iov_base, &pubkey.iov_len);
                         if (r < 0) {
                                 if (tpm2_pubkey_path || r != -ENOENT || !sd_id128_in_set(with_key, _CRED_AUTO, _CRED_AUTO_INITRD, _CRED_AUTO_SCOPED))
-                                        return log_error_errno(r, "Failed read TPM PCR public key: %m");
+                                        return log_error_errno(r, "Failed to read TPM PCR public key: %m");
 
                                 log_debug_errno(r, "Failed to read TPM2 PCR public key, proceeding without: %m");
                         }
@@ -964,7 +972,7 @@ int encrypt_credential_and_warn(
                 r = tpm2_seal(tpm2_context,
                               /* seal_key_handle= */ 0,
                               &tpm2_policy,
-                              /* n_policy_hash= */ 1,
+                              /* n_policy= */ 1,
                               /* pin= */ NULL,
                               &tpm2_key,
                               &blobs,
@@ -1078,6 +1086,7 @@ int encrypt_credential_and_warn(
 
         p = ALIGN8(offsetof(struct encrypted_credential_header, iv) + ivsz);
 
+#if HAVE_TPM2
         if (iovec_is_set(&tpm2_key)) {
                 struct tpm2_credential_header *t;
 
@@ -1092,7 +1101,7 @@ int encrypt_credential_and_warn(
 
                 p += ALIGN8(offsetof(struct tpm2_credential_header, policy_hash_and_blob) + tpm2_blob.iov_len + tpm2_policy_hash.iov_len);
         }
-
+#endif
         if (iovec_is_set(&pubkey)) {
                 struct tpm2_public_key_credential_header *z;
 
@@ -1352,9 +1361,13 @@ int decrypt_credential_and_warn(
                                 &IOVEC_MAKE(t->policy_hash_and_blob, le32toh(t->blob_size)),
                                 /* n_blobs= */ 1,
                                 &IOVEC_MAKE(t->policy_hash_and_blob + le32toh(t->blob_size), le32toh(t->policy_hash_size)),
-                                /* n_policy_hash= */ 1,
+                                /* n_known_policy_hash= */ 1,
                                 /* srk= */ NULL,
                                 &tpm2_key);
+                if (r == -EREMOTE)
+                        return log_error_errno(r, "TPM key integrity check failed. Key enrolled in superblock most likely does not belong to this TPM.");
+                if (ERRNO_IS_NEG_TPM2_UNSEAL_BAD_PCR(r))
+                        return log_error_errno(r, "TPM policy does not match current system state. Either system has been tempered with or policy out-of-date: %m");
                 if (r < 0)
                         return log_error_errno(r, "Failed to unseal secret using TPM2: %m");
 #else
@@ -1572,7 +1585,8 @@ int ipc_encrypt_credential(const char *name, usec_t timestamp, usec_t not_after,
                         SD_JSON_BUILD_PAIR_CONDITION(timestamp != USEC_INFINITY, "timestamp", SD_JSON_BUILD_UNSIGNED(timestamp)),
                         SD_JSON_BUILD_PAIR_CONDITION(not_after != USEC_INFINITY, "notAfter",  SD_JSON_BUILD_UNSIGNED(not_after)),
                         SD_JSON_BUILD_PAIR_CONDITION(!FLAGS_SET(flags, CREDENTIAL_ANY_SCOPE), "scope", SD_JSON_BUILD_STRING(uid_is_valid(uid) ? "user" : "system")),
-                        SD_JSON_BUILD_PAIR_CONDITION(uid_is_valid(uid), "uid", SD_JSON_BUILD_UNSIGNED(uid)));
+                        SD_JSON_BUILD_PAIR_CONDITION(uid_is_valid(uid), "uid", SD_JSON_BUILD_UNSIGNED(uid)),
+                        SD_JSON_BUILD_PAIR_BOOLEAN("allowInteractiveAuthentication", FLAGS_SET(flags, CREDENTIAL_IPC_ALLOW_INTERACTIVE)));
         if (r < 0)
                 return log_error_errno(r, "Failed to call Encrypt() varlink call.");
         if (!isempty(error_id)) {
@@ -1629,7 +1643,8 @@ int ipc_decrypt_credential(const char *validate_name, usec_t validate_timestamp,
                         SD_JSON_BUILD_PAIR("blob", SD_JSON_BUILD_VARIANT(jinput)),
                         SD_JSON_BUILD_PAIR_CONDITION(validate_timestamp != USEC_INFINITY, "timestamp", SD_JSON_BUILD_UNSIGNED(validate_timestamp)),
                         SD_JSON_BUILD_PAIR_CONDITION(!FLAGS_SET(flags, CREDENTIAL_ANY_SCOPE), "scope", SD_JSON_BUILD_STRING(uid_is_valid(uid) ? "user" : "system")),
-                        SD_JSON_BUILD_PAIR_CONDITION(uid_is_valid(uid), "uid", SD_JSON_BUILD_UNSIGNED(uid)));
+                        SD_JSON_BUILD_PAIR_CONDITION(uid_is_valid(uid), "uid", SD_JSON_BUILD_UNSIGNED(uid)),
+                        SD_JSON_BUILD_PAIR_BOOLEAN("allowInteractiveAuthentication", FLAGS_SET(flags, CREDENTIAL_IPC_ALLOW_INTERACTIVE)));
         if (r < 0)
                 return log_error_errno(r, "Failed to call Decrypt() varlink call.");
         if (!isempty(error_id))  {
@@ -1748,7 +1763,7 @@ static int pick_up_credential_one(
                         AT_FDCWD, target_path,
                         /* open_flags= */ 0,
                         0644,
-                        /* flags= */ 0);
+                        /* copy_flags= */ 0);
         if (r < 0)
                 return log_warning_errno(r, "Failed to copy credential %s → file %s: %m",
                                          credential_name, target_path);

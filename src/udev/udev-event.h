@@ -5,31 +5,14 @@
  * Copyright © 2003 Greg Kroah-Hartman <greg@kroah.com>
  */
 
-#include <stdbool.h>
-#include <stddef.h>
-
-#include "sd-device.h"
-#include "sd-netlink.h"
-
-#include "hashmap.h"
-#include "macro.h"
-#include "time-util.h"
-#include "udev-rules.h"
-#include "udev-worker.h"
-#include "user-util.h"
-
-typedef enum EventMode {
-        EVENT_UDEV_WORKER,
-        EVENT_UDEVADM_TEST,
-        EVENT_UDEVADM_TEST_BUILTIN,
-        EVENT_TEST_RULE_RUNNER,
-        EVENT_TEST_SPAWN,
-} EventMode;
+#include "udev-def.h"
+#include "udev-forward.h"
 
 typedef struct UdevEvent {
+        unsigned n_ref;
+
         UdevWorker *worker;
         sd_netlink *rtnl;
-
         sd_device *dev;
         sd_device *dev_parent;
         sd_device *dev_db_clone;
@@ -41,6 +24,8 @@ typedef struct UdevEvent {
         gid_t gid;
         OrderedHashmap *seclabel_list;
         OrderedHashmap *run_list;
+        Hashmap *written_sysattrs;
+        Hashmap *written_sysctls;
         usec_t birth_usec;
         unsigned builtin_run;
         unsigned builtin_ret;
@@ -53,14 +38,16 @@ typedef struct UdevEvent {
         bool name_final;
         bool devlink_final;
         bool run_final;
+        bool trace;
         bool log_level_was_debug;
         int default_log_level;
         EventMode event_mode;
 } UdevEvent;
 
-UdevEvent *udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode);
-UdevEvent *udev_event_free(UdevEvent *event);
-DEFINE_TRIVIAL_CLEANUP_FUNC(UdevEvent*, udev_event_free);
+UdevEvent* udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode);
+UdevEvent* udev_event_ref(UdevEvent *event);
+UdevEvent* udev_event_unref(UdevEvent *event);
+DEFINE_TRIVIAL_CLEANUP_FUNC(UdevEvent*, udev_event_unref);
 
 int udev_event_execute_rules(UdevEvent *event, UdevRules *rules);
 

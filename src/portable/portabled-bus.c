@@ -1,21 +1,23 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "sd-bus.h"
+
 #include "alloc-util.h"
 #include "btrfs-util.h"
-#include "bus-common-errors.h"
+#include "bus-error.h"
 #include "bus-object.h"
 #include "bus-polkit.h"
 #include "discover-image.h"
 #include "fd-util.h"
+#include "hashmap.h"
 #include "io-util.h"
-#include "missing_capability.h"
+#include "log.h"
 #include "portable.h"
-#include "portabled-bus.h"
-#include "portabled-image-bus.h"
-#include "portabled-image.h"
 #include "portabled.h"
+#include "portabled-bus.h"
+#include "portabled-image.h"
+#include "portabled-image-bus.h"
 #include "strv.h"
-#include "user-util.h"
 
 static int property_get_pool_path(
                 sd_bus *bus,
@@ -139,11 +141,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
 
         assert(message);
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return -ENOMEM;
-
-        r = manager_image_cache_discover(m, images, error);
+        r = manager_image_cache_discover(m, &images, error);
         if (r < 0)
                 return r;
 
@@ -165,6 +163,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
                         return r;
 
                 r = portable_get_state(
+                                m->runtime_scope,
                                 sd_bus_message_get_bus(message),
                                 image->path,
                                 NULL,
@@ -192,7 +191,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int redirect_method_to_image(
@@ -225,6 +224,7 @@ static int method_get_image_metadata(sd_bus_message *message, void *userdata, sd
 
 static int method_get_image_state(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_strv_free_ char **extension_images = NULL;
+        Manager *m = ASSERT_PTR(userdata);
         const char *name_or_path;
         PortableState state;
         int r;
@@ -254,6 +254,7 @@ static int method_get_image_state(sd_bus_message *message, void *userdata, sd_bu
         }
 
         r = portable_get_state(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         name_or_path,
                         extension_images,
@@ -330,6 +331,7 @@ static int method_detach_image(sd_bus_message *message, void *userdata, sd_bus_e
                 return 1; /* Will call us back */
 
         r = portable_detach(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         name_or_path,
                         extension_images,
@@ -575,7 +577,7 @@ int reply_portable_changes(sd_bus_message *m, const PortableChange *changes, siz
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int reply_portable_changes_pair(
@@ -602,5 +604,5 @@ int reply_portable_changes_pair(
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }

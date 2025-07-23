@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
-#include "fd-util.h"
 #include "escape.h"
+#include "fd-util.h"
 #include "libmount-util.h"
 #include "tests.h"
 
@@ -24,7 +24,7 @@ static void test_libmount_unescaping_one(
         f = fmemopen((char*) string, strlen(string), "r");
         assert_se(f);
 
-        assert_se(libmount_parse(title, f, &table, &iter) >= 0);
+        assert_se(libmount_parse_mountinfo(f, &table, &iter) >= 0);
 
         struct libmnt_fs *fs;
         const char *source, *target;

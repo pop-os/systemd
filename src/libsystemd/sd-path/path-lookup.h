@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <stdbool.h>
-
 #include "sd-path.h"
 
+#include "forward.h"
 #include "runtime-scope.h"
 
 typedef enum LookupPathsFlags {
@@ -83,4 +82,20 @@ static inline char** generator_binary_paths(RuntimeScope runtime_scope) {
 }
 static inline char** env_generator_binary_paths(RuntimeScope runtime_scope) {
         return generator_binary_paths_internal(runtime_scope, true);
+}
+
+static inline int credential_store_path(RuntimeScope runtime_scope, char ***ret) {
+        return sd_path_lookup_strv(
+                        runtime_scope == RUNTIME_SCOPE_SYSTEM ?
+                        SD_PATH_SYSTEM_SEARCH_CREDENTIAL_STORE : SD_PATH_USER_SEARCH_CREDENTIAL_STORE,
+                        /* suffix= */ NULL,
+                        ret);
+}
+
+static inline int credential_store_path_encrypted(RuntimeScope runtime_scope, char ***ret) {
+        return sd_path_lookup_strv(
+                        runtime_scope == RUNTIME_SCOPE_SYSTEM ?
+                        SD_PATH_SYSTEM_SEARCH_CREDENTIAL_STORE_ENCRYPTED : SD_PATH_USER_SEARCH_CREDENTIAL_STORE_ENCRYPTED,
+                        /* suffix= */ NULL,
+                        ret);
 }

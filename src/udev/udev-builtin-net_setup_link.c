@@ -1,13 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "alloc-util.h"
 #include "device-private.h"
 #include "device-util.h"
-#include "errno-util.h"
 #include "link-config.h"
 #include "log.h"
-#include "string-util.h"
-#include "strv.h"
+#include "netif-naming-scheme.h"
 #include "udev-builtin.h"
 
 static LinkConfigContext *ctx = NULL;
@@ -30,18 +27,22 @@ static int builtin_net_setup_link(UdevEvent *event, int argc, char **argv) {
                                  device_action_to_string(action));
 
                 /* Import previously assigned .link file name. */
-                (void) udev_builtin_import_property(dev, event->dev_db_clone, event->event_mode, "ID_NET_LINK_FILE");
-                (void) udev_builtin_import_property(dev, event->dev_db_clone, event->event_mode, "ID_NET_LINK_FILE_DROPINS");
+                (void) udev_builtin_import_property(event, "ID_NET_LINK_FILE");
+                (void) udev_builtin_import_property(event, "ID_NET_LINK_FILE_DROPINS");
 
                 /* Set ID_NET_NAME= with the current interface name. */
                 const char *value;
-                if (sd_device_get_sysname(dev, &value) >= 0)
-                        (void) udev_builtin_add_property(dev, event->event_mode, "ID_NET_NAME", value);
+                if (naming_scheme_has(NAMING_USE_INTERFACE_PROPERTY))
+                        r = device_get_ifname(dev, &value);
+                else
+                        r = sd_device_get_sysname(dev, &value);
+                if (r >= 0)
+                        (void) udev_builtin_add_property(event, "ID_NET_NAME", value);
 
                 return 0;
         }
 
-        r = link_new(ctx, &event->rtnl, dev, event->dev_db_clone, &link);
+        r = link_new(ctx, event, &link);
         if (r == -ENODEV) {
                 log_device_debug_errno(dev, r, "Link vanished while getting information, ignoring.");
                 return 0;
@@ -59,13 +60,11 @@ static int builtin_net_setup_link(UdevEvent *event, int argc, char **argv) {
                 return log_device_error_errno(dev, r, "Failed to get link config: %m");
         }
 
-        r = link_apply_config(ctx, &event->rtnl, link, event->event_mode);
+        r = link_apply_config(ctx, link);
         if (r == -ENODEV)
                 log_device_debug_errno(dev, r, "Link vanished while applying configuration, ignoring.");
         else if (r < 0)
                 log_device_warning_errno(dev, r, "Could not apply link configuration, ignoring: %m");
-
-        event->altnames = TAKE_PTR(link->altnames);
 
         return 0;
 }
@@ -84,7 +83,7 @@ static int builtin_net_setup_link_init(void) {
         if (r < 0)
                 return r;
 
-        log_debug("Created link configuration context.");
+        log_debug("Loaded link configuration context.");
         return 0;
 }
 

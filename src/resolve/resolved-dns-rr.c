@@ -3,19 +3,24 @@
 #include <math.h>
 
 #include "alloc-util.h"
+#include "bitmap.h"
 #include "dns-domain.h"
 #include "dns-type.h"
 #include "escape.h"
+#include "hash-funcs.h"
 #include "hexdecoct.h"
 #include "json-util.h"
 #include "memory-util.h"
+#include "resolved-dns-answer.h"
 #include "resolved-dns-dnssec.h"
 #include "resolved-dns-packet.h"
 #include "resolved-dns-rr.h"
+#include "siphash24.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
+#include "time-util.h"
 #include "unaligned.h"
 
 DnsResourceKey* dns_resource_key_new(uint16_t class, uint16_t type, const char *name) {
@@ -308,7 +313,7 @@ int dns_resource_key_match_soa(const DnsResourceKey *key, const DnsResourceKey *
         return dns_name_endswith(dns_resource_key_name(key), dns_resource_key_name(soa));
 }
 
-static void dns_resource_key_hash_func(const DnsResourceKey *k, struct siphash *state) {
+void dns_resource_key_hash_func(const DnsResourceKey *k, struct siphash *state) {
         assert(k);
 
         dns_name_hash_func(dns_resource_key_name(k), state);
@@ -316,7 +321,7 @@ static void dns_resource_key_hash_func(const DnsResourceKey *k, struct siphash *
         siphash24_compress_typesafe(k->type, state);
 }
 
-static int dns_resource_key_compare_func(const DnsResourceKey *x, const DnsResourceKey *y) {
+int dns_resource_key_compare_func(const DnsResourceKey *x, const DnsResourceKey *y) {
         int r;
 
         r = dns_name_compare_func(dns_resource_key_name(x), dns_resource_key_name(y));
@@ -930,12 +935,10 @@ static char *format_svc_param_value(DnsSvcParam *i) {
                 }
                 return strv_join(values_strv, ",");
         }
-        default: {
-                value = decescape((char *)&i->value, " ,", i->length);
+        default:
+                value = decescape((char*) &i->value, i->length, " ,");
                 if (!value)
                         return NULL;
-                break;
-        }
         }
 
         char *qvalue;
@@ -1101,19 +1104,27 @@ const char* dns_resource_record_to_string(DnsResourceRecord *rr) {
                         return NULL;
                 break;
 
-        case DNS_TYPE_SSHFP:
+        case DNS_TYPE_SSHFP: {
+                _cleanup_free_ char *alg = NULL, *key_type = NULL;
+
                 t = hexmem(rr->sshfp.fingerprint, rr->sshfp.fingerprint_size);
                 if (!t)
                         return NULL;
 
-                r = asprintf(&s, "%s %u %u %s",
-                             k,
-                             rr->sshfp.algorithm,
-                             rr->sshfp.fptype,
-                             t);
+                r = sshfp_algorithm_to_string_alloc(rr->sshfp.algorithm, &alg);
+                if (r < 0)
+                        return NULL;
+
+                r = sshfp_key_type_to_string_alloc(rr->sshfp.fptype, &key_type);
+                if (r < 0)
+                        return NULL;
+
+                r = asprintf(&s, "%s "SSHFP_ALGORITHM_FMT" "SSHFP_KEY_TYPE_FMT" %s",
+                             k, alg, key_type, t);
                 if (r < 0)
                         return NULL;
                 break;
+        }
 
         case DNS_TYPE_DNSKEY: {
                 _cleanup_free_ char *alg = NULL;
@@ -1346,7 +1357,6 @@ const char* dns_resource_record_to_string(DnsResourceRecord *rr) {
                 }
                 if (r < 0)
                         return NULL;
-                break;
         }
 
         rr->to_string = s;
@@ -1677,7 +1687,6 @@ void dns_resource_record_hash_func(const DnsResourceRecord *rr, struct siphash *
         case DNS_TYPE_OPENPGPKEY:
         default:
                 siphash24_compress_safe(rr->generic.data, rr->generic.data_size, state);
-                break;
         }
 }
 
@@ -1696,7 +1705,21 @@ int dns_resource_record_compare_func(const DnsResourceRecord *x, const DnsResour
         return CMP(x, y);
 }
 
-DEFINE_HASH_OPS(dns_resource_record_hash_ops, DnsResourceRecord, dns_resource_record_hash_func, dns_resource_record_compare_func);
+DEFINE_HASH_OPS_WITH_KEY_DESTRUCTOR(
+                dns_resource_record_hash_ops,
+                DnsResourceRecord,
+                dns_resource_record_hash_func,
+                dns_resource_record_compare_func,
+                dns_resource_record_unref);
+
+DEFINE_HASH_OPS_FULL(
+                dns_resource_record_hash_ops_by_key,
+                DnsResourceKey,
+                dns_resource_key_hash_func,
+                dns_resource_key_compare_func,
+                dns_resource_key_unref,
+                DnsResourceRecord,
+                dns_resource_record_unref);
 
 DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *copy = NULL;
@@ -1915,7 +1938,6 @@ DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr) {
                 if (!copy->generic.data)
                         return NULL;
                 copy->generic.data_size = rr->generic.data_size;
-                break;
         }
 
         t = TAKE_PTR(copy);
@@ -2503,3 +2525,18 @@ static const char* const dnssec_digest_table[_DNSSEC_DIGEST_MAX_DEFINED] = {
         [DNSSEC_DIGEST_SHA384]          = "SHA-384",
 };
 DEFINE_STRING_TABLE_LOOKUP_WITH_FALLBACK(dnssec_digest, int, 255);
+
+static const char* const sshfp_algorithm_table[_SSHFP_ALGORITHM_MAX_DEFINED] = {
+        [SSHFP_ALGORITHM_RSA]     = "RSA",     /* RFC 4255 */
+        [SSHFP_ALGORITHM_DSA]     = "DSA",     /* RFC 4255 */
+        [SSHFP_ALGORITHM_ECDSA]   = "ECDSA",   /* RFC 6594 */
+        [SSHFP_ALGORITHM_ED25519] = "Ed25519", /* RFC 7479 */
+        [SSHFP_ALGORITHM_ED448]   = "Ed448",   /* RFC 8709 */
+};
+DEFINE_STRING_TABLE_LOOKUP_WITH_FALLBACK(sshfp_algorithm, int, 255);
+
+static const char* const sshfp_key_type_table[_SSHFP_KEY_TYPE_MAX_DEFINED] = {
+        [SSHFP_KEY_TYPE_SHA1]     = "SHA-1",     /* RFC 4255 */
+        [SSHFP_KEY_TYPE_SHA256]   = "SHA-256",   /* RFC 4255 */
+};
+DEFINE_STRING_TABLE_LOOKUP_WITH_FALLBACK(sshfp_key_type, int, 255);

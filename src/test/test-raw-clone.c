@@ -5,7 +5,6 @@
 
 #include "errno-util.h"
 #include "format-util.h"
-#include "missing_syscall.h"
 #include "raw-clone.h"
 #include "tests.h"
 
@@ -14,13 +13,13 @@ TEST(raw_clone) {
 
         parent = getpid();
         log_info("before clone: getpid()→"PID_FMT, parent);
-        assert_se(raw_getpid() == parent);
+        assert_se(getpid() == parent);
 
         pid = raw_clone(0);
         assert_se(pid >= 0);
 
-        pid2 = raw_getpid();
-        log_info("raw_clone: "PID_FMT" getpid()→"PID_FMT" raw_getpid()→"PID_FMT,
+        pid2 = getpid();
+        log_info("raw_clone: "PID_FMT" getpid()→"PID_FMT" getpid()→"PID_FMT,
                  pid, getpid(), pid2);
         if (pid == 0) {
                 assert_se(pid2 != parent);

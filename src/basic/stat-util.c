@@ -1,10 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
-#include <sched.h>
+#include <linux/magic.h>
 #include <sys/statvfs.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -12,19 +10,16 @@
 #include "dirent-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "filesystems.h"
 #include "fs-util.h"
 #include "hash-funcs.h"
-#include "macro.h"
-#include "missing_fs.h"
-#include "missing_magic.h"
-#include "missing_syscall.h"
+#include "log.h"
 #include "mountpoint-util.h"
-#include "nulstr-util.h"
-#include "parse-util.h"
+#include "path-util.h"
+#include "siphash24.h"
 #include "stat-util.h"
 #include "string-util.h"
+#include "time-util.h"
 
 static int verify_stat_at(
                 int fd,
@@ -189,19 +184,19 @@ int dir_is_empty_at(int dir_fd, const char *path, bool ignore_hidden_or_backup) 
         return 1;
 }
 
-bool null_or_empty(struct stat *st) {
+bool stat_may_be_dev_null(struct stat *st) {
         assert(st);
-
-        if (S_ISREG(st->st_mode) && st->st_size <= 0)
-                return true;
 
         /* We don't want to hardcode the major/minor of /dev/null, hence we do a simpler "is this a character
          * device node?" check. */
 
-        if (S_ISCHR(st->st_mode))
-                return true;
+        return S_ISCHR(st->st_mode);
+}
 
-        return false;
+bool stat_is_empty(struct stat *st) {
+        assert(st);
+
+        return S_ISREG(st->st_mode) && st->st_size <= 0;
 }
 
 int null_or_empty_path_with_root(const char *fn, const char *root) {
@@ -298,7 +293,7 @@ int inode_same_at(int fda, const char *filea, int fdb, const char *fileb, int fl
                         flags |= AT_EMPTY_PATH;
                 }
 
-                int ntha_flags = (flags & AT_EMPTY_PATH) | (FLAGS_SET(flags, AT_SYMLINK_NOFOLLOW) ? 0 : AT_SYMLINK_FOLLOW);
+                int ntha_flags = at_flags_normalize_follow(flags) & (AT_EMPTY_PATH|AT_SYMLINK_FOLLOW);
                 _cleanup_free_ struct file_handle *ha = NULL, *hb = NULL;
                 int mntida = -1, mntidb = -1;
 
@@ -470,8 +465,8 @@ bool statx_inode_same(const struct statx *a, const struct statx *b) {
                 a->stx_ino == b->stx_ino;
 }
 
-bool statx_mount_same(const struct new_statx *a, const struct new_statx *b) {
-        if (!new_statx_is_set(a) || !new_statx_is_set(b))
+bool statx_mount_same(const struct statx *a, const struct statx *b) {
+        if (!statx_is_set(a) || !statx_is_set(b))
                 return false;
 
         /* if we have the mount ID, that's all we need */
@@ -483,87 +478,27 @@ bool statx_mount_same(const struct new_statx *a, const struct new_statx *b) {
                 a->stx_dev_minor == b->stx_dev_minor;
 }
 
-static bool is_statx_fatal_error(int err, int flags) {
-        assert(err < 0);
-
-        /* If statx() is not supported or if we see EPERM (which might indicate seccomp filtering or so),
-         * let's do a fallback. Note that on EACCES we'll not fall back, since that is likely an indication of
-         * fs access issues, which we should propagate. */
-        if (ERRNO_IS_NOT_SUPPORTED(err) || err == -EPERM)
-                return false;
-
-        /* When unsupported flags are specified, glibc's fallback function returns -EINVAL.
-         * See statx_generic() in glibc. */
-        if (err != -EINVAL)
-                return true;
-
-        if ((flags & ~(AT_EMPTY_PATH | AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_SYNC_AS_STAT)) != 0)
-                return false; /* Unsupported flags are specified. Let's try to use our implementation. */
-
-        return true;
-}
-
-int statx_fallback(int dfd, const char *path, int flags, unsigned mask, struct statx *sx) {
-        static bool avoid_statx = false;
-        struct stat st;
-        int r;
-
-        if (!avoid_statx) {
-                r = RET_NERRNO(statx(dfd, path, flags, mask, sx));
-                if (r >= 0 || is_statx_fatal_error(r, flags))
-                        return r;
-
-                avoid_statx = true;
-        }
-
-        /* Only do fallback if fstatat() supports the flag too, or if it's one of the sync flags, which are
-         * OK to ignore */
-        if ((flags & ~(AT_EMPTY_PATH|AT_NO_AUTOMOUNT|AT_SYMLINK_NOFOLLOW|
-                      AT_STATX_SYNC_AS_STAT|AT_STATX_FORCE_SYNC|AT_STATX_DONT_SYNC)) != 0)
-                return -EOPNOTSUPP;
-
-        if (fstatat(dfd, path, &st, flags & (AT_EMPTY_PATH|AT_NO_AUTOMOUNT|AT_SYMLINK_NOFOLLOW)) < 0)
-                return -errno;
-
-        *sx = (struct statx) {
-                .stx_mask = STATX_TYPE|STATX_MODE|
-                STATX_NLINK|STATX_UID|STATX_GID|
-                STATX_ATIME|STATX_MTIME|STATX_CTIME|
-                STATX_INO|STATX_SIZE|STATX_BLOCKS,
-                .stx_blksize = st.st_blksize,
-                .stx_nlink = st.st_nlink,
-                .stx_uid = st.st_uid,
-                .stx_gid = st.st_gid,
-                .stx_mode = st.st_mode,
-                .stx_ino = st.st_ino,
-                .stx_size = st.st_size,
-                .stx_blocks = st.st_blocks,
-                .stx_rdev_major = major(st.st_rdev),
-                .stx_rdev_minor = minor(st.st_rdev),
-                .stx_dev_major = major(st.st_dev),
-                .stx_dev_minor = minor(st.st_dev),
-                .stx_atime.tv_sec = st.st_atim.tv_sec,
-                .stx_atime.tv_nsec = st.st_atim.tv_nsec,
-                .stx_mtime.tv_sec = st.st_mtim.tv_sec,
-                .stx_mtime.tv_nsec = st.st_mtim.tv_nsec,
-                .stx_ctime.tv_sec = st.st_ctim.tv_sec,
-                .stx_ctime.tv_nsec = st.st_ctim.tv_nsec,
-        };
-
-        return 0;
-}
-
 int xstatfsat(int dir_fd, const char *path, struct statfs *ret) {
         _cleanup_close_ int fd = -EBADF;
 
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
         assert(ret);
 
-        fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY);
-        if (fd < 0)
-                return fd;
+        if (!isempty(path)) {
+                fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY);
+                if (fd < 0)
+                        return fd;
+                dir_fd = fd;
+        }
 
-        return RET_NERRNO(fstatfs(fd, ret));
+        return RET_NERRNO(fstatfs(dir_fd, ret));
+}
+
+usec_t statx_timestamp_load(const struct statx_timestamp *ts) {
+        return timespec_load(&(const struct timespec) { .tv_sec = ts->tv_sec, .tv_nsec = ts->tv_nsec });
+}
+nsec_t statx_timestamp_load_nsec(const struct statx_timestamp *ts) {
+        return timespec_load_nsec(&(const struct timespec) { .tv_sec = ts->tv_sec, .tv_nsec = ts->tv_nsec });
 }
 
 void inode_hash_func(const struct stat *q, struct siphash *state) {

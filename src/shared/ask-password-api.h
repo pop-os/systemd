@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <stdbool.h>
-
-#include "time-util.h"
+#include "forward.h"
 
 typedef enum AskPasswordFlags {
         ASK_PASSWORD_ACCEPT_CACHED = 1 << 0,  /* read from kernel keyring */
@@ -21,16 +19,20 @@ typedef enum AskPasswordFlags {
 
 /* Encapsulates the mostly static fields of a password query */
 typedef struct AskPasswordRequest {
-        const char *message;         /* The human readable password prompt when asking interactively */
+        const char *message;         /* The human-readable password prompt when asking interactively */
         const char *keyring;         /* kernel keyring key name (key of "user" type) */
         const char *icon;            /* freedesktop icon spec name */
         const char *id;              /* some identifier used for this prompt for the "ask-password" protocol */
         const char *credential;      /* $CREDENTIALS_DIRECTORY credential name */
+        const char *flag_file;       /* Once this flag file disappears abort the query */
+        int tty_fd;                  /* If querying on a TTY, the TTY to query on (or -EBADF) */
+        int hup_fd;                  /* An extra fd to watch for POLLHUP, in which case to abort the query */
+        usec_t until;                /* CLOCK_MONOTONIC time until which to show the prompt (if zero: forever) */
 } AskPasswordRequest;
 
-int ask_password_tty(int tty_fd, const AskPasswordRequest *req, usec_t until, AskPasswordFlags flags, const char *flag_file, char ***ret);
-int ask_password_plymouth(const AskPasswordRequest *req, usec_t until, AskPasswordFlags flags, const char *flag_file, char ***ret);
-int ask_password_agent(const AskPasswordRequest *req, usec_t until, AskPasswordFlags flag, char ***ret);
-int ask_password_auto(const AskPasswordRequest *req, usec_t until, AskPasswordFlags flag, char ***ret);
+int ask_password_tty(const AskPasswordRequest *req, AskPasswordFlags flags, char ***ret);
+int ask_password_plymouth(const AskPasswordRequest *req, AskPasswordFlags flags, char ***ret);
+int ask_password_agent(const AskPasswordRequest *req, AskPasswordFlags flags, char ***ret);
+int ask_password_auto(const AskPasswordRequest *req, AskPasswordFlags flags, char ***ret);
 
 int acquire_user_ask_password_directory(char **ret);

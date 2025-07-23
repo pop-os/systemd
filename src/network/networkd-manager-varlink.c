@@ -2,25 +2,33 @@
 
 #include <unistd.h>
 
+#include "sd-event.h"
 #include "sd-varlink.h"
 
 #include "bus-polkit.h"
 #include "fd-util.h"
+#include "hashmap.h"
 #include "json-util.h"
 #include "lldp-rx-internal.h"
+#include "network-util.h"
 #include "networkd-dhcp-server.h"
+#include "networkd-link.h"
+#include "networkd-manager.h"
 #include "networkd-manager-varlink.h"
 #include "stat-util.h"
 #include "varlink-io.systemd.Network.h"
+#include "varlink-io.systemd.service.h"
 #include "varlink-util.h"
 
 static int vl_method_get_states(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
+        int r;
 
         assert(link);
 
-        if (sd_json_variant_elements(parameters) > 0)
-                return sd_varlink_error_invalid_parameter(link, parameters);
+        r = sd_varlink_dispatch(link, parameters, /* dispatch_table = */ NULL, /* userdata = */ NULL);
+        if (r != 0)
+                return r;
 
         return sd_varlink_replybo(
                         link,
@@ -39,8 +47,9 @@ static int vl_method_get_namespace_id(sd_varlink *link, sd_json_variant *paramet
 
         assert(link);
 
-        if (sd_json_variant_elements(parameters) > 0)
-                return sd_varlink_error_invalid_parameter(link, parameters);
+        r = sd_varlink_dispatch(link, parameters, /* dispatch_table = */ NULL, /* userdata = */ NULL);
+        if (r != 0)
+                return r;
 
         /* Network namespaces have two identifiers: the inode number (which all namespace types have), and
          * the "nsid" (aka the "cookie"), which only network namespaces know as a concept, and which is not
@@ -250,20 +259,9 @@ static int vl_method_set_persistent_storage(sd_varlink *vlink, sd_json_variant *
         return sd_varlink_reply(vlink, NULL);
 }
 
-static int on_connect(sd_varlink_server *s, sd_varlink *vlink, void *userdata) {
-        int r;
-
-        assert(vlink);
-
-        r = sd_varlink_set_allow_fd_passing_input(vlink, true);
-        if (r < 0)
-                return log_warning_errno(r, "Failed to allow receiving file descriptor through varlink: %m");
-
-        return 0;
-}
-
-int manager_connect_varlink(Manager *m) {
+int manager_connect_varlink(Manager *m, int fd) {
         _cleanup_(sd_varlink_server_unrefp) sd_varlink_server *s = NULL;
+        _unused_ _cleanup_close_ int fd_close = fd;
         int r;
 
         assert(m);
@@ -271,36 +269,47 @@ int manager_connect_varlink(Manager *m) {
         if (m->varlink_server)
                 return 0;
 
-        r = varlink_server_new(&s, SD_VARLINK_SERVER_ACCOUNT_UID|SD_VARLINK_SERVER_INHERIT_USERDATA, m);
+        r = varlink_server_new(
+                        &s,
+                        SD_VARLINK_SERVER_ACCOUNT_UID|SD_VARLINK_SERVER_INHERIT_USERDATA|
+                        SD_VARLINK_SERVER_ALLOW_FD_PASSING_INPUT,
+                        m);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate varlink server object: %m");
 
         (void) sd_varlink_server_set_description(s, "varlink-api-network");
 
-        r = sd_varlink_server_add_interface(s, &vl_interface_io_systemd_Network);
+        r = sd_varlink_server_add_interface_many(
+                        s,
+                        &vl_interface_io_systemd_Network,
+                        &vl_interface_io_systemd_service);
         if (r < 0)
                 return log_error_errno(r, "Failed to add Network interface to varlink server: %m");
 
         r = sd_varlink_server_bind_method_many(
                         s,
-                        "io.systemd.Network.GetStates", vl_method_get_states,
-                        "io.systemd.Network.GetNamespaceId", vl_method_get_namespace_id,
-                        "io.systemd.Network.GetLLDPNeighbors", vl_method_get_lldp_neighbors,
-                        "io.systemd.Network.SetPersistentStorage", vl_method_set_persistent_storage);
+                        "io.systemd.Network.GetStates",            vl_method_get_states,
+                        "io.systemd.Network.GetNamespaceId",       vl_method_get_namespace_id,
+                        "io.systemd.Network.GetLLDPNeighbors",     vl_method_get_lldp_neighbors,
+                        "io.systemd.Network.SetPersistentStorage", vl_method_set_persistent_storage,
+                        "io.systemd.service.Ping",                 varlink_method_ping,
+                        "io.systemd.service.SetLogLevel",          varlink_method_set_log_level,
+                        "io.systemd.service.GetEnvironment",       varlink_method_get_environment);
         if (r < 0)
                 return log_error_errno(r, "Failed to register varlink methods: %m");
 
-        r = sd_varlink_server_listen_address(s, "/run/systemd/netif/io.systemd.Network", 0666);
+        if (fd < 0)
+                r = sd_varlink_server_listen_address(s, "/run/systemd/netif/io.systemd.Network", /* mode= */ 0666);
+        else
+                r = sd_varlink_server_listen_fd(s, fd);
         if (r < 0)
                 return log_error_errno(r, "Failed to bind to varlink socket: %m");
+
+        TAKE_FD(fd_close);
 
         r = sd_varlink_server_attach_event(s, m->event, SD_EVENT_PRIORITY_NORMAL);
         if (r < 0)
                 return log_error_errno(r, "Failed to attach varlink connection to event loop: %m");
-
-        r = sd_varlink_server_bind_connect(s, on_connect);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set on-connect callback for varlink: %m");
 
         m->varlink_server = TAKE_PTR(s);
         return 0;
@@ -310,5 +319,4 @@ void manager_varlink_done(Manager *m) {
         assert(m);
 
         m->varlink_server = sd_varlink_server_unref(m->varlink_server);
-        (void) unlink("/run/systemd/netif/io.systemd.Network");
 }

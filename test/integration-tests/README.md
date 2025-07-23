@@ -8,10 +8,16 @@ latest version of mkosi. See
 for more specific details. Make sure `mkosi` is available in `$PATH` when
 reconfiguring meson to make sure it is picked up properly.
 
+If you haven't done it already, be sure to generate signing keys for `mkosi`:
+
+```shell
+$ mkosi genkey
+```
+
 Next, we can build the integration test image with meson:
 
 ```shell
-$ mkosi -f sandbox -- meson compile -C build mkosi
+$ mkosi -f box -- meson compile -C build mkosi
 ```
 
 By default, the `mkosi` meson target which builds the integration test image depends on
@@ -32,24 +38,24 @@ directory (`OutputDirectory=`) to point to the other directory using `mkosi/mkos
 After the image has been built, the integration tests can be run with:
 
 ```shell
-$ env SYSTEMD_INTEGRATION_TESTS=1 mkosi -f sandbox -- meson test -C build --suite integration-tests --num-processes "$(($(nproc) / 4))"
+$ mkosi -f box -- meson test -C build --setup=integration --suite integration-tests --num-processes "$(($(nproc) / 4))"
 ```
 
 As usual, specific tests can be run in meson by appending the name of the test
 which is usually the name of the directory e.g.
 
 ```shell
-$ env SYSTEMD_INTEGRATION_TESTS=1 mkosi -f sandbox -- meson test -C build -v TEST-01-BASIC
+$ mkosi -f box -- meson test -C build --setup=integration -v TEST-01-BASIC
 ```
 
-See `mkosi -f sandbox -- meson introspect build --tests` for a list of tests.
+See `mkosi -f box -- meson introspect build --tests` for a list of tests.
 
 To interactively debug a failing integration test, the `--interactive` option
 (`-i`) for `meson test` can be used. Note that this requires meson v1.5.0 or
 newer:
 
 ```shell
-$ env SYSTEMD_INTEGRATION_TESTS=1 mkosi -f sandbox -- meson test -C build -i TEST-01-BASIC
+$ mkosi -f box -- meson test -C build --setup=integration -i TEST-01-BASIC
 ```
 
 Due to limitations in meson, the integration tests do not yet depend on the
@@ -58,7 +64,7 @@ running the integration tests. To rebuild the image and rerun a test, the
 following command can be used:
 
 ```shell
-$ mkosi -f sandbox -- meson compile -C build mkosi && env SYSTEMD_INTEGRATION_TESTS=1 mkosi -f sandbox -- meson test -C build -v TEST-01-BASIC
+$ mkosi -f box -- meson compile -C build mkosi && mkosi -f box -- meson test -C build --setup=integration -v TEST-01-BASIC
 ```
 
 The integration tests use the same mkosi configuration that's used when you run
@@ -72,7 +78,7 @@ To iterate on an integration test, let's first get a shell in the integration te
 the following:
 
 ```shell
-$ mkosi -f sandbox -- meson compile -C build mkosi && env SYSTEMD_INTEGRATION_TESTS=1 TEST_SHELL=1 mkosi -f sandbox -- meson test -C build -i TEST-01-BASIC
+$ mkosi -f box -- meson compile -C build mkosi && mkosi -f box -- meson test -C build --setup=shell -i TEST-01-BASIC
 ```
 
 This will get us a shell in the integration test environment after booting the machine without running the
@@ -101,7 +107,7 @@ re-running the test will first install the new packages we just built, make a ne
 the test again. You can keep running the loop of `mkosi -R`, `systemctl soft-reboot` and
 `systemctl start ...` until the changes to the integration test are working.
 
-If you're debugging a failing integration test (running `meson test --interactive` without `TEST_SHELL`),
+If you're debugging a failing integration test (running `meson test --interactive`),
 there's no need to run `systemctl start ...`, running `systemctl soft-reboot` on its own is sufficient to
 rerun the test.
 
@@ -113,10 +119,6 @@ rerun the test.
 
 `TEST_NO_KVM=1`: Disable qemu KVM auto-detection (may be necessary when you're
 trying to run the *vanilla* qemu and have both qemu and qemu-kvm installed)
-
-`TEST_SHELL=1`: Configure the machine to be more *user-friendly* for
-interactive debugging (e.g. by setting a usable default terminal, suppressing
-the shutdown after the test, etc.).
 
 `TEST_MATCH_SUBTEST=subtest`:  If the test makes use of `run_subtests` use this
 variable to provide a POSIX extended regex to run only subtests matching the
@@ -171,9 +173,9 @@ Finally, we'll make use of the standalone mode of running the integration tests
 to avoid having to install any build dependencies.
 
 ```sh
-$ mkosi -f sandbox -- meson setup testsuite test/integration-tests/standalone
+$ mkosi -f box -- meson setup testsuite test/integration-tests/standalone
 $ mkosi -f
-$ mkosi sandbox -- meson test -C testsuite --num-processes "$(($(nproc) / 4))"
+$ mkosi box -- meson test -C testsuite --num-processes "$(($(nproc) / 4))"
 ```
 
 ### SELinux AVCs
@@ -191,6 +193,10 @@ KernelCommandLineExtra=systemd.setenv=TEST_SELINUX_CHECK_AVCS=1
 New PRs submitted to the project are run through regression tests, and one set
 of those is the 'autopkgtest' runs for several different architectures, called
 'Ubuntu CI'.  Part of that testing is to run all these tests.
+
+Known issues affecting the infrastructure/testbed can be seen on this Ubuntu page:
+
+https://discourse.ubuntu.com/t/autopkgtest-service/34490
 
 In case a test fails, the full set of artifacts, including the journal of the
 failed run, can be downloaded from the artifacts.tar.gz archive which will be
@@ -263,8 +269,9 @@ $ ./mark-suite-dirty -A ppa:upstream-systemd-ci/ubuntu/systemd-ci -s noble
 
 will create an empty 'noble' repository that can be used for 'noble' CI jobs.
 
-For infrastructure help, reaching out to 'qa-help' via the #ubuntu-quality
-channel on libera.chat is an effective way to receive support in general.
+For infrastructure help (e.g.: Github token refresh) a bug can be filed at:
+https://launchpad.net/auto-package-testing or an email can be sent to the
+ubuntu-quality mailing list: https://lists.ubuntu.com/mailman/listinfo/ubuntu-quality
 
 Given access to the shared secret, tests can be re-run using the generic
 retry-github-test tool:
@@ -445,34 +452,103 @@ see `--help` for an exhaustive list.
 
 ## Code coverage
 
-We have a daily cron job in CentOS CI which runs all unit and integration tests,
-collects coverage using gcov/lcov, and uploads the report to
+We have a daily cron job in Github Actions which runs all unit and integration
+tests, collects coverage using gcov/lcov, and uploads the report to
 [Coveralls](https://coveralls.io/github/systemd/systemd). In order to collect
 the most accurate coverage information, some measures have to be taken regarding
 sandboxing, namely:
 
  - ProtectSystem= and ProtectHome= need to be turned off
- - the $BUILD_DIR with necessary .gcno files needs to be present in the image
-   and needs to be writable by all processes
+ - the coverage files (*.gcda) files need to be present in the image and need
+   to be writable by all processes
 
 The first point is relatively easy to handle and is handled automagically by
-our test "framework" by creating necessary dropins.
+mkosi by creating the necessary dropins when `COVERAGE=1` is passed via the
+`Environment=` setting.
 
-Making the `$BUILD_DIR` accessible to _everything_ is slightly more complicated.
-First, and foremost, the `$BUILD_DIR` has a POSIX ACL that makes it writable
-to everyone. However, this is not enough in some cases, like for services
-that use DynamicUser=yes, since that implies ProtectSystem=strict that can't
-be turned off. A solution to this is to use `ReadWritePaths=$BUILD_DIR`, which
-works for the majority of cases, but can't be turned on globally, since
-ReadWritePaths= creates its own mount namespace which might break some
-services. Hence, the `ReadWritePaths=$BUILD_DIR` is enabled for all services
-with the `test-` prefix (i.e. test-foo.service or test-foo-bar.service), both
-in the system and the user managers.
+Making the coverage files accessible and writable to _everything_ is achieved by
+pre-creating all the files and making them world readable and writable. However,
+this is not enough in some cases, like for services that use DynamicUser=yes,
+since that implies ProtectSystem=strict that can't be turned off. A solution to
+this is to use `ReadWritePaths=/coverage`, which works for the majority of
+cases, but can't be turned on globally, since ReadWritePaths= creates its own
+mount namespace which might break some services. Hence, the
+`ReadWritePaths=/coverage` is enabled for all services with the `test-` prefix
+(i.e. test-foo.service or test-foo-bar.service), both in the system and the user
+managers.
 
 So, if you're considering writing an integration test that makes use of
-DynamicUser=yes, or other sandboxing stuff that implies it, please prefix the
+`DynamicUser=yes`, or other sandboxing stuff that implies it, please prefix the
 test unit (be it a static one or a transient one created via systemd-run), with
 `test-`, unless the test unit needs to be able to install mount points in the
 main mount namespace - in that case use `IGNORE_MISSING_COVERAGE=yes` in the
 test definition (i.e. `TEST-*-NAME/test.sh`), which will skip the post-test
 check for missing coverage for the respective test.
+
+## Fuzzers
+
+systemd includes fuzzers in `src/fuzz/` that use libFuzzer and are automatically
+run by [OSS-Fuzz](https://github.com/google/oss-fuzz) with sanitizers. To add a
+fuzz target, create a new `src/fuzz/fuzz-foo.c` file with a
+`LLVMFuzzerTestOneInput` function and add it to the list in
+`src/fuzz/meson.build`.
+
+Whenever possible, a seed corpus and a dictionary should also be added with new
+fuzz targets. The dictionary should be named `src/fuzz/fuzz-foo.dict` and the
+seed corpus should be built and exported as `$OUT/fuzz-foo_seed_corpus.zip` in
+`tools/oss-fuzz.sh`.
+
+The fuzzers can be built locally by running `tools/oss-fuzz.sh`, or by running:
+
+```sh
+CC=clang CXX=clang++ \
+meson setup build-libfuzz -Dllvm-fuzz=true -Db_sanitize=address,undefined -Db_lundef=false \
+-Dc_args='-fno-omit-frame-pointer -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'
+ninja -C build-libfuzz fuzzers
+```
+
+Each fuzzer then can be then run manually together with a directory containing
+the initial corpus:
+
+```
+export UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1
+build-libfuzz/fuzz-varlink-idl test/fuzz/fuzz-varlink-idl/
+```
+
+Note: the `halt_on_error=1` UBSan option is especially important, otherwise the
+fuzzer won't crash when undefined behavior is triggered.
+
+You should also confirm that the fuzzers can be built and run using
+[the OSS-Fuzz toolchain](https://google.github.io/oss-fuzz/advanced-topics/reproducing/#building-using-docker):
+
+```sh
+path_to_systemd=...
+
+git clone --depth=1 https://github.com/google/oss-fuzz
+cd oss-fuzz
+
+for sanitizer in address undefined memory; do
+for engine in libfuzzer afl honggfuzz; do
+./infra/helper.py build_fuzzers --sanitizer "$sanitizer" --engine "$engine" \
+--clean systemd "$path_to_systemd"
+
+./infra/helper.py check_build --sanitizer "$sanitizer" --engine "$engine" \
+-e ALLOWED_BROKEN_TARGETS_PERCENTAGE=0 systemd
+done
+done
+
+./infra/helper.py build_fuzzers --clean --architecture i386 systemd "$path_to_systemd"
+./infra/helper.py check_build --architecture i386 -e ALLOWED_BROKEN_TARGETS_PERCENTAGE=0 systemd
+
+./infra/helper.py build_fuzzers --clean --sanitizer coverage systemd "$path_to_systemd"
+./infra/helper.py coverage --no-corpus-download systemd
+```
+
+If you find a bug that impacts the security of systemd, please follow the
+guidance in [CONTRIBUTING.md](/CONTRIBUTING) on how to report a security
+vulnerability.
+
+For more details on building fuzzers and integrating with OSS-Fuzz, visit:
+
+- [Setting up a new project - OSS-Fuzz](https://google.github.io/oss-fuzz/getting-started/new-project-guide/)
+- [Tutorials - OSS-Fuzz](https://google.github.io/oss-fuzz/reference/useful-links/#tutorials)

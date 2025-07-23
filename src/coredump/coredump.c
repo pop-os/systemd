@@ -1,16 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+#include <elf.h>
 #include <stdio.h>
 #include <sys/mount.h>
 #include <sys/statvfs.h>
-#include <sys/auxv.h>
 #include <sys/xattr.h>
 #include <unistd.h>
-#if WANT_LINUX_FS_H
-#  include <linux/fs.h>
-#endif
 
+#include "sd-bus.h"
 #include "sd-daemon.h"
 #include "sd-journal.h"
 #include "sd-json.h"
@@ -29,25 +26,25 @@
 #include "coredump-vacuum.h"
 #include "dirent-util.h"
 #include "elf-util.h"
+#include "errno-util.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "io-util.h"
 #include "iovec-util.h"
 #include "journal-importer.h"
 #include "journal-send.h"
 #include "json-util.h"
 #include "log.h"
-#include "macro.h"
 #include "main-func.h"
 #include "memory-util.h"
 #include "memstream-util.h"
-#include "missing_mount.h"
-#include "missing_syscall.h"
 #include "mkdir-label.h"
 #include "namespace-util.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
@@ -55,8 +52,6 @@
 #include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "strv.h"
-#include "sync-util.h"
 #include "tmpfile-util.h"
 #include "uid-classification.h"
 #include "user-util.h"
@@ -265,7 +260,7 @@ static int fix_acl(int fd, uid_t uid, bool allow_user) {
         if (!allow_user)
                 return 0;
 
-        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
+        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid_is_greeter(uid) || uid == UID_NOBODY)
                 return 0;
 
         /* Make sure normal users can read (but not write or delete) their own coredumps */
@@ -315,7 +310,7 @@ static const char *coredump_tmpfile_name(const char *s) {
         return s ?: "(unnamed temporary file)";
 }
 
-static int fix_permissions(
+static int fix_permissions_and_link(
                 int fd,
                 const char *filename,
                 const char *target,
@@ -340,21 +335,30 @@ static int fix_permissions(
         return 0;
 }
 
-static int maybe_remove_external_coredump(const char *filename, uint64_t size) {
+static int maybe_remove_external_coredump(
+                const Context *c,
+                const char *filename,
+                uint64_t size) {
 
-        /* Returns 1 if might remove, 0 if will not remove, < 0 on error. */
+        assert(c);
+
+        /* Returns true if might remove, false if will not remove, < 0 on error. */
+
+        if (arg_storage != COREDUMP_STORAGE_NONE &&
+            (c->is_pid1 || c->is_journald)) /* Always keep around in case of journald/pid1, since we cannot rely on the journal to accept them */
+                return false;
 
         if (arg_storage == COREDUMP_STORAGE_EXTERNAL &&
             size <= arg_external_size_max)
-                return 0;
+                return false;
 
         if (!filename)
-                return 1;
+                return true;
 
         if (unlink(filename) < 0 && errno != ENOENT)
                 return log_error_errno(errno, "Failed to unlink %s: %m", filename);
 
-        return 1;
+        return true;
 }
 
 static int make_filename(const Context *context, char **ret) {
@@ -438,7 +442,7 @@ static int grant_user_access(int core_fd, const Context *context) {
         if (r < 0)
                 return r;
 
-        /* We allow access if dumpable on the command line was exactly 1, we got all the data,
+        /* We allow access if %d/dumpable on the command line was exactly 1, we got all the data,
          * at_secure is not set, and the uid/gid match euid/egid. */
         bool ret =
                 context->dumpable == SUID_DUMP_USER &&
@@ -608,7 +612,7 @@ static int save_external_coredump(
                         uncompressed_size += partial_uncompressed_size;
                 }
 
-                r = fix_permissions(fd_compressed, tmp_compressed, fn_compressed, context, allow_user);
+                r = fix_permissions_and_link(fd_compressed, tmp_compressed, fn_compressed, context, allow_user);
                 if (r < 0)
                         return r;
 
@@ -619,11 +623,10 @@ static int save_external_coredump(
 
                 *ret_filename = TAKE_PTR(fn_compressed);       /* compressed */
                 *ret_node_fd = TAKE_FD(fd_compressed);         /* compressed */
-                *ret_compressed_size = (uint64_t) st.st_size;  /* compressed */
                 *ret_data_fd = TAKE_FD(fd);
                 *ret_size = uncompressed_size;
+                *ret_compressed_size = (uint64_t) st.st_size;  /* compressed */
                 *ret_truncated = truncated;
-                tmp_compressed = mfree(tmp_compressed);
 
                 return 0;
         }
@@ -632,10 +635,10 @@ static int save_external_coredump(
         if (truncated)
                 log_struct(LOG_INFO,
                            LOG_MESSAGE("Core file was truncated to %"PRIu64" bytes.", max_size),
-                           "SIZE_LIMIT=%"PRIu64, max_size,
-                           "MESSAGE_ID=" SD_MESSAGE_TRUNCATED_CORE_STR);
+                           LOG_ITEM("SIZE_LIMIT=%"PRIu64, max_size),
+                           LOG_MESSAGE_ID(SD_MESSAGE_TRUNCATED_CORE_STR));
 
-        r = fix_permissions(fd, tmp, fn, context, allow_user);
+        r = fix_permissions_and_link(fd, tmp, fn, context, allow_user);
         if (r < 0)
                 return log_error_errno(r, "Failed to fix permissions and finalize coredump %s into %s: %m", coredump_tmpfile_name(tmp), fn);
 
@@ -646,8 +649,10 @@ static int save_external_coredump(
                 return log_error_errno(errno, "Failed to seek on coredump %s: %m", fn);
 
         *ret_filename = TAKE_PTR(fn);
+        *ret_node_fd = -EBADF;
         *ret_data_fd = TAKE_FD(fd);
         *ret_size = (uint64_t) st.st_size;
+        *ret_compressed_size = UINT64_MAX;
         *ret_truncated = truncated;
 
         return 0;
@@ -766,31 +771,27 @@ static int compose_open_fds(pid_t pid, char **ret) {
  * container parent (the pid's process isn't 'containerized').
  * Returns a negative number on errors.
  */
-static int get_process_container_parent_cmdline(pid_t pid, char** cmdline) {
-        pid_t container_pid;
-        const char *proc_root_path;
-        struct stat root_stat, proc_root_stat;
+static int get_process_container_parent_cmdline(PidRef *pid, char** ret_cmdline) {
         int r;
 
-        /* To compare inodes of / and /proc/[pid]/root */
-        if (stat("/", &root_stat) < 0)
-                return -errno;
+        assert(pidref_is_set(pid));
+        assert(!pidref_is_remote(pid));
 
-        proc_root_path = procfs_file_alloca(pid, "root");
-        if (stat(proc_root_path, &proc_root_stat) < 0)
-                return -errno;
-
-        /* The process uses system root. */
-        if (stat_inode_same(&proc_root_stat, &root_stat)) {
-                *cmdline = NULL;
+        r = pidref_from_same_root_fs(pid, &PIDREF_MAKE_FROM_PID(1));
+        if (r < 0)
+                return r;
+        if (r > 0) {
+                /* The process uses system root. */
+                *ret_cmdline = NULL;
                 return 0;
         }
 
+        _cleanup_(pidref_done) PidRef container_pid = PIDREF_NULL;
         r = namespace_get_leader(pid, NAMESPACE_MOUNT, &container_pid);
         if (r < 0)
                 return r;
 
-        r = pid_get_cmdline(container_pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE_POSIX, cmdline);
+        r = pidref_get_cmdline(&container_pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE_POSIX, ret_cmdline);
         if (r < 0)
                 return r;
 
@@ -832,10 +833,13 @@ static int attach_mount_tree(int mount_tree_fd) {
                 return log_warning_errno(r, "Failed to create directory: %m");
 
         r = mount_setattr(mount_tree_fd, "", AT_EMPTY_PATH,
-                                &(struct mount_attr) {
-                                        .attr_set = MOUNT_ATTR_RDONLY|MOUNT_ATTR_NOSUID|MOUNT_ATTR_NODEV|MOUNT_ATTR_NOEXEC|MOUNT_ATTR_NOSYMFOLLOW,
-                                        .propagation = MS_SLAVE,
-                                }, sizeof(struct mount_attr));
+                          &(struct mount_attr) {
+                                  /* MOUNT_ATTR_NOSYMFOLLOW is left out on purpose to allow libdwfl to resolve symlinks.
+                                   * libdwfl will use openat2() with RESOLVE_IN_ROOT so there is no risk of symlink escape.
+                                   * https://sourceware.org/git/?p=elfutils.git;a=patch;h=06f0520f9a78b07c11c343181d552791dd630346 */
+                                  .attr_set = MOUNT_ATTR_RDONLY|MOUNT_ATTR_NOSUID|MOUNT_ATTR_NODEV|MOUNT_ATTR_NOEXEC,
+                                  .propagation = MS_SLAVE,
+                          }, sizeof(struct mount_attr));
         if (r < 0)
                 return log_warning_errno(errno, "Failed to change properties of mount tree: %m");
 
@@ -877,7 +881,10 @@ static int submit_coredump(
                 /* If we don't want to keep the coredump on disk, remove it now, as later on we
                  * will lack the privileges for it. However, we keep the fd to it, so that we can
                  * still process it and log it. */
-                r = maybe_remove_external_coredump(filename, coredump_node_fd >= 0 ? coredump_compressed_size : coredump_size);
+                r = maybe_remove_external_coredump(
+                                context,
+                                filename,
+                                coredump_node_fd >= 0 ? coredump_compressed_size : coredump_size);
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -1407,7 +1414,7 @@ static int gather_pid_metadata_from_argv(
 
                         /* If there are containers involved with different versions of the code they might
                          * not be using pidfds, so it would be wrong to set the metadata, skip it. */
-                        r = in_same_namespace(/* pid1 = */ 0, context->pidref.pid, NAMESPACE_PID);
+                        r = pidref_in_same_namespace(/* pid1 = */ NULL, &context->pidref, NAMESPACE_PID);
                         if (r < 0)
                                 log_debug_errno(r, "Failed to check pidns of crashing process, ignoring: %m");
                         if (r <= 0)
@@ -1435,7 +1442,7 @@ static int gather_pid_metadata_from_argv(
         if (!pidref_is_set(&context->pidref))
                 context->pidref = TAKE_PIDREF(local_pidref);
 
-        /* Close the kernel-provided FD as the last thing after everything else succeeded */
+        /* Close the kernel-provided FD as the last thing after everything else succeeded. */
         kernel_fd = safe_close(kernel_fd);
 
         return 0;
@@ -1479,10 +1486,10 @@ static int gather_pid_metadata_from_procfs(struct iovec_wrapper *iovw, Context *
         if (cg_pid_get_user_unit(pid, &t) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_USER_UNIT=", t);
 
-        if (sd_pid_get_session(pid, &t) >= 0)
+        if (cg_pidref_get_session(&context->pidref, &t) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_SESSION=", t);
 
-        if (sd_pid_get_owner_uid(pid, &owner_uid) >= 0) {
+        if (cg_pidref_get_owner_uid(&context->pidref, &owner_uid) >= 0) {
                 r = asprintf(&t, UID_FMT, owner_uid);
                 if (r > 0)
                         (void) iovw_put_string_field_free(iovw, "COREDUMP_OWNER_UID=", t);
@@ -1501,28 +1508,28 @@ static int gather_pid_metadata_from_procfs(struct iovec_wrapper *iovw, Context *
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_OPEN_FDS=", t);
 
         p = procfs_file_alloca(pid, "status");
-        if (read_full_virtual_file(p, &t, NULL) >= 0)
+        if (read_full_file(p, &t, /* ret_size= */ NULL) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_PROC_STATUS=", t);
 
         p = procfs_file_alloca(pid, "maps");
-        if (read_full_virtual_file(p, &t, NULL) >= 0)
+        if (read_full_file(p, &t, /* ret_size= */ NULL) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_PROC_MAPS=", t);
 
-        p = procfs_file_alloca(pid, "limits");
-        if (read_full_virtual_file(p, &t, NULL) >= 0)
+        p = procfs_file_alloca(pid, "limits"); /* this uses 'seq_file' in kernel, use read_full_file_at() */
+        if (read_full_file(p, &t, /* ret_size= */ NULL) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_PROC_LIMITS=", t);
 
         p = procfs_file_alloca(pid, "cgroup");
-        if (read_full_virtual_file(p, &t, NULL) >= 0)
+        if (read_full_file(p, &t, /* ret_size= */ NULL) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_PROC_CGROUP=", t);
 
         p = procfs_file_alloca(pid, "mountinfo");
-        if (read_full_virtual_file(p, &t, NULL) >= 0)
+        if (read_full_file(p, &t, /* ret_size= */ NULL) >= 0)
                 (void) iovw_put_string_field_free(iovw, "COREDUMP_PROC_MOUNTINFO=", t);
 
         /* We attach /proc/auxv here. ELF coredumps also contain a note for this (NT_AUXV), see elf(5). */
         p = procfs_file_alloca(pid, "auxv");
-        if (read_full_virtual_file(p, &t, &size) >= 0) {
+        if (read_full_file(p, &t, &size) >= 0) {
                 char *buf = malloc(strlen("COREDUMP_PROC_AUXV=") + size + 1);
                 if (buf) {
                         /* Add a dummy terminator to make context_parse_iovw() happy. */
@@ -1545,7 +1552,7 @@ static int gather_pid_metadata_from_procfs(struct iovec_wrapper *iovw, Context *
 
                 /* If the process' root is "/", then there is a chance it has
                  * mounted own root and hence being containerized. */
-                if (proc_self_root_is_slash && get_process_container_parent_cmdline(pid, &t) > 0)
+                if (proc_self_root_is_slash && get_process_container_parent_cmdline(&context->pidref, &t) > 0)
                         (void) iovw_put_string_field_free(iovw, "COREDUMP_CONTAINER_CMDLINE=", t);
         }
 
@@ -1617,11 +1624,13 @@ static int receive_ucred(int transport_fd, struct ucred *ret_ucred) {
         return 0;
 }
 
-static int can_forward_coredump(Context *context, pid_t pid) {
+static int can_forward_coredump(Context *context, const PidRef *pid) {
         _cleanup_free_ char *cgroup = NULL, *path = NULL, *unit = NULL;
         int r;
 
         assert(context);
+        assert(pidref_is_set(pid));
+        assert(!pidref_is_remote(pid));
 
         /* We need to avoid a situation where the attacker crashes a SUID process or a root daemon and
          * quickly replaces it with a namespaced process and we forward the coredump to the attacker, into
@@ -1630,7 +1639,7 @@ static int can_forward_coredump(Context *context, pid_t pid) {
         if (!context->got_pidfd && context->dumpable != SUID_DUMP_USER)
                 return false;
 
-        r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, pid, &cgroup);
+        r = cg_pidref_get_path(SYSTEMD_CGROUP_CONTROLLER, pid, &cgroup);
         if (r < 0)
                 return r;
 
@@ -1659,7 +1668,7 @@ static int can_forward_coredump(Context *context, pid_t pid) {
 static int forward_coredump_to_container(Context *context) {
         _cleanup_close_ int pidnsfd = -EBADF, mntnsfd = -EBADF, netnsfd = -EBADF, usernsfd = -EBADF, rootfd = -EBADF;
         _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
-        pid_t leader_pid, child;
+        pid_t child;
         struct ucred ucred = {
                 .pid = context->pidref.pid,
                 .uid = context->uid,
@@ -1669,11 +1678,12 @@ static int forward_coredump_to_container(Context *context) {
 
         assert(context);
 
-        r = namespace_get_leader(context->pidref.pid, NAMESPACE_PID, &leader_pid);
+        _cleanup_(pidref_done) PidRef leader_pid = PIDREF_NULL;
+        r = namespace_get_leader(&context->pidref, NAMESPACE_PID, &leader_pid);
         if (r < 0)
                 return log_debug_errno(r, "Failed to get namespace leader: %m");
 
-        r = can_forward_coredump(context, leader_pid);
+        r = can_forward_coredump(context, &leader_pid);
         if (r < 0)
                 return log_debug_errno(r, "Failed to check if coredump can be forwarded: %m");
         if (r == 0)
@@ -1688,15 +1698,15 @@ static int forward_coredump_to_container(Context *context) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to set SO_PASSCRED: %m");
 
-        r = namespace_open(leader_pid, &pidnsfd, &mntnsfd, &netnsfd, &usernsfd, &rootfd);
+        r = pidref_namespace_open(&leader_pid, &pidnsfd, &mntnsfd, &netnsfd, &usernsfd, &rootfd);
         if (r < 0)
-                return log_debug_errno(r, "Failed to join namespaces of PID " PID_FMT ": %m", leader_pid);
+                return log_debug_errno(r, "Failed to open namespaces of PID " PID_FMT ": %m", leader_pid.pid);
 
         r = namespace_fork("(sd-coredumpns)", "(sd-coredump)", NULL, 0,
                            FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM,
                            pidnsfd, mntnsfd, netnsfd, usernsfd, rootfd, &child);
         if (r < 0)
-                return log_debug_errno(r, "Failed to fork into namespaces of PID " PID_FMT ": %m", leader_pid);
+                return log_debug_errno(r, "Failed to fork into namespaces of PID " PID_FMT ": %m", leader_pid.pid);
         if (r == 0) {
                 pair[0] = safe_close(pair[0]);
 
@@ -1745,7 +1755,7 @@ static int forward_coredump_to_container(Context *context) {
                                 break;
 
                         default:
-                                break;
+                                ;
                         }
 
                         r = iovw_put_string_field(iovw, meta_field_names[i], t);
@@ -1818,12 +1828,13 @@ static int acquire_pid_mount_tree_fd(const Context *context, int *ret_fd) {
         if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, pair) < 0)
                 return log_error_errno(errno, "Failed to create socket pair: %m");
 
-        r = namespace_open(context->pidref.pid,
-                           /* ret_pidns_fd= */ NULL,
-                           &mntns_fd,
-                           /* ret_netns_fd= */ NULL,
-                           /* ret_userns_fd= */ NULL,
-                           &root_fd);
+        r = pidref_namespace_open(
+                        &context->pidref,
+                        /* ret_pidns_fd= */ NULL,
+                        &mntns_fd,
+                        /* ret_netns_fd= */ NULL,
+                        /* ret_userns_fd= */ NULL,
+                        &root_fd);
         if (r < 0)
                 return log_error_errno(r, "Failed to open mount namespace of crashing process: %m");
 
@@ -1869,7 +1880,7 @@ static int acquire_pid_mount_tree_fd(const Context *context, int *ret_fd) {
         return 0;
 }
 
-static int process_kernel(int argc, char* argv[]) {
+static int process_kernel(int argc, char *argv[]) {
         _cleanup_(iovw_free_freep) struct iovec_wrapper *iovw = NULL;
         _cleanup_(context_done) Context context = CONTEXT_NULL;
         int r;
@@ -1907,7 +1918,7 @@ static int process_kernel(int argc, char* argv[]) {
                  context.meta[META_ARGV_UID], context.meta[META_ARGV_SIGNAL],
                  signal_to_string(context.signo));
 
-        r = in_same_namespace(getpid_cached(), context.pidref.pid, NAMESPACE_PID);
+        r = pidref_in_same_namespace(/* pid1 = */ NULL, &context.pidref, NAMESPACE_PID);
         if (r < 0)
                 log_debug_errno(r, "Failed to check pidns of crashing process, ignoring: %m");
         if (r == 0) {

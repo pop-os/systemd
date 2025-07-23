@@ -1,20 +1,17 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sched.h>
+#include <stdlib.h>
 #include <sys/mount.h>
-#if WANT_LINUX_FS_H
-#include <linux/fs.h>
-#endif
 
 #include "alloc-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "glyph-util.h"
-#include "home-util.h"
-#include "homework-mount.h"
 #include "homework.h"
-#include "missing_mount.h"
-#include "missing_syscall.h"
+#include "homework-mount.h"
+#include "log.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "namespace-util.h"
@@ -40,7 +37,7 @@ static const char *mount_options_for_fstype(const char *fstype) {
         if (streq(fstype, "xfs"))
                 return "noquota";
         if (streq(fstype, "btrfs"))
-                return "noacl,compress=zstd:1";
+                return "compress=zstd:1,noacl,user_subvol_rm_allowed";
         return NULL;
 }
 
@@ -222,6 +219,11 @@ static int make_home_userns(uid_t stored_uid, uid_t exposed_uid) {
         if (r < 0)
                 return log_oom();
 
+        /* Map the foreign range 1:1. After all  what is foreign should remain foreign. */
+        r = append_identity_range(&text, FOREIGN_UID_MIN, FOREIGN_UID_MAX+1, stored_uid);
+        if (r < 0)
+                return log_oom();
+
         /* Map nspawn's mapped root UID as identity mapping so that people can run nspawn uidmap mounted
          * containers off $HOME, if they want. */
         r = strextendf(&text, UID_FMT " " UID_FMT " " UID_FMT "\n", UID_MAPPED_ROOT, UID_MAPPED_ROOT, 1u);
@@ -233,7 +235,7 @@ static int make_home_userns(uid_t stored_uid, uid_t exposed_uid) {
 
         log_debug("Creating userns with mapping:\n%s", text);
 
-        userns_fd = userns_acquire(text, text); /* same uid + gid mapping */
+        userns_fd = userns_acquire(text, text, /* setgroups_deny= */ true); /* same uid + gid mapping */
         if (userns_fd < 0)
                 return log_error_errno(userns_fd, "Failed to allocate user namespace: %m");
 
@@ -303,7 +305,7 @@ int home_shift_uid(int dir_fd, const char *target, uid_t stored_uid, uid_t expos
                 return log_error_errno(errno, "Failed to apply UID/GID map: %m");
 
         log_debug("Applied uidmap mount to %s. Mapping is " UID_FMT " %s " UID_FMT ".",
-                  strna(target), stored_uid, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), exposed_uid);
+                  strna(target), stored_uid, glyph(GLYPH_ARROW_RIGHT), exposed_uid);
 
         if (ret_mount_fd)
                 *ret_mount_fd = TAKE_FD(mount_fd);

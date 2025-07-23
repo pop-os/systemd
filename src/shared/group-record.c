@@ -1,7 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "alloc-util.h"
+#include "bitfield.h"
 #include "group-record.h"
 #include "json-util.h"
+#include "log.h"
+#include "string-util.h"
 #include "strv.h"
 #include "uid-classification.h"
 #include "user-util.h"
@@ -173,6 +177,7 @@ int group_record_load(
         static const sd_json_dispatch_field group_dispatch_table[] = {
                 { "groupName",      SD_JSON_VARIANT_STRING,        json_dispatch_user_group_name,  offsetof(GroupRecord, group_name),       SD_JSON_RELAX  },
                 { "realm",          SD_JSON_VARIANT_STRING,        json_dispatch_realm,            offsetof(GroupRecord, realm),            0              },
+                { "uuid",           SD_JSON_VARIANT_STRING,        sd_json_dispatch_id128,         offsetof(GroupRecord, uuid),             0              },
                 { "description",    SD_JSON_VARIANT_STRING,        json_dispatch_gecos,            offsetof(GroupRecord, description),      0              },
                 { "disposition",    SD_JSON_VARIANT_STRING,        json_dispatch_user_disposition, offsetof(GroupRecord, disposition),      0              },
                 { "service",        SD_JSON_VARIANT_STRING,        sd_json_dispatch_string,        offsetof(GroupRecord, service),          SD_JSON_STRICT },
@@ -302,6 +307,9 @@ UserDisposition group_record_disposition(GroupRecord *h) {
         if (gid_is_container(h->gid))
                 return USER_CONTAINER;
 
+        if (gid_is_foreign(h->gid))
+                return USER_FOREIGN;
+
         if (h->gid > INT32_MAX)
                 return USER_RESERVED;
 
@@ -327,14 +335,32 @@ int group_record_clone(GroupRecord *h, UserRecordLoadFlags flags, GroupRecord **
         return 0;
 }
 
-int group_record_match(GroupRecord *h, const UserDBMatch *match) {
+bool group_record_matches_group_name(const GroupRecord *g, const char *group_name) {
+        assert(g);
+        assert(group_name);
+
+        if (streq_ptr(g->group_name, group_name))
+                return true;
+
+        if (streq_ptr(g->group_name_and_realm_auto, group_name))
+                return true;
+
+        return false;
+}
+
+bool group_record_match(GroupRecord *h, const UserDBMatch *match) {
         assert(h);
-        assert(match);
+
+        if (!match)
+                return true;
+
+        if (!gid_is_valid(h->gid))
+                return false;
 
         if (h->gid < match->gid_min || h->gid > match->gid_max)
                 return false;
 
-        if (!FLAGS_SET(match->disposition_mask, UINT64_C(1) << group_record_disposition(h)))
+        if (!BIT_SET(match->disposition_mask, group_record_disposition(h)))
                 return false;
 
         if (!strv_isempty(match->fuzzy_names)) {
@@ -349,5 +375,16 @@ int group_record_match(GroupRecord *h, const UserDBMatch *match) {
         }
 
         return true;
+}
 
+bool group_record_is_root(const GroupRecord *g) {
+        assert(g);
+
+        return g->gid == 0 || streq_ptr(g->group_name, "root");
+}
+
+bool group_record_is_nobody(const GroupRecord *g) {
+        assert(g);
+
+        return g->gid == GID_NOBODY || STRPTR_IN_SET(g->group_name, NOBODY_GROUP_NAME, "nobody");
 }

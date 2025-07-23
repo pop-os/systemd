@@ -373,7 +373,7 @@ $imgs/zzz7 : start=     6291416, size=      131072, type=0FC63DAF-8483-4772-8E79
     fi
 
     loop="$(losetup -P --show --find "$imgs/zzz")"
-    udevadm wait --timeout 60 --settle "${loop:?}p7"
+    udevadm wait --timeout=60 --settle "${loop:?}p7"
 
     volume="test-repart-$RANDOM"
 
@@ -565,9 +565,9 @@ EOF
 
     output=$(sfdisk --dump "$imgs/zzz")
 
-    assert_in "$imgs/zzz1 : start=        2048, size=       20480, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=39107B09-615D-48FB-BA37-C663885FCE67, name=\"esp\"" "$output"
-    assert_in "$imgs/zzz2 : start=       22528, size=       65536, type=${root_guid}, uuid=${root_uuid}, name=\"root-${architecture}\", attrs=\"GUID:59\"" "$output"
-    assert_in "$imgs/zzz3 : start=       88064, size=       65536, type=${usr_guid}, uuid=${usr_uuid}, name=\"usr-${architecture}\", attrs=\"GUID:60\"" "$output"
+    assert_in "$imgs/zzz1 : start=        2048, size=      532480, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=39107B09-615D-48FB-BA37-C663885FCE67, name=\"esp\"" "$output"
+    assert_in "$imgs/zzz2 : start=      534528, size=       65536, type=${root_guid}, uuid=${root_uuid}, name=\"root-${architecture}\", attrs=\"GUID:59\"" "$output"
+    assert_in "$imgs/zzz3 : start=      600064, size=       65536, type=${usr_guid}, uuid=${usr_uuid}, name=\"usr-${architecture}\", attrs=\"GUID:60\"" "$output"
 
     if systemd-detect-virt --quiet --container; then
         echo "Skipping second part of copy blocks tests in container."
@@ -897,6 +897,34 @@ EOF
     assert_eq "$drh" "$hrh"
     assert_eq "$hrh" "$srh"
 
+    # Check that offline signing works and the resulting image is valid
+
+    output=$(systemd-repart --offline="$OFFLINE" \
+                            --definitions="$defs" \
+                            --seed="$seed" \
+                            --dry-run=no \
+                            --empty=create \
+                            --size=auto \
+                            --json=pretty \
+                            --defer-partitions=root-${architecture}-verity-sig \
+                            "$imgs/offline")
+
+    offline_drh=$(jq -r ".[] | select(.type == \"root-${architecture}\") | .roothash" <<<"$output")
+
+    echo -n "$offline_drh" | \
+        openssl smime -sign -in /dev/stdin \
+                      -inkey "$defs/verity.key" \
+                      -signer "$defs/verity.crt" \
+                      -noattr -binary -outform der \
+                      -out "$imgs/offline.roothash.p7s"
+
+    systemd-repart --offline "$OFFLINE" \
+                   --definitions "$defs" \
+                   --dry-run no \
+                   --join-signature "$offline_drh:$imgs/offline.roothash.p7s" \
+                   --certificate "$defs/verity.crt" \
+                   "$imgs/offline"
+
     # Check that we can dissect, mount and unmount a repart verity image. (and that the image UUID is deterministic)
 
     if systemd-detect-virt --quiet --container; then
@@ -907,6 +935,11 @@ EOF
     systemd-dissect "$imgs/verity" --root-hash "$drh"
     systemd-dissect "$imgs/verity" --root-hash "$drh" --json=short | grep -q '"imageUuid":"1d2ce291-7cce-4f7d-bc83-fdb49ad74ebd"'
     systemd-dissect "$imgs/verity" --root-hash "$drh" -M "$imgs/mnt"
+    systemd-dissect -U "$imgs/mnt"
+
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh"
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh" --json=short | grep -q '"imageUuid":"1d2ce291-7cce-4f7d-bc83-fdb49ad74ebd"'
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh" -M "$imgs/mnt"
     systemd-dissect -U "$imgs/mnt"
 }
 
@@ -961,7 +994,7 @@ EOF
     # shellcheck disable=SC2064
     trap "rm -rf '$defs' '$imgs' ; losetup -d '$loop'" RETURN ERR
 
-    udevadm wait --timeout 60 --settle "${loop:?}p1" "${loop:?}p2"
+    udevadm wait --timeout=60 --settle "${loop:?}p1" "${loop:?}p2"
 
     # Check that the verity block sizes are as expected
     veritysetup dump "${loop}p2" | grep 'Data block size:' | grep -q '4096'
@@ -1021,7 +1054,7 @@ EOF
     # shellcheck disable=SC2064
     trap "rm -rf '$defs' '$imgs' ; losetup -d '$loop'" RETURN ERR
 
-    udevadm wait --timeout 60 --settle "${loop:?}p1" "${loop:?}p2"
+    udevadm wait --timeout=60 --settle "${loop:?}p1" "${loop:?}p2"
 
     output=$(sfdisk -J "$loop")
 
@@ -1103,7 +1136,7 @@ EOF
     fi
 
     loop=$(losetup -P --show -f "$imgs/zzz")
-    udevadm wait --timeout 60 --settle "${loop:?}p1" "${loop:?}p2"
+    udevadm wait --timeout=60 --settle "${loop:?}p1" "${loop:?}p2"
 
     # Test that /usr/def did not end up in the root partition but other files did.
     mkdir "$imgs/mnt"
@@ -1316,7 +1349,7 @@ EOF
 
     truncate -s 100m "$imgs/$sector.img"
     loop=$(losetup -b "$sector" -P --show -f "$imgs/$sector.img" )
-    udevadm wait --timeout 60 --settle "${loop:?}"
+    udevadm wait --timeout=60 --settle "${loop:?}"
 
     systemd-repart --offline="$OFFLINE" \
                    --pretty=yes \
@@ -1540,7 +1573,7 @@ EOF
     systemd-repart --empty=create --size=auto --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      532480, type=${esp_guid}" "$output"
     assert_not_in "${image}2" "$output"
 
     # Disk with small ESP => ESP grows
@@ -1553,12 +1586,12 @@ EOF
     systemd-repart --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      532480, type=${esp_guid}" "$output"
     assert_not_in "${image}2" "$output"
 
     # Disk with small ESP that can't grow => XBOOTLDR created
 
-    truncate -s 150M "$image"
+    truncate -s 400M "$image"
     sfdisk "$image" <<EOF
 label: gpt
 size=10M, type=${esp_guid},
@@ -1569,7 +1602,7 @@ EOF
 
     output=$(sfdisk -d "$image")
     assert_in "${image}1 : start=        2048, size=       20480, type=${esp_guid}" "$output"
-    assert_in "${image}3 : start=       43008, size=      264152, type=${xbootldr_guid}" "$output"
+    assert_in "${image}3 : start=       43008, size=      776152, type=${xbootldr_guid}" "$output"
 
     # Disk with existing XBOOTLDR partition => XBOOTLDR grows, small ESP created
 
@@ -1581,8 +1614,8 @@ EOF
     systemd-repart --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${xbootldr_guid}" "$output"
-    assert_in "${image}2 : start=      206848, size=      100312, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      284632, type=${xbootldr_guid}" "$output"
+    assert_in "${image}2 : start=      286680, size=      532480, type=${esp_guid}" "$output"
 }
 
 OFFLINE="yes"

@@ -1,20 +1,18 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <unistd.h>
+
 #include "alloc-util.h"
 #include "cgroup-util.h"
-#include "dirent-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "format-util.h"
-#include "parse-util.h"
-#include "proc-cmdline.h"
+#include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "special.h"
-#include "stat-util.h"
 #include "string-util.h"
-#include "strv.h"
 #include "tests.h"
-#include "user-util.h"
 
 static void check_p_d_u(const char *path, int code, const char *result) {
         _cleanup_free_ char *unit = NULL;
@@ -60,6 +58,36 @@ TEST(path_get_unit) {
         check_p_g_u("/system.slice/system-waldo.slice/_cpu.service/sdfdsaf", 0, "cpu.service");
         check_p_g_u("/user.slice/user-1000.slice/user@1000.service/server.service", 0, "user@1000.service");
         check_p_g_u("/user.slice/user-1000.slice/user@.service/server.service", -ENXIO, NULL);
+}
+
+static void check_p_g_u_f(const char *path, int expected_code, const char *expected_unit, const char *expected_subgroup) {
+        _cleanup_free_ char *unit = NULL, *subgroup = NULL;
+        int r;
+
+        r = cg_path_get_unit_full(path, &unit, &subgroup);
+        printf("%s: %s → %s %s %d expected %s %s %d\n", __func__, path, unit, subgroup, r, strnull(expected_unit), strnull(expected_subgroup), expected_code);
+        ASSERT_EQ(r, expected_code);
+        ASSERT_STREQ(unit, expected_unit);
+        ASSERT_STREQ(subgroup, expected_subgroup);
+}
+
+TEST(path_get_unit_full) {
+        check_p_g_u_f("/system.slice/foobar.service/sdfdsaf", 0, "foobar.service", "sdfdsaf");
+        check_p_g_u_f("/system.slice/foobar.service//sdfdsaf", 0, "foobar.service", "sdfdsaf");
+        check_p_g_u_f("/system.slice/foobar.service/sdfdsaf/", 0, "foobar.service", "sdfdsaf");
+        check_p_g_u_f("/system.slice/foobar.service//sdfdsaf/", 0, "foobar.service", "sdfdsaf");
+        check_p_g_u_f("/system.slice/foobar.service//sdfdsaf//", 0, "foobar.service", "sdfdsaf");
+        check_p_g_u_f("/system.slice/foobar.service/sdfdsaf/urks", 0, "foobar.service", "sdfdsaf/urks");
+        check_p_g_u_f("/system.slice/foobar.service//sdfdsaf//urks", 0, "foobar.service", "sdfdsaf/urks");
+        check_p_g_u_f("/system.slice/foobar.service/sdfdsaf/urks/", 0, "foobar.service", "sdfdsaf/urks");
+        check_p_g_u_f("/system.slice/foobar.service//sdfdsaf//urks//", 0, "foobar.service", "sdfdsaf/urks");
+        check_p_g_u_f("/system.slice/foobar.service", 0, "foobar.service", NULL);
+        check_p_g_u_f("/system.slice/foobar.service/", 0, "foobar.service", NULL);
+        check_p_g_u_f("/system.slice/foobar.service//", 0, "foobar.service", NULL);
+        check_p_g_u_f("/system.slice/", -ENXIO, NULL, NULL);
+        check_p_g_u_f("/system.slice/piff", -ENXIO, NULL, NULL);
+        check_p_g_u_f("/system.service/piff", 0, "system.service", "piff");
+        check_p_g_u_f("//system.service//piff", 0, "system.service", "piff");
 }
 
 static void check_p_g_u_p(const char *path, int code, const char *result) {
@@ -113,6 +141,9 @@ TEST(path_get_user_unit) {
         check_p_g_u_u("/user.slice/user-1000.slice/user@1000.service/server.service", 0, "server.service");
         check_p_g_u_u("/user.slice/user-1000.slice/user@1000.service/foobar.slice/foobar@pie.service", 0, "foobar@pie.service");
         check_p_g_u_u("/user.slice/user-1000.slice/user@.service/server.service", -ENXIO, NULL);
+        check_p_g_u_u("/capsule.slice/capsule@test.service/app.slice/run-p9-i1.service", 0, "run-p9-i1.service");
+        check_p_g_u_u("/capsule.slice/capsule@usr-joe.service/foo.slice/foo-bar.slice/run-p9-i1.service", 0, "run-p9-i1.service");
+        check_p_g_u_u("/capsule.slice/capsule@#.service/foo.slice/foo-bar.slice/run-p9-i1.service", -ENXIO, NULL);
 }
 
 static void check_p_g_s(const char *path, int code, const char *result) {
@@ -157,6 +188,7 @@ TEST(path_get_slice) {
         check_p_g_slice("foobar", 0, SPECIAL_ROOT_SLICE);
         check_p_g_slice("foobar.slice", 0, "foobar.slice");
         check_p_g_slice("foo.slice/foo-bar.slice/waldo.service", 0, "foo-bar.slice");
+        check_p_g_slice("/capsule.slice/capsule@test.service/app.slice/run-p9-i1.service", 0, "capsule.slice");
 }
 
 static void check_p_g_u_slice(const char *path, int code, const char *result) {
@@ -181,6 +213,10 @@ TEST(path_get_user_slice) {
         check_p_g_u_slice("foo.slice/foo-bar.slice/user@1000.service/waldo.service", 0, SPECIAL_ROOT_SLICE);
         check_p_g_u_slice("foo.slice/foo-bar.slice/user@1000.service/piep.slice/foo.service", 0, "piep.slice");
         check_p_g_u_slice("/foo.slice//foo-bar.slice/user@1000.service/piep.slice//piep-pap.slice//foo.service", 0, "piep-pap.slice");
+
+        check_p_g_u_slice("/capsule.slice/capsule@test.service/app.slice/run-p9-i1.service", 0, "app.slice");
+        check_p_g_u_slice("/capsule.slice/capsule@usr-joe.service/app.slice/run-p9-i1.service", 0, "app.slice");
+        check_p_g_u_slice("/capsule.slice/capsule@usr-joe.service/foo.slice/foo-bar.slice/run-p9-i1.service", 0, "foo-bar.slice");
 }
 
 TEST(get_paths, .sd_booted = true) {
@@ -190,7 +226,14 @@ TEST(get_paths, .sd_booted = true) {
         log_info("Root = %s", a);
 }
 
-TEST(proc) {
+static inline bool hidden_cgroup(const char *p) {
+        assert(p);
+
+        /* Consider top-level cgroup hidden from us */
+        return p[0] == '/' && p[strspn(p, "/")] == '.';
+}
+
+TEST(proc, .sd_booted = true) {
         _cleanup_closedir_ DIR *d = NULL;
         int r;
 
@@ -201,34 +244,51 @@ TEST(proc) {
                 _cleanup_(pidref_done) PidRef pid = PIDREF_NULL;
                 uid_t uid = UID_INVALID;
 
-                r = proc_dir_read_pidref(d, &pid);
-                assert_se(r >= 0);
-
+                ASSERT_OK(r = proc_dir_read_pidref(d, &pid));
                 if (r == 0)
                         break;
 
                 if (pidref_is_kernel_thread(&pid) != 0)
                         continue;
 
-                cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, pid.pid, &path);
-                cg_pid_get_path_shifted(pid.pid, NULL, &path_shifted);
-                cg_pid_get_owner_uid(pid.pid, &uid);
-                cg_pid_get_session(pid.pid, &session);
-                cg_pid_get_unit(pid.pid, &unit);
-                cg_pid_get_user_unit(pid.pid, &user_unit);
-                cg_pid_get_machine_name(pid.pid, &machine);
-                cg_pid_get_slice(pid.pid, &slice);
+                r = cg_pidref_get_path(SYSTEMD_CGROUP_CONTROLLER, &pid, &path);
+                if (r == -ESRCH)
+                        continue;
+                ASSERT_OK(r);
 
-                printf(PID_FMT"\t%s\t%s\t"UID_FMT"\t%s\t%s\t%s\t%s\t%s\n",
-                       pid.pid,
-                       path,
-                       path_shifted,
-                       uid,
-                       session,
-                       unit,
-                       user_unit,
-                       machine,
-                       slice);
+                /* Test may run in a container with supervising/monitor processes that don't belong to our
+                 * cgroup tree (slices/leaves) */
+                if (hidden_cgroup(path))
+                        continue;
+
+                int r1 = cg_pid_get_path_shifted(pid.pid, NULL, &path_shifted);
+                int r2 = cg_pidref_get_unit(&pid, &unit);
+                int r3 = cg_pid_get_slice(pid.pid, &slice);
+
+                /* Not all processes belong to a specific user or a machine */
+                int r4 = cg_pidref_get_owner_uid(&pid, &uid);
+                int r5 = cg_pidref_get_session(&pid, &session);
+                int r6 = cg_pid_get_user_unit(pid.pid, &user_unit);
+                int r7 = cg_pid_get_machine_name(pid.pid, &machine);
+
+                log_debug(PID_FMT": %s, %s, "UID_FMT", %s, %s, %s, %s, %s",
+                          pid.pid,
+                          path,
+                          strna(path_shifted),
+                          uid,
+                          strna(session),
+                          strna(unit),
+                          strna(user_unit),
+                          strna(machine),
+                          strna(slice));
+
+                ASSERT_OK_OR(r1, -ESRCH);
+                ASSERT_OK_OR(r2, -ESRCH, -ENXIO);
+                ASSERT_OK_OR(r3, -ESRCH, -ENXIO);
+                ASSERT_OK_OR(r4, -ESRCH, -ENXIO);
+                ASSERT_OK_OR(r5, -ESRCH, -ENXIO);
+                ASSERT_OK_OR(r6, -ESRCH, -ENXIO);
+                ASSERT_OK_OR(r7, -ESRCH, -ENXIO, -ENOENT);
         }
 }
 
@@ -337,36 +397,12 @@ TEST(mask_supported, .sd_booted = true) {
                        yes_no(m & CGROUP_CONTROLLER_TO_MASK(c)));
 }
 
-TEST(is_cgroup_fs, .sd_booted = true) {
-        struct statfs sfs;
-        assert_se(statfs("/sys/fs/cgroup", &sfs) == 0);
-        if (is_temporary_fs(&sfs))
-                assert_se(statfs("/sys/fs/cgroup/systemd", &sfs) == 0);
-        assert_se(is_cgroup_fs(&sfs));
-}
-
-TEST(fd_is_cgroup_fs, .sd_booted = true) {
-        int fd;
-
-        fd = open("/sys/fs/cgroup", O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
-        assert_se(fd >= 0);
-        if (fd_is_temporary_fs(fd)) {
-                fd = safe_close(fd);
-                fd = open("/sys/fs/cgroup/systemd", O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
-                assert_se(fd >= 0);
-        }
-        assert_se(fd_is_cgroup_fs(fd));
-        fd = safe_close(fd);
-}
-
 TEST(cg_tests) {
         int all, hybrid, systemd, r;
 
         r = cg_unified();
-        if (IN_SET(r, -ENOENT, -ENOMEDIUM)) {
-                log_tests_skipped("cgroup not mounted");
-                return;
-        }
+        if (IN_SET(r, -ENOENT, -ENOMEDIUM))
+                return (void) log_tests_skipped("cgroup not mounted");
         assert_se(r >= 0);
 
         all = cg_all_unified();
@@ -410,49 +446,22 @@ TEST(cg_get_keyed_attribute) {
         }
 
         assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat", STRV_MAKE("no_such_attr"), &val) == -ENXIO);
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat", STRV_MAKE("no_such_attr"), &val) == 0);
         ASSERT_NULL(val);
 
         assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec"), &val) == 0);
         val = mfree(val);
 
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec"), &val) == 1);
-        log_info("cpu /init.scope cpu.stat [usage_usec] → \"%s\"", val);
-
         assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec", "no_such_attr"), vals3) == -ENXIO);
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec", "no_such_attr"), vals3) == 1);
-        assert_se(vals3[0] && !vals3[1]);
-        free(vals3[0]);
-
-        assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec", "usage_usec"), vals3) == -ENXIO);
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat", STRV_MAKE("usage_usec", "usage_usec"), vals3) == 1);
-        assert_se(vals3[0] && !vals3[1]);
-        free(vals3[0]);
 
         assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat",
                                          STRV_MAKE("usage_usec", "user_usec", "system_usec"), vals3) == 0);
         for (size_t i = 0; i < 3; i++)
                 free(vals3[i]);
 
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat",
-                                         STRV_MAKE("usage_usec", "user_usec", "system_usec"), vals3) == 3);
-        log_info("cpu /init.scope cpu.stat [usage_usec user_usec system_usec] → \"%s\", \"%s\", \"%s\"",
-                 vals3[0], vals3[1], vals3[2]);
-
         assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "cpu.stat",
                                          STRV_MAKE("system_usec", "user_usec", "usage_usec"), vals3a) == 0);
         for (size_t i = 0; i < 3; i++)
                 free(vals3a[i]);
-
-        assert_se(cg_get_keyed_attribute_graceful("cpu", "/init.scope", "cpu.stat",
-                                         STRV_MAKE("system_usec", "user_usec", "usage_usec"), vals3a) == 3);
-        log_info("cpu /init.scope cpu.stat [system_usec user_usec usage_usec] → \"%s\", \"%s\", \"%s\"",
-                 vals3a[0], vals3a[1], vals3a[2]);
-
-        for (size_t i = 0; i < 3; i++) {
-                free(vals3[i]);
-                free(vals3a[i]);
-        }
 }
 
 TEST(bfq_weight_conversion) {

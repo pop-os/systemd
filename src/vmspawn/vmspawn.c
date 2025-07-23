@@ -1,15 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <net/if.h>
-#include <linux/if.h>
 #include <getopt.h>
-#include <stdint.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "sd-bus.h"
 #include "sd-daemon.h"
 #include "sd-event.h"
 #include "sd-id128.h"
@@ -18,14 +17,13 @@
 #include "architecture.h"
 #include "bootspec.h"
 #include "build.h"
+#include "bus-error.h"
 #include "bus-internal.h"
 #include "bus-locator.h"
-#include "bus-wait-for-jobs.h"
-#include "chase.h"
+#include "bus-util.h"
+#include "capability-util.h"
 #include "common-signal.h"
 #include "copy.h"
-#include "creds-util.h"
-#include "dirent-util.h"
 #include "discover-image.h"
 #include "dissect-image.h"
 #include "escape.h"
@@ -33,26 +31,29 @@
 #include "event-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
-#include "fileio.h"
+#include "fork-notify.h"
 #include "format-util.h"
 #include "fs-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
+#include "hostname-setup.h"
 #include "hostname-util.h"
-#include "io-util.h"
-#include "kernel-image.h"
+#include "id128-util.h"
 #include "log.h"
 #include "machine-credential.h"
-#include "macro.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "namespace-util.h"
 #include "netif-util.h"
+#include "nsresource.h"
+#include "osc-context.h"
 #include "pager.h"
 #include "parse-argument.h"
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
 #include "pidref.h"
+#include "polkit-agent.h"
 #include "pretty-print.h"
 #include "process-util.h"
 #include "ptyfwd.h"
@@ -60,13 +61,14 @@
 #include "rm-rf.h"
 #include "signal-util.h"
 #include "socket-util.h"
-#include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
-#include "time-util.h"
+#include "sync-util.h"
+#include "terminal-util.h"
 #include "tmpfile-util.h"
 #include "unit-name.h"
+#include "utf8.h"
 #include "vmspawn-mount.h"
 #include "vmspawn-register.h"
 #include "vmspawn-scope.h"
@@ -74,6 +76,14 @@
 #include "vmspawn-util.h"
 
 #define VM_TAP_HASH_KEY SD_ID128_MAKE(01,d0,c6,4c,2b,df,24,fb,c0,f8,b2,09,7d,59,b2,93)
+
+typedef enum TpmStateMode {
+        TPM_STATE_OFF,      /* keep no state around */
+        TPM_STATE_AUTO,     /* keep state around, derive path from image/directory */
+        TPM_STATE_PATH,     /* explicitly specified location */
+        _TPM_STATE_MODE_MAX,
+        _TPM_STATE_MODE_INVALID = -EINVAL,
+} TpmStateMode;
 
 typedef struct SSHInfo {
         unsigned cid;
@@ -91,6 +101,8 @@ static PagerFlags arg_pager_flags = 0;
 static char *arg_directory = NULL;
 static char *arg_image = NULL;
 static char *arg_machine = NULL;
+static char *arg_slice = NULL;
+static char **arg_property = NULL;
 static char *arg_cpus = NULL;
 static uint64_t arg_ram = UINT64_C(2) * U64_GB;
 static int arg_kvm = -1;
@@ -105,13 +117,10 @@ static int arg_secure_boot = -1;
 static MachineCredentialContext arg_credentials = {};
 static uid_t arg_uid_shift = UID_INVALID, arg_uid_range = 0x10000U;
 static RuntimeMountContext arg_runtime_mounts = {};
-static SettingsMask arg_settings_mask = 0;
 static char *arg_firmware = NULL;
-static char *arg_runtime_directory = NULL;
 static char *arg_forward_journal = NULL;
-static bool arg_runtime_directory_created = false;
 static bool arg_privileged = false;
-static bool arg_register = false;
+static bool arg_register = true;
 static bool arg_keep_unit = false;
 static sd_id128_t arg_uuid = {};
 static char **arg_kernel_cmdline_extra = NULL;
@@ -121,12 +130,18 @@ static bool arg_pass_ssh_key = true;
 static char *arg_ssh_key_type = NULL;
 static bool arg_discard_disk = true;
 struct ether_addr arg_network_provided_mac = {};
+static char **arg_smbios11 = NULL;
+static uint64_t arg_grow_image = 0;
+static char *arg_tpm_state_path = NULL;
+static TpmStateMode arg_tpm_state_mode = TPM_STATE_AUTO;
+static bool arg_ask_password = true;
+static bool arg_notify_ready = true;
 
 STATIC_DESTRUCTOR_REGISTER(arg_directory, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_machine, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_slice, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_cpus, freep);
-STATIC_DESTRUCTOR_REGISTER(arg_runtime_directory, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_credentials, machine_credential_context_done);
 STATIC_DESTRUCTOR_REGISTER(arg_firmware, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_linux, freep);
@@ -137,6 +152,9 @@ STATIC_DESTRUCTOR_REGISTER(arg_kernel_cmdline_extra, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_extra_drives, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_background, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_ssh_key_type, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_smbios11, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_tpm_state_path, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_property, strv_freep);
 
 static int help(void) {
         _cleanup_free_ char *link = NULL;
@@ -154,6 +172,7 @@ static int help(void) {
                "     --version             Print version string\n"
                "  -q --quiet               Do not show status information\n"
                "     --no-pager            Do not pipe output into a pager\n"
+               "     --no-ask-password     Do not prompt for password\n"
                "\n%3$sImage:%4$s\n"
                "  -D --directory=PATH      Root directory for the VM\n"
                "  -i --image=FILE|DEVICE   Root file system disk image or device for the VM\n"
@@ -164,6 +183,8 @@ static int help(void) {
                "     --vsock=BOOL          Override autodetection of VSOCK support\n"
                "     --vsock-cid=CID       Specify the CID to use for the guest's VSOCK support\n"
                "     --tpm=BOOL            Enable use of a virtual TPM\n"
+               "     --tpm-state=off|auto|PATH\n"
+               "                           Where to store TPM state\n"
                "     --linux=PATH          Specify the linux kernel for direct kernel boot\n"
                "     --initrd=PATH         Specify the initrd for direct kernel boot\n"
                "  -n --network-tap         Create a TAP device for networking\n"
@@ -171,12 +192,19 @@ static int help(void) {
                "     --secure-boot=BOOL    Enable searching for firmware supporting SecureBoot\n"
                "     --firmware=PATH|list  Select firmware definition file (or list available)\n"
                "     --discard-disk=BOOL   Control processing of discard requests\n"
+               "  -G --grow-image=BYTES    Grow image file to specified size in bytes\n"
+               "\n%3$sExecution:%4$s\n"
+               "  -s --smbios11=STRING     Pass an arbitrary SMBIOS Type #11 string to the VM\n"
+               "     --notify-ready=BOOL   Wait for ready notification from the VM\n"
                "\n%3$sSystem Identity:%4$s\n"
                "  -M --machine=NAME        Set the machine name for the VM\n"
                "     --uuid=UUID           Set a specific machine UUID for the VM\n"
                "\n%3$sProperties:%4$s\n"
-               "     --register=BOOLEAN    Register VM with systemd-machined\n"
-               "     --keep-unit           Don't let systemd-machined allocate scope unit for us\n"
+               "  -S --slice=SLICE         Place the VM in the specified slice\n"
+               "     --property=NAME=VALUE Set scope unit property\n"
+               "     --register=BOOLEAN    Register VM as machine\n"
+               "     --keep-unit           Do not register a scope for the machine, reuse\n"
+               "                           the service unit vmspawn is running in\n"
                "\n%3$sUser Namespacing:%4$s\n"
                "     --private-users=UIDBASE[:NUIDS]\n"
                "                           Configure the UID/GID range to map into the\n"
@@ -257,6 +285,10 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_DISCARD_DISK,
                 ARG_CONSOLE,
                 ARG_BACKGROUND,
+                ARG_TPM_STATE,
+                ARG_NO_ASK_PASSWORD,
+                ARG_PROPERTY,
+                ARG_NOTIFY_READY,
         };
 
         static const struct option options[] = {
@@ -267,6 +299,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "image",             required_argument, NULL, 'i'                   },
                 { "directory",         required_argument, NULL, 'D'                   },
                 { "machine",           required_argument, NULL, 'M'                   },
+                { "slice",             required_argument, NULL, 'S'                   },
                 { "cpus",              required_argument, NULL, ARG_CPUS              },
                 { "qemu-smp",          required_argument, NULL, ARG_CPUS              }, /* Compat alias */
                 { "ram",               required_argument, NULL, ARG_RAM               },
@@ -299,6 +332,12 @@ static int parse_argv(int argc, char *argv[]) {
                 { "firmware",          required_argument, NULL, ARG_FIRMWARE          },
                 { "discard-disk",      required_argument, NULL, ARG_DISCARD_DISK      },
                 { "background",        required_argument, NULL, ARG_BACKGROUND        },
+                { "smbios11",          required_argument, NULL, 's'                   },
+                { "grow-image",        required_argument, NULL, 'G'                   },
+                { "tpm-state",         required_argument, NULL, ARG_TPM_STATE         },
+                { "no-ask-password",   no_argument,       NULL, ARG_NO_ASK_PASSWORD   },
+                { "property",          required_argument, NULL, ARG_PROPERTY          },
+                { "notify-ready",      required_argument, NULL, ARG_NOTIFY_READY      },
                 {}
         };
 
@@ -308,7 +347,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argv);
 
         optind = 0;
-        while ((c = getopt_long(argc, argv, "+hD:i:M:nq", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+hD:i:M:nqs:G:S:", options, NULL)) >= 0)
                 switch (c) {
                 case 'h':
                         return help();
@@ -325,7 +364,6 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return r;
 
-                        arg_settings_mask |= SETTING_DIRECTORY;
                         break;
 
                 case 'i':
@@ -333,7 +371,6 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return r;
 
-                        arg_settings_mask |= SETTING_DIRECTORY;
                         break;
 
                 case 'M':
@@ -445,7 +482,6 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return log_error_errno(r, "Invalid UUID: %s", optarg);
 
-                        arg_settings_mask |= SETTING_MACHINE_ID;
                         break;
 
                 case ARG_REGISTER:
@@ -465,7 +501,6 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --bind(-ro)= argument %s: %m", optarg);
 
-                        arg_settings_mask |= SETTING_BIND_MOUNTS;
                         break;
 
                 case ARG_EXTRA_DRIVE: {
@@ -518,7 +553,6 @@ static int parse_argv(int argc, char *argv[]) {
                         r = machine_credential_set(&arg_credentials, optarg);
                         if (r < 0)
                                 return r;
-                        arg_settings_mask |= SETTING_CREDENTIALS;
                         break;
                 }
 
@@ -527,7 +561,6 @@ static int parse_argv(int argc, char *argv[]) {
                         if (r < 0)
                                 return r;
 
-                        arg_settings_mask |= SETTING_CREDENTIALS;
                         break;
                 }
 
@@ -568,6 +601,80 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case 's':
+                        if (isempty(optarg)) {
+                                arg_smbios11 = strv_free(arg_smbios11);
+                                break;
+                        }
+
+                        if (!utf8_is_valid(optarg))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "SMBIOS Type 11 string is not UTF-8 clean, refusing: %s", optarg);
+
+                        if (strv_extend(&arg_smbios11, optarg) < 0)
+                                return log_oom();
+
+                        break;
+
+                case 'G':
+                        if (isempty(optarg)) {
+                                arg_grow_image = 0;
+                                break;
+                        }
+
+                        r = parse_size(optarg, 1024, &arg_grow_image);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --grow-image= parameter: %s", optarg);
+
+                        break;
+
+                case ARG_TPM_STATE:
+                        if (path_is_absolute(optarg) && path_is_valid(optarg)) {
+                                r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_tpm_state_path);
+                                if (r < 0)
+                                        return r;
+
+                                arg_tpm_state_mode = TPM_STATE_PATH;
+                                break;
+                        }
+
+                        r = isempty(optarg) ? false :
+                                streq(optarg, "auto") ? true :
+                                parse_boolean(optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --tpm-state= parameter: %s", optarg);
+
+                        arg_tpm_state_mode = r ? TPM_STATE_AUTO : TPM_STATE_OFF;
+                        arg_tpm_state_path = mfree(arg_tpm_state_path);
+                        break;
+
+                case ARG_NO_ASK_PASSWORD:
+                        arg_ask_password = false;
+                        break;
+
+                case 'S': {
+                        _cleanup_free_ char *mangled = NULL;
+
+                        r = unit_name_mangle_with_suffix(optarg, /* operation= */ NULL, UNIT_NAME_MANGLE_WARN, ".slice", &mangled);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to turn '%s' into unit name: %m", optarg);
+
+                        free_and_replace(arg_slice, mangled);
+                        break;
+                }
+
+                case ARG_PROPERTY:
+                        if (strv_extend(&arg_property, optarg) < 0)
+                                return log_oom();
+
+                        break;
+
+                case ARG_NOTIFY_READY:
+                        r = parse_boolean_argument("--notify-ready=", optarg, &arg_notify_ready);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -579,8 +686,6 @@ static int parse_argv(int argc, char *argv[]) {
                 arg_kernel_cmdline_extra = strv_copy(argv + optind);
                 if (!arg_kernel_cmdline_extra)
                         return log_oom();
-
-                arg_settings_mask |= SETTING_START_MODE;
         }
 
         return 1;
@@ -650,21 +755,27 @@ static int read_vsock_notify(NotifyConnectionData *d, int fd) {
                 log_debug("Received notification message with tags: %s", strnull(j));
         }
 
+        const char *status = strv_find_startswith(tags, "STATUS=");
+        if (status)
+                (void) sd_notifyf(/* unset_environment= */ false, "STATUS=VM running: %s", status);
+
         if (strv_contains(tags, "READY=1")) {
-                r = sd_notify(false, "READY=1");
+                r = sd_notify(/* unset_environment= */ false, "READY=1");
                 if (r < 0)
                         log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
+
+                if (!status)
+                        (void) sd_notifyf(/* unset_environment= */ false, "STATUS=VM running.");
         }
 
-        const char *p = strv_find_startswith(tags, "STATUS=");
-        if (p)
-                (void) sd_notifyf(false, "STATUS=VM running: %s", p);
-
-        p = strv_find_startswith(tags, "EXIT_STATUS=");
+        const char *p = strv_find_startswith(tags, "EXIT_STATUS=");
         if (p) {
-                r = safe_atoi(p, d->exit_status);
+                uint8_t k = 0;
+                r = safe_atou8(p, &k);
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse exit status from %s, ignoring: %m", p);
+                else
+                        *d->exit_status = k;
         }
 
         return 1; /* done */
@@ -850,7 +961,7 @@ static int shutdown_vm_graceful(sd_event_source *s, const struct signalfd_siginf
                 goto fallback;
         }
 
-        r = bus_call_method(bus, bus_login_mgr, "PowerOff", &error, /* reply= */ NULL, "b", false);
+        r = bus_call_method(bus, bus_login_mgr, "PowerOff", &error, /* ret_reply= */ NULL, "b", false);
         if (r >= 0) {
                 log_info("Requested powering off VM through D-Bus.");
                 return 0;
@@ -859,7 +970,7 @@ static int shutdown_vm_graceful(sd_event_source *s, const struct signalfd_siginf
         log_warning_errno(r, "Failed to shutdown VM via logind, ignoring: %s", bus_error_message(&error, r));
         sd_bus_error_free(&error);
 
-        r = bus_call_method(bus, bus_systemd_mgr, "PowerOff", &error, /* reply= */ NULL, /* types= */ NULL);
+        r = bus_call_method(bus, bus_systemd_mgr, "PowerOff", &error, /* ret_reply= */ NULL, /* types= */ NULL);
         if (r >= 0) {
                 log_info("Requested powering off VM through D-Bus.");
                 return 0;
@@ -887,7 +998,36 @@ fallback:
 }
 
 static int on_child_exit(sd_event_source *s, const siginfo_t *si, void *userdata) {
-        sd_event_exit(sd_event_source_get_event(s), 0);
+        assert(si);
+
+        /* Let's first do some logging about the exit status of the child. */
+
+        int ret;
+        if (si->si_code == CLD_EXITED) {
+                if (si->si_status == EXIT_SUCCESS)
+                        log_debug("Child process " PID_FMT " exited successfully.", si->si_pid);
+                else
+                        log_error("Child process " PID_FMT " died with a failure exit status %i.", si->si_pid, si->si_status);
+
+                ret = si->si_status;
+        } else if (si->si_code == CLD_KILLED)
+                ret = log_error_errno(SYNTHETIC_ERRNO(EPROTO),
+                                      "Child process " PID_FMT " was killed by signal %s.",
+                                      si->si_pid, signal_to_string(si->si_status));
+        else if (si->si_code == CLD_DUMPED)
+                ret = log_error_errno(SYNTHETIC_ERRNO(EPROTO),
+                                      "Child process " PID_FMT " dumped core by signal %s.",
+                                      si->si_pid, signal_to_string(si->si_status));
+        else
+                ret = log_error_errno(SYNTHETIC_ERRNO(EPROTO),
+                                      "Got unexpected exit code %i via SIGCHLD,",
+                                      si->si_code);
+
+        /* Regardless of whether the main qemu process or an auxiliary process died, let's exit either way
+         * as it's very likely that the main qemu process won't be able to operate properly anymore if one
+         * of the auxiliary processes died. */
+
+        sd_event_exit(sd_event_source_get_event(s), ret);
         return 0;
 }
 
@@ -900,9 +1040,9 @@ static int cmdline_add_vsock(char ***cmdline, int vsock_fd) {
 
         union sockaddr_union addr;
         socklen_t addr_len = sizeof addr.vm;
-        r = getsockname(vsock_fd, &addr.sa, &addr_len);
-        if (r < 0)
+        if (getsockname(vsock_fd, &addr.sa, &addr_len) < 0)
                 return -errno;
+
         assert(addr_len >= sizeof addr.vm);
         assert(addr.vm.svm_family == AF_VSOCK);
 
@@ -913,111 +1053,216 @@ static int cmdline_add_vsock(char ***cmdline, int vsock_fd) {
         return 0;
 }
 
-static int start_tpm(
-                sd_bus *bus,
-                const char *scope,
-                const char *swtpm,
-                char **ret_state_tempdir) {
-
-        _cleanup_(rm_rf_physical_and_freep) char *state_dir = NULL;
-        _cleanup_free_ char *scope_prefix = NULL;
-        _cleanup_(socket_service_pair_done) SocketServicePair ssp = {
-                .socket_type = SOCK_STREAM,
-        };
+static int cmdline_add_kernel_cmdline(char ***cmdline, const char *kernel, const char *smbios_dir) {
         int r;
 
-        assert(bus);
+        assert(cmdline);
+
+        if (strv_isempty(arg_kernel_cmdline_extra))
+                return 0;
+
+        _cleanup_free_ char *kcl = strv_join(arg_kernel_cmdline_extra, " ");
+        if (!kcl)
+                return log_oom();
+
+        if (kernel) {
+                if (strv_extend_many(cmdline, "-append", kcl) < 0)
+                        return log_oom();
+        } else {
+                if (!ARCHITECTURE_SUPPORTS_SMBIOS) {
+                        log_warning("Cannot append extra args to kernel cmdline, native architecture doesn't support SMBIOS, ignoring.");
+                        return 0;
+                }
+
+                FOREACH_STRING(id, "io.systemd.stub.kernel-cmdline-extra", "io.systemd.boot.kernel-cmdline-extra") {
+                        _cleanup_free_ char *p = path_join(smbios_dir, id);
+                        if (!p)
+                                return log_oom();
+
+                        r = write_string_filef(
+                                        p,
+                                        WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_AVOID_NEWLINE|WRITE_STRING_FILE_MODE_0600,
+                                        "%s=%s", id, kcl);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to write smbios kernel command line to file: %m");
+
+                        if (strv_extend(cmdline, "-smbios") < 0)
+                                return log_oom();
+
+                        if (strv_extendf(cmdline, "type=11,path=%s", p) < 0)
+                                return log_oom();
+                }
+        }
+
+        return 0;
+}
+
+static int cmdline_add_smbios11(char ***cmdline, const char* smbios_dir) {
+        int r;
+
+        assert(cmdline);
+
+        if (strv_isempty(arg_smbios11))
+                return 0;
+
+        if (!ARCHITECTURE_SUPPORTS_SMBIOS) {
+                log_warning("Cannot issue SMBIOS Type #11 strings, native architecture doesn't support SMBIOS, ignoring.");
+                return 0;
+        }
+
+        STRV_FOREACH(i, arg_smbios11) {
+                _cleanup_(unlink_and_freep) char *p = NULL;
+
+                r = tempfn_random_child(smbios_dir, "smbios11", &p);
+                if (r < 0)
+                        return r;
+
+                r = write_string_file(
+                                p, *i,
+                                WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_AVOID_NEWLINE|WRITE_STRING_FILE_MODE_0600);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to write smbios data to smbios file %s: %m", p);
+
+                if (strv_extend(cmdline, "-smbios") < 0)
+                        return log_oom();
+
+                if (strv_extendf(cmdline, "type=11,path=%s", p) < 0)
+                        return log_oom();
+        }
+
+        return 0;
+}
+
+static int start_tpm(
+                const char *scope,
+                const char *swtpm,
+                const char *runtime_dir,
+                const char *sd_socket_activate,
+                char **ret_listen_address,
+                PidRef *ret_pidref) {
+
+        int r;
+
         assert(scope);
         assert(swtpm);
-        assert(ret_state_tempdir);
+        assert(runtime_dir);
 
+        _cleanup_free_ char *scope_prefix = NULL;
         r = unit_name_to_prefix(scope, &scope_prefix);
         if (r < 0)
                 return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
 
-        ssp.unit_name_prefix = strjoin(scope_prefix, "-tpm");
-        if (!ssp.unit_name_prefix)
+        _cleanup_free_ char *listen_address = path_join(runtime_dir, "tpm.sock");
+        if (!listen_address)
                 return log_oom();
 
-        state_dir = path_join(arg_runtime_directory, ssp.unit_name_prefix);
-        if (!state_dir)
-                return log_oom();
-
-        if (arg_runtime_directory_created) {
-                ssp.runtime_directory = path_join("systemd/vmspawn", ssp.unit_name_prefix);
-                if (!ssp.runtime_directory)
+        _cleanup_free_ char *transient_state_dir = NULL;
+        const char *state_dir;
+        if (arg_tpm_state_path)
+                state_dir = arg_tpm_state_path;
+        else {
+                _cleanup_free_ char *dirname = strjoin(scope_prefix, "-tpm");
+                if (!dirname)
                         return log_oom();
+
+                transient_state_dir = path_join(runtime_dir, dirname);
+                if (!transient_state_dir)
+                        return log_oom();
+
+                state_dir = transient_state_dir;
         }
 
-        ssp.listen_address = path_join(state_dir, "sock");
-        if (!ssp.listen_address)
-                return log_oom();
+        r = mkdir_p(state_dir, 0700);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create TPM state directory '%s': %m", state_dir);
 
         _cleanup_free_ char *swtpm_setup = NULL;
         r = find_executable("swtpm_setup", &swtpm_setup);
         if (r < 0)
                 return log_error_errno(r, "Failed to find swtpm_setup binary: %m");
 
-        ssp.exec_start_pre = strv_new(swtpm_setup, "--tpm-state", state_dir, "--tpm2", "--pcr-banks", "sha256");
-        if (!ssp.exec_start_pre)
+        _cleanup_strv_free_ char **argv = strv_new(swtpm_setup, "--tpm-state", state_dir, "--tpm2", "--pcr-banks", "sha256", "--not-overwrite");
+        if (!argv)
                 return log_oom();
 
-        ssp.exec_start = strv_new(swtpm, "socket", "--tpm2", "--tpmstate");
-        if (!ssp.exec_start)
+        r = safe_fork("(swtpm-setup)", FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_WAIT, NULL);
+        if (r == 0) {
+                /* Child */
+                execvp(argv[0], argv);
+                log_error_errno(errno, "Failed to execute '%s': %m", argv[0]);
+                _exit(EXIT_FAILURE);
+        }
+
+        strv_free(argv);
+        argv = strv_new(sd_socket_activate, "--listen", listen_address, swtpm, "socket", "--tpm2", "--tpmstate");
+        if (!argv)
                 return log_oom();
 
-        r = strv_extendf(&ssp.exec_start, "dir=%s", state_dir);
+        r = strv_extendf(&argv, "dir=%s", state_dir);
         if (r < 0)
                 return log_oom();
 
-        r = strv_extend_many(&ssp.exec_start, "--ctrl", "type=unixio,fd=3");
+        r = strv_extend_many(&argv, "--ctrl", "type=unixio,fd=3");
         if (r < 0)
                 return log_oom();
 
-        r = start_socket_service_pair(bus, scope, &ssp);
-        if (r < 0)
-                return r;
-
-        *ret_state_tempdir = TAKE_PTR(state_dir);
-        return 0;
-}
-
-static int start_systemd_journal_remote(sd_bus *bus, const char *scope, unsigned port, const char *sd_journal_remote, char **ret_listen_address) {
-        _cleanup_free_ char *scope_prefix = NULL;
-        _cleanup_(socket_service_pair_done) SocketServicePair ssp = {
-                .socket_type = SOCK_STREAM,
-        };
-        int r;
-
-        assert(bus);
-        assert(scope);
-        assert(sd_journal_remote);
-
-        r = unit_name_to_prefix(scope, &scope_prefix);
-        if (r < 0)
-                return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
-
-        ssp.unit_name_prefix = strjoin(scope_prefix, "-forward-journal");
-        if (!ssp.unit_name_prefix)
-                return log_oom();
-
-        r = asprintf(&ssp.listen_address, "vsock:2:%u", port);
-        if (r < 0)
-                return log_oom();
-
-        ssp.exec_start = strv_new(
-                        sd_journal_remote,
-                        "--output", arg_forward_journal,
-                        "--split-mode", endswith(arg_forward_journal, ".journal") ? "none" : "host");
-        if (!ssp.exec_start)
-                return log_oom();
-
-        r = start_socket_service_pair(bus, scope, &ssp);
+        r = fork_notify(argv, ret_pidref);
         if (r < 0)
                 return r;
 
         if (ret_listen_address)
-                *ret_listen_address = TAKE_PTR(ssp.listen_address);
+                *ret_listen_address = TAKE_PTR(listen_address);
+
+        return 0;
+}
+
+static int start_systemd_journal_remote(
+                const char *scope,
+                unsigned port,
+                const char *sd_socket_activate,
+                char **ret_listen_address,
+                PidRef *ret_pidref) {
+
+        int r;
+
+        assert(scope);
+
+        _cleanup_free_ char *scope_prefix = NULL;
+        r = unit_name_to_prefix(scope, &scope_prefix);
+        if (r < 0)
+                return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
+
+        _cleanup_free_ char *listen_address = NULL;
+        if (asprintf(&listen_address, "vsock:2:%u", port) < 0)
+                return log_oom();
+
+        _cleanup_free_ char *sd_journal_remote = NULL;
+        r = find_executable_full(
+                        "systemd-journal-remote",
+                        /* root = */ NULL,
+                        STRV_MAKE(LIBEXECDIR),
+                        /* use_path_envvar = */ true, /* systemd-journal-remote should be installed in
+                                                        * LIBEXECDIR, but for supporting fancy setups. */
+                        &sd_journal_remote,
+                        /* ret_fd = */ NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to find systemd-journal-remote binary: %m");
+
+        _cleanup_strv_free_ char **argv = strv_new(
+                        sd_socket_activate,
+                        "--listen", listen_address,
+                        sd_journal_remote,
+                        "--output", arg_forward_journal,
+                        "--split-mode", endswith(arg_forward_journal, ".journal") ? "none" : "host");
+        if (!argv)
+                return log_oom();
+
+        r = fork_notify(argv, ret_pidref);
+        if (r < 0)
+                return r;
+
+        if (ret_listen_address)
+                *ret_listen_address = TAKE_PTR(listen_address);
 
         return 0;
 }
@@ -1034,6 +1279,7 @@ static int discover_root(char **ret) {
                         /* verity= */ NULL,
                         /* mount_options= */ NULL,
                         /* image_policy= */ NULL,
+                        /* image_filter= */ NULL,
                         /* flags= */ 0,
                         &image);
         if (r < 0)
@@ -1084,78 +1330,71 @@ static int find_virtiofsd(char **ret) {
         return 0;
 }
 
-static int start_virtiofsd(sd_bus *bus, const char *scope, const char *directory, bool uidmap, char **ret_state_tempdir, char **ret_sock_name) {
-        _cleanup_(rm_rf_physical_and_freep) char *state_dir = NULL;
-        _cleanup_free_ char *virtiofsd = NULL, *sock_name = NULL, *scope_prefix = NULL;
-        _cleanup_(socket_service_pair_done) SocketServicePair ssp = {
-                .socket_type = SOCK_STREAM,
-        };
-        static unsigned virtiofsd_instance = 0;
+static int start_virtiofsd(
+                const char *scope,
+                const char *directory,
+                bool uidmap,
+                const char *runtime_dir,
+                const char *sd_socket_activate,
+                char **ret_listen_address,
+                PidRef *ret_pidref) {
+
         int r;
 
-        assert(bus);
         assert(scope);
         assert(directory);
-        assert(ret_state_tempdir);
-        assert(ret_sock_name);
+        assert(runtime_dir);
 
+        _cleanup_free_ char *virtiofsd = NULL;
         r = find_virtiofsd(&virtiofsd);
         if (r < 0)
                 return r;
 
+        _cleanup_free_ char *scope_prefix = NULL;
         r = unit_name_to_prefix(scope, &scope_prefix);
         if (r < 0)
                 return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
 
-        if (asprintf(&ssp.unit_name_prefix, "%s-virtiofsd-%u", scope_prefix, virtiofsd_instance++) < 0)
-                return log_oom();
-
-        state_dir = path_join(arg_runtime_directory, ssp.unit_name_prefix);
-        if (!state_dir)
-                return log_oom();
-
-        if (arg_runtime_directory_created) {
-                ssp.runtime_directory = strjoin("systemd/vmspawn/", ssp.unit_name_prefix);
-                if (!ssp.runtime_directory)
-                        return log_oom();
-        }
-
-        if (asprintf(&sock_name, "sock-%"PRIx64, random_u64()) < 0)
-                return log_oom();
-
-        ssp.listen_address = path_join(state_dir, sock_name);
-        if (!ssp.listen_address)
+        _cleanup_free_ char *listen_address = NULL;
+        if (asprintf(&listen_address, "%s/sock-%"PRIx64, runtime_dir, random_u64()) < 0)
                 return log_oom();
 
         /* QEMU doesn't support submounts so don't announce them */
-        ssp.exec_start = strv_new(virtiofsd, "--shared-dir", directory, "--xattr", "--fd", "3", "--no-announce-submounts");
-        if (!ssp.exec_start)
+        _cleanup_strv_free_ char **argv = strv_new(
+                        sd_socket_activate,
+                        "--listen", listen_address,
+                        virtiofsd,
+                        "--shared-dir", directory,
+                        "--xattr",
+                        "--fd", "3",
+                        "--no-announce-submounts");
+        if (!argv)
                 return log_oom();
 
         if (uidmap && arg_uid_shift != UID_INVALID) {
-                r = strv_extend(&ssp.exec_start, "--uid-map");
+                r = strv_extend(&argv, "--uid-map");
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extendf(&ssp.exec_start, ":0:" UID_FMT ":" UID_FMT ":", arg_uid_shift, arg_uid_range);
+                r = strv_extendf(&argv, ":0:" UID_FMT ":" UID_FMT ":", arg_uid_shift, arg_uid_range);
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extend(&ssp.exec_start, "--gid-map");
+                r = strv_extend(&argv, "--gid-map");
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extendf(&ssp.exec_start, ":0:" GID_FMT ":" GID_FMT ":", arg_uid_shift, arg_uid_range);
+                r = strv_extendf(&argv, ":0:" GID_FMT ":" GID_FMT ":", arg_uid_shift, arg_uid_range);
                 if (r < 0)
                         return log_oom();
         }
 
-        r = start_socket_service_pair(bus, scope, &ssp);
+        r = fork_notify(argv, ret_pidref);
         if (r < 0)
                 return r;
 
-        *ret_state_tempdir = TAKE_PTR(state_dir);
-        *ret_sock_name = TAKE_PTR(sock_name);
+        if (ret_listen_address)
+                *ret_listen_address = TAKE_PTR(listen_address);
 
         return 0;
 }
@@ -1209,7 +1448,7 @@ static int discover_boot_entry(const char *root, char **ret_linux, char ***ret_i
 
         const BootEntry *boot_entry = boot_config_default_entry(&config);
 
-        if (boot_entry && !IN_SET(boot_entry->type, BOOT_ENTRY_UNIFIED, BOOT_ENTRY_CONF))
+        if (boot_entry && !IN_SET(boot_entry->type, BOOT_ENTRY_TYPE1, BOOT_ENTRY_TYPE2))
                 boot_entry = NULL;
 
         /* If we cannot determine a default entry search for UKIs (Type #2 EFI Unified Kernel Images)
@@ -1217,14 +1456,14 @@ static int discover_boot_entry(const char *root, char **ret_linux, char ***ret_i
          * https://uapi-group.org/specifications/specs/boot_loader_specification */
         if (!boot_entry)
                 FOREACH_ARRAY(entry, config.entries, config.n_entries)
-                        if (entry->type == BOOT_ENTRY_UNIFIED) {
+                        if (entry->type == BOOT_ENTRY_TYPE2) { /* UKI */
                                 boot_entry = entry;
                                 break;
                         }
 
         if (!boot_entry)
                 FOREACH_ARRAY(entry, config.entries, config.n_entries)
-                        if (entry->type == BOOT_ENTRY_CONF) {
+                        if (entry->type == BOOT_ENTRY_TYPE1) { /* .conf */
                                 boot_entry = entry;
                                 break;
                         }
@@ -1232,15 +1471,15 @@ static int discover_boot_entry(const char *root, char **ret_linux, char ***ret_i
         if (!boot_entry)
                 return log_error_errno(SYNTHETIC_ERRNO(ENOENT), "Failed to discover any boot entries.");
 
-        log_debug("Discovered boot entry %s (%s)", boot_entry->id, boot_entry_type_to_string(boot_entry->type));
+        log_debug("Discovered boot entry %s (%s)", boot_entry->id, boot_entry_type_description_to_string(boot_entry->type));
 
         _cleanup_free_ char *linux_kernel = NULL;
         _cleanup_strv_free_ char **initrds = NULL;
-        if (boot_entry->type == BOOT_ENTRY_UNIFIED) {
+        if (boot_entry->type == BOOT_ENTRY_TYPE2) { /* UKI */
                 linux_kernel = path_join(boot_entry->root, boot_entry->kernel);
                 if (!linux_kernel)
                         return log_oom();
-        } else if (boot_entry->type == BOOT_ENTRY_CONF) {
+        } else if (boot_entry->type == BOOT_ENTRY_TYPE1) { /* .conf */
                 linux_kernel = path_join(boot_entry->root, boot_entry->kernel);
                 if (!linux_kernel)
                         return log_oom();
@@ -1305,28 +1544,6 @@ static int merge_initrds(char **ret) {
         return 0;
 }
 
-static void set_window_title(PTYForward *f) {
-        _cleanup_free_ char *hn = NULL, *dot = NULL;
-
-        assert(f);
-
-        if (!shall_set_terminal_title())
-                return;
-
-        (void) gethostname_strict(&hn);
-
-        if (emoji_enabled())
-                dot = strjoin(special_glyph(SPECIAL_GLYPH_GREEN_CIRCLE), " ");
-
-        if (hn)
-                (void) pty_forward_set_titlef(f, "%sVirtual Machine %s on %s", strempty(dot), arg_machine, hn);
-        else
-                (void) pty_forward_set_titlef(f, "%sVirtual Machine %s", strempty(dot), arg_machine);
-
-        if (dot)
-                (void) pty_forward_set_title_prefix(f, dot);
-}
-
 static int generate_ssh_keypair(const char *key_path, const char *key_type) {
         _cleanup_free_ char *ssh_keygen = NULL;
         _cleanup_strv_free_ char **cmdline = NULL;
@@ -1371,28 +1588,102 @@ static int generate_ssh_keypair(const char *key_path, const char *key_type) {
         return 0;
 }
 
+static int grow_image(const char *path, uint64_t size) {
+        int r;
+
+        assert(path);
+
+        if (size == 0)
+                return 0;
+
+        /* Round up to multiple of 4K */
+        size = DIV_ROUND_UP(size, 4096);
+        if (size > UINT64_MAX / 4096)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Specified file size too large, refusing.");
+        size *= 4096;
+
+        _cleanup_close_ int fd = xopenat_full(AT_FDCWD, path, O_RDWR|O_CLOEXEC, XO_REGULAR, /* mode= */ 0);
+        if (fd < 0)
+                return log_error_errno(fd, "Failed to open image file '%s': %m", path);
+
+        struct stat st;
+        if (fstat(fd, &st) < 0)
+                return log_error_errno(errno, "Failed to stat '%s': %m", path);
+        if ((uint64_t) st.st_size >= size) {
+                log_debug("Not growing image '%s' to %s, size already at %s.", path,
+                          FORMAT_BYTES(size), FORMAT_BYTES(st.st_size));
+                return 0;
+        }
+
+        if (ftruncate(fd, size) < 0)
+                return log_error_errno(errno, "Failed to grow image file '%s' from %s to %s: %m", path,
+                                       FORMAT_BYTES(st.st_size), FORMAT_BYTES(size));
+
+        r = fsync_full(fd);
+        if (r < 0)
+                return log_error_errno(r, "Failed to sync image file '%s' after growing to %s: %m", path, FORMAT_BYTES(size));
+
+        if (!arg_quiet)
+                log_info("Image file '%s' successfully grown from %s to %s.", path, FORMAT_BYTES(st.st_size), FORMAT_BYTES(size));
+
+        return 1;
+}
+
+static int on_request_stop(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+        assert(m);
+
+        log_info("VM termination requested. Exiting.");
+        sd_event_exit(sd_bus_get_event(sd_bus_message_get_bus(m)), 0);
+
+        return 0;
+}
+
 static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         _cleanup_(ovmf_config_freep) OvmfConfig *ovmf_config = NULL;
-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        _cleanup_free_ char *machine = NULL, *qemu_binary = NULL, *mem = NULL, *trans_scope = NULL, *kernel = NULL;
+        _cleanup_free_ char *qemu_binary = NULL, *mem = NULL, *kernel = NULL;
         _cleanup_(rm_rf_physical_and_freep) char *ssh_private_key_path = NULL, *ssh_public_key_path = NULL;
         _cleanup_close_ int notify_sock_fd = -EBADF;
         _cleanup_strv_free_ char **cmdline = NULL;
         _cleanup_free_ int *pass_fds = NULL;
-        size_t n_pass_fds = 0;
-        const char *accel, *shm;
+        sd_event_source **children = NULL;
+        size_t n_children = 0, n_pass_fds = 0;
+        const char *accel;
         int r;
 
-        if (arg_privileged)
-                r = sd_bus_default_system(&bus);
-        else
-                r = sd_bus_default_user(&bus);
-        if (r < 0)
-                return log_error_errno(r, "Failed to connect to systemd bus: %m");
+        CLEANUP_ARRAY(children, n_children, fork_notify_terminate_many);
 
-        r = start_transient_scope(bus, arg_machine, /* allow_pidfd= */ true, &trans_scope);
-        if (r < 0)
-                return r;
+        polkit_agent_open();
+
+        /* Registration always happens on the system bus */
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *system_bus = NULL;
+        if (arg_register || arg_privileged) {
+                r = sd_bus_default_system(&system_bus);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to open system bus: %m");
+
+                r = sd_bus_set_close_on_exit(system_bus, false);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to disable close-on-exit behaviour: %m");
+
+                (void) sd_bus_set_allow_interactive_authorization(system_bus, arg_ask_password);
+        }
+
+        /* Scope allocation happens on the user bus if we are unpriv, otherwise system bus. */
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *user_bus = NULL;
+        _cleanup_(sd_bus_unrefp) sd_bus *runtime_bus = NULL;
+        if (arg_privileged)
+                runtime_bus = sd_bus_ref(system_bus);
+        else {
+                r = sd_bus_default_user(&user_bus);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to open system bus: %m");
+
+                r = sd_bus_set_close_on_exit(user_bus, false);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to disable close-on-exit behaviour: %m");
+
+                runtime_bus = sd_bus_ref(user_bus);
+        }
 
         bool use_kvm = arg_kvm > 0;
         if (arg_kvm < 0) {
@@ -1414,11 +1705,13 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 log_warning("Couldn't find OVMF firmware blob with Secure Boot support, "
                             "falling back to OVMF firmware blobs without Secure Boot support.");
 
-        shm = arg_directory || arg_runtime_mounts.n_mounts != 0 ? ",memory-backend=mem" : "";
+        _cleanup_free_ char *machine = NULL;
+        const char *shm = arg_directory || arg_runtime_mounts.n_mounts != 0 ? ",memory-backend=mem" : "";
+        const char *hpet = ARCHITECTURE_SUPPORTS_HPET ? ",hpet=off" : "";
         if (ARCHITECTURE_SUPPORTS_SMM)
-                machine = strjoin("type=" QEMU_MACHINE_TYPE ",smm=", on_off(ovmf_config->supports_sb), shm);
+                machine = strjoin("type=" QEMU_MACHINE_TYPE ",smm=", on_off(ovmf_config->supports_sb), shm, hpet);
         else
-                machine = strjoin("type=" QEMU_MACHINE_TYPE, shm);
+                machine = strjoin("type=" QEMU_MACHINE_TYPE, shm, hpet);
         if (!machine)
                 return log_oom();
 
@@ -1481,43 +1774,92 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         }
 
         /* if we are going to be starting any units with state then create our runtime dir */
-        if (arg_tpm != 0 || arg_directory || arg_runtime_mounts.n_mounts != 0) {
-                r = runtime_directory(arg_privileged ? RUNTIME_SCOPE_SYSTEM : RUNTIME_SCOPE_USER, "systemd/vmspawn",
-                                      &arg_runtime_directory);
+        _cleanup_free_ char *runtime_dir = NULL;
+        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir_destroy = NULL;
+        if (arg_tpm != 0 || arg_directory || arg_runtime_mounts.n_mounts != 0 || arg_pass_ssh_key) {
+                _cleanup_free_ char *subdir = NULL;
+
+                if (asprintf(&subdir, "systemd/vmspawn.%" PRIx64, random_u64()) < 0)
+                        return log_oom();
+
+                r = runtime_directory(
+                                arg_privileged ? RUNTIME_SCOPE_SYSTEM : RUNTIME_SCOPE_USER,
+                                subdir,
+                                &runtime_dir);
                 if (r < 0)
                         return log_error_errno(r, "Failed to lookup runtime directory: %m");
                 if (r > 0) { /* We need to create our own runtime dir */
-                        r = mkdir_p(arg_runtime_directory, 0755);
+                        r = mkdir_p(runtime_dir, 0755);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to create runtime directory: %m");
-                        arg_runtime_directory_created = true;
+                                return log_error_errno(r, "Failed to create runtime directory '%s': %m", runtime_dir);
+
+                        /* We created this, hence also destroy it */
+                        runtime_dir_destroy = TAKE_PTR(runtime_dir);
+
+                        runtime_dir = strdup(runtime_dir_destroy);
+                        if (!runtime_dir)
+                                return log_oom();
                 }
+
+                log_debug("Using runtime directory: %s", runtime_dir);
         }
 
+        _cleanup_close_ int delegate_userns_fd = -EBADF, tap_fd = -EBADF;
         if (arg_network_stack == NETWORK_STACK_TAP) {
-                _cleanup_free_ char *tap_name = NULL;
-                struct ether_addr mac_vm = {};
+                if (have_effective_cap(CAP_NET_ADMIN) <= 0) {
+                        delegate_userns_fd = userns_acquire_self_root();
+                        if (delegate_userns_fd < 0)
+                                return log_error_errno(delegate_userns_fd, "Failed to acquire userns: %m");
 
-                tap_name = strjoin("vt-", arg_machine);
-                if (!tap_name)
-                        return log_oom();
+                        _cleanup_free_ char *userns_name = NULL;
+                        if (asprintf(&userns_name, "vmspawn-" PID_FMT "-%s", getpid_cached(), arg_machine) < 0)
+                                return log_oom();
 
-                (void) net_shorten_ifname(tap_name, /* check_naming_scheme= */ false);
-
-                if (ether_addr_is_null(&arg_network_provided_mac)){
-                        r = net_generate_mac(arg_machine, &mac_vm, VM_TAP_HASH_KEY, 0);
+                        r = nsresource_register_userns(userns_name, delegate_userns_fd);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to generate predictable MAC address for VM side: %m");
-                } else
-                        mac_vm = arg_network_provided_mac;
+                                return log_error_errno(r, "Failed to register user namespace with systemd-nsresourced: %m");
 
-                r = strv_extend(&cmdline, "-nic");
-                if (r < 0)
-                        return log_oom();
+                        tap_fd = nsresource_add_netif_tap(delegate_userns_fd, /* ret_host_ifname= */ NULL);
+                        if (tap_fd < 0)
+                                return log_error_errno(tap_fd, "Failed to allocate network tap device: %m");
 
-                r = strv_extendf(&cmdline, "tap,ifname=%s,script=no,downscript=no,model=virtio-net-pci,mac=%s", tap_name, ETHER_ADDR_TO_STR(&mac_vm));
-                if (r < 0)
-                        return log_oom();
+                        r = strv_extend(&cmdline, "-nic");
+                        if (r < 0)
+                                return log_oom();
+
+                        r = strv_extendf(&cmdline, "tap,fd=%i,model=virtio-net-pci", tap_fd);
+                        if (r < 0)
+                                return log_oom();
+
+                        if (!GREEDY_REALLOC(pass_fds, n_pass_fds + 1))
+                                return log_oom();
+
+                        pass_fds[n_pass_fds++] = tap_fd;
+                } else {
+                        _cleanup_free_ char *tap_name = NULL;
+                        struct ether_addr mac_vm = {};
+
+                        tap_name = strjoin("vt-", arg_machine);
+                        if (!tap_name)
+                                return log_oom();
+
+                        (void) net_shorten_ifname(tap_name, /* check_naming_scheme= */ false);
+
+                        if (ether_addr_is_null(&arg_network_provided_mac)){
+                                r = net_generate_mac(arg_machine, &mac_vm, VM_TAP_HASH_KEY, 0);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to generate predictable MAC address for VM side: %m");
+                        } else
+                                mac_vm = arg_network_provided_mac;
+
+                        r = strv_extend(&cmdline, "-nic");
+                        if (r < 0)
+                                return log_oom();
+
+                        r = strv_extendf(&cmdline, "tap,ifname=%s,script=no,downscript=no,model=virtio-net-pci,mac=%s", tap_name, ETHER_ADDR_TO_STR(&mac_vm));
+                        if (r < 0)
+                                return log_oom();
+                }
         } else if (arg_network_stack == NETWORK_STACK_USER)
                 r = strv_extend_many(&cmdline, "-nic", "user,model=virtio-net-pci");
         else
@@ -1637,6 +1979,7 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                                 &cmdline,
                                 "-nographic",
                                 "-nodefaults",
+                                "-device", "virtio-serial-pci,id=vmspawn-virtio-serial-pci",
                                 "-chardev") < 0)
                         return log_oom();
 
@@ -1646,7 +1989,7 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
                 r = strv_extend_many(
                                 &cmdline,
-                                "-serial", "chardev:console");
+                                "-device", "virtconsole,chardev=console");
                 break;
         }
 
@@ -1663,7 +2006,8 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                                 "-nographic",
                                 "-nodefaults",
                                 "-chardev", "stdio,mux=on,id=console,signal=off",
-                                "-serial", "chardev:console",
+                                "-device", "virtio-serial-pci,id=vmspawn-virtio-serial-pci",
+                                "-device", "virtconsole,chardev=console",
                                 "-mon", "console");
                 break;
 
@@ -1727,18 +2071,8 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                         return log_oom();
         }
 
-        STRV_FOREACH(drive, arg_extra_drives) {
-                _cleanup_free_ char *escaped_drive = NULL;
-
-                r = strv_extend(&cmdline, "-blockdev");
-                if (r < 0)
-                        return log_oom();
-
-                escaped_drive = escape_qemu_value(*drive);
-                if (!escaped_drive)
-                        return log_oom();
-
-                r = strv_extendf(&cmdline, "driver=raw,cache.direct=off,cache.no-flush=on,file.driver=file,file.filename=%s", escaped_drive);
+        if (strv_length(arg_extra_drives) > 0) {
+                r = strv_extend_many(&cmdline, "-device", "virtio-scsi-pci,id=scsi");
                 if (r < 0)
                         return log_oom();
         }
@@ -1768,35 +2102,111 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
                 escaped_image = escape_qemu_value(arg_image);
                 if (!escaped_image)
-                        log_oom();
+                        return log_oom();
 
-                r = strv_extendf(&cmdline, "if=none,id=mkosi,file=%s,format=raw,discard=%s", escaped_image, on_off(arg_discard_disk));
+                r = strv_extendf(&cmdline, "if=none,id=vmspawn,file=%s,format=raw,discard=%s", escaped_image, on_off(arg_discard_disk));
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extend_many(&cmdline,
-                        "-device", "virtio-scsi-pci,id=scsi",
-                        "-device", "scsi-hd,drive=mkosi,bootindex=1");
+                r = strv_extend_many(&cmdline, "-device", "virtio-blk-pci,drive=vmspawn,bootindex=1");
                 if (r < 0)
                         return log_oom();
+
+                r = grow_image(arg_image, arg_grow_image);
+                if (r < 0)
+                        return r;
         }
 
-        if (arg_directory) {
-                _cleanup_free_ char *sock_path = NULL, *sock_name = NULL, *escaped_sock_path = NULL;
+        assert_se(sigprocmask_many(SIG_BLOCK, /* ret_old_mask=*/ NULL, SIGCHLD) >= 0);
 
-                r = start_virtiofsd(bus, trans_scope, arg_directory, /* uidmap= */ true, &sock_path, &sock_name);
+        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
+        r = sd_event_new(&event);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get default event loop: %m");
+
+        (void) sd_event_set_watchdog(event, true);
+
+        _cleanup_free_ char *unit = NULL;
+        r = unit_name_mangle_with_suffix(arg_machine, "as machine name", /* flags= */ 0, ".scope", &unit);
+        if (r < 0)
+                return log_error_errno(r, "Failed to mangle scope name: %m");
+
+        _cleanup_free_ char *sd_socket_activate = NULL;
+        r = find_executable("systemd-socket-activate", &sd_socket_activate);
+        if (r < 0)
+                return log_error_errno(r, "Failed to find systemd-socket-activate binary: %m");
+
+        if (arg_directory) {
+                _cleanup_free_ char *listen_address = NULL;
+                _cleanup_(fork_notify_terminate) PidRef child = PIDREF_NULL;
+
+                if (!GREEDY_REALLOC(children, n_children + 1))
+                        return log_oom();
+
+                r = start_virtiofsd(
+                                unit,
+                                arg_directory,
+                                /* uidmap= */ true,
+                                runtime_dir,
+                                sd_socket_activate,
+                                &listen_address,
+                                &child);
                 if (r < 0)
                         return r;
 
-                escaped_sock_path = escape_qemu_value(sock_path);
-                if (!escaped_sock_path)
-                        log_oom();
+                _cleanup_(sd_event_source_unrefp) sd_event_source *source = NULL;
+                r = event_add_child_pidref(event, &source, &child, WEXITED, on_child_exit, /* userdata= */ NULL);
+                if (r < 0)
+                        return r;
 
-                r = strv_extend(&cmdline, "-chardev");
+                pidref_done(&child);
+                children[n_children++] = TAKE_PTR(source);
+
+                _cleanup_free_ char *escaped_listen_address = escape_qemu_value(listen_address);
+                if (!escaped_listen_address)
+                        return log_oom();
+
+                if (strv_extend(&cmdline, "-chardev") < 0)
+                        return log_oom();
+
+                if (strv_extendf(&cmdline, "socket,id=rootdir,path=%s", escaped_listen_address) < 0)
+                        return log_oom();
+
+                if (strv_extend_many(
+                                    &cmdline,
+                                    "-device",
+                                    "vhost-user-fs-pci,queue-size=1024,chardev=rootdir,tag=root") < 0)
+                        return log_oom();
+
+                if (strv_extend(&arg_kernel_cmdline_extra, "root=root rootfstype=virtiofs rw") < 0)
+                        return log_oom();
+        }
+
+        size_t i = 0;
+        STRV_FOREACH(drive, arg_extra_drives) {
+                _cleanup_free_ char *escaped_drive = NULL;
+                const char *driver = NULL;
+                struct stat st;
+
+                r = strv_extend(&cmdline, "-blockdev");
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extendf(&cmdline, "socket,id=%1$s,path=%2$s/%1$s", sock_name, escaped_sock_path);
+                escaped_drive = escape_qemu_value(*drive);
+                if (!escaped_drive)
+                        return log_oom();
+
+                if (stat(*drive, &st) < 0)
+                        return log_error_errno(errno, "Failed to stat '%s': %m", *drive);
+
+                if (S_ISREG(st.st_mode))
+                        driver = "file";
+                else if (S_ISBLK(st.st_mode))
+                        driver = "host_device";
+                else
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Expected regular file or block device, not '%s'.", *drive);
+
+                r = strv_extendf(&cmdline, "driver=raw,cache.direct=off,cache.no-flush=on,file.driver=%s,file.filename=%s,node-name=vmspawn_extra_%zu", driver, escaped_drive, i);
                 if (r < 0)
                         return log_oom();
 
@@ -1804,102 +2214,120 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 if (r < 0)
                         return log_oom();
 
-                r = strv_extendf(&cmdline, "vhost-user-fs-pci,queue-size=1024,chardev=%s,tag=root", sock_name);
-                if (r < 0)
-                        return log_oom();
-
-                r = strv_extend(&arg_kernel_cmdline_extra, "root=root rootfstype=virtiofs rw");
+                r = strv_extendf(&cmdline, "scsi-hd,drive=vmspawn_extra_%zu", i++);
                 if (r < 0)
                         return log_oom();
         }
 
-        r = strv_prepend(&arg_kernel_cmdline_extra, "console=" DEFAULT_SERIAL_TTY);
+        r = strv_prepend(&arg_kernel_cmdline_extra, "console=hvc0");
         if (r < 0)
                 return log_oom();
 
         FOREACH_ARRAY(mount, arg_runtime_mounts.mounts, arg_runtime_mounts.n_mounts) {
-                _cleanup_free_ char *sock_path = NULL, *sock_name = NULL, *clean_target = NULL, *escaped_sock_path = NULL;
-                r = start_virtiofsd(bus, trans_scope, mount->source, /* uidmap= */ false, &sock_path, &sock_name);
+                _cleanup_free_ char *listen_address = NULL;
+                _cleanup_(fork_notify_terminate) PidRef child = PIDREF_NULL;
+
+                if (!GREEDY_REALLOC(children, n_children + 1))
+                        return log_oom();
+
+                r = start_virtiofsd(
+                                unit,
+                                mount->source,
+                                /* uidmap= */ false,
+                                runtime_dir,
+                                sd_socket_activate,
+                                &listen_address,
+                                &child);
                 if (r < 0)
                         return r;
 
-                escaped_sock_path = escape_qemu_value(sock_path);
-                if (!escaped_sock_path)
-                        log_oom();
-
-                r = strv_extend(&cmdline, "-chardev");
+                _cleanup_(sd_event_source_unrefp) sd_event_source *source = NULL;
+                r = event_add_child_pidref(event, &source, &child, WEXITED, on_child_exit, /* userdata= */ NULL);
                 if (r < 0)
+                        return r;
+
+                pidref_done(&child);
+                children[n_children++] = TAKE_PTR(source);
+
+                _cleanup_free_ char *escaped_listen_address = escape_qemu_value(listen_address);
+                if (!escaped_listen_address)
                         return log_oom();
 
-                r = strv_extendf(&cmdline, "socket,id=%1$s,path=%2$s/%1$s", sock_name, escaped_sock_path);
-                if (r < 0)
+                if (strv_extend(&cmdline, "-chardev") < 0)
                         return log_oom();
 
-                r = strv_extend(&cmdline, "-device");
-                if (r < 0)
+                _cleanup_free_ char *id = NULL;
+                if (asprintf(&id, "mnt%zi", mount - arg_runtime_mounts.mounts) < 0)
                         return log_oom();
 
-                r = strv_extendf(&cmdline, "vhost-user-fs-pci,queue-size=1024,chardev=%1$s,tag=%1$s", sock_name);
-                if (r < 0)
+                if (strv_extendf(&cmdline, "socket,id=%s,path=%s", id, escaped_listen_address) < 0)
                         return log_oom();
 
-                clean_target = xescape(mount->target, "\":");
+                if (strv_extend(&cmdline, "-device") < 0)
+                        return log_oom();
+
+                if (strv_extendf(&cmdline, "vhost-user-fs-pci,queue-size=1024,chardev=%1$s,tag=%1$s", id) < 0)
+                        return log_oom();
+
+                _cleanup_free_ char *clean_target = xescape(mount->target, "\":");
                 if (!clean_target)
                         return log_oom();
 
-                r = strv_extendf(&arg_kernel_cmdline_extra, "systemd.mount-extra=\"%s:%s:virtiofs:%s\"",
-                                 sock_name, clean_target, mount->read_only ? "ro" : "rw");
-                if (r < 0)
+                if (strv_extendf(&arg_kernel_cmdline_extra, "systemd.mount-extra=\"%s:%s:virtiofs:%s\"",
+                                 id, clean_target, mount->read_only ? "ro" : "rw") < 0)
                         return log_oom();
         }
 
-        if (ARCHITECTURE_SUPPORTS_SMBIOS) {
-                _cleanup_free_ char *kcl = strv_join(arg_kernel_cmdline_extra, " "), *escaped_kcl = NULL;
-                if (!kcl)
-                        return log_oom();
+        _cleanup_(rm_rf_physical_and_freep) char *smbios_dir = NULL;
+        r = mkdtemp_malloc("/var/tmp/vmspawn-smbios-XXXXXX", &smbios_dir);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create temporary directory: %m");
 
-                if (kernel) {
-                        r = strv_extend_many(&cmdline, "-append", kcl);
-                        if (r < 0)
-                                return log_oom();
-                } else {
-                        if (ARCHITECTURE_SUPPORTS_SMBIOS) {
-                                escaped_kcl = escape_qemu_value(kcl);
-                                if (!escaped_kcl)
-                                        log_oom();
+        r = cmdline_add_kernel_cmdline(&cmdline, kernel, smbios_dir);
+        if (r < 0)
+                return r;
 
-                                r = strv_extend(&cmdline, "-smbios");
-                                if (r < 0)
-                                        return log_oom();
-
-                                r = strv_extendf(&cmdline, "type=11,value=io.systemd.stub.kernel-cmdline-extra=%s", escaped_kcl);
-                                if (r < 0)
-                                        return log_oom();
-
-                                r = strv_extend(&cmdline, "-smbios");
-                                if (r < 0)
-                                        return log_oom();
-
-                                r = strv_extendf(&cmdline, "type=11,value=io.systemd.boot.kernel-cmdline-extra=%s", escaped_kcl);
-                                if (r < 0)
-                                        return log_oom();
-                        } else
-                                log_warning("Cannot append extra args to kernel cmdline, native architecture doesn't support SMBIOS, ignoring");
-                }
-        } else
-                log_warning("Cannot append extra args to kernel cmdline, native architecture doesn't support SMBIOS");
+        r = cmdline_add_smbios11(&cmdline, smbios_dir);
+        if (r < 0)
+                return r;
 
         /* disable TPM autodetection if the user's hardware doesn't support it */
         if (!ARCHITECTURE_SUPPORTS_TPM) {
-                if (arg_tpm < 0) {
-                        arg_tpm = 0;
-                        log_debug("TPM not support on %s, disabling tpm autodetection and continuing", architecture_to_string(native_architecture()));
-                } else if (arg_tpm > 0)
+                if (arg_tpm > 0)
                         return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "TPM not supported on %s, refusing", architecture_to_string(native_architecture()));
+                if (arg_tpm < 0) {
+                        arg_tpm = false;
+                        log_debug("TPM not support on %s, disabling tpm autodetection and continuing", architecture_to_string(native_architecture()));
+                }
         }
 
         _cleanup_free_ char *swtpm = NULL;
         if (arg_tpm != 0) {
+                if (arg_tpm_state_mode == TPM_STATE_AUTO) {
+                        assert(!arg_tpm_state_path);
+
+                        const char *p = ASSERT_PTR(arg_image ?: arg_directory);
+
+                        _cleanup_free_ char *parent = NULL;
+                        r = path_extract_directory(p, &parent);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract parent directory from '%s': %m", p);
+
+                        _cleanup_free_ char *filename = NULL;
+                        r = path_extract_filename(p, &filename);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to extract filename from '%s': %m", p);
+
+                        if (!strextend(&filename, ".tpmstate"))
+                                return log_oom();
+
+                        arg_tpm_state_path = path_join(parent, filename);
+                        if (!arg_tpm_state_path)
+                                return log_oom();
+
+                        log_debug("Storing TPM state persistently under '%s'.", arg_tpm_state_path);
+                }
+
                 r = find_executable("swtpm", &swtpm);
                 if (r < 0) {
                         /* log if the user asked for swtpm and we cannot find it */
@@ -1911,34 +2339,43 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 }
         }
 
-        _cleanup_free_ char *tpm_state_tempdir = NULL;
+        _cleanup_free_ char *tpm_socket_address = NULL;
         if (swtpm) {
-                r = start_tpm(bus, trans_scope, swtpm, &tpm_state_tempdir);
+                _cleanup_(fork_notify_terminate) PidRef child = PIDREF_NULL;
+
+                if (!GREEDY_REALLOC(children, n_children + 1))
+                        return log_oom();
+
+                r = start_tpm(unit, swtpm, runtime_dir, sd_socket_activate, &tpm_socket_address, &child);
                 if (r < 0) {
                         /* only bail if the user asked for a tpm */
                         if (arg_tpm > 0)
                                 return log_error_errno(r, "Failed to start tpm: %m");
+
                         log_debug_errno(r, "Failed to start tpm, ignoring: %m");
                 }
+
+                _cleanup_(sd_event_source_unrefp) sd_event_source *source = NULL;
+                r = event_add_child_pidref(event, &source, &child, WEXITED, on_child_exit, /* userdata= */ NULL);
+                if (r < 0)
+                        return r;
+
+                pidref_done(&child);
+                children[n_children++] = TAKE_PTR(source);
         }
 
-        if (tpm_state_tempdir) {
-                _cleanup_free_ char *escaped_state_dir = NULL;
-
-                escaped_state_dir = escape_qemu_value(tpm_state_tempdir);
-                if (!escaped_state_dir)
-                        log_oom();
-
-                r = strv_extend(&cmdline, "-chardev");
-                if (r < 0)
+        if (tpm_socket_address) {
+                _cleanup_free_ char *escaped_tpm_socket_address = escape_qemu_value(tpm_socket_address);
+                if (!escaped_tpm_socket_address)
                         return log_oom();
 
-                r = strv_extendf(&cmdline, "socket,id=chrtpm,path=%s/sock", escaped_state_dir);
-                if (r < 0)
+                if (strv_extend(&cmdline, "-chardev") < 0)
                         return log_oom();
 
-                r = strv_extend_many(&cmdline, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm");
-                if (r < 0)
+                if (strv_extendf(&cmdline, "socket,id=chrtpm,path=%s", tpm_socket_address) < 0)
+                        return log_oom();
+
+                if (strv_extend_many(&cmdline, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm") < 0)
                         return log_oom();
 
                 if (native_architecture() == ARCHITECTURE_X86_64)
@@ -1970,22 +2407,23 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         }
 
         if (arg_forward_journal) {
-                _cleanup_free_ char *sd_journal_remote = NULL, *listen_address = NULL, *cred = NULL;
+                _cleanup_free_ char *listen_address = NULL, *cred = NULL;
 
-                r = find_executable_full(
-                                "systemd-journal-remote",
-                                /* root = */ NULL,
-                                STRV_MAKE(LIBEXECDIR),
-                                /* use_path_envvar = */ true, /* systemd-journal-remote should be installed in
-                                                               * LIBEXECDIR, but for supporting fancy setups. */
-                                &sd_journal_remote,
-                                /* ret_fd = */ NULL);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to find systemd-journal-remote binary: %m");
+                if (!GREEDY_REALLOC(children, n_children + 1))
+                        return log_oom();
 
-                r = start_systemd_journal_remote(bus, trans_scope, child_cid, sd_journal_remote, &listen_address);
+                _cleanup_(fork_notify_terminate) PidRef child = PIDREF_NULL;
+                r = start_systemd_journal_remote(unit, child_cid, sd_socket_activate, &listen_address, &child);
                 if (r < 0)
                         return r;
+
+                _cleanup_(sd_event_source_unrefp) sd_event_source *source = NULL;
+                r = event_add_child_pidref(event, &source, &child, WEXITED, on_child_exit, /* userdata= */ NULL);
+                if (r < 0)
+                        return r;
+
+                pidref_done(&child);
+                children[n_children++] = TAKE_PTR(source);
 
                 cred = strjoin("journal.forward_to_socket:", listen_address);
                 if (!cred)
@@ -2000,11 +2438,11 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 _cleanup_free_ char *scope_prefix = NULL, *privkey_path = NULL, *pubkey_path = NULL;
                 const char *key_type = arg_ssh_key_type ?: "ed25519";
 
-                r = unit_name_to_prefix(trans_scope, &scope_prefix);
+                r = unit_name_to_prefix(unit, &scope_prefix);
                 if (r < 0)
                         return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
 
-                privkey_path = strjoin(arg_runtime_directory, "/", scope_prefix, "-", key_type);
+                privkey_path = strjoin(runtime_dir, "/", scope_prefix, "-", key_type);
                 if (!privkey_path)
                         return log_oom();
 
@@ -2031,7 +2469,7 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to load credential %s: %m", cred_path);
 
-                r = unit_name_to_prefix(trans_scope, &scope_prefix);
+                r = unit_name_to_prefix(unit, &scope_prefix);
                 if (r < 0)
                         return log_error_errno(r, "Failed to strip .scope suffix from scope: %m");
 
@@ -2050,18 +2488,29 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
         if (ARCHITECTURE_SUPPORTS_SMBIOS)
                 FOREACH_ARRAY(cred, arg_credentials.credentials, arg_credentials.n_credentials) {
-                        _cleanup_free_ char *cred_data_b64 = NULL;
+                        _cleanup_free_ char *p = NULL, *cred_data_b64 = NULL;
                         ssize_t n;
 
                         n = base64mem(cred->data, cred->size, &cred_data_b64);
                         if (n < 0)
                                 return log_oom();
 
+                        p = path_join(smbios_dir, cred->id);
+                        if (!p)
+                                return log_oom();
+
+                        r = write_string_filef(
+                                        p,
+                                        WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_AVOID_NEWLINE|WRITE_STRING_FILE_MODE_0600,
+                                        "io.systemd.credential.binary:%s=%s", cred->id, cred_data_b64);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to write smbios credential file %s: %m", p);
+
                         r = strv_extend(&cmdline, "-smbios");
                         if (r < 0)
                                 return log_oom();
 
-                        r = strv_extendf(&cmdline, "type=11,value=io.systemd.credential.binary:%s=%s", cred->id, cred_data_b64);
+                        r = strv_extendf(&cmdline, "type=11,path=%s", p);
                         if (r < 0)
                                 return log_oom();
                 }
@@ -2081,7 +2530,7 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         const char *e = secure_getenv("SYSTEMD_VMSPAWN_QEMU_EXTRA");
         if (e) {
                 r = strv_split_and_extend_full(&cmdline, e,
-                                               /* separator = */ NULL, /* filter_duplicates = */ false,
+                                               /* separators = */ NULL, /* filter_duplicates = */ false,
                                                EXTRACT_CUNESCAPE|EXTRACT_UNQUOTE);
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse $SYSTEMD_VMSPAWN_QEMU_EXTRA: %m");
@@ -2095,36 +2544,9 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 log_debug("Executing: %s", joined);
         }
 
-        if (arg_register) {
-                char vm_address[STRLEN("vsock/") + DECIMAL_STR_MAX(unsigned)];
-
-                xsprintf(vm_address, "vsock/%u", child_cid);
-                r = register_machine(
-                                bus,
-                                arg_machine,
-                                arg_uuid,
-                                "systemd-vmspawn",
-                                arg_directory,
-                                child_cid,
-                                child_cid != VMADDR_CID_ANY ? vm_address : NULL,
-                                ssh_private_key_path,
-                                arg_keep_unit);
-                if (r < 0)
-                        return r;
-        }
-
         assert_se(sigprocmask_many(SIG_BLOCK, /* ret_old_mask=*/ NULL, SIGCHLD) >= 0);
 
-        _cleanup_(sd_event_source_unrefp) sd_event_source *notify_event_source = NULL;
-        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        r = sd_event_new(&event);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get default event source: %m");
-
-        (void) sd_event_set_watchdog(event, true);
-
         _cleanup_(pidref_done) PidRef child_pidref = PIDREF_NULL;
-
         r = pidref_safe_fork_full(
                         qemu_binary,
                         /* stdio_fds= */ NULL,
@@ -2134,20 +2556,114 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         if (r < 0)
                 return r;
         if (r == 0) {
-                /* set TERM and LANG if they are missing */
-                if (setenv("TERM", "vt220", 0) < 0)
-                        return log_oom();
-
-                if (setenv("LANG", "C.UTF-8", 0) < 0)
-                        return log_oom();
+                if (setenv("LANG", "C.UTF-8", 0) < 0) {
+                        log_oom();
+                        goto fail;
+                }
 
                 execv(qemu_binary, cmdline);
                 log_error_errno(errno, "Failed to execve %s: %m", qemu_binary);
+        fail:
                 _exit(EXIT_FAILURE);
         }
 
-        /* Close the vsock fd we passed to qemu in the parent. We don't need it anymore. */
+        /* Close relevant fds we passed to qemu in the parent. We don't need them anymore. */
         child_vsock_fd = safe_close(child_vsock_fd);
+        tap_fd = safe_close(tap_fd);
+
+        if (!arg_keep_unit) {
+                /* When a new scope is created for this container, then we'll be registered as its controller, in which
+                 * case PID 1 will send us a friendly RequestStop signal, when it is asked to terminate the
+                 * scope. Let's hook into that, and cleanly shut down the container, and print a friendly message. */
+
+                r = sd_bus_match_signal_async(
+                                runtime_bus,
+                                /* ret= */ NULL,
+                                "org.freedesktop.systemd1",
+                                /* path= */ NULL,
+                                "org.freedesktop.systemd1.Scope",
+                                "RequestStop",
+                                on_request_stop,
+                                /* install_callback= */ NULL,
+                                /* userdata= */ NULL);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to request RequestStop match: %m");
+        }
+
+        bool scope_allocated = false;
+        if (!arg_keep_unit && (!arg_register || !arg_privileged)) {
+                r = allocate_scope(
+                                runtime_bus,
+                                arg_machine,
+                                &child_pidref,
+                                children,
+                                n_children,
+                                unit,
+                                arg_slice,
+                                arg_property,
+                                /* allow_pidfd= */ true);
+                if (r < 0)
+                        return r;
+
+                scope_allocated = true;
+        } else {
+                if (arg_privileged)
+                        r = cg_pid_get_unit(0, &unit);
+                else
+                        r = cg_pid_get_user_unit(0, &unit);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get our own unit: %m");
+        }
+
+        bool registered = false;
+        if (arg_register) {
+                char vm_address[STRLEN("vsock/") + DECIMAL_STR_MAX(unsigned)];
+                xsprintf(vm_address, "vsock/%u", child_cid);
+                r = register_machine(
+                                system_bus,
+                                arg_machine,
+                                arg_uuid,
+                                "systemd-vmspawn",
+                                &child_pidref,
+                                arg_directory,
+                                child_cid,
+                                child_cid != VMADDR_CID_ANY ? vm_address : NULL,
+                                ssh_private_key_path,
+                                arg_keep_unit || !arg_privileged);
+                if (r < 0)
+                        return r;
+
+                registered = true;
+        }
+
+        /* Report that the VM is now set up */
+        (void) sd_notifyf(/* unset_environment= */ false,
+                          "STATUS=VM started.\n"
+                          "X_VMSPAWN_LEADER_PID=" PID_FMT, child_pidref.pid);
+        if (!arg_notify_ready) {
+                r = sd_notify(/* unset_environment= */ false, "READY=1\n");
+                if (r < 0)
+                        log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
+        }
+
+        /* All operations that might need Polkit authorizations (i.e. machine registration, netif
+         * acquisition, …) are complete now, get rid of the agent again, so that we retain exclusive control
+         * of the TTY from now on. */
+        polkit_agent_close();
+
+        _cleanup_(sd_event_source_unrefp) sd_event_source *notify_event_source = NULL;
+
+        if (system_bus) {
+                r = sd_bus_attach_event(system_bus, event, 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to attach system bus to event loop: %m");
+        }
+
+        if (user_bus) {
+                r = sd_bus_attach_event(user_bus, event, 0);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to attach user bus to event loop: %m");
+        }
 
         int exit_status = INT_MAX;
         if (use_vsock) {
@@ -2175,13 +2691,22 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
         r = sd_event_add_memory_pressure(event, NULL, NULL, NULL);
         if (r < 0)
-                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
+                log_debug_errno(r, "Failed to allocate memory pressure event source, ignoring: %m");
 
         /* Exit when the child exits */
-        (void) event_add_child_pidref(event, NULL, &child_pidref, WEXITED, on_child_exit, NULL);
+        r = event_add_child_pidref(event, /* ret= */ NULL, &child_pidref, WEXITED, on_child_exit, /* userdata= */ NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to watch qemu process: &m");
 
+        _cleanup_(osc_context_closep) sd_id128_t osc_context_id = SD_ID128_NULL;
         _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
         if (master >= 0) {
+                if (!terminal_is_dumb()) {
+                        r = osc_context_open_vm(arg_machine, /* ret_seq= */ NULL, &osc_context_id);
+                        if (r < 0)
+                                return r;
+                }
+
                 r = pty_forward_new(event, master, ptyfwd_flags, &forward);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create PTY forwarder: %m");
@@ -2197,15 +2722,20 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 } else if (!isempty(arg_background))
                         (void) pty_forward_set_background_color(forward, arg_background);
 
-                set_window_title(forward);
+                (void) pty_forward_set_window_title(forward, GLYPH_GREEN_CIRCLE, /* hostname = */ NULL,
+                                                    STRV_MAKE("Virtual Machine", arg_machine));
         }
 
         r = sd_event_loop(event);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
 
-        if (arg_register)
-                (void) unregister_machine(bus, arg_machine);
+        /* Kill if it is not dead yet anyway */
+        if (scope_allocated)
+                terminate_scope(runtime_bus, arg_machine);
+
+        if (registered)
+                (void) unregister_machine(system_bus, arg_machine);
 
         if (use_vsock) {
                 if (exit_status == INT_MAX) {
@@ -2227,7 +2757,8 @@ static int determine_names(void) {
                 if (arg_machine) {
                         _cleanup_(image_unrefp) Image *i = NULL;
 
-                        r = image_find(IMAGE_MACHINE, arg_machine, NULL, &i);
+                        r = image_find(arg_privileged ? RUNTIME_SCOPE_SYSTEM : RUNTIME_SCOPE_USER,
+                                       IMAGE_MACHINE, arg_machine, NULL, &i);
                         if (r == -ENOENT)
                                 return log_error_errno(r, "No image for machine '%s'.", arg_machine);
                         if (r < 0)
@@ -2279,16 +2810,8 @@ static int determine_names(void) {
 }
 
 static int verify_arguments(void) {
-        if (arg_network_stack == NETWORK_STACK_TAP && !arg_privileged)
-                return log_error_errno(SYNTHETIC_ERRNO(EPERM), "--network-tap requires root privileges, refusing.");
-
         if (!strv_isempty(arg_initrds) && !arg_linux)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Option --initrd= cannot be used without --linux=.");
-
-        if (arg_keep_unit && arg_register && cg_pid_get_owner_uid(0, NULL) >= 0)
-                /* Save the user from accidentally registering either user-$SESSION.scope or user@.service.
-                 * The latter is not technically a user session, but we don't need to labour the point. */
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "--keep-unit --register=yes may not be used when invoked from a user session.");
 
         return 0;
 }
@@ -2300,9 +2823,6 @@ static int run(int argc, char *argv[]) {
         log_setup();
 
         arg_privileged = getuid() == 0;
-
-        /* don't attempt to register as a machine when running as a user */
-        arg_register = arg_privileged;
 
         r = parse_environment();
         if (r < 0)
@@ -2326,21 +2846,21 @@ static int run(int argc, char *argv[]) {
                 (void) terminal_urlify_path(vm_path, vm_path, &u);
 
                 log_info("%s %sSpawning VM %s on %s.%s",
-                         special_glyph(SPECIAL_GLYPH_LIGHT_SHADE), ansi_grey(), arg_machine, u ?: vm_path, ansi_normal());
+                         glyph(GLYPH_LIGHT_SHADE), ansi_grey(), arg_machine, u ?: vm_path, ansi_normal());
 
                 if (arg_console_mode == CONSOLE_INTERACTIVE)
                         log_info("%s %sPress %sCtrl-]%s three times within 1s to kill VM.%s",
-                                 special_glyph(SPECIAL_GLYPH_LIGHT_SHADE), ansi_grey(), ansi_highlight(), ansi_grey(), ansi_normal());
+                                 glyph(GLYPH_LIGHT_SHADE), ansi_grey(), ansi_highlight(), ansi_grey(), ansi_normal());
                 else if (arg_console_mode == CONSOLE_NATIVE)
                         log_info("%s %sPress %sCtrl-a x%s to kill VM.%s",
-                                 special_glyph(SPECIAL_GLYPH_LIGHT_SHADE), ansi_grey(), ansi_highlight(), ansi_grey(), ansi_normal());
+                                 glyph(GLYPH_LIGHT_SHADE), ansi_grey(), ansi_highlight(), ansi_grey(), ansi_normal());
         }
 
-        r = sd_listen_fds_with_names(true, &names);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get passed file descriptors: %m");
+        int n = sd_listen_fds_with_names(true, &names);
+        if (n < 0)
+                return log_error_errno(n, "Failed to get passed file descriptors: %m");
 
-        for (int i = 0; i < r; i++) {
+        for (int i = 0; i < n; i++) {
                 int fd = SD_LISTEN_FDS_START + i;
                 if (streq(names[i], "kvm"))
                         kvm_device_fd = fd;

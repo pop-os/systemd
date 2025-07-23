@@ -68,7 +68,20 @@
     <cmdsynopsis>
       <command>systemd-analyze</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">unit-gdb</arg>
+      <arg choice="plain"><replaceable>SERVICE</replaceable></arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="plain">unit-paths</arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">unit-shell</arg>
+      <arg choice="plain"><replaceable>SERVICE</replaceable></arg>
+      <arg choice="opt" rep="repeat"><replaceable>Command</replaceable></arg>
     </cmdsynopsis>
     <cmdsynopsis>
       <command>systemd-analyze</command>
@@ -204,6 +217,17 @@
       <command>systemd-analyze</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="plain">smbios11</arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">chid</arg>
+    </cmdsynopsis>
+    <cmdsynopsis>
+      <command>systemd-analyze</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <arg choice="plain">transient-settings</arg>
+      <arg choice="plain" rep="repeat"><replaceable>TYPE</replaceable></arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -520,8 +544,8 @@ cap_net_raw              13
       <example>
         <title>Evaluate conditions that check kernel versions</title>
 
-        <programlisting>$ systemd-analyze condition 'ConditionKernelVersion = ! &lt;4.0' \
-        'ConditionKernelVersion = &gt;=5.1' \
+        <programlisting>$ systemd-analyze condition 'ConditionVersion = ! &lt;4.0' \
+        'ConditionVersion = &gt;=5.1' \
         'ConditionACPower=|false' \
         'ConditionArchitecture=|!arm' \
         'AssertPathExists=/etc/os-release'
@@ -529,8 +553,8 @@ test.service: AssertPathExists=/etc/os-release succeeded.
 Asserts succeeded.
 test.service: ConditionArchitecture=|!arm succeeded.
 test.service: ConditionACPower=|false failed.
-test.service: ConditionKernelVersion=&gt;=5.1 succeeded.
-test.service: ConditionKernelVersion=!&lt;4.0 succeeded.
+test.service: ConditionVersion=&gt;=5.1 succeeded.
+test.service: ConditionVersion=!&lt;4.0 succeeded.
 Conditions succeeded.</programlisting>
       </example>
     </refsect2>
@@ -862,8 +886,9 @@ alias.service:7: Unknown key name 'MysteryKey' in section 'Service', ignoring.
 
       <para>This command will load the specified files, and if they are ELF objects (executables,
       libraries, core files, etc.) it will parse the embedded packaging metadata, if any, and print
-      it in a table or json format. See the <ulink url="https://systemd.io/COREDUMP_PACKAGE_METADATA/">
-      Packaging Metadata</ulink> documentation for more information.</para>
+      it in a table or json format. See the
+      <ulink url="https://systemd.io/PACKAGE_METADATA_FOR_EXECUTABLE_FILES/">
+      Package Metadata for Executable Files</ulink> document for more information.</para>
 
       <example>
         <title>Print information about a core file as JSON</title>
@@ -1084,6 +1109,103 @@ io.systemd.credential:vmm.notify_socket=vsock-stream:2:254570042
       <xi:include href="version-info.xml" xpointer="v257"/>
     </refsect2>
 
+    <refsect2>
+      <title><command>systemd-analyze chid</command></title>
+
+      <para>Shows a list of Computer Hardware IDs (CHIDs) of the local system. These IDs identify the
+      system's computer hardware, based on SMBIOS data. See <ulink
+      url="https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/using-chids">Using Computer
+      Hardware IDs (CHIDs)</ulink> for details about CHIDs.</para>
+
+      <example>
+        <title>Example output</title>
+        <programlisting>$ systemd-analyze chid
+TYPE INPUT  CHID
+   3 MFPSmp 520537c0-3b59-504f-b062-9682ea236b21
+   4 MFPS-- edf05dc8-a53d-5b2c-8023-630bca2a2463
+   5 MFP--- ebc6a4d9-ec48-537a-916b-c69fa4fdd814
+   6 M--Smp 5ebe4bba-f598-5e90-9ff2-9fd0d3211465
+   7 M--S-- 1a3fb835-b42a-5f9c-a38c-eff5bfd5c41d
+   8 M-P-mp 2a831dce-8163-5bad-8406-435b8c752dd8
+   9 M-P--- 7c21c878-4a75-50f7-9816-21e811588da0
+  10 MF--mp 9a003537-bcc5-500e-b10a-8d8892e4fc64
+  11 MF---- bb9122bb-8a5c-50d2-a742-a85beb719909
+  13 M---mp bfc36935-5032-5987-a0a3-6311f01de33a
+
+LEGEND: M → sys_vendor (LENOVO) ┄ F → product_family (ThinkPad X1 Carbon Gen 9) ┄ P → product_name (20XW0055GE)
+        S → product_sku (LENOVO_MT_20XW_BU_Think_FM_ThinkPad X1 Carbon Gen 9) ┄ m → board_vendor (LENOVO)
+        p → board_name (20XW0055GE)</programlisting>
+      </example>
+
+      <xi:include href="version-info.xml" xpointer="v258"/>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze transient-settings <replaceable>TYPE</replaceable>...</command></title>
+
+      <para>Lists properties that can be set for various unit types via command line interfaces, in
+      particular
+      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+      <command>set-property</command> and <option>--property=</option>/<option>--automount-property=</option>
+      options in
+      <citerefentry><refentrytitle>systemd-run</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>, and
+      <citerefentry><refentrytitle>systemd-mount</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
+      Those assignments are possible for a subset of the properties that can be set in config files, see
+      <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      and the other unit-type-specific pages. The <replaceable>TYPE</replaceable> argument must be a unit
+      type ("service", "socket", …). The properties that apply to the specific types are listed.</para>
+
+      <para>Note: D-Bus properties documented in
+      <citerefentry><refentrytitle>org.freedesktop.systemd1</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+      form a partially overlapping set with the lists generated by this command. Many D-Bus properties and
+      transient settings share the same names, but for example, <varname>LogRateLimitIntervalSec=</varname>
+      is described in
+      <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> and
+      would be listed by this command, but the corresponding D-Bus property described in
+      <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> is
+      <varname>LogRateLimitIntervalUSec</varname>.
+      </para>
+
+      <para>This verb is intended primarily for programmatic generation of shell completions.</para>
+
+      <xi:include href="version-info.xml" xpointer="v258"/>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze unit-shell <replaceable>SERVICE</replaceable> <optional><replaceable>command</replaceable>...</optional></command></title>
+
+      <para>The given command runs on the namespace of the specified running service. If no command is given,
+      spawn and attach a shell with the namespace to the service.</para>
+
+      <example>
+        <title>Example output</title>
+        <programlisting>$ systemd-analyze unit-shell systemd-resolved.service ls
+bin   dev  etc	   home  lib	lib64	lost+found  mnt  proc  run   srv  tmp  var	vmlinuz.old
+boot  efi  exitrd  init  lib32	libx32	media	    opt  root  sbin  sys  usr  vmlinuz	work</programlisting>
+      </example>
+
+      <xi:include href="version-info.xml" xpointer="v258"/>
+    </refsect2>
+
+    <refsect2>
+      <title><command>systemd-analyze unit-gdb <replaceable>SERVICE</replaceable></command></title>
+
+      <para>Spawn and attach a debugger to the given service. By default,
+      <citerefentry project='man-pages'><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+      will be used. This may be changed using the <option>--debugger=</option> option or the
+      <varname>$SYSTEMD_DEBUGGER</varname> environment variable. Use the <option>--debugger-arguments=</option> option
+      to pass extra command line arguments to the debugger and quote as appropriate
+      when <replaceable>ARGS</replaceable> contain whitespace (See Example).</para>
+
+      <example>
+        <programlisting>$ systemd-analyze --debugger-arguments="-batch -ex 'info all-registers'" unit-gdb systemd-oomd.service</programlisting>
+      </example>
+
+      <xi:include href="version-info.xml" xpointer="v258"/>
+    </refsect2>
   </refsect1>
 
   <refsect1>
@@ -1229,8 +1351,8 @@ io.systemd.credential:vmm.notify_socket=vsock-stream:2:254570042
         <term><option>--root=<replaceable>PATH</replaceable></option></term>
 
         <listitem><para>With <command>cat-config</command>, <command>verify</command>,
-        <command>condition</command> and <command>security</command> when used with
-        <option>--offline=</option>, operate on files underneath the specified root path
+        <command>condition</command>, <command>unit-gdb</command>, and <command>security</command> when
+        used with <option>--offline=</option>, operate on files underneath the specified root path
         <replaceable>PATH</replaceable>.</para>
 
         <xi:include href="version-info.xml" xpointer="v239"/></listitem>
@@ -1674,6 +1796,35 @@ io.systemd.credential:vmm.notify_socket=vsock-stream:2:254570042
         details can be seen in SVG plot.</para>
 
         <xi:include href="version-info.xml" xpointer="v257"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--drm-device=<replaceable>PATH</replaceable></option></term>
+
+        <listitem><para>When provided with the <command>chid</command> command, use this sysfs path to a DRM
+        device to fetch EDID from. Example: <filename>/sys/class/drm/card1-HDMI-A-1/</filename></para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--debugger=<replaceable>DEBUGGER</replaceable></option></term>
+
+        <listitem><para>Use the given debugger for the <command>unit-gdb</command> command. If not given and
+        <varname>$SYSTEMD_DEBUGGER</varname> is unset, then
+        <citerefentry project='man-pages'><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        will be used.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-A</option> <replaceable>ARGS</replaceable></term>
+        <term><option>--debugger-arguments=<replaceable>ARGS</replaceable></option></term>
+
+        <listitem><para>Pass the given <replaceable>ARGS</replaceable> as extra command line arguments to the debugger.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
       </varlistentry>
 
       <xi:include href="standard-options.xml" xpointer="help" />

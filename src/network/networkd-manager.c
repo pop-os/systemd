@@ -1,50 +1,40 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <linux/if.h>
-#include <linux/fib_rules.h>
-#include <linux/nexthop.h>
+#include <linux/filter.h>
 #include <linux/nl80211.h>
+#include <sys/socket.h>
 
+#include "sd-bus.h"
+#include "sd-event.h"
 #include "sd-netlink.h"
+#include "sd-resolve.h"
 
 #include "alloc-util.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-log-control-api.h"
-#include "bus-polkit.h"
+#include "bus-object.h"
 #include "bus-util.h"
 #include "capability-util.h"
 #include "common-signal.h"
-#include "conf-parser.h"
-#include "constants.h"
 #include "daemon-util.h"
 #include "device-private.h"
 #include "device-util.h"
-#include "dns-domain.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "firewall-util.h"
-#include "fs-util.h"
 #include "initrd-util.h"
-#include "local-addresses.h"
 #include "mount-util.h"
 #include "netlink-util.h"
-#include "network-internal.h"
+#include "networkd-address.h"
 #include "networkd-address-label.h"
 #include "networkd-address-pool.h"
-#include "networkd-address.h"
-#include "networkd-dhcp-server-bus.h"
-#include "networkd-dhcp6.h"
-#include "networkd-link-bus.h"
+#include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-manager-bus.h"
 #include "networkd-manager-varlink.h"
 #include "networkd-neighbor.h"
-#include "networkd-network-bus.h"
 #include "networkd-nexthop.h"
 #include "networkd-queue.h"
 #include "networkd-route.h"
@@ -55,16 +45,12 @@
 #include "networkd-wifi.h"
 #include "networkd-wiphy.h"
 #include "ordered-set.h"
-#include "path-lookup.h"
-#include "path-util.h"
 #include "qdisc.h"
-#include "selinux-util.h"
 #include "set.h"
-#include "signal-util.h"
+#include "stat-util.h"
+#include "string-util.h"
 #include "strv.h"
-#include "sysctl-util.h"
 #include "tclass.h"
-#include "tmpfile-util.h"
 #include "tuntap.h"
 #include "udev-util.h"
 
@@ -171,11 +157,11 @@ static int manager_process_uevent(sd_device_monitor *monitor, sd_device *device,
         if (r < 0)
                 return log_device_warning_errno(device, r, "Failed to get udev action, ignoring: %m");
 
-        if (device_in_subsystem(device, "net"))
+        if (device_in_subsystem(device, "net") > 0)
                 r = manager_udev_process_link(m, device, action);
-        else if (device_in_subsystem(device, "ieee80211"))
+        else if (device_in_subsystem(device, "ieee80211") > 0)
                 r = manager_udev_process_wiphy(m, device, action);
-        else if (device_in_subsystem(device, "rfkill"))
+        else if (device_in_subsystem(device, "rfkill") > 0)
                 r = manager_udev_process_rfkill(m, device, action);
         if (r < 0)
                 log_device_warning_errno(device, r, "Failed to process \"%s\" uevent, ignoring: %m",
@@ -219,30 +205,33 @@ static int manager_connect_udev(Manager *m) {
         return 0;
 }
 
-static int manager_listen_fds(Manager *m, int *ret_rtnl_fd) {
+static int manager_listen_fds(Manager *m, int *ret_rtnl_fd, int *ret_varlink_fd) {
         _cleanup_strv_free_ char **names = NULL;
-        int n, rtnl_fd = -EBADF;
+        int n, rtnl_fd = -EBADF, varlink_fd = -EBADF;
 
         assert(m);
         assert(ret_rtnl_fd);
+        assert(ret_varlink_fd);
 
         n = sd_listen_fds_with_names(/* unset_environment = */ true, &names);
         if (n < 0)
                 return n;
-
-        if (strv_length(names) != (size_t) n)
-                return -EINVAL;
 
         for (int i = 0; i < n; i++) {
                 int fd = i + SD_LISTEN_FDS_START;
 
                 if (sd_is_socket(fd, AF_NETLINK, SOCK_RAW, -1) > 0) {
                         if (rtnl_fd >= 0) {
-                                log_debug("Received multiple netlink socket, ignoring.");
+                                log_debug("Received multiple netlink sockets, ignoring.");
                                 goto unused;
                         }
 
                         rtnl_fd = fd;
+                        continue;
+                }
+
+                if (streq(names[i], "varlink")) {
+                        varlink_fd = fd;
                         continue;
                 }
 
@@ -260,6 +249,8 @@ static int manager_listen_fds(Manager *m, int *ret_rtnl_fd) {
         }
 
         *ret_rtnl_fd = rtnl_fd;
+        *ret_varlink_fd = varlink_fd;
+
         return 0;
 }
 
@@ -280,6 +271,7 @@ static int manager_connect_genl(Manager *m) {
         if (r < 0)
                 return r;
 
+        /* If the kernel is built without CONFIG_WIRELESS, the below will fail with -EOPNOTSUPP. */
         r = genl_add_match(m->genl, NULL, NL80211_GENL_NAME, NL80211_MULTICAST_GROUP_CONFIG, 0,
                            &manager_genl_process_nl80211_config, NULL, m, "network-genl_process_nl80211_config");
         if (r < 0 && r != -EOPNOTSUPP)
@@ -529,7 +521,7 @@ static int manager_set_keep_configuration(Manager *m) {
 }
 
 int manager_setup(Manager *m) {
-        _cleanup_close_ int rtnl_fd = -EBADF;
+        _cleanup_close_ int rtnl_fd = -EBADF, varlink_fd = -EBADF;
         int r;
 
         assert(m);
@@ -547,13 +539,13 @@ int manager_setup(Manager *m) {
 
         r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
         if (r < 0)
-                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
+                log_debug_errno(r, "Failed to allocate memory pressure event source, ignoring: %m");
 
         r = sd_event_add_post(m->event, NULL, manager_post_handler, m);
         if (r < 0)
                 return r;
 
-        r = manager_listen_fds(m, &rtnl_fd);
+        r = manager_listen_fds(m, &rtnl_fd, &varlink_fd);
         if (r < 0)
                 return r;
 
@@ -568,7 +560,7 @@ int manager_setup(Manager *m) {
         if (m->test_mode)
                 return 0;
 
-        r = manager_connect_varlink(m);
+        r = manager_connect_varlink(m, TAKE_FD(varlink_fd));
         if (r < 0)
                 return r;
 
@@ -615,7 +607,7 @@ static int persistent_storage_open(void) {
 
         fd = open("/var/lib/systemd/network/", O_CLOEXEC | O_DIRECTORY);
         if (fd < 0)
-                return log_debug_errno(errno, "Failed to open /var/lib/systemd/network/, ignoring: %m");
+                return log_debug_errno(errno, "Failed to open %s, ignoring: %m", "/var/lib/systemd/network/");
 
         r = fd_is_read_only_fs(fd);
         if (r < 0)
@@ -647,10 +639,11 @@ int manager_new(Manager **ret, bool test_mode) {
                 .dhcp_use_domains = _USE_DOMAINS_INVALID,
                 .dhcp6_use_domains = _USE_DOMAINS_INVALID,
                 .ndisc_use_domains = _USE_DOMAINS_INVALID,
+                .dhcp_client_identifier = DHCP_CLIENT_ID_DUID,
                 .dhcp_duid.type = DUID_TYPE_EN,
                 .dhcp6_duid.type = DUID_TYPE_EN,
                 .duid_product_uuid.type = DUID_TYPE_UUID,
-                .dhcp_server_persist_leases = true,
+                .dhcp_server_persist_leases = DHCP_SERVER_PERSIST_LEASES_YES,
                 .serialization_fd = -EBADF,
                 .ip_forwarding = { -1, -1, },
 #if HAVE_VMLINUX_H
@@ -666,25 +659,25 @@ Manager* manager_free(Manager *m) {
         if (!m)
                 return NULL;
 
-        sysctl_remove_monitor(m);
+        manager_remove_sysctl_monitor(m);
 
         free(m->state_file);
 
         m->request_queue = ordered_set_free(m->request_queue);
         m->remove_request_queue = ordered_set_free(m->remove_request_queue);
 
-        m->dirty_links = set_free_with_destructor(m->dirty_links, link_unref);
         m->new_wlan_ifindices = set_free(m->new_wlan_ifindices);
+
+        m->dirty_links = set_free(m->dirty_links);
         m->links_by_name = hashmap_free(m->links_by_name);
         m->links_by_hw_addr = hashmap_free(m->links_by_hw_addr);
         m->links_by_dhcp_pd_subnet_prefix = hashmap_free(m->links_by_dhcp_pd_subnet_prefix);
-        m->links_by_index = hashmap_free_with_destructor(m->links_by_index, link_unref);
+        m->links_by_index = hashmap_free(m->links_by_index);
 
         m->dhcp_pd_subnet_ids = set_free(m->dhcp_pd_subnet_ids);
-        m->networks = ordered_hashmap_free_with_destructor(m->networks, network_unref);
+        m->networks = ordered_hashmap_free(m->networks);
 
-        /* The same object may be registered with multiple names, and netdev_detach() may drop multiple
-         * entries. Hence, hashmap_free_with_destructor() cannot be used. */
+        /* The same object may be registered with multiple names, and netdev_detach() may drop multiple entries. */
         for (NetDev *n; (n = hashmap_first(m->netdevs)); )
                 netdev_detach(n);
         m->netdevs = hashmap_free(m->netdevs);
@@ -692,9 +685,9 @@ Manager* manager_free(Manager *m) {
         m->tuntap_fds_by_name = hashmap_free(m->tuntap_fds_by_name);
 
         m->wiphy_by_name = hashmap_free(m->wiphy_by_name);
-        m->wiphy_by_index = hashmap_free_with_destructor(m->wiphy_by_index, wiphy_free);
+        m->wiphy_by_index = hashmap_free(m->wiphy_by_index);
 
-        ordered_set_free_free(m->address_pools);
+        ordered_set_free(m->address_pools);
 
         hashmap_free(m->route_table_names_by_number);
         hashmap_free(m->route_table_numbers_by_name);
@@ -705,10 +698,6 @@ Manager* manager_free(Manager *m) {
         sd_netlink_unref(m->genl);
         sd_resolve_unref(m->resolve);
 
-        /* reject (e.g. unreachable) type routes are managed by Manager, but may be referenced by a
-         * link. E.g., DHCP6 with prefix delegation creates unreachable routes, and they are referenced
-         * by the upstream link. And the links may be referenced by netlink slots. Hence, two
-         * set_free() must be called after the above sd_netlink_unref(). */
         m->routes = set_free(m->routes);
 
         m->nexthops_by_id = hashmap_free(m->nexthops_by_id);
@@ -746,7 +735,7 @@ int manager_start(Manager *m) {
 
         log_debug("Starting...");
 
-        (void) sysctl_add_monitor(m);
+        (void) manager_install_sysctl_monitor(m);
 
         /* Loading BPF programs requires CAP_SYS_ADMIN and CAP_BPF.
          * Drop the capabilities here, regardless if the load succeeds or not. */
@@ -1055,12 +1044,14 @@ int manager_enumerate(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Could not enumerate links: %m");
 
+        /* If the kernel is built without CONFIG_NET_SCHED, the below will fail with -EOPNOTSUPP. */
         r = manager_enumerate_qdisc(m);
         if (r == -EOPNOTSUPP)
                 log_debug_errno(r, "Could not enumerate QDiscs, ignoring: %m");
         else if (r < 0)
                 return log_error_errno(r, "Could not enumerate QDisc: %m");
 
+        /* If the kernel is built without CONFIG_NET_CLS, the below will fail with -EOPNOTSUPP. */
         r = manager_enumerate_tclass(m);
         if (r == -EOPNOTSUPP)
                 log_debug_errno(r, "Could not enumerate TClasses, ignoring: %m");
@@ -1075,25 +1066,22 @@ int manager_enumerate(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Could not enumerate neighbors: %m");
 
-        /* NextHop support is added in kernel v5.3 (65ee00a9409f751188a8cdc0988167858eb4a536),
-         * and older kernels return -EOPNOTSUPP, or -EINVAL if SELinux is enabled. */
         r = manager_enumerate_nexthop(m);
-        if (r == -EOPNOTSUPP || (r == -EINVAL && mac_selinux_enforcing()))
-                log_debug_errno(r, "Could not enumerate nexthops, ignoring: %m");
-        else if (r < 0)
+        if (r < 0)
                 return log_error_errno(r, "Could not enumerate nexthops: %m");
 
         r = manager_enumerate_routes(m);
         if (r < 0)
                 return log_error_errno(r, "Could not enumerate routes: %m");
 
-        /* If kernel is built with CONFIG_FIB_RULES=n, it returns -EOPNOTSUPP. */
+        /* If the kernel is built without CONFIG_FIB_RULES, the below will fail with -EOPNOTSUPP. */
         r = manager_enumerate_rules(m);
         if (r == -EOPNOTSUPP)
                 log_debug_errno(r, "Could not enumerate routing policy rules, ignoring: %m");
         else if (r < 0)
                 return log_error_errno(r, "Could not enumerate routing policy rules: %m");
 
+        /* If the kernel is built without CONFIG_WIRELESS, the below will fail with -EOPNOTSUPP. */
         r = manager_enumerate_nl80211_wiphy(m);
         if (r == -EOPNOTSUPP)
                 log_debug_errno(r, "Could not enumerate wireless LAN phy, ignoring: %m");
@@ -1236,6 +1224,6 @@ int manager_reload(Manager *m, sd_bus_message *message) {
         log_debug("Reloaded.");
         r = 0;
 finish:
-        (void) sd_notify(/* unset= */ false, NOTIFY_READY);
+        (void) sd_notify(/* unset_environment= */ false, NOTIFY_READY_MESSAGE);
         return r;
 }

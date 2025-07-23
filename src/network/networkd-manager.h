@@ -1,23 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include "sd-bus.h"
-#include "sd-device.h"
-#include "sd-event.h"
-#include "sd-id128.h"
-#include "sd-netlink.h"
-#include "sd-resolve.h"
-#include "sd-varlink.h"
-
-#include "dhcp-duid-internal.h"
-#include "firewall-util.h"
-#include "hashmap.h"
-#include "networkd-link.h"
+#include "networkd-forward.h"
 #include "networkd-network.h"
-#include "networkd-sysctl.h"
-#include "ordered-set.h"
-#include "set.h"
-#include "time-util.h"
 
 typedef enum ManagerState {
         MANAGER_RUNNING,
@@ -28,7 +13,7 @@ typedef enum ManagerState {
         _MANAGER_STATE_INVALID = -EINVAL,
 } ManagerState;
 
-struct Manager {
+typedef struct Manager {
         sd_netlink *rtnl;
         /* lazy initialized */
         sd_netlink *genl;
@@ -51,7 +36,7 @@ struct Manager {
         bool manage_foreign_routes;
         bool manage_foreign_rules;
         bool manage_foreign_nexthops;
-        bool dhcp_server_persist_leases;
+        DHCPServerPersistLeases dhcp_server_persist_leases;
 
         Set *dirty_links;
         Set *new_wlan_ifindices;
@@ -78,6 +63,7 @@ struct Manager {
         UseDomains dhcp6_use_domains;
         UseDomains ndisc_use_domains;
 
+        DHCPClientIdentifier dhcp_client_identifier;
         DUID dhcp_duid;
         DUID dhcp6_duid;
         DUID duid_product_uuid;
@@ -117,8 +103,6 @@ struct Manager {
         usec_t speed_meter_usec_new;
         usec_t speed_meter_usec_old;
 
-        bool bridge_mdb_on_master_not_supported;
-
         FirewallContext *fw_ctx;
 
         bool request_queued;
@@ -141,7 +125,7 @@ struct Manager {
         struct bpf_link *sysctl_link;
         int cgroup_fd;
 #endif
-};
+} Manager;
 
 int manager_new(Manager **ret, bool test_mode);
 Manager* manager_free(Manager *m);

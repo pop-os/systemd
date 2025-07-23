@@ -1,23 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <stdbool.h>
-
-#include "sd-bus.h"
-#include "sd-event.h"
-
+#include "core-forward.h"
 #include "list.h"
-#include "unit-dependency-atom.h"
-
-typedef struct ActivationDetails ActivationDetails;
-typedef struct Job Job;
-typedef struct JobDependency JobDependency;
-typedef enum JobType JobType;
-typedef enum JobState JobState;
-typedef enum JobMode JobMode;
-typedef enum JobResult JobResult;
-typedef struct Manager Manager;
-typedef struct Unit Unit;
 
 /* Be careful when changing the job types! Adjust job_merging_table[] accordingly! */
 enum JobType {
@@ -64,28 +49,14 @@ enum JobType {
         _JOB_TYPE_INVALID = -EINVAL,
 };
 
-enum JobState {
+typedef enum JobState {
         JOB_WAITING,
         JOB_RUNNING,
         _JOB_STATE_MAX,
         _JOB_STATE_INVALID = -EINVAL,
-};
+} JobState;
 
-enum JobMode {
-        JOB_FAIL,                /* Fail if a conflicting job is already queued */
-        JOB_REPLACE,             /* Replace an existing conflicting job */
-        JOB_REPLACE_IRREVERSIBLY,/* Like JOB_REPLACE + produce irreversible jobs */
-        JOB_ISOLATE,             /* Start a unit, and stop all others */
-        JOB_FLUSH,               /* Flush out all other queued jobs when queueing this one */
-        JOB_IGNORE_DEPENDENCIES, /* Ignore both requirement and ordering dependencies */
-        JOB_IGNORE_REQUIREMENTS, /* Ignore requirement dependencies */
-        JOB_TRIGGERING,          /* Adds TRIGGERED_BY dependencies to the same transaction */
-        JOB_RESTART_DEPENDENCIES,/* A "start" job for the specified unit becomes "restart" for depending units */
-        _JOB_MODE_MAX,
-        _JOB_MODE_INVALID = -EINVAL,
-};
-
-enum JobResult {
+typedef enum JobResult {
         JOB_DONE,                /* Job completed successfully (or skipped due to an unmet ConditionXYZ=) */
         JOB_CANCELED,            /* Job canceled by a conflicting job installation or by explicit cancel request */
         JOB_TIMEOUT,             /* Job timeout elapsed */
@@ -98,11 +69,12 @@ enum JobResult {
         JOB_COLLECTED,           /* Job was garbage collected, since nothing needed it anymore */
         JOB_ONCE,                /* Unit was started before, and hence can't be started again */
         JOB_FROZEN,              /* Unit is currently frozen, so we can't safely operate on it */
+        JOB_CONCURRENCY,         /* Slice the unit is in has its hard concurrency limit reached */
         _JOB_RESULT_MAX,
         _JOB_RESULT_INVALID = -EINVAL,
-};
+} JobResult;
 
-struct JobDependency {
+typedef struct JobDependency {
         /* Encodes that the 'subject' job needs the 'object' job in
          * some way. This structure is used only while building a transaction. */
         Job *subject;
@@ -113,9 +85,9 @@ struct JobDependency {
 
         bool matters:1;
         bool conflicts:1;
-};
+} JobDependency;
 
-struct Job {
+typedef struct Job {
         Manager *manager;
         Unit *unit;
 
@@ -170,7 +142,7 @@ struct Job {
         bool ref_by_private_bus:1;
 
         bool in_gc_queue:1;
-};
+} Job;
 
 Job* job_new(Unit *unit, JobType type);
 Job* job_new_raw(Unit *unit);
@@ -242,9 +214,6 @@ JobType job_type_from_string(const char *s) _pure_;
 
 const char* job_state_to_string(JobState t) _const_;
 JobState job_state_from_string(const char *s) _pure_;
-
-const char* job_mode_to_string(JobMode t) _const_;
-JobMode job_mode_from_string(const char *s) _pure_;
 
 const char* job_result_to_string(JobResult t) _const_;
 JobResult job_result_from_string(const char *s) _pure_;

@@ -311,6 +311,19 @@
         </listitem>
       </varlistentry>
 
+      <varlistentry id='version'>
+        <term><varname>Version=</varname></term>
+        <listitem>
+          <para>Checks whether a software version matches a certain expression. See
+          <varname>ConditionVersion=</varname> in
+          <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, the previously assigned value is cleared.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+
       <varlistentry id='credential'>
         <term><varname>Credential=</varname></term>
         <listitem>
@@ -413,7 +426,7 @@
         <term><varname>UnsetProperty=</varname></term>
         <listitem>
           <para>Unset specified udev properties. This takes space separated list of
-          property names. Example: <programlisting>ImportProperty=HOGE BAR</programlisting>
+          property names. Example: <programlisting>UnsetProperty=HOGE BAR</programlisting>
           This option supports simple specifier expansion, see the Specifiers section below.
           This option can be specified multiple times. If an empty string is assigned, then the all previous
           assignments are cleared.</para>
@@ -949,6 +962,18 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><varname>PartialGenericSegmentationOffload=</varname></term>
+        <listitem>
+          <para>Takes a boolean. If set to true, Partial Generic Segmentation Offload (GSO_Partial) is
+          enabled. See
+          <ulink url="https://docs.kernel.org/networking/segmentation-offloads.html#partial-generic-segmentation-offload">
+          Partial Generic Segmentation Offload</ulink> for more details.
+          When unset, the kernel's default will be used.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><varname>GenericReceiveOffload=</varname></term>
         <listitem>
           <para>Takes a boolean. If set to true, Generic Receive Offload (GRO) is enabled.
@@ -1033,6 +1058,25 @@
           When unset, the kernel's default will be used.</para>
 
           <xi:include href="version-info.xml" xpointer="v250"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>ReceiveFCS=</varname></term>
+        <listitem>
+          <para>Takes a boolean. If set to true, pass the Frame Check Sequence (FCS) value up the stack
+          without trimming it, and allow userspace to calculate error rate or link health.
+          When unset, the kernel's default will be used.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>ReceiveAll=</varname></term>
+        <listitem>
+          <para>Takes a boolean. If set to true, allow to also receive damaged ethernet frames.
+          When unset, the kernel's default will be used.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1338,6 +1382,58 @@
           <para>Specifies the MAC address for the virtual function.</para>
 
         <xi:include href="version-info.xml" xpointer="v251"/>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[EnergyEfficientEthernet] Section Options</title>
+    <para>The [EnergyEfficientEthernet] section controls the Energy Efficient Ethernet (EEE) feature of the
+    interface, and accepts the following keys.</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>Enable=</varname></term>
+        <listitem>
+          <para>Takes a boolean argument. When true, the Energy Efficient Ethernet (EEE) feature will be
+          enabled on the interface. Defaults to unset, and the enablement of EEE will be unchanged.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>TxLowPowerIdle=</varname></term>
+        <listitem>
+          <para>Takes a boolean argument. When true, the transmit Low Power Idle (Tx-LPI) mode of the Energy
+          Efficient Ethernet feature will be enabled on the interface. Defaults to unset, and the enablement
+          of the mode will be unchanged.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>TxLowPowerIdleSec=</varname></term>
+        <listitem>
+          <para>Takes a timespan. This configures how long the interface should not enter the Low Power Idle
+          mode after transmission. If it is too short, may decrease performance. If it is too long, may not
+          gain energy saving. Defaults to unset, and the timespan will be unchanged.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>LinkMode=</varname></term>
+        <listitem>
+          <para>Takes a list of link modes, e.g. <literal>1000baset-full</literal>. See the table for
+          <varname>Advertise=</varname> setting in [Link] section in the above for possible values. This
+          configures the Energy Efficient Ethernet capable connection modes to be advertised. Defaults to
+          unset, and the advertised modes will be unchanged.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
         </listitem>
       </varlistentry>
     </variablelist>

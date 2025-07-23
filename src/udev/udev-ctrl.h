@@ -1,12 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
-#include "sd-event.h"
-
-#include "macro.h"
-#include "time-util.h"
-
-typedef struct UdevCtrl UdevCtrl;
+#include "udev-forward.h"
 
 typedef enum UdevCtrlMessageType {
         _UDEV_CTRL_END_MESSAGES,
@@ -30,7 +25,7 @@ typedef int (*udev_ctrl_handler_t)(UdevCtrl *udev_ctrl, UdevCtrlMessageType type
 
 int udev_ctrl_new_from_fd(UdevCtrl **ret, int fd);
 static inline int udev_ctrl_new(UdevCtrl **ret) {
-        return udev_ctrl_new_from_fd(ret, -1);
+        return udev_ctrl_new_from_fd(ret, -EBADF);
 }
 
 int udev_ctrl_enable_receiving(UdevCtrl *uctrl);

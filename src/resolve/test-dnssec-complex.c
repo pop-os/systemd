@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <netinet/ip.h>
+#include <sys/socket.h>
 
 #include "sd-bus.h"
 
@@ -13,7 +13,6 @@
 #include "resolved-def.h"
 #include "string-util.h"
 #include "tests.h"
-#include "time-util.h"
 
 static void prefix_random(const char *name, char **ret) {
         uint64_t i, u;
@@ -93,7 +92,6 @@ static void test_hostname_lookup(sd_bus *bus, const char *name, int family, cons
                 assert_se(!result);
                 log_info("[OK] %s/%s succeeded.", name, af);
         }
-
 }
 
 int main(int argc, char* argv[]) {

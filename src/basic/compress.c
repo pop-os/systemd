@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <inttypes.h>
-#include <malloc.h>
-#include <stdlib.h>
+#include <stdio.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
+
+#if HAVE_LZ4
+#include <lz4.h>
+#include <lz4hc.h>
+#include <lz4frame.h>
+#endif
 
 #if HAVE_XZ
 #include <lzma.h>
@@ -18,12 +21,12 @@
 #endif
 
 #include "alloc-util.h"
+#include "bitfield.h"
 #include "compress.h"
-#include "fd-util.h"
+#include "dlfcn-util.h"
 #include "fileio.h"
 #include "io-util.h"
-#include "macro.h"
-#include "sparse-endian.h"
+#include "log.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "unaligned.h"
@@ -41,6 +44,8 @@ static DLSYM_PROTOTYPE(LZ4F_decompress) = NULL;
 static DLSYM_PROTOTYPE(LZ4F_freeCompressionContext) = NULL;
 static DLSYM_PROTOTYPE(LZ4F_freeDecompressionContext) = NULL;
 static DLSYM_PROTOTYPE(LZ4F_isError) = NULL;
+static DLSYM_PROTOTYPE(LZ4_compress_HC) = NULL;
+/* These are used in test-compress.c so we don't make them static. */
 DLSYM_PROTOTYPE(LZ4_compress_default) = NULL;
 DLSYM_PROTOTYPE(LZ4_decompress_safe) = NULL;
 DLSYM_PROTOTYPE(LZ4_decompress_safe_partial) = NULL;
@@ -93,6 +98,7 @@ static DLSYM_PROTOTYPE(lzma_easy_encoder) = NULL;
 static DLSYM_PROTOTYPE(lzma_end) = NULL;
 static DLSYM_PROTOTYPE(lzma_stream_buffer_encode) = NULL;
 static DLSYM_PROTOTYPE(lzma_stream_decoder) = NULL;
+static DLSYM_PROTOTYPE(lzma_lzma_preset) = NULL;
 
 /* We can't just do _cleanup_(sym_lzma_end) because a compiler bug makes
  * this fail with:
@@ -115,7 +121,15 @@ static const char* const compression_table[_COMPRESSION_MAX] = {
         [COMPRESSION_ZSTD] = "ZSTD",
 };
 
+static const char* const compression_lowercase_table[_COMPRESSION_MAX] = {
+        [COMPRESSION_NONE] = "none",
+        [COMPRESSION_XZ]   = "xz",
+        [COMPRESSION_LZ4]  = "lz4",
+        [COMPRESSION_ZSTD] = "zstd",
+};
+
 DEFINE_STRING_TABLE_LOOKUP(compression, Compression);
+DEFINE_STRING_TABLE_LOOKUP(compression_lowercase, Compression);
 
 bool compression_supported(Compression c) {
         static const unsigned supported =
@@ -124,7 +138,10 @@ bool compression_supported(Compression c) {
                 (1U << COMPRESSION_LZ4) * HAVE_LZ4 |
                 (1U << COMPRESSION_ZSTD) * HAVE_ZSTD;
 
-        return c >= 0 && c < _COMPRESSION_MAX && FLAGS_SET(supported, 1U << c);
+        assert(c >= 0);
+        assert(c < _COMPRESSION_MAX);
+
+        return BIT_SET(supported, c);
 }
 
 #if HAVE_XZ
@@ -141,12 +158,13 @@ int dlopen_lzma(void) {
                         DLSYM_ARG(lzma_easy_encoder),
                         DLSYM_ARG(lzma_end),
                         DLSYM_ARG(lzma_stream_buffer_encode),
+                        DLSYM_ARG(lzma_lzma_preset),
                         DLSYM_ARG(lzma_stream_decoder));
 }
 #endif
 
 int compress_blob_xz(const void *src, uint64_t src_size,
-                     void *dst, size_t dst_alloc_size, size_t *dst_size) {
+                     void *dst, size_t dst_alloc_size, size_t *dst_size, int level) {
 
         assert(src);
         assert(src_size > 0);
@@ -155,12 +173,12 @@ int compress_blob_xz(const void *src, uint64_t src_size,
         assert(dst_size);
 
 #if HAVE_XZ
-        static const lzma_options_lzma opt = {
+        lzma_options_lzma opt = {
                 1u << 20u, NULL, 0, LZMA_LC_DEFAULT, LZMA_LP_DEFAULT,
                 LZMA_PB_DEFAULT, LZMA_MODE_FAST, 128, LZMA_MF_HC3, 4
         };
-        static const lzma_filter filters[] = {
-                { LZMA_FILTER_LZMA2, (lzma_options_lzma*) &opt },
+        lzma_filter filters[] = {
+                { LZMA_FILTER_LZMA2, &opt },
                 { LZMA_VLI_UNKNOWN, NULL }
         };
         lzma_ret ret;
@@ -171,13 +189,19 @@ int compress_blob_xz(const void *src, uint64_t src_size,
         if (r < 0)
                 return r;
 
+        if (level >= 0) {
+                r = sym_lzma_lzma_preset(&opt, (uint32_t) level);
+                if (r < 0)
+                        return r;
+        }
+
         /* Returns < 0 if we couldn't compress the data or the
          * compressed result is longer than the original */
 
         if (src_size < 80)
                 return -ENOBUFS;
 
-        ret = sym_lzma_stream_buffer_encode((lzma_filter*) filters, LZMA_CHECK_NONE, NULL,
+        ret = sym_lzma_stream_buffer_encode(filters, LZMA_CHECK_NONE, NULL,
                                         src, src_size, dst, &out_pos, dst_alloc_size);
         if (ret != LZMA_OK)
                 return -ENOBUFS;
@@ -210,6 +234,7 @@ int dlopen_lz4(void) {
                         DLSYM_ARG(LZ4F_freeDecompressionContext),
                         DLSYM_ARG(LZ4F_isError),
                         DLSYM_ARG(LZ4_compress_default),
+                        DLSYM_ARG(LZ4_compress_HC),
                         DLSYM_ARG(LZ4_decompress_safe),
                         DLSYM_ARG(LZ4_decompress_safe_partial),
                         DLSYM_ARG(LZ4_versionNumber));
@@ -217,7 +242,7 @@ int dlopen_lz4(void) {
 #endif
 
 int compress_blob_lz4(const void *src, uint64_t src_size,
-                      void *dst, size_t dst_alloc_size, size_t *dst_size) {
+                      void *dst, size_t dst_alloc_size, size_t *dst_size, int level) {
 
         assert(src);
         assert(src_size > 0);
@@ -237,7 +262,10 @@ int compress_blob_lz4(const void *src, uint64_t src_size,
         if (src_size < 9)
                 return -ENOBUFS;
 
-        r = sym_LZ4_compress_default(src, (char*)dst + 8, src_size, (int) dst_alloc_size - 8);
+        if (level <= 0)
+                r = sym_LZ4_compress_default(src, (char*)dst + 8, src_size, (int) dst_alloc_size - 8);
+        else
+                r = sym_LZ4_compress_HC(src, (char*)dst + 8, src_size, (int) dst_alloc_size - 8, level);
         if (r <= 0)
                 return -ENOBUFS;
 
@@ -281,7 +309,7 @@ int dlopen_zstd(void) {
 
 int compress_blob_zstd(
                 const void *src, uint64_t src_size,
-                void *dst, size_t dst_alloc_size, size_t *dst_size) {
+                void *dst, size_t dst_alloc_size, size_t *dst_size, int level) {
 
         assert(src);
         assert(src_size > 0);
@@ -297,7 +325,7 @@ int compress_blob_zstd(
         if (r < 0)
                 return r;
 
-        k = sym_ZSTD_compress(dst, dst_alloc_size, src, src_size, 0);
+        k = sym_ZSTD_compress(dst, dst_alloc_size, src, src_size, level < 0 ? 0 : level);
         if (sym_ZSTD_isError(k))
                 return zstd_ret_to_errno(k);
 
@@ -348,15 +376,14 @@ int decompress_blob_xz(
                 size_t used;
 
                 ret = sym_lzma_code(&s, LZMA_FINISH);
-
                 if (ret == LZMA_STREAM_END)
                         break;
-                else if (ret != LZMA_OK)
+                if (ret != LZMA_OK)
                         return -ENOMEM;
 
                 if (dst_max > 0 && (space - s.avail_out) >= dst_max)
                         break;
-                else if (dst_max > 0 && space == dst_max)
+                if (dst_max > 0 && space == dst_max)
                         return -ENOBUFS;
 
                 used = space - s.avail_out;
@@ -462,11 +489,10 @@ int decompress_blob_zstd(
         };
 
         size_t k = sym_ZSTD_decompressStream(dctx, &output, &input);
-        if (sym_ZSTD_isError(k)) {
-                log_debug("ZSTD decoder failed: %s", sym_ZSTD_getErrorName(k));
-                return zstd_ret_to_errno(k);
-        }
-        assert(output.pos >= size);
+        if (sym_ZSTD_isError(k))
+                return log_debug_errno(zstd_ret_to_errno(k), "ZSTD decoder failed: %s", sym_ZSTD_getErrorName(k));
+        if (output.pos < size)
+                return log_debug_errno(SYNTHETIC_ERRNO(EBADMSG), "ZSTD decoded less data than indicated, probably corrupted stream.");
 
         *dst_size = size;
         return 0;
@@ -483,20 +509,22 @@ int decompress_blob(
                 size_t* dst_size,
                 size_t dst_max) {
 
-        if (compression == COMPRESSION_XZ)
+        switch (compression) {
+        case COMPRESSION_XZ:
                 return decompress_blob_xz(
                                 src, src_size,
                                 dst, dst_size, dst_max);
-        else if (compression == COMPRESSION_LZ4)
+        case COMPRESSION_LZ4:
                 return decompress_blob_lz4(
                                 src, src_size,
                                 dst, dst_size, dst_max);
-        else if (compression == COMPRESSION_ZSTD)
+        case COMPRESSION_ZSTD:
                 return decompress_blob_zstd(
                                 src, src_size,
                                 dst, dst_size, dst_max);
-        else
+        default:
                 return -EPROTONOSUPPORT;
+        }
 }
 
 int decompress_startswith_xz(
@@ -707,27 +735,30 @@ int decompress_startswith(
                 size_t prefix_len,
                 uint8_t extra) {
 
-        if (compression == COMPRESSION_XZ)
+        switch (compression) {
+
+        case COMPRESSION_XZ:
                 return decompress_startswith_xz(
                                 src, src_size,
                                 buffer,
                                 prefix, prefix_len,
                                 extra);
 
-        else if (compression == COMPRESSION_LZ4)
+        case COMPRESSION_LZ4:
                 return decompress_startswith_lz4(
                                 src, src_size,
                                 buffer,
                                 prefix, prefix_len,
                                 extra);
-        else if (compression == COMPRESSION_ZSTD)
+        case COMPRESSION_ZSTD:
                 return decompress_startswith_zstd(
                                 src, src_size,
                                 buffer,
                                 prefix, prefix_len,
                                 extra);
-        else
+        default:
                 return -EBADMSG;
+        }
 }
 
 int compress_stream_xz(int fdf, int fdt, uint64_t max_bytes, uint64_t *ret_uncompressed_size) {
@@ -1291,10 +1322,10 @@ int decompress_stream(const char *filename, int fdf, int fdt, uint64_t max_bytes
 
         if (endswith(filename, ".lz4"))
                 return decompress_stream_lz4(fdf, fdt, max_bytes);
-        else if (endswith(filename, ".xz"))
+        if (endswith(filename, ".xz"))
                 return decompress_stream_xz(fdf, fdt, max_bytes);
-        else if (endswith(filename, ".zst"))
+        if (endswith(filename, ".zst"))
                 return decompress_stream_zstd(fdf, fdt, max_bytes);
-        else
-                return -EPROTONOSUPPORT;
+
+        return -EPROTONOSUPPORT;
 }

@@ -31,6 +31,7 @@ endforeach
 
 in_files = [
         ['20-systemd-shell-extra.conf',   'LINK_SHELL_EXTRA_DROPIN'],
+        ['20-systemd-osc-context.conf',   'LINK_OSC_CONTEXT_DROPIN'],
         ['20-systemd-ssh-generator.conf', 'ENABLE_SSH_PROXY_CONFIG'],
         ['20-systemd-stub.conf',          'ENABLE_EFI'],
         ['20-systemd-userdb.conf',        'ENABLE_SSH_USERDB_CONFIG'],
@@ -44,7 +45,6 @@ in_files = [
 foreach f : in_files
         if f.length() == 1 or conf.get(f[1]) == 1
                 custom_target(
-                        f[0],
                         input : f[0] + '.in',
                         output: f[0],
                         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],

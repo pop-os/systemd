@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <sys/prctl.h>
-#include <sys/wait.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-daemon.h"
 #include "sd-varlink.h"
 
 #include "alloc-util.h"
@@ -11,7 +12,9 @@
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
 #include "bus-log-control-api.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
+#include "bus-util.h"
 #include "common-signal.h"
 #include "constants.h"
 #include "daemon-util.h"
@@ -20,32 +23,31 @@
 #include "event-util.h"
 #include "fd-util.h"
 #include "float.h"
-#include "hostname-util.h"
+#include "hashmap.h"
 #include "import-common.h"
 #include "import-util.h"
 #include "json-util.h"
 #include "machine-pool.h"
 #include "main-func.h"
-#include "missing_capability.h"
-#include "mkdir-label.h"
+#include "notify-recv.h"
 #include "os-util.h"
 #include "parse-util.h"
-#include "path-util.h"
 #include "percent-util.h"
+#include "pidref.h"
 #include "process-util.h"
+#include "runtime-scope.h"
 #include "service-util.h"
+#include "set.h"
 #include "signal-util.h"
-#include "socket-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "strv.h"
 #include "syslog-util.h"
-#include "user-util.h"
 #include "varlink-io.systemd.Import.h"
+#include "varlink-io.systemd.service.h"
 #include "varlink-util.h"
 #include "web-util.h"
 
-typedef struct Transfer Transfer;
 typedef struct Manager Manager;
 
 typedef enum TransferType {
@@ -60,7 +62,7 @@ typedef enum TransferType {
         _TRANSFER_TYPE_INVALID = -EINVAL,
 } TransferType;
 
-struct Transfer {
+typedef struct Transfer {
         Manager *manager;
 
         uint32_t id;
@@ -71,6 +73,7 @@ struct Transfer {
 
         char *remote;
         char *local;
+        char *image_root;
         ImageClass class;
         ImportFlags flags;
         char *format;
@@ -93,9 +96,9 @@ struct Transfer {
         int stdout_fd;
 
         Set *varlink_subscribed;
-};
+} Transfer;
 
-struct Manager {
+typedef struct Manager {
         sd_event *event;
         sd_bus *bus;
         sd_varlink_server *varlink_server;
@@ -105,13 +108,13 @@ struct Manager {
 
         Hashmap *polkit_registry;
 
-        int notify_fd;
-
-        sd_event_source *notify_event_source;
+        char *notify_socket_path;
 
         bool use_btrfs_subvol;
         bool use_btrfs_quota;
-};
+
+        RuntimeScope runtime_scope; /* for now: always RUNTIME_SCOPE_SYSTEM */
+} Manager;
 
 #define TRANSFERS_MAX 64
 
@@ -142,6 +145,7 @@ static Transfer *transfer_unref(Transfer *t) {
         free(t->remote);
         free(t->local);
         free(t->format);
+        free(t->image_root);
         free(t->object_path);
 
         pidref_done_sigkill_wait(&t->pidref);
@@ -451,6 +455,8 @@ static int transfer_start(Transfer *t) {
                         NULL, /* if so: the actual URL */
                         NULL, /* maybe --format= */
                         NULL, /* if so: the actual format */
+                        NULL, /* maybe --image-root= */
+                        NULL, /* if so: the image root path */
                         NULL, /* remote */
                         NULL, /* local */
                         NULL
@@ -460,7 +466,7 @@ static int transfer_start(Transfer *t) {
                 /* Child */
 
                 if (setenv("SYSTEMD_LOG_TARGET", "console-prefixed", 1) < 0 ||
-                    setenv("NOTIFY_SOCKET", "/run/systemd/import/notify", 1) < 0) {
+                    setenv("NOTIFY_SOCKET", t->manager->notify_socket_path, 1) < 0) {
                         log_error_errno(errno, "setenv() failed: %m");
                         _exit(EXIT_FAILURE);
                 }
@@ -517,7 +523,7 @@ static int transfer_start(Transfer *t) {
                         break;
 
                 default:
-                        break;
+                        ;
                 }
 
                 if (t->verify != _IMPORT_VERIFY_INVALID) {
@@ -542,6 +548,11 @@ static int transfer_start(Transfer *t) {
                 if (t->format) {
                         cmd[k++] = "--format";
                         cmd[k++] = t->format;
+                }
+
+                if (t->image_root) {
+                        cmd[k++] = "--image-root";
+                        cmd[k++] = t->image_root;
                 }
 
                 if (!IN_SET(t->type, TRANSFER_EXPORT_TAR, TRANSFER_EXPORT_RAW)) {
@@ -612,8 +623,7 @@ static Manager *manager_unref(Manager *m) {
         if (!m)
                 return NULL;
 
-        sd_event_source_unref(m->notify_event_source);
-        safe_close(m->notify_fd);
+        free(m->notify_socket_path);
 
         while ((t = hashmap_first(m->transfers)))
                 transfer_unref(t);
@@ -634,55 +644,24 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_unref);
 
 static int manager_on_notify(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
-        char buf[NOTIFY_BUFFER_MAX+1];
-        struct iovec iovec = {
-                .iov_base = buf,
-                .iov_len = sizeof(buf)-1,
-        };
-        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred)) +
-                         CMSG_SPACE(sizeof(int) * NOTIFY_FD_MAX)) control;
-        struct msghdr msghdr = {
-                .msg_iov = &iovec,
-                .msg_iovlen = 1,
-                .msg_control = &control,
-                .msg_controllen = sizeof(control),
-        };
-        ssize_t n;
         int r;
 
-        n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
-        if (ERRNO_IS_NEG_TRANSIENT(n))
+        _cleanup_free_ char *buf = NULL;
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        r = notify_recv(fd, &buf, /* ret_ucred= */ NULL, &pidref);
+        if (r == -EAGAIN)
                 return 0;
-        if (n == -ECHRNG) {
-                log_warning_errno(n, "Got message with truncated control data (unexpected fds sent?), ignoring.");
-                return 0;
-        }
-        if (n == -EXFULL) {
-                log_warning_errno(n, "Got message with truncated payload data, ignoring.");
-                return 0;
-        }
-        if (n < 0)
-                return (int) n;
-
-        cmsg_close_all(&msghdr);
-
-        struct ucred *ucred = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
-        if (!ucred || ucred->pid <= 0) {
-                log_warning("Got notification datagram lacking credential information, ignoring.");
-                return 0;
-        }
+        if (r < 0)
+                return r;
 
         Transfer *t;
         HASHMAP_FOREACH(t, m->transfers)
-                if (ucred->pid == t->pidref.pid)
+                if (pidref_equal(&pidref, &t->pidref))
                         break;
-
         if (!t) {
                 log_warning("Got notification datagram from unexpected peer, ignoring.");
                 return 0;
         }
-
-        buf[n] = 0;
 
         char *p = find_line_startswith(buf, "X_IMPORT_PROGRESS=");
         if (!p)
@@ -706,10 +685,6 @@ static int manager_on_notify(sd_event_source *s, int fd, uint32_t revents, void 
 
 static int manager_new(Manager **ret) {
         _cleanup_(manager_unrefp) Manager *m = NULL;
-        static const union sockaddr_union sa = {
-                .un.sun_family = AF_UNIX,
-                .un.sun_path = "/run/systemd/import/notify",
-        };
         int r;
 
         assert(ret);
@@ -721,6 +696,7 @@ static int manager_new(Manager **ret) {
         *m = (Manager) {
                 .use_btrfs_subvol = true,
                 .use_btrfs_quota = true,
+                .runtime_scope = RUNTIME_SCOPE_SYSTEM,
         };
 
         r = sd_event_default(&m->event);
@@ -737,28 +713,18 @@ static int manager_new(Manager **ret) {
 
         r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
         if (r < 0)
-                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
+                log_debug_errno(r, "Failed to allocate memory pressure event source, ignoring: %m");
 
         r = sd_event_set_watchdog(m->event, true);
         if (r < 0)
                 log_debug_errno(r, "Failed to enable watchdog logic, ignoring: %m");
 
-        m->notify_fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-        if (m->notify_fd < 0)
-                return -errno;
-
-        (void) mkdir_parents_label(sa.un.sun_path, 0755);
-        (void) sockaddr_un_unlink(&sa.un);
-
-        if (bind(m->notify_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0)
-                return -errno;
-
-        r = setsockopt_int(m->notify_fd, SOL_SOCKET, SO_PASSCRED, true);
-        if (r < 0)
-                return r;
-
-        r = sd_event_add_io(m->event, &m->notify_event_source,
-                            m->notify_fd, EPOLLIN, manager_on_notify, m);
+        r = notify_socket_prepare(
+                        m->event,
+                        SD_EVENT_PRIORITY_NORMAL,
+                        manager_on_notify,
+                        m,
+                        &m->notify_socket_path);
         if (r < 0)
                 return r;
 
@@ -1266,7 +1232,7 @@ static int method_list_transfers(sd_bus_message *msg, void *userdata, sd_bus_err
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_cancel(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -1332,6 +1298,7 @@ static int method_cancel_transfer(sd_bus_message *msg, void *userdata, sd_bus_er
 static int method_list_images(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         ImageClass class = _IMAGE_CLASS_INVALID;
+        Manager *m = ASSERT_PTR(userdata);
         int r;
 
         assert(msg);
@@ -1366,13 +1333,9 @@ static int method_list_images(sd_bus_message *msg, void *userdata, sd_bus_error 
              class < 0 ? (c < _IMAGE_CLASS_MAX) : (c == class);
              c++) {
 
-                _cleanup_(hashmap_freep) Hashmap *h = NULL;
+                _cleanup_hashmap_free_ Hashmap *images = NULL;
 
-                h = hashmap_new(&image_hash_ops);
-                if (!h)
-                        return -ENOMEM;
-
-                r = image_discover(c, /* root= */ NULL, h);
+                r = image_discover(m->runtime_scope, c, /* root= */ NULL, &images);
                 if (r < 0) {
                         if (class >= 0)
                                 return r;
@@ -1382,7 +1345,7 @@ static int method_list_images(sd_bus_message *msg, void *userdata, sd_bus_error 
                 }
 
                 Image *i;
-                HASHMAP_FOREACH(i, h) {
+                HASHMAP_FOREACH(i, images) {
                         r = sd_bus_message_append(
                                         reply,
                                         "(ssssbtttttt)",
@@ -1406,7 +1369,7 @@ static int method_list_images(sd_bus_message *msg, void *userdata, sd_bus_error 
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int property_get_progress(
@@ -1859,6 +1822,7 @@ static int vl_method_pull(sd_varlink *link, sd_json_variant *parameters, sd_varl
                 bool force;
                 bool read_only;
                 bool keep_download;
+                const char *image_root;
         } p = {
                 .class = _IMAGE_CLASS_INVALID,
                 .verify = IMPORT_VERIFY_SIGNATURE,
@@ -1873,6 +1837,7 @@ static int vl_method_pull(sd_varlink *link, sd_json_variant *parameters, sd_varl
                 { "force",        SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_stdbool,      offsetof(struct p, force),         0                 },
                 { "readOnly",     SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_stdbool,      offsetof(struct p, read_only),     0                 },
                 { "keepDownload", SD_JSON_VARIANT_BOOLEAN, sd_json_dispatch_stdbool,      offsetof(struct p, keep_download), 0                 },
+                { "imageRoot",    SD_JSON_VARIANT_STRING,  json_dispatch_const_path,      offsetof(struct p, image_root),    SD_JSON_STRICT    },
                 VARLINK_DISPATCH_POLKIT_FIELD,
                 {},
         };
@@ -1939,6 +1904,12 @@ static int vl_method_pull(sd_varlink *link, sd_json_variant *parameters, sd_varl
                         return -ENOMEM;
         }
 
+        if (p.image_root) {
+                t->image_root = strdup(p.image_root);
+                if (!t->image_root)
+                        return -ENOMEM;
+        }
+
         r = transfer_start(t);
         if (r < 0)
                 return r;
@@ -1975,14 +1946,20 @@ static int manager_connect_varlink(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate varlink server object: %m");
 
-        r = sd_varlink_server_add_interface(m->varlink_server, &vl_interface_io_systemd_Import);
+        r = sd_varlink_server_add_interface_many(
+                        m->varlink_server,
+                        &vl_interface_io_systemd_Import,
+                        &vl_interface_io_systemd_service);
         if (r < 0)
                 return log_error_errno(r, "Failed to add Import interface to varlink server: %m");
 
         r = sd_varlink_server_bind_method_many(
                         m->varlink_server,
-                        "io.systemd.Import.ListTransfers", vl_method_list_transfers,
-                        "io.systemd.Import.Pull",          vl_method_pull);
+                        "io.systemd.Import.ListTransfers",   vl_method_list_transfers,
+                        "io.systemd.Import.Pull",            vl_method_pull,
+                        "io.systemd.service.Ping",           varlink_method_ping,
+                        "io.systemd.service.SetLogLevel",    varlink_method_set_log_level,
+                        "io.systemd.service.GetEnvironment", varlink_method_get_environment);
         if (r < 0)
                 return log_error_errno(r, "Failed to bind Varlink method calls: %m");
 
@@ -2064,7 +2041,7 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return r;
 
-        r = sd_notify(false, NOTIFY_READY);
+        r = sd_notify(false, NOTIFY_READY_MESSAGE);
         if (r < 0)
                 log_warning_errno(r, "Failed to send readiness notification, ignoring: %m");
 

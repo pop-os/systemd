@@ -1,14 +1,22 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "bpf-restrict-ifaces.h"
-#include "bpf-socket-bind.h"
-#include "bus-util.h"
+#include "sd-bus.h"
+
+#include "alloc-util.h"
+#include "bitfield.h"
+#include "cgroup.h"
+#include "condition.h"
 #include "dbus.h"
+#include "extract-word.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "glyph-util.h"
 #include "parse-util.h"
 #include "serialize.h"
-#include "string-table.h"
+#include "set.h"
+#include "string-util.h"
+#include "strv.h"
+#include "unit.h"
 #include "unit-serialize.h"
 #include "user-util.h"
 
@@ -24,9 +32,8 @@ static int serialize_markers(FILE *f, unsigned markers) {
         bool space = false;
 
         fputs("markers=", f);
-        for (UnitMarker m = 0; m < _UNIT_MARKER_MAX; m++)
-                if (FLAGS_SET(markers, 1u << m))
-                        fputs_with_separator(f, unit_marker_to_string(m), /* separator = */ NULL, &space);
+        BIT_FOREACH(m, markers)
+                fputs_with_separator(f, unit_marker_to_string(m), /* separator = */ NULL, &space);
         fputc('\n', f);
         return 0;
 }
@@ -117,8 +124,7 @@ int unit_serialize_state(Unit *u, FILE *f, FDSet *fds, bool switching_root) {
         if (gid_is_valid(u->ref_gid))
                 (void) serialize_item_format(f, "ref-gid", GID_FMT, u->ref_gid);
 
-        if (!sd_id128_is_null(u->invocation_id))
-                (void) serialize_item_format(f, "invocation-id", SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(u->invocation_id));
+        (void) serialize_id128(f, "invocation-id", u->invocation_id);
 
         (void) serialize_item(f, "freezer-state", freezer_state_to_string(u->freezer_state));
 
@@ -358,22 +364,20 @@ int unit_deserialize_state(Unit *u, FILE *f, FDSet *fds) {
                 }
         }
 
-        /* Versions before 228 did not carry a state change timestamp. In this case, take the current
-         * time. This is useful, so that timeouts based on this timestamp don't trigger too early, and is
-         * in-line with the logic from before 228 where the base for timeouts was not persistent across
-         * reboots. */
-
-        if (!dual_timestamp_is_set(&u->state_change_timestamp))
-                dual_timestamp_now(&u->state_change_timestamp);
-
         /* Let's make sure that everything that is deserialized also gets any potential new cgroup settings
          * applied after we are done. For that we invalidate anything already realized, so that we can
          * realize it again. */
-        CGroupRuntime *crt;
-        crt = unit_get_cgroup_runtime(u);
-        if (crt && crt->cgroup_realized) {
-                unit_invalidate_cgroup(u, _CGROUP_MASK_ALL);
-                unit_invalidate_cgroup_bpf(u);
+        CGroupRuntime *crt = unit_get_cgroup_runtime(u);
+        if (crt && crt->cgroup_path) {
+                /* Since v258, CGroupRuntime.cgroup_path is coupled with cgroup realized state, which however
+                 * wasn't the case in prior versions with the realized state tracked in a discrete field.
+                 * Patch cgroup_realized == 0 back to no cgroup_path here hence. */
+                if (crt->deserialized_cgroup_realized == 0)
+                        unit_release_cgroup(u, /* drop_cgroup_runtime = */ false);
+                else {
+                        unit_invalidate_cgroup(u, _CGROUP_MASK_ALL);
+                        unit_invalidate_cgroup_bpf_firewall(u);
+                }
         }
 
         return 0;
@@ -458,7 +462,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
 
         fprintf(f,
                 "%s%s Unit %s:\n",
-                prefix, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), u->id);
+                prefix, glyph(GLYPH_ARROW_RIGHT), u->id);
 
         SET_FOREACH(t, u->aliases)
                 fprintf(f, "%s\tAlias: %s\n", prefix, t);
@@ -496,9 +500,8 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
         if (u->markers != 0) {
                 fprintf(f, "%s\tMarkers:", prefix);
 
-                for (UnitMarker marker = 0; marker < _UNIT_MARKER_MAX; marker++)
-                        if (FLAGS_SET(u->markers, 1u << marker))
-                                fprintf(f, " %s", unit_marker_to_string(marker));
+                BIT_FOREACH(marker, u->markers)
+                        fprintf(f, " %s", unit_marker_to_string(marker));
                 fputs("\n", f);
         }
 
@@ -507,11 +510,9 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
 
                 fprintf(f,
                         "%s\tSlice: %s\n"
-                        "%s\tCGroup: %s\n"
-                        "%s\tCGroup realized: %s\n",
+                        "%s\tCGroup: %s\n",
                         prefix, strna(unit_slice_name(u)),
-                        prefix, strna(crt ? crt->cgroup_path : NULL),
-                        prefix, yes_no(crt ? crt->cgroup_realized : false));
+                        prefix, strna(crt ? crt->cgroup_path : NULL));
 
                 if (crt && crt->cgroup_realized_mask != 0) {
                         _cleanup_free_ char *s = NULL;
@@ -678,7 +679,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                         "%s\tMerged into: %s\n",
                         prefix, u->merged_into->id);
         else if (u->load_state == UNIT_ERROR) {
-                errno = abs(u->load_error);
+                errno = ABS(u->load_error);
                 fprintf(f, "%s\tLoad Error Code: %m\n", prefix);
         }
 

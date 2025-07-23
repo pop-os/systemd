@@ -1,24 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <stdbool.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fstab-util.h"
 #include "generator.h"
-#include "hexdecoct.h"
-#include "id128-util.h"
 #include "integrity-util.h"
-#include "main-func.h"
-#include "mkdir.h"
-#include "parse-util.h"
+#include "log.h"
 #include "path-util.h"
-#include "proc-cmdline.h"
 #include "specifier.h"
 #include "string-util.h"
 #include "unit-name.h"
@@ -36,11 +27,16 @@ static int create_disk(
 
         _cleanup_free_ char *n = NULL, *dd = NULL, *e = NULL, *name_escaped = NULL, *key_file_escaped = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        int r;
         char *dmname = NULL;
+        bool noauto, nofail, netdev;
+        int r;
 
         assert(name);
         assert(device);
+
+        noauto = fstab_test_yes_no_option(options, "noauto\0" "auto\0");
+        nofail = fstab_test_yes_no_option(options, "nofail\0" "fail\0");
+        netdev = fstab_test_option(options, "_netdev\0");
 
         name_escaped = specifier_escape(name);
         if (!name_escaped)
@@ -88,12 +84,19 @@ static int create_disk(
                 "Before=blockdev@dev-mapper-%%i.target\n"
                 "Wants=blockdev@dev-mapper-%%i.target\n"
                 "Conflicts=umount.target\n"
-                "Before=integritysetup.target\n"
                 "BindsTo=%s\n"
                 "After=%s\n"
                 "Before=umount.target\n",
                 arg_integritytab,
                 dd, dd);
+
+        if (netdev)
+                fprintf(f, "After=remote-fs-pre.target\n");
+
+        if (!nofail)
+                fprintf(f,
+                        "Before=%s\n",
+                        netdev ? "remote-integritysetup.target" : "integritysetup.target");
 
         fprintf(f,
                 "\n"
@@ -110,9 +113,15 @@ static int create_disk(
         if (r < 0)
                 return log_error_errno(r, "Failed to write unit file %s: %m", n);
 
-        r = generator_add_symlink(arg_dest, "integritysetup.target", "requires", n);
-        if (r < 0)
-                return r;
+        if (!noauto) {
+                r = generator_add_symlink(
+                                arg_dest,
+                                netdev ? "remote-integritysetup.target" : "integritysetup.target",
+                                nofail ? "wants" : "requires",
+                                n);
+                if (r < 0)
+                        return r;
+        }
 
         dmname = strjoina("dev-mapper-", e, ".device");
         return generator_add_symlink(arg_dest, dmname, "requires", n);

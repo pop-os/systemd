@@ -1,16 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <errno.h>
 #include <getopt.h>
-#include <stddef.h>
 #include <stdio.h>
 
 #include "alloc-util.h"
+#include "argv-util.h"
+#include "label-util.h"
 #include "main-func.h"
 #include "pretty-print.h"
-#include "process-util.h"
-#include "selinux-util.h"
-#include "string-util.h"
 #include "udev-util.h"
 #include "udevadm.h"
 #include "udevd.h"
@@ -26,6 +23,7 @@ static int help(void) {
                 { "test",         "Test an event run"                 },
                 { "test-builtin", "Test a built-in command"           },
                 { "verify",       "Verify udev rules files"           },
+                { "cat",          "Show udev rules files"             },
                 { "wait",         "Wait for device or device symlink" },
                 { "lock",         "Lock a block device"               },
         };
@@ -87,6 +85,12 @@ static int parse_argv(int argc, char *argv[]) {
         return 1; /* work to do */
 }
 
+int print_version(void) {
+        /* Dracut relies on the version being a single integer */
+        puts(PROJECT_VERSION_STR);
+        return 0;
+}
+
 static int version_main(int argc, char *argv[], void *userdata) {
         return print_version();
 }
@@ -97,6 +101,7 @@ static int help_main(int argc, char *argv[], void *userdata) {
 
 static int udevadm_main(int argc, char *argv[]) {
         static const Verb verbs[] = {
+                { "cat",          VERB_ANY, VERB_ANY, 0, cat_main     },
                 { "info",         VERB_ANY, VERB_ANY, 0, info_main    },
                 { "trigger",      VERB_ANY, VERB_ANY, 0, trigger_main },
                 { "settle",       VERB_ANY, VERB_ANY, 0, settle_main  },

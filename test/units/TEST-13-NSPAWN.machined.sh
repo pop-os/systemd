@@ -13,7 +13,7 @@ at_exit() {
     set +e
 
     machinectl status long-running &>/dev/null && machinectl kill --signal=KILL long-running
-    mountpoint -q /var/lib/machines && timeout 10 sh -c "until umount /var/lib/machines; do sleep .5; done"
+    mountpoint -q /var/lib/machines && timeout 30 sh -c "until umount /var/lib/machines; do sleep .5; done"
     [[ -n "${NSPAWN_FRAGMENT:-}" ]] && rm -f "/etc/systemd/nspawn/$NSPAWN_FRAGMENT" "/var/lib/machines/$NSPAWN_FRAGMENT"
     rm -f /run/systemd/nspawn/*.nspawn
 }
@@ -41,6 +41,8 @@ done
 create_dummy_container /var/lib/machines/long-running
 cat >/var/lib/machines/long-running/sbin/init <<\EOF
 #!/usr/bin/bash
+
+set -x
 
 PID=0
 
@@ -111,29 +113,29 @@ machinectl disable long-running
 test ! -L /etc/systemd/system/machines.target.wants/systemd-nspawn@long-running.service
 machinectl disable long-running long-running long-running container1
 
-[[ "$(machinectl shell testuser@ /usr/bin/bash -c 'echo -ne $FOO')" == "" ]]
-[[ "$(machinectl shell --setenv=FOO=bar testuser@ /usr/bin/bash -c 'echo -ne $FOO')" == "bar" ]]
+[[ "$(TERM=dumb machinectl shell testuser@ /usr/bin/bash -c 'echo -ne $FOO')" == "" ]]
+[[ "$(TERM=dumb machinectl shell --setenv=FOO=bar testuser@ /usr/bin/bash -c 'echo -ne $FOO')" == "bar" ]]
 
 [[ "$(machinectl show --property=State --value long-running)" == "running" ]]
 # Equivalent to machinectl kill --signal=SIGRTMIN+4 --kill-whom=leader
 rm -f /var/lib/machines/long-running/poweroff
 machinectl poweroff long-running
-timeout 10 bash -c "until test -e /var/lib/machines/long-running/poweroff; do sleep .5; done"
+timeout 30 bash -c "until test -e /var/lib/machines/long-running/poweroff; do sleep .5; done"
 # Equivalent to machinectl kill --signal=SIGINT --kill-whom=leader
 rm -f /var/lib/machines/long-running/reboot
 machinectl reboot long-running
-timeout 10 bash -c "until test -e /var/lib/machines/long-running/reboot; do sleep .5; done"
+timeout 30 bash -c "until test -e /var/lib/machines/long-running/reboot; do sleep .5; done"
 # Test for 'machinectl terminate'
 rm -f /var/lib/machines/long-running/terminate
 machinectl terminate long-running
-timeout 10 bash -c "until test -e /var/lib/machines/long-running/terminate; do sleep .5; done"
-timeout 10 bash -c "while machinectl status long-running &>/dev/null; do sleep .5; done"
+timeout 30 bash -c "until test -e /var/lib/machines/long-running/terminate; do sleep .5; done"
+timeout 30 bash -c "while machinectl status long-running &>/dev/null; do sleep .5; done"
 # Restart container
 long_running_machine_start
 # Test for 'machinectl kill'
 rm -f /var/lib/machines/long-running/trap
 machinectl kill --signal=SIGTRAP --kill-whom=leader long-running
-timeout 10 bash -c "until test -e /var/lib/machines/long-running/trap; do sleep .5; done"
+timeout 30 bash -c "until test -e /var/lib/machines/long-running/trap; do sleep .5; done"
 # Multiple machines at once
 machinectl poweroff long-running long-running long-running
 machinectl reboot long-running long-running long-running
@@ -221,7 +223,7 @@ machinectl import-fs /var/tmp/container.dir container-dir
 machinectl start container-dir
 rm -fr /var/tmp/container.dir
 
-timeout 10 bash -c "until machinectl clean --all; do sleep .5; done"
+timeout 30 bash -c "until machinectl clean --all; do sleep .5; done"
 
 NSPAWN_FRAGMENT="machinectl-test-$RANDOM.nspawn"
 cat >"/var/lib/machines/$NSPAWN_FRAGMENT" <<EOF
@@ -257,7 +259,7 @@ done
 
 ####################
 # varlinkctl tests #
-# ##################
+####################
 
 long_running_machine_start
 
@@ -285,6 +287,10 @@ rm -f /var/lib/machines/long-running/trap
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Kill '{"name":"long-running", "whom": "leader", "signal": 5}'
 timeout 120 bash -c "until test -e /var/lib/machines/long-running/trap; do sleep .5; done"
 
+# sending KILL signal
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Kill '{"name":"long-running", "signal": 9}'
+timeout 30 bash -c "while varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{\"name\":\"long-running\"}'; do sleep 0.5; done"
+
 # test io.systemd.Machine.Terminate
 long_running_machine_start
 rm -f /var/lib/machines/long-running/terminate
@@ -310,6 +316,10 @@ varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Unreg
 # test io.systemd.Machine.List with addresses, OSRelease, and UIDShift fields
 create_dummy_container "/var/lib/machines/container-without-os-release"
 cat >>/var/lib/machines/container-without-os-release/sbin/init <<\EOF
+#!/usr/bin/bash
+
+set -x
+
 ip link add hoge type dummy
 ip link set hoge up
 ip address add 192.0.2.1/24 dev hoge
@@ -357,12 +367,7 @@ TS="$(date '+%H:%M:%S')"
 (! varlinkctl --more call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"acquireMetadata": "yes"}')
 journalctl --sync
 (! journalctl -u systemd-machined.service --since="$TS" --grep 'Connection busy')
-# terminate machines
 machinectl terminate container-without-os-release
-machinectl terminate long-running
-# wait for the container being stopped, otherwise acquiring image metadata by io.systemd.MachineImage.List may fail in the below.
-timeout 30 bash -c "while machinectl status long-running &>/dev/null; do sleep .5; done"
-systemctl kill --signal=KILL systemd-nspawn@long-running.service || :
 
 (ip addr show lo | grep -q 192.168.1.100) || ip address add 192.168.1.100/24 dev lo
 (! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name": ".host"}' | grep 'addresses')
@@ -387,9 +392,58 @@ varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open 
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell"}'
 
 rm -f /tmp/none-existent-file
-varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell", "user": "root", "path": "/bin/sh", "args": ["/bin/sh", "-c", "echo $FOO > /tmp/none-existent-file"], "environment": ["FOO=BAR"]}'
+
+# We need to make sure the acquired pty fd stays open if we invoke a command
+# server side, to not generate early SIGHUP. Hence, let's just invoke "sleep
+# infinity" client side, once we acquired the fd (passing it to it), and kill
+# it once we verified everything worked.
+PID=$(systemd-notify --fork -- varlinkctl --exec call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell", "user": "root", "path": "/bin/bash", "args": ["/bin/bash", "-c", "echo $FOO > /tmp/none-existent-file"], "environment": ["FOO=BAR"]}' -- sleep infinity)
 timeout 30 bash -c "until test -e /tmp/none-existent-file; do sleep .5; done"
 grep -q "BAR" /tmp/none-existent-file
+kill "$PID"
+
+# Test varlinkctl's --exec fd passing logic properly
+assert_eq "$(varlinkctl --exec call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell", "user": "root", "path": "/bin/bash", "args": ["/bin/bash", "-c", "echo $((7 + 8))"], "environment": ["TERM=dumb"]}' -- bash -c 'read -r -N 2 x <&3 ; echo "$x"')" 15
+
+# test io.systemd.Machine.MapFrom
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapFrom '{"name": "long-running", "uid":0, "gid": 0}'
+container_uid=$(varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapFrom '{"name": "long-running", "uid":0}' | jq '.uid')
+container_gid=$(varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapFrom '{"name": "long-running", "gid":0}' | jq '.gid')
+# test io.systemd.Machine.MapTo
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapTo "{\"uid\": $container_uid, \"gid\": $container_gid}" | grep "long-running"
+(! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapTo '{"uid": 0}')
+(! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.MapTo '{"gid": 0}')
+
+# io.systemd.Machine.BindMount is covered by testcase_check_machinectl_bind() in nspawn tests
+
+# test io.systemd.Machine.CopyTo
+rm -f /tmp/foo /var/lib/machines/long-running/root/foo
+cp /etc/machine-id /tmp/foo
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo"}'
+diff /tmp/foo /var/lib/machines/long-running/root/foo
+(! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo"}') # FileExists
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo", "replace": true}'
+
+echo "sample-test-output" > /tmp/foo
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo", "replace": true}'
+diff /tmp/foo /var/lib/machines/long-running/root/foo
+rm -f /tmp/foo /var/lib/machines/long-running/root/foo
+
+# test io.systemd.Machine.CopyFrom
+cp /etc/machine-id /var/lib/machines/long-running/foo
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyFrom '{"name": "long-running", "source": "/foo"}'
+diff /var/lib/machines/long-running/foo /foo
+rm -f /var/lib/machines/long-running/root/foo /foo
+
+# test io.systemd.Machine.OpenRootDirectory
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.OpenRootDirectory '{"name": ".host"}'
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.OpenRootDirectory '{"name": "long-running"}'
+
+# Terminating machine, otherwise acquiring image metadata by io.systemd.MachineImage.List may fail in the below.
+machinectl terminate long-running
+# wait for the container being stopped, otherwise acquiring image metadata by io.systemd.MachineImage.List may fail in the below.
+timeout 30 bash -c "while machinectl status long-running &>/dev/null; do sleep .5; done"
+systemctl kill --signal=KILL systemd-nspawn@long-running.service || :
 
 # test io.systemd.MachineImage.List
 varlinkctl --more call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{}' | grep 'long-running'
@@ -410,7 +464,20 @@ varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineI
 varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.Clone '{"name":"long-running", "newName": "long-running-cloned", "readOnly": true}'
 varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{"name":"long-running-cloned"}'
 varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{"name":"long-running-cloned"}' | jq '.readOnly' | grep 'true'
+# this is for io.systemd.MachineImage.CleanPool test
+varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.Clone '{"name":"long-running", "newName": "long-running-to-cleanup", "readOnly": true}'
 
 # test io.systemd.MachineImage.Remove
 varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.Remove '{"name":"long-running-cloned"}'
 (! varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{"name":"long-running-cloned"}')
+
+# test io.systemd.MachineImage.SetPoolLimit
+FSTYPE="$(stat --file-system --format "%T" /var/lib/machines)"
+if [[ "$FSTYPE" == "btrfs" ]]; then
+     varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.SetPoolLimit '{"limit": 18446744073709551615}' # UINT64_MAX
+fi
+
+# test io.systemd.MachineImage.CleanPool
+varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{"name":"long-running-to-cleanup"}'
+varlinkctl --more call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.CleanPool '{"mode":"all"}' | grep "long-running-to-cleanup"
+(! varlinkctl call /run/systemd/machine/io.systemd.MachineImage io.systemd.MachineImage.List '{"name":"long-running-to-cleanup"}')

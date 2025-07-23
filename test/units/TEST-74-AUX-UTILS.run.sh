@@ -200,6 +200,16 @@ grep -q "^SocketMode=0644$" "/run/systemd/transient/$UNIT.socket"
 grep -qE "^ExecStart=.*/bin/true.*$" "/run/systemd/transient/$UNIT.service"
 systemctl stop "$UNIT.socket" "$UNIT.service" || :
 
+: "Job mode"
+systemd-run --job-mode=help
+(! systemd-run --job-mode=foo --scope true)
+systemd-run --no-block --unit=slowly-activating.service --collect \
+    --service-type=oneshot --remain-after-exit \
+    sleep 30
+(! systemd-run --scope --property=Conflicts=slowly-activating.service true)
+(! systemd-run --scope --property=Conflicts=slowly-activating.service --job-mode=fail true)
+systemd-run --scope --property=Conflicts=slowly-activating.service --job-mode=replace true
+
 : "Interactive options"
 SHELL=/bin/true systemd-run --shell
 SHELL=/bin/true systemd-run --scope --shell
@@ -246,10 +256,20 @@ if [[ -e /usr/lib/pam.d/systemd-run0 ]] || [[ -e /etc/pam.d/systemd-run0 ]]; the
         # Validate that we actually went properly through PAM (XDG_SESSION_TYPE is set by pam_systemd)
         assert_eq "$(run0 ${tu:+"--user=$tu"} bash -c 'echo $XDG_SESSION_TYPE')" "unspecified"
 
+        # Test spawning via shell
+        assert_eq "$(run0 ${tu:+"--user=$tu"} --setenv=SHLVL=10 printenv SHLVL)" "10"
+        if [[ ! -v ASAN_OPTIONS ]]; then
+            assert_eq "$(run0 ${tu:+"--user=$tu"} --setenv=SHLVL=10 --via-shell echo \$SHLVL)" "11"
+        fi
+
         if [[ -n "$tu" ]]; then
             # Validate that $SHELL is set to login shell of target user when cmdline is supplied (not invoking shell)
             TARGET_LOGIN_SHELL="$(getent passwd "$tu" | cut -d: -f7)"
             assert_eq "$(run0 --user="$tu" printenv SHELL)" "$TARGET_LOGIN_SHELL"
+            # ... or when the command is chained by login shell
+            if [[ ! -v ASAN_OPTIONS ]]; then
+                assert_eq "$(run0 --user="$tu" -i printenv SHELL)" "$TARGET_LOGIN_SHELL"
+            fi
         fi
     done
     # Let's chain a couple of run0 calls together, for fun
@@ -280,4 +300,4 @@ if [[ -e /usr/lib/pam.d/systemd-run0 ]] || [[ -e /etc/pam.d/systemd-run0 ]]; the
 fi
 
 # Tests whether intermediate disconnects corrupt us (modified testcase from https://github.com/systemd/systemd/issues/27204)
-assert_rc "37" systemd-run --unit=disconnecttest --wait --pipe --user -M testuser@.host bash -ec 'systemctl --user daemon-reexec; sleep 3; exit 37'
+assert_rc "37" timeout 300 systemd-run --unit=disconnecttest --wait --pipe --user -M testuser@.host bash -ec 'systemctl --user daemon-reexec; sleep 3; exit 37'

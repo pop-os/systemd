@@ -1,51 +1,51 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#if HAVE_LINUX_MEMFD_H
-#include <linux/memfd.h>
-#endif
-
-#include <sys/mman.h>
-#include <sys/quota.h>
 #include <sys/vfs.h>
+#include <unistd.h>
+
+#include "sd-bus.h"
 
 #include "blockdev-util.h"
 #include "btrfs-util.h"
 #include "build-path.h"
 #include "bus-common-errors.h"
 #include "bus-locator.h"
-#include "data-fd-util.h"
+#include "device-util.h"
 #include "env-util.h"
 #include "errno-list.h"
 #include "errno-util.h"
+#include "event-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "filesystems.h"
-#include "fs-util.h"
+#include "format-util.h"
 #include "glyph-util.h"
 #include "home-util.h"
 #include "homed-home.h"
 #include "homed-home-bus.h"
+#include "homed-manager.h"
+#include "homed-operation.h"
 #include "json-util.h"
+#include "log.h"
 #include "memfd-util.h"
-#include "missing_magic.h"
-#include "missing_mman.h"
-#include "missing_syscall.h"
 #include "mkdir.h"
+#include "ordered-set.h"
+#include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "quota-util.h"
 #include "resize-fs.h"
 #include "rm-rf.h"
-#include "set.h"
 #include "signal-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "strv.h"
+#include "time-util.h"
 #include "uid-classification.h"
+#include "user-record.h"
 #include "user-record-password-quality.h"
 #include "user-record-sign.h"
 #include "user-record-util.h"
-#include "user-record.h"
 #include "user-util.h"
 
 /* Retry to deactivate home directories again and again every 15s until it works */
@@ -84,7 +84,8 @@ static int suitable_home_record(UserRecord *hr) {
 
         /* Insist we are outside of the dynamic and system range */
         if (uid_is_system(hr->uid) || gid_is_system(user_record_gid(hr)) ||
-            uid_is_dynamic(hr->uid) || gid_is_dynamic(user_record_gid(hr)))
+            uid_is_dynamic(hr->uid) || gid_is_dynamic(user_record_gid(hr)) ||
+            uid_is_greeter(hr->uid))
                 return -EADDRNOTAVAIL;
 
         /* Insist that GID and UID match */
@@ -106,6 +107,7 @@ static int suitable_home_record(UserRecord *hr) {
 int home_new(Manager *m, UserRecord *hr, const char *sysfs, Home **ret) {
         _cleanup_(home_freep) Home *home = NULL;
         _cleanup_free_ char *nm = NULL, *ns = NULL, *blob = NULL;
+        _cleanup_strv_free_ char **aliases = NULL;
         int r;
 
         assert(m);
@@ -118,18 +120,28 @@ int home_new(Manager *m, UserRecord *hr, const char *sysfs, Home **ret) {
         if (hashmap_contains(m->homes_by_name, hr->user_name))
                 return -EBUSY;
 
+        STRV_FOREACH(a, hr->aliases)
+                if (hashmap_contains(m->homes_by_name, *a))
+                        return -EBUSY;
+
         if (hashmap_contains(m->homes_by_uid, UID_TO_PTR(hr->uid)))
                 return -EBUSY;
 
         if (sysfs && hashmap_contains(m->homes_by_sysfs, sysfs))
                 return -EBUSY;
 
-        if (hashmap_size(m->homes_by_name) >= HOME_USERS_MAX)
+        if (hashmap_size(m->homes_by_uid) >= HOME_USERS_MAX)
                 return -EUSERS;
 
         nm = strdup(hr->user_name);
         if (!nm)
                 return -ENOMEM;
+
+        if (!strv_isempty(hr->aliases)) {
+                aliases = strv_copy(hr->aliases);
+                if (!aliases)
+                        return -ENOMEM;
+        }
 
         if (sysfs) {
                 ns = strdup(sysfs);
@@ -144,8 +156,10 @@ int home_new(Manager *m, UserRecord *hr, const char *sysfs, Home **ret) {
         *home = (Home) {
                 .manager = m,
                 .user_name = TAKE_PTR(nm),
+                .aliases = TAKE_PTR(aliases),
                 .uid = hr->uid,
                 .state = _HOME_STATE_INVALID,
+                .worker_pid = PIDREF_NULL,
                 .worker_stdout_fd = -EBADF,
                 .sysfs = TAKE_PTR(ns),
                 .signed_locally = -1,
@@ -156,6 +170,12 @@ int home_new(Manager *m, UserRecord *hr, const char *sysfs, Home **ret) {
         r = hashmap_put(m->homes_by_name, home->user_name, home);
         if (r < 0)
                 return r;
+
+        STRV_FOREACH(a, home->aliases) {
+                r = hashmap_put(m->homes_by_name, *a, home);
+                if (r < 0)
+                        return r;
+        }
 
         r = hashmap_put(m->homes_by_uid, UID_TO_PTR(home->uid), home);
         if (r < 0)
@@ -202,14 +222,17 @@ Home *home_free(Home *h) {
                 if (h->user_name)
                         (void) hashmap_remove_value(h->manager->homes_by_name, h->user_name, h);
 
+                STRV_FOREACH(a, h->aliases)
+                        (void) hashmap_remove_value(h->manager->homes_by_name, *a, h);
+
                 if (uid_is_valid(h->uid))
                         (void) hashmap_remove_value(h->manager->homes_by_uid, UID_TO_PTR(h->uid), h);
 
                 if (h->sysfs)
                         (void) hashmap_remove_value(h->manager->homes_by_sysfs, h->sysfs, h);
 
-                if (h->worker_pid > 0)
-                        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, PID_TO_PTR(h->worker_pid), h);
+                if (pidref_is_set(&h->worker_pid))
+                        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, &h->worker_pid, h);
 
                 if (h->manager->gc_focus == h)
                         h->manager->gc_focus = NULL;
@@ -220,9 +243,11 @@ Home *home_free(Home *h) {
         user_record_unref(h->record);
         user_record_unref(h->secret);
 
+        pidref_done_sigkill_wait(&h->worker_pid);
         h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
         safe_close(h->worker_stdout_fd);
         free(h->user_name);
+        strv_free(h->aliases);
         free(h->sysfs);
 
         h->ref_event_source_please_suspend = sd_event_source_disable_unref(h->ref_event_source_please_suspend);
@@ -260,6 +285,10 @@ int home_set_record(Home *h, UserRecord *hr) {
                 return r;
 
         if (!user_record_compatible(h->record, hr))
+                return -EREMCHG;
+
+        /* For now do not allow changing list of aliases */
+        if (!strv_equal_ignore_order(h->aliases, hr->aliases))
                 return -EREMCHG;
 
         if (!FLAGS_SET(hr->mask, USER_RECORD_REGULAR) ||
@@ -506,7 +535,7 @@ static void home_set_state(Home *h, HomeState state) {
 
         log_info("%s: changing state %s %s %s", h->user_name,
                  home_state_to_string(old_state),
-                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                 glyph(GLYPH_ARROW_RIGHT),
                  home_state_to_string(new_state));
 
         home_update_pin_fd(h, new_state);
@@ -528,7 +557,6 @@ static int home_parse_worker_stdout(int _fd, UserRecord **ret) {
         _cleanup_close_ int fd = _fd; /* take possession, even on failure */
         _cleanup_(user_record_unrefp) UserRecord *hr = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        unsigned line, column;
         struct stat st;
         int r;
 
@@ -560,6 +588,7 @@ static int home_parse_worker_stdout(int _fd, UserRecord **ret) {
                 rewind(f);
         }
 
+        unsigned line = 0, column = 0;
         r = sd_json_parse_file(f, "stdout", SD_JSON_PARSE_SENSITIVE, &v, &line, &column);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse identity at %u:%u: %m", line, column);
@@ -668,6 +697,8 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_CANT_AUTHENTICATE, "Home %s has no password or other authentication mechanism defined.", h->user_name);
         case -EADDRINUSE:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_IN_USE, "Home %s is currently being used elsewhere.", h->user_name);
+        case -ENETUNREACH:
+                return sd_bus_error_setf(error, BUS_ERROR_HOME_ABSENT, "Backing storage for %s currently absent.", h->user_name);
         }
 
         return 0;
@@ -889,8 +920,7 @@ static void home_remove_finish(Home *h, int ret, UserRecord *hr) {
          * partitions like USB sticks, or so). Sometimes these storage locations are among those we normally
          * automatically discover in /home or in udev. When such a home is deleted let's hence issue a rescan
          * after completion, so that "unfixated" entries are rediscovered.  */
-        if (!IN_SET(user_record_test_image_path(h->record), USER_TEST_UNDEFINED, USER_TEST_ABSENT))
-                manager_enqueue_rescan(m);
+        (void) manager_enqueue_rescan(m);
 
         /* The image is now removed from disk. Now also remove our stored record */
         r = home_unlink_record(h);
@@ -1114,13 +1144,13 @@ static int home_on_worker_process(sd_event_source *s, const siginfo_t *si, void 
         assert(s);
         assert(si);
 
-        assert(h->worker_pid == si->si_pid);
+        assert(h->worker_pid.pid == si->si_pid);
         assert(h->worker_event_source);
         assert(h->worker_stdout_fd >= 0);
 
-        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, PID_TO_PTR(h->worker_pid), h);
+        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, &h->worker_pid, h);
 
-        h->worker_pid = 0;
+        pidref_done(&h->worker_pid);
         h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
 
         if (si->si_code != CLD_EXITED) {
@@ -1204,14 +1234,13 @@ static int home_start_work(
         _cleanup_(erase_and_freep) char *formatted = NULL;
         _cleanup_close_ int stdin_fd = -EBADF, stdout_fd = -EBADF;
         _cleanup_free_ int *blob_fds = NULL;
-        pid_t pid = 0;
         int r;
 
         assert(h);
         assert(verb);
         assert(hr);
 
-        if (h->worker_pid != 0)
+        if (pidref_is_set(&h->worker_pid))
                 return -EBUSY;
 
         assert(h->worker_stdout_fd < 0);
@@ -1268,7 +1297,7 @@ static int home_start_work(
         if (r < 0)
                 return r;
 
-        stdin_fd = acquire_data_fd(formatted);
+        stdin_fd = memfd_new_and_seal_string("request", formatted);
         if (stdin_fd < 0)
                 return stdin_fd;
 
@@ -1283,11 +1312,12 @@ static int home_start_work(
                 log_debug("Sending to worker: %s", censored_text);
         }
 
-        stdout_fd = memfd_create_wrapper("homework-stdout", MFD_CLOEXEC | MFD_NOEXEC_SEAL);
+        stdout_fd = memfd_new("homework-stdout");
         if (stdout_fd < 0)
                 return stdout_fd;
 
-        r = safe_fork_full("(sd-homework)",
+        _cleanup_(pidref_done_sigkill_wait) PidRef pid = PIDREF_NULL;
+        r = pidref_safe_fork_full("(sd-homework)",
                            (int[]) { stdin_fd, stdout_fd, STDERR_FILENO },
                            blob_fds, hashmap_size(blobs),
                            FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_CLOEXEC_OFF|FORK_PACK_FDS|FORK_DEATHSIG_SIGTERM|
@@ -1295,21 +1325,9 @@ static int home_start_work(
         if (r < 0)
                 return r;
         if (r == 0) {
-                _cleanup_free_ char *joined = NULL;
-                const char *suffix, *unix_path;
-
                 /* Child */
 
-                suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
-                if (suffix) {
-                        joined = strjoin("/run/systemd/home/notify.", suffix);
-                        if (!joined)
-                                return log_oom();
-                        unix_path = joined;
-                } else
-                        unix_path = "/run/systemd/home/notify";
-
-                if (setenv("NOTIFY_SOCKET", unix_path, 1) < 0) {
+                if (setenv("NOTIFY_SOCKET", h->manager->notify_socket_path, /* overwrite = */ true) < 0) {
                         log_error_errno(errno, "Failed to set $NOTIFY_SOCKET: %m");
                         _exit(EXIT_FAILURE);
                 }
@@ -1350,20 +1368,21 @@ static int home_start_work(
                 _exit(EXIT_FAILURE);
         }
 
-        r = sd_event_add_child(h->manager->event, &h->worker_event_source, pid, WEXITED, home_on_worker_process, h);
+        r = event_add_child_pidref(h->manager->event, &h->worker_event_source, &pid, WEXITED, home_on_worker_process, h);
         if (r < 0)
                 return r;
 
         (void) sd_event_source_set_description(h->worker_event_source, "worker");
 
-        r = hashmap_put(h->manager->homes_by_worker_pid, PID_TO_PTR(pid), h);
+        h->worker_pid = TAKE_PIDREF(pid);
+        r = hashmap_put(h->manager->homes_by_worker_pid, &h->worker_pid, h);
         if (r < 0) {
+                pidref_done_sigkill_wait(&h->worker_pid);
                 h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
                 return r;
         }
 
         h->worker_stdout_fd = TAKE_FD(stdout_fd);
-        h->worker_pid = pid;
         h->worker_error_code = 0;
 
         return 0;
@@ -2047,12 +2066,17 @@ int home_unregister(Home *h, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_BUSY, "Home %s is currently being used, or an operation on home %s is currently being executed.", h->user_name, h->user_name);
         }
 
+        Manager *m = ASSERT_PTR(h->manager);
+
         r = home_unlink_record(h);
         if (r < 0)
                 return r;
 
         /* And destroy the whole entry. The caller needs to be prepared for that. */
         h = home_free(h);
+
+        /* Let's rescan, who knows, maybe this revealed a directory in /home/ that we should pick up now */
+        manager_enqueue_rescan(m);
         return 1;
 }
 
@@ -2399,6 +2423,7 @@ static int home_get_disk_status_directory(
         uint64_t disk_size = UINT64_MAX, disk_usage = UINT64_MAX, disk_free = UINT64_MAX,
                 disk_ceiling = UINT64_MAX, disk_floor = UINT64_MAX;
         mode_t access_mode = MODE_INVALID;
+        _cleanup_close_ int fd = -EBADF;
         statfs_f_type_t fstype = 0;
         struct statfs sfs;
         struct dqblk req;
@@ -2420,7 +2445,13 @@ static int home_get_disk_status_directory(
         if (!path)
                 goto finish;
 
-        if (statfs(path, &sfs) < 0)
+        fd = open(path, O_CLOEXEC|O_RDONLY);
+        if (fd < 0) {
+                log_debug_errno(errno, "Failed to open '%s', ignoring: %m", path);
+                goto finish;
+        }
+
+        if (fstatfs(fd, &sfs) < 0)
                 log_debug_errno(errno, "Failed to statfs() %s, ignoring: %m", path);
         else {
                 disk_free = sfs.f_bsize * sfs.f_bavail;
@@ -2434,13 +2465,13 @@ static int home_get_disk_status_directory(
 
         if (IN_SET(h->record->storage, USER_CLASSIC, USER_DIRECTORY, USER_SUBVOLUME)) {
 
-                r = btrfs_is_subvol(path);
+                r = btrfs_is_subvol_fd(fd);
                 if (r < 0)
                         log_debug_errno(r, "Failed to determine whether %s is a btrfs subvolume: %m", path);
                 else if (r > 0) {
                         BtrfsQuotaInfo qi;
 
-                        r = btrfs_subvol_get_subtree_quota(path, 0, &qi);
+                        r = btrfs_subvol_get_subtree_quota_fd(fd, /* subvol_id= */ 0, &qi);
                         if (r < 0)
                                 log_debug_errno(r, "Failed to query btrfs subtree quota, ignoring: %m");
                         else {
@@ -2473,13 +2504,12 @@ static int home_get_disk_status_directory(
         }
 
         if (IN_SET(h->record->storage, USER_CLASSIC, USER_DIRECTORY, USER_FSCRYPT)) {
-                r = quotactl_path(QCMD_FIXED(Q_GETQUOTA, USRQUOTA), path, h->uid, &req);
+                r = quotactl_fd_with_fallback(fd, QCMD_FIXED(Q_GETQUOTA, USRQUOTA), h->uid, &req);
                 if (r < 0) {
                         if (ERRNO_IS_NOT_SUPPORTED(r)) {
                                 log_debug_errno(r, "No UID quota support on %s.", path);
                                 goto finish;
                         }
-
                         if (r != -ESRCH) {
                                 log_debug_errno(r, "Failed to query disk quota for UID " UID_FMT ": %m", h->uid);
                                 goto finish;
@@ -3190,10 +3220,8 @@ static int home_get_image_path_seat(Home *h, char **ret) {
         if (r < 0)
                 return r;
 
-        r = sd_device_get_property_value(d, "ID_SEAT", &seat);
-        if (r == -ENOENT) /* no property means seat0 */
-                seat = "seat0";
-        else if (r < 0)
+        r = device_get_seat(d, &seat);
+        if (r < 0)
                 return r;
 
         return strdup_to(ret, seat);
@@ -3266,19 +3294,19 @@ int home_wait_for_worker(Home *h) {
 
         assert(h);
 
-        if (h->worker_pid <= 0)
+        if (!pidref_is_set(&h->worker_pid))
                 return 0;
 
         log_info("Worker process for home %s is still running while exiting. Waiting for it to finish.", h->user_name);
 
-        r = wait_for_terminate_with_timeout(h->worker_pid, 30 * USEC_PER_SEC);
+        r = wait_for_terminate_with_timeout(h->worker_pid.pid, 30 * USEC_PER_SEC);
         if (r == -ETIMEDOUT)
                 log_warning_errno(r, "Waiting for worker process for home %s timed out. Ignoring.", h->user_name);
         else if (r < 0)
                 log_warning_errno(r, "Failed to wait for worker process for home %s. Ignoring.", h->user_name);
 
-        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, PID_TO_PTR(h->worker_pid), h);
-        h->worker_pid = 0;
+        (void) hashmap_remove_value(h->manager->homes_by_worker_pid, &h->worker_pid, h);
+        pidref_done(&h->worker_pid);
         return 1;
 }
 

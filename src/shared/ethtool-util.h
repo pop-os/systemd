@@ -1,12 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <macro.h>
-#include <net/ethernet.h>
 #include <linux/ethtool.h>
 
-#include "conf-parser.h"
-#include "ether-addr-util.h"
+#include "conf-parser-forward.h"
+#include "forward.h"
 
 #define N_ADVERTISE 4
 
@@ -106,10 +104,11 @@ typedef enum NetDevPort {
 #define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBYTES  (4 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
 
 /* layout of the struct passed from/to userland */
-struct ethtool_link_usettings {
+union ethtool_link_usettings {
         struct ethtool_link_settings base;
 
         struct {
+                uint8_t header[offsetof(struct ethtool_link_settings, link_mode_masks)];
                 uint32_t supported[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
                 uint32_t advertising[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
                 uint32_t lp_advertising[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
@@ -180,6 +179,13 @@ int ethtool_set_glinksettings(
 int ethtool_set_channels(int *ethtool_fd, const char *ifname, const netdev_channels *channels);
 int ethtool_set_flow_control(int *fd, const char *ifname, int rx, int tx, int autoneg);
 int ethtool_set_nic_coalesce_settings(int *ethtool_fd, const char *ifname, const netdev_coalesce_param *coalesce);
+int ethtool_set_eee_settings(
+                int *ethtool_fd,
+                const char *ifname,
+                int enabled,
+                int tx_lpi_enabled,
+                usec_t tx_lpi_timer_usec,
+                uint32_t advertise);
 
 const char* duplex_to_string(Duplex d) _const_;
 Duplex duplex_from_string(const char *d) _pure_;

@@ -3,19 +3,19 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "sd-event.h"
 #include "sd-json.h"
 #include "sd-varlink.h"
 
-#include "data-fd-util.h"
 #include "fd-util.h"
 #include "json-util.h"
+#include "memfd-util.h"
 #include "rm-rf.h"
-#include "strv.h"
 #include "tests.h"
 #include "tmpfile-util.h"
-#include "user-util.h"
 #include "varlink-util.h"
 
 /* Let's pick some high value, that is higher than the largest listen() backlog, but leaves enough room below
@@ -134,8 +134,8 @@ static int method_passfd(sd_varlink *link, sd_json_variant *parameters, sd_varli
         test_fd(yy, "bar", 3);
         test_fd(zz, "quux", 4);
 
-        _cleanup_close_ int vv = acquire_data_fd("miau");
-        _cleanup_close_ int ww = acquire_data_fd("wuff");
+        _cleanup_close_ int vv = memfd_new_and_seal_string("data", "miau");
+        _cleanup_close_ int ww = memfd_new_and_seal_string("data", "wuff");
 
         assert_se(vv >= 0);
         assert_se(ww >= 0);
@@ -151,6 +151,16 @@ static int method_passfd(sd_varlink *link, sd_json_variant *parameters, sd_varli
         TAKE_FD(ww);
 
         return sd_varlink_reply(link, ret);
+}
+
+static int method_fail_with_errno(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
+        int r;
+
+        r = sd_varlink_dispatch(link, parameters, NULL, NULL);
+        if (r != 0)
+                return r;
+
+        return sd_varlink_error_errno(link, EHWPOISON);
 }
 
 static int method_done(sd_varlink *link, sd_json_variant *parameters, sd_varlink_method_flags_t flags, void *userdata) {
@@ -284,9 +294,9 @@ static void *thread(void *arg) {
         assert_se(sd_json_variant_integer(sd_json_variant_by_key(o, "sum")) == 88 + 99);
         assert_se(!e);
 
-        int fd1 = acquire_data_fd("foo");
-        int fd2 = acquire_data_fd("bar");
-        int fd3 = acquire_data_fd("quux");
+        int fd1 = memfd_new_and_seal_string("data", "foo");
+        int fd2 = memfd_new_and_seal_string("data", "bar");
+        int fd3 = memfd_new_and_seal_string("data", "quux");
 
         assert_se(fd1 >= 0);
         assert_se(fd2 >= 0);
@@ -315,6 +325,8 @@ static void *thread(void *arg) {
         ASSERT_STREQ(sd_json_variant_string(sd_json_variant_by_key(o, "method")), "io.test.IDontExist");
         ASSERT_STREQ(e, SD_VARLINK_ERROR_METHOD_NOT_FOUND);
 
+        ASSERT_OK(sd_varlink_call(c, "io.test.FailWithErrno", NULL, &o, &e));
+        ASSERT_ERROR(sd_varlink_error_to_errno(e, o), EHWPOISON);
         flood_test(arg);
 
         assert_se(sd_varlink_send(c, "io.test.Done", NULL) >= 0);
@@ -368,6 +380,7 @@ TEST(chat) {
         assert_se(sd_varlink_server_bind_method(s, "io.test.PassFD", method_passfd) >= 0);
         assert_se(sd_varlink_server_bind_method(s, "io.test.DoSomething", method_something) >= 0);
         assert_se(sd_varlink_server_bind_method(s, "io.test.DoSomethingMore", method_something_more) >= 0);
+        assert_se(sd_varlink_server_bind_method(s, "io.test.FailWithErrno", method_fail_with_errno) >= 0);
         assert_se(sd_varlink_server_bind_method(s, "io.test.Done", method_done) >= 0);
         assert_se(sd_varlink_server_bind_connect(s, on_connect) >= 0);
         assert_se(sd_varlink_server_listen_address(s, sp, 0600) >= 0);
@@ -440,7 +453,6 @@ TEST(invalid_parameter) {
         assert_se(sd_varlink_invokebo(c, "foo.mytest.Invalid",
                                       SD_JSON_BUILD_PAIR_STRING("iexist", "foo"),
                                       SD_JSON_BUILD_PAIR_STRING("idontexist", "bar")) >= 0);
-
 
         assert_se(sd_event_loop(e) >= 0);
 }
