@@ -2,26 +2,29 @@
 
 #include "sd-bus.h"
 
+#include "alloc-util.h"
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-unit-util.h"
 #include "bus-util.h"
 #include "bus-wait-for-jobs.h"
+#include "nspawn-mount.h"
 #include "nspawn-register.h"
 #include "nspawn-settings.h"
+#include "pidref.h"
 #include "special.h"
 #include "stat-util.h"
-#include "strv.h"
+#include "string-util.h"
+#include "unit-def.h"
+#include "unit-name.h"
 
 static int append_machine_properties(
                 sd_bus_message *m,
-                bool enable_fuse,
                 CustomMount *mounts,
                 unsigned n_mounts,
                 int kill_signal,
                 bool coredump_receive) {
 
-        unsigned j;
         int r;
 
         assert(m);
@@ -32,25 +35,19 @@ static int append_machine_properties(
 
         /* If you make changes here, also make sure to update systemd-nspawn@.service, to keep the device
          * policies in sync regardless if we are run with or without the --keep-unit switch. */
-        r = sd_bus_message_append(m, "(sv)", "DeviceAllow", "a(ss)", 2,
-                                  /* Allow the container to access and create the API device nodes, so that
-                                   * PrivateDevices= in the container can work fine */
+        r = sd_bus_message_append(m, "(sv)", "DeviceAllow", "a(ss)", 3,
+                                  /* Allow the container to access and create the API device node, so that
+                                   * PrivateDevices= in the container can work fine. */
                                   "/dev/net/tun", "rwm",
-                                  /* Allow the container access to ptys. However, do not permit the container
+                                  /* Allow the container to access ptys. However, do not permit the container
                                    * to ever create these device nodes. */
-                                  "char-pts", "rw");
+                                  "char-pts", "rw",
+                                  /* Allow the container to access and create the FUSE API device node. */
+                                  "/dev/fuse", "rwm");
         if (r < 0)
                 return bus_log_create_error(r);
-        if (enable_fuse) {
-                r = sd_bus_message_append(m, "(sv)", "DeviceAllow", "a(ss)", 1,
-                                          "/dev/fuse", "rwm");
-                if (r < 0)
-                        return bus_log_create_error(r);
-        }
 
-        for (j = 0; j < n_mounts; j++) {
-                CustomMount *cm = mounts + j;
-
+        FOREACH_ARRAY(cm, mounts, n_mounts) {
                 if (cm->type != CUSTOM_MOUNT_BIND)
                         continue;
 
@@ -137,7 +134,7 @@ static int can_set_coredump_receive(sd_bus *bus) {
 int register_machine(
                 sd_bus *bus,
                 const char *machine_name,
-                pid_t pid,
+                const PidRef *pid,
                 const char *directory,
                 sd_id128_t uuid,
                 int local_ifindex,
@@ -168,7 +165,7 @@ int register_machine(
                                 SD_BUS_MESSAGE_APPEND_ID128(uuid),
                                 service,
                                 "container",
-                                (uint32_t) pid,
+                                pidref_is_set(pid) ? (uint32_t) pid->pid : 0,
                                 strempty(directory),
                                 local_ifindex > 0 ? 1 : 0, local_ifindex);
         } else {
@@ -185,7 +182,7 @@ int register_machine(
                                 SD_BUS_MESSAGE_APPEND_ID128(uuid),
                                 service,
                                 "container",
-                                (uint32_t) pid,
+                                pidref_is_set(pid) ? (uint32_t) pid->pid : 0,
                                 strempty(directory),
                                 local_ifindex > 0 ? 1 : 0, local_ifindex);
                 if (r < 0)
@@ -207,7 +204,6 @@ int register_machine(
 
                 r = append_machine_properties(
                                 m,
-                                FLAGS_SET(flags, REGISTER_MACHINE_ENABLE_FUSE),
                                 mounts,
                                 n_mounts,
                                 kill_signal,
@@ -256,7 +252,7 @@ int unregister_machine(
 int allocate_scope(
                 sd_bus *bus,
                 const char *machine_name,
-                pid_t pid,
+                const PidRef* pid,
                 const char *slice,
                 CustomMount *mounts,
                 unsigned n_mounts,
@@ -270,7 +266,7 @@ int allocate_scope(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *w = NULL;
         _cleanup_free_ char *scope = NULL;
-        const char *description, *object;
+        const char *object;
         int r;
 
         assert(bus);
@@ -296,16 +292,13 @@ int allocate_scope(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        description = strjoina("Container ", machine_name);
-
-        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
-        r = pidref_set_pid(&pidref, pid);
-        if (r < 0)
-                return log_error_errno(r, "Failed to allocate PID reference: %m");
-
-        r = bus_append_scope_pidref(m, &pidref, FLAGS_SET(flags, ALLOCATE_SCOPE_ALLOW_PIDFD));
+        r = bus_append_scope_pidref(m, pid, FLAGS_SET(flags, ALLOCATE_SCOPE_ALLOW_PIDFD));
         if (r < 0)
                 return bus_log_create_error(r);
+
+        _cleanup_free_ char *description = strjoin("Container ", machine_name);
+        if (!description)
+                return log_oom();
 
         r = sd_bus_message_append(m, "(sv)(sv)(sv)(sv)(sv)",
                                   "Description", "s", description,
@@ -328,7 +321,6 @@ int allocate_scope(
 
         r = append_machine_properties(
                         m,
-                        FLAGS_SET(flags, ALLOCATE_SCOPE_ENABLE_FUSE),
                         mounts,
                         n_mounts,
                         kill_signal,
@@ -397,11 +389,11 @@ int terminate_scope(
         _cleanup_free_ char *scope = NULL;
         int r;
 
-        r = unit_name_mangle_with_suffix(machine_name, "to terminate", 0, ".scope", &scope);
+        r = unit_name_mangle_with_suffix(machine_name, "to terminate", /* flags= */ 0, ".scope", &scope);
         if (r < 0)
                 return log_error_errno(r, "Failed to mangle scope name: %m");
 
-        r = bus_call_method(bus, bus_systemd_mgr, "AbandonScope", &error, NULL, "s", scope);
+        r = bus_call_method(bus, bus_systemd_mgr, "AbandonScope", &error, /* ret_reply= */ NULL, "s", scope);
         if (r < 0) {
                 log_debug_errno(r, "Failed to abandon scope '%s', ignoring: %s", scope, bus_error_message(&error, r));
                 sd_bus_error_free(&error);
@@ -422,7 +414,7 @@ int terminate_scope(
                 sd_bus_error_free(&error);
         }
 
-        r = bus_call_method(bus, bus_systemd_mgr, "UnrefUnit", &error, NULL, "s", scope);
+        r = bus_call_method(bus, bus_systemd_mgr, "UnrefUnit", &error, /* ret_reply= */ NULL, "s", scope);
         if (r < 0)
                 log_debug_errno(r, "Failed to drop reference to scope '%s', ignoring: %s", scope, bus_error_message(&error, r));
 

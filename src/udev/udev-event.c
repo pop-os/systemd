@@ -1,23 +1,29 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "sd-netlink.h"
+
 #include "alloc-util.h"
 #include "device-internal.h"
 #include "device-private.h"
 #include "device-util.h"
-#include "fs-util.h"
+#include "hashmap.h"
 #include "netif-naming-scheme.h"
 #include "netlink-util.h"
 #include "path-util.h"
+#include "socket-util.h"
 #include "string-util.h"
 #include "strv.h"
+#include "time-util.h"
 #include "udev-event.h"
 #include "udev-node.h"
+#include "udev-rules.h"
 #include "udev-trace.h"
 #include "udev-util.h"
+#include "udev-worker.h"
 #include "user-util.h"
 
-UdevEvent *udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode) {
-        int log_level = worker ? worker->log_level : log_get_max_level();
+UdevEvent* udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode) {
+        int log_level = worker ? worker->config.log_level : log_get_max_level();
         UdevEvent *event;
 
         assert(dev);
@@ -27,6 +33,7 @@ UdevEvent *udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode) {
                 return NULL;
 
         *event = (UdevEvent) {
+                .n_ref = 1,
                 .worker = worker,
                 .rtnl = worker ? sd_netlink_ref(worker->rtnl) : NULL,
                 .dev = sd_device_ref(dev),
@@ -42,21 +49,25 @@ UdevEvent *udev_event_new(sd_device *dev, UdevWorker *worker, EventMode mode) {
         return event;
 }
 
-UdevEvent *udev_event_free(UdevEvent *event) {
+static UdevEvent* udev_event_free(UdevEvent *event) {
         if (!event)
                 return NULL;
 
         sd_device_unref(event->dev);
         sd_device_unref(event->dev_db_clone);
         sd_netlink_unref(event->rtnl);
-        ordered_hashmap_free_free_key(event->run_list);
-        ordered_hashmap_free_free_free(event->seclabel_list);
+        ordered_hashmap_free(event->run_list);
+        ordered_hashmap_free(event->seclabel_list);
+        hashmap_free(event->written_sysattrs);
+        hashmap_free(event->written_sysctls);
         free(event->program_result);
         free(event->name);
         strv_free(event->altnames);
 
         return mfree(event);
 }
+
+DEFINE_TRIVIAL_REF_UNREF_FUNC(UdevEvent, udev_event, udev_event_free);
 
 static int device_rename(sd_device *device, const char *name) {
         _cleanup_free_ char *new_syspath = NULL;
@@ -89,11 +100,8 @@ static int device_rename(sd_device *device, const char *name) {
         if (r < 0)
                 return r;
 
-        r = sd_device_get_property_value(device, "INTERFACE", &s);
-        if (r == -ENOENT)
+        if (device_get_ifname(device, &s) < 0)
                 return 0;
-        if (r < 0)
-                return r;
 
         /* like DEVPATH_OLD, INTERFACE_OLD is not saved to the db, but only stays around for the current event */
         r = device_add_property_internal(device, "INTERFACE_OLD", s);
@@ -131,9 +139,9 @@ static int rename_netif(UdevEvent *event) {
                 return 0;
         }
 
-        r = sd_device_get_sysname(dev, &s);
+        r = device_get_ifname(dev, &s);
         if (r < 0)
-                return log_device_warning_errno(dev, r, "Failed to get sysname: %m");
+                return log_device_warning_errno(dev, r, "Failed to get ifname: %m");
 
         if (streq(event->name, s))
                 return 0; /* The interface name is already requested name. */
@@ -238,9 +246,9 @@ static int assign_altnames(UdevEvent *event) {
         if (r < 0)
                 return log_device_warning_errno(dev, r, "Failed to get ifindex: %m");
 
-        r = sd_device_get_sysname(dev, &s);
+        r = device_get_ifname(dev, &s);
         if (r < 0)
-                return log_device_warning_errno(dev, r, "Failed to get sysname: %m");
+                return log_device_warning_errno(dev, r, "Failed to get ifname: %m");
 
         /* Filter out the current interface name. */
         strv_remove(event->altnames, s);

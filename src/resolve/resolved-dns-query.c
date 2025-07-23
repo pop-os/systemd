@@ -1,16 +1,27 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "sd-bus.h"
+#include "sd-varlink.h"
+
 #include "alloc-util.h"
 #include "dns-domain.h"
 #include "dns-type.h"
 #include "event-util.h"
 #include "glyph-util.h"
-#include "hostname-util.h"
-#include "local-addresses.h"
+#include "log.h"
+#include "resolved-dns-answer.h"
+#include "resolved-dns-packet.h"
 #include "resolved-dns-query.h"
+#include "resolved-dns-question.h"
+#include "resolved-dns-rr.h"
+#include "resolved-dns-scope.h"
+#include "resolved-dns-search-domain.h"
 #include "resolved-dns-synthesize.h"
+#include "resolved-dns-transaction.h"
 #include "resolved-etc-hosts.h"
+#include "resolved-manager.h"
 #include "resolved-timeouts.h"
+#include "set.h"
 #include "string-util.h"
 
 #define QUERIES_MAX 2048
@@ -136,7 +147,7 @@ static int dns_query_candidate_next_search_domain(DnsQueryCandidate *c) {
         dns_search_domain_unref(c->search_domain);
         c->search_domain = dns_search_domain_ref(next);
 
-        return 1;
+        return 0;
 }
 
 static int dns_query_candidate_add_transaction(
@@ -263,8 +274,6 @@ static DnsTransactionState dns_query_candidate_state(DnsQueryCandidate *c) {
                 default:
                         if (state != DNS_TRANSACTION_SUCCESS)
                                 state = t->state;
-
-                        break;
                 }
 
         return state;
@@ -371,7 +380,7 @@ void dns_query_candidate_notify(DnsQueryCandidate *c) {
                                         c->query->manager->event,
                                         &c->timeout_event_source,
                                         CLOCK_BOOTTIME,
-                                        CANDIDATE_EXPEDITED_TIMEOUT_USEC, /* accuracy_usec= */ 0,
+                                        CANDIDATE_EXPEDITED_TIMEOUT_USEC, /* accuracy= */ 0,
                                         on_candidate_timeout, c,
                                         /* priority= */ 0, "candidate-timeout",
                                         /* force_reset= */ false);
@@ -395,7 +404,7 @@ void dns_query_candidate_notify(DnsQueryCandidate *c) {
                                 goto fail;
 
                         if (r > 0) {
-                                /* New transactions where queued. Start them and wait */
+                                /* New transactions have been queued. Start them and wait */
 
                                 r = dns_query_candidate_go(c);
                                 if (r < 0)
@@ -511,12 +520,88 @@ DnsQuery *dns_query_free(DnsQuery *q) {
 
         free(q->request_address_string);
 
+        dnssd_discovered_service_unref(q->dnsservice_request);
+
+        dns_service_browser_unref(q->service_browser_request);
+
         if (q->manager) {
                 LIST_REMOVE(queries, q->manager->dns_queries, q);
                 q->manager->n_dns_queries--;
         }
 
         return mfree(q);
+}
+
+typedef enum RefuseRecordTypeResult {
+        REFUSE_BAD,
+        REFUSE_GOOD,
+        REFUSE_PARTIAL,
+} RefuseRecordTypeResult;
+
+static RefuseRecordTypeResult test_refuse_record_types(Set *refuse_record_types, DnsQuestion *question) {
+        bool has_good = false, has_bad = false;
+        DnsResourceKey *key;
+
+        DNS_QUESTION_FOREACH(key, question)
+                if (set_contains(refuse_record_types, INT_TO_PTR(key->type)))
+                        has_bad = true;
+                else
+                        has_good = true;
+
+        if (has_bad && !has_good)
+                return REFUSE_BAD;
+        if (!has_bad) {
+                assert(has_good); /* The question should have at least one key. */
+                return REFUSE_GOOD;
+        }
+
+        return REFUSE_PARTIAL;
+}
+
+static int manager_validate_and_mangle_question(Manager *manager, DnsQuestion **question, DnsQuestion **ret_allocated) {
+        int r;
+
+        assert(manager);
+        assert(question);
+        assert(ret_allocated);
+
+        if (dns_question_isempty(*question)) {
+                *ret_allocated = NULL;
+                return 0;
+        }
+
+        if (set_isempty(manager->refuse_record_types)) {
+                *ret_allocated = NULL;
+                return 0; /* No filtering configured. Let's shortcut. */
+        }
+
+        RefuseRecordTypeResult result = test_refuse_record_types(manager->refuse_record_types, *question);
+        if (result == REFUSE_BAD)
+                return -ENOANO; /* All bad, refuse.*/
+        if (result == REFUSE_GOOD) {
+                *ret_allocated = NULL;
+                return 0; /* All good. Not necessary to filter. */
+        }
+
+        assert(result == REFUSE_PARTIAL);
+
+        /* Mangle the question suppressing bad entries, leaving good entries */
+        _cleanup_(dns_question_unrefp) DnsQuestion *new_question = dns_question_new(dns_question_size(*question));
+        if (!new_question)
+                return -ENOMEM;
+
+        DnsQuestionItem *item;
+        DNS_QUESTION_FOREACH_ITEM(item, *question) {
+                if (set_contains(manager->refuse_record_types, INT_TO_PTR(item->key->type)))
+                        continue;
+                r = dns_question_add_raw(new_question, item->key, item->flags);
+                if (r < 0)
+                        return r;
+        }
+
+        *question = new_question;
+        *ret_allocated = TAKE_PTR(new_question);
+        return 0;
 }
 
 int dns_query_new(
@@ -535,11 +620,29 @@ int dns_query_new(
 
         assert(m);
 
+        /* Check for records that is refused and refuse query for the records if matched in configuration */
+        _unused_ _cleanup_(dns_question_unrefp) DnsQuestion *filtered_question_utf8 = NULL;
+        r = manager_validate_and_mangle_question(m, &question_utf8, &filtered_question_utf8);
+        if (r < 0)
+                return r;
+
+        _unused_ _cleanup_(dns_question_unrefp) DnsQuestion *filtered_question_idna = NULL;
+        r = manager_validate_and_mangle_question(m, &question_idna, &filtered_question_idna);
+        if (r < 0)
+                return r;
+
         if (question_bypass) {
                 /* It's either a "bypass" query, or a regular one, but can't be both. */
                 if (question_utf8 || question_idna)
                         return -EINVAL;
 
+                assert(dns_question_size(question_bypass->question) == 1);
+
+                /* In bypass mode we'll never mangle the question, but only deny or allow. (In bypass mode
+                 * there's only going to be one entry in the query, hence there's no point in mangling
+                 * questions, i.e. leaving some entries in and removing others.) */
+                if (test_refuse_record_types(m->refuse_record_types, question_bypass->question) != REFUSE_GOOD)
+                        return -ENOANO;
         } else {
                 bool good = false;
 
@@ -995,7 +1098,6 @@ static void dns_query_accept(DnsQuery *q, DnsQueryCandidate *c) {
                         DNS_PACKET_REPLACE(q->answer_full_packet, dns_packet_ref(t->received));
 
                         state = t->state;
-                        break;
                 }
         }
 
@@ -1059,8 +1161,13 @@ void dns_query_ready(DnsQuery *q) {
                         break;
 
                 default:
-                        /* Any kind of failure */
-                        bad = c;
+                        /* Any kind of failure: save the most recent error, as long as we never saved one
+                         * before or our current one is "conclusive" in the sense that we definitely did a
+                         * lookup, and thus have a real answer (which might be a failure, but is still *some*
+                         * answer). */
+
+                        if (!bad || !IN_SET(state, DNS_TRANSACTION_NO_SERVERS, DNS_TRANSACTION_NETWORK_DOWN, DNS_TRANSACTION_NO_SOURCE))
+                                bad = c;
                         break;
                 }
         }
@@ -1107,7 +1214,7 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
         if (r > 0)
                 log_debug("Following CNAME/DNAME %s %s %s.",
                           dns_question_first_name(q->question_idna),
-                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                          glyph(GLYPH_ARROW_RIGHT),
                           dns_question_first_name(nq_idna));
 
         k = dns_question_is_equal(q->question_idna, q->question_utf8);
@@ -1124,7 +1231,7 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
                 if (k > 0)
                         log_debug("Following UTF8 CNAME/DNAME %s %s %s.",
                                   dns_question_first_name(q->question_utf8),
-                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                                  glyph(GLYPH_ARROW_RIGHT),
                                   dns_question_first_name(nq_utf8));
         }
 
@@ -1387,4 +1494,71 @@ bool dns_query_fully_authoritative(DnsQuery *q) {
          * zones. (Note: the SD_RESOLVED_FROM_xyz flags we merge on each redirect, hence no need to
          * explicitly check previous redirects here.) */
         return (q->answer_query_flags & SD_RESOLVED_FROM_MASK & ~(SD_RESOLVED_FROM_TRUST_ANCHOR | SD_RESOLVED_FROM_ZONE)) == 0;
+}
+
+int validate_and_mangle_query_flags(
+                Manager *manager,
+                uint64_t *flags,
+                const char *name,
+                uint64_t ok) {
+
+        assert(manager);
+        assert(flags);
+
+        /* Checks that the client supplied interface index and flags parameter actually are valid and make
+         * sense in our method call context. Specifically:
+         *
+         * 1. Checks that the interface index is either 0 (meaning *all* interfaces) or positive
+         *
+         * 2. Only the protocols flags and a bunch of NO_XYZ flags are set, at most. Plus additional flags
+         *    specific to our method, passed in the "ok" parameter.
+         *
+         * 3. If zero protocol flags are specified it is automatically turned into *all* protocols. This way
+         *    clients can simply pass 0 as flags and all will work as it should. They can also use this so
+         *    that clients don't have to know all the protocols resolved implements, but can just specify 0
+         *    to mean "all supported protocols".
+         */
+
+        if (*flags & ~(SD_RESOLVED_PROTOCOLS_ALL|
+                       SD_RESOLVED_NO_CNAME|
+                       SD_RESOLVED_NO_VALIDATE|
+                       SD_RESOLVED_NO_SYNTHESIZE|
+                       SD_RESOLVED_NO_CACHE|
+                       SD_RESOLVED_NO_ZONE|
+                       SD_RESOLVED_NO_TRUST_ANCHOR|
+                       SD_RESOLVED_NO_NETWORK|
+                       SD_RESOLVED_NO_STALE|
+                       SD_RESOLVED_RELAX_SINGLE_LABEL|
+                       ok))
+                return -EINVAL;
+
+        if ((*flags & SD_RESOLVED_PROTOCOLS_ALL) == 0) /* If no protocol is enabled, enable all */
+                *flags |= SD_RESOLVED_PROTOCOLS_ALL;
+
+        /* Imply SD_RESOLVED_NO_SEARCH if permitted and name is dot suffixed. */
+        if (name && FLAGS_SET(ok, SD_RESOLVED_NO_SEARCH) && dns_name_dot_suffixed(name) > 0)
+                *flags |= SD_RESOLVED_NO_SEARCH;
+
+        /* If both A and AAAA are refused, set SD_RESOLVED_NO_ADDRESS flag if it is allowed. */
+        if (set_contains(manager->refuse_record_types, INT_TO_PTR(DNS_TYPE_A)) &&
+            set_contains(manager->refuse_record_types, INT_TO_PTR(DNS_TYPE_AAAA)) &&
+            FLAGS_SET(ok, SD_RESOLVED_NO_ADDRESS))
+                *flags |= SD_RESOLVED_NO_ADDRESS;
+
+        /* Similarly, if TXT is refused, set SD_RESOLVED_NO_TXT flag if it is allowed. */
+        if (set_contains(manager->refuse_record_types, INT_TO_PTR(DNS_TYPE_TXT)) &&
+            FLAGS_SET(ok, SD_RESOLVED_NO_TXT))
+                *flags |= SD_RESOLVED_NO_TXT;
+
+        return 0;
+}
+
+uint64_t dns_query_reply_flags_make(DnsQuery *q) {
+        assert(q);
+
+        return SD_RESOLVED_FLAGS_MAKE(q->answer_protocol,
+                                      q->answer_family,
+                                      dns_query_fully_authenticated(q),
+                                      dns_query_fully_confidential(q)) |
+                (q->answer_query_flags & (SD_RESOLVED_FROM_MASK|SD_RESOLVED_SYNTHETIC));
 }

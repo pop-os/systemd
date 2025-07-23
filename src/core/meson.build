@@ -10,7 +10,6 @@ libcore_sources = files(
         'bpf-restrict-ifaces.c',
         'bpf-socket-bind.c',
         'cgroup.c',
-        'core-varlink.c',
         'dbus-automount.c',
         'dbus-cgroup.c',
         'dbus-device.c',
@@ -32,7 +31,6 @@ libcore_sources = files(
         'dbus.c',
         'device.c',
         'dynamic-user.c',
-        'efi-random.c',
         'emergency-action.c',
         'exec-credential.c',
         'execute.c',
@@ -64,17 +62,17 @@ libcore_sources = files(
         'unit-printf.c',
         'unit-serialize.c',
         'unit.c',
+        'varlink.c',
+        'varlink-cgroup.c',
+        'varlink-common.c',
+        'varlink-dynamic-user.c',
+        'varlink-manager.c',
+        'varlink-unit.c',
 )
 
-if conf.get('BPF_FRAMEWORK') == 1
-        libcore_sources += files(
-                'bpf-util.c',
-        )
-endif
-
-subdir('bpf/socket_bind')
-subdir('bpf/restrict_fs')
-subdir('bpf/restrict_ifaces')
+subdir('bpf/socket-bind')
+subdir('bpf/restrict-fs')
+subdir('bpf/restrict-ifaces')
 
 if conf.get('BPF_FRAMEWORK') == 1
         libcore_sources += [
@@ -83,34 +81,55 @@ if conf.get('BPF_FRAMEWORK') == 1
                 restrict_ifaces_skel_h]
 endif
 
+sources += libcore_sources
+
 load_fragment_gperf_gperf = custom_target(
-        'load-fragment-gperf.gperf',
         input : 'load-fragment-gperf.gperf.in',
         output: 'load-fragment-gperf.gperf',
         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'])
 
 load_fragment_gperf_c = custom_target(
-        'load-fragment-gperf.c',
         input : load_fragment_gperf_gperf,
         output : 'load-fragment-gperf.c',
         command : [gperf, '@INPUT@', '--output-file', '@OUTPUT@'])
 
 awkscript = 'load-fragment-gperf-nulstr.awk'
 load_fragment_gperf_nulstr_c = custom_target(
-        'load-fragment-gperf-nulstr.c',
         input : [awkscript, load_fragment_gperf_gperf],
         output : 'load-fragment-gperf-nulstr.c',
         command : [awk, '-f', '@INPUT0@', '@INPUT1@'],
         capture : true)
 
+generate_bpf_delegate_configs = files('generate-bpf-delegate-configs.py')
+bpf_delegate_configs_inc = custom_target(
+        input : [generate_bpf_delegate_configs, bpf_delegate_sources],
+        output : 'bpf-delegate-configs.inc',
+        command : [python,
+                   generate_bpf_delegate_configs,
+                   'code',
+                   bpf_delegate_sources],
+        capture : true)
+
+bpf_delegate_xml = custom_target(
+        input : [generate_bpf_delegate_configs, bpf_delegate_sources],
+        output : 'bpf-delegate.xml',
+        command : [python,
+                   generate_bpf_delegate_configs,
+                   'doc',
+                   bpf_delegate_sources],
+        capture : true)
+man_page_depends += bpf_delegate_xml
+
+generated_sources += [load_fragment_gperf_c, load_fragment_gperf_nulstr_c, bpf_delegate_configs_inc]
+libcore_sources += [load_fragment_gperf_c, load_fragment_gperf_nulstr_c, bpf_delegate_configs_inc]
+libcore_build_dir = meson.current_build_dir()
 libcore_name = 'systemd-core-@0@'.format(shared_lib_tag)
 
 libcore_static = static_library(
         libcore_name,
         libcore_sources,
-        load_fragment_gperf_c,
-        load_fragment_gperf_nulstr_c,
-        include_directories : includes,
+        include_directories : [includes, include_directories('.')],
+        implicit_include_directories : false,
         c_args : ['-fvisibility=default'],
         dependencies : [libacl,
                         libaudit,
@@ -118,7 +137,6 @@ libcore_static = static_library(
                         libdl,
                         libm,
                         libmount,
-                        libpam,
                         librt,
                         libseccomp,
                         libselinux,
@@ -129,6 +147,7 @@ libcore_static = static_library(
 libcore = shared_library(
         libcore_name,
         c_args : ['-fvisibility=default'],
+        implicit_include_directories : false,
         link_args : ['-shared',
                      '-Wl,--version-script=' + libshared_sym_path],
         link_depends : libshared_sym_path,
@@ -149,6 +168,7 @@ systemd_sources = files(
         'ipe-setup.c',
         'selinux-setup.c',
         'smack-setup.c',
+        'efi-random.c',
 )
 
 systemd_executor_sources = files(
@@ -161,6 +181,7 @@ executor_libs = get_option('link-executor-shared') ? \
                 libcore,
                 libshared,
         ] : [
+                libc_wrapper_static,
                 libcore_static,
                 libshared_static,
                 libbasic_static,
@@ -178,7 +199,7 @@ executables += [
                         libshared,
                 ],
                 'dependencies' : [
-                        libapparmor,
+                        libapparmor_cflags,
                         libkmod_cflags,
                         libseccomp,
                         libselinux,
@@ -191,7 +212,7 @@ executables += [
                 'include_directories' : core_includes,
                 'link_with' : executor_libs,
                 'dependencies' : [
-                        libapparmor,
+                        libapparmor_cflags,
                         libpam,
                         libseccomp,
                         libselinux,
@@ -230,7 +251,6 @@ foreach item : in_files
         dir = item[1]
 
         custom_target(
-                file,
                 input : file + '.in',
                 output: file,
                 command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
@@ -239,7 +259,6 @@ foreach item : in_files
 endforeach
 
 systemd_pc = custom_target(
-        'systemd.pc',
         input : 'systemd.pc.in',
         output : 'systemd.pc',
         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
@@ -262,13 +281,17 @@ install_emptydir(usergeneratordir)
 if install_sysconfdir
         install_emptydir(pkgsysconfdir / 'system')
         install_emptydir(pkgsysconfdir / 'user')
-        install_emptydir(sysconfdir / 'xdg/systemd')
-        meson.add_install_script(sh, '-c', ln_s.format(pkgsysconfdir / 'user',
-                                                       sysconfdir / 'xdg/systemd/user'))
+
+        assert(sysconfdir / 'systemd' == pkgsysconfdir)
+        install_symlink('user',
+                        pointing_to : '../../systemd/user',
+                        install_dir : sysconfdir / 'xdg/systemd')
 endif
 
-install_emptydir(sbindir)
-meson.add_install_script(sh, '-c', ln_s.format(libexecdir / 'systemd', sbindir / 'init'))
+assert(fs.parent(sbindir) / 'lib/systemd' == libexecdir)
+install_symlink('init',
+                pointing_to : '../lib/systemd/systemd',
+                install_dir : sbindir)
 
 ############################################################
 

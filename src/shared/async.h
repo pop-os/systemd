@@ -1,10 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <sys/types.h>
-
-#include "macro.h"
-#include "rm-rf.h"
+#include "forward.h"
 
 /* These functions implement various potentially slow operations that are executed asynchronously. They are
  * carefully written to not use pthreads, but use fork() or clone() (without CLONE_VM) so that the child does
@@ -19,9 +16,12 @@
  * child, or never use clone()/clone3() and stick to fork() only. Because we need clone()/clone3() we opted
  * for avoiding threads. */
 
-int asynchronous_sync(pid_t *ret_pid);
-int asynchronous_fsync(int fd, pid_t *ret_pid);
+int asynchronous_sync(PidRef *ret_pid);
+int asynchronous_fsync(int fd, PidRef *ret_pid);
+
 int asynchronous_close(int fd);
-int asynchronous_rm_rf(const char *p, RemoveFlags flags);
+void asynchronous_close_many(const int fds[], size_t n_fds);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(int, asynchronous_close);
+
+int asynchronous_rm_rf(const char *p, RemoveFlags flags);

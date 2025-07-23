@@ -59,6 +59,8 @@ typedef struct {
 } _packed_ EFI_TCG2_EVENT;
 
 typedef struct {
+        uint32_t Size;
+        EFI_TCG2_EVENT_HEADER Header;
         uint32_t EventId;
         uint32_t EventSize;
         uint8_t Event[];
@@ -77,7 +79,9 @@ struct EFI_TCG2_PROTOCOL {
                         uint64_t DataToHashLen,
                         EFI_TCG2_EVENT *EfiTcgEvent);
         void *SubmitCommand;
-        void *GetActivePcrBanks;
+        EFI_STATUS (EFIAPI *GetActivePcrBanks)(
+                        EFI_TCG2_PROTOCOL *This,
+                        uint32_t *ActivePcrBanks);
         void *SetActivePcrBanks;
         void *GetResultOfSetActivePcrBanks;
 };

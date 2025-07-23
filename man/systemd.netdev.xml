@@ -164,6 +164,9 @@
           <row><entry><varname>geneve</varname></entry>
           <entry>A GEneric NEtwork Virtualization Encapsulation (GENEVE) netdev driver.</entry></row>
 
+          <row><entry><varname>hsr</varname></entry>
+          <entry>A High-availability Seamless Redundancy (HSR) or Parallel Redundancy Protocol (PRP) interface. HSR and PRP are two protocols defined by the IEC 62439-3 standard, providing seamless failover against failure of any single network component.</entry></row>
+
           <row><entry><varname>l2tp</varname></entry>
           <entry>A Layer 2 Tunneling Protocol (L2TP) is a tunneling protocol used to support virtual private networks (VPNs) or as part of the delivery of services by ISPs. It does not provide any encryption or confidentiality by itself</entry></row>
 
@@ -223,6 +226,7 @@
       <xi:include href="systemd.link.xml" xpointer="virtualization" />
       <xi:include href="systemd.link.xml" xpointer="kernel-command-line" />
       <xi:include href="systemd.link.xml" xpointer="kernel-version" />
+      <xi:include href="systemd.link.xml" xpointer="version" />
       <xi:include href="systemd.link.xml" xpointer="credential" />
       <xi:include href="systemd.link.xml" xpointer="architecture" />
       <xi:include href="systemd.link.xml" xpointer="firmware" />
@@ -456,6 +460,16 @@
           <xi:include href="version-info.xml" xpointer="v257"/>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>LinkLocalLearning=</varname></term>
+        <listitem>
+          <para>Takes a boolean. This enables learning source addresses from link local frames. When unset, the
+          kernel's default will be used.
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -659,7 +673,8 @@
       <varlistentry>
         <term><varname>VNI=</varname></term>
         <listitem>
-          <para>The VXLAN Network Identifier (or VXLAN Segment ID). Takes a number in the range 1…16777215.</para>
+          <para>The VXLAN Network Identifier (or VXLAN Segment ID). Takes a number in the range 1…16777215.
+          Ignored if <varname>External=</varname> is set to true.</para>
 
         <xi:include href="version-info.xml" xpointer="v243"/>
         </listitem>
@@ -889,6 +904,24 @@
           <xi:include href="version-info.xml" xpointer="v247"/>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>External=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, the vxlan interface is externally controlled, for example by an
+          EVPN control plane. Defaults to false.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>VNIFilter=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, the interface is capable of filtering VNI filtering.
+          Ignored if <varname>External=</varname> is set to false. Defaults to false.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -998,6 +1031,58 @@
   </refsect1>
 
   <refsect1>
+    <title>[HSR] Section Options</title>
+
+    <para>The [HSR] section only applies for
+    netdevs of kind <literal>hsr</literal>, and accepts the
+    following keys:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>Ports=</varname></term>
+        <listitem>
+          <para>Specifies the underlying interfaces. This field is mandatory and must contain exactly two
+          interface names separated by space. This option can be specified multiples times, hence the two cases below have the same result:
+          <programlisting>Ports=eth1 eth2</programlisting>
+          <programlisting>Ports=eth1
+Ports=eth2</programlisting>
+          All the previous assignments are cleared when an empty string is specified.
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Protocol=</varname></term>
+        <listitem>
+          <para>Specifies the protocol used by the interface. Takes one of <literal>hsr</literal> or
+          <literal>prp</literal>. Defaults to <literal>hsr</literal>.</para>
+
+          <para>Both protocols work by sending two copies of every outgoing frame, one for each of the two
+          ports. The destination node receives the two frames and and keeps only the first one. If a link
+          fails, only one of the two frames is received. HSR uses a ring topology where the two outgoing
+          frames are sent in opposite directions in the ring. PRP doesn't need a specific topology, but it
+          requires two completely redundant networks attached to the two ports.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Supervision=</varname></term>
+        <listitem>
+          <para>Specifies the last byte of the destination MAC address of supervision frames. Takes a number
+          between 0 and 255. Defaults to 0. Supervision frames are used by the HSR and the PRP protocols to
+          monitor the integrity of the network and the presence of nodes. The first 5 bytes of the
+          destination MAC are always 01:15:4E:00:01 while the last byte is configurable.
+          </para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[BareUDP] Section Options</title>
 
     <para>The [BareUDP] section only applies for
@@ -1048,7 +1133,7 @@
       <varlistentry>
         <term><varname>TunnelId=</varname></term>
         <listitem>
-          <para>Specifies the tunnel identifier. Takes an number in the range 1…4294967295. The value used
+          <para>Specifies the tunnel identifier. Takes a number in the range 1…4294967295. The value used
           must match the <literal>PeerTunnelId=</literal> value being used at the peer. This setting is
           compulsory.</para>
 
@@ -1126,7 +1211,7 @@
         </listitem>
       </varlistentry>
       <varlistentry>
-        <term><varname>UDP6ZeroChecksumTx=</varname></term>
+        <term><varname>UDP6ChecksumTx=</varname></term>
         <listitem>
           <para>Takes a boolean. When true, skip UDP checksum calculation for transmitted packets over IPv6.</para>
 
@@ -1134,7 +1219,7 @@
         </listitem>
       </varlistentry>
       <varlistentry>
-        <term><varname>UDP6ZeroChecksumRx=</varname></term>
+        <term><varname>UDP6ChecksumRx=</varname></term>
         <listitem>
           <para>Takes a boolean. When true, allows incoming UDP packets over IPv6 with zero checksum field.</para>
 
@@ -1162,7 +1247,7 @@
       <varlistentry>
         <term><varname>SessionId=</varname></term>
         <listitem>
-          <para>Specifies the session identifier. Takes an number in the range 1…4294967295. The value used
+          <para>Specifies the session identifier. Takes a number in the range 1…4294967295. The value used
           must match the <literal>SessionId=</literal> value being used at the peer. This setting is
           compulsory.</para>
 
@@ -1172,7 +1257,7 @@
       <varlistentry>
         <term><varname>PeerSessionId=</varname></term>
         <listitem>
-          <para>Specifies the peer session identifier. Takes an number in the range 1…4294967295.
+          <para>Specifies the peer session identifier. Takes a number in the range 1…4294967295.
           The value used must match the <literal>PeerSessionId=</literal> value being used at the peer.
           This setting is compulsory.</para>
 
@@ -1423,7 +1508,7 @@
           <para>A static local address for tunneled packets. It must be an address on another interface
           of this host, or one of the special values <literal>any</literal>,
           <literal>ipv4_link_local</literal>, <literal>ipv6_link_local</literal>,
-          <literal>dhcp4</literal>, <literal>dhcp6</literal>, and <literal>slaac</literal>. If one
+          <literal>dhcp4</literal>, <literal>dhcp6</literal>, <literal>dhcp_pd</literal>, and <literal>slaac</literal>. If one
           of the special values except for <literal>any</literal> is specified, an address which
           matches the corresponding type on the underlying interface will be used. Defaults to
           <literal>any</literal>.</para>
@@ -1569,12 +1654,61 @@
       <varlistentry>
         <term><varname>Mode=</varname></term>
         <listitem>
-          <para>An <literal>ip6tnl</literal> tunnel can be in one of three
-          modes
-          <literal>ip6ip6</literal> for IPv6 over IPv6,
-          <literal>ipip6</literal> for IPv4 over IPv6 or
-          <literal>any</literal> for either.
-          </para>
+          <para>Specifies the tunnel mode. Acceptable values depend on the tunnel kind.</para>
+
+          <table>
+            <title>Supported tunnel modes</title>
+
+            <tgroup cols='3'>
+              <colspec colname='kind' />
+              <colspec colname='mode' />
+              <colspec colname='explanation' />
+              <thead>
+                <row>
+                  <entry>Kind</entry>
+                  <entry>Mode</entry>
+                  <entry>Description</entry>
+                </row>
+              </thead>
+              <tbody>
+                <row>
+                  <entry morerows="1"><literal>ipip</literal></entry>
+                  <entry><literal>ipip</literal></entry>
+                  <entry>IPv4 over IPv4 (default)</entry>
+                </row>
+                <row>
+                  <entry><literal>any</literal></entry>
+                  <entry>both IPv4 and IPv6 over IPv4</entry>
+                </row>
+                <row>
+                  <entry morerows="2"><literal>sit</literal></entry>
+                  <entry><literal>ipip</literal></entry>
+                  <entry>IPv4 over IPv4</entry>
+                </row>
+                <row>
+                  <entry><literal>ip6ip</literal></entry>
+                  <entry>IPv6 over IPv4 (default)</entry>
+                </row>
+                <row>
+                  <entry><literal>any</literal></entry>
+                  <entry>both IPv4 and IPv6 over IPv4</entry>
+                </row>
+                <row>
+                  <entry morerows="2"><literal>ip6tnl</literal></entry>
+                  <entry><literal>ipip6</literal></entry>
+                  <entry>IPv4 over IPv6</entry>
+                </row>
+                <row>
+                  <entry><literal>ip6ip6</literal></entry>
+                  <entry>IPv6 over IPv6</entry>
+                </row>
+                <row>
+                  <entry><literal>any</literal></entry>
+                  <entry>both IPv4 and IPv6 over IPv6 (default)</entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </table>
 
         <xi:include href="version-info.xml" xpointer="v219"/>
         </listitem>
@@ -1707,7 +1841,7 @@
       <varlistentry>
         <term><varname>ERSPANHardwareId=</varname></term>
         <listitem>
-          <para>Specifies an unique identifier of the ERSPAN v2 engine. Takes an integer in the range 0…63.
+          <para>Specifies a unique identifier of the ERSPAN v2 engine. Takes an integer in the range 0…63.
           Only used when <varname>ERSPANVersion=2</varname>. Defaults to 0.</para>
 
           <xi:include href="version-info.xml" xpointer="v252"/>
@@ -1885,16 +2019,16 @@
       </varlistentry>
       <varlistentry>
         <term><varname>User=</varname></term>
-        <listitem><para>User to grant access to the
-        <filename>/dev/net/tun</filename> device.</para>
+        <listitem><para>User to grant access to the <filename>/dev/net/tun</filename> device. The specified
+        user must be a system user.</para>
 
         <xi:include href="version-info.xml" xpointer="v215"/>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Group=</varname></term>
-        <listitem><para>Group to grant access to the
-        <filename>/dev/net/tun</filename> device.</para>
+        <listitem><para>Group to grant access to the <filename>/dev/net/tun</filename> device. The specified
+        group must be a system group.</para>
 
         <xi:include href="version-info.xml" xpointer="v215"/>
         </listitem>
@@ -2457,7 +2591,7 @@
           <para>Takes a boolean. Specifies that duplicate frames (received on inactive ports)
           should be dropped when false, or delivered when true. Normally, bonding will drop
           duplicate frames (received on inactive ports), which is desirable for
-          most users. But there are some times it is nice to allow duplicate
+          most users. But there are some cases where it is nice to allow duplicate
           frames to be delivered. The default value is false (drop duplicate frames
           received on inactive ports).
           </para>
@@ -2714,9 +2848,9 @@
       </varlistentry>
 
       <varlistentry id='ipoib_umcast'>
-        <term><varname>IgnoreUserspaceMulticastGroup=</varname></term>
+        <term><varname>IgnoreUserspaceMulticastGroups=</varname></term>
         <listitem>
-          <para>Takes an boolean value. When true, the kernel ignores multicast groups handled by
+          <para>Takes a boolean value. When true, the kernel ignores multicast groups handled by
           userspace. Defaults to unset, and the kernel's default is used.</para>
 
           <xi:include href="version-info.xml" xpointer="v250"/>

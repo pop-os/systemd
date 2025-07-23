@@ -474,8 +474,8 @@
         <term><option>-k</option></term>
         <term><option>--dmesg</option></term>
 
-        <listitem><para>Show only kernel messages. This implies <option>-b</option> and adds the match
-        <literal>_TRANSPORT=kernel</literal>.</para>
+        <listitem><para>Show only kernel messages. This adds the match <literal>_TRANSPORT=kernel</literal>.
+        This implies <option>--boot=0</option> unless explicitly specified otherwise.</para>
 
         <xi:include href="version-info.xml" xpointer="v205"/></listitem>
       </varlistentry>
@@ -773,8 +773,13 @@
         <term><option>-f</option></term>
         <term><option>--follow</option></term>
 
-        <listitem><para>Show only the most recent journal entries, and continuously print new entries as
-        they are appended to the journal.</para></listitem>
+        <listitem><para>Show only the most recent journal entries, and continuously print new entries as they
+        are appended to the journal, until Ctrl-C is hit (or the tool is otherwise terminated).</para>
+
+        <para><command>journalctl</command> will send an
+        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+        <literal>READY=1</literal> message once it initialized and successfully established its watch on the
+        journal.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -791,6 +796,20 @@
         <listitem><para>Suppresses all informational messages (i.e. "-- Journal begins at …", "-- Reboot
         --"), any warning messages regarding inaccessible system journals when run as a normal
         user.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--synchronize-on-exit=</option></term>
+
+        <listitem><para>Takes a boolean argument. If true and operating in <option>--follow</option> mode, a
+        journal synchronization request (equivalent to <command>journalctl --sync</command>) is issued when
+        <constant>SIGTERM</constant>/<constant>SIGINT</constant> is received, and log output continues until
+        this request completes. This is useful for synchronizing journal log output to the runtime of
+        services or external events, ensuring that any log data enqueued to the logging subsystem by
+        the time <constant>SIGTERM</constant>/<constant>SIGINT</constant> is issued is guaranteed to be
+        processed and displayed by the time log output ends. Defaults to false.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -809,11 +828,10 @@
         <term><option>--pager-end</option></term>
 
         <listitem><para>Immediately jump to the end of the journal inside the implied pager tool. This
-        implies <option>-n1000</option> to guarantee that the pager will not buffer logs of unbounded
-        size. This may be overridden with an explicit <option>-n</option> with some other numeric value,
-        while <option>-nall</option> will disable this cap.  Note that this option is only supported for
-        the <citerefentry
-        project='man-pages'><refentrytitle>less</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        implies <option>--lines=1000</option> and <option>--boot=0</option> unless explicitly specified
+        otherwise, to guarantee that the pager will not buffer logs of unbounded size. Note that this option
+        is only supported for the
+        <citerefentry project='man-pages'><refentrytitle>less</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         pager.</para>
 
         <xi:include href="version-info.xml" xpointer="v198"/></listitem>
@@ -834,6 +852,9 @@
         <listitem><para>Specifies the change interval for the sealing key when generating an FSS key pair
         with <option>--setup-keys</option>. Shorter intervals increase CPU consumption but shorten the time
         range of undetectable journal alterations. Defaults to 15min.</para>
+
+        <para>Note, <option>--output=json-sse</option> and <option>--output=json-seq</option> are silently
+        migrated to <option>--output=json</option>.</para>
 
         <xi:include href="version-info.xml" xpointer="v189"/></listitem>
       </varlistentry>

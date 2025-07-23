@@ -1,22 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <sys/timex.h>
-
-#include "sd-bus.h"
-#include "sd-event.h"
-#include "sd-network.h"
-#include "sd-resolve.h"
-
-#include "hashmap.h"
 #include "list.h"
 #include "ratelimit.h"
 #include "time-util.h"
+#include "timesyncd-forward.h"
 #include "timesyncd-ntp-message.h"
-
-typedef struct Manager Manager;
-
-#include "timesyncd-server.h"
 
 /*
  * "A client MUST NOT under any conditions use a poll interval less
@@ -32,7 +21,7 @@ typedef struct Manager Manager;
 
 #define DEFAULT_SAVE_TIME_INTERVAL_USEC (60 * USEC_PER_SEC)
 
-struct Manager {
+typedef struct Manager {
         sd_bus *bus;
         sd_event *event;
         sd_resolve *resolve;
@@ -112,12 +101,11 @@ struct Manager {
         /* save time event */
         sd_event_source *event_save_time;
         usec_t save_time_interval_usec;
-        bool save_on_exit;
 
         /* Used to coalesce bus PropertiesChanged events */
         sd_event_source *deferred_ntp_server_event_source;
         unsigned ntp_server_change_mask;
-};
+} Manager;
 
 int manager_new(Manager **ret);
 Manager* manager_free(Manager *m);

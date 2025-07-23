@@ -6,16 +6,16 @@
 #include "sd-messages.h"
 #include "sd-varlink.h"
 
+#include "alloc-util.h"
 #include "build.h"
 #include "efi-loader.h"
 #include "escape.h"
 #include "json-util.h"
 #include "main-func.h"
-#include "openssl-util.h"
 #include "parse-argument.h"
-#include "parse-util.h"
 #include "pcrextend-util.h"
 #include "pretty-print.h"
+#include "string-util.h"
 #include "strv.h"
 #include "tpm2-pcr.h"
 #include "tpm2-util.h"
@@ -131,7 +131,7 @@ static int parse_argv(int argc, char *argv[]) {
                         _cleanup_free_ char *device = NULL;
 
                         if (streq(optarg, "list"))
-                                return tpm2_list_devices();
+                                return tpm2_list_devices(/* legend = */ true, /* quiet = */ false);
 
                         if (!streq(optarg, "auto")) {
                                 device = strdup(optarg);
@@ -238,11 +238,11 @@ static int extend_now(unsigned pcr, const void *data, size_t size, Tpm2Userspace
                 return log_error_errno(r, "Could not extend PCR: %m");
 
         log_struct(LOG_INFO,
-                   "MESSAGE_ID=" SD_MESSAGE_TPM_PCR_EXTEND_STR,
+                   LOG_MESSAGE_ID(SD_MESSAGE_TPM_PCR_EXTEND_STR),
                    LOG_MESSAGE("Extended PCR index %u with '%s' (banks %s).", pcr, safe, joined_banks),
-                   "MEASURING=%s", safe,
-                   "PCR=%u", pcr,
-                   "BANKS=%s", joined_banks);
+                   LOG_ITEM("MEASURING=%s", safe),
+                   LOG_ITEM("PCR=%u", pcr),
+                   LOG_ITEM("BANKS=%s", joined_banks));
 
         return 0;
 }
@@ -297,6 +297,29 @@ static int vl_method_extend(sd_varlink *link, sd_json_variant *parameters, sd_va
         return sd_varlink_reply(link, NULL);
 }
 
+static int vl_server(void) {
+        _cleanup_(sd_varlink_server_unrefp) sd_varlink_server *varlink_server = NULL;
+        int r;
+
+        r = varlink_server_new(&varlink_server, SD_VARLINK_SERVER_ROOT_ONLY, /* userdata= */ NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate Varlink server: %m");
+
+        r = sd_varlink_server_add_interface(varlink_server, &vl_interface_io_systemd_PCRExtend);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add Varlink interface: %m");
+
+        r = sd_varlink_server_bind_method(varlink_server, "io.systemd.PCRExtend.Extend", vl_method_extend);
+        if (r < 0)
+                return log_error_errno(r, "Failed to bind Varlink method: %m");
+
+        r = sd_varlink_server_loop_auto(varlink_server);
+        if (r < 0)
+                return log_error_errno(r, "Failed to run Varlink event loop: %m");
+
+        return 0;
+}
+
 static int run(int argc, char *argv[]) {
         _cleanup_free_ char *word = NULL;
         Tpm2UserspaceEventType event;
@@ -308,29 +331,8 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        if (arg_varlink) {
-                _cleanup_(sd_varlink_server_unrefp) sd_varlink_server *varlink_server = NULL;
-
-                /* Invocation as Varlink service */
-
-                r = varlink_server_new(&varlink_server, SD_VARLINK_SERVER_ROOT_ONLY, NULL);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to allocate Varlink server: %m");
-
-                r = sd_varlink_server_add_interface(varlink_server, &vl_interface_io_systemd_PCRExtend);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to add Varlink interface: %m");
-
-                r = sd_varlink_server_bind_method(varlink_server, "io.systemd.PCRExtend.Extend", vl_method_extend);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to bind Varlink method: %m");
-
-                r = sd_varlink_server_loop_auto(varlink_server);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to run Varlink event loop: %m");
-
-                return EXIT_SUCCESS;
-        }
+        if (arg_varlink)
+                return vl_server(); /* Invocation as Varlink service */
 
         if (arg_file_system) {
                 if (optind != argc)

@@ -3,14 +3,10 @@
   Copyright © 2010 ProFUSION embedded systems
 ***/
 
-#include <errno.h>
 #include <getopt.h>
-#include <linux/reboot.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
-#include <sys/reboot.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -30,13 +26,16 @@
 #include "detach-swap.h"
 #include "errno-util.h"
 #include "exec-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "getopt-defs.h"
 #include "initrd-util.h"
 #include "killall.h"
 #include "log.h"
 #include "parse-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "reboot-util.h"
 #include "rlimit-util.h"
@@ -46,6 +45,7 @@
 #include "switch-root.h"
 #include "sysctl-util.h"
 #include "terminal-util.h"
+#include "time-util.h"
 #include "umount.h"
 #include "virt.h"
 #include "watchdog.h"
@@ -195,7 +195,7 @@ static int sync_making_progress(unsigned long long *prev_dirty) {
 
         f = fopen("/proc/meminfo", "re");
         if (!f)
-                return log_warning_errno(errno, "Failed to open /proc/meminfo: %m");
+                return log_warning_errno(errno, "Failed to open %s: %m", "/proc/meminfo");
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
@@ -226,7 +226,7 @@ int sync_with_progress(int fd) {
         unsigned long long dirty = ULLONG_MAX;
         _cleanup_free_ char *path = NULL;
         const char *what;
-        pid_t pid;
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
         int r;
 
         BLOCK_SIGNALS(SIGCHLD);
@@ -235,13 +235,13 @@ int sync_with_progress(int fd) {
          * the progress. If the timeout lapses, the assumption is that the particular sync stalled. */
 
         if (fd >= 0) {
-                r = asynchronous_fsync(fd, &pid);
+                r = asynchronous_fsync(fd, &pidref);
                 if (r < 0)
                         return log_error_errno(r, "Failed to fork fsync(): %m");
 
                 (void) fd_get_path(fd, &path);
         } else {
-                r = asynchronous_sync(&pid);
+                r = asynchronous_sync(&pidref);
                 if (r < 0)
                         return log_error_errno(r, "Failed to fork sync(): %m");
         }
@@ -253,7 +253,7 @@ int sync_with_progress(int fd) {
          * SYNC_PROGRESS_ATTEMPTS lapse without progress being made,
          * we assume that the sync is stalled */
         for (unsigned checks = 0; checks < SYNC_PROGRESS_ATTEMPTS; checks++) {
-                r = wait_for_terminate_with_timeout(pid, SYNC_TIMEOUT_USEC);
+                r = wait_for_terminate_with_timeout(pidref.pid, SYNC_TIMEOUT_USEC);
                 if (r == 0)
                         /* Sync finished without error (sync() call itself does not return an error code) */
                         return 0;
@@ -267,8 +267,8 @@ int sync_with_progress(int fd) {
 
         /* Only reached in the event of a timeout. We should issue a kill to the stray process. */
         r = log_error_errno(SYNTHETIC_ERRNO(ETIMEDOUT),
-                            "Syncing %s - timed out, issuing SIGKILL to PID "PID_FMT".", what, pid);
-        (void) kill(pid, SIGKILL);
+                            "Syncing %s - timed out, issuing SIGKILL to PID "PID_FMT".", what, pidref.pid);
+        (void) pidref_kill(&pidref, SIGKILL);
         return r;
 }
 
@@ -445,7 +445,7 @@ int main(int argc, char *argv[]) {
                 (void) sync_with_progress(-EBADF);
 
         disable_coredumps();
-        disable_binfmt();
+        (void) disable_binfmt();
 
         log_info("Sending SIGTERM to remaining processes...");
         broadcast_signal(SIGTERM, true, true, arg_timeout);
@@ -466,7 +466,7 @@ int main(int argc, char *argv[]) {
                 /* Let's trim the cgroup tree on each iteration so that we leave an empty cgroup tree around,
                  * so that container managers get a nice notify event when we are down */
                 if (cgroup)
-                        (void) cg_trim(SYSTEMD_CGROUP_CONTROLLER, cgroup, false);
+                        (void) cg_trim(cgroup, false);
 
                 if (need_umount) {
                         log_info("Unmounting file systems.");
@@ -679,6 +679,6 @@ int main(int argc, char *argv[]) {
 error:
         log_struct_errno(LOG_EMERG, r,
                          LOG_MESSAGE("Critical error while doing system shutdown: %m"),
-                         "MESSAGE_ID=" SD_MESSAGE_SHUTDOWN_ERROR_STR);
+                         LOG_MESSAGE_ID(SD_MESSAGE_SHUTDOWN_ERROR_STR));
         freeze();
 }

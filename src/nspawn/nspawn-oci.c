@@ -1,28 +1,28 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/oom.h>
+#include <sys/stat.h>
 
+#include "sd-bus.h"
 #include "sd-json.h"
 
+#include "alloc-util.h"
 #include "bus-util.h"
-#include "cap-list.h"
+#include "capability-list.h"
+#include "cgroup-util.h"
 #include "cpu-set-util.h"
 #include "device-util.h"
 #include "devnum-util.h"
 #include "env-util.h"
-#include "format-util.h"
-#include "fs-util.h"
 #include "hostname-util.h"
 #include "json-util.h"
-#include "missing_sched.h"
+#include "nspawn-mount.h"
 #include "nspawn-oci.h"
 #include "path-util.h"
 #include "rlimit-util.h"
-#include "seccomp-util.h"
-#include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
-#include "user-util.h"
+#include "time-util.h"
 
 /* TODO:
  * OCI runtime tool implementation
@@ -75,6 +75,18 @@
  * device cgroups matches where minor is specified, but major isn't. similar where major is specified but char/block is not. also, any match that only has a type set that has less than "rwm" set. also, any entry that has none of rwm set.
  *
  */
+
+/* Special values for the cpu.shares attribute */
+#define CGROUP_CPU_SHARES_INVALID UINT64_MAX
+#define CGROUP_CPU_SHARES_MIN UINT64_C(2)
+#define CGROUP_CPU_SHARES_MAX UINT64_C(262144)
+#define CGROUP_CPU_SHARES_DEFAULT UINT64_C(1024)
+
+/* Special values for the blkio.weight attribute */
+#define CGROUP_BLKIO_WEIGHT_INVALID UINT64_MAX
+#define CGROUP_BLKIO_WEIGHT_MIN UINT64_C(10)
+#define CGROUP_BLKIO_WEIGHT_MAX UINT64_C(1000)
+#define CGROUP_BLKIO_WEIGHT_DEFAULT UINT64_C(500)
 
 static int oci_unexpected(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
         return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
@@ -700,8 +712,8 @@ static int oci_uid_gid_mappings(const char *name, sd_json_variant *v, sd_json_di
         if (r < 0)
                 return r;
 
-        if (data.host_id + data.range < data.host_id ||
-            data.container_id + data.range < data.container_id)
+        if (data.range > UINT32_MAX - data.host_id ||
+            data.range > UINT32_MAX - data.container_id)
                 return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
                                 "UID/GID range goes beyond UID/GID validity range, refusing.");
 
@@ -919,21 +931,17 @@ struct device_data {
 static int oci_cgroup_device_access(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
         struct device_data *d = ASSERT_PTR(userdata);
         bool r = false, w = false, m = false;
-        const char *s;
-        size_t i;
 
-        assert_se(s = sd_json_variant_string(v));
-
-        for (i = 0; s[i]; i++)
-                if (s[i] == 'r')
+        for (const char *s = ASSERT_PTR(sd_json_variant_string(v)); *s; s++)
+                if (*s == 'r')
                         r = true;
-                else if (s[i] == 'w')
+                else if (*s == 'w')
                         w = true;
-                else if (s[i] == 'm')
+                else if (*s == 'm')
                         m = true;
                 else
                         return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
-                                        "Unknown device access character '%c'.", s[i]);
+                                        "Unknown device access character '%c'.", *s);
 
         d->r = r;
         d->w = w;
@@ -945,7 +953,7 @@ static int oci_cgroup_device_access(const char *name, sd_json_variant *v, sd_jso
 static int oci_cgroup_devices(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
         _cleanup_free_ struct device_data *list = NULL;
         Settings *s = ASSERT_PTR(userdata);
-        size_t n_list = 0, i;
+        size_t n_list = 0;
         bool noop = false;
         sd_json_variant *e;
         int r;
@@ -1036,43 +1044,43 @@ static int oci_cgroup_devices(const char *name, sd_json_variant *v, sd_json_disp
         if (r < 0)
                 return bus_log_create_error(r);
 
-        for (i = 0; i < n_list; i++) {
+        FOREACH_ARRAY(d, list, n_list) {
                 _cleanup_free_ char *pattern = NULL;
                 char access[4];
                 size_t n = 0;
 
-                if (list[i].minor == UINT_MAX) {
+                if (d->minor == UINT_MAX) {
                         const char *t;
 
-                        if (list[i].type == S_IFBLK)
+                        if (d->type == S_IFBLK)
                                 t = "block";
                         else {
-                                assert(list[i].type == S_IFCHR);
+                                assert(d->type == S_IFCHR);
                                 t = "char";
                         }
 
-                        if (list[i].major == UINT_MAX) {
+                        if (d->major == UINT_MAX) {
                                 pattern = strjoin(t, "-*");
                                 if (!pattern)
                                         return log_oom();
                         } else {
-                                if (asprintf(&pattern, "%s-%u", t, list[i].major) < 0)
+                                if (asprintf(&pattern, "%s-%u", t, d->major) < 0)
                                         return log_oom();
                         }
 
                 } else {
-                        assert(list[i].major != UINT_MAX); /* If a minor is specified, then a major also needs to be specified */
+                        assert(d->major != UINT_MAX); /* If a minor is specified, then a major also needs to be specified */
 
-                        r = device_path_make_major_minor(list[i].type, makedev(list[i].major, list[i].minor), &pattern);
+                        r = device_path_make_major_minor(d->type, makedev(d->major, d->minor), &pattern);
                         if (r < 0)
                                 return log_oom();
                 }
 
-                if (list[i].r)
+                if (d->r)
                         access[n++] = 'r';
-                if (list[i].w)
+                if (d->w)
                         access[n++] = 'w';
-                if (list[i].m)
+                if (d->m)
                         access[n++] = 'm';
                 access[n] = 0;
 
@@ -1190,35 +1198,33 @@ static int oci_cgroup_memory(const char *name, sd_json_variant *v, sd_json_dispa
 }
 
 struct cpu_data {
-        uint64_t shares;
+        uint64_t weight;
         uint64_t quota;
         uint64_t period;
         CPUSet cpu_set;
 };
 
 static int oci_cgroup_cpu_shares(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
-        uint64_t *u = ASSERT_PTR(userdata);
-        uint64_t k;
+        uint64_t k, *u = ASSERT_PTR(userdata);
 
         k = sd_json_variant_unsigned(v);
         if (k < CGROUP_CPU_SHARES_MIN || k > CGROUP_CPU_SHARES_MAX)
-                return json_log(v, flags, SYNTHETIC_ERRNO(ERANGE),
-                                "shares value out of range.");
+                return json_log(v, flags, SYNTHETIC_ERRNO(ERANGE), "shares value out of range.");
 
-        *u = (uint64_t) k;
+        /* convert from cgroup v1 cpu.shares to v2 cpu.weight */
+        assert_cc(CGROUP_CPU_SHARES_MAX <= UINT64_MAX / CGROUP_WEIGHT_DEFAULT);
+        *u = CLAMP(k * CGROUP_WEIGHT_DEFAULT / CGROUP_CPU_SHARES_DEFAULT, CGROUP_WEIGHT_MIN, CGROUP_WEIGHT_MAX);
         return 0;
 }
 
 static int oci_cgroup_cpu_quota(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
-        uint64_t *u = ASSERT_PTR(userdata);
-        uint64_t k;
+        uint64_t k, *u = ASSERT_PTR(userdata);
 
         k = sd_json_variant_unsigned(v);
         if (k <= 0 || k >= UINT64_MAX)
-                return json_log(v, flags, SYNTHETIC_ERRNO(ERANGE),
-                                "period/quota value out of range.");
+                return json_log(v, flags, SYNTHETIC_ERRNO(ERANGE), "period/quota value out of range.");
 
-        *u = (uint64_t) k;
+        *u = k;
         return 0;
 }
 
@@ -1234,16 +1240,13 @@ static int oci_cgroup_cpu_cpus(const char *name, sd_json_variant *v, sd_json_dis
         if (r < 0)
                 return json_log(v, flags, r, "Failed to parse CPU set specification: %s", n);
 
-        cpu_set_reset(&data->cpu_set);
-        data->cpu_set = set;
-
-        return 0;
+        return cpu_set_done_and_replace(data->cpu_set, set);
 }
 
 static int oci_cgroup_cpu(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
 
         static const sd_json_dispatch_field table[] = {
-                { "shares",          SD_JSON_VARIANT_UNSIGNED, oci_cgroup_cpu_shares, offsetof(struct cpu_data, shares), 0 },
+                { "shares",          SD_JSON_VARIANT_UNSIGNED, oci_cgroup_cpu_shares, offsetof(struct cpu_data, weight), 0 },
                 { "quota",           SD_JSON_VARIANT_UNSIGNED, oci_cgroup_cpu_quota,  offsetof(struct cpu_data, quota),  0 },
                 { "period",          SD_JSON_VARIANT_UNSIGNED, oci_cgroup_cpu_quota,  offsetof(struct cpu_data, period), 0 },
                 { "realtimeRuntime", SD_JSON_VARIANT_UNSIGNED, oci_unsupported,       0,                                 0 },
@@ -1254,7 +1257,7 @@ static int oci_cgroup_cpu(const char *name, sd_json_variant *v, sd_json_dispatch
         };
 
         struct cpu_data data = {
-                .shares = UINT64_MAX,
+                .weight = UINT64_MAX,
                 .quota = UINT64_MAX,
                 .period = UINT64_MAX,
         };
@@ -1264,19 +1267,18 @@ static int oci_cgroup_cpu(const char *name, sd_json_variant *v, sd_json_dispatch
 
         r = oci_dispatch(v, table, flags, &data);
         if (r < 0) {
-                cpu_set_reset(&data.cpu_set);
+                cpu_set_done(&data.cpu_set);
                 return r;
         }
 
-        cpu_set_reset(&s->cpu_set);
-        s->cpu_set = data.cpu_set;
+        cpu_set_done_and_replace(s->cpu_set, data.cpu_set);
 
-        if (data.shares != UINT64_MAX) {
+        if (data.weight != UINT64_MAX) {
                 r = settings_allocate_properties(s);
                 if (r < 0)
                         return r;
 
-                r = sd_bus_message_append(s->properties, "(sv)", "CPUShares", "t", data.shares);
+                r = sd_bus_message_append(s->properties, "(sv)", "CPUWeight", "t", data.weight);
                 if (r < 0)
                         return bus_log_create_error(r);
         }
@@ -1286,7 +1288,11 @@ static int oci_cgroup_cpu(const char *name, sd_json_variant *v, sd_json_dispatch
                 if (r < 0)
                         return r;
 
-                r = sd_bus_message_append(s->properties, "(sv)", "CPUQuotaPerSecUSec", "t", (uint64_t) (data.quota * USEC_PER_SEC / data.period));
+                r = sd_bus_message_append(s->properties, "(sv)", "CPUQuotaPerSecUSec", "t", data.quota * USEC_PER_SEC / data.period);
+                if (r < 0)
+                        return bus_log_create_error(r);
+
+                r = sd_bus_message_append(s->properties, "(sv)", "CPUQuotaPeriodUSec", "t", data.period);
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -1295,6 +1301,13 @@ static int oci_cgroup_cpu(const char *name, sd_json_variant *v, sd_json_dispatch
                                 "CPU quota and period not used together.");
 
         return 0;
+}
+
+static uint64_t cgroup_weight_blkio_to_io(uint64_t blkio_weight) {
+        /* convert from cgroup v1 blkio.weight to v2 io.weight */
+        assert_cc(CGROUP_BLKIO_WEIGHT_MAX <= UINT64_MAX / CGROUP_WEIGHT_DEFAULT);
+        return CLAMP(blkio_weight * CGROUP_WEIGHT_DEFAULT / CGROUP_BLKIO_WEIGHT_DEFAULT,
+                     CGROUP_WEIGHT_MIN, CGROUP_WEIGHT_MAX);
 }
 
 static int oci_cgroup_block_io_weight(const char *name, sd_json_variant *v, sd_json_dispatch_flags_t flags, void *userdata) {
@@ -1311,7 +1324,7 @@ static int oci_cgroup_block_io_weight(const char *name, sd_json_variant *v, sd_j
         if (r < 0)
                 return r;
 
-        r = sd_bus_message_append(s->properties, "(sv)", "BlockIOWeight", "t", (uint64_t) k);
+        r = sd_bus_message_append(s->properties, "(sv)", "IOWeight", "t", cgroup_weight_blkio_to_io(k));
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -1363,7 +1376,8 @@ static int oci_cgroup_block_io_weight_device(const char *name, sd_json_variant *
                 if (r < 0)
                         return r;
 
-                r = sd_bus_message_append(s->properties, "(sv)", "BlockIODeviceWeight", "a(st)", 1, path, (uint64_t) data.weight);
+                r = sd_bus_message_append(s->properties, "(sv)", "IODeviceWeight", "a(st)", 1,
+                                          path, cgroup_weight_blkio_to_io(data.weight));
                 if (r < 0)
                         return bus_log_create_error(r);
         }

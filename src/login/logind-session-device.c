@@ -1,24 +1,29 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
+#include <linux/hidraw.h>
+#include <linux/input.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/types.h>
+#include <sys/sysmacros.h>
 
+#include "sd-bus.h"
 #include "sd-device.h"
-#include "sd-daemon.h"
 
 #include "alloc-util.h"
-#include "bus-util.h"
 #include "daemon-util.h"
 #include "device-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
+#include "hashmap.h"
+#include "logind.h"
+#include "logind-device.h"
+#include "logind-seat.h"
+#include "logind-session.h"
 #include "logind-session-dbus.h"
 #include "logind-session-device.h"
-#include "missing_drm.h"
-#include "missing_hidraw.h"
-#include "missing_input.h"
-#include "parse-util.h"
+#include "missing-drm.h"
+#include "string-util.h"
 
 enum SessionDeviceNotifications {
         SESSION_DEVICE_RESUME,
@@ -171,7 +176,7 @@ static int session_device_open(SessionDevice *sd, bool active) {
         case DEVICE_TYPE_UNKNOWN:
         default:
                 /* fallback for devices without synchronizations */
-                break;
+                ;
         }
 
         return TAKE_FD(fd);
@@ -215,7 +220,7 @@ static int session_device_start(SessionDevice *sd) {
         case DEVICE_TYPE_UNKNOWN:
         default:
                 /* fallback for devices without synchronizations */
-                break;
+                ;
         }
 
         sd->active = true;
@@ -262,28 +267,29 @@ static void session_device_stop(SessionDevice *sd) {
         case DEVICE_TYPE_UNKNOWN:
         default:
                 /* fallback for devices without synchronization */
-                break;
+                ;
         }
 
         sd->active = false;
 }
 
 static DeviceType detect_device_type(sd_device *dev) {
-        const char *sysname;
-
-        if (sd_device_get_sysname(dev, &sysname) < 0)
-                return DEVICE_TYPE_UNKNOWN;
-
-        if (device_in_subsystem(dev, "drm")) {
-                if (startswith(sysname, "card"))
+        if (device_in_subsystem(dev, "drm") > 0) {
+                if (device_sysname_startswith(dev, "card") > 0)
                         return DEVICE_TYPE_DRM;
+                return DEVICE_TYPE_UNKNOWN;
+        }
 
-        } else if (device_in_subsystem(dev, "input")) {
-                if (startswith(sysname, "event"))
+        if (device_in_subsystem(dev, "input") > 0) {
+                if (device_sysname_startswith(dev, "event") > 0)
                         return DEVICE_TYPE_EVDEV;
-        } else if (device_in_subsystem(dev, "hidraw")) {
-                if (startswith(sysname, "hidraw"))
+                return DEVICE_TYPE_UNKNOWN;
+        }
+
+        if (device_in_subsystem(dev, "hidraw") > 0) {
+                if (device_sysname_startswith(dev, "hidraw") > 0)
                         return DEVICE_TYPE_HIDRAW;
+                return DEVICE_TYPE_UNKNOWN;
         }
 
         return DEVICE_TYPE_UNKNOWN;

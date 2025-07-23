@@ -2,9 +2,8 @@
 
 #if ENABLE_TPM
 
-#include "macro-fundamental.h"
+#include "efi-log.h"
 #include "measure.h"
-#include "memory-util-fundamental.h"
 #include "proto/cc-measurement.h"
 #include "proto/tcg.h"
 #include "tpm2-pcr.h"
@@ -18,10 +17,10 @@ static EFI_STATUS tpm2_measure_to_pcr_and_tagged_event_log(
                 uint32_t event_id,
                 const char16_t *description) {
 
-        _cleanup_free_ struct event {
+        _cleanup_free_ union event {
                 EFI_TCG2_EVENT tcg_event;
                 EFI_TCG2_TAGGED_EVENT tcg_tagged_event;
-        } _packed_ *event = NULL;
+        } *event = NULL;
         size_t desc_len, event_size;
 
         assert(tcg);
@@ -30,21 +29,17 @@ static EFI_STATUS tpm2_measure_to_pcr_and_tagged_event_log(
         /* New style stuff we log as EV_EVENT_TAG with a recognizable event tag. */
 
         desc_len = strsize16(description);
-        event_size = offsetof(EFI_TCG2_EVENT, Event) + offsetof(EFI_TCG2_TAGGED_EVENT, Event) + desc_len;
+        event_size = offsetof(EFI_TCG2_TAGGED_EVENT, Event) + desc_len;
 
         event = xmalloc(event_size);
-        *event = (struct event) {
-                .tcg_event = (EFI_TCG2_EVENT) {
-                        .Size = event_size,
-                        .Header.HeaderSize = sizeof(EFI_TCG2_EVENT_HEADER),
-                        .Header.HeaderVersion = EFI_TCG2_EVENT_HEADER_VERSION,
-                        .Header.PCRIndex = pcrindex,
-                        .Header.EventType = EV_EVENT_TAG,
-                },
-                .tcg_tagged_event = {
-                        .EventId = event_id,
-                        .EventSize = desc_len,
-                },
+        event->tcg_tagged_event = (EFI_TCG2_TAGGED_EVENT) {
+                .Size = event_size,
+                .Header.HeaderSize = sizeof(EFI_TCG2_EVENT_HEADER),
+                .Header.HeaderVersion = EFI_TCG2_EVENT_HEADER_VERSION,
+                .Header.PCRIndex = pcrindex,
+                .Header.EventType = EV_EVENT_TAG,
+                .EventId = event_id,
+                .EventSize = desc_len,
         };
         memcpy(event->tcg_tagged_event.Event, description, desc_len);
 
@@ -186,6 +181,24 @@ static EFI_TCG2_PROTOCOL *tcg2_interface_check(void) {
 
 bool tpm_present(void) {
         return tcg2_interface_check();
+}
+
+uint32_t tpm_get_active_pcr_banks(void) {
+        uint32_t active_pcr_banks = 0;
+        EFI_TCG2_PROTOCOL *tpm2;
+        EFI_STATUS err;
+
+        tpm2 = tcg2_interface_check();
+        if (!tpm2)
+                return 0;
+
+        err = tpm2->GetActivePcrBanks(tpm2, &active_pcr_banks);
+        if (err != EFI_SUCCESS) {
+                log_warning_status(err, "Failed to get TPM2 active PCR banks, assuming none: %m");
+                return 0;
+        }
+
+        return active_pcr_banks;
 }
 
 static EFI_STATUS tcg2_log_ipl_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char16_t *description, bool *ret_measured) {

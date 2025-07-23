@@ -1,31 +1,32 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
+
+#include "sd-bus.h"
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
-#include "bus-label.h"
 #include "bus-object.h"
 #include "bus-polkit.h"
 #include "bus-util.h"
 #include "discover-image.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "hashmap.h"
+#include "image-policy.h"
 #include "io-util.h"
-#include "missing_capability.h"
 #include "os-util.h"
+#include "path-util.h"
 #include "portable.h"
-#include "portabled-bus.h"
-#include "portabled-image-bus.h"
-#include "portabled-image.h"
 #include "portabled.h"
+#include "portabled-bus.h"
+#include "portabled-image.h"
+#include "portabled-image-bus.h"
+#include "portabled-operation.h"
 #include "process-util.h"
 #include "strv.h"
-#include "user-util.h"
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_type, image_type, ImageType);
 
@@ -114,10 +115,8 @@ int bus_image_common_get_metadata(
         assert(name_or_path || image);
         assert(message);
 
-        if (!m) {
-                assert(image);
-                m = image->userdata;
-        }
+        if (!m)
+                m = ASSERT_PTR(ASSERT_PTR(image)->userdata);
 
         bool have_exti = sd_bus_message_is_method_call(message, NULL, "GetImageMetadataWithExtensions") ||
                          sd_bus_message_is_method_call(message, NULL, "GetMetadataWithExtensions");
@@ -160,6 +159,7 @@ int bus_image_common_get_metadata(
                 return 1;
 
         r = portable_extract(
+                        m->runtime_scope,
                         image->path,
                         matches,
                         extension_images,
@@ -250,7 +250,7 @@ int bus_image_common_get_metadata(
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int bus_image_method_get_metadata(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -264,6 +264,7 @@ static int bus_image_method_get_state(
 
         _cleanup_strv_free_ char **extension_images = NULL;
         Image *image = ASSERT_PTR(userdata);
+        Manager *m = ASSERT_PTR(image->userdata);
         PortableState state;
         int r;
 
@@ -288,6 +289,7 @@ static int bus_image_method_get_state(
         }
 
         r = portable_get_state(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         extension_images,
@@ -385,6 +387,7 @@ int bus_image_common_attach(
                 return 1;
 
         r = portable_attach(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         matches,
@@ -463,6 +466,7 @@ static int bus_image_method_detach(
                 return 1; /* Will call us back */
 
         r = portable_detach(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         extension_images,
@@ -513,6 +517,7 @@ int bus_image_common_remove(
                 return 1; /* Will call us back */
 
         r = portable_get_state(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         NULL,
@@ -716,6 +721,7 @@ int bus_image_common_reattach(
                 return 1;
 
         r = portable_detach(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         extension_images,
@@ -727,6 +733,7 @@ int bus_image_common_reattach(
                 return r;
 
         r = portable_attach(
+                        m->runtime_scope,
                         sd_bus_message_get_bus(message),
                         image->path,
                         matches,
@@ -1039,7 +1046,7 @@ int bus_image_acquire(
         if (image_name_is_valid(name_or_path)) {
 
                 /* If it's a short name, let's search for it */
-                r = image_find(IMAGE_PORTABLE, name_or_path, NULL, &loaded);
+                r = image_find(m->runtime_scope, IMAGE_PORTABLE, name_or_path, NULL, &loaded);
                 if (r == -ENOENT)
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_PORTABLE_IMAGE,
                                                  "No image '%s' found.", name_or_path);
@@ -1149,11 +1156,7 @@ int bus_image_node_enumerator(sd_bus *bus, const char *path, void *userdata, cha
         assert(path);
         assert(nodes);
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return -ENOMEM;
-
-        r = manager_image_cache_discover(m, images, error);
+        r = manager_image_cache_discover(m, &images, error);
         if (r < 0)
                 return r;
 

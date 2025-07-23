@@ -1,10 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "efi-string.h"
-#include "efivars.h"
-#include "proto/device-path.h"
 #include "smbios.h"
-#include "string-util-fundamental.h"
 #include "util.h"
 
 #define SMBIOS_TABLE_GUID \
@@ -174,7 +171,7 @@ not_found:
 
 bool smbios_in_hypervisor(void) {
         /* Look up BIOS Information (Type 0). */
-        const SmbiosTableType0 *type0 = (const SmbiosTableType0 *) get_smbios_table(0, sizeof(SmbiosTableType0), /* left= */ NULL);
+        const SmbiosTableType0 *type0 = (const SmbiosTableType0 *) get_smbios_table(0, sizeof(SmbiosTableType0), /* ret_size_left= */ NULL);
         if (!type0)
                 return false;
 
@@ -182,7 +179,7 @@ bool smbios_in_hypervisor(void) {
         return FLAGS_SET(type0->bios_characteristics_ext[1], 1 << 4);
 }
 
-const char* smbios_find_oem_string(const char *name) {
+const char* smbios_find_oem_string(const char *name, const char *after) {
         uint64_t left;
 
         assert(name);
@@ -199,9 +196,9 @@ const char* smbios_find_oem_string(const char *name) {
                 if (!e || e == p) /* Double NUL byte means we've reached the end of the OEM strings. */
                         break;
 
-                const char *eq = startswith8(p, name);
-                if (eq && *eq == '=')
-                        return eq + 1;
+                const char *suffix = startswith8(p, name);
+                if (suffix && (!after || suffix > after))
+                        return suffix;
 
                 p = e + 1;
         }
@@ -258,4 +255,18 @@ void smbios_raw_info_populate(RawSmbiosInfo *ret_info) {
                 ret_info->baseboard_manufacturer = NULL;
                 ret_info->baseboard_product = NULL;
         }
+}
+
+void smbios_raw_info_get_cached(RawSmbiosInfo *ret_info) {
+        static RawSmbiosInfo info = {};
+        static bool cached = false;
+
+        assert(ret_info);
+
+        if (!cached) {
+                smbios_raw_info_populate(&info);
+                cached = true;
+        }
+
+        *ret_info = info;
 }

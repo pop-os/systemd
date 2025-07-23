@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <stddef.h>
 #include <stdio.h>
 
 #if HAVE_GNUTLS
@@ -10,10 +9,11 @@
 
 #include "alloc-util.h"
 #include "log.h"
-#include "macro.h"
 #include "microhttpd-util.h"
 #include "string-util.h"
 #include "strv.h"
+
+#if HAVE_MICROHTTPD
 
 void microhttpd_logger(void *arg, const char *fmt, va_list ap) {
         char *f;
@@ -28,6 +28,7 @@ void microhttpd_logger(void *arg, const char *fmt, va_list ap) {
 int mhd_respond_internal(
                 struct MHD_Connection *connection,
                 enum MHD_RequestTerminationCode code,
+                const char *encoding,
                 const char *buffer,
                 size_t size,
                 enum MHD_ResponseMemoryMode mode) {
@@ -40,6 +41,10 @@ int mhd_respond_internal(
                 return MHD_NO;
 
         log_debug("Queueing response %u: %s", code, buffer);
+        if (encoding)
+                if (MHD_add_response_header(response, "Accept-Encoding", encoding) == MHD_NO)
+                        return MHD_NO;
+
         if (MHD_add_response_header(response, "Content-Type", "text/plain") == MHD_NO)
                 return MHD_NO;
         return MHD_queue_response(connection, code, response);
@@ -53,6 +58,7 @@ int mhd_respondf_internal(
                 struct MHD_Connection *connection,
                 int error,
                 enum MHD_RequestTerminationCode code,
+                const char *encoding,
                 const char *format, ...) {
 
         char *m;
@@ -72,7 +78,7 @@ int mhd_respondf_internal(
         if (r < 0)
                 return respond_oom(connection);
 
-        return mhd_respond_internal(connection, code, m, r, MHD_RESPMEM_MUST_FREE);
+        return mhd_respond_internal(connection, code, encoding, m, r, MHD_RESPMEM_MUST_FREE);
 }
 
 #if HAVE_GNUTLS
@@ -290,4 +296,6 @@ int setup_gnutls_logger(char **categories) {
                 log_notice("Ignoring specified gnutls logging categories — gnutls not available.");
         return 0;
 }
+#endif
+
 #endif

@@ -3,11 +3,16 @@
 #include <elf.h>
 #include <sys/prctl.h>
 
+#include "alloc-util.h"
 #include "coredump-util.h"
 #include "errno-util.h"
 #include "extract-word.h"
 #include "fileio.h"
+#include "log.h"
+#include "parse-util.h"
+#include "stdio-util.h"
 #include "string-table.h"
+#include "string-util.h"
 #include "unaligned.h"
 #include "virt.h"
 

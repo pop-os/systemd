@@ -3,25 +3,18 @@
   Copyright © 2016 Michal Soltys <soltys@ziu.info>
 ***/
 
-#include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <linux/kd.h>
 #include <linux/tiocl.h>
 #include <linux/vt.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sysexits.h>
 #include <termios.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "creds-util.h"
-#include "dev-setup.h"
 #include "env-file.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -32,56 +25,36 @@
 #include "main-func.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
-#include "signal-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "virt.h"
-
-typedef enum VCMeta {
-        VC_KEYMAP,
-        VC_KEYMAP_TOGGLE,
-        VC_FONT,
-        VC_FONT_MAP,
-        VC_FONT_UNIMAP,
-        _VC_META_MAX,
-        _VC_META_INVALID = -EINVAL,
-} VCMeta;
 
 typedef struct Context {
-        char *config[_VC_META_MAX];
+        char *keymap;
+        char *keymap_toggle;
+        char *font;
+        char *font_map;
+        char *font_unimap;
 } Context;
-
-static const char * const vc_meta_names[_VC_META_MAX] = {
-        [VC_KEYMAP]        = "vconsole.keymap",
-        [VC_KEYMAP_TOGGLE] = "vconsole.keymap_toggle",
-        [VC_FONT]          = "vconsole.font",
-        [VC_FONT_MAP]      = "vconsole.font_map",
-        [VC_FONT_UNIMAP]   = "vconsole.font_unimap",
-};
-
-/* compatibility with obsolete multiple-dot scheme */
-static const char * const vc_meta_compat_names[_VC_META_MAX] = {
-        [VC_KEYMAP_TOGGLE] = "vconsole.keymap.toggle",
-        [VC_FONT_MAP]      = "vconsole.font.map",
-        [VC_FONT_UNIMAP]   = "vconsole.font.unimap",
-};
-
-static const char * const vc_env_names[_VC_META_MAX] = {
-        [VC_KEYMAP]        = "KEYMAP",
-        [VC_KEYMAP_TOGGLE] = "KEYMAP_TOGGLE",
-        [VC_FONT]          = "FONT",
-        [VC_FONT_MAP]      = "FONT_MAP",
-        [VC_FONT_UNIMAP]   = "FONT_UNIMAP",
-};
 
 static void context_done(Context *c) {
         assert(c);
 
-        FOREACH_ARRAY(cc, c->config, _VC_META_MAX)
-                free(*cc);
+        free(c->keymap);
+        free(c->keymap_toggle);
+        free(c->font);
+        free(c->font_map);
+        free(c->font_unimap);
 }
+
+#define context_merge(dst, src, src_compat, name)                      \
+        ({                                                             \
+                if (src->name)                                         \
+                        free_and_replace(dst->name, src->name);        \
+                else if (src_compat && src_compat->name)               \
+                        free_and_replace(dst->name, src_compat->name); \
+        })
 
 static void context_merge_config(
                 Context *dst,
@@ -91,21 +64,11 @@ static void context_merge_config(
         assert(dst);
         assert(src);
 
-        for (VCMeta i = 0; i < _VC_META_MAX; i++)
-                if (src->config[i])
-                        free_and_replace(dst->config[i], src->config[i]);
-                else if (src_compat && src_compat->config[i])
-                        free_and_replace(dst->config[i], src_compat->config[i]);
-}
-
-static const char* context_get_config(Context *c, VCMeta meta) {
-        assert(c);
-        assert(meta >= 0 && meta < _VC_META_MAX);
-
-        if (meta == VC_KEYMAP)
-                return isempty(c->config[VC_KEYMAP]) ? SYSTEMD_DEFAULT_KEYMAP : c->config[VC_KEYMAP];
-
-        return empty_to_null(c->config[meta]);
+        context_merge(dst, src, src_compat, keymap);
+        context_merge(dst, src, src_compat, keymap_toggle);
+        context_merge(dst, src, src_compat, font);
+        context_merge(dst, src, src_compat, font_map);
+        context_merge(dst, src, src_compat, font_unimap);
 }
 
 static int context_read_creds(Context *c) {
@@ -115,11 +78,11 @@ static int context_read_creds(Context *c) {
         assert(c);
 
         r = read_credential_strings_many(
-                        vc_meta_names[VC_KEYMAP],        &v.config[VC_KEYMAP],
-                        vc_meta_names[VC_KEYMAP_TOGGLE], &v.config[VC_KEYMAP_TOGGLE],
-                        vc_meta_names[VC_FONT],          &v.config[VC_FONT],
-                        vc_meta_names[VC_FONT_MAP],      &v.config[VC_FONT_MAP],
-                        vc_meta_names[VC_FONT_UNIMAP],   &v.config[VC_FONT_UNIMAP]);
+                        "vconsole.keymap",        &v.keymap,
+                        "vconsole.keymap_toggle", &v.keymap_toggle,
+                        "vconsole.font",          &v.font,
+                        "vconsole.font_map",      &v.font_map,
+                        "vconsole.font_unimap",   &v.font_unimap);
         if (r < 0)
                 log_warning_errno(r, "Failed to import credentials, ignoring: %m");
 
@@ -135,11 +98,11 @@ static int context_read_env(Context *c) {
 
         r = parse_env_file(
                         NULL, "/etc/vconsole.conf",
-                        vc_env_names[VC_KEYMAP],        &v.config[VC_KEYMAP],
-                        vc_env_names[VC_KEYMAP_TOGGLE], &v.config[VC_KEYMAP_TOGGLE],
-                        vc_env_names[VC_FONT],          &v.config[VC_FONT],
-                        vc_env_names[VC_FONT_MAP],      &v.config[VC_FONT_MAP],
-                        vc_env_names[VC_FONT_UNIMAP],   &v.config[VC_FONT_UNIMAP]);
+                        "KEYMAP",        &v.keymap,
+                        "KEYMAP_TOGGLE", &v.keymap_toggle,
+                        "FONT",          &v.font,
+                        "FONT_MAP",      &v.font_map,
+                        "FONT_UNIMAP",   &v.font_unimap);
         if (r < 0) {
                 if (r != -ENOENT)
                         log_warning_errno(r, "Failed to read /etc/vconsole.conf, ignoring: %m");
@@ -158,14 +121,15 @@ static int context_read_proc_cmdline(Context *c) {
 
         r = proc_cmdline_get_key_many(
                         PROC_CMDLINE_STRIP_RD_PREFIX,
-                        vc_meta_names[VC_KEYMAP],               &v.config[VC_KEYMAP],
-                        vc_meta_names[VC_KEYMAP_TOGGLE],        &v.config[VC_KEYMAP_TOGGLE],
-                        vc_meta_names[VC_FONT],                 &v.config[VC_FONT],
-                        vc_meta_names[VC_FONT_MAP],             &v.config[VC_FONT_MAP],
-                        vc_meta_names[VC_FONT_UNIMAP],          &v.config[VC_FONT_UNIMAP],
-                        vc_meta_compat_names[VC_KEYMAP_TOGGLE], &w.config[VC_KEYMAP_TOGGLE],
-                        vc_meta_compat_names[VC_FONT_MAP],      &w.config[VC_FONT_MAP],
-                        vc_meta_compat_names[VC_FONT_UNIMAP],   &w.config[VC_FONT_UNIMAP]);
+                        "vconsole.keymap",        &v.keymap,
+                        "vconsole.keymap_toggle", &v.keymap_toggle,
+                        "vconsole.font",          &v.font,
+                        "vconsole.font_map",      &v.font_map,
+                        "vconsole.font_unimap",   &v.font_unimap,
+                        /* compatibility with obsolete multiple-dot scheme */
+                        "vconsole.keymap.toggle", &w.keymap_toggle,
+                        "vconsole.font.map",      &w.font_map,
+                        "vconsole.font.unimap",   &w.font_unimap);
         if (r < 0) {
                 if (r != -ENOENT)
                         log_warning_errno(r, "Failed to read /proc/cmdline, ignoring: %m");
@@ -285,8 +249,11 @@ static int toggle_utf8_sysfs(bool utf8) {
         return 0;
 }
 
+/* SYSTEMD_DEFAULT_KEYMAP must not be empty */
+assert_cc(STRLEN(SYSTEMD_DEFAULT_KEYMAP) > 0);
+
 static int keyboard_load_and_wait(const char *vc, Context *c, bool utf8) {
-        const char *map, *map_toggle, *args[8];
+        const char* args[8];
         unsigned i = 0;
         pid_t pid;
         int r;
@@ -294,11 +261,11 @@ static int keyboard_load_and_wait(const char *vc, Context *c, bool utf8) {
         assert(vc);
         assert(c);
 
-        map = context_get_config(c, VC_KEYMAP);
-        map_toggle = context_get_config(c, VC_KEYMAP_TOGGLE);
+        const char
+                *keymap = empty_to_null(c->keymap) ?: SYSTEMD_DEFAULT_KEYMAP,
+                *keymap_toggle = empty_to_null(c->keymap_toggle);
 
-        /* An empty map means kernel map */
-        if (isempty(map) || streq(map, "@kernel"))
+        if (streq(keymap, "@kernel"))
                 return 0;
 
         args[i++] = KBD_LOADKEYS;
@@ -307,9 +274,9 @@ static int keyboard_load_and_wait(const char *vc, Context *c, bool utf8) {
         args[i++] = vc;
         if (utf8)
                 args[i++] = "-u";
-        args[i++] = map;
-        if (map_toggle)
-                args[i++] = map_toggle;
+        args[i++] = keymap;
+        if (keymap_toggle)
+                args[i++] = keymap_toggle;
         args[i++] = NULL;
 
         if (DEBUG_LOGGING) {
@@ -331,7 +298,7 @@ static int keyboard_load_and_wait(const char *vc, Context *c, bool utf8) {
 }
 
 static int font_load_and_wait(const char *vc, Context *c) {
-        const char *font, *map, *unimap, *args[9];
+        const char* args[9];
         unsigned i = 0;
         pid_t pid;
         int r;
@@ -339,24 +306,25 @@ static int font_load_and_wait(const char *vc, Context *c) {
         assert(vc);
         assert(c);
 
-        font = context_get_config(c, VC_FONT);
-        map = context_get_config(c, VC_FONT_MAP);
-        unimap = context_get_config(c, VC_FONT_UNIMAP);
+        const char
+                *font = empty_to_null(c->font),
+                *font_map = empty_to_null(c->font_map),
+                *font_unimap = empty_to_null(c->font_unimap);
 
         /* Any part can be set independently */
-        if (!font && !map && !unimap)
+        if (!font && !font_map && !font_unimap)
                 return 0;
 
         args[i++] = KBD_SETFONT;
         args[i++] = "-C";
         args[i++] = vc;
-        if (map) {
+        if (font_map) {
                 args[i++] = "-m";
-                args[i++] = map;
+                args[i++] = font_map;
         }
-        if (unimap) {
+        if (font_unimap) {
                 args[i++] = "-u";
-                args[i++] = unimap;
+                args[i++] = font_unimap;
         }
         if (font)
                 args[i++] = font;
@@ -377,7 +345,7 @@ static int font_load_and_wait(const char *vc, Context *c) {
                 _exit(EXIT_FAILURE);
         }
 
-        /* setfont returns EX_OSERR when ioctl(KDFONTOP/PIO_FONTX/PIO_FONTX) fails.  This might mean various
+        /* setfont returns EX_OSERR when ioctl(KDFONTOP/PIO_FONTX/PIO_FONTX) fails. This might mean various
          * things, but in particular lack of a graphical console. Let's be generous and not treat this as an
          * error. */
         r = wait_for_terminate_and_check(KBD_SETFONT, pid, WAIT_LOG_ABNORMAL);
@@ -598,7 +566,7 @@ static int verify_source_vc(char **ret_path, const char *src_vc) {
 
         /* setfont(8) silently ignores when the font can't be applied due to the vc being in
          * KD_GRAPHICS. Hence we continue to accept this case however we now let the user know that the vc
-         * will be initialized only partially.*/
+         * will be initialized only partially. */
         r = verify_vc_display_mode(fd);
         if (r < 0)
                 log_notice_errno(r, "Virtual console %s is not in KD_TEXT, font settings likely won't be applied.", src_vc);
@@ -630,7 +598,7 @@ static int run(int argc, char **argv) {
         } else {
                 fd = find_source_vc(&vc, &idx);
                 if (fd < 0 && fd != -EBUSY)
-                        return log_error_errno(fd, "No usable source console found: %m");
+                        return log_error_errno(fd, "No virtual console that can be configured found: %m");
         }
 
         utf8 = is_locale_utf8();
@@ -640,7 +608,7 @@ static int run(int argc, char **argv) {
                 /* We found only busy VCs, which might happen during the boot process when the boot splash is
                  * displayed on the only allocated VC. In this case we don't interfere and avoid initializing
                  * the VC partially as some operations are likely to fail. */
-                log_notice("All allocated VCs are currently busy, skipping initialization of font and keyboard settings.");
+                log_notice("All allocated virtual consoles are busy, will not configure key mapping and font.");
                 return EXIT_SUCCESS;
         }
 
@@ -664,7 +632,7 @@ static int run(int argc, char **argv) {
                         setup_remaining_vcs(fd, idx, utf8);
                 else
                         log_full(r == EX_OSERR ? LOG_NOTICE : LOG_WARNING,
-                                 "Setting source virtual console failed, ignoring remaining ones.");
+                                 "Configuration of first virtual console failed, ignoring remaining ones.");
         }
 
         return IN_SET(r, 0, EX_OSERR) && keyboard_ok ? EXIT_SUCCESS : EXIT_FAILURE;

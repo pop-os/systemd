@@ -1,56 +1,58 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+#include <linux/capability.h>
 #include <sys/prctl.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "architecture.h"
+#include "bitfield.h"
 #include "build.h"
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
 #include "bus-log-control-api.h"
+#include "bus-message-util.h"
 #include "bus-util.h"
 #include "chase.h"
 #include "confidential-virt.h"
-#include "data-fd-util.h"
 #include "dbus-cgroup.h"
 #include "dbus-execute.h"
+#include "dbus.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
 #include "dbus-scope.h"
 #include "dbus-service.h"
 #include "dbus-unit.h"
 #include "dbus-util.h"
-#include "dbus.h"
+#include "dynamic-user.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "format-util.h"
+#include "glyph-util.h"
+#include "hashmap.h"
 #include "initrd-util.h"
 #include "install.h"
 #include "locale-util.h"
 #include "log.h"
 #include "manager-dump.h"
+#include "manager.h"
+#include "memfd-util.h"
 #include "os-util.h"
-#include "parse-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "selinux-access.h"
-#include "stat-util.h"
+#include "set.h"
 #include "string-util.h"
 #include "strv.h"
 #include "syslog-util.h"
 #include "taint.h"
+#include "unit-name.h"
 #include "user-util.h"
 #include "version.h"
 #include "virt.h"
 #include "watchdog.h"
-
-/* Require 16MiB free in /run/systemd for reloading/reexecing. After all we need to serialize our state
- * there, and if we can't we'll fail badly. */
-#define RELOAD_DISK_SPACE_MIN (UINT64_C(16) * UINT64_C(1024) * UINT64_C(1024))
 
 static UnitFileFlags unit_file_bools_to_flags(bool runtime, bool force) {
         return (runtime ? UNIT_FILE_RUNTIME : 0) |
@@ -683,7 +685,7 @@ static int method_get_unit_by_pidfd(sd_bus_message *message, void *userdata, sd_
         if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to get PID from PIDFD: %m");
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_load_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -824,9 +826,15 @@ static int method_start_unit_replace(sd_bus_message *message, void *userdata, sd
 }
 
 static int method_kill_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        /* We don't bother with GENERIC_UNIT_LOAD nor GENERIC_UNIT_VALIDATE_LOADED here, as it shouldn't
-         * matter whether a unit is loaded for killing any processes possibly in the unit's cgroup. */
+        /* We don't bother with GENERIC_UNIT_LOAD or GENERIC_UNIT_VALIDATE_LOADED here, as it shouldn't
+         * matter whether a unit is loaded for killing any processes in the unit's cgroup. */
         return method_generic_unit_operation(message, userdata, error, bus_unit_method_kill, 0);
+}
+
+static int method_kill_unit_subgroup(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        /* We don't bother with GENERIC_UNIT_LOAD or GENERIC_UNIT_VALIDATE_LOADED here, as it shouldn't
+         * matter whether a unit is loaded for killing any processes in the unit's cgroup. */
+        return method_generic_unit_operation(message, userdata, error, bus_unit_method_kill_subgroup, 0);
 }
 
 static int method_clean_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -946,7 +954,7 @@ static int method_list_units_by_names(sd_bus_message *message, void *userdata, s
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_get_unit_processes(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -963,11 +971,17 @@ static int method_attach_processes_to_unit(sd_bus_message *message, void *userda
         return method_generic_unit_operation(message, userdata, error, bus_unit_method_attach_processes, GENERIC_UNIT_VALIDATE_LOADED);
 }
 
+static int method_remove_subgroup_from_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        /* Don't allow removal of subgroups from units that aren't loaded. But allow loading the unit, since
+         * this is clean-up work, that is OK to do when the unit is stopped already. */
+        return method_generic_unit_operation(message, userdata, error, bus_unit_method_remove_subgroup, GENERIC_UNIT_LOAD|GENERIC_UNIT_VALIDATE_LOADED);
+}
+
 static int transient_unit_from_message(
                 Manager *m,
                 sd_bus_message *message,
                 const char *name,
-                Unit **unit,
+                Unit **ret_unit,
                 sd_bus_error *error) {
 
         UnitType t;
@@ -981,7 +995,7 @@ static int transient_unit_from_message(
         t = unit_name_to_type(name);
         if (t < 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Invalid unit name or type.");
+                                         "Invalid unit name or type: %s", name);
 
         if (!unit_vtable[t]->can_transient)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
@@ -1018,7 +1032,8 @@ static int transient_unit_from_message(
         unit_add_to_load_queue(u);
         manager_dispatch_load_queue(m);
 
-        *unit = u;
+        if (ret_unit)
+                *ret_unit = u;
 
         return 0;
 }
@@ -1038,14 +1053,13 @@ static int transient_aux_units_from_message(
                 return r;
 
         while ((r = sd_bus_message_enter_container(message, 'r', "sa(sv)")) > 0) {
-                const char *name = NULL;
-                Unit *u;
+                const char *name;
 
                 r = sd_bus_message_read(message, "s", &name);
                 if (r < 0)
                         return r;
 
-                r = transient_unit_from_message(m, message, name, &u, error);
+                r = transient_unit_from_message(m, message, name, /* ret_unit = */ NULL, error);
                 if (r < 0)
                         return r;
 
@@ -1238,7 +1252,7 @@ static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_e
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_list_units(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1321,7 +1335,7 @@ static int method_list_jobs(sd_bus_message *message, void *userdata, sd_bus_erro
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_subscribe(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1447,7 +1461,7 @@ static int method_dump(sd_bus_message *message, void *userdata, sd_bus_error *er
 static int reply_dump_by_fd(sd_bus_message *message, char *dump) {
         _cleanup_close_ int fd = -EBADF;
 
-        fd = acquire_data_fd(dump);
+        fd = memfd_new_and_seal_string("dump", dump);
         if (fd < 0)
                 return fd;
 
@@ -1485,73 +1499,6 @@ static int method_refuse_snapshot(sd_bus_message *message, void *userdata, sd_bu
         return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Support for snapshots has been removed.");
 }
 
-static int get_run_space(uint64_t *ret, sd_bus_error *error) {
-        struct statvfs svfs;
-
-        assert(ret);
-
-        if (statvfs("/run/systemd", &svfs) < 0)
-                return sd_bus_error_set_errnof(error, errno, "Failed to statvfs(/run/systemd): %m");
-
-        *ret = (uint64_t) svfs.f_bfree * (uint64_t) svfs.f_bsize;
-        return 0;
-}
-
-static int verify_run_space(const char *message, sd_bus_error *error) {
-        uint64_t available = 0; /* unnecessary, but used to trick out gcc's incorrect maybe-uninitialized warning */
-        int r;
-
-        assert(message);
-
-        r = get_run_space(&available, error);
-        if (r < 0)
-                return r;
-
-        if (available < RELOAD_DISK_SPACE_MIN)
-                return sd_bus_error_setf(error,
-                                         BUS_ERROR_DISK_FULL,
-                                         "%s, not enough space available on /run/systemd/. "
-                                         "Currently, %s are free, but a safety buffer of %s is enforced.",
-                                         message,
-                                         FORMAT_BYTES(available),
-                                         FORMAT_BYTES(RELOAD_DISK_SPACE_MIN));
-
-        return 0;
-}
-
-int verify_run_space_and_log(const char *message) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        int r;
-
-        assert(message);
-
-        r = verify_run_space(message, &error);
-        if (r < 0)
-                return log_error_errno(r, "%s", bus_error_message(&error, r));
-
-        return 0;
-}
-
-static int verify_run_space_permissive(const char *message, sd_bus_error *error) {
-        uint64_t available = 0; /* unnecessary, but used to trick out gcc's incorrect maybe-uninitialized warning */
-        int r;
-
-        assert(message);
-
-        r = get_run_space(&available, error);
-        if (r < 0)
-                return r;
-
-        if (available < RELOAD_DISK_SPACE_MIN)
-                log_warning("Dangerously low amount of free space on /run/systemd/, %s.\n"
-                            "Currently, %s are free, but %s are suggested. Proceeding anyway.",
-                            message,
-                            FORMAT_BYTES(available),
-                            FORMAT_BYTES(RELOAD_DISK_SPACE_MIN));
-
-        return 0;
-}
-
 static void log_caller(sd_bus_message *message, Manager *manager, const char *method) {
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
         _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
@@ -1585,10 +1532,6 @@ static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *
 
         assert(message);
 
-        r = verify_run_space("Refusing to reload", error);
-        if (r < 0)
-                return r;
-
         r = mac_selinux_access_check(message, "reload", error);
         if (r < 0)
                 return r;
@@ -1605,9 +1548,9 @@ static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *
         /* Check the rate limit after the authorization succeeds, to avoid denial-of-service issues. */
         if (!ratelimit_below(&m->reload_reexec_ratelimit)) {
                 log_warning("Reloading request rejected due to rate limit.");
-                return sd_bus_error_setf(error,
-                                         SD_BUS_ERROR_LIMITS_EXCEEDED,
-                                         "Reload() request rejected due to rate limit.");
+                return sd_bus_error_set(error,
+                                        SD_BUS_ERROR_LIMITS_EXCEEDED,
+                                        "Reload() request rejected due to rate limit.");
         }
 
         /* Instead of sending the reply back right away, we just
@@ -1631,10 +1574,6 @@ static int method_reexecute(sd_bus_message *message, void *userdata, sd_bus_erro
 
         assert(message);
 
-        r = verify_run_space("Refusing to reexecute", error);
-        if (r < 0)
-                return r;
-
         r = mac_selinux_access_check(message, "reload", error);
         if (r < 0)
                 return r;
@@ -1651,9 +1590,9 @@ static int method_reexecute(sd_bus_message *message, void *userdata, sd_bus_erro
         /* Check the rate limit after the authorization succeeds, to avoid denial-of-service issues. */
         if (!ratelimit_below(&m->reload_reexec_ratelimit)) {
                 log_warning("Reexecution request rejected due to rate limit.");
-                return sd_bus_error_setf(error,
-                                         SD_BUS_ERROR_LIMITS_EXCEEDED,
-                                         "Reexecute() request rejected due to rate limit.");
+                return sd_bus_error_set(error,
+                                        SD_BUS_ERROR_LIMITS_EXCEEDED,
+                                        "Reexecute() request rejected due to rate limit.");
         }
 
         /* We don't send a reply back here, the client should
@@ -1717,10 +1656,6 @@ static int method_soft_reboot(sd_bus_message *message, void *userdata, sd_bus_er
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED,
                                         "Soft reboot is only supported by system manager.");
-
-        r = verify_run_space_permissive("soft reboot may fail", error);
-        if (r < 0)
-                return r;
 
         r = mac_selinux_access_check(message, "reboot", error);
         if (r < 0)
@@ -1825,10 +1760,6 @@ static int method_switch_root(sd_bus_message *message, void *userdata, sd_bus_er
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED,
                                         "Root switching is only supported by system manager.");
-
-        r = verify_run_space_permissive("root switching may fail", error);
-        if (r < 0)
-                return r;
 
         r = mac_selinux_access_check(message, "reboot", error);
         if (r < 0)
@@ -1958,8 +1889,8 @@ static int method_unset_environment(sd_bus_message *message, void *userdata, sd_
                 return r;
 
         if (!strv_env_name_or_assignment_is_valid(minus))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Invalid environment variable names or assignments");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
+                                        "Invalid environment variable names or assignments");
 
         r = bus_verify_set_environment_async(m, message, error);
         if (r < 0)
@@ -1994,11 +1925,11 @@ static int method_unset_and_set_environment(sd_bus_message *message, void *userd
                 return r;
 
         if (!strv_env_name_or_assignment_is_valid(minus))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Invalid environment variable names or assignments");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
+                                        "Invalid environment variable names or assignments");
         if (!strv_env_is_valid(plus))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Invalid environment assignments");
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS,
+                                        "Invalid environment assignments");
 
         r = bus_verify_set_environment_async(m, message, error);
         if (r < 0)
@@ -2046,8 +1977,8 @@ static int method_lookup_dynamic_user_by_name(sd_bus_message *message, void *use
                 return r;
 
         if (!MANAGER_IS_SYSTEM(m))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED,
-                                         "Dynamic users are only supported in the system instance.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED,
+                                        "Dynamic users are only supported in the system instance.");
         if (!valid_user_group_name(name, VALID_USER_RELAX))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
                                          "User name invalid: %s", name);
@@ -2076,8 +2007,8 @@ static int method_lookup_dynamic_user_by_uid(sd_bus_message *message, void *user
                 return r;
 
         if (!MANAGER_IS_SYSTEM(m))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED,
-                                         "Dynamic users are only supported in the system instance.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED,
+                                        "Dynamic users are only supported in the system instance.");
         if (!uid_is_valid(uid))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
                                          "User ID invalid: " UID_FMT, uid);
@@ -2103,8 +2034,8 @@ static int method_get_dynamic_users(sd_bus_message *message, void *userdata, sd_
         assert_cc(sizeof(uid_t) == sizeof(uint32_t));
 
         if (!MANAGER_IS_SYSTEM(m))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED,
-                                         "Dynamic users are only supported in the system instance.");
+                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED,
+                                        "Dynamic users are only supported in the system instance.");
 
         r = sd_bus_message_new_method_return(message, &reply);
         if (r < 0)
@@ -2121,8 +2052,8 @@ static int method_get_dynamic_users(sd_bus_message *message, void *userdata, sd_
                 if (r == -EAGAIN) /* not realized yet? */
                         continue;
                 if (r < 0)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_FAILED,
-                                                 "Failed to look up a dynamic user.");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_FAILED,
+                                                "Failed to look up a dynamic user.");
 
                 r = sd_bus_message_append(reply, "(us)", uid, d->name);
                 if (r < 0)
@@ -2133,7 +2064,7 @@ static int method_get_dynamic_users(sd_bus_message *message, void *userdata, sd_
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_enqueue_marked_jobs(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -2152,7 +2083,7 @@ static int method_enqueue_marked_jobs(sd_bus_message *message, void *userdata, s
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        log_info("Queuing reload/restart jobs for marked units%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("Queuing reload/restart jobs for marked units%s", glyph(GLYPH_ELLIPSIS));
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         r = sd_bus_message_new_method_return(message, &reply);
@@ -2172,9 +2103,9 @@ static int method_enqueue_marked_jobs(sd_bus_message *message, void *userdata, s
                         continue;
 
                 BusUnitQueueFlags flags;
-                if (FLAGS_SET(u->markers, 1u << UNIT_MARKER_NEEDS_RESTART))
+                if (BIT_SET(u->markers, UNIT_MARKER_NEEDS_RESTART))
                         flags = 0;
-                else if (FLAGS_SET(u->markers, 1u << UNIT_MARKER_NEEDS_RELOAD))
+                else if (BIT_SET(u->markers, UNIT_MARKER_NEEDS_RELOAD))
                         flags = BUS_UNIT_QUEUE_RELOAD_IF_POSSIBLE;
                 else
                         continue;
@@ -2201,7 +2132,7 @@ static int method_enqueue_marked_jobs(sd_bus_message *message, void *userdata, s
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int list_unit_files_by_patterns(sd_bus_message *message, void *userdata, sd_bus_error *error, char **states, char **patterns) {
@@ -2241,7 +2172,7 @@ static int list_unit_files_by_patterns(sd_bus_message *message, void *userdata, 
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_list_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -2304,7 +2235,7 @@ static int method_get_default_target(sd_bus_message *message, void *userdata, sd
 
         r = unit_file_get_default(m->runtime_scope, NULL, &default_target);
         if (r == -ERFKILL)
-                sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED, "Unit file is masked.");
+                return sd_bus_error_set(error, BUS_ERROR_UNIT_MASKED, "Default target unit file is masked.");
         if (r < 0)
                 return r;
 
@@ -2432,7 +2363,7 @@ static int reply_install_changes_and_free(
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_enable_unit_files_generic(
@@ -2810,7 +2741,7 @@ static int method_get_unit_file_links(sd_bus_message *message, void *userdata, s
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_get_job_waiting(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -2893,178 +2824,8 @@ static int method_dump_unit_descriptor_store(sd_bus_message *message, void *user
         return method_generic_unit_operation(message, userdata, error, bus_service_method_dump_file_descriptor_store, 0);
 }
 
-static int aux_scope_from_message(Manager *m, sd_bus_message *message, Unit **ret_scope, sd_bus_error *error) {
-        _cleanup_(pidref_done) PidRef sender_pidref = PIDREF_NULL;
-        _cleanup_free_ PidRef *pidrefs = NULL;
-        const char *name;
-        Unit *from, *scope;
-        PidRef *main_pid;
-        CGroupContext *cc;
-        size_t n_pids = 0;
-        uint64_t flags;
-        int r;
-
-        assert(ret_scope);
-
-        r = bus_query_sender_pidref(message, &sender_pidref);
-        if (r < 0)
-                return r;
-
-        from = manager_get_unit_by_pidref(m, &sender_pidref);
-        if (!from)
-                return sd_bus_error_set(error, BUS_ERROR_NO_SUCH_UNIT, "Client not member of any unit.");
-
-        if (!IN_SET(from->type, UNIT_SERVICE, UNIT_SCOPE))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Starting auxiliary scope is supported only for service and scope units, refusing.");
-
-        if (!unit_name_is_valid(from->id, UNIT_NAME_PLAIN))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Auxiliary scope can be started only for non-template service units and scope units, refusing.");
-
-        r = sd_bus_message_read(message, "s", &name);
-        if (r < 0)
-                return r;
-
-        if (!unit_name_is_valid(name, UNIT_NAME_PLAIN))
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Invalid name \"%s\" for auxiliary scope.", name);
-
-        if (unit_name_to_type(name) != UNIT_SCOPE)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
-                                         "Name \"%s\" of auxiliary scope doesn't have .scope suffix.", name);
-
-        log_unit_warning(from, "D-Bus call StartAuxiliaryScope() has been invoked which is deprecated.");
-        main_pid = unit_main_pid(from);
-
-        r = sd_bus_message_enter_container(message, 'a', "h");
-        if (r < 0)
-                return r;
-
-        for (;;) {
-                _cleanup_(pidref_done) PidRef p = PIDREF_NULL;
-                Unit *unit;
-                int fd;
-
-                r = sd_bus_message_read(message, "h", &fd);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        break;
-
-                r = pidref_set_pidfd(&p, fd);
-                if (r < 0) {
-                        log_unit_warning_errno(from, r, "Failed to create process reference from PIDFD, ignoring: %m");
-                        continue;
-                }
-
-                unit = manager_get_unit_by_pidref(m, &p);
-                if (!unit) {
-                        log_unit_warning(from, "Failed to get unit from PIDFD, ignoring.");
-                        continue;
-                }
-
-                if (!streq(unit->id, from->id)) {
-                        log_unit_warning(from, "PID " PID_FMT " is not running in the same service as the calling process, ignoring.", p.pid);
-                        continue;
-                }
-
-                if (pidref_equal(main_pid, &p)) {
-                        log_unit_warning(from, "Main PID cannot be migrated into auxiliary scope, ignoring.");
-                        continue;
-                }
-
-                if (!GREEDY_REALLOC(pidrefs, n_pids+1))
-                        return -ENOMEM;
-
-                pidrefs[n_pids++] = TAKE_PIDREF(p);
-        }
-
-        if (n_pids == 0)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "No processes can be migrated to auxiliary scope.");
-
-        r = sd_bus_message_exit_container(message);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_read(message, "t", &flags);
-        if (r < 0)
-                return r;
-
-        if (flags != 0)
-                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Flags must be zero.");
-
-        r = manager_load_unit(m, name, NULL, error, &scope);
-        if (r < 0)
-                return r;
-
-        if (!unit_is_pristine(scope))
-                return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS,
-                                         "Unit %s was already loaded or has a fragment file.", name);
-
-        r = unit_set_slice(scope, UNIT_GET_SLICE(from));
-        if (r < 0)
-                return r;
-
-        cc = unit_get_cgroup_context(scope);
-
-        r = cgroup_context_copy(cc, unit_get_cgroup_context(from));
-        if (r < 0)
-                return r;
-
-        r = unit_make_transient(scope);
-        if (r < 0)
-                return r;
-
-        r = bus_unit_set_properties(scope, message, UNIT_RUNTIME, true, error);
-        if (r < 0)
-                return r;
-
-        FOREACH_ARRAY(p, pidrefs, n_pids) {
-                r = unit_pid_attachable(scope, p, error);
-                if (r < 0)
-                        return r;
-
-                r = unit_watch_pidref(scope, p, /* exclusive= */ false);
-                if (r < 0 && r != -EEXIST)
-                        return r;
-        }
-
-        /* Now load the missing bits of the unit we just created */
-        unit_add_to_load_queue(scope);
-        manager_dispatch_load_queue(m);
-
-        *ret_scope = TAKE_PTR(scope);
-
-        return 1;
-}
-
 static int method_start_aux_scope(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        Manager *m = ASSERT_PTR(userdata);
-        Unit *u = NULL; /* avoid false maybe-uninitialized warning */
-        int r;
-
-        assert(message);
-
-        r = mac_selinux_access_check(message, "start", error);
-        if (r < 0)
-                return r;
-
-        r = bus_verify_manage_units_async(m, message, error);
-        if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
-
-        log_once(LOG_WARNING, "StartAuxiliaryScope() is deprecated because state of resources cannot be "
-                              "migrated between cgroups. Please report this to "
-                              "systemd-devel@lists.freedesktop.org or https://github.com/systemd/systemd/issues/ "
-                              "if you see this message and know the software making use of this functionality.");
-        r = aux_scope_from_message(m, message, &u, error);
-        if (r < 0)
-                return r;
-
-        return bus_unit_queue_job(message, u, JOB_START, JOB_REPLACE, 0, error);
+        return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "StartAuxiliaryScope() method has been removed.");
 }
 
 const sd_bus_vtable bus_manager_vtable[] = {
@@ -3135,8 +2896,6 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultStartLimitIntervalSec", "t", bus_property_get_usec, offsetof(Manager, defaults.start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("DefaultStartLimitInterval", "t", bus_property_get_usec, offsetof(Manager, defaults.start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("DefaultStartLimitBurst", "u", bus_property_get_unsigned, offsetof(Manager, defaults.start_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("DefaultCPUAccounting", "b", bus_property_get_bool, offsetof(Manager, defaults.cpu_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("DefaultBlockIOAccounting", "b", bus_property_get_bool, offsetof(Manager, defaults.blockio_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultIOAccounting", "b", bus_property_get_bool, offsetof(Manager, defaults.io_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultIPAccounting", "b", bus_property_get_bool, offsetof(Manager, defaults.ip_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultMemoryAccounting", "b", bus_property_get_bool, offsetof(Manager, defaults.memory_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -3179,8 +2938,14 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("TimerSlackNSec", "t", property_get_timer_slack_nsec, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultOOMPolicy", "s", bus_property_get_oom_policy, offsetof(Manager, defaults.oom_policy), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultOOMScoreAdjust", "i", property_get_oom_score_adjust, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultRestrictSUIDSGID", "b", bus_property_get_bool, offsetof(Manager, defaults.restrict_suid_sgid), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("CtrlAltDelBurstAction", "s", bus_property_get_emergency_action, offsetof(Manager, cad_burst_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SoftRebootsCount", "u", bus_property_get_unsigned, offsetof(Manager, soft_reboots_count), SD_BUS_VTABLE_PROPERTY_CONST),
+
+        /* deprecated cgroup v1 property */
+        SD_BUS_PROPERTY("DefaultBlockIOAccounting", "b", bus_property_get_bool_false, 0, SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_DEPRECATED|SD_BUS_VTABLE_HIDDEN),
+        /* see comment in bus_cgroup_vtable */
+        SD_BUS_PROPERTY("DefaultCPUAccounting", "b", bus_property_get_bool_true, 0, SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_DEPRECATED|SD_BUS_VTABLE_HIDDEN),
 
         SD_BUS_METHOD_WITH_ARGS("GetUnit",
                                 SD_BUS_ARGS("s", name),
@@ -3267,6 +3032,11 @@ const sd_bus_vtable bus_manager_vtable[] = {
                                 SD_BUS_NO_RESULT,
                                 method_kill_unit,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("KillUnitSubgroup",
+                                SD_BUS_ARGS("s", name, "s", whom, "s", subgroup, "i", signal),
+                                SD_BUS_NO_RESULT,
+                                method_kill_unit_subgroup,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_ARGS("QueueSignalUnit",
                                 SD_BUS_ARGS("s", name, "s", whom, "i", signal, "i", value),
                                 SD_BUS_NO_RESULT,
@@ -3331,6 +3101,11 @@ const sd_bus_vtable bus_manager_vtable[] = {
                                 SD_BUS_ARGS("s", unit_name, "s", subcgroup, "au", pids),
                                 SD_BUS_NO_RESULT,
                                 method_attach_processes_to_unit,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("RemoveSubgroupFromUnit",
+                                SD_BUS_ARGS("s", unit_name, "s", subcgroup, "t", flags),
+                                SD_BUS_NO_RESULT,
+                                method_remove_subgroup_from_unit,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_ARGS("AbandonScope",
                                 SD_BUS_ARGS("s", name),
@@ -3631,7 +3406,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
                                 SD_BUS_ARGS("s", name, "ah", pidfds, "t", flags, "a(sv)", properties),
                                 SD_BUS_RESULT("o", job),
                                 method_start_aux_scope,
-                                SD_BUS_VTABLE_DEPRECATED|SD_BUS_VTABLE_UNPRIVILEGED),
+                                SD_BUS_VTABLE_DEPRECATED|SD_BUS_VTABLE_UNPRIVILEGED|SD_BUS_VTABLE_HIDDEN),
 
         SD_BUS_SIGNAL_WITH_ARGS("UnitNew",
                                 SD_BUS_ARGS("s", id, "o", unit),

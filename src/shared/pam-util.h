@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <security/pam_modules.h>
+#include <security/pam_modules.h> /* IWYU pragma: export */
+#include <syslog.h>
 
-#include "sd-bus.h"
+#include "forward.h"
 
 void pam_log_setup(void);
 
@@ -38,13 +39,15 @@ void pam_bus_data_disconnectp(PamBusData **d);
 /* Use a different module name per different PAM module. They are all loaded in the same namespace, and this
  * helps avoid a clash in the internal data structures of sd-bus. It will be used as key for cache items. */
 int pam_acquire_bus_connection(pam_handle_t *handle, const char *module_name, bool debug, sd_bus **ret_bus, PamBusData **ret_bus_data);
-int pam_release_bus_connection(pam_handle_t *handle, const char *module_name);
 int pam_get_bus_data(pam_handle_t *handle, const char *module_name, PamBusData **ret);
 
 void pam_cleanup_free(pam_handle_t *handle, void *data, int error_status);
+void pam_cleanup_close(pam_handle_t *handle, void *data, int error_status);
 
 int pam_get_item_many_internal(pam_handle_t *handle, ...);
-
 #define pam_get_item_many(handle, ...) pam_get_item_many_internal(handle, __VA_ARGS__, -1)
+
+int pam_get_data_many_internal(pam_handle_t *handle, ...) _sentinel_;
+#define pam_get_data_many(handle, ...) pam_get_data_many_internal(handle, __VA_ARGS__, NULL)
 
 int pam_prompt_graceful(pam_handle_t *handle, int style, char **ret_response, const char *fmt, ...) _printf_(4,5);

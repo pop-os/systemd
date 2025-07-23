@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "architecture.h"
 #include "hexdecoct.h"
-#include "macro.h"
 #include "tests.h"
 #include "tpm2-util.h"
 #include "virt.h"
@@ -556,8 +556,13 @@ static void check_parse_pcr_argument(
 
                 assert_se(tpm2_pcr_values_to_mask(expected_values, n_expected_values, expected_values[0].hash, &expected_mask) == 0);
 
-                assert_se(tpm2_parse_pcr_argument_to_mask(arg, &mask) == 0);
-                assert_se(mask == expected_mask);
+                _cleanup_free_ Tpm2PCRValue *arg_pcr_values = NULL;
+                size_t n_arg_pcr_values = 0;
+                assert_se(tpm2_parse_pcr_argument(arg, &arg_pcr_values, &n_arg_pcr_values) >= 0);
+                uint32_t mask2 = UINT32_MAX;
+                assert_se(tpm2_pcr_values_to_mask(arg_pcr_values, n_arg_pcr_values, /* hash= */ 0, &mask2) >= 0);
+
+                assert_se((mask == UINT32_MAX ? mask2 : (mask|mask2)) == expected_mask);
         }
 
         size_t old_n_values = n_values;
@@ -701,6 +706,10 @@ TEST(parse_pcr_argument) {
         check_parse_pcr_argument_to_mask("sysexts+17+23", 0x822000);
         check_parse_pcr_argument_to_mask("6+boot-loader-code,44", -EINVAL);
         check_parse_pcr_argument_to_mask("debug+24", -EINVAL);
+        check_parse_pcr_argument_to_mask("5:sha1=f013d66c7f6817d08b7eb2a93e6d0440c1f3e7f8", -EINVAL);
+        check_parse_pcr_argument_to_mask("0:sha256=f013d66c7f6817d08b7eb2a93e6d0440c1f3e7f8", -EINVAL);
+        check_parse_pcr_argument_to_mask("5:sha1=f013d66c7f6817d08b7eb2a93e6d0440c1f3e7f8,3", -EINVAL);
+        check_parse_pcr_argument_to_mask("3,0:sha256=f013d66c7f6817d08b7eb2a93e6d0440c1f3e7f8", -EINVAL);
 }
 
 static const TPMT_PUBLIC test_rsa_template = {
@@ -801,7 +810,7 @@ static void get_tpm2b_public_from_pem(const void *pem, size_t pem_size, TPM2B_PU
         assert(pem);
         assert(ret);
 
-        assert_se(openssl_pkey_from_pem(pem, pem_size, &pkey) >= 0);
+        assert_se(openssl_pubkey_from_pem(pem, pem_size, &pkey) >= 0);
         assert_se(tpm2_tpm2b_public_from_openssl_pkey(pkey, &p1) >= 0);
         assert_se(tpm2_tpm2b_public_from_pem(pem, pem_size, &p2) >= 0);
         assert_se(memcmp_nn(&p1, sizeof(p1), &p2, sizeof(p2)) == 0);
@@ -867,6 +876,13 @@ static void check_tpm2b_public_from_rsa_pem(const char *pem, const char *hexn, u
 }
 
 TEST(tpm2b_public_from_openssl_pkey) {
+        // TODO: this test fails on s390x but only on Github Actions, re-enable once
+        // https://github.com/systemd/systemd/issues/38229 is fixed
+        if (strstr_ptr(ci_environment(), "github-actions") && uname_architecture() == ARCHITECTURE_S390X) {
+                log_notice("%s: skipping test on GH Actions because of systemd/systemd#38229", __func__);
+                return;
+        }
+
         /* standard ECC key */
         check_tpm2b_public_from_ecc_pem("2d2d2d2d2d424547494e205055424c4943204b45592d2d2d2d2d0a4d466b77457759484b6f5a497a6a3043415159494b6f5a497a6a30444151634451674145726a6e4575424c73496c3972687068777976584e50686a346a426e500a44586e794a304b395579724e6764365335413532542b6f5376746b436a365a726c34685847337741515558706f426c532b7448717452714c35513d3d0a2d2d2d2d2d454e44205055424c4943204b45592d2d2d2d2d0a",
                                         "ae39c4b812ec225f6b869870caf5cd3e18f88c19cf0d79f22742bd532acd81de",
@@ -1250,8 +1266,8 @@ static void check_seal_unseal_for_handle(Tpm2Context *c, TPM2_HANDLE handle) {
                         /* primary_alg= */ 0,
                         blobs,
                         n_blobs,
-                        /* policy_hash= */ NULL,
-                        /* n_policy_hash= */ 0,
+                        /* known_policy_hash= */ NULL,
+                        /* n_known_policy_hash= */ 0,
                         &srk,
                         &unsealed_secret) >= 0);
 

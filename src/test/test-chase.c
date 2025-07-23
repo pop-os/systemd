@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "argv-util.h"
 #include "chase.h"
 #include "dirent-util.h"
 #include "fd-util.h"
@@ -10,10 +12,13 @@
 #include "id128-util.h"
 #include "mkdir.h"
 #include "path-util.h"
+#include "random-util.h"
 #include "rm-rf.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "tests.h"
 #include "tmpfile-util.h"
+#include "user-util.h"
 
 static const char *arg_test_dir = NULL;
 
@@ -467,7 +472,7 @@ TEST(chaseat) {
         struct stat st;
         const char *p;
 
-        ASSERT_OK((tfd = mkdtemp_open(NULL, 0, &t)));
+        ASSERT_OK(tfd = mkdtemp_open(NULL, 0, &t));
 
         /* Test that AT_FDCWD with CHASE_AT_RESOLVE_IN_ROOT resolves against / and not the current working
          * directory. */
@@ -535,7 +540,7 @@ TEST(chaseat) {
 
         /* Test CHASE_PARENT */
 
-        ASSERT_OK((fd = open_mkdir_at(tfd, "chase", O_CLOEXEC, 0755)));
+        ASSERT_OK(fd = open_mkdir_at(tfd, "chase", O_CLOEXEC, 0755));
         ASSERT_OK(symlinkat("/def", fd, "parent"));
         fd = safe_close(fd);
 
@@ -667,24 +672,24 @@ TEST(chaseat) {
 
         /* Test chase_and_open_parent_at() */
 
-        ASSERT_OK((fd = chase_and_open_parent_at(tfd, "chase/parent", CHASE_AT_RESOLVE_IN_ROOT|CHASE_NOFOLLOW, &result)));
+        ASSERT_OK(fd = chase_and_open_parent_at(tfd, "chase/parent", CHASE_AT_RESOLVE_IN_ROOT|CHASE_NOFOLLOW, &result));
         ASSERT_OK(faccessat(fd, result, F_OK, AT_SYMLINK_NOFOLLOW));
         ASSERT_STREQ(result, "parent");
         fd = safe_close(fd);
         result = mfree(result);
 
-        ASSERT_OK((fd = chase_and_open_parent_at(tfd, "chase", CHASE_AT_RESOLVE_IN_ROOT, &result)));
+        ASSERT_OK(fd = chase_and_open_parent_at(tfd, "chase", CHASE_AT_RESOLVE_IN_ROOT, &result));
         ASSERT_OK(faccessat(fd, result, F_OK, 0));
         ASSERT_STREQ(result, "chase");
         fd = safe_close(fd);
         result = mfree(result);
 
-        ASSERT_OK((fd = chase_and_open_parent_at(tfd, "/", CHASE_AT_RESOLVE_IN_ROOT, &result)));
+        ASSERT_OK(fd = chase_and_open_parent_at(tfd, "/", CHASE_AT_RESOLVE_IN_ROOT, &result));
         ASSERT_STREQ(result, ".");
         fd = safe_close(fd);
         result = mfree(result);
 
-        ASSERT_OK((fd = chase_and_open_parent_at(tfd, ".", CHASE_AT_RESOLVE_IN_ROOT, &result)));
+        ASSERT_OK(fd = chase_and_open_parent_at(tfd, ".", CHASE_AT_RESOLVE_IN_ROOT, &result));
         ASSERT_STREQ(result, ".");
         fd = safe_close(fd);
         result = mfree(result);
@@ -752,6 +757,34 @@ TEST(trailing_dot_dot) {
         assert_se(path_equal(path, expected1));
         ASSERT_OK(fd_get_path(fd, &fdpath));
         assert_se(path_equal(fdpath, expected2));
+}
+
+TEST(use_chase_as_mkdir_p) {
+        _cleanup_free_ char *p = NULL;
+        ASSERT_OK_ERRNO(asprintf(&p, "/tmp/chasemkdir%" PRIu64 "/a/b/c", random_u64()));
+
+        _cleanup_close_ int fd = -EBADF;
+        ASSERT_OK(chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_MKDIR_0755, NULL, &fd));
+
+        ASSERT_OK_EQ(inode_same_at(AT_FDCWD, p, fd, NULL, AT_EMPTY_PATH), 1);
+
+        _cleanup_close_ int fd2 = -EBADF;
+        ASSERT_OK(chase(p, p, CHASE_PREFIX_ROOT|CHASE_MKDIR_0755, NULL, &fd2));
+
+        _cleanup_free_ char *pp = ASSERT_PTR(path_join(p, p));
+
+        ASSERT_OK_EQ(inode_same_at(AT_FDCWD, pp, fd2, NULL, AT_EMPTY_PATH), 1);
+
+        _cleanup_free_ char *f = NULL;
+        ASSERT_OK(path_extract_directory(p, &f));
+
+        _cleanup_free_ char *ff = NULL;
+        ASSERT_OK(path_extract_directory(f, &ff));
+
+        _cleanup_free_ char *fff = NULL;
+        ASSERT_OK(path_extract_directory(ff, &fff));
+
+        ASSERT_OK(rm_rf(fff, REMOVE_PHYSICAL));
 }
 
 static int intro(void) {

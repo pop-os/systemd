@@ -3,37 +3,22 @@
 
 #include <sys/stat.h>
 
-#include "sd-event.h"
-#include "sd-netlink.h"
-#include "sd-network.h"
-#include "sd-varlink.h"
-
 #include "common-signal.h"
-#include "hashmap.h"
+#include "forward.h"
 #include "list.h"
-#include "ordered-set.h"
 #include "resolve-util.h"
-
-typedef struct Manager Manager;
-
-#include "resolved-dns-query.h"
-#include "resolved-dns-search-domain.h"
+#include "resolved-dns-browse-services.h"
+#include "resolved-dns-dnssec.h"
 #include "resolved-dns-stream.h"
 #include "resolved-dns-stub.h"
 #include "resolved-dns-trust-anchor.h"
-#include "resolved-link.h"
-#include "resolved-socket-graveyard.h"
+#include "resolved-etc-hosts.h"
+#include "resolved-forward.h"
 
 #define MANAGER_SEARCH_DOMAINS_MAX 256
 #define MANAGER_DNS_SERVERS_MAX 256
 
-typedef struct EtcHosts {
-        Hashmap *by_address;
-        Hashmap *by_name;
-        Set *no_address;
-} EtcHosts;
-
-struct Manager {
+typedef struct Manager {
         sd_event *event;
 
         ResolveSupport llmnr_support;
@@ -87,6 +72,8 @@ struct Manager {
         LIST_HEAD(DnsScope, dns_scopes);
         DnsScope *unicast_scope;
 
+        Hashmap *delegates; /* id string → DnsDelegate objects */
+
         /* LLMNR */
         int llmnr_ipv4_udp_fd;
         int llmnr_ipv6_udp_fd;
@@ -105,7 +92,7 @@ struct Manager {
         sd_event_source *mdns_ipv6_event_source;
 
         /* DNS-SD */
-        Hashmap *dnssd_services;
+        Hashmap *dnssd_registered_services;
 
         /* dbus */
         sd_bus *bus;
@@ -137,6 +124,9 @@ struct Manager {
         struct stat etc_hosts_stat;
         bool read_etc_hosts;
 
+        /* List of refused DNS Record Types*/
+        Set *refuse_record_types;
+
         OrderedSet *dns_extra_stub_listeners;
 
         /* Local DNS stub on 127.0.0.53:53 */
@@ -152,7 +142,13 @@ struct Manager {
         sd_varlink_server *varlink_server;
         sd_varlink_server *varlink_monitor_server;
 
-        Set *varlink_subscription;
+        Set *varlink_query_results_subscription;
+        Set *varlink_dns_configuration_subscription;
+
+        sd_json_variant *dns_configuration_json;
+
+        sd_netlink_slot *netlink_new_route_slot;
+        sd_netlink_slot *netlink_del_route_slot;
 
         sd_event_source *clock_change_event_source;
 
@@ -161,7 +157,10 @@ struct Manager {
         size_t n_socket_graveyard;
 
         struct sigrtmin18_info sigrtmin18_info;
-};
+
+        /* Map varlink links to DnsServiceBrowser instances. */
+        Hashmap *dns_service_browsers;
+} Manager;
 
 /* Manager */
 
@@ -188,7 +187,13 @@ int manager_next_hostname(Manager *m);
 bool manager_packet_from_local_address(Manager *m, DnsPacket *p);
 bool manager_packet_from_our_transaction(Manager *m, DnsPacket *p);
 
-DnsScope* manager_find_scope(Manager *m, DnsPacket *p);
+DnsScope* manager_find_scope_from_protocol(Manager *m, int ifindex, DnsProtocol protocol, int family);
+
+static inline DnsScope* manager_find_scope(Manager *m, DnsPacket *p) {
+        assert(m);
+        assert(p);
+        return manager_find_scope_from_protocol(m, p->ifindex, p->protocol, p->family);
+}
 
 void manager_verify_all(Manager *m);
 
@@ -225,3 +230,9 @@ int socket_disable_pmtud(int fd, int af);
 int dns_manager_dump_statistics_json(Manager *m, sd_json_variant **ret);
 
 void dns_manager_reset_statistics(Manager *m);
+
+int manager_dump_dns_configuration_json(Manager *m, sd_json_variant **ret);
+int manager_send_dns_configuration_changed(Manager *m, Link *l, bool reset);
+
+int manager_start_dns_configuration_monitor(Manager *m);
+void manager_stop_dns_configuration_monitor(Manager *m);

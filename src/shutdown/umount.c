@@ -3,21 +3,22 @@
   Copyright © 2010 ProFUSION embedded systems
 ***/
 
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "chase.h"
+#include "constants.h"
 #include "dirent-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "fstab-util.h"
 #include "libmount-util.h"
+#include "log.h"
 #include "mkdir.h"
 #include "mount-setup.h"
 #include "mount-util.h"
@@ -26,6 +27,8 @@
 #include "process-util.h"
 #include "random-util.h"
 #include "signal-util.h"
+#include "stat-util.h"
+#include "string-util.h"
 #include "umount.h"
 #include "virt.h"
 
@@ -47,16 +50,16 @@ void mount_points_list_free(MountPoint **head) {
                 mount_point_free(head, *head);
 }
 
-int mount_points_list_get(const char *mountinfo, MountPoint **head) {
+int mount_points_list_get(FILE *f, MountPoint **head) {
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         int r;
 
         assert(head);
 
-        r = libmount_parse(mountinfo, NULL, &table, &iter);
+        r = libmount_parse_mountinfo(f, &table, &iter);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse %s: %m", mountinfo ?: "/proc/self/mountinfo");
+                return log_error_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
         for (;;) {
                 _cleanup_free_ char *options = NULL, *remount_options = NULL;
@@ -70,7 +73,7 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                 if (r == 1) /* EOF */
                         break;
                 if (r < 0)
-                        return log_error_errno(r, "Failed to get next entry from %s: %m", mountinfo ?: "/proc/self/mountinfo");
+                        return log_error_errno(r, "Failed to get next entry from /proc/self/mountinfo: %m");
 
                 path = mnt_fs_get_target(fs);
                 if (!path)
@@ -142,7 +145,7 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
 
                 r = libmount_is_leaf(table, fs);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to get children mounts for %s from %s: %m", path, mountinfo ?: "/proc/self/mountinfo");
+                        return log_error_errno(r, "Failed to get children mounts for %s from /proc/self/mountinfo: %m", path);
                 bool leaf = r;
 
                 *m = (MountPoint) {
@@ -185,7 +188,7 @@ static void log_umount_blockers(const char *mnt) {
 
         _cleanup_closedir_ DIR *dir = opendir("/proc");
         if (!dir)
-                return (void) log_warning_errno(errno, "Failed to open /proc/: %m");
+                return (void) log_warning_errno(errno, "Failed to open %s: %m", "/proc/");
 
         FOREACH_DIRENT_ALL(de, dir, break) {
                 if (!IN_SET(de->d_type, DT_DIR, DT_UNKNOWN))

@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <unistd.h>
+
 #include "alloc-util.h"
 #include "format-util.h"
 #include "libcrypt-util.h"
 #include "log.h"
-#include "macro.h"
 #include "memory-util.h"
 #include "path-util.h"
 #include "string-util.h"
@@ -444,9 +445,8 @@ TEST(gid_lists_ops) {
         assert_se(nresult >= 0);
         assert_se(memcmp_nn(result2, ELEMENTSOF(result2), res4, nresult) == 0);
 
-        nresult = getgroups_alloc(&gids);
-        assert_se(nresult >= 0 || nresult == -EINVAL || nresult == -ENOMEM);
-        assert_se(gids);
+        ASSERT_OK(nresult = getgroups_alloc(&gids));
+        assert_se(gids || nresult == 0);
 }
 
 TEST(parse_uid_range) {

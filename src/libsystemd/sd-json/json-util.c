@@ -1,18 +1,28 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <netinet/in.h>
+#include <sys/sysmacros.h>
+
 #include "alloc-util.h"
 #include "devnum-util.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "glyph-util.h"
-#include "in-addr-util.h"
 #include "iovec-util.h"
 #include "json-util.h"
+#include "log.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
+#include "stat-util.h"
+#include "stdio-util.h"
 #include "string-util.h"
+#include "strv.h"
+#include "syslog-util.h"
+#include "unit-name.h"
 #include "user-util.h"
 
 int json_dispatch_unbase64_iovec(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
@@ -60,7 +70,7 @@ int json_dispatch_byte_array_iovec(const char *name, sd_json_variant *variant, s
                 if (b > 0xff)
                         return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
                                         "Element %zu of JSON field '%s' is out of range 0%s255.",
-                                        k, strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                                        k, strna(name), glyph(GLYPH_ELLIPSIS));
 
                 buffer[k++] = (uint8_t) b;
         }
@@ -109,6 +119,33 @@ int json_dispatch_const_user_group_name(const char *name, sd_json_variant *varia
         return 0;
 }
 
+int json_dispatch_const_unit_name(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        const char **s = ASSERT_PTR(userdata), *n;
+        UnitNameFlags unitname_flags;
+
+        if (sd_json_variant_is_null(variant)) {
+                *s = NULL;
+                return 0;
+        }
+
+        if (!sd_json_variant_is_string(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
+
+        if (FLAGS_SET(flags, SD_JSON_STRICT))
+                unitname_flags = UNIT_NAME_PLAIN;
+        else if (FLAGS_SET(flags, SD_JSON_RELAX))
+                unitname_flags = UNIT_NAME_ANY;
+        else
+                unitname_flags = UNIT_NAME_PLAIN | UNIT_NAME_INSTANCE;
+
+        n = sd_json_variant_string(variant);
+        if (!unit_name_is_valid(n, unitname_flags))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a valid unit name.", strna(name));
+
+        *s = n;
+        return 0;
+}
+
 int json_dispatch_in_addr(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
         struct in_addr *address = ASSERT_PTR(userdata);
         _cleanup_(iovec_done) struct iovec iov = {};
@@ -125,14 +162,13 @@ int json_dispatch_in_addr(const char *name, sd_json_variant *variant, sd_json_di
         return 0;
 }
 
-int json_dispatch_path(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
-        char **p = ASSERT_PTR(userdata);
-        const char *path;
+int json_dispatch_const_path(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        const char **p = ASSERT_PTR(userdata), *path;
 
         assert(variant);
 
         if (sd_json_variant_is_null(variant)) {
-                *p = mfree(*p);
+                *p = NULL;
                 return 0;
         }
 
@@ -145,7 +181,58 @@ int json_dispatch_path(const char *name, sd_json_variant *variant, sd_json_dispa
         if (!path_is_absolute(path))
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an absolute file system path.", strna(name));
 
+        *p = path;
+        return 0;
+}
+
+int json_dispatch_path(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        char **p = ASSERT_PTR(userdata);
+        const char *path;
+        int r;
+
+        assert_return(variant, -EINVAL);
+
+        r = json_dispatch_const_path(name, variant, flags, &path);
+        if (r < 0)
+                return r;
+
         if (free_and_strdup(p, path) < 0)
+                return json_log_oom(variant, flags);
+
+        return 0;
+}
+
+int json_dispatch_const_filename(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        const char **n = ASSERT_PTR(userdata);
+
+        if (sd_json_variant_is_null(variant)) {
+                *n = NULL;
+                return 0;
+        }
+
+        if (!sd_json_variant_is_string(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
+
+        const char *filename = sd_json_variant_string(variant);
+        if (!filename_is_valid(filename))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a valid file name.", strna(name));
+
+        *n = filename;
+        return 0;
+}
+
+int json_dispatch_filename(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        char **n = ASSERT_PTR(userdata);
+        const char *filename;
+        int r;
+
+        assert_return(variant, -EINVAL);
+
+        r = json_dispatch_const_filename(name, variant, flags, &filename);
+        if (r < 0)
+                return r;
+
+        if (free_and_strdup(n, filename) < 0)
                 return json_log_oom(variant, flags);
 
         return 0;
@@ -324,6 +411,34 @@ int json_dispatch_ifindex(const char *name, sd_json_variant *variant, sd_json_di
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is out of bounds for an interface index.", strna(name));
 
         *ifi = t;
+        return 0;
+}
+
+int json_dispatch_log_level(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        int *log_level = ASSERT_PTR(userdata), r, t;
+
+        /* If SD_JSON_STRICT is set, we'll refuse attempts to set the log level to null. If SD_JSON_RELAX is
+         * set we'll turn null (and any negative log level) into LOG_NULL (which when used as max log level
+         * means: no logging). Otherwise we turn null into LOG_INFO (which is typically our default). */
+
+        if (sd_json_variant_is_null(variant)) {
+                if (FLAGS_SET(flags, SD_JSON_STRICT))
+                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' may not be null.", strna(name));
+
+                *log_level = FLAGS_SET(flags, SD_JSON_RELAX) ? LOG_NULL : LOG_INFO;
+                return 0;
+        }
+
+        r = sd_json_dispatch_int(name, variant, flags, &t);
+        if (r < 0)
+                return r;
+
+        if (FLAGS_SET(flags, SD_JSON_RELAX) && t < 0)
+                t = LOG_NULL;
+        else if (!log_level_is_valid(t))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a valid log level.", strna(name));
+
+        *log_level = t;
         return 0;
 }
 

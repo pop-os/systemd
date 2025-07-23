@@ -2,9 +2,9 @@
 
 #include <getopt.h>
 #include <locale.h>
+#include <stdio.h>
 
 #include "sd-event.h"
-#include "sd-id128.h"
 
 #include "alloc-util.h"
 #include "ansi-color.h"
@@ -12,18 +12,19 @@
 #include "discover-image.h"
 #include "env-util.h"
 #include "hexdecoct.h"
-#include "hostname-util.h"
 #include "import-common.h"
 #include "import-util.h"
 #include "io-util.h"
+#include "log.h"
 #include "main-func.h"
 #include "parse-argument.h"
 #include "parse-util.h"
+#include "path-util.h"
 #include "pull-raw.h"
 #include "pull-tar.h"
+#include "runtime-scope.h"
 #include "signal-util.h"
 #include "string-util.h"
-#include "terminal-util.h"
 #include "verbs.h"
 #include "web-util.h"
 
@@ -33,6 +34,7 @@ static ImportFlags arg_import_flags = IMPORT_PULL_SETTINGS | IMPORT_PULL_ROOTHAS
 static uint64_t arg_offset = UINT64_MAX, arg_size_max = UINT64_MAX;
 static char *arg_checksum = NULL;
 static ImageClass arg_class = IMAGE_MACHINE;
+static RuntimeScope arg_runtime_scope = _RUNTIME_SCOPE_INVALID;
 
 STATIC_DESTRUCTOR_REGISTER(arg_checksum, freep);
 
@@ -66,7 +68,7 @@ static int normalize_local(const char *local, const char *url, char **ret) {
                                                local);
 
                 if (!FLAGS_SET(arg_import_flags, IMPORT_FORCE)) {
-                        r = image_find(arg_class, local, NULL, NULL);
+                        r = image_find(arg_runtime_scope, arg_class, local, NULL, NULL);
                         if (r < 0) {
                                 if (r != -ENOENT)
                                         return log_error_errno(r, "Failed to check whether image '%s' exists: %m", local);
@@ -108,7 +110,7 @@ static void on_tar_finished(TarPull *pull, int error, void *userdata) {
         if (error == 0)
                 log_info("Operation completed successfully.");
 
-        sd_event_exit(event, abs(error));
+        sd_event_exit(event, ABS(error));
 }
 
 static int pull_tar(int argc, char *argv[], void *userdata) {
@@ -178,7 +180,7 @@ static void on_raw_finished(RawPull *pull, int error, void *userdata) {
         if (error == 0)
                 log_info("Operation completed successfully.");
 
-        sd_event_exit(event, abs(error));
+        sd_event_exit(event, ABS(error));
 }
 
 static int pull_raw(int argc, char *argv[], void *userdata) {

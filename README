@@ -29,28 +29,55 @@ LICENSE:
         LGPL-2.1-or-later for all code, exceptions noted in LICENSES/README.md
 
 REQUIREMENTS:
-        Linux kernel ≥ 3.15
+        Linux kernel ≥ 3.15 for timerfd_create() CLOCK_BOOTTIME support
+                     ≥ 3.17 for memfd_create() and getrandom()
                      ≥ 4.3 for ambient capabilities
                      ≥ 4.5 for pids controller in cgroup v2
                      ≥ 4.6 for cgroup namespaces
                      ≥ 4.9 for RENAME_NOREPLACE support in vfat
                      ≥ 4.10 for cgroup-bpf egress and ingress hooks
+                     ≥ 4.11 for nsfs NS_GET_NSTYPE
+                     ≥ 4.13 for TIOCGPTPEER and SYNTH_UUID= property support in uevent
                      ≥ 4.15 for cgroup-bpf device hook and cpu controller in cgroup v2
-                     ≥ 4.17 for cgroup-bpf socket address hooks
+                     ≥ 4.17 for cgroup-bpf socket address hooks, /sys/power/resume_offset,
+                            and FRA_PROTOCOL attribute for fib rules
                      ≥ 4.20 for PSI (used by systemd-oomd)
-                     ≥ 5.3 for bounded loops in BPF program
+                     ≥ 5.1 for SO_BINDTOIFINDEX
+                     ≥ 5.2 for cgroup freezer and new mount API
+                     ≥ 5.3 for bounded loops in BPF program, keyring namespacing,
+                           and nexthop support
                      ≥ 5.4 for pidfd and signed Verity images
-                     ≥ 5.7 for CLONE_INTO_CGROUP, BPF links and the BPF LSM hook
 
-        ⛔ Kernel versions below 3.15 ("minimum baseline") are not supported at
-        all, and are missing required functionality (e.g. CLOCK_BOOTTIME
-        support for timerfd_create()).
+        ⛔ Kernel versions below 5.4 ("minimum baseline") are not supported at all,
+           and are missing required functionality as listed above.
+           # FIXME: actually drop compat glue before v258
 
-        ⚠️ Kernel versions below 5.4 ("recommended baseline") have significant
-        gaps in functionality and are not recommended for use with this version
-        of systemd (e.g. lack race-free process tracking by pidfd and new mount API
-        support). Taint flag 'old-kernel' will be set. systemd will most likely
-        still function, but upstream support and testing are limited.
+        Linux kernel ≥ 5.6 for getrandom() GRND_INSECURE
+                     ≥ 5.7 for CLONE_INTO_CGROUP, cgroup2fs memory_recursiveprot option,
+                               BPF links and the BPF LSM hook
+
+        ⚠️ Kernel versions below 5.7 ("recommended baseline") have significant gaps
+           in functionality and are not recommended for use with this version
+           of systemd. Taint flag 'old-kernel' will be set. systemd will most likely
+           still function, but upstream support and testing are limited.
+
+        Linux kernel ≥ 5.8 for LOOP_CONFIGURE and STATX_ATTR_MOUNT_ROOT
+                     ≥ 5.9 for close_range()
+                     ≥ 5.12 for idmapped mount
+                     ≥ 5.14 for cgroup.kill
+                     ≥ 5.14 for quotactl_fd()
+                     ≥ 6.3 for MFD_EXEC/MFD_NOEXEC_SEAL and tmpfs noswap option
+                     ≥ 6.5 for name_to_handle_at() AT_HANDLE_FID, SO_PEERPIDFD/SO_PASSPIDFD,
+                               and MOVE_MOUNT_BENEATH
+                     ≥ 6.6 for quota support on tmpfs
+                     ≥ 6.9 for pidfs
+                     ≥ 6.10 for fcntl(F_DUPFD_QUERY), unprivileged linkat(AT_EMPTY_PATH),
+                            and block device 'partscan' sysfs attribute
+                     ≥ 6.13 for PIDFD_GET_INFO and {set,remove}xattrat()
+                     ≥ 6.16 for coredump pattern '%F' (pidfd) specifier and SO_PASSRIGHTS
+
+        ✅ systemd utilizes several new kernel APIs, but will fall back gracefully
+           when unavailable.
 
         Kernel Config Options:
           CONFIG_DEVTMPFS
@@ -139,7 +166,7 @@ REQUIREMENTS:
 
         Required for reading credentials from SMBIOS:
           CONFIG_DMI
-          CONFIG_DMI_SYSFS
+          CONFIG_DMI_SYSFS (must be built-in, not as kmod)
 
         Required for RestrictFileSystems= in service units:
           CONFIG_BPF
@@ -184,7 +211,8 @@ REQUIREMENTS:
         with audit being enabled. This works correctly only on kernels 3.14 and
         newer though. TL;DR: turn audit off, still.
 
-        glibc >= 2.16
+        glibc >= 2.31
+        libxcrypt or glibc (<= 2.38 built with --enable-crypt)
         libcap
         libmount >= 2.30 (from util-linux)
                 (util-linux *must* be built without --enable-libmount-support-mtab)
@@ -192,21 +220,34 @@ REQUIREMENTS:
         libblkid >= 2.24 (from util-linux) (optional)
         libkmod >= 15 (optional)
         PAM >= 1.1.2 (optional)
-        libcryptsetup (optional), >= 2.3.0 required for signed Verity images support
+        libcryptsetup >= 2.0.1 (optional),
+                      >= 2.3.0 is required for signed Verity images support
         libaudit (optional)
         libacl (optional)
-        libbpf >= 0.1.0 (optional)
+        libbpf >= 0.1.0 (optional),
+               >= 1.4.0 is required for using GCC as a bpf compiler
         libfdisk >= 2.32 (from util-linux) (optional)
-        libselinux (optional)
+        libselinux >= 2.1.9 (optional)
+        libapparmor >= 2.13 (optional)
+        libxenctrl >= 4.9 (optional)
+        zlib (optional)
+        bzip2 (optional)
         liblzma (optional)
         liblz4 >= 1.3.0 / 130 (optional)
         libzstd >= 1.4.0 (optional)
+        libarchive >= 3.0 (optional)
+        libxkbcommon >= 0.3.0 (optional)
+        libpcre2 (optional)
         libgcrypt (optional)
-        libqrencode (optional)
-        libmicrohttpd (optional)
+        libqrencode >= 3 (optional)
+        libmicrohttpd >= 0.9.33 (optional)
+        libcurl >= 7.32.0 (optional)
         libidn2 or libidn (optional)
-        gnutls >= 3.1.4 (optional, >= 3.6.0 is required to support DNS-over-TLS with gnutls)
-        openssl >= 1.1.0 (optional, required to support DNS-over-TLS with openssl)
+        gnutls >= 3.1.4 (optional)
+        openssl >= 1.1.0 (optional, required to support DNS-over-TLS)
+        p11-kit >= 0.23.3 (optional)
+        libfido2 (optional)
+        tpm2-tss (optional)
         elfutils >= 158 (optional)
         polkit (optional)
         tzdata >= 2014f (optional)
@@ -219,9 +260,10 @@ REQUIREMENTS:
         python-pefile (optional, required for ukify)
         python-lxml (optional, required to build the indices)
         pyelftools (optional, required for systemd-boot)
-        meson >= 0.60.0
+        meson >= 0.62.0
         ninja
         gcc >= 8.4
+            >= 13.1.0 is required to build BPF program by using GCC
         awk, sed, grep, and similar tools
         clang >= 10.0, llvm >= 10.0 (optional, required to build BPF programs
                 from source code in C)
@@ -280,7 +322,7 @@ POLICY FOR SUPPORT OF DISTRIBUTIONS AND ARCHITECTURES:
         expected to compile on current versions of popular distributions (at
         least all non-EOL versions of Fedora, Debian unstable/testing/stable,
         latest Ubuntu LTS and non-LTS releases, openSUSE Tumbleweed/Leap,
-        CentOS Stream 8 and 9, up-to-date Arch, etc.)  We will generally
+        CentOS Stream 9 and 10, up-to-date Arch, etc.)  We will generally
         attempt to support also other non-EOL versions of various distros.
         Features which would break compilation on slightly older distributions
         will only be introduced if there are significant reasons for this
@@ -343,7 +385,8 @@ USERS AND GROUPS:
         need to be resolvable by getgrnam() at any time, even in the very early
         boot stages, where no other databases and network are available:
 
-        audio, cdrom, dialout, disk, input, kmem, kvm, lp, render, tape, tty, video
+          audio, cdrom, clock, dialout, disk, input, kmem, kvm, lp, render,
+          sgx, tape, tty, video
 
         During runtime, the journal daemon requires the "systemd-journal" system
         group to exist. New journal files will be readable by this group (but

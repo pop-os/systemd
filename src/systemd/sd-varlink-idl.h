@@ -17,12 +17,10 @@
   along with systemd; If not, see <https://www.gnu.org/licenses/>.
 ***/
 
-#include <errno.h>
 #include <stdio.h>
 
-#include "sd-json.h"
-
 #include "_sd-common.h"
+#include "sd-json.h"
 
 _SD_BEGIN_DECLARATIONS;
 
@@ -70,7 +68,7 @@ __extension__ typedef enum _SD_ENUM_TYPE_S64(sd_varlink_field_type_t) {
         SD_VARLINK_STRING,
         SD_VARLINK_OBJECT,
         SD_VARLINK_ENUM_VALUE,
-        _SD_VARLINK_FIELD_COMMENT,        /* Not really a field, just a comment about a field*/
+        _SD_VARLINK_FIELD_COMMENT,        /* Not really a field, just a comment about a field */
         _SD_VARLINK_FIELD_TYPE_MAX,
         _SD_VARLINK_FIELD_TYPE_INVALID = -EINVAL,
         _SD_ENUM_FORCE_S64(SD_VARLINK_FIELD)
@@ -221,6 +219,10 @@ __extension__ typedef enum _SD_ENUM_TYPE_S64(sd_varlink_idl_format_flags_t) {
 int sd_varlink_idl_dump(FILE *f, const sd_varlink_interface *interface, sd_varlink_idl_format_flags_t flags, size_t cols);
 int sd_varlink_idl_format_full(const sd_varlink_interface *interface, sd_varlink_idl_format_flags_t flags, size_t cols, char **ret);
 int sd_varlink_idl_format(const sd_varlink_interface *interface, char **ret);
+
+int sd_varlink_idl_parse(const char *text, unsigned *reterr_line, unsigned *reterr_column, sd_varlink_interface **ret);
+sd_varlink_interface* sd_varlink_interface_free(sd_varlink_interface *interface);
+_SD_DEFINE_POINTER_CLEANUP_FUNC(sd_varlink_interface, sd_varlink_interface_free);
 
 _SD_END_DECLARATIONS;
 

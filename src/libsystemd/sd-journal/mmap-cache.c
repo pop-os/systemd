@@ -1,16 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "alloc-util.h"
+#include "bitfield.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "hashmap.h"
 #include "list.h"
 #include "log.h"
-#include "macro.h"
 #include "memory-util.h"
 #include "mmap-cache.h"
 #include "sigbus.h"
@@ -109,7 +109,7 @@ static Window* window_unlink(Window *w) {
         }
 
         for (unsigned i = 0; i < _MMAP_CACHE_CATEGORY_MAX; i++)
-                if (FLAGS_SET(w->flags, 1u << i))
+                if (BIT_SET(w->flags, i))
                         assert_se(TAKE_PTR(m->windows_by_category[i]) == w);
 
         return LIST_REMOVE(windows, w->fd->windows, w);
@@ -193,7 +193,7 @@ static void category_detach_window(MMapCache *m, MMapCacheCategory c) {
         if (!w)
                 return; /* Nothing attached. */
 
-        assert(FLAGS_SET(w->flags, 1u << c));
+        assert(BIT_SET(w->flags, c));
         w->flags &= ~(1u << c);
 
         if (WINDOW_IS_UNUSED(w)) {

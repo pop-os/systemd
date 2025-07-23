@@ -3,26 +3,111 @@
  * manage device node user ACL
  */
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-
 #include "sd-login.h"
 
+#include "acl-util.h"
 #include "device-util.h"
-#include "devnode-acl.h"
 #include "errno-util.h"
+#include "fd-util.h"
 #include "login-util.h"
-#include "log.h"
 #include "udev-builtin.h"
+
+static int devnode_acl(int fd, uid_t uid) {
+        bool changed = false, found = false;
+        int r;
+
+        assert(fd >= 0);
+
+        _cleanup_(acl_freep) acl_t acl = NULL;
+        acl = acl_get_file(FORMAT_PROC_FD_PATH(fd), ACL_TYPE_ACCESS);
+        if (!acl)
+                return -errno;
+
+        acl_entry_t entry;
+        for (r = acl_get_entry(acl, ACL_FIRST_ENTRY, &entry);
+             r > 0;
+             r = acl_get_entry(acl, ACL_NEXT_ENTRY, &entry)) {
+
+                acl_tag_t tag;
+                if (acl_get_tag_type(entry, &tag) < 0)
+                        return -errno;
+
+                if (tag != ACL_USER)
+                        continue;
+
+                if (uid > 0) {
+                        uid_t *u = acl_get_qualifier(entry);
+                        if (!u)
+                                return -errno;
+
+                        if (*u == uid) {
+                                acl_permset_t permset;
+                                if (acl_get_permset(entry, &permset) < 0)
+                                        return -errno;
+
+                                int rd = acl_get_perm(permset, ACL_READ);
+                                if (rd < 0)
+                                        return -errno;
+
+                                int wt = acl_get_perm(permset, ACL_WRITE);
+                                if (wt < 0)
+                                        return -errno;
+
+                                if (!rd || !wt) {
+                                        if (acl_add_perm(permset, ACL_READ|ACL_WRITE) < 0)
+                                                return -errno;
+
+                                        changed = true;
+                                }
+
+                                found = true;
+                                continue;
+                        }
+                }
+
+                if (acl_delete_entry(acl, entry) < 0)
+                        return -errno;
+
+                changed = true;
+        }
+        if (r < 0)
+                return -errno;
+
+        if (!found && uid > 0) {
+                if (acl_create_entry(&acl, &entry) < 0)
+                        return -errno;
+
+                if (acl_set_tag_type(entry, ACL_USER) < 0)
+                        return -errno;
+
+                if (acl_set_qualifier(entry, &uid) < 0)
+                        return -errno;
+
+                acl_permset_t permset;
+                if (acl_get_permset(entry, &permset) < 0)
+                        return -errno;
+
+                if (acl_add_perm(permset, ACL_READ|ACL_WRITE) < 0)
+                        return -errno;
+
+                changed = true;
+        }
+
+        if (!changed)
+                return 0;
+
+        if (acl_calc_mask(&acl) < 0)
+                return -errno;
+
+        if (acl_set_file(FORMAT_PROC_FD_PATH(fd), ACL_TYPE_ACCESS, acl) < 0)
+                return -errno;
+
+        return 0;
+}
 
 static int builtin_uaccess(UdevEvent *event, int argc, char *argv[]) {
         sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
-        const char *path = NULL, *seat;
-        bool changed_acl = false;
-        uid_t uid;
-        int r;
+        int r, k;
 
         if (event->event_mode != EVENT_UDEV_WORKER) {
                 log_device_debug(dev, "Running in test mode, skipping execution of 'uaccess' builtin command.");
@@ -35,16 +120,22 @@ static int builtin_uaccess(UdevEvent *event, int argc, char *argv[]) {
         if (!logind_running())
                 return 0;
 
-        r = sd_device_get_devname(dev, &path);
-        if (r < 0) {
-                log_device_error_errno(dev, r, "Failed to get device name: %m");
-                goto finish;
+        _cleanup_close_ int fd = sd_device_open(dev, O_CLOEXEC|O_PATH);
+        if (fd < 0) {
+                bool ignore = ERRNO_IS_DEVICE_ABSENT(fd);
+                log_device_full_errno(dev, ignore ? LOG_DEBUG : LOG_WARNING, fd,
+                                      "Failed to open device node%s: %m",
+                                      ignore ? ", ignoring" : "");
+                return ignore ? 0 : fd;
         }
 
-        if (sd_device_get_property_value(dev, "ID_SEAT", &seat) < 0)
-                seat = "seat0";
+        const char *seat;
+        r = device_get_seat(dev, &seat);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to get seat: %m");
 
-        r = sd_seat_get_active(seat, NULL, &uid);
+        uid_t uid;
+        r = sd_seat_get_active(seat, /* ret_session = */ NULL, &uid);
         if (r < 0) {
                 if (IN_SET(r, -ENXIO, -ENODATA))
                         /* No active session on this seat */
@@ -52,29 +143,22 @@ static int builtin_uaccess(UdevEvent *event, int argc, char *argv[]) {
                 else
                         log_device_error_errno(dev, r, "Failed to determine active user on seat %s: %m", seat);
 
-                goto finish;
+                goto reset;
         }
 
-        r = devnode_acl(path, true, false, 0, true, uid);
+        r = devnode_acl(fd, uid);
         if (r < 0) {
                 log_device_full_errno(dev, r == -ENOENT ? LOG_DEBUG : LOG_ERR, r, "Failed to apply ACL: %m");
-                goto finish;
+                goto reset;
         }
 
-        changed_acl = true;
-        r = 0;
+        return 0;
 
-finish:
-        if (path && !changed_acl) {
-                int k;
-
-                /* Better be safe than sorry and reset ACL */
-                k = devnode_acl(path, true, false, 0, false, 0);
-                if (k < 0) {
-                        log_device_full_errno(dev, k == -ENOENT ? LOG_DEBUG : LOG_ERR, k, "Failed to apply ACL: %m");
-                        RET_GATHER(r, k);
-                }
-        }
+reset:
+        /* Better be safe than sorry and reset ACL */
+        k = devnode_acl(fd, /* uid = */ 0);
+        if (k < 0)
+                RET_GATHER(r, log_device_full_errno(dev, k == -ENOENT ? LOG_DEBUG : LOG_ERR, k, "Failed to flush ACLs: %m"));
 
         return r;
 }

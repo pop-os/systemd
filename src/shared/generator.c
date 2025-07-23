@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "argv-util.h"
 #include "cgroup-util.h"
 #include "dropin.h"
 #include "escape.h"
@@ -13,12 +15,10 @@
 #include "generator.h"
 #include "initrd-util.h"
 #include "log.h"
-#include "macro.h"
 #include "mkdir-label.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
-#include "process-util.h"
 #include "special.h"
 #include "specifier.h"
 #include "string-util.h"
@@ -216,8 +216,8 @@ static int write_fsck_sysroot_service(
 
         /* Writes out special versions of systemd-fsck-root.service and systemd-fsck-usr.service for use in
          * the initrd. The regular statically shipped versions of these unit files use / and /usr for as
-         * paths, which doesn't match what we need for the initrd (where the dirs are /sysroot +
-         * /sysusr/usr), hence we overwrite those versions here. */
+         * paths, which doesn't match what we need for the initrd (where the dirs are /sysroot/ +
+         * /sysusr/usr/), hence we overwrite those versions here. */
 
         escaped = specifier_escape(what);
         if (!escaped)
@@ -250,7 +250,8 @@ static int write_fsck_sysroot_service(
                 "Type=oneshot\n"
                 "RemainAfterExit=yes\n"
                 "ExecStart=" SYSTEMD_FSCK_PATH " %6$s\n"
-                "TimeoutSec=infinity\n",
+                "TimeoutSec=infinity\n"
+                "ImportCredential=fsck.*\n",
                 escaped,
                 unit,
                 device,
@@ -270,7 +271,8 @@ int generator_write_fsck_deps(
                 const char *dir,
                 const char *what,
                 const char *where,
-                const char *fstype) {
+                const char *fstype,
+                const char *options) {
 
         int r;
 
@@ -280,14 +282,31 @@ int generator_write_fsck_deps(
         assert(where);
 
         /* Let's do an early exit if we are invoked for the root and /usr/ trees in the initrd, to avoid
-         * generating confusing log messages */
+         * generating confusing log messages. */
         if (in_initrd() && PATH_IN_SET(where, "/", "/usr")) {
                 log_debug("Skipping fsck for %s in initrd.", where);
                 return 0;
         }
 
+        if (fstype) {
+                if (!fstype_is_blockdev_backed(fstype)) {
+                        log_debug("Skipping file system check for non-block based file system '%s'.", what);
+                        return 0;
+                }
+
+                if (fstype_is_ro(fstype)) {
+                        log_debug("Skipping file system check for read-only file system '%s'.", what);
+                        return 0;
+                }
+        }
+
+        if (fstab_test_option(options, "bind\0rbind\0")) {
+                log_debug("Skipping file system check for bind mount of '%s'.", what);
+                return 0;
+        }
+
         if (!is_device_path(what)) {
-                log_warning("Checking was requested for \"%s\", but it is not a device.", what);
+                log_debug("Checking was requested for \"%s\", but it is not a device.", what);
                 return 0;
         }
 
@@ -368,10 +387,9 @@ int generator_write_fsck_deps(
         return 0;
 }
 
-int generator_write_timeouts(
+int generator_write_device_timeout(
                 const char *dir,
                 const char *what,
-                const char *where,
                 const char *opts,
                 char **filtered) {
 
@@ -382,6 +400,9 @@ int generator_write_timeouts(
         _cleanup_free_ char *node = NULL, *unit = NULL, *timeout = NULL;
         usec_t u;
         int r;
+
+        assert(dir);
+        assert(what);
 
         r = fstab_filter_options(opts, "comment=systemd.device-timeout\0"
                                        "x-systemd.device-timeout\0",
@@ -395,7 +416,7 @@ int generator_write_timeouts(
 
         r = parse_sec_fix_0(timeout, &u);
         if (r < 0) {
-                log_warning("Failed to parse timeout for %s, ignoring: %s", where, timeout);
+                log_warning("Failed to parse timeout for device '%s', ignoring: %s", what, timeout);
                 return 0;
         }
 
@@ -403,25 +424,62 @@ int generator_write_timeouts(
         if (!node)
                 return log_oom();
         if (!is_device_path(node)) {
-                log_warning("x-systemd.device-timeout ignored for %s", what);
+                log_warning("'%s' is not a device path, ignoring x-systemd.device-timeout= option.", node);
                 return 0;
         }
 
         r = unit_name_from_path(node, ".device", &unit);
         if (r < 0)
-                return log_error_errno(r, "Failed to make unit name from path: %m");
+                return log_error_errno(r, "Failed to make unit name from device path '%s': %m", node);
 
-        return write_drop_in_format(dir, unit, 50, "device-timeout",
-                                    "# Automatically generated by %s\n"
-                                    "# from supplied options \"%s\"\n\n"
-                                    "[Unit]\n"
-                                    "JobRunningTimeoutSec=%s",
-                                    program_invocation_short_name,
-                                    opts,
-                                    timeout);
+        r = write_drop_in_format(dir, unit, 50, "device-timeout",
+                                 "# Automatically generated by %s\n"
+                                 "# from supplied options \"%s\"\n\n"
+                                 "[Unit]\n"
+                                 "JobRunningTimeoutSec=%s",
+                                 program_invocation_short_name,
+                                 opts,
+                                 timeout);
+        if (r < 0)
+                return r;
+
+        return 1;
 }
 
-int generator_write_device_deps(
+int generator_write_unit_timeout(
+                FILE *f,
+                const char *where,
+                const char *opts,
+                const char *filter,
+                const char *unit_setting) {
+
+        _cleanup_free_ char *timeout = NULL;
+        usec_t u;
+        int r;
+
+        assert(f);
+        assert(where);
+        assert(filter);
+        assert(unit_setting);
+
+        r = fstab_filter_options(opts, filter, NULL, &timeout, NULL, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse options for '%s': %m", where);
+        if (r == 0)
+                return 0;
+
+        r = parse_sec_fix_0(timeout, &u);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to parse timeout '%s' for '%s', ignoring: %m", timeout, where);
+                return 0;
+        }
+
+        fprintf(f, "%s=%s\n", unit_setting, FORMAT_TIMESPAN(u, 0));
+
+        return 0;
+}
+
+int generator_write_network_device_deps(
                 const char *dir,
                 const char *what,
                 const char *where,
@@ -434,6 +492,10 @@ int generator_write_device_deps(
 
         _cleanup_free_ char *node = NULL, *unit = NULL;
         int r;
+
+        assert(dir);
+        assert(what);
+        assert(where);
 
         if (fstab_is_extrinsic(where, opts))
                 return 0;
@@ -451,8 +513,7 @@ int generator_write_device_deps(
 
         r = unit_name_from_path(node, ".device", &unit);
         if (r < 0)
-                return log_error_errno(r, "Failed to make unit name from path \"%s\": %m",
-                                       node);
+                return log_error_errno(r, "Failed to make unit name from path \"%s\": %m", node);
 
         /* See mount_add_default_dependencies for explanation why we create such
          * dependencies. */
@@ -710,6 +771,43 @@ int generator_hook_up_pcrfs(
         return generator_add_symlink_full(dir, where_unit, "wants", pcrfs_unit_path, instance);
 }
 
+int generator_hook_up_validatefs(
+                const char *dir,
+                const char *where,
+                const char *target) {
+
+        _cleanup_free_ char *where_unit = NULL, *instance = NULL;
+        const char *validatefs_unit, *validatefs_unit_path;
+        int r;
+
+        assert(dir);
+        assert(where);
+
+        /* never hook this in for the actual root fs, because it's too late then, we already are running from
+         * the root fs, it makes no sense to validate it anymore */
+        if (empty_or_root(where))
+                return 0;
+
+        r = unit_name_from_path(where, ".mount", &where_unit);
+        if (r < 0)
+                return log_error_errno(r, "Failed to make unit name from path '%s': %m", where);
+
+        validatefs_unit = SPECIAL_VALIDATEFS_SERVICE;
+        validatefs_unit_path = SYSTEM_DATA_UNIT_DIR "/" SPECIAL_VALIDATEFS_SERVICE;
+
+        r = unit_name_path_escape(where, &instance);
+        if (r < 0)
+                return log_error_errno(r, "Failed to escape path '%s': %m", where);
+
+        if (target) {
+                r = generator_add_ordering(dir, target, "After", validatefs_unit, instance);
+                if (r < 0)
+                        return r;
+        }
+
+        return generator_add_symlink_full(dir, where_unit, "wants", validatefs_unit_path, instance);
+}
+
 int generator_hook_up_quotacheck(
                 const char *dir,
                 const char *what,
@@ -787,10 +885,7 @@ int generator_enable_remount_fs_service(const char *dir) {
                                      SYSTEM_DATA_UNIT_DIR "/" SPECIAL_REMOUNT_FS_SERVICE);
 }
 
-int generator_write_blockdev_dependency(
-                FILE *f,
-                const char *what) {
-
+int generator_write_blockdev_dependency(FILE *f, const char *what) {
         _cleanup_free_ char *escaped = NULL;
         int r;
 
@@ -811,10 +906,7 @@ int generator_write_blockdev_dependency(
         return 0;
 }
 
-int generator_write_cryptsetup_unit_section(
-                FILE *f,
-                const char *source) {
-
+int generator_write_cryptsetup_unit_section(FILE *f, const char *source) {
         assert(f);
 
         fprintf(f,
@@ -886,10 +978,7 @@ int generator_write_cryptsetup_service_section(
         return 0;
 }
 
-int generator_write_veritysetup_unit_section(
-                FILE *f,
-                const char *source) {
-
+int generator_write_veritysetup_unit_section(FILE *f, const char *source) {
         assert(f);
 
         fprintf(f,
@@ -938,9 +1027,11 @@ int generator_write_veritysetup_service_section(
         if (!hash_what_escaped)
                 return log_oom();
 
-        roothash_escaped = specifier_escape(roothash);
-        if (!roothash_escaped)
-                return log_oom();
+        if (roothash) {
+                roothash_escaped = specifier_escape(roothash);
+                if (!roothash_escaped)
+                        return log_oom();
+        }
 
         if (options) {
                 options_escaped = specifier_escape(options);
@@ -955,7 +1046,7 @@ int generator_write_veritysetup_service_section(
                 "RemainAfterExit=yes\n"
                 "ExecStart=" SYSTEMD_VERITYSETUP_PATH " attach '%s' '%s' '%s' '%s' '%s'\n"
                 "ExecStop=" SYSTEMD_VERITYSETUP_PATH " detach '%s'\n",
-                name_escaped, data_what_escaped, hash_what_escaped, roothash_escaped, strempty(options_escaped),
+                name_escaped, data_what_escaped, hash_what_escaped, empty_to_dash(roothash_escaped), strempty(options_escaped),
                 name_escaped);
 
         return 0;
@@ -964,10 +1055,10 @@ int generator_write_veritysetup_service_section(
 void log_setup_generator(void) {
         if (invoked_by_systemd()) {
                 /* Disable talking to syslog/journal (i.e. the two IPC-based loggers) if we run in system context. */
-                if (cg_pid_get_owner_uid(0, NULL) == -ENXIO /* not running in a per-user slice */)
+                if (streq_ptr(getenv("SYSTEMD_SCOPE"), "system"))
                         log_set_prohibit_ipc(true);
 
-                /* This effectively means: journal for per-user generators, kmsg otherwise */
+                /* This effectively means: journal for per-user service manager generators, kmsg for per-system service manager generators */
                 log_set_target(LOG_TARGET_JOURNAL_OR_KMSG);
         } else
                 log_set_target(LOG_TARGET_AUTO);
@@ -996,4 +1087,41 @@ bool generator_soft_rebooted(void) {
         }
 
         return (cached = (u > 0));
+}
+
+GptAutoRoot parse_gpt_auto_root(const char *switch_name, const char *value) {
+        assert(switch_name);
+        assert(value);
+
+        /* Parses the 'gpt-auto'/'gpt-auto-root'/'dissect'/'dissect-force' parameters to root=
+         *
+         * note that we are not using a regular string table here, because the mode names don't fully match
+         * the parameter names. And root= being something else is not an error. */
+
+        if (streq(value, "gpt-auto")) {
+                log_debug("Enabling partition auto-detection (respecting factory reset mode), %s is explicitly set to 'gpt-auto'.", switch_name);
+                return GPT_AUTO_ROOT_ON;
+        }
+
+        if (streq(value, "gpt-auto-force")) {
+                log_debug("Enabling partition auto-detection (ignoring factory reset mode), %s is explicitly set to 'gpt-auto-force'.", switch_name);
+                return GPT_AUTO_ROOT_FORCE;
+        }
+
+        if (streq(value, "dissect")) {
+                log_debug("Enabling partition auto-detection via full image dissection (respecting factory reset mode), %s is explicitly set to 'dissect'.", switch_name);
+                return GPT_AUTO_ROOT_DISSECT;
+        }
+
+        if (streq(value, "dissect-force")) {
+                log_debug("Enabling partition auto-detection via full image dissection (ignoring factory reset mode), %s is explicitly set to 'dissect-force'.", switch_name);
+                return GPT_AUTO_ROOT_DISSECT_FORCE;
+        }
+
+        if (streq(value, "off"))
+                log_debug("Disabling partition auto-detection, %s handling is explicitly turned off.", switch_name);
+        else
+                log_debug("Disabling partition auto-detection, %s is neither unset, nor set to 'gpt-auto', 'gpt-auto-force', 'dissect' or 'dissect-force'.", switch_name);
+
+        return GPT_AUTO_ROOT_OFF;
 }

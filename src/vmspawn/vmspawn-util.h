@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <stdbool.h>
-#include "macro.h"
+#include "forward.h"
 
 #if defined(__x86_64__) || defined(__i386__) || defined(__arm__) || defined(__aarch64__)
 #  define ARCHITECTURE_SUPPORTS_SMBIOS 1
@@ -28,14 +27,10 @@
 #  define ARCHITECTURE_SUPPORTS_SMM 0
 #endif
 
-#if defined(__arm__) || defined(__aarch64__)
-#  define DEFAULT_SERIAL_TTY "ttyAMA0"
-#elif defined(__s390__) || defined(__s390x__)
-#  define DEFAULT_SERIAL_TTY "ttysclp0"
-#elif defined(__powerpc__) || defined(__powerpc64__)
-#  define DEFAULT_SERIAL_TTY "hvc0"
+#if defined(__x86_64__) || defined(__i386__)
+#  define ARCHITECTURE_SUPPORTS_HPET 1
 #else
-#  define DEFAULT_SERIAL_TTY "ttyS0"
+#  define ARCHITECTURE_SUPPORTS_HPET 0
 #endif
 
 #if defined(__x86_64__) || defined(__i386__)

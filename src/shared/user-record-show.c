@@ -1,18 +1,22 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "cap-list.h"
+#include "alloc-util.h"
+#include "capability-list.h"
 #include "format-util.h"
-#include "fs-util.h"
 #include "glyph-util.h"
 #include "hashmap.h"
 #include "hexdecoct.h"
 #include "path-util.h"
+#include "percent-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
 #include "rlimit-util.h"
 #include "sha256.h"
+#include "string-util.h"
 #include "strv.h"
-#include "terminal-util.h"
+#include "time-util.h"
+#include "user-record.h"
+#include "group-record.h"
 #include "user-record-show.h"
 #include "user-util.h"
 #include "userdb.h"
@@ -28,7 +32,7 @@ const char* user_record_state_color(const char *state) {
         return NULL;
 }
 
-static void dump_self_modifiable(
+static void show_self_modifiable(
                 const char *heading,
                 char **field,
                 const char **value) {
@@ -54,6 +58,26 @@ static void dump_self_modifiable(
                         printf("%13s %s\n", i == value ? heading : "", *i);
 }
 
+static void show_tmpfs_limit(const char *tmpfs, const TmpfsLimit *limit, uint32_t scale) {
+        assert(tmpfs);
+        assert(limit);
+
+        if (!limit->is_set)
+                return;
+
+        printf("   %s Limit:", tmpfs);
+
+        if (limit->limit != UINT64_MAX)
+                printf(" %s", FORMAT_BYTES(limit->limit));
+        if (limit->limit == UINT64_MAX || limit->limit_scale != UINT32_MAX) {
+                if (limit->limit != UINT64_MAX)
+                        printf(" or");
+
+                printf(" %i%%", UINT32_SCALE_TO_PERCENT(scale));
+        }
+        printf("\n");
+}
+
 void user_record_show(UserRecord *hr, bool show_full_group_info) {
         _cleanup_strv_free_ char **langs = NULL;
         const char *hd, *ip, *shell;
@@ -64,6 +88,13 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
 
         printf("   User name: %s\n",
                user_record_user_name_and_realm(hr));
+
+        if (!strv_isempty(hr->aliases)) {
+                STRV_FOREACH(i, hr->aliases)
+                        printf(i == hr->aliases ?
+                               "       Alias: %s" : ", %s", *i);
+                putchar('\n');
+        }
 
         if (hr->state) {
                 const char *color;
@@ -125,7 +156,6 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
                 }
 
                 printf("    Login OK: %syes%s\n", ansi_highlight_green(), ansi_normal());
-                break;
         }}
 
         r = user_record_test_password_change_required(hr);
@@ -189,18 +219,18 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
         }
         if (uid_is_valid(hr->uid))
                 printf("         UID: " UID_FMT "\n", hr->uid);
-        if (gid_is_valid(hr->gid)) {
+        if (gid_is_valid(user_record_gid(hr))) {
                 if (show_full_group_info) {
                         _cleanup_(group_record_unrefp) GroupRecord *gr = NULL;
 
-                        r = groupdb_by_gid(hr->gid, 0, &gr);
+                        r = groupdb_by_gid(user_record_gid(hr), /* match= */ NULL, /* flags= */ 0, &gr);
                         if (r < 0) {
                                 errno = -r;
-                                printf("         GID: " GID_FMT " (unresolvable: %m)\n", hr->gid);
+                                printf("         GID: " GID_FMT " (unresolvable: %m)\n", user_record_gid(hr));
                         } else
-                                printf("         GID: " GID_FMT " (%s)\n", hr->gid, gr->group_name);
+                                printf("         GID: " GID_FMT " (%s)\n", user_record_gid(hr), gr->group_name);
                 } else
-                        printf("         GID: " GID_FMT "\n", hr->gid);
+                        printf("         GID: " GID_FMT "\n", user_record_gid(hr));
         } else if (uid_is_valid(hr->uid)) /* Show UID as GID if not separately configured */
                 printf("         GID: " GID_FMT "\n", (gid_t) hr->uid);
 
@@ -232,6 +262,9 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
                 }
         }
 
+        if (!sd_id128_is_null(hr->uuid))
+                printf("        UUID: " SD_ID128_UUID_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(hr->uuid));
+
         if (hr->real_name && !streq(hr->real_name, hr->user_name))
                 printf("   Real Name: %s\n", hr->real_name);
 
@@ -244,6 +277,9 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
 
                 printf("\n");
         }
+
+        if (hr->default_area)
+                printf("Default Area: %s\n", hr->default_area);
 
         if (hr->blob_directory) {
                 _cleanup_free_ char **filenames = NULL;
@@ -268,7 +304,7 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
                         hash = hexmem(hash_bytes, SHA256_DIGEST_SIZE);
 
                         printf("              %s %s %s(%s)%s\n",
-                               special_glyph(last ? SPECIAL_GLYPH_TREE_RIGHT : SPECIAL_GLYPH_TREE_BRANCH),
+                               glyph(last ? GLYPH_TREE_RIGHT : GLYPH_TREE_BRANCH),
                                link ?: filename,
                                ansi_grey(),
                                hash ?: "can't display hash",
@@ -360,6 +396,9 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
 
         if (hr->io_weight != UINT64_MAX)
                 printf("   IO Weight: %" PRIu64 "\n", hr->io_weight);
+
+        show_tmpfs_limit("TMP", &hr->tmp_limit, user_record_tmp_limit_scale(hr));
+        show_tmpfs_limit("SHM", &hr->dev_shm_limit, user_record_dev_shm_limit_scale(hr));
 
         if (hr->access_mode != MODE_INVALID)
                 printf(" Access Mode: 0%03o\n", user_record_access_mode(hr));
@@ -612,13 +651,13 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
         if (hr->service)
                 printf("     Service: %s\n", hr->service);
 
-        dump_self_modifiable("Self Modify:",
+        show_self_modifiable("Self Modify:",
                              hr->self_modifiable_fields,
                              user_record_self_modifiable_fields(hr));
-        dump_self_modifiable("(Blobs)",
+        show_self_modifiable("(Blobs)",
                              hr->self_modifiable_blobs,
                              user_record_self_modifiable_blobs(hr));
-        dump_self_modifiable("(Privileged)",
+        show_self_modifiable("(Privileged)",
                              hr->self_modifiable_privileged,
                              user_record_self_modifiable_privileged(hr));
 }
@@ -636,6 +675,9 @@ void group_record_show(GroupRecord *gr, bool show_full_user_info) {
 
         if (gid_is_valid(gr->gid))
                 printf("         GID: " GID_FMT "\n", gr->gid);
+
+        if (!sd_id128_is_null(gr->uuid))
+                printf("        UUID: " SD_ID128_UUID_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(gr->uuid));
 
         if (show_full_user_info) {
                 _cleanup_(userdb_iterator_freep) UserDBIterator *iterator = NULL;

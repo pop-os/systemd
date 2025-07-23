@@ -3,21 +3,28 @@
   Copyright © 2014 Intel Corporation. All rights reserved.
 ***/
 
+#include <linux/if_addr.h>
+#include <stdio.h>
+
+#include "sd-dhcp6-protocol.h"
+
+#include "conf-parser.h"
 #include "dhcp6-client-internal.h"
 #include "dhcp6-lease-internal.h"
+#include "errno-util.h"
 #include "hashmap.h"
 #include "hostname-setup.h"
-#include "hostname-util.h"
 #include "networkd-address.h"
 #include "networkd-dhcp-prefix-delegation.h"
-#include "networkd-dhcp6-bus.h"
 #include "networkd-dhcp6.h"
+#include "networkd-dhcp6-bus.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-ntp.h"
 #include "networkd-queue.h"
 #include "networkd-route.h"
 #include "networkd-state-file.h"
+#include "set.h"
 #include "string-table.h"
 #include "string-util.h"
 
@@ -134,8 +141,9 @@ static int dhcp6_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Reques
         int r;
 
         assert(link);
+        assert(address);
 
-        r = address_configure_handler_internal(rtnl, m, link, "Could not set DHCPv6 address");
+        r = address_configure_handler_internal(m, link, address);
         if (r <= 0)
                 return r;
 
@@ -679,6 +687,16 @@ static int dhcp6_configure(Link *link) {
                         return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to request SNTP servers: %m");
         }
 
+        if (link->network->dhcp6_use_sip > 0) {
+                r = sd_dhcp6_client_set_request_option(client, SD_DHCP6_OPTION_SIP_SERVER_ADDRESS);
+                if (r < 0)
+                        return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to request SIP servers: %m");
+
+                r = sd_dhcp6_client_set_request_option(client, SD_DHCP6_OPTION_SIP_SERVER_DOMAIN_NAME);
+                if (r < 0)
+                        return log_link_debug_errno(link, r, "DHCPv6 CLIENT: Failed to request SIP server domain names: %m");
+        }
+
         SET_FOREACH(request_options, link->network->dhcp6_request_options) {
                 uint32_t option = PTR_TO_UINT32(request_options);
 
@@ -879,7 +897,7 @@ int link_serialize_dhcp6_client(Link *link, FILE *f) {
 }
 
 int config_parse_dhcp6_pd_prefix_hint(
-                const char* unit,
+                const char *unit,
                 const char *filename,
                 unsigned line,
                 const char *section,

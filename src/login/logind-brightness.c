@@ -1,11 +1,20 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "bus-util.h"
+#include <unistd.h>
+
+#include "sd-bus.h"
+#include "sd-device.h"
+#include "sd-event.h"
+
+#include "alloc-util.h"
+#include "bus-message-util.h"
 #include "device-util.h"
+#include "format-util.h"
 #include "hash-funcs.h"
-#include "logind-brightness.h"
 #include "logind.h"
+#include "logind-brightness.h"
 #include "process-util.h"
+#include "set.h"
 #include "stdio-util.h"
 
 /* Brightness and LED devices tend to be very slow to write to (often being I2C and such). Writes to the
@@ -173,10 +182,9 @@ static int set_add_message(Set **set, sd_bus_message *message) {
         if (r <= 0)
                 return r;
 
-        r = set_ensure_put(set, &bus_message_hash_ops, message);
+        r = set_ensure_consume(set, &bus_message_hash_ops, sd_bus_message_ref(message));
         if (r <= 0)
                 return r;
-        sd_bus_message_ref(message);
 
         return 1;
 }

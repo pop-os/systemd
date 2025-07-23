@@ -1,10 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <inttypes.h>
-#include <stdbool.h>
-
-typedef struct Link Link;
+#include "networkd-forward.h"
 
 int link_request_to_set_addrgen_mode(Link *link);
 int link_request_to_set_bond(Link *link);
@@ -24,6 +21,13 @@ int link_request_to_activate(Link *link);
 
 int link_request_to_bring_up_or_down(Link *link, bool up);
 
-int link_down_now(Link *link);
+int link_up_or_down_now(Link *link, bool up);
+static inline int link_up_now(Link *link) {
+        return link_up_or_down_now(link, true);
+}
+static inline int link_down_now(Link *link) {
+        return link_up_or_down_now(link, false);
+}
+
 int link_down_slave_links(Link *link);
 int link_remove(Link *link);

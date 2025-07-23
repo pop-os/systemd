@@ -2,9 +2,11 @@
 
 #include <stdio.h>
 
+#include "fstab-util.h"
 #include "libmount-util.h"
+#include "log.h"
 
-int libmount_parse(
+int libmount_parse_full(
                 const char *path,
                 FILE *source,
                 struct libmnt_table **ret_table,
@@ -37,6 +39,13 @@ int libmount_parse(
         *ret_table = TAKE_PTR(table);
         *ret_iter = TAKE_PTR(iter);
         return 0;
+}
+
+int libmount_parse_fstab(
+        struct libmnt_table **ret_table,
+        struct libmnt_iter **ret_iter) {
+
+        return libmount_parse_full(fstab_path(), NULL, ret_table, ret_iter);
 }
 
 int libmount_is_leaf(

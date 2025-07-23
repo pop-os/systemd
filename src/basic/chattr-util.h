@@ -1,12 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <fcntl.h>
 #include <linux/fs.h>
-#include <stdbool.h>
-#include <stddef.h>
 
-#include "missing_fs.h"
+#include "forward.h"
 
 /* The chattr() flags to apply when creating a new file *before* writing to it. In particular, flags such as
  * FS_NOCOW_FL don't work if applied a-posteriori. All other flags are fine (or even necessary, think
@@ -41,18 +38,22 @@ typedef enum ChattrApplyFlags {
 } ChattrApplyFlags;
 
 int chattr_full(int dir_fd, const char *path, unsigned value, unsigned mask, unsigned *ret_previous, unsigned *ret_final, ChattrApplyFlags flags);
-static inline int chattr_at(int dir_fd, const char *path, unsigned value, unsigned mask, unsigned *previous) {
-        return chattr_full(dir_fd, path, value, mask, previous, NULL, 0);
+static inline int chattr_at(int dir_fd, const char *path, unsigned value, unsigned mask) {
+        return chattr_full(dir_fd, path, value, mask, NULL, NULL, 0);
 }
-static inline int chattr_fd(int fd, unsigned value, unsigned mask, unsigned *previous) {
-        return chattr_full(fd, NULL, value, mask, previous, NULL, 0);
+static inline int chattr_fd(int fd, unsigned value, unsigned mask) {
+        return chattr_full(fd, NULL, value, mask, NULL, NULL, 0);
 }
-static inline int chattr_path(const char *path, unsigned value, unsigned mask, unsigned *previous) {
-        return chattr_full(AT_FDCWD, path, value, mask, previous, NULL, 0);
+static inline int chattr_path(const char *path, unsigned value, unsigned mask) {
+        return chattr_full(AT_FDCWD, path, value, mask, NULL, NULL, 0);
 }
 
 int read_attr_fd(int fd, unsigned *ret);
 int read_attr_at(int dir_fd, const char *path, unsigned *ret);
+int read_fs_xattr_fd(int fd, uint32_t *ret_xflags, uint32_t *ret_projid);
+
+int set_proj_id(int fd, uint32_t proj_id);
+int set_proj_id_recursive(int fd, uint32_t proj_id);
 
 /* Combination of chattr flags, that should be appropriate for secrets stored on disk: Secure Remove +
  * Exclusion from Dumping + Synchronous Writing (i.e. not caching in memory) + In-Place Updating (i.e. not

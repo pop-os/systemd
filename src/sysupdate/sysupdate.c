@@ -3,6 +3,8 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#include "sd-daemon.h"
+
 #include "build.h"
 #include "chase.h"
 #include "conf-files.h"
@@ -13,7 +15,8 @@
 #include "format-table.h"
 #include "glyph-util.h"
 #include "hexdecoct.h"
-#include "json-util.h"
+#include "image-policy.h"
+#include "loop-util.h"
 #include "main-func.h"
 #include "mount-util.h"
 #include "os-util.h"
@@ -30,10 +33,10 @@
 #include "strv.h"
 #include "sysupdate.h"
 #include "sysupdate-feature.h"
+#include "sysupdate-instance.h"
 #include "sysupdate-transfer.h"
 #include "sysupdate-update-set.h"
 #include "sysupdate-util.h"
-#include "terminal-util.h"
 #include "utf8.h"
 #include "verbs.h"
 
@@ -172,7 +175,7 @@ static int read_definitions(
         return 0;
 }
 
-static int context_read_definitions(Context *c, const char* node) {
+static int context_read_definitions(Context *c, const char* node, bool requires_enabled_transfers) {
         _cleanup_strv_free_ char **dirs = NULL, **files = NULL;
         int r;
 
@@ -241,7 +244,7 @@ static int context_read_definitions(Context *c, const char* node) {
                         log_warning("As of v257, transfer definitions should have the '.transfer' extension.");
         }
 
-        if (c->n_transfers == 0) {
+        if (c->n_transfers + (requires_enabled_transfers ? 0 : c->n_disabled_transfers) == 0) {
                 if (arg_component)
                         return log_error_errno(SYNTHETIC_ERRNO(ENOENT),
                                                "No transfer definitions for component '%s' found.",
@@ -259,7 +262,7 @@ static int context_load_installed_instances(Context *c) {
 
         assert(c);
 
-        log_info("Discovering installed instances%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("Discovering installed instances%s", glyph(GLYPH_ELLIPSIS));
 
         FOREACH_ARRAY(tr, c->transfers, c->n_transfers) {
                 Transfer *t = *tr;
@@ -291,7 +294,7 @@ static int context_load_available_instances(Context *c) {
 
         assert(c);
 
-        log_info("Discovering available instances%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("Discovering available instances%s", glyph(GLYPH_ELLIPSIS));
 
         FOREACH_ARRAY(tr, c->transfers, c->n_transfers) {
                 Transfer *t = *tr;
@@ -497,14 +500,14 @@ static int context_discover_update_sets(Context *c) {
 
         assert(c);
 
-        log_info("Determining installed update sets%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("Determining installed update sets%s", glyph(GLYPH_ELLIPSIS));
 
         r = context_discover_update_sets_by_flag(c, UPDATE_INSTALLED);
         if (r < 0)
                 return r;
 
         if (!arg_offline) {
-                log_info("Determining available update sets%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                log_info("Determining available update sets%s", glyph(GLYPH_ELLIPSIS));
 
                 r = context_discover_update_sets_by_flag(c, UPDATE_AVAILABLE);
                 if (r < 0)
@@ -540,9 +543,9 @@ static int context_show_table(Context *c) {
                                    TABLE_SET_COLOR, color,
                                    TABLE_STRING,    us->version,
                                    TABLE_SET_COLOR, color,
-                                   TABLE_STRING,    special_glyph_check_mark_space(FLAGS_SET(us->flags, UPDATE_INSTALLED)),
+                                   TABLE_STRING,    glyph_check_mark_space(FLAGS_SET(us->flags, UPDATE_INSTALLED)),
                                    TABLE_SET_COLOR, color,
-                                   TABLE_STRING,    special_glyph_check_mark_space(FLAGS_SET(us->flags, UPDATE_AVAILABLE)),
+                                   TABLE_STRING,    glyph_check_mark_space(FLAGS_SET(us->flags, UPDATE_AVAILABLE)),
                                    TABLE_SET_COLOR, color,
                                    TABLE_STRING,    update_set_flags_to_string(us->flags),
                                    TABLE_SET_COLOR, color);
@@ -847,9 +850,9 @@ static int context_vacuum(
         assert(c);
 
         if (space == 0)
-                log_info("Making room%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                log_info("Making room%s", glyph(GLYPH_ELLIPSIS));
         else
-                log_info("Making room for %" PRIu64 " updates%s", space, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                log_info("Making room for %" PRIu64 " updates%s", space, glyph(GLYPH_ELLIPSIS));
 
         FOREACH_ARRAY(tr, c->transfers, c->n_transfers) {
                 Transfer *t = *tr;
@@ -899,7 +902,7 @@ static int context_vacuum(
         return 0;
 }
 
-static int context_make_offline(Context **ret, const char *node) {
+static int context_make_offline(Context **ret, const char *node, bool requires_enabled_transfers) {
         _cleanup_(context_freep) Context* context = NULL;
         int r;
 
@@ -912,7 +915,7 @@ static int context_make_offline(Context **ret, const char *node) {
         if (!context)
                 return log_oom();
 
-        r = context_read_definitions(context, node);
+        r = context_read_definitions(context, node, requires_enabled_transfers);
         if (r < 0)
                 return r;
 
@@ -933,7 +936,7 @@ static int context_make_online(Context **ret, const char *node) {
         /* Like context_make_offline(), but also communicates with the update source looking for new
          * versions (as long as --offline is not specified on the command line). */
 
-        r = context_make_offline(&context, node);
+        r = context_make_offline(&context, node, /* requires_enabled_transfers= */ true);
         if (r < 0)
                 return r;
 
@@ -968,7 +971,7 @@ static int context_on_acquire_progress(const Transfer *t, const Instance *inst, 
         assert(overall <= 100);
 
         log_debug("Transfer %zu/%zu is %u%% complete (%u%% overall).", i+1, n, percentage, overall);
-        return sd_notifyf(/* unset= */ false, "X_SYSUPDATE_PROGRESS=%u\n"
+        return sd_notifyf(/* unset_environment=*/ false, "X_SYSUPDATE_PROGRESS=%u\n"
                                               "X_SYSUPDATE_TRANSFERS_LEFT=%zu\n"
                                               "X_SYSUPDATE_TRANSFERS_DONE=%zu\n"
                                               "STATUS=Updating to '%s' (%u%% complete).",
@@ -1025,7 +1028,7 @@ static int context_apply(
 
         log_info("Selected update '%s' for install.", us->version);
 
-        (void) sd_notifyf(/* unset= */ false,
+        (void) sd_notifyf(/* unset_environment=*/ false,
                           "READY=1\n"
                           "X_SYSUPDATE_VERSION=%s\n"
                           "STATUS=Making room for '%s'.", us->version, us->version);
@@ -1043,7 +1046,7 @@ static int context_apply(
         if (arg_sync)
                 sync();
 
-        (void) sd_notifyf(/* unset= */ false,
+        (void) sd_notifyf(/* unset_environment=*/ false,
                           "STATUS=Updating to '%s'.", us->version);
 
         /* There should now be one instance picked for each transfer, and the order is the same */
@@ -1068,7 +1071,7 @@ static int context_apply(
         if (arg_sync)
                 sync();
 
-        (void) sd_notifyf(/* unset= */ false,
+        (void) sd_notifyf(/* unset_environment=*/ false,
                           "STATUS=Installing '%s'.", us->version);
 
         for (size_t i = 0; i < c->n_transfers; i++) {
@@ -1083,7 +1086,7 @@ static int context_apply(
                         return r;
         }
 
-        log_info("%s Successfully installed update '%s'.", special_glyph(SPECIAL_GLYPH_SPARKLES), us->version);
+        log_info("%s Successfully installed update '%s'.", glyph(GLYPH_SPARKLES), us->version);
 
         (void) sd_notifyf(/* unset_environment=*/ false,
                           "STATUS=Installed '%s'.", us->version);
@@ -1220,7 +1223,7 @@ static int verb_features(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return r;
 
-        r = context_make_offline(&context, loop_device ? loop_device->node : NULL);
+        r = context_make_offline(&context, loop_device ? loop_device->node : NULL, /* requires_enabled_transfers= */ false);
         if (r < 0)
                 return r;
 
@@ -1395,7 +1398,7 @@ static int verb_vacuum(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return r;
 
-        r = context_make_offline(&context, loop_device ? loop_device->node : NULL);
+        r = context_make_offline(&context, loop_device ? loop_device->node : NULL, /* requires_enabled_transfers= */ false);
         if (r < 0)
                 return r;
 
@@ -1472,11 +1475,11 @@ static int verb_pending_or_reboot(int argc, char **argv, void *userdata) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "The --root=/--image= switches may not be combined with the '%s' operation.", argv[0]);
 
-        r = context_make_offline(&context, NULL);
+        r = context_make_offline(&context, /* node= */ NULL, /* requires_enabled_transfers= */ true);
         if (r < 0)
                 return r;
 
-        log_info("Determining installed update sets%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("Determining installed update sets%s", glyph(GLYPH_ELLIPSIS));
 
         r = context_discover_update_sets_by_flag(context, UPDATE_INSTALLED);
         if (r < 0)

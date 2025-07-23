@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
+#include <linux/magic.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -11,23 +12,25 @@
 #include "device-util.h"
 #include "devnum-util.h"
 #include "dirent-util.h"
-#include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
+#include "fdisk-util.h"
 #include "fileio.h"
 #include "find-esp.h"
 #include "glyph-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
 #include "import-util.h"
-#include "macro.h"
 #include "process-util.h"
 #include "sort-util.h"
+#include "stat-util.h"
 #include "string-table.h"
+#include "strv.h"
 #include "sysupdate-cache.h"
 #include "sysupdate-instance.h"
 #include "sysupdate-pattern.h"
 #include "sysupdate-resource.h"
-#include "sysupdate.h"
+#include "time-util.h"
 #include "utf8.h"
 
 void resource_destroy(Resource *rr) {
@@ -287,8 +290,8 @@ static int download_manifest(
         if (pipe2(pfd, O_CLOEXEC) < 0)
                 return log_error_errno(errno, "Failed to allocate pipe: %m");
 
-        log_info("%s Acquiring manifest file %s%s", special_glyph(SPECIAL_GLYPH_DOWNLOAD),
-                 suffixed_url, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_info("%s Acquiring manifest file %s%s", glyph(GLYPH_DOWNLOAD),
+                 suffixed_url, glyph(GLYPH_ELLIPSIS));
 
         r = safe_fork_full("(sd-pull)",
                            (int[]) { -EBADF, pfd[1], STDERR_FILENO },
@@ -324,7 +327,7 @@ static int download_manifest(
 
         manifest = fdopen(pfd[0], "r");
         if (!manifest)
-                return log_error_errno(errno, "Failed allocate FILE object for manifest file: %m");
+                return log_error_errno(errno, "Failed to allocate FILE object for manifest file: %m");
 
         TAKE_FD(pfd[0]);
 
@@ -552,6 +555,47 @@ Instance* resource_find_instance(Resource *rr, const char *version) {
         return *found;
 }
 
+static int get_sysext_overlay_block(const char *p, dev_t *ret) {
+        int r;
+
+        assert(p);
+        assert(ret);
+
+        /* Tries to read the backing device information systemd-sysext puts in the virtual file
+         * /usr/.systemd-sysext/backing */
+
+        _cleanup_free_ char *j = path_join(p, ".systemd-sysext");
+        if (!j)
+                return log_oom_debug();
+
+        _cleanup_close_ int fd = open(j, O_RDONLY|O_DIRECTORY);
+        if (fd < 0)
+                return log_debug_errno(errno, "Failed to open '%s': %m", j);
+
+        r = fd_is_fs_type(fd, OVERLAYFS_SUPER_MAGIC);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine backing file system of '%s': %m", j);
+        if (r == 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(ENOTTY), "Backing file system of '%s' is not an overlayfs.", j);
+
+        _cleanup_free_ char *buf = NULL;
+        r = read_one_line_file_at(fd, "backing", &buf);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to read contents of '%s/backing': %m", j);
+
+        r = parse_devnum(buf, ret);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to parse contents of '%s/backing': %m", j);
+
+        if (major(*ret) == 0) { /* not a block device? */
+                *ret = 0;
+                return 0;
+        }
+
+        (void) block_get_originating(*ret, ret);
+        return 1;
+}
+
 int resource_resolve_path(
                 Resource *rr,
                 const char *root,
@@ -571,8 +615,6 @@ int resource_resolve_path(
                                        path_relative_to_to_string(rr->path_relative_to));
 
         if (rr->path_auto) {
-                struct stat orig_root_stats;
-
                 /* NB: If the root mount has been replaced by some form of volatile file system (overlayfs),
                  * the original root block device node is symlinked in /run/systemd/volatile-root. Let's
                  * follow that link here. If that doesn't exist, we check the backing device of "/usr". We
@@ -596,12 +638,18 @@ int resource_resolve_path(
                         return log_error_errno(SYNTHETIC_ERRNO(EPERM),
                                                "Block device is not allowed when using --root= mode.");
 
-                r = stat("/run/systemd/volatile-root", &orig_root_stats);
+                struct stat orig_root_stats;
+                r = RET_NERRNO(stat("/run/systemd/volatile-root", &orig_root_stats));
                 if (r < 0) {
-                        if (errno == ENOENT) /* volatile-root not found */
-                                r = get_block_device_harder("/usr/", &d);
-                        else
+                        if (r != -ENOENT)
                                 return log_error_errno(r, "Failed to stat /run/systemd/volatile-root: %m");
+
+                        /* volatile-root not found */
+                        r = get_block_device_harder("/usr/", &d);
+                        if (r == 0) /* Not backed by a block device? Let's see if this is a sysext overlayfs instance */
+                                r = get_sysext_overlay_block("/usr/", &d);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to determine block device of file system: %m");
                 } else if (!S_ISBLK(orig_root_stats.st_mode)) /* symlink was present but not block device */
                         return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK), "/run/systemd/volatile-root is not linked to a block device.");
                 else /* symlink was present and a block device */
@@ -643,7 +691,9 @@ int resource_resolve_path(
                 if (real_fd < 0)
                         return log_error_errno(real_fd, "Failed to convert O_PATH file descriptor for %s to regular file descriptor: %m", rr->path);
 
-                r = get_block_device_harder_fd(fd, &d);
+                r = get_block_device_harder_fd(real_fd, &d);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to determine block device of file system: %m");
 
         } else if (RESOURCE_IS_FILESYSTEM(rr->type)) {
                 _cleanup_free_ char *resolved = NULL, *relative_to = NULL;
@@ -681,9 +731,6 @@ int resource_resolve_path(
                 return 0;
         } else
                 return 0; /* Otherwise assume there's nothing to resolve */
-
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine block device of file system: %m");
 
         r = block_get_whole_disk(d, &d);
         if (r < 0)

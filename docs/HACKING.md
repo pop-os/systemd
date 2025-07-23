@@ -36,19 +36,20 @@ or via your distribution's package manager. Note that systemd regularly adopts
 newer mkosi features that are not in an official release yet so there's a good
 chance that your distribution's packaged version of mkosi will be too old.
 
-Then, you can build and run systemd executables as follows:
+Then, you can build, run and test systemd executables as follows:
 
 ```sh
 $ mkosi -f genkey                                  # Generate signing keys once.
-$ mkosi -f sandbox -- meson setup -Dbpf-framework=disabled build # bpftool detection inside mkosi sandbox is broken on Ubuntu Noble and older
-$ mkosi -f sandbox -- meson compile -C build
-$ mkosi -f sandbox -- build/systemctl --version
+$ mkosi -f box -- meson setup -Dbpf-framework=disabled build # bpftool detection inside mkosi box is broken on Ubuntu Noble and older
+$ mkosi -f box -- meson compile -C build
+$ mkosi -f box -- build/systemctl --version
+$ mkosi -f box -- meson test -C build          # Run the unit tests
 ```
 
 To build and boot an OS image with the latest systemd installed:
 
 ```sh
-$ mkosi -f sandbox -- meson compile -C build mkosi # (re-)build the OS image
+$ mkosi -f box -- meson compile -C build mkosi # (re-)build the OS image
 $ mkosi boot                                       # Boot the image with systemd-nspawn.
 $ mkosi vm                                         # Boot the image with qemu.
 ```
@@ -64,8 +65,8 @@ $ cd systemd
 $ git checkout -b <BRANCH>                         # where BRANCH is the name of the branch
 $ $EDITOR src/core/main.c                          # or wherever you'd like to make your changes
 $ mkosi -f genkey                                  # Generate signing keys once.
-$ mkosi -f sandbox -- meson setup build            # Set up meson
-$ mkosi -f sandbox -- meson compile -C build mkosi # (re-)build the test image
+$ mkosi -f box -- meson setup build            # Set up meson
+$ mkosi -f box -- meson compile -C build mkosi # (re-)build the test image
 $ mkosi vm                                         # Boot the image in qemu
 $ git add -p                                       # interactively put together your patch
 $ git commit                                       # commit it
@@ -84,7 +85,7 @@ not required to write basic patches.
 ## Building the OS image without a tools tree
 
 By default, `mkosi` will first build a tools tree and use it build the image and
-provide the environment for `mkosi sandbox`. To disable the tools tree and use
+provide the environment for `mkosi box`. To disable the tools tree and use
 binaries from your host instead, write the following to `mkosi/mkosi.local.conf`:
 
 ```conf
@@ -187,74 +188,6 @@ Those are not useful when compiling for distribution and can be disabled by sett
 ## Sanitizers in mkosi
 
 See [Testing systemd using sanitizers](/TESTING_WITH_SANITIZERS) for more information on how to build with sanitizers enabled in mkosi.
-
-## Fuzzers
-
-systemd includes fuzzers in `src/fuzz/` that use libFuzzer and are automatically
-run by [OSS-Fuzz](https://github.com/google/oss-fuzz) with sanitizers. To add a
-fuzz target, create a new `src/fuzz/fuzz-foo.c` file with a
-`LLVMFuzzerTestOneInput` function and add it to the list in
-`src/fuzz/meson.build`.
-
-Whenever possible, a seed corpus and a dictionary should also be added with new
-fuzz targets. The dictionary should be named `src/fuzz/fuzz-foo.dict` and the
-seed corpus should be built and exported as `$OUT/fuzz-foo_seed_corpus.zip` in
-`tools/oss-fuzz.sh`.
-
-The fuzzers can be built locally by running `tools/oss-fuzz.sh`, or by running:
-
-```sh
-CC=clang CXX=clang++ \
-meson setup build-libfuzz -Dllvm-fuzz=true -Db_sanitize=address,undefined -Db_lundef=false \
--Dc_args='-fno-omit-frame-pointer -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'
-ninja -C build-libfuzz fuzzers
-```
-
-Each fuzzer then can be then run manually together with a directory containing
-the initial corpus:
-
-```
-export UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1
-build-libfuzz/fuzz-varlink-idl test/fuzz/fuzz-varlink-idl/
-```
-
-Note: the `halt_on_error=1` UBSan option is especially important, otherwise the
-fuzzer won't crash when undefined behavior is triggered.
-
-You should also confirm that the fuzzers can be built and run using
-[the OSS-Fuzz toolchain](https://google.github.io/oss-fuzz/advanced-topics/reproducing/#building-using-docker):
-
-```sh
-path_to_systemd=...
-
-git clone --depth=1 https://github.com/google/oss-fuzz
-cd oss-fuzz
-
-for sanitizer in address undefined memory; do
-for engine in libfuzzer afl honggfuzz; do
-./infra/helper.py build_fuzzers --sanitizer "$sanitizer" --engine "$engine" \
---clean systemd "$path_to_systemd"
-
-./infra/helper.py check_build --sanitizer "$sanitizer" --engine "$engine" \
--e ALLOWED_BROKEN_TARGETS_PERCENTAGE=0 systemd
-done
-done
-
-./infra/helper.py build_fuzzers --clean --architecture i386 systemd "$path_to_systemd"
-./infra/helper.py check_build --architecture i386 -e ALLOWED_BROKEN_TARGETS_PERCENTAGE=0 systemd
-
-./infra/helper.py build_fuzzers --clean --sanitizer coverage systemd "$path_to_systemd"
-./infra/helper.py coverage --no-corpus-download systemd
-```
-
-If you find a bug that impacts the security of systemd, please follow the
-guidance in [CONTRIBUTING.md](/CONTRIBUTING) on how to report a security
-vulnerability.
-
-For more details on building fuzzers and integrating with OSS-Fuzz, visit:
-
-- [Setting up a new project - OSS-Fuzz](https://google.github.io/oss-fuzz/getting-started/new-project-guide/)
-- [Tutorials - OSS-Fuzz](https://google.github.io/oss-fuzz/reference/useful-links/#tutorials)
 
 ## Debugging binaries that need to run as root in vscode
 
@@ -378,7 +311,7 @@ To debug systemd-boot in an IDE such as VSCode we can use a launch configuration
 right in your editor of choice (with the right plugin installed). When using mkosi, we can run clangd in the
 mkosi tools tree to avoid needing to install clangd on the host machine.
 
-All that is required is to run `mkosi -f sandbox true` once to make sure the tools tree is available and to modify
+All that is required is to run `mkosi -f box true` once to make sure the tools tree is available and to modify
 the path of the clangd binary used by your editor to the `mkosi.clangd` script included in the systemd repository.
 For example, for VScode, you'd have to add the following to the VSCode workspace settings of the systemd repository:
 
@@ -396,5 +329,13 @@ When using clangd, it's recommended to setup the build directory containing the
 compilation database used by clangd to use clang as the compiler as well:
 
 ```sh
-$ mkosi sandbox -- env CC=clang CXX=clang++ meson setup build
+$ mkosi box -- env CC=clang CXX=clang++ meson setup build
+```
+
+Additionally, the `gensources` target can be used to make sure all generated
+sources are generated to avoid clangd complaining that these source files don't
+exist.
+
+```sh
+$ mkosi box -- ninja -C build gensources
 ```

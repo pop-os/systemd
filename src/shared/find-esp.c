@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/magic.h>
+#include <stdlib.h>
 #include <sys/vfs.h>
+#include <unistd.h>
 
 #include "sd-device.h"
+#include "sd-gpt.h"
 #include "sd-id128.h"
 
 #include "alloc-util.h"
@@ -16,12 +19,12 @@
 #include "errno-util.h"
 #include "fd-util.h"
 #include "find-esp.h"
-#include "gpt.h"
 #include "mount-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "stat-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "virt.h"
 
 typedef enum VerifyESPFlags {
@@ -100,7 +103,7 @@ static int verify_esp_blkid(
         if (r != 0)
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
-                                      "No filesystem found on \"%s\": %m", node);
+                                      "No filesystem found on \"%s\".", node);
         if (!streq(v, "vfat"))
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
@@ -273,8 +276,7 @@ static int verify_fsroot_dir(
         bool searching = FLAGS_SET(flags, VERIFY_ESP_SEARCHING),
                 unprivileged_mode = FLAGS_SET(flags, VERIFY_ESP_UNPRIVILEGED_MODE);
         _cleanup_free_ char *f = NULL;
-        STRUCT_NEW_STATX_DEFINE(sxa);
-        STRUCT_NEW_STATX_DEFINE(sxb);
+        struct statx sxa, sxb;
         int r;
 
         /* Checks if the specified directory is at the root of its file system, and returns device
@@ -291,22 +293,22 @@ static int verify_fsroot_dir(
         if (r < 0 && r != -EADDRNOTAVAIL)
                 return log_error_errno(r, "Failed to extract filename of %s: %m", path);
 
-        r = statx_fallback(dir_fd, strempty(f), AT_SYMLINK_NOFOLLOW|(isempty(f) ? AT_EMPTY_PATH : 0),
-                           STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxa.sx);
-        if (r < 0)
-                return log_full_errno((searching && r == -ENOENT) ||
-                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(r)) ? LOG_DEBUG : LOG_ERR, r,
+        if (statx(dir_fd, strempty(f),
+                  AT_SYMLINK_NOFOLLOW|(isempty(f) ? AT_EMPTY_PATH : 0),
+                  STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxa) < 0)
+                return log_full_errno((searching && errno == ENOENT) ||
+                                      (unprivileged_mode && ERRNO_IS_PRIVILEGE(errno)) ? LOG_DEBUG : LOG_ERR, errno,
                                       "Failed to determine block device node of \"%s\": %m", path);
 
-        assert(S_ISDIR(sxa.sx.stx_mode)); /* We used O_DIRECTORY above, when opening, so this must hold */
+        assert(S_ISDIR(sxa.stx_mode)); /* We used O_DIRECTORY above, when opening, so this must hold */
 
-        if (FLAGS_SET(sxa.sx.stx_attributes_mask, STATX_ATTR_MOUNT_ROOT)) {
+        if (FLAGS_SET(sxa.stx_attributes_mask, STATX_ATTR_MOUNT_ROOT)) {
 
                 /* If we have STATX_ATTR_MOUNT_ROOT, we are happy, that's all we need. We operate under the
                  * assumption that a top of a mount point is also the top of the file system. (Which of
                  * course is strictly speaking not always true...) */
 
-                if (!FLAGS_SET(sxa.sx.stx_attributes, STATX_ATTR_MOUNT_ROOT))
+                if (!FLAGS_SET(sxa.stx_attributes, STATX_ATTR_MOUNT_ROOT))
                         return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                               SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
                                               "Directory \"%s\" is not the root of the file system.", path);
@@ -315,15 +317,14 @@ static int verify_fsroot_dir(
         }
 
         /* Now let's look at the parent */
-        r = statx_fallback(dir_fd, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxb.sx);
-        if (r < 0)
-                return log_full_errno(unprivileged_mode && ERRNO_IS_PRIVILEGE(r) ? LOG_DEBUG : LOG_ERR, r,
+        if (statx(dir_fd, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sxb) < 0)
+                return log_full_errno(unprivileged_mode && ERRNO_IS_PRIVILEGE(errno) ? LOG_DEBUG : LOG_ERR, errno,
                                       "Failed to determine block device node of parent of \"%s\": %m", path);
 
-        if (statx_inode_same(&sxa.sx, &sxb.sx)) /* for the root dir inode nr for both inodes will be the same */
+        if (statx_inode_same(&sxa, &sxb)) /* for the root dir inode nr for both inodes will be the same */
                 goto success;
 
-        if (statx_mount_same(&sxa.nsx, &sxb.nsx))
+        if (statx_mount_same(&sxa, &sxb))
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
                                       "Directory \"%s\" is not the root of the file system.", path);
@@ -332,10 +333,10 @@ success:
         if (!ret_dev)
                 return 0;
 
-        if (sxa.sx.stx_dev_major == 0) /* Hmm, maybe a btrfs device, and the caller asked for the backing device? Then let's try to get it. */
+        if (sxa.stx_dev_major == 0) /* Hmm, maybe a btrfs device, and the caller asked for the backing device? Then let's try to get it. */
                 return btrfs_get_block_device_at(dir_fd, strempty(f), ret_dev);
 
-        *ret_dev = makedev(sxa.sx.stx_dev_major, sxa.sx.stx_dev_minor);
+        *ret_dev = makedev(sxa.stx_dev_major, sxa.stx_dev_minor);
         return 0;
 }
 
@@ -630,7 +631,7 @@ static int verify_xbootldr_blkid(
         if (r != 0)
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       searching ? SYNTHETIC_ERRNO(EADDRNOTAVAIL) : SYNTHETIC_ERRNO(EIO),
-                                      "%s: Failed to probe PART_ENTRY_SCHEME: %m", node);
+                                      "%s: Failed to probe PART_ENTRY_SCHEME.", node);
         if (streq(type, "gpt")) {
 
                 errno = 0;

@@ -1,19 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <fcntl.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <sys/stat.h>
-#include <sys/statfs.h>
-#include <sys/types.h>
-#include <sys/vfs.h>
+#include <sys/stat.h>           /* IWYU pragma: export */
+#include <sys/statfs.h>         /* IWYU pragma: export */
 
-#include "fs-util.h"
-#include "macro.h"
-#include "missing_stat.h"
-#include "siphash24.h"
-#include "time-util.h"
+#include "forward.h"
 
 int stat_verify_regular(const struct stat *st);
 int verify_regular_at(int fd, const char *path, bool follow);
@@ -38,7 +29,11 @@ static inline int dir_is_empty(const char *path, bool ignore_hidden_or_backup) {
         return dir_is_empty_at(AT_FDCWD, path, ignore_hidden_or_backup);
 }
 
-bool null_or_empty(struct stat *st) _pure_;
+bool stat_may_be_dev_null(struct stat *st) _pure_;
+bool stat_is_empty(struct stat *st) _pure_;
+static inline bool null_or_empty(struct stat *st) {
+        return stat_may_be_dev_null(st) || stat_is_empty(st);
+}
 int null_or_empty_path_with_root(const char *fn, const char *root);
 
 static inline int null_or_empty_path(const char *fn) {
@@ -58,7 +53,7 @@ static inline int fd_inode_same(int fda, int fdb) {
 
 /* The .f_type field of struct statfs is really weird defined on
  * different archs. Let's give its type a name. */
-typedef typeof(((struct statfs*)NULL)->f_type) statfs_f_type_t;
+typedef typeof_field(struct statfs, f_type) statfs_f_type_t;
 
 bool is_fs_type(const struct statfs *s, statfs_f_type_t magic_value) _pure_;
 int is_fs_type_at(int dir_fd, const char *path, statfs_f_type_t magic_value);
@@ -90,44 +85,19 @@ bool stat_inode_same(const struct stat *a, const struct stat *b);
 bool stat_inode_unmodified(const struct stat *a, const struct stat *b);
 
 bool statx_inode_same(const struct statx *a, const struct statx *b);
-bool statx_mount_same(const struct new_statx *a, const struct new_statx *b);
-
-int statx_fallback(int dfd, const char *path, int flags, unsigned mask, struct statx *sx);
+bool statx_mount_same(const struct statx *a, const struct statx *b);
 
 int xstatfsat(int dir_fd, const char *path, struct statfs *ret);
 
-#if HAS_FEATURE_MEMORY_SANITIZER
-#  warning "Explicitly initializing struct statx, to work around msan limitation. Please remove as soon as msan has been updated to not require this."
-#  define STRUCT_STATX_DEFINE(var)              \
-        struct statx var = {}
-#  define STRUCT_NEW_STATX_DEFINE(var)          \
-        union {                                 \
-                struct statx sx;                \
-                struct new_statx nsx;           \
-        } var = {}
-#else
-#  define STRUCT_STATX_DEFINE(var)              \
-        struct statx var
-#  define STRUCT_NEW_STATX_DEFINE(var)          \
-        union {                                 \
-                struct statx sx;                \
-                struct new_statx nsx;           \
-        } var
-#endif
-
-static inline usec_t statx_timestamp_load(const struct statx_timestamp *ts) {
-        return timespec_load(&(const struct timespec) { .tv_sec = ts->tv_sec, .tv_nsec = ts->tv_nsec });
-}
-static inline nsec_t statx_timestamp_load_nsec(const struct statx_timestamp *ts) {
-        return timespec_load_nsec(&(const struct timespec) { .tv_sec = ts->tv_sec, .tv_nsec = ts->tv_nsec });
-}
+usec_t statx_timestamp_load(const struct statx_timestamp *ts) _pure_;
+nsec_t statx_timestamp_load_nsec(const struct statx_timestamp *ts) _pure_;
 
 void inode_hash_func(const struct stat *q, struct siphash *state);
 int inode_compare_func(const struct stat *a, const struct stat *b);
 extern const struct hash_ops inode_hash_ops;
 
-const char* inode_type_to_string(mode_t m);
-mode_t inode_type_from_string(const char *s);
+const char* inode_type_to_string(mode_t m) _const_;
+mode_t inode_type_from_string(const char *s) _pure_;
 
 /* Macros that check whether the stat/statx structures have been initialized already. For "struct stat" we
  * use a check for .st_dev being non-zero, since the kernel unconditionally fills that in, mapping the file
@@ -138,8 +108,5 @@ static inline bool stat_is_set(const struct stat *st) {
         return st && st->st_dev != 0 && st->st_mode != MODE_INVALID;
 }
 static inline bool statx_is_set(const struct statx *sx) {
-        return sx && sx->stx_mask != 0;
-}
-static inline bool new_statx_is_set(const struct new_statx *sx) {
         return sx && sx->stx_mask != 0;
 }

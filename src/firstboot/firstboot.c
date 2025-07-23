@@ -2,9 +2,9 @@
 
 #include <fcntl.h>
 #include <getopt.h>
-#include <linux/loop.h>
 #include <unistd.h>
 
+#include "sd-bus.h"
 #include "sd-id128.h"
 
 #include "alloc-util.h"
@@ -26,13 +26,17 @@
 #include "fs-util.h"
 #include "glyph-util.h"
 #include "hostname-util.h"
+#include "image-policy.h"
 #include "kbd-util.h"
+#include "label.h"
+#include "label-util.h"
 #include "libcrypt-util.h"
+#include "locale-setup.h"
 #include "locale-util.h"
 #include "lock-util.h"
+#include "loop-util.h"
 #include "main-func.h"
 #include "memory-util.h"
-#include "mkdir.h"
 #include "mount-util.h"
 #include "os-util.h"
 #include "parse-argument.h"
@@ -41,16 +45,16 @@
 #include "path-util.h"
 #include "pretty-print.h"
 #include "proc-cmdline.h"
-#include "random-util.h"
+#include "runtime-scope.h"
 #include "smack-util.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "time-util.h"
 #include "tmpfile-util-label.h"
-#include "tmpfile-util.h"
-#include "umask-util.h"
 #include "user-util.h"
+#include "vconsole-util.h"
 
 static char *arg_root = NULL;
 static char *arg_image = NULL;
@@ -120,21 +124,58 @@ static void print_welcome(int rfd) {
         pn = os_release_pretty_name(pretty_name, os_name);
         ac = isempty(ansi_color) ? "0" : ansi_color;
 
-        (void) terminal_reset_defensive_locked(STDOUT_FILENO, /* switch_to_text= */ false);
+        (void) terminal_reset_defensive_locked(STDOUT_FILENO, /* flags= */ 0);
 
         if (colors_enabled())
-                printf("\nWelcome to your new installation of \x1B[%sm%s\x1B[0m!\n", ac, pn);
+                printf("\n"
+                       ANSI_HIGHLIGHT "Welcome to your new installation of " ANSI_NORMAL "\x1B[%sm%s" ANSI_HIGHLIGHT "!" ANSI_NORMAL "\n", ac, pn);
         else
                 printf("\nWelcome to your new installation of %s!\n", pn);
 
-        printf("\nPlease configure your system!\n\n");
+        putchar('\n');
+        if (emoji_enabled()) {
+                fputs(glyph(GLYPH_SPARKLES), stdout);
+                putchar(' ');
+        }
+        printf("Please configure your new system!\n");
 
         any_key_to_proceed();
 
         done = true;
 }
 
-static int prompt_loop(int rfd, const char *text, char **l, unsigned percentage, bool (*is_valid)(int rfd, const char *name), char **ret) {
+static int get_completions(
+                const char *key,
+                char ***ret_list,
+                void *userdata) {
+
+        int r;
+
+        if (!userdata) {
+                *ret_list = NULL;
+                return 0;
+        }
+
+        _cleanup_strv_free_ char **copy = strv_copy(userdata);
+        if (!copy)
+                return -ENOMEM;
+
+        r = strv_extend(&copy, "list");
+        if (r < 0)
+                return r;
+
+        *ret_list = TAKE_PTR(copy);
+        return 0;
+}
+
+static int prompt_loop(
+                int rfd,
+                const char *text,
+                char **l,
+                unsigned ellipsize_percentage,
+                bool (*is_valid)(int rfd, const char *name),
+                char **ret) {
+
         int r;
 
         assert(text);
@@ -143,11 +184,14 @@ static int prompt_loop(int rfd, const char *text, char **l, unsigned percentage,
 
         for (;;) {
                 _cleanup_free_ char *p = NULL;
-                unsigned u;
 
-                r = ask_string(&p, strv_isempty(l) ? "%s %s (empty to skip): "
-                                                   : "%s %s (empty to skip, \"list\" to list options): ",
-                               special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET), text);
+                r = ask_string_full(
+                                &p,
+                                get_completions,
+                                l,
+                                strv_isempty(l) ? "%s %s (empty to skip): "
+                                                : "%s %s (empty to skip, \"list\" to list options): ",
+                                glyph(GLYPH_TRIANGULAR_BULLET), text);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query user: %m");
 
@@ -158,14 +202,20 @@ static int prompt_loop(int rfd, const char *text, char **l, unsigned percentage,
 
                 if (!strv_isempty(l)) {
                         if (streq(p, "list")) {
-                                r = show_menu(l, 3, 20, percentage);
+                                r = show_menu(l,
+                                              /* n_columns= */ 3,
+                                              /* column_width= */ 20,
+                                              ellipsize_percentage,
+                                              /* grey_prefix= */ NULL,
+                                              /* with_numbers= */ true);
                                 if (r < 0)
-                                        return r;
+                                        return log_error_errno(r, "Failed to show menu: %m");
 
                                 putchar('\n');
                                 continue;
                         }
 
+                        unsigned u;
                         r = safe_atou(p, &u);
                         if (r >= 0) {
                                 if (u <= 0 || u > strv_length(l)) {
@@ -359,7 +409,7 @@ static int process_locale(int rfd) {
 
         assert(rfd >= 0);
 
-        pfd = chase_and_open_parent_at(rfd, "/etc/locale.conf",
+        pfd = chase_and_open_parent_at(rfd, etc_locale_conf(),
                                        CHASE_AT_RESOLVE_IN_ROOT|CHASE_MKDIR_0755|CHASE_WARN|CHASE_NOFOLLOW,
                                        &f);
         if (pfd < 0)
@@ -376,7 +426,7 @@ static int process_locale(int rfd) {
                 return log_error_errno(r, "Failed to check if directory file descriptor is root: %m");
 
         if (arg_copy_locale && r == 0) {
-                r = copy_file_atomic_at(AT_FDCWD, "/etc/locale.conf", pfd, f, 0644, COPY_REFLINK);
+                r = copy_file_atomic_at(AT_FDCWD, etc_locale_conf(), pfd, f, 0644, COPY_REFLINK);
                 if (r != -ENOENT) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to copy host's /etc/locale.conf: %m");
@@ -400,7 +450,12 @@ static int process_locale(int rfd) {
 
         locales[i] = NULL;
 
-        r = write_env_file(pfd, f, NULL, locales);
+        r = write_env_file(
+                        pfd,
+                        f,
+                        /* headers= */ NULL,
+                        locales,
+                        WRITE_ENV_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write /etc/locale.conf: %m");
 
@@ -461,12 +516,12 @@ static int prompt_keymap(int rfd) {
 static int process_keymap(int rfd) {
         _cleanup_close_ int pfd = -EBADF;
         _cleanup_free_ char *f = NULL;
-        char **keymap;
+        _cleanup_strv_free_ char **keymap = NULL;
         int r;
 
         assert(rfd >= 0);
 
-        pfd = chase_and_open_parent_at(rfd, "/etc/vconsole.conf",
+        pfd = chase_and_open_parent_at(rfd, etc_vconsole_conf(),
                                        CHASE_AT_RESOLVE_IN_ROOT|CHASE_MKDIR_0755|CHASE_WARN|CHASE_NOFOLLOW,
                                        &f);
         if (pfd < 0)
@@ -483,7 +538,7 @@ static int process_keymap(int rfd) {
                 return log_error_errno(r, "Failed to check if directory file descriptor is root: %m");
 
         if (arg_copy_keymap && r == 0) {
-                r = copy_file_atomic_at(AT_FDCWD, "/etc/vconsole.conf", pfd, f, 0644, COPY_REFLINK);
+                r = copy_file_atomic_at(AT_FDCWD, etc_vconsole_conf(), pfd, f, 0644, COPY_REFLINK);
                 if (r != -ENOENT) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to copy host's /etc/vconsole.conf: %m");
@@ -502,7 +557,18 @@ static int process_keymap(int rfd) {
         if (isempty(arg_keymap))
                 return 0;
 
-        keymap = STRV_MAKE(strjoina("KEYMAP=", arg_keymap));
+        VCContext vc = {
+                .keymap = arg_keymap,
+        };
+        _cleanup_(x11_context_clear) X11Context xc = {};
+
+        r = vconsole_convert_to_x11(&vc, /* verify= */ NULL, &xc);
+        if (r < 0)
+                return log_error_errno(r, "Failed to convert keymap data: %m");
+
+        r = vconsole_serialize(&vc, &xc, &keymap);
+        if (r < 0)
+                return log_error_errno(r, "Failed to serialize keymap data: %m");
 
         r = write_vconsole_conf(pfd, f, keymap);
         if (r < 0)
@@ -552,13 +618,13 @@ static int prompt_timezone(int rfd) {
 
 static int process_timezone(int rfd) {
         _cleanup_close_ int pfd = -EBADF;
-        _cleanup_free_ char *f = NULL;
+        _cleanup_free_ char *f = NULL, *relpath = NULL;
         const char *e;
         int r;
 
         assert(rfd >= 0);
 
-        pfd = chase_and_open_parent_at(rfd, "/etc/localtime",
+        pfd = chase_and_open_parent_at(rfd, etc_localtime(),
                                        CHASE_AT_RESOLVE_IN_ROOT|CHASE_MKDIR_0755|CHASE_WARN|CHASE_NOFOLLOW,
                                        &f);
         if (pfd < 0)
@@ -577,12 +643,12 @@ static int process_timezone(int rfd) {
         if (arg_copy_timezone && r == 0) {
                 _cleanup_free_ char *s = NULL;
 
-                r = readlink_malloc("/etc/localtime", &s);
+                r = readlink_malloc(etc_localtime(), &s);
                 if (r != -ENOENT) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read host's /etc/localtime: %m");
 
-                        r = symlinkat_atomic_full(s, pfd, f, /* make_relative= */ false);
+                        r = symlinkat_atomic_full(s, pfd, f, SYMLINK_LABEL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to create /etc/localtime symlink: %m");
 
@@ -598,9 +664,12 @@ static int process_timezone(int rfd) {
         if (isempty(arg_timezone))
                 return 0;
 
-        e = strjoina("../usr/share/zoneinfo/", arg_timezone);
+        e = strjoina("/usr/share/zoneinfo/", arg_timezone);
+        r = path_make_relative_parent(etc_localtime(), e, &relpath);
+        if (r < 0)
+                return r;
 
-        r = symlinkat_atomic_full(e, pfd, f, /* make_relative= */ false);
+        r = symlinkat_atomic_full(relpath, pfd, f, SYMLINK_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to create /etc/localtime symlink: %m");
 
@@ -647,7 +716,7 @@ static int process_hostname(int rfd) {
 
         assert(rfd >= 0);
 
-        pfd = chase_and_open_parent_at(rfd, "/etc/hostname",
+        pfd = chase_and_open_parent_at(rfd, etc_hostname(),
                                        CHASE_AT_RESOLVE_IN_ROOT|CHASE_MKDIR_0755|CHASE_WARN,
                                        &f);
         if (pfd < 0)
@@ -667,7 +736,7 @@ static int process_hostname(int rfd) {
                 return 0;
 
         r = write_string_file_at(pfd, f, arg_hostname,
-                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC);
+                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write /etc/hostname: %m");
 
@@ -700,7 +769,7 @@ static int process_machine_id(int rfd) {
         }
 
         r = write_string_file_at(pfd, "machine-id", SD_ID128_TO_STRING(arg_machine_id),
-                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC);
+                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write /etc/machine-id: %m");
 
@@ -727,8 +796,8 @@ static int prompt_root_password(int rfd) {
 
         print_welcome(rfd);
 
-        msg1 = strjoina(special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET), " Please enter the new root password (empty to skip):");
-        msg2 = strjoina(special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET), " Please enter the new root password again:");
+        msg1 = strjoina(glyph(GLYPH_TRIANGULAR_BULLET), " Please enter the new root password (empty to skip):");
+        msg2 = strjoina(glyph(GLYPH_TRIANGULAR_BULLET), " Please enter the new root password again:");
 
         suggest_passwords();
 
@@ -737,10 +806,13 @@ static int prompt_root_password(int rfd) {
                 _cleanup_free_ char *error = NULL;
 
                 AskPasswordRequest req = {
+                        .tty_fd = -EBADF,
                         .message = msg1,
+                        .until = USEC_INFINITY,
+                        .hup_fd = -EBADF,
                 };
 
-                r = ask_password_tty(-EBADF, &req, /* until= */ 0, /* flags= */ 0, /* flag_file= */ NULL, &a);
+                r = ask_password_tty(&req, /* flags= */ 0, &a);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query root password: %m");
                 if (strv_length(a) != 1)
@@ -752,7 +824,7 @@ static int prompt_root_password(int rfd) {
                         break;
                 }
 
-                r = check_password_quality(*a, /* old */ NULL, "root", &error);
+                r = check_password_quality(*a, /* old = */ NULL, "root", &error);
                 if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                         log_warning("Password quality check is not supported, proceeding anyway.");
                 else if (r < 0)
@@ -762,7 +834,7 @@ static int prompt_root_password(int rfd) {
 
                 req.message = msg2;
 
-                r = ask_password_tty(-EBADF, &req, /* until= */ 0, /* flags= */ 0, /* flag_file= */ NULL, &b);
+                r = ask_password_tty(&req, /* flags= */ 0, &b);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query root password: %m");
                 if (strv_length(b) != 1)
@@ -1123,7 +1195,7 @@ static int process_kernel_cmdline(int rfd) {
         }
 
         r = write_string_file_at(pfd, "cmdline", arg_kernel_cmdline,
-                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC);
+                                 WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write /etc/kernel/cmdline: %m");
 
@@ -1160,12 +1232,12 @@ static int process_reset(int rfd) {
                 return 0;
 
         FOREACH_STRING(p,
-                       "/etc/locale.conf",
-                       "/etc/vconsole.conf",
-                       "/etc/hostname",
+                       etc_locale_conf(),
+                       etc_vconsole_conf(),
+                       etc_hostname(),
                        "/etc/machine-id",
                        "/etc/kernel/cmdline",
-                       "/etc/localtime") {
+                       etc_localtime()) {
                 r = reset_one(rfd, p);
                 if (r < 0)
                         return r;
@@ -1405,7 +1477,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_HOSTNAME:
-                        if (!hostname_is_valid(optarg, VALID_HOSTNAME_TRAILING_DOT))
+                        if (!hostname_is_valid(optarg, VALID_HOSTNAME_TRAILING_DOT|VALID_HOSTNAME_QUESTION_MARK))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Host name %s is not valid.", optarg);
 
@@ -1617,6 +1689,10 @@ static int run(int argc, char *argv[]) {
                         arg_prompt_locale = arg_prompt_keymap = arg_prompt_timezone = arg_prompt_hostname = arg_prompt_root_password = arg_prompt_root_shell = false;
                 }
         }
+
+        r = mac_init();
+        if (r < 0)
+                return r;
 
         if (arg_image) {
                 assert(!arg_root);

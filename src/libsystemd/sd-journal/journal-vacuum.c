@@ -12,9 +12,11 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "journal-def.h"
-#include "journal-file.h"
 #include "journal-internal.h"
 #include "journal-vacuum.h"
+#include "log.h"
+#include "log-ratelimit.h"
+#include "ratelimit.h"
 #include "sort-util.h"
 #include "string-util.h"
 #include "time-util.h"
@@ -90,7 +92,7 @@ static void patch_realtime(
          * FS might provide, but unfortunately there's currently no sane API to query it. Hence let's
          * implement this manually... */
 
-        if (fd_getcrtime_at(fd, fn, AT_SYMLINK_FOLLOW, &x) >= 0 && x < *realtime)
+        if (getcrtime_at(fd, fn, AT_SYMLINK_FOLLOW, &x) >= 0 && x < *realtime)
                 *realtime = x;
 }
 
@@ -253,7 +255,7 @@ int journal_directory_vacuum(
 
                 r = journal_file_empty(dirfd(d), p);
                 if (r < 0) {
-                        log_debug_errno(r, "Failed check if %s is empty, ignoring: %m", p);
+                        log_debug_errno(r, "Failed to check if %s is empty, ignoring: %m", p);
                         continue;
                 }
                 if (r > 0) {

@@ -1,22 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <inttypes.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <time.h>
 
-typedef uint64_t usec_t;
-typedef uint64_t nsec_t;
+#include "forward.h"
 
 #define PRI_NSEC PRIu64
 #define PRI_USEC PRIu64
 #define NSEC_FMT "%" PRI_NSEC
 #define USEC_FMT "%" PRI_USEC
-
-#include "macro.h"
 
 typedef struct dual_timestamp {
         usec_t realtime;
@@ -176,6 +168,7 @@ bool clock_supported(clockid_t clock);
 usec_t usec_shift_clock(usec_t, clockid_t from, clockid_t to);
 
 int get_timezone(char **ret);
+const char* etc_localtime(void);
 
 int mktime_or_timegm_usec(struct tm *tm, bool utc, usec_t *ret);
 int localtime_or_gmtime_usec(usec_t t, bool utc, struct tm *ret);

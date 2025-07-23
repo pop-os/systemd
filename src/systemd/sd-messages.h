@@ -17,9 +17,8 @@
   along with systemd; If not, see <https://www.gnu.org/licenses/>.
 ***/
 
-#include "sd-id128.h"
-
 #include "_sd-common.h"
+#include "sd-id128.h"
 
 _SD_BEGIN_DECLARATIONS;
 
@@ -190,6 +189,8 @@ _SD_BEGIN_DECLARATIONS;
 
 #define SD_MESSAGE_OVERMOUNTING                       SD_ID128_MAKE(1d,ee,03,69,c7,fc,47,36,b7,09,9b,38,ec,b4,6e,e7)
 #define SD_MESSAGE_OVERMOUNTING_STR                   SD_ID128_MAKE_STR(1d,ee,03,69,c7,fc,47,36,b7,09,9b,38,ec,b4,6e,e7)
+#define SD_MESSAGE_NON_CANONICAL_MOUNT                SD_ID128_MAKE(1e,da,bb,4e,da,2a,49,c1,9b,c0,20,6f,24,b4,38,89)
+#define SD_MESSAGE_NON_CANONICAL_MOUNT_STR            SD_ID128_MAKE_STR(1e,da,bb,4e,da,2a,49,c1,9b,c0,20,6f,24,b4,38,89)
 
 #define SD_MESSAGE_UNIT_OOMD_KILL                     SD_ID128_MAKE(d9,89,61,1b,15,e4,4c,9d,bf,31,e3,c8,12,56,e4,ed)
 #define SD_MESSAGE_UNIT_OOMD_KILL_STR                 SD_ID128_MAKE_STR(d9,89,61,1b,15,e4,4c,9d,bf,31,e3,c8,12,56,e4,ed)
@@ -254,6 +255,15 @@ _SD_BEGIN_DECLARATIONS;
 #define SD_MESSAGE_TIME_BUMP                          SD_ID128_MAKE(7d,b7,3c,8a,f0,d9,4e,eb,82,2a,e0,43,23,fe,6a,b6)
 #define SD_MESSAGE_TIME_BUMP_STR                      SD_ID128_MAKE_STR(7d,b7,3c,8a,f0,d9,4e,eb,82,2a,e0,43,23,fe,6a,b6)
 
+#define SD_MESSAGE_WATCHDOG_OPENED                    SD_ID128_MAKE(21,66,8d,bd,3d,7a,4a,32,a2,67,6d,53,da,da,b0,22)
+#define SD_MESSAGE_WATCHDOG_OPENED_STR                SD_ID128_MAKE_STR(21,66,8d,bd,3d,7a,4a,32,a2,67,6d,53,da,da,b0,22)
+
+#define SD_MESSAGE_WATCHDOG_OPEN_FAILED               SD_ID128_MAKE(37,5a,c1,51,ef,9d,4d,e3,90,68,b3,ef,bf,ed,0c,ee)
+#define SD_MESSAGE_WATCHDOG_OPEN_FAILED_STR           SD_ID128_MAKE_STR(37,5a,c1,51,ef,9d,4d,e3,90,68,b3,ef,bf,ed,0c,ee)
+
+#define SD_MESSAGE_WATCHDOG_PING_FAILED               SD_ID128_MAKE(87,39,78,9e,ca,06,43,25,af,15,a8,ed,0e,cf,c5,56)
+#define SD_MESSAGE_WATCHDOG_PING_FAILED_STR           SD_ID128_MAKE_STR(87,39,78,9e,ca,06,43,25,af,15,a8,ed,0e,cf,c5,56)
+
 #define SD_MESSAGE_SHUTDOWN_SCHEDULED                 SD_ID128_MAKE(9e,70,66,27,9d,c8,40,3d,a7,9c,e4,b1,a6,90,64,b2)
 #define SD_MESSAGE_SHUTDOWN_SCHEDULED_STR             SD_ID128_MAKE_STR(9e,70,66,27,9d,c8,40,3d,a7,9c,e4,b1,a6,90,64,b2)
 
@@ -276,9 +286,20 @@ _SD_BEGIN_DECLARATIONS;
 
 #define SD_MESSAGE_SRK_ENROLLMENT_NEEDS_AUTHORIZATION     SD_ID128_MAKE(ad,70,89,f9,28,ac,4f,7e,a0,0c,07,45,7d,47,ba,8a)
 #define SD_MESSAGE_SRK_ENROLLMENT_NEEDS_AUTHORIZATION_STR SD_ID128_MAKE_STR(ad,70,89,f9,28,ac,4f,7e,a0,0c,07,45,7d,47,ba,8a)
+#define SD_MESSAGE_TPM2_CLEAR_REQUESTED               SD_ID128_MAKE(43,81,88,86,1e,0b,42,7a,9d,63,8a,90,48,7a,0c,a6)
+#define SD_MESSAGE_TPM2_CLEAR_REQUESTED_STR           SD_ID128_MAKE_STR(43,81,88,86,1e,0b,42,7a,9d,63,8a,90,48,7a,0c,a6)
 
 #define SD_MESSAGE_SYSCTL_CHANGED                     SD_ID128_MAKE(9c,f5,6b,8b,af,95,46,cf,94,78,78,3a,8d,e4,21,13)
 #define SD_MESSAGE_SYSCTL_CHANGED_STR                 SD_ID128_MAKE_STR(9c,f5,6b,8b,af,95,46,cf,94,78,78,3a,8d,e4,21,13)
+
+#define SD_MESSAGE_UNIT_ORDERING_CYCLE                SD_ID128_MAKE(f2,7a,3f,94,40,6a,47,83,b9,46,a9,bc,84,9e,94,52)
+#define SD_MESSAGE_UNIT_ORDERING_CYCLE_STR            SD_ID128_MAKE_STR(f2,7a,3f,94,40,6a,47,83,b9,46,a9,bc,84,9e,94,52)
+
+#define SD_MESSAGE_DELETING_JOB_BECAUSE_ORDERING_CYCLE     SD_ID128_MAKE(50,84,36,75,42,f7,47,2d,bc,6a,94,12,5d,5d,eb,ce)
+#define SD_MESSAGE_DELETING_JOB_BECAUSE_ORDERING_CYCLE_STR SD_ID128_MAKE_STR(50,84,36,75,42,f7,47,2d,bc,6a,94,12,5d,5d,eb,ce)
+
+#define SD_MESSAGE_CANT_BREAK_ORDERING_CYCLE          SD_ID128_MAKE(b3,11,2d,da,d1,90,45,53,8c,76,68,5b,a5,91,8a,80)
+#define SD_MESSAGE_CANT_BREAK_ORDERING_CYCLE_STR      SD_ID128_MAKE_STR(b3,11,2d,da,d1,90,45,53,8c,76,68,5b,a5,91,8a,80)
 
 _SD_END_DECLARATIONS;
 

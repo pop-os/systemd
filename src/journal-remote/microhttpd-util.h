@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <microhttpd.h>
-#include <stdarg.h>
+#if HAVE_MICROHTTPD
 
-#include "macro.h"
+#include <microhttpd.h>
+
+#include "forward.h"
 
 /* Those defines are added when options are renamed. If the old names
  * are not '#define'd, then they are not deprecated yet and there are
@@ -65,16 +66,20 @@ void microhttpd_logger(void *arg, const char *fmt, va_list ap) _printf_(2, 0);
 int mhd_respond_internal(
                 struct MHD_Connection *connection,
                 enum MHD_RequestTerminationCode code,
+                const char *encoding,
                 const char *buffer,
                 size_t size,
                 enum MHD_ResponseMemoryMode mode);
 
-#define mhd_respond(connection, code, message)                  \
-        mhd_respond_internal(                                   \
-             connection, code,                                  \
-             message "\n",                                      \
-             strlen(message) + 1,                               \
+#define mhd_respond_with_encoding(connection, code, encoding, message)   \
+        mhd_respond_internal(                                            \
+             (connection), (code), (encoding),                           \
+             message "\n",                                               \
+             strlen(message) + 1,                                        \
              MHD_RESPMEM_PERSISTENT)
+
+#define mhd_respond(connection, code, message)                     \
+        mhd_respond_with_encoding(connection, code, NULL, message) \
 
 int mhd_respond_oom(struct MHD_Connection *connection);
 
@@ -82,12 +87,13 @@ int mhd_respondf_internal(
                 struct MHD_Connection *connection,
                 int error,
                 enum MHD_RequestTerminationCode code,
-                const char *format, ...) _printf_(4,5);
+                const char *encoding,
+                const char *format, ...) _printf_(5,6);
 
-#define mhd_respondf(connection, error, code, format, ...)      \
-        mhd_respondf_internal(                                  \
-                connection, error, code,                        \
-                format "\n",                                    \
+#define mhd_respondf(connection, error, code, format, ...)   \
+        mhd_respondf_internal(                               \
+                connection, error, code, NULL,               \
+                format "\n",                                 \
                 ##__VA_ARGS__)
 
 int check_permissions(struct MHD_Connection *connection, int *code, char **hostname);
@@ -103,3 +109,5 @@ int setup_gnutls_logger(char **categories);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct MHD_Daemon*, MHD_stop_daemon, NULL);
 DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct MHD_Response*, MHD_destroy_response, NULL);
+
+#endif

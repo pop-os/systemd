@@ -1,62 +1,75 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <stdlib.h>
 #include <sys/file.h>
-#include <unistd.h>
 
-#include "sd-device.h"
 #include "sd-id128.h"
 
 #include "alloc-util.h"
-#include "blkid-util.h"
 #include "blockdev-util.h"
-#include "btrfs-util.h"
 #include "device-util.h"
 #include "devnum-util.h"
-#include "dirent-util.h"
 #include "dissect-image.h"
 #include "dropin.h"
 #include "efi-loader.h"
+#include "efivars.h"
+#include "errno-util.h"
+#include "factory-reset.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "fs-util.h"
 #include "fstab-util.h"
 #include "generator.h"
 #include "gpt.h"
 #include "image-policy.h"
 #include "initrd-util.h"
+#include "loop-util.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
 #include "special.h"
-#include "specifier.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
+#include "time-util.h"
 #include "unit-name.h"
 #include "virt.h"
 
+typedef enum MountPointFlags {
+        MOUNT_RW         = 1 << 0,
+        MOUNT_GROWFS     = 1 << 1,
+        MOUNT_MEASURE    = 1 << 2,
+        MOUNT_VALIDATEFS = 1 << 3,
+} MountPointFlags;
+
 static const char *arg_dest = NULL;
+static const char *arg_dest_late = NULL;
 static bool arg_enabled = true;
-static bool arg_root_enabled = true;
+static GptAutoRoot arg_auto_root = _GPT_AUTO_ROOT_INVALID;
+static GptAutoRoot arg_auto_usr = _GPT_AUTO_ROOT_INVALID;
 static bool arg_swap_enabled = true;
 static char *arg_root_fstype = NULL;
 static char *arg_root_options = NULL;
 static int arg_root_rw = -1;
+static char *arg_usr_fstype = NULL;
+static char *arg_usr_options = NULL;
 static ImagePolicy *arg_image_policy = NULL;
-
-STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
+static ImageFilter *arg_image_filter = NULL;
 
 STATIC_DESTRUCTOR_REGISTER(arg_root_fstype, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_root_options, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_usr_fstype, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_usr_options, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_policy, image_policy_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image_filter, image_filter_freep);
+
+#define LOADER_PARTITION_IDLE_USEC (120 * USEC_PER_SEC)
 
 static int add_cryptsetup(
                 const char *id,
                 const char *what,
-                bool rw,
+                const char *mount_opts,
+                MountPointFlags flags,
                 bool require,
-                bool measure,
                 char **ret_device) {
 
 #if HAVE_LIBCRYPTSETUP
@@ -79,7 +92,7 @@ static int add_cryptsetup(
         if (r < 0)
                 return log_error_errno(r, "Failed to generate unit name: %m");
 
-        r = generator_open_unit_file(arg_dest, /* source = */ NULL, n, &f);
+        r = generator_open_unit_file(arg_dest_late, /* source = */ NULL, n, &f);
         if (r < 0)
                 return r;
 
@@ -94,7 +107,7 @@ static int add_cryptsetup(
                 "After=%s\n",
                 d, d);
 
-        if (!rw) {
+        if (!FLAGS_SET(flags, MOUNT_RW)) {
                 options = strdup("read-only");
                 if (!options)
                         return log_oom();
@@ -106,7 +119,7 @@ static int add_cryptsetup(
                 if (!strextend_with_separator(&options, ",", "tpm2-device=auto"))
                         return log_oom();
 
-        if (measure) {
+        if (FLAGS_SET(flags, MOUNT_MEASURE)) {
                 /* We only measure the root volume key into PCR 15 if we are booted with sd-stub (i.e. in a
                  * UKI), and sd-stub measured the UKI. We do this in order not to step into people's own PCR
                  * assignment, under the assumption that people who are fine to use sd-stub with its PCR
@@ -126,23 +139,27 @@ static int add_cryptsetup(
         if (r < 0)
                 return log_error_errno(r, "Failed to write file %s: %m", n);
 
-        r = generator_add_symlink(arg_dest, d, "wants", n);
+        r = generator_write_device_timeout(arg_dest_late, what, mount_opts, /* filtered = */ NULL);
+        if (r < 0)
+                return r;
+
+        r = generator_add_symlink(arg_dest_late, d, "wants", n);
         if (r < 0)
                 return r;
 
         const char *dmname = strjoina("dev-mapper-", e, ".device");
 
         if (require) {
-                r = generator_add_symlink(arg_dest, "cryptsetup.target", "requires", n);
+                r = generator_add_symlink(arg_dest_late, "cryptsetup.target", "requires", n);
                 if (r < 0)
                         return r;
 
-                r = generator_add_symlink(arg_dest, dmname, "requires", n);
+                r = generator_add_symlink(arg_dest_late, dmname, "requires", n);
                 if (r < 0)
                         return r;
         }
 
-        r = write_drop_in_format(arg_dest, dmname, 50, "job-timeout",
+        r = write_drop_in_format(arg_dest_late, dmname, 50, "job-timeout",
                                  "# Automatically generated by systemd-gpt-auto-generator\n\n"
                                  "[Unit]\n"
                                  "JobTimeoutSec=infinity"); /* the binary handles timeouts anyway */
@@ -166,19 +183,117 @@ static int add_cryptsetup(
 #endif
 }
 
+#if ENABLE_EFI
+static int add_veritysetup(
+                const char *id,
+                const char *data_what,
+                const char *hash_what,
+                const char *mount_opts) {
+
+#if HAVE_LIBCRYPTSETUP
+        int r;
+
+        assert(id);
+        assert(data_what);
+        assert(hash_what);
+
+        _cleanup_free_ char *dd = NULL;
+        r = unit_name_from_path(data_what, ".device", &dd);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate data device unit name: %m");
+
+        _cleanup_free_ char *dh = NULL;
+        r = unit_name_from_path(hash_what, ".device", &dh);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate hash device unit name: %m");
+
+        _cleanup_free_ char *e = unit_name_escape(id);
+        if (!e)
+                return log_oom();
+
+        _cleanup_free_ char *n = NULL;
+        r = unit_name_build("systemd-veritysetup", e, ".service", &n);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate unit name: %m");
+
+        _cleanup_fclose_ FILE *f = NULL;
+        r = generator_open_unit_file(arg_dest_late, /* source= */ NULL, n, &f);
+        if (r < 0)
+                return r;
+
+        r = generator_write_veritysetup_unit_section(f, /* source= */ NULL);
+        if (r < 0)
+                return r;
+
+        fprintf(f,
+                "Before=veritysetup.target\n"
+                "BindsTo=%1$s %2$s\n"
+                "After=%1$s %2$s\n",
+                dd, dh);
+
+        r = generator_write_veritysetup_service_section(
+                        f,
+                        id,
+                        data_what,
+                        hash_what,
+                        /* roothash= */ NULL,        /* NULL means: derive root hash from udev property ID_DISSECT_PART_ROOTHASH */
+                        "root-hash-signature=auto"); /* auto means: derive signature from udev property ID_DISSECT_PART_ROOTHASH_SIG */
+        if (r < 0)
+                return r;
+
+        r = fflush_and_check(f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write file %s: %m", n);
+
+        r = generator_write_device_timeout(arg_dest_late, data_what, mount_opts, /* filtered= */ NULL);
+        if (r < 0)
+                return r;
+
+        r = generator_write_device_timeout(arg_dest_late, hash_what, mount_opts, /* filtered= */ NULL);
+        if (r < 0)
+                return r;
+
+        r = generator_add_symlink(arg_dest_late, dd, "wants", n);
+        if (r < 0)
+                return r;
+
+        r = generator_add_symlink(arg_dest_late, dh, "wants", n);
+        if (r < 0)
+                return r;
+
+        _cleanup_free_ char *dmname = NULL;
+        dmname = strjoin("dev-mapper-", e, ".device");
+        if (!dmname)
+                return log_oom();
+
+        r = write_drop_in_format(
+                        arg_dest_late,
+                        dmname, 50, "job-timeout",
+                        "# Automatically generated by systemd-gpt-auto-generator\n\n"
+                        "[Unit]\n"
+                        "JobTimeoutSec=infinity"); /* the binary handles timeouts anyway */
+        if (r < 0)
+                return log_error_errno(r, "Failed to write device timeout drop-in: %m");
+
+        return 0;
+#else
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "Partition is Verity protected, but systemd-gpt-auto-generator was compiled without libcryptsetup support.");
+#endif
+}
+#endif
+
 static int add_mount(
                 const char *id,
                 const char *what,
                 const char *where,
                 const char *fstype,
-                bool rw,
-                bool growfs,
-                bool measure,
+                MountPointFlags flags,
                 const char *options,
                 const char *description,
                 const char *post) {
 
-        _cleanup_free_ char *unit = NULL, *crypto_what = NULL;
+        _cleanup_free_ char *unit = NULL, *crypto_what = NULL, *opts_filtered = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -194,7 +309,9 @@ static int add_mount(
         log_debug("Adding %s: %s fstype=%s", where, what, fstype ?: "(any)");
 
         if (streq_ptr(fstype, "crypto_LUKS")) {
-                r = add_cryptsetup(id, what, rw, /* require= */ true, measure, &crypto_what);
+                /* Mount options passed are determined by partition_pick_mount_options(), whose result
+                 * is known to not contain timeout options. */
+                r = add_cryptsetup(id, what, /* mount_opts = */ NULL, flags, /* require= */ true, &crypto_what);
                 if (r < 0)
                         return r;
 
@@ -211,11 +328,15 @@ static int add_mount(
                                         fstype, where);
         }
 
+        r = generator_write_device_timeout(arg_dest_late, what, options, &opts_filtered);
+        if (r < 0)
+                return r;
+
         r = unit_name_from_path(where, ".mount", &unit);
         if (r < 0)
                 return log_error_errno(r, "Failed to generate unit name: %m");
 
-        r = generator_open_unit_file(arg_dest, /* source = */ NULL, unit, &f);
+        r = generator_open_unit_file(arg_dest_late, /* source = */ NULL, unit, &f);
         if (r < 0)
                 return r;
 
@@ -228,7 +349,11 @@ static int add_mount(
         if (post)
                 fprintf(f, "Before=%s\n", post);
 
-        r = generator_write_fsck_deps(f, arg_dest, what, where, fstype);
+        /* NB: here we do not write to arg_dest_late, but to arg_dest! We typically leave the normal
+         * generator drop-in dir for explicit configuration via systemd-fstab-generator or similar, and put
+         * out automatic configuration in the arg_dest_late directory. But this one is an exception, since we
+         * need to override the static version of the fsck root service file. */
+        r = generator_write_fsck_deps(f, arg_dest, what, where, fstype, opts_filtered);
         if (r < 0)
                 return r;
 
@@ -246,27 +371,37 @@ static int add_mount(
         if (fstype)
                 fprintf(f, "Type=%s\n", fstype);
 
-        if (options)
-                fprintf(f, "Options=%s\n", options);
+        if (opts_filtered)
+                fprintf(f, "Options=%s\n", opts_filtered);
+
+        r = generator_write_mount_timeout(f, where, opts_filtered);
+        if (r < 0)
+                return r;
 
         r = fflush_and_check(f);
         if (r < 0)
                 return log_error_errno(r, "Failed to write unit %s: %m", unit);
 
-        if (growfs) {
-                r = generator_hook_up_growfs(arg_dest, where, post);
+        if (FLAGS_SET(flags, MOUNT_VALIDATEFS)) {
+                r = generator_hook_up_validatefs(arg_dest_late, where, post);
                 if (r < 0)
                         return r;
         }
 
-        if (measure) {
-                r = generator_hook_up_pcrfs(arg_dest, where, post);
+        if (FLAGS_SET(flags, MOUNT_GROWFS)) {
+                r = generator_hook_up_growfs(arg_dest_late, where, post);
+                if (r < 0)
+                        return r;
+        }
+
+        if (FLAGS_SET(flags, MOUNT_MEASURE)) {
+                r = generator_hook_up_pcrfs(arg_dest_late, where, post);
                 if (r < 0)
                         return r;
         }
 
         if (post) {
-                r = generator_add_symlink(arg_dest, post, "requires", unit);
+                r = generator_add_symlink(arg_dest_late, post, "requires", unit);
                 if (r < 0)
                         return r;
         }
@@ -336,9 +471,10 @@ static int add_partition_mount(
                         p->node,
                         where,
                         p->fstype,
-                        p->rw,
-                        p->growfs,
-                        /* measure= */ STR_IN_SET(id, "root", "var"), /* by default measure rootfs and /var, since they contain the "identity" of the system */
+                        (p->rw ? MOUNT_RW : 0) |
+                        MOUNT_VALIDATEFS |
+                        (p->growfs ? MOUNT_GROWFS : 0) |
+                        (STR_IN_SET(id, "root", "var") ? MOUNT_MEASURE : 0), /* by default measure rootfs and /var, since they contain the "identity" of the system */
                         options,
                         description,
                         SPECIAL_LOCAL_FS_TARGET);
@@ -366,7 +502,7 @@ static int add_partition_swap(DissectedPartition *p) {
         }
 
         if (streq_ptr(p->fstype, "crypto_LUKS")) {
-                r = add_cryptsetup("swap", p->node, /* rw= */ true, /* require= */ true, /* measure= */ false, &crypto_what);
+                r = add_cryptsetup("swap", p->node, /* mount_opts = */ NULL, MOUNT_RW, /* require= */ true, &crypto_what);
                 if (r < 0)
                         return r;
                 what = crypto_what;
@@ -379,7 +515,7 @@ static int add_partition_swap(DissectedPartition *p) {
         if (r < 0)
                 return log_error_errno(r, "Failed to generate unit name: %m");
 
-        r = generator_open_unit_file(arg_dest, /* source = */ NULL, name, &f);
+        r = generator_open_unit_file(arg_dest_late, /* source = */ NULL, name, &f);
         if (r < 0)
                 return r;
 
@@ -402,7 +538,7 @@ static int add_partition_swap(DissectedPartition *p) {
         if (r < 0)
                 return log_error_errno(r, "Failed to write unit %s: %m", name);
 
-        return generator_add_symlink(arg_dest, SPECIAL_SWAP_TARGET, "wants", name);
+        return generator_add_symlink(arg_dest_late, SPECIAL_SWAP_TARGET, "wants", name);
 }
 
 static int add_automount(
@@ -410,8 +546,7 @@ static int add_automount(
                 const char *what,
                 const char *where,
                 const char *fstype,
-                bool rw,
-                bool growfs,
+                MountPointFlags flags,
                 const char *options,
                 const char *description,
                 usec_t timeout) {
@@ -428,12 +563,10 @@ static int add_automount(
                       what,
                       where,
                       fstype,
-                      rw,
-                      growfs,
-                      /* measure= */ false,
+                      flags,
                       options,
                       description,
-                      NULL);
+                      /* post= */ NULL);
         if (r < 0)
                 return r;
 
@@ -441,7 +574,7 @@ static int add_automount(
         if (r < 0)
                 return log_error_errno(r, "Failed to generate unit name: %m");
 
-        r = generator_open_unit_file(arg_dest, /* source = */ NULL, unit, &f);
+        r = generator_open_unit_file(arg_dest_late, /* source = */ NULL, unit, &f);
         if (r < 0)
                 return r;
 
@@ -460,7 +593,7 @@ static int add_automount(
         if (r < 0)
                 return log_error_errno(r, "Failed to write unit %s: %m", unit);
 
-        return generator_add_symlink(arg_dest, SPECIAL_LOCAL_FS_TARGET, "wants", unit);
+        return generator_add_symlink(arg_dest_late, SPECIAL_LOCAL_FS_TARGET, "wants", unit);
 }
 
 static int add_partition_xbootldr(DissectedPartition *p) {
@@ -468,11 +601,7 @@ static int add_partition_xbootldr(DissectedPartition *p) {
         int r;
 
         assert(p);
-
-        if (in_initrd()) {
-                log_debug("In initrd, ignoring the XBOOTLDR partition.");
-                return 0;
-        }
+        assert(!in_initrd());
 
         r = path_is_busy("/boot");
         if (r < 0)
@@ -495,11 +624,10 @@ static int add_partition_xbootldr(DissectedPartition *p) {
                         p->node,
                         "/boot",
                         p->fstype,
-                        /* rw= */ true,
-                        /* growfs= */ false,
+                        MOUNT_RW,
                         options,
                         "Boot Loader Partition",
-                        120 * USEC_PER_SEC);
+                        LOADER_PARTITION_IDLE_USEC);
 }
 
 #if ENABLE_EFI
@@ -509,11 +637,7 @@ static int add_partition_esp(DissectedPartition *p, bool has_xbootldr) {
         int r;
 
         assert(p);
-
-        if (in_initrd()) {
-                log_debug("In initrd, ignoring the ESP.");
-                return 0;
-        }
+        assert(!in_initrd());
 
         /* Check if there's an existing fstab entry for ESP. If so, we just skip the gpt-auto logic. */
         r = fstab_has_node(p->node);
@@ -562,11 +686,10 @@ static int add_partition_esp(DissectedPartition *p, bool has_xbootldr) {
                         p->node,
                         esp_path,
                         p->fstype,
-                        /* rw= */ true,
-                        /* growfs= */ false,
+                        MOUNT_RW,
                         options,
                         "EFI System Partition Automount",
-                        120 * USEC_PER_SEC);
+                        LOADER_PARTITION_IDLE_USEC);
 }
 #else
 static int add_partition_esp(DissectedPartition *p, bool has_xbootldr) {
@@ -593,11 +716,11 @@ static int add_partition_root_rw(DissectedPartition *p) {
                 return 0;
         }
 
-        r = generator_enable_remount_fs_service(arg_dest);
+        r = generator_enable_remount_fs_service(arg_dest_late);
         if (r < 0)
                 return r;
 
-        path = strjoina(arg_dest, "/systemd-remount-fs.service.d/50-remount-rw.conf");
+        path = strjoina(arg_dest_late, "/systemd-remount-fs.service.d/50-remount-rw.conf");
 
         r = write_string_file(path,
                               "# Automatically generated by systemd-gpt-auto-generator\n\n"
@@ -622,7 +745,7 @@ static int add_partition_root_growfs(DissectedPartition *p) {
                 return 0;
         }
 
-        return generator_hook_up_growfs(arg_dest, "/", SPECIAL_LOCAL_FS_TARGET);
+        return generator_hook_up_growfs(arg_dest_late, "/", SPECIAL_LOCAL_FS_TARGET);
 }
 
 static int add_partition_root_flags(DissectedPartition *p) {
@@ -641,10 +764,36 @@ static int add_partition_root_flags(DissectedPartition *p) {
 static int add_root_cryptsetup(void) {
 #if HAVE_LIBCRYPTSETUP
 
-        /* If a device /dev/gpt-auto-root-luks appears, then make it pull in systemd-cryptsetup-root.service, which
-         * sets it up, and causes /dev/gpt-auto-root to appear which is all we are looking for. */
+        assert(arg_auto_root != GPT_AUTO_ROOT_OFF);
 
-        return add_cryptsetup("root", "/dev/gpt-auto-root-luks", /* rw= */ true, /* require= */ false, /* measure= */ true, NULL);
+        /* If a device /dev/gpt-auto-root-luks or /dev/disk/by-designator/root-luks appears, then make it
+         * pull in systemd-cryptsetup@root.service, which sets it up, and causes /dev/gpt-auto-root or
+         * /dev/disk/by-designator/root to appear which is all we are looking for. */
+
+        const char *bdev =
+                IN_SET(arg_auto_root, GPT_AUTO_ROOT_DISSECT, GPT_AUTO_ROOT_DISSECT_FORCE) ?
+                "/dev/disk/by-designator/root-luks" : "/dev/gpt-auto-root-luks";
+
+        if (IN_SET(arg_auto_root, GPT_AUTO_ROOT_FORCE, GPT_AUTO_ROOT_DISSECT_FORCE)) {
+                /* Similar logic as in add_root_mount(), see below */
+                FactoryResetMode f = factory_reset_mode();
+                if (f < 0)
+                        log_warning_errno(f, "Failed to determine whether we are in factory reset mode, assuming not: %m");
+
+                if (IN_SET(f, FACTORY_RESET_ON, FACTORY_RESET_COMPLETE))
+                        bdev =
+                                IN_SET(arg_auto_root, GPT_AUTO_ROOT_DISSECT, GPT_AUTO_ROOT_DISSECT_FORCE) ?
+                                "/dev/disk/by-designator/root-luks-ignore-factory-reset" :
+                                "/dev/gpt-auto-root-luks-ignore-factory-reset";
+        }
+
+        return add_cryptsetup(
+                        "root",
+                        bdev,
+                        arg_root_options,
+                        MOUNT_RW|MOUNT_MEASURE,
+                        /* require= */ false,
+                        /* ret_device= */ NULL);
 #else
         return 0;
 #endif
@@ -656,28 +805,71 @@ static int add_root_mount(void) {
         _cleanup_free_ char *options = NULL;
         int r;
 
-        if (!is_efi_boot()) {
-                log_debug("Not an EFI boot, not creating root mount.");
+        /* Explicitly disabled? Then exit immediately */
+        if (arg_auto_root == GPT_AUTO_ROOT_OFF)
                 return 0;
+
+        /* Neither explicitly enabled nor disabled? Then decide based on the EFI partition variables to be set */
+        if (arg_auto_root < 0) {
+                if (!is_efi_boot()) {
+                        log_debug("Not an EFI boot, not creating root mount.");
+                        return 0;
+                }
+
+                r = efi_loader_get_device_part_uuid(/* ret= */ NULL);
+                if (r == -ENOENT) {
+                        log_notice("EFI loader partition unknown, not processing %s.\n"
+                                   "(The boot loader did not set EFI variable LoaderDevicePartUUID.)",
+                                   in_initrd() ? "/sysroot" : "/");
+                        return 0;
+                }
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read loader partition UUID: %m");
         }
 
-        r = efi_loader_get_device_part_uuid(NULL);
-        if (r == -ENOENT) {
-                log_notice("EFI loader partition unknown, exiting.\n"
-                           "(The boot loader did not set EFI variable LoaderDevicePartUUID.)");
-                return 0;
-        } else if (r < 0)
-                return log_error_errno(r, "Failed to read loader partition UUID: %m");
+        /* OK, we shall look for a root device, so let's wait for a root device to show up.  A udev rule will
+         * create the link for us under the right name.
+         *
+         * There are two distinct names: the /dev/gpt-auto-root-ignore-factory-reset symlink is created for
+         * the root partition if factory reset mode is enabled or complete, and the /dev/gpt-auto-root
+         * symlink is only created if factory reset mode is off or already complete (thus taking factory
+         * reset state into account). In scenarios where the root disk is partially reformatted during
+         * factory reset the latter is the link to use, otherwise the former (so that we don't accidentally
+         * mount a root partition too early that is about to be wiped and replaced by another one). */
 
-        /* OK, we have an ESP/XBOOTLDR partition, this is fantastic, so let's wait for a root device to show up.
-         * A udev rule will create the link for us under the right name. */
+        const char *bdev =
+                IN_SET(arg_auto_root, GPT_AUTO_ROOT_DISSECT, GPT_AUTO_ROOT_DISSECT_FORCE) ?
+                "/dev/disk/by-designator/root" : "/dev/gpt-auto-root";
+        if (IN_SET(arg_auto_root, GPT_AUTO_ROOT_FORCE, GPT_AUTO_ROOT_DISSECT_FORCE)) {
+                FactoryResetMode f = factory_reset_mode();
+                if (f < 0)
+                        log_warning_errno(f, "Failed to determine whether we are in factory reset mode, assuming not: %m");
+
+                if (IN_SET(f, FACTORY_RESET_ON, FACTORY_RESET_COMPLETE))
+                        bdev =
+                                IN_SET(arg_auto_root, GPT_AUTO_ROOT_DISSECT, GPT_AUTO_ROOT_DISSECT_FORCE) ?
+                                "/dev/disk/by-designator/root-ignore-factory-reset" :
+                                "/dev/gpt-auto-root-ignore-factory-reset";
+        }
 
         if (in_initrd()) {
-                r = generator_write_initrd_root_device_deps(arg_dest, "/dev/gpt-auto-root");
+                r = generator_write_initrd_root_device_deps(arg_dest_late, bdev);
                 if (r < 0)
                         return 0;
 
                 r = add_root_cryptsetup();
+                if (r < 0)
+                        return r;
+
+                /* If a device /dev/disk/by-designator/root-verity or
+                 * /dev/disk/by-designator/root-verity-data appears, then make it pull in
+                 * systemd-cryptsetup@root.service, which sets it up, and causes /dev/disk/by-designator/root
+                 * to appear. */
+                r = add_veritysetup(
+                                "root",
+                                "/dev/disk/by-designator/root-verity-data",
+                                "/dev/disk/by-designator/root-verity",
+                                arg_root_options);
                 if (r < 0)
                         return r;
         }
@@ -702,18 +894,109 @@ static int add_root_mount(void) {
 
         return add_mount(
                         "root",
-                        "/dev/gpt-auto-root",
+                        bdev,
                         in_initrd() ? "/sysroot" : "/",
                         arg_root_fstype,
-                        /* rw= */ arg_root_rw > 0,
-                        /* growfs= */ false,
-                        /* measure= */ true,
+                        (arg_root_rw > 0 ? MOUNT_RW : 0) |
+                        (in_initrd() ? MOUNT_VALIDATEFS : 0) |
+                        MOUNT_MEASURE,
                         options,
                         "Root Partition",
                         in_initrd() ? SPECIAL_INITRD_ROOT_FS_TARGET : SPECIAL_LOCAL_FS_TARGET);
 #else
         return 0;
 #endif
+}
+
+static int add_usr_mount(void) {
+#if ENABLE_EFI
+        int r;
+
+        /* /usr/ discovery must be enabled explicitly. */
+        if (arg_auto_usr <= 0)
+                return 0;
+
+        /* We do not support the other gpt-auto modes for /usr/, but the parser should already have checked that. */
+        assert(arg_auto_usr == GPT_AUTO_ROOT_DISSECT);
+
+        if (arg_root_fstype && !arg_usr_fstype) {
+                arg_usr_fstype = strdup(arg_root_fstype);
+                if (!arg_usr_fstype)
+                        return log_oom();
+        }
+
+        if (arg_root_options && !arg_usr_options) {
+                arg_usr_options = strdup(arg_root_options);
+                if (!arg_usr_options)
+                        return log_oom();
+        }
+
+        if (in_initrd()) {
+                r = add_cryptsetup(
+                                "usr",
+                                "/dev/disk/by-designator/usr-luks",
+                                arg_usr_options,
+                                MOUNT_RW|MOUNT_MEASURE,
+                                /* require= */ false,
+                                /* ret_device= */ NULL);
+                if (r < 0)
+                        return r;
+
+                /* If a device /dev/disk/by-designator/usr-verity or
+                 * /dev/disk/by-designator/usr-verity-data appears, then make it pull in
+                 * systemd-cryptsetup@usr.service, which sets it up, and causes /dev/disk/by-designator/usr
+                 * to appear. */
+                r = add_veritysetup(
+                                "usr",
+                                "/dev/disk/by-designator/usr-verity-data",
+                                "/dev/disk/by-designator/usr-verity",
+                                arg_usr_options);
+                if (r < 0)
+                        return r;
+        }
+
+        _cleanup_free_ char *options = NULL;
+        r = partition_pick_mount_options(
+                        PARTITION_USR,
+                        arg_usr_fstype,
+                        /* rw= */ false,
+                        /* discard= */ true,
+                        &options,
+                        /* ret_ms_flags= */ NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to pick /usr/ mount options: %m");
+
+        if (arg_usr_options)
+                if (!strextend_with_separator(&options, ",", arg_usr_options))
+                        return log_oom();
+
+        r = add_mount("usr",
+                      "/dev/disk/by-designator/usr",
+                      in_initrd() ? "/sysusr/usr" : "/usr",
+                      arg_usr_fstype,
+                      /* flags = */ 0,
+                      options,
+                      "/usr/ Partition",
+                      in_initrd() ? SPECIAL_INITRD_USR_FS_TARGET : SPECIAL_LOCAL_FS_TARGET);
+        if (r < 0)
+                return r;
+
+        if (in_initrd()) {
+                log_debug("Synthesizing entry what=/sysusr/usr where=/sysroot/usr opts=bind");
+
+                r = add_mount("usr-bind",
+                              "/sysusr/usr",
+                              "/sysroot/usr",
+                              /* fstype= */ NULL,
+                              MOUNT_VALIDATEFS,
+                              "bind",
+                              "/usr/ Partition (Final)",
+                              SPECIAL_INITRD_FS_TARGET);
+                if (r < 0)
+                        return r;
+        }
+#endif
+        return 0;
 }
 
 static int process_loader_partitions(DissectedPartition *esp, DissectedPartition *xbootldr) {
@@ -780,6 +1063,15 @@ static int enumerate_partitions(dev_t devnum) {
         _cleanup_free_ char *devname = NULL;
         int r;
 
+        static const PartitionDesignator ignore_designators[] = {
+                PARTITION_ROOT,
+                PARTITION_ROOT_VERITY,
+                PARTITION_ROOT_VERITY_SIG,
+                PARTITION_USR,
+                PARTITION_USR_VERITY,
+                PARTITION_USR_VERITY_SIG,
+        };
+
         assert(!in_initrd());
 
         /* Run on the final root fs (not in the initrd), to mount auxiliary partitions, and hook in rw
@@ -795,6 +1087,14 @@ static int enumerate_partitions(dev_t devnum) {
                 return log_debug_errno(r, "Failed to get device node of " DEVNUM_FORMAT_STR ": %m",
                                        DEVNUM_FORMAT_VAL(devnum));
 
+        _cleanup_(image_policy_freep) ImagePolicy *image_policy = NULL;
+        r = image_policy_ignore_designators(
+                        arg_image_policy ?: &image_policy_host,
+                        ignore_designators, ELEMENTSOF(ignore_designators),
+                        &image_policy);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to mark root/usr designators as ignore in image policy: %m");
+
         /* Let's take a LOCK_SH lock on the block device, in case udevd is already running. If we don't take
          * the lock, udevd might end up issuing BLKRRPART in the middle, and we don't want that, since that
          * might remove all partitions while we are operating on them. */
@@ -806,7 +1106,8 @@ static int enumerate_partitions(dev_t devnum) {
                         loop,
                         /* verity= */ NULL,
                         /* mount_options= */ NULL,
-                        arg_image_policy ?: &image_policy_host,
+                        image_policy,
+                        arg_image_filter,
                         DISSECT_IMAGE_GPT_ONLY|
                         DISSECT_IMAGE_USR_NO_ROOT|
                         DISSECT_IMAGE_DISKSEQ_DEVNODE|
@@ -854,6 +1155,9 @@ static int add_mounts(void) {
         dev_t devno;
         int r;
 
+        if (in_initrd())
+                return 0;
+
         r = blockdev_get_root(LOG_ERR, &devno);
         if (r < 0)
                 return r;
@@ -884,13 +1188,11 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                /* Disable root disk logic if there's a root= value
-                 * specified (unless it happens to be "gpt-auto") */
+                /* Disable root disk logic if there's a root= value specified (unless it happens to be
+                 * "gpt-auto" or "gpt-auto-force") */
 
-                if (!streq(value, "gpt-auto")) {
-                        arg_root_enabled = false;
-                        log_debug("Disabling root partition auto-detection, root= is defined.");
-                }
+                arg_auto_root = parse_gpt_auto_root("root=", value);
+                assert(arg_auto_root >= 0);
 
         } else if (streq(key, "roothash")) {
 
@@ -899,7 +1201,8 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
                 /* Disable root disk logic if there's roothash= defined (i.e. verity enabled) */
 
-                arg_root_enabled = false;
+                arg_auto_root = GPT_AUTO_ROOT_OFF;
+                log_debug("Disabling root partition auto-detection, roothash= is set.");
 
         } else if (streq(key, "rootfstype")) {
 
@@ -916,14 +1219,54 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (!strextend_with_separator(&arg_root_options, ",", value))
                         return log_oom();
 
+        } else if (streq(key, "mount.usr")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                /* Disable root disk logic if there's a root= value specified (unless it happens to be
+                 * "gpt-auto" or "gpt-auto-force") */
+
+                arg_auto_usr = parse_gpt_auto_root("mount.usr=", value);
+                assert(arg_auto_usr >= 0);
+
+                if (IN_SET(arg_auto_usr, GPT_AUTO_ROOT_ON, GPT_AUTO_ROOT_FORCE, GPT_AUTO_ROOT_DISSECT_FORCE)) {
+                        log_warning("'gpt-auto', 'gpt-auto-force' and 'dissect-force' are not supported for mount.usr=. Automatically resorting to mount.usr=dissect mode instead.");
+                        arg_auto_usr = GPT_AUTO_ROOT_DISSECT;
+                }
+
+        } else if (streq(key, "mount.usrfstype")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                return free_and_strdup_warn(&arg_usr_fstype, empty_to_null(value));
+
+        } else if (streq(key, "mount.usrflags")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                if (!strextend_with_separator(&arg_usr_options, ",", value))
+                        return log_oom();
+
         } else if (streq(key, "rw") && !value)
                 arg_root_rw = true;
         else if (streq(key, "ro") && !value)
                 arg_root_rw = false;
         else if (proc_cmdline_key_streq(key, "systemd.image_policy"))
                 return parse_image_policy_argument(value, &arg_image_policy);
+        else if (proc_cmdline_key_streq(key, "systemd.image_filter")) {
+                _cleanup_(image_filter_freep) ImageFilter *f = NULL;
 
-        else if (streq(key, "systemd.swap")) {
+                r = image_filter_parse(value, &f);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse image filter: %s", value);
+
+                image_filter_free(arg_image_filter);
+                arg_image_filter = TAKE_PTR(f);
+
+        } else if (streq(key, "systemd.swap")) {
 
                 r = value ? parse_boolean(value) : 1;
                 if (r < 0)
@@ -942,7 +1285,8 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 static int run(const char *dest, const char *dest_early, const char *dest_late) {
         int r;
 
-        assert_se(arg_dest = dest_late);
+        assert_se(arg_dest = dest);
+        assert_se(arg_dest_late = dest_late);
 
         if (detect_container() > 0) {
                 log_debug("In a container, exiting.");
@@ -958,13 +1302,10 @@ static int run(const char *dest, const char *dest_early, const char *dest_late) 
                 return 0;
         }
 
-        if (arg_root_enabled)
-                r = add_root_mount();
-        else
-                r = 0;
-
-        if (!in_initrd())
-                RET_GATHER(r, add_mounts());
+        r = 0;
+        RET_GATHER(r, add_root_mount());
+        RET_GATHER(r, add_usr_mount());
+        RET_GATHER(r, add_mounts());
 
         return r;
 }

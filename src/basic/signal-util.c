@@ -1,13 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <stdarg.h>
+#include <threads.h>
+#include <unistd.h>
 
 #include "errno-util.h"
-#include "macro.h"
-#include "missing_syscall.h"
-#include "missing_threads.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "signal-util.h"
 #include "stdio-util.h"
 #include "string-table.h"
@@ -280,13 +278,13 @@ void propagate_signal(int sig, siginfo_t *siginfo) {
 
         /* To be called from a signal handler. Will raise the same signal again, in our process + in our threads.
          *
-         * Note that we use raw_getpid() instead of getpid_cached(). We might have forked with raw_clone()
+         * Note that we use getpid() instead of getpid_cached(). We might have forked with raw_clone()
          * earlier (see PID 1), and hence let's go to the raw syscall here. In particular as this is not
          * performance sensitive code.
          *
          * Note that we use kill() rather than raise() as fallback, for similar reasons. */
 
-        p = raw_getpid();
+        p = getpid();
 
         if (rt_tgsigqueueinfo(p, gettid(), sig, siginfo) < 0)
                 assert_se(kill(p, sig) >= 0);
@@ -300,6 +298,11 @@ const struct sigaction sigaction_ignore = {
 const struct sigaction sigaction_default = {
         .sa_handler = SIG_DFL,
         .sa_flags = SA_RESTART,
+};
+
+const struct sigaction sigaction_nop_nocldstop = {
+        .sa_handler = nop_signal_handler,
+        .sa_flags = SA_NOCLDSTOP|SA_RESTART,
 };
 
 int parse_signo(const char *s, int *ret) {
@@ -316,4 +319,16 @@ int parse_signo(const char *s, int *ret) {
                 *ret = sig;
 
         return 0;
+}
+
+void sigterm_process_group_handler(int signal, siginfo_t *info, void *ucontext) {
+        assert(signal == SIGTERM);
+        assert(info);
+
+        /* If the sender is not us, propagate the signal to all processes in
+         * the same process group */
+        if (si_code_from_process(info->si_code) &&
+            pid_is_valid(info->si_pid) &&
+            info->si_pid != getpid_cached())
+                (void) kill(0, signal);
 }

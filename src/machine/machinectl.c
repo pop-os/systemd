@@ -1,17 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
-#include <math.h>
+#include <locale.h>
 #include <net/if.h>
-#include <netinet/in.h>
-#include <sys/mount.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-event.h"
+#include "sd-journal.h"
 
 #include "alloc-util.h"
 #include "ask-password-agent.h"
@@ -21,48 +18,48 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
+#include "bus-message-util.h"
 #include "bus-print-properties.h"
 #include "bus-unit-procs.h"
 #include "bus-unit-util.h"
+#include "bus-util.h"
 #include "bus-wait-for-jobs.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
-#include "constants.h"
-#include "copy.h"
 #include "edit-util.h"
 #include "env-util.h"
-#include "fd-util.h"
 #include "format-ifname.h"
 #include "format-table.h"
+#include "format-util.h"
 #include "hostname-util.h"
 #include "import-util.h"
 #include "in-addr-util.h"
-#include "locale-util.h"
+#include "label-util.h"
 #include "log.h"
 #include "logs-show.h"
 #include "machine-dbus.h"
-#include "macro.h"
 #include "main-func.h"
-#include "mkdir.h"
 #include "nulstr-util.h"
+#include "osc-context.h"
+#include "output-mode.h"
 #include "pager.h"
 #include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "polkit-agent.h"
 #include "pretty-print.h"
 #include "process-util.h"
 #include "ptyfwd.h"
-#include "rlimit-util.h"
-#include "signal-util.h"
-#include "sort-util.h"
+#include "runtime-scope.h"
 #include "stdio-util.h"
 #include "string-table.h"
+#include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
+#include "time-util.h"
 #include "unit-name.h"
 #include "verbs.h"
-#include "web-util.h"
 
 typedef enum MachineRunner {
         RUNNER_NSPAWN,
@@ -72,14 +69,14 @@ typedef enum MachineRunner {
 } MachineRunner;
 
 static const char* const machine_runner_table[_RUNNER_MAX] = {
-        [RUNNER_NSPAWN] = "nspawn",
+        [RUNNER_NSPAWN]  = "nspawn",
         [RUNNER_VMSPAWN] = "vmspawn",
 };
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(machine_runner, MachineRunner);
 
 static const char* const machine_runner_unit_prefix_table[_RUNNER_MAX] = {
-        [RUNNER_NSPAWN] = "systemd-nspawn",
+        [RUNNER_NSPAWN]  = "systemd-nspawn",
         [RUNNER_VMSPAWN] = "systemd-vmspawn",
 };
 
@@ -416,11 +413,16 @@ static int list_images(int argc, char *argv[], void *userdata) {
         return show_table(table, "images");
 }
 
-static int show_unit_cgroup(sd_bus *bus, const char *unit, pid_t leader) {
+static int show_unit_cgroup(
+                sd_bus *bus,
+                const char *unit,
+                const char *subgroup,
+                pid_t leader) {
+
         _cleanup_free_ char *cgroup = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        OutputFlags extra_flags = 0;
         int r;
-        unsigned c;
 
         assert(bus);
         assert(unit);
@@ -432,13 +434,16 @@ static int show_unit_cgroup(sd_bus *bus, const char *unit, pid_t leader) {
         if (isempty(cgroup))
                 return 0;
 
-        c = columns();
-        if (c > 18)
-                c -= 18;
-        else
-                c = 0;
+        if (!empty_or_root(subgroup)) {
+                if (!path_extend(&cgroup, subgroup))
+                        return log_oom();
 
-        r = unit_show_processes(bus, unit, cgroup, "\t\t  ", c, get_output_flags(), &error);
+                /* If we have a subcgroup, then hide all processes outside of it */
+                extra_flags |= OUTPUT_HIDE_EXTRA;
+        }
+
+        unsigned c = MAX(LESS_BY(columns(), 18U), 10U);
+        r = unit_show_processes(bus, unit, cgroup, "\t\t  ", c, get_output_flags() | extra_flags, &error);
         if (r == -EBADR) {
 
                 if (arg_transport == BUS_TRANSPORT_REMOTE)
@@ -446,7 +451,7 @@ static int show_unit_cgroup(sd_bus *bus, const char *unit, pid_t leader) {
 
                 /* Fallback for older systemd versions where the GetUnitProcesses() call is not yet available */
 
-                if (cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, cgroup) != 0 && leader <= 0)
+                if (cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, cgroup) != 0 && leader <= 0)
                         return 0;
 
                 show_cgroup_and_extra(SYSTEMD_CGROUP_CONTROLLER, cgroup, "\t\t  ", c, &leader, leader > 0, get_output_flags());
@@ -494,7 +499,7 @@ static int print_uid_shift(sd_bus *bus, const char *name) {
         if (shift == 0) /* Don't show trivial mappings */
                 return 0;
 
-        printf("  UID Shift: %" PRIu32 "\n", shift);
+        printf("\tID Shift: %" PRIu32 "\n", shift);
         return 0;
 }
 
@@ -504,18 +509,50 @@ typedef struct MachineStatusInfo {
         const char *class;
         const char *service;
         const char *unit;
+        const char *subgroup;
         const char *root_directory;
         pid_t leader;
+        uint64_t leader_pidfdid;
+        pid_t supervisor;
+        uint64_t supervisor_pidfdid;
         struct dual_timestamp timestamp;
         int *netif;
         size_t n_netif;
+        uid_t uid;
 } MachineStatusInfo;
 
-static void machine_status_info_clear(MachineStatusInfo *info) {
-        if (info) {
-                free(info->netif);
-                zero(*info);
+static void machine_status_info_done(MachineStatusInfo *info) {
+        if (!info)
+                return;
+
+        free(info->netif);
+        zero(*info);
+}
+
+static void print_process_info(const char *field, pid_t pid, uint64_t pidfdid) {
+        int r;
+
+        assert(field);
+
+        if (pid <= 0)
+                return;
+
+        printf("%s: " PID_FMT, field, pid);
+
+        _cleanup_(pidref_done) PidRef pr = PIDREF_NULL;
+        r = pidref_set_pid_and_pidfd_id(&pr, pid, pidfdid);
+        if (r < 0)
+                log_debug_errno(r, "Failed to acquire reference to process, ignoring: %m");
+        else {
+                _cleanup_free_ char *t = NULL;
+                r = pidref_get_comm(&pr, &t);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to acquire name of process, ignoring: %m");
+                else
+                        printf(" (%s)", t);
         }
+
+        putchar('\n');
 }
 
 static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
@@ -540,17 +577,8 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
         else if (!isempty(s2))
                 printf("\t   Since: %s\n", s2);
 
-        if (i->leader > 0) {
-                _cleanup_free_ char *t = NULL;
-
-                printf("\t  Leader: %u", (unsigned) i->leader);
-
-                (void) pid_get_comm(i->leader, &t);
-                if (t)
-                        printf(" (%s)", t);
-
-                putchar('\n');
-        }
+        print_process_info("\t  Leader", i->leader, i->leader_pidfdid);
+        print_process_info("\t Superv.", i->supervisor, i->supervisor_pidfdid);
 
         if (i->service) {
                 printf("\t Service: %s", i->service);
@@ -561,6 +589,9 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
                 putchar('\n');
         } else if (i->class)
                 printf("\t   Class: %s\n", i->class);
+
+        if (i->uid != 0)
+                printf("\t     UID: " UID_FMT "\n", i->uid);
 
         if (i->root_directory)
                 printf("\t    Root: %s\n", i->root_directory);
@@ -599,7 +630,11 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
 
         if (i->unit) {
                 printf("\t    Unit: %s\n", i->unit);
-                show_unit_cgroup(bus, i->unit, i->leader);
+
+                if (!empty_or_root(i->subgroup))
+                        printf("\tSubgroup: %s\n", i->subgroup);
+
+                show_unit_cgroup(bus, i->unit, i->subgroup, i->leader);
 
                 if (arg_transport == BUS_TRANSPORT_LOCAL)
 
@@ -646,18 +681,23 @@ static int show_machine_info(const char *verb, sd_bus *bus, const char *path, bo
                 { "Class",              "s",  NULL,          offsetof(MachineStatusInfo, class)               },
                 { "Service",            "s",  NULL,          offsetof(MachineStatusInfo, service)             },
                 { "Unit",               "s",  NULL,          offsetof(MachineStatusInfo, unit)                },
+                { "Subgroup",           "s",  NULL,          offsetof(MachineStatusInfo, subgroup)            },
                 { "RootDirectory",      "s",  NULL,          offsetof(MachineStatusInfo, root_directory)      },
                 { "Leader",             "u",  NULL,          offsetof(MachineStatusInfo, leader)              },
+                { "LeaderPIDFDId",      "t",  NULL,          offsetof(MachineStatusInfo, leader_pidfdid)      },
+                { "Supervisor",         "u",  NULL,          offsetof(MachineStatusInfo, supervisor)          },
+                { "SupervisorPIDFDId",  "t",  NULL,          offsetof(MachineStatusInfo, supervisor_pidfdid)  },
                 { "Timestamp",          "t",  NULL,          offsetof(MachineStatusInfo, timestamp.realtime)  },
                 { "TimestampMonotonic", "t",  NULL,          offsetof(MachineStatusInfo, timestamp.monotonic) },
                 { "Id",                 "ay", bus_map_id128, offsetof(MachineStatusInfo, id)                  },
                 { "NetworkInterfaces",  "ai", map_netif,     0                                                },
+                { "UID",                "u",  NULL,          offsetof(MachineStatusInfo, uid)                 },
                 {}
         };
 
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
-        _cleanup_(machine_status_info_clear) MachineStatusInfo info = {};
+        _cleanup_(machine_status_info_done) MachineStatusInfo info = {};
         int r;
 
         assert(verb);
@@ -1188,35 +1228,29 @@ static int bind_mount(int argc, char *argv[], void *userdata) {
 }
 
 static int on_machine_removed(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        PTYForward ** forward = (PTYForward**) userdata;
+        PTYForward *forward = ASSERT_PTR(userdata);
         int r;
 
         assert(m);
-        assert(forward);
 
-        if (*forward) {
-                /* If the forwarder is already initialized, tell it to
-                 * exit on the next vhangup(), so that we still flush
-                 * out what might be queued and exit then. */
+        /* Tell the forwarder to exit on the next vhangup(), so that we still flush out what might be queued
+         * and exit then. */
 
-                r = pty_forward_set_ignore_vhangup(*forward, false);
-                if (r >= 0)
-                        return 0;
-
+        r = pty_forward_set_ignore_vhangup(forward, false);
+        if (r < 0) {
+                /* On error, quit immediately. */
                 log_error_errno(r, "Failed to set ignore_vhangup flag: %m");
+                (void) sd_event_exit(sd_bus_get_event(sd_bus_message_get_bus(m)), EXIT_FAILURE);
         }
 
-        /* On error, or when the forwarder is not initialized yet, quit immediately */
-        sd_event_exit(sd_bus_get_event(sd_bus_message_get_bus(m)), EXIT_FAILURE);
         return 0;
 }
 
-static int process_forward(sd_event *event, PTYForward **forward, int master, PTYForwardFlags flags, const char *name) {
-        char last_char = 0;
-        bool machine_died;
+static int process_forward(sd_event *event, sd_bus_slot *machine_removed_slot, int master, PTYForwardFlags flags, const char *name) {
         int r;
 
         assert(event);
+        assert(machine_removed_slot);
         assert(master >= 0);
         assert(name);
 
@@ -1227,28 +1261,32 @@ static int process_forward(sd_event *event, PTYForward **forward, int master, PT
                         log_info("Connected to machine %s. Press ^] three times within 1s to exit session.", name);
         }
 
+        _cleanup_(osc_context_closep) sd_id128_t osc_context_id = SD_ID128_NULL;
+        if (!terminal_is_dumb()) {
+                r = osc_context_open_container(name, /* ret_seq= */ NULL, &osc_context_id);
+                if (r < 0)
+                        return r;
+        }
+
         r = sd_event_set_signal_exit(event, true);
         if (r < 0)
                 return log_error_errno(r, "Failed to enable SIGINT/SITERM handling: %m");
 
-        r = pty_forward_new(event, master, flags, forward);
+        _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
+        r = pty_forward_new(event, master, flags, &forward);
         if (r < 0)
                 return log_error_errno(r, "Failed to create PTY forwarder: %m");
+
+        /* No userdata should not set previously. */
+        assert_se(!sd_bus_slot_set_userdata(machine_removed_slot, forward));
 
         r = sd_event_loop(event);
         if (r < 0)
                 return log_error_errno(r, "Failed to run event loop: %m");
 
-        pty_forward_get_last_char(*forward, &last_char);
-
-        machine_died =
+        bool machine_died =
                 (flags & PTY_FORWARD_IGNORE_VHANGUP) &&
-                pty_forward_get_ignore_vhangup(*forward) == 0;
-
-        *forward = pty_forward_free(*forward);
-
-        if (last_char != '\n')
-                fputc('\n', stdout);
+                pty_forward_get_ignore_vhangup(forward) == 0;
 
         if (!arg_quiet) {
                 if (machine_died)
@@ -1300,7 +1338,6 @@ static int parse_machine_uid(const char *spec, const char **machine, char **uid)
 static int login_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
         _cleanup_(sd_bus_slot_unrefp) sd_bus_slot *slot = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         int master = -1, r;
@@ -1334,7 +1371,7 @@ static int login_machine(int argc, char *argv[], void *userdata) {
                          "member='MachineRemoved',"
                          "arg0='", machine, "'");
 
-        r = sd_bus_add_match_async(bus, &slot, match, on_machine_removed, NULL, &forward);
+        r = sd_bus_add_match_async(bus, &slot, match, on_machine_removed, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request machine removal match: %m");
 
@@ -1346,13 +1383,12 @@ static int login_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        return process_forward(event, &forward, master, PTY_FORWARD_IGNORE_VHANGUP, machine);
+        return process_forward(event, slot, master, PTY_FORWARD_IGNORE_VHANGUP, machine);
 }
 
 static int shell_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL, *m = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
         _cleanup_(sd_bus_slot_unrefp) sd_bus_slot *slot = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         int master = -1, r;
@@ -1364,15 +1400,17 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
                                        "Shell only supported on local machines.");
 
-        /* Pass $TERM to shell session, if not explicitly specified. */
-        if (!strv_find_prefix(arg_setenv, "TERM=")) {
-                const char *t;
+        /* Pass $TERM & Co. to shell session, if not explicitly specified. */
+        FOREACH_STRING(v, "TERM=", "COLORTERM=", "NO_COLOR=") {
+                if (strv_find_prefix(arg_setenv, v))
+                        continue;
 
-                t = strv_find_prefix(environ, "TERM=");
-                if (t) {
-                        if (strv_extend(&arg_setenv, t) < 0)
-                                return log_oom();
-                }
+                const char *t = strv_find_prefix(environ, v);
+                if (!t)
+                        continue;
+
+                if (strv_extend(&arg_setenv, t) < 0)
+                        return log_oom();
         }
 
         (void) polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
@@ -1396,7 +1434,7 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
                          "member='MachineRemoved',"
                          "arg0='", machine, "'");
 
-        r = sd_bus_add_match_async(bus, &slot, match, on_machine_removed, NULL, &forward);
+        r = sd_bus_add_match_async(bus, &slot, match, on_machine_removed, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request machine removal match: %m");
 
@@ -1426,7 +1464,7 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        return process_forward(event, &forward, master, 0, machine);
+        return process_forward(event, slot, master, /* flags = */ 0, machine);
 }
 
 static int normalize_nspawn_filename(const char *name, char **ret_file) {
@@ -1706,7 +1744,7 @@ static int make_service_name(const char *name, char **ret) {
 
         assert(name);
         assert(ret);
-        assert(arg_runner >= 0 && arg_runner < (MachineRunner) ELEMENTSOF(machine_runner_unit_prefix_table));
+        assert(arg_runner >= 0 && arg_runner < _RUNNER_MAX);
 
         if (!hostname_is_valid(name, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -2334,7 +2372,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_FORMAT:
-                        if (!STR_IN_SET(optarg, "uncompressed", "xz", "gzip", "bzip2"))
+                        if (!STR_IN_SET(optarg, "uncompressed", "xz", "gzip", "bzip2", "zstd"))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Unknown format: %s", optarg);
 

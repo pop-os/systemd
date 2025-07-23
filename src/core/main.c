@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/oom.h>
+#include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+
 #if HAVE_VALGRIND_VALGRIND_H
 #  include <valgrind/valgrind.h>
 #endif
@@ -20,46 +21,43 @@
 #include "apparmor-setup.h"
 #include "architecture.h"
 #include "argv-util.h"
-#if HAVE_LIBBPF
-#include "bpf-restrict-fs.h"
-#endif
 #include "build.h"
 #include "bus-error.h"
-#include "bus-util.h"
 #include "capability-util.h"
 #include "cgroup-setup.h"
-#include "cgroup-util.h"
 #include "chase.h"
 #include "clock-util.h"
 #include "clock-warp.h"
 #include "conf-parser.h"
 #include "confidential-virt.h"
+#include "constants.h"
 #include "copy.h"
+#include "coredump-util.h"
 #include "cpu-set-util.h"
 #include "crash-handler.h"
-#include "dbus-manager.h"
 #include "dbus.h"
-#include "constants.h"
+#include "dbus-manager.h"
 #include "dev-setup.h"
 #include "efi-random.h"
-#include "efivars.h"
 #include "emergency-action.h"
 #include "env-util.h"
-#include "exit-status.h"
+#include "escape.h"
 #include "fd-util.h"
 #include "fdset.h"
 #include "fileio.h"
 #include "format-util.h"
-#include "fs-util.h"
 #include "getopt-defs.h"
 #include "hexdecoct.h"
 #include "hostname-setup.h"
+#include "id128-util.h"
 #include "ima-setup.h"
 #include "import-creds.h"
 #include "initrd-util.h"
+#include "io-util.h"
 #include "ipe-setup.h"
 #include "killall.h"
 #include "kmod-setup.h"
+#include "label-util.h"
 #include "limits-util.h"
 #include "load-fragment.h"
 #include "log.h"
@@ -73,6 +71,7 @@
 #include "mount-setup.h"
 #include "mount-util.h"
 #include "os-util.h"
+#include "osc-context.h"
 #include "pager.h"
 #include "parse-argument.h"
 #include "parse-util.h"
@@ -80,25 +79,26 @@
 #include "pretty-print.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
-#include "psi-util.h"
 #include "random-util.h"
 #include "rlimit-util.h"
 #include "rm-rf.h"
 #include "seccomp-util.h"
 #include "selinux-setup.h"
 #include "selinux-util.h"
+#include "serialize.h"
+#include "set.h"
 #include "signal-util.h"
 #include "smack-setup.h"
 #include "special.h"
 #include "stat-util.h"
 #include "stdio-util.h"
-#include "string-table.h"
 #include "strv.h"
 #include "switch-root.h"
 #include "sysctl-util.h"
 #include "terminal-util.h"
 #include "time-util.h"
 #include "umask-util.h"
+#include "unit-name.h"
 #include "user-util.h"
 #include "version.h"
 #include "virt.h"
@@ -166,14 +166,6 @@ static char **saved_env = NULL;
 
 static int parse_configuration(const struct rlimit *saved_rlimit_nofile,
                                const struct rlimit *saved_rlimit_memlock);
-
-static const char* const crash_action_table[_CRASH_ACTION_MAX] = {
-        [CRASH_FREEZE]   = "freeze",
-        [CRASH_REBOOT]   = "reboot",
-        [CRASH_POWEROFF] = "poweroff",
-};
-
-DEFINE_STRING_TABLE_LOOKUP(crash_action, CrashAction);
 
 static DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_crash_action, crash_action, CrashAction, CRASH_FREEZE);
 
@@ -245,32 +237,18 @@ unset:
 }
 
 static int console_setup(void) {
+
+        if (getpid_cached() != 1)
+                return 0;
+
         _cleanup_close_ int tty_fd = -EBADF;
-        unsigned rows, cols;
-        int r;
 
-        tty_fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
+        tty_fd = open_terminal("/dev/console", O_RDWR|O_NOCTTY|O_CLOEXEC);
         if (tty_fd < 0)
-                return log_error_errno(tty_fd, "Failed to open /dev/console: %m");
+                return log_error_errno(tty_fd, "Failed to open %s: %m", "/dev/console");
 
-        /* We don't want to force text mode.  plymouth may be showing
-         * pictures already from initrd. */
-        r = terminal_reset_ioctl(tty_fd, false);
-        if (r < 0)
-                return log_error_errno(r, "Failed to reset /dev/console: %m");
-
-        r = proc_cmdline_tty_size("/dev/console", &rows, &cols);
-        if (r < 0)
-                log_warning_errno(r, "Failed to get /dev/console size, ignoring: %m");
-        else {
-                r = terminal_set_size_fd(tty_fd, NULL, rows, cols);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to set /dev/console size, ignoring: %m");
-        }
-
-        r = terminal_reset_ansi_seq(tty_fd);
-        if (r < 0)
-                log_warning_errno(r, "Failed to reset /dev/console using ANSI sequences, ignoring: %m");
+        /* We don't want to force text mode. Plymouth may be showing pictures already from initrd. */
+        reset_dev_console_fd(tty_fd, /* switch_to_text= */ false);
 
         save_console_winsize_in_environment(tty_fd);
 
@@ -676,10 +654,8 @@ static int config_parse_oom_score_adjust(
         }
 
         r = parse_oom_score_adjust(rvalue, &oa);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse the OOM score adjust value '%s', ignoring: %m", rvalue);
-                return 0;
-        }
+        if (r < 0)
+                return log_syntax_parse_error(unit, filename, line, r, lvalue, rvalue);
 
         arg_defaults.oom_score_adjust = oa;
         arg_defaults.oom_score_adjust_set = true;
@@ -715,10 +691,8 @@ static int config_parse_protect_system_pid1(
         }
 
         r = parse_boolean(rvalue);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse ProtectSystem= argument '%s', ignoring: %m", rvalue);
-                return 0;
-        }
+        if (r < 0)
+                return log_syntax_parse_error(unit, filename, line, r, lvalue, rvalue);
 
         *v = r;
         return 0;
@@ -745,10 +719,8 @@ static int config_parse_crash_reboot(
         }
 
         r = parse_boolean(rvalue);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse CrashReboot= argument '%s', ignoring: %m", rvalue);
-                return 0;
-        }
+        if (r < 0)
+                return log_syntax_parse_error(unit, filename, line, r, lvalue, rvalue);
 
         *v = r > 0 ? CRASH_REBOOT : CRASH_FREEZE;
         return 0;
@@ -769,9 +741,9 @@ static int parse_config_file(void) {
                 { "Manager", "CrashAction",                  config_parse_crash_action,          0,                        &arg_crash_action                 },
                 { "Manager", "ShowStatus",                   config_parse_show_status,           0,                        &arg_show_status                  },
                 { "Manager", "StatusUnitFormat",             config_parse_status_unit_format,    0,                        &arg_status_unit_format           },
-                { "Manager", "CPUAffinity",                  config_parse_cpu_affinity2,         0,                        &arg_cpu_affinity                 },
+                { "Manager", "CPUAffinity",                  config_parse_cpu_set,               0,                        &arg_cpu_affinity                 },
                 { "Manager", "NUMAPolicy",                   config_parse_numa_policy,           0,                        &arg_numa_policy.type             },
-                { "Manager", "NUMAMask",                     config_parse_numa_mask,             0,                        &arg_numa_policy                  },
+                { "Manager", "NUMAMask",                     config_parse_numa_mask,             0,                        &arg_numa_policy.nodes            },
                 { "Manager", "JoinControllers",              config_parse_warn_compat,           DISABLED_LEGACY,          NULL                              },
                 { "Manager", "RuntimeWatchdogSec",           config_parse_watchdog_sec,          0,                        &arg_runtime_watchdog             },
                 { "Manager", "RuntimeWatchdogPreSec",        config_parse_watchdog_sec,          0,                        &arg_pretimeout_watchdog          },
@@ -801,6 +773,7 @@ static int parse_config_file(void) {
                 { "Manager", "DefaultStartLimitInterval",    config_parse_sec,                   0,                        &arg_defaults.start_limit.interval}, /* obsolete alias */
                 { "Manager", "DefaultStartLimitIntervalSec", config_parse_sec,                   0,                        &arg_defaults.start_limit.interval},
                 { "Manager", "DefaultStartLimitBurst",       config_parse_unsigned,              0,                        &arg_defaults.start_limit.burst   },
+                { "Manager", "DefaultRestrictSUIDSGID",      config_parse_bool,                  0,                        &arg_defaults.restrict_suid_sgid  },
                 { "Manager", "DefaultEnvironment",           config_parse_environ,               arg_runtime_scope,        &arg_default_environment          },
                 { "Manager", "ManagerEnvironment",           config_parse_environ,               arg_runtime_scope,        &arg_manager_environment          },
                 { "Manager", "DefaultLimitCPU",              config_parse_rlimit,                RLIMIT_CPU,               arg_defaults.rlimit               },
@@ -819,10 +792,10 @@ static int parse_config_file(void) {
                 { "Manager", "DefaultLimitNICE",             config_parse_rlimit,                RLIMIT_NICE,              arg_defaults.rlimit               },
                 { "Manager", "DefaultLimitRTPRIO",           config_parse_rlimit,                RLIMIT_RTPRIO,            arg_defaults.rlimit               },
                 { "Manager", "DefaultLimitRTTIME",           config_parse_rlimit,                RLIMIT_RTTIME,            arg_defaults.rlimit               },
-                { "Manager", "DefaultCPUAccounting",         config_parse_bool,                  0,                        &arg_defaults.cpu_accounting      },
+                { "Manager", "DefaultCPUAccounting",         config_parse_warn_compat,           DISABLED_LEGACY,          NULL                              },
                 { "Manager", "DefaultIOAccounting",          config_parse_bool,                  0,                        &arg_defaults.io_accounting       },
                 { "Manager", "DefaultIPAccounting",          config_parse_bool,                  0,                        &arg_defaults.ip_accounting       },
-                { "Manager", "DefaultBlockIOAccounting",     config_parse_bool,                  0,                        &arg_defaults.blockio_accounting  },
+                { "Manager", "DefaultBlockIOAccounting",     config_parse_warn_compat,           DISABLED_LEGACY,          NULL                              },
                 { "Manager", "DefaultMemoryAccounting",      config_parse_bool,                  0,                        &arg_defaults.memory_accounting   },
                 { "Manager", "DefaultTasksAccounting",       config_parse_bool,                  0,                        &arg_defaults.tasks_accounting    },
                 { "Manager", "DefaultTasksMax",              config_parse_tasks_max,             0,                        &arg_defaults.tasks_max           },
@@ -1247,13 +1220,13 @@ static int prepare_reexecute(
         assert(ret_f);
         assert(ret_fds);
 
-        r = manager_open_serialization(m, &f);
-        if (r < 0)
-                return log_error_errno(r, "Failed to create serialization file: %m");
-
         /* Make sure nothing is really destructed when we shut down */
         m->n_reloading++;
         bus_manager_send_reloading(m, true);
+
+        r = manager_open_serialization(m, &f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create serialization file: %m");
 
         fds = fdset_new();
         if (!fds)
@@ -1263,8 +1236,9 @@ static int prepare_reexecute(
         if (r < 0)
                 return r;
 
-        if (fseeko(f, 0, SEEK_SET) < 0)
-                return log_error_errno(errno, "Failed to rewind serialization fd: %m");
+        r = finish_serialization_file(f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to finish serialization file: %m");
 
         r = fd_cloexec(fileno(f), false);
         if (r < 0)
@@ -1297,51 +1271,34 @@ static void bump_file_max_and_nr_open(void) {
          * different, but the operation would fail silently.) */
         r = sysctl_write("fs/file-max", LONG_MAX_STR);
         if (r < 0)
-                log_full_errno(IN_SET(r, -EROFS, -EPERM, -EACCES) ? LOG_DEBUG : LOG_WARNING,
-                               r, "Failed to bump fs.file-max, ignoring: %m");
+                log_full_errno(ERRNO_IS_NEG_FS_WRITE_REFUSED(r) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to bump fs.file-max, ignoring: %m");
 #endif
 
 #if BUMP_PROC_SYS_FS_NR_OPEN
-        int v = INT_MAX;
+        /* The kernel enforces maximum and minimum values on the fs.nr_open, but they are not directly
+         * exposed, but hardcoded in fs/file.c. Hopefully, these values will not be changed, but not sure.
+         * Let's first try the hardcoded maximum value, and if it does not work, try the half of it. */
 
-        /* Argh! The kernel enforces maximum and minimum values on the fs.nr_open, but we don't really know
-         * what they are. The expression by which the maximum is determined is dependent on the architecture,
-         * and is something we don't really want to copy to userspace, as it is dependent on implementation
-         * details of the kernel. Since the kernel doesn't expose the maximum value to us, we can only try
-         * and hope. Hence, let's start with INT_MAX, and then keep halving the value until we find one that
-         * works. Ugly? Yes, absolutely, but kernel APIs are kernel APIs, so what do can we do... 🤯 */
-
-        for (;;) {
-                int k;
-
-                v &= ~(__SIZEOF_POINTER__ - 1); /* Round down to next multiple of the pointer size */
-                if (v < 1024) {
-                        log_warning("Can't bump fs.nr_open, value too small.");
-                        break;
-                }
-
-                k = read_nr_open();
-                if (k < 0) {
-                        log_error_errno(k, "Failed to read fs.nr_open: %m");
-                        break;
-                }
+        for (unsigned v = NR_OPEN_MAXIMUM; v >= NR_OPEN_MINIMUM; v /= 2) {
+                unsigned k = read_nr_open();
                 if (k >= v) { /* Already larger */
                         log_debug("Skipping bump, value is already larger.");
                         break;
                 }
 
-                r = sysctl_writef("fs/nr_open", "%i", v);
+                r = sysctl_writef("fs/nr_open", "%u", v);
                 if (r == -EINVAL) {
-                        log_debug("Couldn't write fs.nr_open as %i, halving it.", v);
-                        v /= 2;
+                        log_debug("Couldn't write fs.nr_open as %u, halving it.", v);
                         continue;
                 }
                 if (r < 0) {
-                        log_full_errno(IN_SET(r, -EROFS, -EPERM, -EACCES) ? LOG_DEBUG : LOG_WARNING, r, "Failed to bump fs.nr_open, ignoring: %m");
+                        log_full_errno(ERRNO_IS_NEG_FS_WRITE_REFUSED(r) ? LOG_DEBUG : LOG_WARNING, r,
+                                       "Failed to bump fs.nr_open, ignoring: %m");
                         break;
                 }
 
-                log_debug("Successfully bumped fs.nr_open to %i", v);
+                log_debug("Successfully bumped fs.nr_open to %u", v);
                 break;
         }
 #endif
@@ -1349,10 +1306,10 @@ static void bump_file_max_and_nr_open(void) {
 
 static int bump_rlimit_nofile(const struct rlimit *saved_rlimit) {
         struct rlimit new_rlimit;
-        int r, nr;
+        int r;
 
         /* Get the underlying absolute limit the kernel enforces */
-        nr = read_nr_open();
+        unsigned nr = read_nr_open();
 
         /* Calculate the new limits to use for us. Never lower from what we inherited. */
         new_rlimit = (struct rlimit) {
@@ -1464,7 +1421,7 @@ static int os_release_status(void) {
                 }
         }
 
-        if (support_end && os_release_support_ended(support_end, /* quiet */ false, NULL) > 0)
+        if (support_end && os_release_support_ended(support_end, /* quiet = */ false, /* ret_eol = */ NULL) > 0)
                 /* pretty_name may include the version already, so we'll print the version only if we
                  * have it and we're not using pretty_name. */
                 status_printf(ANSI_HIGHLIGHT_RED "  !!  " ANSI_NORMAL, 0,
@@ -1523,6 +1480,38 @@ static int write_container_id(void) {
         return 1;
 }
 
+static int write_boot_or_shutdown_osc(const char *type) {
+        int r;
+
+        assert(STRPTR_IN_SET(type, "boot", "shutdown"));
+
+        if (getenv_terminal_is_dumb())
+                return 0;
+
+        _cleanup_close_ int fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
+        if (fd < 0)
+                return log_debug_errno(fd, "Failed to open /dev/console to print %s OSC, ignoring: %m", type);
+
+        _cleanup_free_ char *seq = NULL;
+        if (streq(type, "boot"))
+                r = osc_context_open_boot(&seq);
+        else
+                r = osc_context_close(SD_ID128_ALLF, &seq);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to acquire %s OSC sequence, ignoring: %m", type);
+
+        r = loop_write(fd, seq, SIZE_MAX);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to write %s OSC sequence, ignoring: %m", type);
+
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *h = cescape(seq);
+                log_debug("OSC sequence for %s successfully written: %s", type, strna(h));
+        }
+
+        return 0;
+}
+
 static int bump_unix_max_dgram_qlen(void) {
         _cleanup_free_ char *qlen = NULL;
         unsigned long v;
@@ -1546,15 +1535,13 @@ static int bump_unix_max_dgram_qlen(void) {
 
         r = sysctl_write("net/unix/max_dgram_qlen", STRINGIFY(DEFAULT_UNIX_MAX_DGRAM_QLEN));
         if (r < 0)
-                return log_full_errno(IN_SET(r, -EROFS, -EPERM, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                return log_full_errno(ERRNO_IS_NEG_FS_WRITE_REFUSED(r) ? LOG_DEBUG : LOG_WARNING, r,
                                       "Failed to bump AF_UNIX datagram queue length, ignoring: %m");
 
         return 1;
 }
 
 static int fixup_environment(void) {
-        _cleanup_free_ char *term = NULL;
-        const char *t;
         int r;
 
         /* Only fix up the environment when we are started as PID 1 */
@@ -1570,19 +1557,31 @@ static int fixup_environment(void) {
          * not have support for color mode for example.
          *
          * However if TERM was configured through the kernel command line then leave it alone. */
+        _cleanup_free_ char *term = NULL;
         r = proc_cmdline_get_key("TERM", 0, &term);
         if (r < 0)
                 return r;
-
-        if (r == 0) {
+        if (r > 0) {
+                /* If we pick up $TERM, then also pick up $COLORTERM, $NO_COLOR */
+                FOREACH_STRING(v, "COLORTERM", "NO_COLOR") {
+                        _cleanup_free_ char *vv = NULL;
+                        r = proc_cmdline_get_key(v, 0, &vv);
+                        if (r < 0)
+                                return r;
+                        if (r > 0 && setenv(v, vv, /* overwrite= */ true) < 0)
+                                return -errno;
+                }
+        } else {
+                /* If no $TERM is set then look for the per-tty variable instead */
                 r = proc_cmdline_get_key("systemd.tty.term.console", 0, &term);
                 if (r < 0)
                         return r;
         }
 
-        t = term ?: default_term_for_tty("/dev/console");
+        if (!term)
+                (void) query_term_for_tty("/dev/console", &term);
 
-        if (setenv("TERM", t, 1) < 0)
+        if (setenv("TERM", term ?: FALLBACK_TERM, /* overwrite= */ true) < 0)
                 return -errno;
 
         /* The kernels sets HOME=/ for init. Let's undo this. */
@@ -1590,23 +1589,6 @@ static int fixup_environment(void) {
                 assert_se(unsetenv("HOME") == 0);
 
         return 0;
-}
-
-static void redirect_telinit(int argc, char *argv[]) {
-
-        /* This is compatibility support for SysV, where calling init as a user is identical to telinit. */
-
-#if HAVE_SYSV_COMPAT
-        if (getpid_cached() == 1)
-                return;
-
-        if (!invoked_as(argv, "init"))
-                return;
-
-        execv(SYSTEMCTL_BINARY_PATH, argv);
-        log_error_errno(errno, "Failed to exec " SYSTEMCTL_BINARY_PATH ": %m");
-        exit(EXIT_FAILURE);
-#endif
 }
 
 static int become_shutdown(int objective, int retval) {
@@ -1664,7 +1646,6 @@ static int become_shutdown(int objective, int retval) {
         case LOG_TARGET_CONSOLE:
         default:
                 command_line[pos++] = "--log-target=console";
-                break;
         };
 
         if (log_get_show_color())
@@ -1711,10 +1692,7 @@ static int become_shutdown(int objective, int retval) {
         if (arg_watchdog_device)
                 (void) strv_extendf(&env_block, "WATCHDOG_DEVICE=%s", arg_watchdog_device);
 
-        /* Avoid the creation of new processes forked by the kernel; at this
-         * point, we will not listen to the signals anyway */
-        if (detect_container() <= 0)
-                (void) cg_uninstall_release_agent(SYSTEMD_CGROUP_CONTROLLER);
+        (void) write_boot_or_shutdown_osc("shutdown");
 
         execve(SYSTEMD_SHUTDOWN_BINARY_PATH, (char **) command_line, env_block);
         return -errno;
@@ -1971,9 +1949,9 @@ static int do_reexecute(
         assert(saved_rlimit_memlock);
         assert(ret_error_message);
 
-        /* Close and disarm the watchdog, so that the new instance can reinitialize it, but doesn't get
-         * rebooted while we do that */
-        watchdog_close(true);
+        /* Close and disarm the watchdog, so that the new instance can reinitialize it, but the machine
+         * doesn't get rebooted while we do that. */
+        watchdog_close(/* disarm= */ true);
 
         if (!switch_root_dir && objective == MANAGER_SOFT_REBOOT) {
                 /* If no switch root dir is specified, then check if /run/nextroot/ qualifies and use that */
@@ -2118,22 +2096,23 @@ static int do_reexecute(
         args[0] = "/sbin/init";
         (void) execv(args[0], (char* const*) args);
         r = -errno;
-
-        manager_status_printf(NULL, STATUS_TYPE_EMERGENCY,
-                              ANSI_HIGHLIGHT_RED "  !!  " ANSI_NORMAL,
-                              "Failed to execute /sbin/init");
+        *ret_error_message = "Failed to execute /sbin/init";
 
         if (r == -ENOENT) {
+                manager_status_printf(NULL, STATUS_TYPE_EMERGENCY,
+                                      ANSI_HIGHLIGHT_RED "  !!  " ANSI_NORMAL,
+                                      "%s", *ret_error_message);
+
                 log_warning_errno(r, "No /sbin/init, trying fallback shell");
 
                 args[0] = "/bin/sh";
                 args[1] = NULL;
                 (void) execve(args[0], (char* const*) args, saved_env);
                 r = -errno;
+                *ret_error_message = "Failed to execute fallback shell";
         }
 
-        *ret_error_message = "Failed to execute fallback shell";
-        return log_error_errno(r, "Failed to execute /bin/sh, giving up: %m");
+        return log_error_errno(r, "%s, giving up: %m", *ret_error_message);
 }
 
 static int invoke_main_loop(
@@ -2163,7 +2142,7 @@ static int invoke_main_loop(
                         *ret_error_message = "Failed to run main loop";
                         return log_struct_errno(LOG_EMERG, objective,
                                                 LOG_MESSAGE("Failed to run main loop: %m"),
-                                                "MESSAGE_ID=" SD_MESSAGE_CORE_MAINLOOP_FAILED_STR);
+                                                LOG_MESSAGE_ID(SD_MESSAGE_CORE_MAINLOOP_FAILED_STR));
                 }
 
                 /* Ensure shutdown timestamp is taken even when bypassing the job engine */
@@ -2446,18 +2425,19 @@ static int initialize_runtime(
                         (void) import_credentials();
 
                         (void) os_release_status();
-                        (void) hostname_setup(/* really = */ true);
                         (void) machine_id_setup(/* root = */ NULL, arg_machine_id,
                                                 (first_boot ? MACHINE_ID_SETUP_FORCE_TRANSIENT : 0) |
                                                 (arg_machine_id_from_firmware ? MACHINE_ID_SETUP_FORCE_FIRMWARE : 0),
-                                                /* ret_machine_id = */ NULL);
-
+                                                /* ret = */ NULL);
+                        (void) hostname_setup(/* really = */ true);
                         (void) loopback_setup();
 
                         bump_unix_max_dgram_qlen();
                         bump_file_max_and_nr_open();
 
                         write_container_id();
+
+                        (void) write_boot_or_shutdown_osc("boot");
 
                         /* Copy os-release to the propagate directory, so that we update it for services running
                          * under RootDirectory=/RootImage= when we do a soft reboot. */
@@ -2476,7 +2456,7 @@ static int initialize_runtime(
                                 *ret_error_message = "Failed to drop capability bounding set of usermode helpers";
                                 return log_struct_errno(LOG_EMERG, r,
                                                         LOG_MESSAGE("Failed to drop capability bounding set of usermode helpers: %m"),
-                                                        "MESSAGE_ID=" SD_MESSAGE_CORE_CAPABILITY_BOUNDING_USER_STR);
+                                                        LOG_MESSAGE_ID(SD_MESSAGE_CORE_CAPABILITY_BOUNDING_USER_STR));
                         }
 
                         r = capability_bounding_set_drop(arg_capability_bounding_set, true);
@@ -2484,7 +2464,7 @@ static int initialize_runtime(
                                 *ret_error_message = "Failed to drop capability bounding set";
                                 return log_struct_errno(LOG_EMERG, r,
                                                         LOG_MESSAGE("Failed to drop capability bounding set: %m"),
-                                                        "MESSAGE_ID=" SD_MESSAGE_CORE_CAPABILITY_BOUNDING_STR);
+                                                        LOG_MESSAGE_ID(SD_MESSAGE_CORE_CAPABILITY_BOUNDING_STR));
                         }
                 }
 
@@ -2493,7 +2473,7 @@ static int initialize_runtime(
                                 *ret_error_message = "Failed to disable new privileges";
                                 return log_struct_errno(LOG_EMERG, errno,
                                                         LOG_MESSAGE("Failed to disable new privileges: %m"),
-                                                        "MESSAGE_ID=" SD_MESSAGE_CORE_DISABLE_PRIVILEGES_STR);
+                                                        LOG_MESSAGE_ID(SD_MESSAGE_CORE_DISABLE_PRIVILEGES_STR));
                         }
                 }
 
@@ -2510,7 +2490,7 @@ static int initialize_runtime(
                         *ret_error_message = "$XDG_RUNTIME_DIR is not set";
                         return log_struct_errno(LOG_EMERG, r,
                                                 LOG_MESSAGE("Failed to determine $XDG_RUNTIME_DIR path: %m"),
-                                                "MESSAGE_ID=" SD_MESSAGE_CORE_NO_XDGDIR_PATH_STR);
+                                                LOG_MESSAGE_ID(SD_MESSAGE_CORE_NO_XDGDIR_PATH_STR));
                 }
 
                 if (!skip_setup) {
@@ -2591,12 +2571,12 @@ static int do_queue_default_job(
                 /* Fall back to default.target, which we used to always use by default. Only do this if no
                  * explicit configuration was given. */
 
-                log_info("Falling back to " SPECIAL_DEFAULT_TARGET ".");
+                log_info("Falling back to %s.", SPECIAL_DEFAULT_TARGET);
 
                 r = manager_load_startable_unit_or_warn(m, SPECIAL_DEFAULT_TARGET, NULL, &target);
         }
         if (r < 0) {
-                log_info("Falling back to " SPECIAL_RESCUE_TARGET ".");
+                log_info("Falling back to %s.", SPECIAL_RESCUE_TARGET);
 
                 r = manager_load_startable_unit_or_warn(m, SPECIAL_RESCUE_TARGET, NULL, &target);
                 if (r < 0) {
@@ -2619,14 +2599,14 @@ static int do_queue_default_job(
                         *ret_error_message = "Failed to start default target";
                         return log_struct_errno(LOG_EMERG, r,
                                                 LOG_MESSAGE("Failed to start default target: %s", bus_error_message(&error, r)),
-                                                "MESSAGE_ID=" SD_MESSAGE_CORE_START_TARGET_FAILED_STR);
+                                                LOG_MESSAGE_ID(SD_MESSAGE_CORE_START_TARGET_FAILED_STR));
                 }
 
         } else if (r < 0) {
                 *ret_error_message = "Failed to isolate default target";
                 return log_struct_errno(LOG_EMERG, r,
                                         LOG_MESSAGE("Failed to isolate default target: %s", bus_error_message(&error, r)),
-                                        "MESSAGE_ID=" SD_MESSAGE_CORE_ISOLATE_TARGET_FAILED_STR);
+                                        LOG_MESSAGE_ID(SD_MESSAGE_CORE_ISOLATE_TARGET_FAILED_STR));
         } else
                 log_info("Queued %s job for default target %s.",
                          job_type_to_string(job->type),
@@ -2677,14 +2657,8 @@ static void fallback_rlimit_nofile(const struct rlimit *saved_rlimit_nofile) {
          * (and thus use poll()/epoll instead of select(), the way everybody should) can
          * explicitly opt into high fds by bumping their soft limit beyond 1024, to the hard limit
          * we pass. */
-        if (arg_runtime_scope == RUNTIME_SCOPE_SYSTEM) {
-                int nr;
-
-                /* Get the underlying absolute limit the kernel enforces */
-                nr = read_nr_open();
-
-                rl->rlim_max = MIN((rlim_t) nr, MAX(rl->rlim_max, (rlim_t) HIGH_RLIMIT_NOFILE));
-        }
+        if (arg_runtime_scope == RUNTIME_SCOPE_SYSTEM)
+                rl->rlim_max = MIN((rlim_t) read_nr_open(), MAX(rl->rlim_max, (rlim_t) HIGH_RLIMIT_NOFILE));
 
         /* If for some reason we were invoked with a soft limit above 1024 (which should never
          * happen!, but who knows what we get passed in from pam_limit when invoked as --user
@@ -2774,7 +2748,7 @@ static void reset_arguments(void) {
         arg_machine_id = (sd_id128_t) {};
         arg_cad_burst_action = EMERGENCY_ACTION_REBOOT_FORCE;
 
-        cpu_set_reset(&arg_cpu_affinity);
+        cpu_set_done(&arg_cpu_affinity);
         numa_policy_reset(&arg_numa_policy);
 
         arg_random_seed = mfree(arg_random_seed);
@@ -2976,7 +2950,7 @@ static int collect_fds(FDSet **ret_fds, const char **ret_error_message) {
                 *ret_error_message = "Failed to allocate fd set";
                 return log_struct_errno(LOG_EMERG, r,
                                         LOG_MESSAGE("Failed to allocate fd set: %m"),
-                                        "MESSAGE_ID=" SD_MESSAGE_CORE_FD_SET_FAILED_STR);
+                                        LOG_MESSAGE_ID(SD_MESSAGE_CORE_FD_SET_FAILED_STR));
         }
 
         /* The serialization fd should have O_CLOEXEC turned on already, let's verify that we didn't pick it up here */
@@ -2990,15 +2964,12 @@ static void setup_console_terminal(bool skip_setup) {
         if (arg_runtime_scope != RUNTIME_SCOPE_SYSTEM)
                 return;
 
-        /* Become a session leader if we aren't one yet. */
-        (void) setsid();
-
         /* If we are init, we connect stdin/stdout/stderr to /dev/null and make sure we don't have a
          * controlling tty. */
-        (void) release_terminal();
+        terminal_detach_session();
 
         /* Reset the console, but only if this is really init and we are freshly booted */
-        if (getpid_cached() == 1 && !skip_setup)
+        if (!skip_setup)
                 (void) console_setup();
 }
 
@@ -3052,9 +3023,6 @@ int main(int argc, char *argv[]) {
         FDSet *fds = NULL;
 
         assert_se(argc > 0 && !isempty(argv[0]));
-
-        /* SysV compatibility: redirect init → telinit */
-        redirect_telinit(argc, argv);
 
         /* Take timestamps early on */
         dual_timestamp_from_monotonic(&kernel_timestamp, 0);
@@ -3172,7 +3140,7 @@ int main(int argc, char *argv[]) {
                 if (r < 0) {
                         log_struct_errno(LOG_EMERG, r,
                                          LOG_MESSAGE("Failed to fix up PID 1 environment: %m"),
-                                         "MESSAGE_ID=" SD_MESSAGE_CORE_PID1_ENVIRONMENT_STR);
+                                         LOG_MESSAGE_ID(SD_MESSAGE_CORE_PID1_ENVIRONMENT_STR));
                         error_message = "Failed to fix up PID1 environment";
                         goto finish;
                 }
@@ -3196,20 +3164,8 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
-                if (!skip_setup) {
-                        r = mount_cgroup_legacy_controllers(loaded_policy);
-                        if (r < 0) {
-                                error_message = "Failed to mount cgroup v1 hierarchy";
-                                goto finish;
-                        }
-                }
-
                 /* The efivarfs is now mounted, let's lock down the system token. */
                 lock_down_efi_variables();
-
-                /* Cache command-line options passed from EFI variables */
-                if (!skip_setup)
-                        (void) cache_efi_options_variable();
         } else {
                 /* Running as user instance */
                 arg_runtime_scope = RUNTIME_SCOPE_USER;
@@ -3309,6 +3265,23 @@ int main(int argc, char *argv[]) {
 
         log_execution_mode(&first_boot);
 
+        r = cg_has_legacy();
+        if (r < 0) {
+                error_message = "Failed to check cgroup hierarchy";
+                goto finish;
+        }
+        if (r > 0) {
+                r = log_full_errno(LOG_EMERG, SYNTHETIC_ERRNO(EPROTO),
+                                   "Detected cgroup v1 hierarchy at /sys/fs/cgroup/, which is no longer supported by current version of systemd.\n"
+                                   "Please instruct your initrd to mount cgroup v2 (unified) hierarchy,\n"
+                                   "possibly by removing any stale kernel command line options, such as:\n"
+                                   "  systemd.legacy_systemd_cgroup_controller=1\n"
+                                   "  systemd.unified_cgroup_hierarchy=0");
+
+                error_message = "Detected unsupported legacy cgroup hierarchy, refusing execution";
+                goto finish;
+        }
+
         r = initialize_runtime(skip_setup,
                                first_boot,
                                &saved_rlimit_nofile,
@@ -3324,7 +3297,7 @@ int main(int argc, char *argv[]) {
         if (r < 0) {
                 log_struct_errno(LOG_EMERG, r,
                                  LOG_MESSAGE("Failed to allocate manager object: %m"),
-                                 "MESSAGE_ID=" SD_MESSAGE_CORE_MANAGER_ALLOCATE_STR);
+                                 LOG_MESSAGE_ID(SD_MESSAGE_CORE_MANAGER_ALLOCATE_STR));
                 error_message = "Failed to allocate manager object";
                 goto finish;
         }

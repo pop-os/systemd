@@ -136,7 +136,7 @@ if want_tests != 'false'
         test('udev-rules-check',
              exe,
              suite : 'udev',
-             args : ['verify', '--resolve-names=never', all_rules])
+             args : ['verify', '--resolve-names=late', all_rules])
 endif
 
 ############################################################
@@ -220,7 +220,8 @@ if rpm.found() and rpmspec.found()
                 test('test-rpm-macros',
                      test_rpm_macros,
                      suite : 'dist',
-                     args : [meson.project_build_root()])
+                     args : [meson.project_build_root()],
+                     depends : rpm_depends)
         endif
 else
       message('Skipping test-rpm-macros since rpm and/or rpmspec are not available')
@@ -282,6 +283,34 @@ if want_tests != 'false'
 endif
 
 if install_tests
+        if meson.version().version_compare('<1.3.0')
+                if not rsync.found()
+                        error('rsync is required to install the integration test data')
+                endif
+
+                rsync_r = rsync.full_path() + ' -rlpt --exclude .gitattributes -- "@0@" "${DESTDIR:-}@1@"'
+        endif
+
+        if meson.version().version_compare('>=1.3.0')
+                # Installing symlinks to directories is broken in install_subdir() so we exclude the
+                # standalone directory from install_subdir() and handle it manually.
+                # TODO: Remove when https://github.com/mesonbuild/meson/pull/14471 is available in all
+                # supported distributions.
+                install_subdir('integration-tests',
+                               install_dir : testsdir,
+                               exclude_directories : ['standalone'],
+                               follow_symlinks : false)
+                install_emptydir(testsdir / 'integration-tests/standalone')
+                install_data('integration-tests/standalone/meson.build',
+                             install_dir : testsdir / 'integration-tests/standalone')
+                install_symlink('integration-tests',
+                                pointing_to : '..',
+                                install_dir : testsdir / 'integration-tests/standalone')
+        else
+                meson.add_install_script(sh, '-c',
+                                         rsync_r.format(meson.current_source_dir() / 'integration-tests', testsdir))
+        endif
+
         foreach integration_test : integration_tests
                 integration_test_unit_env = []
                 integration_test_extra_unit_properties = []
@@ -341,26 +370,16 @@ if install_tests
         foreach subdir : testdata_subdirs
                 # install_subdir() before meson 1.3.0 does not handle symlinks correctly (it follows them
                 # instead of copying the symlink) so we use rsync instead.
-                if meson.version().version_compare('<1.3.0')
-                        if not rsync.found()
-                                error('rsync is required to install the integration test data')
-                        endif
-
-                        rsync_r = rsync.full_path() + ' -rlpt --exclude .gitattributes --exclude 25-default.link -- "@0@" "${DESTDIR:-}@1@"'
-                        meson.add_install_script(sh, '-c',
-                                                 rsync_r.format(meson.current_source_dir() / subdir, testdata_dir))
-                else
+                if meson.version().version_compare('>=1.3.0')
                         install_subdir(subdir,
-                                       exclude_files : ['.gitattributes', '25-default.link'],
+                                       exclude_files : ['.gitattributes'],
                                        install_dir : testdata_dir,
                                        follow_symlinks : false)
+                else
+                        meson.add_install_script(sh, '-c',
+                                                 rsync_r.format(meson.current_source_dir() / subdir, testdata_dir))
                 endif
         endforeach
-
-        # test-network/conf/25-default.link is a local symlink that becomes dangling when installed, so we
-        # exclude it and create the correct symlink here.
-        meson.add_install_script(sh, '-c', ln_s.format(networkdir / '99-default.link',
-                                                       testdata_dir / 'test-network/conf/25-default.link'))
 
         install_data(kbd_model_map,
                      install_dir : testdata_dir + '/test-keymap-util')
@@ -370,14 +389,14 @@ if install_tests
                                exclude_files : '.gitattributes',
                                install_dir : testdata_dir)
         endif
-        if conf.get('ENABLE_RESOLVE') == 1
-                install_subdir('test-resolve',
-                               exclude_files : '.gitattributes',
-                               install_dir : testdata_dir)
-        endif
+        install_subdir('test-resolve',
+                       exclude_files : '.gitattributes',
+                       install_dir : testdata_dir)
 
         # The unit tests implemented as shell scripts expect to find testdata/
         # in the directory where they are stored.
-        meson.add_install_script(sh, '-c', ln_s.format(testdata_dir,
-                                                       unittestsdir / 'testdata'))
+        assert(fs.parent(unittestsdir) / 'testdata' == testdata_dir)
+        install_symlink('testdata',
+                        pointing_to : '../testdata',
+                        install_dir : unittestsdir)
 endif

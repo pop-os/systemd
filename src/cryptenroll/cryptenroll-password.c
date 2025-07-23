@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "alloc-util.h"
 #include "ask-password-api.h"
 #include "cryptenroll-password.h"
+#include "cryptsetup-util.h"
 #include "env-util.h"
 #include "errno-util.h"
 #include "escape.h"
 #include "iovec-util.h"
-#include "memory-util.h"
+#include "log.h"
 #include "password-quality-util.h"
+#include "string-util.h"
 #include "strv.h"
 
 int load_volume_key_password(
@@ -55,11 +58,14 @@ int load_volume_key_password(
                         return log_oom();
 
                 AskPasswordRequest req = {
+                        .tty_fd = -EBADF,
                         .message = question,
                         .icon = "drive-harddisk",
                         .id = id,
                         .keyring = "cryptenroll",
                         .credential = "cryptenroll.passphrase",
+                        .until = USEC_INFINITY,
+                        .hup_fd = -EBADF,
                 };
 
                 for (;;) {
@@ -69,7 +75,7 @@ int load_volume_key_password(
                                 return log_error_errno(SYNTHETIC_ERRNO(ENOKEY),
                                                        "Too many attempts, giving up.");
 
-                        r = ask_password_auto(&req, USEC_INFINITY, ask_password_flags, &passwords);
+                        r = ask_password_auto(&req, ask_password_flags, &passwords);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to query password: %m");
 
@@ -130,10 +136,13 @@ int enroll_password(
                         return log_oom();
 
                 AskPasswordRequest req = {
+                        .tty_fd = -EBADF,
                         .icon = "drive-harddisk",
                         .id = id,
                         .keyring = "cryptenroll",
                         .credential = "cryptenroll.new-passphrase",
+                        .until = USEC_INFINITY,
+                        .hup_fd = -EBADF,
                 };
 
                 for (;;) {
@@ -150,7 +159,7 @@ int enroll_password(
 
                         req.message = question;
 
-                        r = ask_password_auto(&req, USEC_INFINITY, /* flags= */ 0, &passwords);
+                        r = ask_password_auto(&req, /* flags= */ 0, &passwords);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to query password: %m");
 
@@ -163,7 +172,7 @@ int enroll_password(
 
                         req.message = question;
 
-                        r = ask_password_auto(&req, USEC_INFINITY, /* flags= */ 0, &passwords2);
+                        r = ask_password_auto(&req, /* flags= */ 0, &passwords2);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to query password: %m");
 
@@ -179,7 +188,7 @@ int enroll_password(
                 }
         }
 
-        r = check_password_quality(new_password, /* old */ NULL, /* user */ NULL, &error);
+        r = check_password_quality(new_password, /* old = */ NULL, /* user = */ NULL, &error);
         if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
                 log_warning("Password quality check is not supported, proceeding anyway.");
         else if (r < 0)

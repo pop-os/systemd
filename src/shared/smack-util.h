@@ -7,14 +7,7 @@
   Author: Auke Kok <auke-jan.h.kok@intel.com>
 ***/
 
-#include <stdbool.h>
-#include <sys/types.h>
-
-#include "label-util.h"
-#include "macro.h"
-
-#define SMACK_FLOOR_LABEL "_"
-#define SMACK_STAR_LABEL  "*"
+#include "forward.h"
 
 typedef enum SmackAttr {
         SMACK_ATTR_ACCESS,
@@ -28,24 +21,31 @@ typedef enum SmackAttr {
 } SmackAttr;
 
 bool mac_smack_use(void);
-int mac_smack_init(void);
+
+int mac_smack_read_at(int fd, const char *path, SmackAttr attr, char **ret);
+int mac_smack_apply_at(int fd, const char *path, SmackAttr attr, const char *label);
+
+int mac_smack_apply_pid(pid_t pid, const char *label);
 
 int mac_smack_fix_full(int atfd, const char *inode_path, const char *label_path, LabelFixFlags flags);
-static inline int mac_smack_fix(const char *path, LabelFixFlags flags) {
-        return mac_smack_fix_full(AT_FDCWD, path, path, flags);
+
+int mac_smack_init(void);
+
+static inline int mac_smack_read(const char *path, SmackAttr attr, char **ret) {
+        return mac_smack_read_at(AT_FDCWD, path, attr, ret);
+}
+static inline int mac_smack_read_fd(int fd, SmackAttr attr, char **ret) {
+        return mac_smack_read_at(fd, NULL, attr, ret);
 }
 
-const char* smack_attr_to_string(SmackAttr i) _const_;
-SmackAttr smack_attr_from_string(const char *s) _pure_;
-int mac_smack_read(const char *path, SmackAttr attr, char **label);
-int mac_smack_read_fd(int fd, SmackAttr attr, char **label);
-int mac_smack_apply_at(int dir_fd, const char *path, SmackAttr attr, const char *label);
 static inline int mac_smack_apply(const char *path, SmackAttr attr, const char *label) {
         return mac_smack_apply_at(AT_FDCWD, path, attr, label);
 }
-int mac_smack_apply_fd(int fd, SmackAttr attr, const char *label);
-int mac_smack_apply_pid(pid_t pid, const char *label);
-int mac_smack_copy(const char *dest, const char *src);
+static inline int mac_smack_apply_fd(int fd, SmackAttr attr, const char *label) {
+        return mac_smack_apply_at(fd, NULL, attr, label);
+}
+
+int mac_smack_fix(const char *path, LabelFixFlags flags);
 
 int renameat_and_apply_smack_floor_label(int fdf, const char *from, int fdt, const char *to);
 static inline int rename_and_apply_smack_floor_label(const char *from, const char *to) {

@@ -2,6 +2,8 @@
 
 #include "chid.h"
 #include "devicetree.h"
+#include "efi-firmware.h"
+#include "efi-log.h"
 #include "pe.h"
 #include "util.h"
 
@@ -68,6 +70,13 @@ typedef struct CoffFileHeader {
 #define OPTHDR32_MAGIC 0x10B /* PE32  OptionalHeader */
 #define OPTHDR64_MAGIC 0x20B /* PE32+ OptionalHeader */
 
+typedef struct PeImageDataDirectory {
+        uint32_t VirtualAddress;
+        uint32_t Size;
+} _packed_ PeImageDataDirectory;
+
+#define IMAGE_NUMBEROF_DIRECTORY_ENTRIES 16
+
 typedef struct PeOptionalHeader {
         uint16_t Magic;
         uint8_t  LinkerMajor;
@@ -98,7 +107,28 @@ typedef struct PeOptionalHeader {
         uint32_t CheckSum;
         uint16_t Subsystem;
         uint16_t DllCharacteristics;
-        /* fields with different sizes for 32/64 omitted */
+        union {
+                struct {
+                        uint64_t SizeOfStackReserve64;
+                        uint64_t SizeOfStackCommit64;
+                        uint64_t SizeOfHeapReserve64;
+                        uint64_t SizeOfHeapCommit64;
+                        uint32_t LoaderFlags64;
+                        uint32_t NumberOfRvaAndSizes64;
+
+                        PeImageDataDirectory DataDirectory64[IMAGE_NUMBEROF_DIRECTORY_ENTRIES];
+                };
+                struct {
+                        uint32_t SizeOfStackReserve32;
+                        uint32_t SizeOfStackCommit32;
+                        uint32_t SizeOfHeapReserve32;
+                        uint32_t SizeOfHeapCommit32;
+                        uint32_t LoaderFlags32;
+                        uint32_t NumberOfRvaAndSizes32;
+
+                        PeImageDataDirectory DataDirectory32[IMAGE_NUMBEROF_DIRECTORY_ENTRIES];
+                };
+        };
 } _packed_ PeOptionalHeader;
 
 typedef struct PeFileHeader {
@@ -195,6 +225,33 @@ static bool pe_use_this_dtb(
         return false;
 }
 
+static bool pe_use_this_firmware(
+                const void *efifw,
+                size_t efifw_size,
+                const void *base,
+                const Device *device,
+                size_t section_nb) {
+
+        assert(efifw);
+
+        EFI_STATUS err;
+
+        /* if there is no hwids section, there is nothing much we can do */
+        if (!device || !base)
+                return false;
+
+        const char *fwid = device_get_fwid(base, device);
+        if (!fwid)
+                return false;
+
+        err = efi_firmware_match_by_fwid(efifw, efifw_size, fwid);
+        if (err == EFI_SUCCESS)
+                return true;
+        if (err == EFI_INVALID_PARAMETER)
+                log_error_status(err, "Found bad efifw blob in PE section %zu", section_nb);
+        return false;
+}
+
 static void pe_locate_sections_internal(
                 const PeSectionHeader section_table[],
                 size_t n_section_table,
@@ -255,6 +312,20 @@ static void pe_locate_sections_internal(
                                         continue;
                         }
 
+                        /* handle efifw section which works very much like .dtbauto */
+                        if (pe_section_name_equal(section_names[i], ".efifw")) {
+                                /* can't match without validate_base */
+                                if (!validate_base)
+                                        break;
+                                if (!pe_use_this_firmware(
+                                                    (const uint8_t *) SIZE_TO_PTR(validate_base) + j->VirtualAddress,
+                                                    j->VirtualSize,
+                                                    device_table,
+                                                    device,
+                                                    (PTR_TO_SIZE(j) - PTR_TO_SIZE(section_table)) / sizeof(*j)))
+                                        continue;
+                        }
+
                         /* At this time, the sizes and offsets have been validated. Store them away */
                         sections[i] = (PeSectionVector) {
                                 .memory_size = j->VirtualSize,
@@ -273,7 +344,7 @@ static void pe_locate_sections_internal(
                 }
 }
 
-static bool looking_for_dbauto(const char *const section_names[]) {
+static bool looking_for_dtbauto(const char *const section_names[]) {
         assert(section_names);
 
         for (size_t i = 0; section_names[i]; i++)
@@ -289,14 +360,14 @@ static void pe_locate_sections(
                 size_t validate_base,
                 PeSectionVector sections[]) {
 
-        if (!looking_for_dbauto(section_names))
+        if (!looking_for_dtbauto(section_names))
                 return pe_locate_sections_internal(
                                   section_table,
                                   n_section_table,
                                   section_names,
                                   validate_base,
-                                  /* device_base */ NULL,
-                                  /* device */ NULL,
+                                  /* device_table = */ NULL,
+                                  /* device = */ NULL,
                                   sections);
 
         /* It doesn't make sense not to provide validate_base here */
@@ -307,21 +378,22 @@ static void pe_locate_sections(
 
         if (!firmware_devicetree_exists()) {
                 /* Find HWIDs table and search for the current device */
-                PeSectionVector hwids_section = {};
+                static const char *const hwid_section_names[] = { ".hwids", NULL };
+                PeSectionVector hwids_section[1] = {};
 
                 pe_locate_sections_internal(
                                 section_table,
                                 n_section_table,
-                                (const char *const[]) { ".hwids", NULL },
+                                hwid_section_names,
                                 validate_base,
-                                /* device_table */ NULL,
-                                /* device */ NULL,
-                                &hwids_section);
+                                /* device_table = */ NULL,
+                                /* device = */ NULL,
+                                hwids_section);
 
-                if (PE_SECTION_VECTOR_IS_SET(&hwids_section)) {
-                        hwids = (const uint8_t *) SIZE_TO_PTR(validate_base) + hwids_section.memory_offset;
+                if (PE_SECTION_VECTOR_IS_SET(hwids_section)) {
+                        hwids = (const uint8_t *) SIZE_TO_PTR(validate_base) + hwids_section[0].memory_offset;
 
-                        EFI_STATUS err = chid_match(hwids, hwids_section.memory_size, &device);
+                        EFI_STATUS err = chid_match(hwids, hwids_section[0].memory_size, DEVICE_TYPE_DEVICETREE, &device);
                         if (err != EFI_SUCCESS) {
                                 log_error_status(err, "HWID matching failed, no DT blob will be selected: %m");
                                 hwids = NULL;
@@ -348,15 +420,15 @@ static uint32_t get_compatibility_entry_address(const DosFileHeader *dos, const 
         assert(pe);
 
         static const char *const section_names[] = { ".compat", NULL };
-        PeSectionVector vector = {};
+        PeSectionVector vector[1] = {};
         pe_locate_sections(
                         (const PeSectionHeader *) ((const uint8_t *) dos + section_table_offset(dos, pe)),
                         pe->FileHeader.NumberOfSections,
                         section_names,
                         PTR_TO_SIZE(dos),
-                        &vector);
+                        vector);
 
-        if (!PE_SECTION_VECTOR_IS_SET(&vector)) /* not found */
+        if (!PE_SECTION_VECTOR_IS_SET(vector)) /* not found */
                 return 0;
 
         typedef struct {
@@ -366,7 +438,7 @@ static uint32_t get_compatibility_entry_address(const DosFileHeader *dos, const 
                 uint32_t entry_point;
         } _packed_ LinuxPeCompat1;
 
-        size_t addr = vector.memory_offset, size = vector.memory_size;
+        size_t addr = vector[0].memory_offset, size = vector[0].memory_size;
 
         while (size >= sizeof(LinuxPeCompat1) && addr % alignof(LinuxPeCompat1) == 0) {
                 const LinuxPeCompat1 *compat = (const LinuxPeCompat1 *) ((const uint8_t *) dos + addr);
@@ -386,9 +458,8 @@ static uint32_t get_compatibility_entry_address(const DosFileHeader *dos, const 
         return 0;
 }
 
-EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_compat_address, size_t *ret_size_in_memory) {
+EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_entry_point, uint32_t *ret_compat_entry_point, uint64_t *ret_image_base, size_t *ret_size_in_memory) {
         assert(base);
-        assert(ret_compat_address);
 
         const DosFileHeader *dos = (const DosFileHeader *) base;
         if (!verify_dos(dos))
@@ -398,26 +469,89 @@ EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_compat_address, size_t
         if (!verify_pe(dos, pe, /* allow_compatibility= */ true))
                 return EFI_LOAD_ERROR;
 
+        uint64_t image_base;
+        switch (pe->OptionalHeader.Magic) {
+        case OPTHDR32_MAGIC:
+                image_base = pe->OptionalHeader.ImageBase32;
+                break;
+        case OPTHDR64_MAGIC:
+                image_base = pe->OptionalHeader.ImageBase64;
+                break;
+        default:
+                assert_not_reached();
+        }
+
         /* When allocating we need to also consider the virtual/uninitialized data sections, so parse it out
          * of the SizeOfImage field in the PE header and return it */
-        if (ret_size_in_memory)
-                *ret_size_in_memory = pe->OptionalHeader.SizeOfImage;
+        size_t size_in_memory = pe->OptionalHeader.SizeOfImage;
 
         /* Support for LINUX_INITRD_MEDIA_GUID was added in kernel stub 1.0. */
         if (pe->OptionalHeader.MajorImageVersion < 1)
                 return EFI_UNSUPPORTED;
 
         if (pe->FileHeader.Machine == TARGET_MACHINE_TYPE) {
-                *ret_compat_address = 0;
+                if (ret_entry_point)
+                        *ret_entry_point = pe->OptionalHeader.AddressOfEntryPoint;
+                if (ret_compat_entry_point)
+                        *ret_compat_entry_point = 0;
+                if (ret_image_base)
+                        *ret_image_base = image_base;
+                if (ret_size_in_memory)
+                        *ret_size_in_memory = size_in_memory;
                 return EFI_SUCCESS;
         }
 
-        uint32_t compat_address = get_compatibility_entry_address(dos, pe);
-        if (compat_address == 0)
+        uint32_t compat_entry_point = get_compatibility_entry_address(dos, pe);
+        if (compat_entry_point == 0)
                 /* Image type not supported and no compat entry found. */
                 return EFI_UNSUPPORTED;
 
-        *ret_compat_address = compat_address;
+        if (ret_entry_point)
+                *ret_entry_point = 0;
+        if (ret_compat_entry_point)
+                *ret_compat_entry_point = compat_entry_point;
+        if (ret_image_base)
+                *ret_image_base = image_base;
+        if (ret_size_in_memory)
+                *ret_size_in_memory = size_in_memory;
+
+        return EFI_SUCCESS;
+}
+
+/* https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#optional-header-data-directories-image-only */
+#define BASE_RELOCATION_TABLE_DATA_DIRECTORY_ENTRY 5
+
+/* We do not expect PE inner kernels to have any relocations. However that might be wrong for some
+ * architectures, or it might change in the future. If the case of relocation arise, we should transform this
+ * function in a function applying the relocations. However for now, since it would not be exercised and
+ * would bitrot, we leave it as a check that relocations are never expected.
+ */
+EFI_STATUS pe_kernel_check_no_relocation(const void *base) {
+        assert(base);
+
+        const DosFileHeader *dos = base;
+        if (!verify_dos(dos))
+                return EFI_LOAD_ERROR;
+
+        const PeFileHeader *pe = (const PeFileHeader *) ((const uint8_t *) base + dos->ExeHeader);
+        if (!verify_pe(dos, pe, /* allow_compatibility= */ true))
+                return EFI_LOAD_ERROR;
+
+        const PeImageDataDirectory *data_directory;
+        switch (pe->OptionalHeader.Magic) {
+        case OPTHDR32_MAGIC:
+                data_directory = pe->OptionalHeader.DataDirectory32;
+                break;
+        case OPTHDR64_MAGIC:
+                data_directory = pe->OptionalHeader.DataDirectory64;
+                break;
+        default:
+                assert_not_reached();
+        }
+
+        if (data_directory[BASE_RELOCATION_TABLE_DATA_DIRECTORY_ENTRY].Size != 0)
+                return log_error_status(EFI_LOAD_ERROR, "Inner kernel image contains base relocations, which we do not support.");
+
         return EFI_SUCCESS;
 }
 

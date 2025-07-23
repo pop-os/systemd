@@ -3,17 +3,13 @@
   Copyright © 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
 ***/
 
-#include <errno.h>
-#include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/mount.h>
-#include <sys/signalfd.h>
 #include <unistd.h>
 
 #include "device-private.h"
 #include "device-util.h"
 #include "fs-util.h"
+#include "label-util.h"
 #include "log.h"
 #include "main-func.h"
 #include "mkdir-label.h"
@@ -24,7 +20,9 @@
 #include "signal-util.h"
 #include "string-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "udev-event.h"
+#include "udev-rules.h"
 #include "udev-spawn.h"
 #include "version.h"
 
@@ -88,7 +86,7 @@ static int fake_filesystems(void) {
 
 static int run(int argc, char *argv[]) {
         _cleanup_(udev_rules_freep) UdevRules *rules = NULL;
-        _cleanup_(udev_event_freep) UdevEvent *event = NULL;
+        _cleanup_(udev_event_unrefp) UdevEvent *event = NULL;
         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
         const char *devpath, *devname, *action;
         int r;
@@ -135,7 +133,7 @@ static int run(int argc, char *argv[]) {
                 usleep_safe(us);
         }
 
-        assert_se(udev_rules_load(&rules, RESOLVE_NAME_EARLY) == 0);
+        assert_se(udev_rules_load(&rules, RESOLVE_NAME_EARLY, /* extra = */ NULL) == 0);
 
         const char *syspath = strjoina("/sys", devpath);
         r = device_new_from_synthetic_event(&dev, syspath, action);
@@ -150,7 +148,10 @@ static int run(int argc, char *argv[]) {
         if (sd_device_get_devname(dev, &devname) >= 0) {
                 mode_t mode = 0600;
 
-                if (device_in_subsystem(dev, "block"))
+                r = device_in_subsystem(dev, "block");
+                if (r < 0)
+                        return r;
+                if (r > 0)
                         mode |= S_IFBLK;
                 else
                         mode |= S_IFCHR;

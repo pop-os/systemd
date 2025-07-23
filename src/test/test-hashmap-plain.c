@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <unistd.h>
+
 #include "alloc-util.h"
 #include "hashmap.h"
 #include "log.h"
 #include "nulstr-util.h"
 #include "stdio-util.h"
-#include "string-util.h"
 #include "strv.h"
 #include "tests.h"
 #include "time-util.h"
@@ -74,36 +75,21 @@ TEST(hashmap_ensure_replace) {
 }
 
 TEST(hashmap_copy) {
-        _cleanup_hashmap_free_ Hashmap *m = NULL;
-        _cleanup_hashmap_free_free_ Hashmap *copy = NULL;
-        char *val1, *val2, *val3, *val4, *r;
+        _cleanup_hashmap_free_ Hashmap *m = NULL, *copy = NULL;
 
-        val1 = strdup("val1");
-        assert_se(val1);
-        val2 = strdup("val2");
-        assert_se(val2);
-        val3 = strdup("val3");
-        assert_se(val3);
-        val4 = strdup("val4");
-        assert_se(val4);
+        ASSERT_NOT_NULL((m = hashmap_new(&string_hash_ops)));
 
-        m = hashmap_new(&string_hash_ops);
+        ASSERT_OK_POSITIVE(hashmap_put(m, "key 1", (void*) "val1"));
+        ASSERT_OK_POSITIVE(hashmap_put(m, "key 2", (void*) "val2"));
+        ASSERT_OK_POSITIVE(hashmap_put(m, "key 3", (void*) "val3"));
+        ASSERT_OK_POSITIVE(hashmap_put(m, "key 4", (void*) "val4"));
 
-        hashmap_put(m, "key 1", val1);
-        hashmap_put(m, "key 2", val2);
-        hashmap_put(m, "key 3", val3);
-        hashmap_put(m, "key 4", val4);
+        ASSERT_NOT_NULL((copy = hashmap_copy(m)));
 
-        copy = hashmap_copy(m);
-
-        r = hashmap_get(copy, "key 1");
-        ASSERT_STREQ(r, "val1");
-        r = hashmap_get(copy, "key 2");
-        ASSERT_STREQ(r, "val2");
-        r = hashmap_get(copy, "key 3");
-        ASSERT_STREQ(r, "val3");
-        r = hashmap_get(copy, "key 4");
-        ASSERT_STREQ(r, "val4");
+        ASSERT_STREQ(hashmap_get(copy, "key 1"), "val1");
+        ASSERT_STREQ(hashmap_get(copy, "key 2"), "val2");
+        ASSERT_STREQ(hashmap_get(copy, "key 3"), "val3");
+        ASSERT_STREQ(hashmap_get(copy, "key 4"), "val4");
 }
 
 TEST(hashmap_get_strv) {
@@ -140,7 +126,7 @@ TEST(hashmap_get_strv) {
 }
 
 TEST(hashmap_move_one) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL, *n = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL, *n = NULL;
         char *val1, *val2, *val3, *val4, *r;
 
         val1 = strdup("val1");
@@ -152,8 +138,8 @@ TEST(hashmap_move_one) {
         val4 = strdup("val4");
         assert_se(val4);
 
-        m = hashmap_new(&string_hash_ops);
-        n = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
+        n = hashmap_new(&string_hash_ops_value_free);
 
         hashmap_put(m, "key 1", val1);
         hashmap_put(m, "key 2", val2);
@@ -176,7 +162,7 @@ TEST(hashmap_move_one) {
 }
 
 TEST(hashmap_move) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL, *n = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL, *n = NULL;
         char *val1, *val2, *val3, *val4, *r;
 
         val1 = strdup("val1");
@@ -188,8 +174,8 @@ TEST(hashmap_move) {
         val4 = strdup("val4");
         assert_se(val4);
 
-        m = hashmap_new(&string_hash_ops);
-        n = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
+        n = hashmap_new(&string_hash_ops_value_free);
 
         hashmap_put(n, "key 1", strdup(val1));
         hashmap_put(m, "key 1", val1);
@@ -282,7 +268,7 @@ TEST(hashmap_remove1) {
 }
 
 TEST(hashmap_remove2) {
-        _cleanup_hashmap_free_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char key1[] = "key 1";
         char key2[] = "key 2";
         char val1[] = "val 1";
@@ -292,7 +278,7 @@ TEST(hashmap_remove2) {
         r = hashmap_remove2(NULL, "key 1", &r2);
         ASSERT_NULL(r);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_free_free);
         assert_se(m);
 
         r = hashmap_remove2(m, "no such key", &r2);
@@ -434,17 +420,10 @@ TEST(hashmap_remove_and_replace) {
 
 TEST(hashmap_ensure_allocated) {
         _cleanup_hashmap_free_ Hashmap *m = NULL;
-        int r;
 
-        r = hashmap_ensure_allocated(&m, &string_hash_ops);
-        assert_se(r == 1);
-
-        r = hashmap_ensure_allocated(&m, &string_hash_ops);
-        assert_se(r == 0);
-
-        /* different hash ops shouldn't matter at this point */
-        r = hashmap_ensure_allocated(&m, &trivial_hash_ops);
-        assert_se(r == 0);
+        ASSERT_OK_POSITIVE(hashmap_ensure_allocated(&m, &string_hash_ops));
+        ASSERT_OK_ZERO(hashmap_ensure_allocated(&m, &string_hash_ops));
+        ASSERT_SIGNAL(hashmap_ensure_allocated(&m, &trivial_hash_ops), SIGABRT);
 }
 
 TEST(hashmap_foreach_key) {
@@ -480,7 +459,7 @@ TEST(hashmap_foreach_key) {
 }
 
 TEST(hashmap_foreach) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         bool value_found[] = { false, false, false, false };
         char *val1, *val2, *val3, *val4, *s;
         unsigned count;
@@ -499,7 +478,7 @@ TEST(hashmap_foreach) {
                 count++;
         assert_se(count == 0);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
 
         count = 0;
         HASHMAP_FOREACH(s, m)
@@ -527,8 +506,7 @@ TEST(hashmap_foreach) {
 }
 
 TEST(hashmap_merge) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
-        _cleanup_hashmap_free_ Hashmap *n = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL, *n = NULL;
         char *val1, *val2, *val3, *val4, *r;
 
         val1 = strdup("my val1");
@@ -540,7 +518,7 @@ TEST(hashmap_merge) {
         val4 = strdup("my val4");
         assert_se(val4);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
         n = hashmap_new(&string_hash_ops);
 
         hashmap_put(m, "Key 1", val1);
@@ -559,13 +537,13 @@ TEST(hashmap_merge) {
 }
 
 TEST(hashmap_contains) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char *val1;
 
         val1 = strdup("my val");
         assert_se(val1);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
 
         assert_se(!hashmap_contains(m, "Key 1"));
         hashmap_put(m, "Key 1", val1);
@@ -578,13 +556,13 @@ TEST(hashmap_contains) {
 }
 
 TEST(hashmap_isempty) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char *val1;
 
         val1 = strdup("my val");
         assert_se(val1);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
 
         assert_se(hashmap_isempty(m));
         hashmap_put(m, "Key 1", val1);
@@ -594,7 +572,7 @@ TEST(hashmap_isempty) {
 }
 
 TEST(hashmap_size) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char *val1, *val2, *val3, *val4;
 
         val1 = strdup("my val");
@@ -609,7 +587,7 @@ TEST(hashmap_size) {
         assert_se(hashmap_size(NULL) == 0);
         assert_se(hashmap_buckets(NULL) == 0);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
 
         hashmap_put(m, "Key 1", val1);
         hashmap_put(m, "Key 2", val2);
@@ -622,7 +600,7 @@ TEST(hashmap_size) {
 }
 
 TEST(hashmap_get) {
-        _cleanup_hashmap_free_free_ Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char *r;
         char *val;
 
@@ -632,7 +610,7 @@ TEST(hashmap_get) {
         r = hashmap_get(NULL, "Key 1");
         ASSERT_NULL(r);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_value_free);
 
         hashmap_put(m, "Key 1", val);
 
@@ -646,7 +624,7 @@ TEST(hashmap_get) {
 }
 
 TEST(hashmap_get2) {
-        _cleanup_(hashmap_free_free_freep) Hashmap *m = NULL;
+        _cleanup_hashmap_free_ Hashmap *m = NULL;
         char *r;
         char *val;
         char key_orig[] = "Key 1";
@@ -661,7 +639,7 @@ TEST(hashmap_get2) {
         r = hashmap_get2(NULL, key_orig, &key_copy);
         ASSERT_NULL(r);
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_free_free);
 
         hashmap_put(m, key_copy, val);
         key_copy = NULL;
@@ -780,29 +758,6 @@ TEST(hashmap_free) {
         }
 }
 
-typedef struct Item {
-        int seen;
-} Item;
-static void item_seen(Item *item) {
-        item->seen++;
-}
-
-TEST(hashmap_free_with_destructor) {
-        Hashmap *m;
-        struct Item items[4] = {};
-        unsigned i;
-
-        assert_se(m = hashmap_new(NULL));
-        for (i = 0; i < ELEMENTSOF(items) - 1; i++)
-                assert_se(hashmap_put(m, INT_TO_PTR(i), items + i) == 1);
-
-        m = hashmap_free_with_destructor(m, item_seen);
-        assert_se(items[0].seen == 1);
-        assert_se(items[1].seen == 1);
-        assert_se(items[2].seen == 1);
-        assert_se(items[3].seen == 0);
-}
-
 TEST(hashmap_first) {
         _cleanup_hashmap_free_ Hashmap *m = NULL;
 
@@ -870,32 +825,29 @@ TEST(hashmap_steal_first) {
         assert_se(hashmap_isempty(m));
 }
 
-TEST(hashmap_clear_free_free) {
+DEFINE_PRIVATE_HASH_OPS_WITH_KEY_DESTRUCTOR(test_hash_ops_key, char, string_hash_func, string_compare_func, free);
+DEFINE_PRIVATE_HASH_OPS_FULL(test_hash_ops_full, char, string_hash_func, string_compare_func, free, char, free);
+
+TEST(hashmap_clear) {
         _cleanup_hashmap_free_ Hashmap *m = NULL;
 
-        m = hashmap_new(&string_hash_ops);
+        m = hashmap_new(&string_hash_ops_free_free);
         assert_se(m);
 
         assert_se(hashmap_put(m, strdup("key 1"), NULL) == 1);
         assert_se(hashmap_put(m, strdup("key 2"), NULL) == 1);
         assert_se(hashmap_put(m, strdup("key 3"), NULL) == 1);
 
-        hashmap_clear_free_free(m);
+        hashmap_clear(m);
         assert_se(hashmap_isempty(m));
 
         assert_se(hashmap_put(m, strdup("key 1"), strdup("value 1")) == 1);
         assert_se(hashmap_put(m, strdup("key 2"), strdup("value 2")) == 1);
         assert_se(hashmap_put(m, strdup("key 3"), strdup("value 3")) == 1);
 
-        hashmap_clear_free_free(m);
+        hashmap_clear(m);
         assert_se(hashmap_isempty(m));
-}
-
-DEFINE_PRIVATE_HASH_OPS_WITH_KEY_DESTRUCTOR(test_hash_ops_key, char, string_hash_func, string_compare_func, free);
-DEFINE_PRIVATE_HASH_OPS_FULL(test_hash_ops_full, char, string_hash_func, string_compare_func, free, char, free);
-
-TEST(hashmap_clear_free_with_destructor) {
-        _cleanup_hashmap_free_ Hashmap *m = NULL;
+        m = hashmap_free(m);
 
         m = hashmap_new(&test_hash_ops_key);
         assert_se(m);
@@ -904,7 +856,7 @@ TEST(hashmap_clear_free_with_destructor) {
         assert_se(hashmap_put(m, strdup("key 2"), NULL) == 1);
         assert_se(hashmap_put(m, strdup("key 3"), NULL) == 1);
 
-        hashmap_clear_free(m);
+        hashmap_clear(m);
         assert_se(hashmap_isempty(m));
         m = hashmap_free(m);
 
@@ -915,7 +867,7 @@ TEST(hashmap_clear_free_with_destructor) {
         assert_se(hashmap_put(m, strdup("key 2"), strdup("value 2")) == 1);
         assert_se(hashmap_put(m, strdup("key 3"), strdup("value 3")) == 1);
 
-        hashmap_clear_free(m);
+        hashmap_clear(m);
         assert_se(hashmap_isempty(m));
 }
 
@@ -992,6 +944,22 @@ TEST(string_strv_hashmap) {
 
         s = hashmap_get(m, "xxx");
         assert_se(strv_equal(s, STRV_MAKE("bar", "BAR")));
+
+        string_strv_hashmap_remove(m, "foo", "bar");
+        ASSERT_NOT_NULL((s = hashmap_get(m, "foo")));
+        ASSERT_TRUE(strv_equal(s, STRV_MAKE("BAR")));
+
+        string_strv_hashmap_remove(m, "foo", "BAR");
+        ASSERT_NULL(hashmap_get(m, "foo"));
+
+        string_strv_hashmap_remove(m, "xxx", "BAR");
+        ASSERT_NOT_NULL((s = hashmap_get(m, "xxx")));
+        ASSERT_TRUE(strv_equal(s, STRV_MAKE("bar")));
+
+        string_strv_hashmap_remove(m, "xxx", "bar");
+        ASSERT_NULL(hashmap_get(m, "xxx"));
+
+        ASSERT_TRUE(hashmap_isempty(m));
 }
 
 TEST(hashmap_dump_sorted) {

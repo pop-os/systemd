@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include "conf-parser.h"
+#include "forward.h"
 #include "netdev.h"
 
 #define LINK_BRIDGE_PORT_PRIORITY_INVALID 128U
@@ -21,6 +21,7 @@ typedef struct Bridge {
         uint8_t igmp_version;
         uint32_t fdb_max_learned;
         bool fdb_max_learned_set;
+        int linklocal_learn;
 
         usec_t forward_delay;
         usec_t hello_time;

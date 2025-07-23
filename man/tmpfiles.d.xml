@@ -576,7 +576,7 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
       removed unless applied to a directory. This functionality is particularly useful in conjunction with
       <varname>Z</varname>.</para>
 
-      <para>By default the access mode of listed inodes is set to the specified mode regardless if it is
+      <para>By default, the access mode of listed inodes is set to the specified mode regardless of whether it is
       created anew, or already existed. Optionally, if prefixed with <literal>:</literal>, the configured
       access mode is only applied when creating new inodes, and if the inode the line refers to
       already exists, its access mode is left in place unmodified.</para>
@@ -596,13 +596,13 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
 
       <para>This field should generally only reference system users/groups, i.e. users/groups that are
       guaranteed to be resolvable during early boot. If this field references users/groups that only become
-      resolveable during later boot (i.e. after NIS, LDAP or a similar networked directory service become
+      resolvable during later boot (i.e. after NIS, LDAP or a similar networked directory service become
       available), execution of the operations declared by the line will likely fail. Also see <ulink
       url="https://systemd.io/UIDS-GIDS/#notes-on-resolvability-of-user-and-group-names">Notes on
       Resolvability of User and Group Names</ulink> for more information on requirements on system user/group
       definitions.</para>
 
-      <para>By default the ownership of listed inodes is set to the specified user/group regardless if it is
+      <para>By default, the ownership of listed inodes is set to the specified user/group regardless of whether it is
       created anew, or already existed. Optionally, if prefixed with <literal>:</literal>, the configured
       user/group information is only applied when creating new inodes, and if the inode the line refers to
       already exists, its user/group is left in place unmodified.</para>

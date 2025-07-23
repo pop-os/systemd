@@ -2,16 +2,16 @@
 
 #include "sd-json.h"
 
+#include "alloc-util.h"
 #include "ask-password-api.h"
 #include "cryptsetup-fido2.h"
+#include "cryptsetup-util.h"
 #include "env-util.h"
 #include "fido2-util.h"
-#include "fileio.h"
-#include "hexdecoct.h"
 #include "iovec-util.h"
 #include "libfido2-util.h"
-#include "parse-util.h"
-#include "random-util.h"
+#include "log.h"
+
 #include "strv.h"
 
 int acquire_fido2_key(
@@ -32,6 +32,7 @@ int acquire_fido2_key(
                 void **ret_decrypted_key,
                 size_t *ret_decrypted_key_size) {
 
+#if HAVE_LIBCRYPTSETUP && HAVE_LIBFIDO2
         _cleanup_(erase_and_freep) char *envpw = NULL;
         _cleanup_strv_free_erase_ char **pins = NULL;
         _cleanup_(iovec_done_erase) struct iovec loaded_salt = {};
@@ -111,20 +112,26 @@ int acquire_fido2_key(
                 if (FLAGS_SET(askpw_flags, ASK_PASSWORD_HEADLESS))
                         return log_error_errno(SYNTHETIC_ERRNO(ENOPKG), "PIN querying disabled via 'headless' option. Use the '$PIN' environment variable.");
 
-                static const AskPasswordRequest req = {
+                AskPasswordRequest req = {
+                        .tty_fd = -EBADF,
                         .message = "Please enter security token PIN:",
                         .icon = "drive-harddisk",
                         .keyring = "fido2-pin",
                         .credential = "cryptsetup.fido2-pin",
+                        .until = until,
+                        .hup_fd = -EBADF,
                 };
 
                 pins = strv_free_erase(pins);
-                r = ask_password_auto(&req, until, askpw_flags, &pins);
+                r = ask_password_auto(&req, askpw_flags, &pins);
                 if (r < 0)
                         return log_error_errno(r, "Failed to ask for user password: %m");
 
                 askpw_flags &= ~ASK_PASSWORD_ACCEPT_CACHED;
         }
+#else
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "FIDO2 token support not available.");
+#endif
 }
 
 int acquire_fido2_key_auto(
@@ -138,6 +145,7 @@ int acquire_fido2_key_auto(
                 void **ret_decrypted_key,
                 size_t *ret_decrypted_key_size) {
 
+#if HAVE_LIBCRYPTSETUP && HAVE_LIBFIDO2
         _cleanup_free_ void *cid = NULL;
         size_t cid_size = 0;
         int r, ret = -ENOENT;
@@ -273,4 +281,7 @@ int acquire_fido2_key_auto(
 
         log_info("Unlocked volume via automatically discovered security FIDO2 token.");
         return ret;
+#else
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "FIDO2 token support not available.");
+#endif
 }

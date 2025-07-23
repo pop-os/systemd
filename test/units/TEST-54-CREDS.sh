@@ -23,6 +23,49 @@ run_with_cred_compare() (
     diff "$log_file" <(echo -ne "$exp")
 )
 
+test_mount_with_credential() {
+    local credfile tmpdir unit
+    credfile="/tmp/mount-cred"
+    tmpdir="/tmp/test-54-mount"
+    unit=$(systemd-escape --suffix mount --path "$tmpdir")
+
+    echo foo >"$credfile"
+    mkdir -p "$tmpdir"
+
+    # Set up test mount unit
+    cat >/run/systemd/system/"$unit" <<EOF
+[Mount]
+What=tmpfs
+Where=$tmpdir
+Type=thisisatest
+LoadCredential=loadcred:$credfile
+EOF
+
+    # Set up test mount type
+    cat >/usr/sbin/mount.thisisatest <<EOF
+#!/usr/bin/env bash
+# Mount after verifying credential file content
+if [ \$(cat \${CREDENTIALS_DIRECTORY}/loadcred) = "foo" ]; then
+    mount -t tmpfs \$1 \$2
+fi
+EOF
+    chmod +x /usr/sbin/mount.thisisatest
+
+    # Verify mount succeeds
+    systemctl daemon-reload
+    systemctl start "$unit"
+    systemctl --no-pager show -p SubState --value "$unit" | grep -q mounted
+
+    # Verify mount fails with different credential file content
+    echo bar >"$credfile"
+    (! systemctl restart "$unit")
+
+    # Stop unit and delete files
+    systemctl stop "$unit"
+    rm -f "$credfile" /run/systemd/system/"$unit" /usr/sbin/mount.thisisatest
+    rm -rf "$tmpdir"
+}
+
 # Sanity checks
 #
 # Create a dummy "full" disk (similar to /dev/full) to check out-of-space
@@ -291,7 +334,7 @@ systemd-run -p "ImportCredential=test.creds.*" \
             test ! -e '${CREDENTIALS_DIRECTORY}/test.creds.hoge:invalid'
 
 # Check if credentials with invalid names are not imported (with renaming).
-systemd-run -p "ImportCredentialEx=test.creds.*:renamed.creds." \
+systemd-run -p "ImportCredential=test.creds.*:renamed.creds." \
             --unit=test-54-ImportCredential.service \
             -p DynamicUser=1 \
             --wait \
@@ -309,8 +352,8 @@ systemd-run -p "ImportCredential=test.creds.*" \
                 '${CREDENTIALS_DIRECTORY}/test.creds.third' >/tmp/ts54-concat
 cmp /tmp/ts54-concat <(echo -n abc)
 
-# Check that ImportCredentialEx= works without renaming.
-systemd-run -p "ImportCredentialEx=test.creds.*" \
+# Check that ImportCredential= works without renaming.
+systemd-run -p "ImportCredential=test.creds.*" \
             --unit=test-54-ImportCredential.service \
             -p DynamicUser=1 \
             --wait \
@@ -321,7 +364,7 @@ systemd-run -p "ImportCredentialEx=test.creds.*" \
 cmp /tmp/ts54-concat <(echo -n abc)
 
 # Check that renaming with globs works as expected.
-systemd-run -p "ImportCredentialEx=test.creds.*:renamed.creds." \
+systemd-run -p "ImportCredential=test.creds.*:renamed.creds." \
             --unit=test-54-ImportCredential.service \
             -p DynamicUser=1 \
             --wait \
@@ -332,7 +375,7 @@ systemd-run -p "ImportCredentialEx=test.creds.*:renamed.creds." \
 cmp /tmp/ts54-concat <(echo -n abc)
 
 # Check that renaming without globs works as expected.
-systemd-run -p "ImportCredentialEx=test.creds.first:renamed.creds.first" \
+systemd-run -p "ImportCredential=test.creds.first:renamed.creds.first" \
             --unit=test-54-ImportCredential.service \
             -p DynamicUser=1 \
             --wait \
@@ -341,8 +384,8 @@ systemd-run -p "ImportCredentialEx=test.creds.first:renamed.creds.first" \
 cmp /tmp/ts54-concat <(echo -n a)
 
 # Test that multiple renames are processed in the correct order.
-systemd-run -p "ImportCredentialEx=test.creds.first:renamed.creds.first" \
-            -p "ImportCredentialEx=test.creds.second:renamed.creds.first" \
+systemd-run -p "ImportCredential=test.creds.first:renamed.creds.first" \
+            -p "ImportCredential=test.creds.second:renamed.creds.first" \
             --unit=test-54-ImportCredential.service \
             -p DynamicUser=1 \
             --wait \
@@ -351,6 +394,7 @@ systemd-run -p "ImportCredentialEx=test.creds.first:renamed.creds.first" \
 cmp /tmp/ts54-concat <(echo -n a)
 
 # Test that a credential can be imported multiple times with different names.
+# We use the deprecated name ImportCredentialEx= on purpose to check that it works.
 systemd-run -p "ImportCredentialEx=test.creds.first" \
             -p "ImportCredentialEx=test.creds.first:renamed.creds.first" \
             -p "ImportCredentialEx=test.creds.first:renamed.creds.second" \
@@ -447,7 +491,7 @@ cmp /tmp/vlcredsdata /tmp/vlcredsdata2
 rm /tmp/vlcredsdata /tmp/vlcredsdata2
 
 clean_usertest() {
-    rm -f /tmp/usertest.data /tmp/usertest.data
+    rm -f /tmp/usertest.data /tmp/usertest.data /tmp/brummbaer.data
 }
 
 trap clean_usertest EXIT
@@ -473,6 +517,15 @@ systemd-creds encrypt --user /tmp/usertest.data /tmp/usertest.creds --name=mytes
 # Make sure we actually can decode this in user context
 systemctl start user@0.service
 XDG_RUNTIME_DIR=/run/user/0 systemd-run --pipe --user --unit=waldi.service -p LoadCredentialEncrypted=mytest:/tmp/usertest.creds cat /run/user/0/credentials/waldi.service/mytest | cmp /tmp/usertest.data
+
+# Test mount unit with credential
+test_mount_with_credential
+
+# Fully unpriv operation
+dd if=/dev/urandom of=/tmp/brummbaer.data bs=4096 count=1
+run0 -u testuser --pipe mkdir -p /home/testuser/.config/credstore.encrypted
+run0 -u testuser --pipe systemd-creds encrypt --user --name=brummbaer - /home/testuser/.config/credstore.encrypted/brummbaer < /tmp/brummbaer.data
+run0 -u testuser --pipe systemd-run --user --pipe -p ImportCredential=brummbaer systemd-creds cat brummbaer | cmp /tmp/brummbaer.data
 
 systemd-analyze log-level info
 

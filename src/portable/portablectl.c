@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <getopt.h>
 
 #include "sd-bus.h"
@@ -10,16 +9,15 @@
 #include "bus-error.h"
 #include "bus-locator.h"
 #include "bus-unit-util.h"
+#include "bus-util.h"
 #include "bus-wait-for-jobs.h"
 #include "chase.h"
-#include "constants.h"
-#include "dirent-util.h"
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-table.h"
 #include "fs-util.h"
-#include "locale-util.h"
+#include "install.h"
 #include "main-func.h"
 #include "os-util.h"
 #include "pager.h"
@@ -31,7 +29,6 @@
 #include "pretty-print.h"
 #include "string-util.h"
 #include "strv.h"
-#include "terminal-util.h"
 #include "verbs.h"
 
 static PagerFlags arg_pager_flags = 0;
@@ -39,7 +36,7 @@ static bool arg_legend = true;
 static bool arg_ask_password = true;
 static bool arg_quiet = false;
 static const char *arg_profile = "default";
-static const char* arg_copy_mode = NULL;
+static const char *arg_copy_mode = NULL;
 static bool arg_runtime = false;
 static bool arg_reload = true;
 static bool arg_cat = false;
@@ -533,12 +530,12 @@ static int print_changes(sd_bus_message *m) {
                         break;
 
                 if (streq(type, "symlink"))
-                        log_info("Created symlink %s %s %s.", path, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), source);
+                        log_info("Created symlink %s %s %s.", path, glyph(GLYPH_ARROW_RIGHT), source);
                 else if (streq(type, "copy")) {
                         if (isempty(source))
                                 log_info("Copied %s.", path);
                         else
-                                log_info("Copied %s %s %s.", source, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), path);
+                                log_info("Copied %s %s %s.", source, glyph(GLYPH_ARROW_RIGHT), path);
                 } else if (streq(type, "unlink"))
                         log_info("Removed %s.", path);
                 else if (streq(type, "write"))
@@ -1322,7 +1319,6 @@ static int help(int argc, char *argv[], void *userdata) {
 }
 
 static int parse_argv(int argc, char *argv[]) {
-        int r;
 
         enum {
                 ARG_VERSION = 0x100,
@@ -1364,15 +1360,12 @@ static int parse_argv(int argc, char *argv[]) {
                 {}
         };
 
+        int r, c;
+
         assert(argc >= 0);
         assert(argv);
 
-        for (;;) {
-                int c;
-
-                c = getopt_long(argc, argv, "hH:M:qp:", options, NULL);
-                if (c < 0)
-                        break;
+        while ((c = getopt_long(argc, argv, "hH:M:qp:", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -1400,8 +1393,9 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'M':
-                        arg_transport = BUS_TRANSPORT_MACHINE;
-                        arg_host = optarg;
+                        r = parse_machine_argument(optarg, &arg_host, &arg_transport);
+                        if (r < 0)
+                                return r;
                         break;
 
                 case 'q':
@@ -1480,7 +1474,6 @@ static int parse_argv(int argc, char *argv[]) {
                 default:
                         assert_not_reached();
                 }
-        }
 
         return 1;
 }

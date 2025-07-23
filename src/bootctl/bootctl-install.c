@@ -1,5 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "alloc-util.h"
+#include "boot-entry.h"
 #include "bootctl.h"
 #include "bootctl-install.h"
 #include "bootctl-random-seed.h"
@@ -9,7 +14,9 @@
 #include "dirent-util.h"
 #include "efi-api.h"
 #include "efi-fundamental.h"
+#include "efivars.h"
 #include "env-file.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -17,13 +24,17 @@
 #include "id128-util.h"
 #include "io-util.h"
 #include "kernel-config.h"
-#include "os-util.h"
+#include "log.h"
+#include "openssl-util.h"
 #include "parse-argument.h"
 #include "path-util.h"
 #include "pe-binary.h"
 #include "rm-rf.h"
 #include "stat-util.h"
+#include "string-util.h"
+#include "strv.h"
 #include "sync-util.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "utf8.h"
@@ -329,6 +340,9 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
         _cleanup_free_ char *p = NULL;
         int r, ret = 0;
 
+        assert(esp_path);
+        assert(source_path);
+
         r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
         if (r == -ENOENT)
                 return 0;
@@ -337,12 +351,11 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
 
         FOREACH_DIRENT(de, d, break) {
                 _cleanup_close_ int fd = -EBADF;
-                _cleanup_free_ char *v = NULL;
 
                 if (!endswith_no_case(de->d_name, ".efi"))
                         continue;
 
-                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, /* xopen_flags= */ 0, /* mode= */ 0);
+                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, XO_REGULAR, /* mode= */ 0);
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to open \"%s/%s\" for reading: %m", p, de->d_name);
 
@@ -354,19 +367,14 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
                 if (r == 0)
                         continue;
 
-                r = get_file_version(fd, &v);
-                if (r == -ESRCH)
-                        continue;  /* No version information */
-                if (r < 0)
-                        return r;
-                if (!startswith(v, "systemd-boot "))
-                        continue;
-
                 _cleanup_free_ char *dest_path = path_join(p, de->d_name);
                 if (!dest_path)
                         return log_oom();
 
-                RET_GATHER(ret, copy_file_with_version_check(source_path, dest_path, /* force = */ false));
+                r = copy_file_with_version_check(source_path, dest_path, /* force = */ false);
+                if (IN_SET(r, -ESTALE, -ESRCH))
+                        continue;
+                RET_GATHER(ret, r);
         }
 
         return ret;
@@ -691,7 +699,7 @@ static int install_secure_boot_auto_enroll(const char *esp, X509 *certificate, E
                                                ERR_error_string(ERR_get_error(), NULL));
 
                 _cleanup_free_ uint8_t *sig = NULL;
-                int sigsz = i2d_PKCS7_SIGNED(p7->d.sign, &sig);
+                int sigsz = i2d_PKCS7(p7, &sig);
                 if (sigsz < 0)
                         return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to convert PKCS7 signature to DER: %s",
                                                ERR_error_string(ERR_get_error(), NULL));
@@ -873,22 +881,11 @@ static int install_variables(
         uint16_t slot;
         int r;
 
-        if (arg_root) {
-                log_info("Acting on %s, skipping EFI variable setup.",
-                         arg_image ? "image" : "root directory");
-                return 0;
-        }
-
-        if (!is_efi_boot()) {
-                log_warning("Not booted with EFI, skipping EFI variable setup.");
-                return 0;
-        }
-
         r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
-                return log_error_errno(r, "Cannot access \"%s/%s\": %m", esp_path, path);
+                return log_error_errno(r, "Cannot access \"%s/%s\": %m", esp_path, skip_leading_slash(path));
 
         r = find_slot(uuid, path, &slot);
         if (r < 0) {
@@ -943,7 +940,7 @@ static int are_we_installed(const char *esp_path) {
         if (!p)
                 return log_oom();
 
-        log_debug("Checking whether %s contains any files%s", p, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_debug("Checking whether %s contains any files%s", p, glyph(GLYPH_ELLIPSIS));
         r = dir_is_empty(p, /* ignore_hidden_or_backup= */ false);
         if (r < 0 && r != -ENOENT)
                 return log_error_errno(r, "Failed to check whether %s contains any files: %m", p);
@@ -992,9 +989,12 @@ int verb_install(int argc, char *argv[], void *userdata) {
                                 arg_private_key_source,
                                 arg_private_key,
                                 &(AskPasswordRequest) {
+                                        .tty_fd = -EBADF,
                                         .id = "bootctl-private-key-pin",
                                         .keyring = arg_private_key,
                                         .credential = "bootctl.private-key-pin",
+                                        .until = USEC_INFINITY,
+                                        .hup_fd = -EBADF,
                                 },
                                 &private_key,
                                 &ui);
@@ -1080,7 +1080,7 @@ int verb_install(int argc, char *argv[], void *userdata) {
 
         (void) sync_everything();
 
-        if (!arg_touch_variables)
+        if (!touch_variables())
                 return 0;
 
         if (arg_arch_all) {
@@ -1110,7 +1110,7 @@ static int remove_boot_efi(const char *esp_path) {
                 if (!endswith_no_case(de->d_name, ".efi"))
                         continue;
 
-                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, /* xopen_flags= */ 0, /* mode= */ 0);
+                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, XO_REGULAR, /* mode= */ 0);
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to open \"%s/%s\" for reading: %m", p, de->d_name);
 
@@ -1141,9 +1141,10 @@ static int remove_boot_efi(const char *esp_path) {
 }
 
 static int rmdir_one(const char *prefix, const char *suffix) {
-        const char *p;
+        _cleanup_free_ char *p = path_join(prefix, suffix);
+        if (!p)
+                return log_oom();
 
-        p = prefix_roota(prefix, suffix);
         if (rmdir(p) < 0) {
                 bool ignore = IN_SET(errno, ENOENT, ENOTEMPTY);
 
@@ -1183,10 +1184,12 @@ static int remove_entry_directory(const char *root) {
 }
 
 static int remove_binaries(const char *esp_path) {
-        const char *p;
         int r, q;
 
-        p = prefix_roota(esp_path, "/EFI/systemd");
+        _cleanup_free_ char *p = path_join(esp_path, "/EFI/systemd");
+        if (!p)
+                return log_oom();
+
         r = rm_rf(p, REMOVE_ROOT|REMOVE_PHYSICAL);
 
         q = remove_boot_efi(esp_path);
@@ -1197,12 +1200,13 @@ static int remove_binaries(const char *esp_path) {
 }
 
 static int remove_file(const char *root, const char *file) {
-        const char *p;
-
         assert(root);
         assert(file);
 
-        p = prefix_roota(root, file);
+        _cleanup_free_ char *p = path_join(root, file);
+        if (!p)
+                return log_oom();
+
         if (unlink(p) < 0) {
                 log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
                                "Failed to unlink file \"%s\": %m", p);
@@ -1217,9 +1221,6 @@ static int remove_file(const char *root, const char *file) {
 static int remove_variables(sd_id128_t uuid, const char *path, bool in_order) {
         uint16_t slot;
         int r;
-
-        if (arg_root || !is_efi_boot())
-                return 0;
 
         r = find_slot(uuid, path, &slot);
         if (r != 1)
@@ -1245,6 +1246,7 @@ static int remove_loader_variables(void) {
                        EFI_LOADER_VARIABLE_STR("LoaderConfigTimeout"),
                        EFI_LOADER_VARIABLE_STR("LoaderConfigTimeoutOneShot"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryDefault"),
+                       EFI_LOADER_VARIABLE_STR("LoaderEntrySysFail"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryLastBooted"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryOneShot"),
                        EFI_LOADER_VARIABLE_STR("LoaderSystemToken")) {
@@ -1339,7 +1341,7 @@ int verb_remove(int argc, char *argv[], void *userdata) {
 
         (void) sync_everything();
 
-        if (!arg_touch_variables)
+        if (!touch_variables())
                 return r;
 
         if (arg_arch_all) {

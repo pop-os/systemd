@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <libcryptsetup.h>
 
+#include "alloc-util.h"
 #include "cryptsetup-token.h"
 #include "cryptsetup-token-util.h"
 #include "hexdecoct.h"
 #include "json-util.h"
 #include "luks2-tpm2.h"
 #include "memory-util.h"
-#include "strv.h"
+#include "string-util.h"
 #include "tpm2-util.h"
 #include "version.h"
 
@@ -254,7 +254,7 @@ _public_ void cryptsetup_token_dump(
                 if (r < 0)
                         return (void) crypt_log_debug_errno(cd, r, "Cannot dump " TOKEN_NAME " content: %m");
 
-                crypt_log(cd, "\ttpm2-blob:        %s\n", blob_str);
+                crypt_log(cd, "\ttpm2-blob:  %s\n", blob_str);
         }
 }
 

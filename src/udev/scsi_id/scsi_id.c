@@ -5,15 +5,9 @@
  */
 
 #include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
-#include <signal.h>
-#include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <stdlib.h>
 
 #include "alloc-util.h"
 #include "build.h"
@@ -21,7 +15,6 @@
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "parse-util.h"
 #include "scsi_id.h"
 #include "string-util.h"
 #include "strv.h"
@@ -93,7 +86,6 @@ static void set_type(unsigned type_num, char *to, size_t len) {
                 break;
         default:
                 type = "generic";
-                break;
         }
         strscpy(to, len, type);
 }
@@ -368,7 +360,6 @@ static int per_dev_options(struct scsi_id_device *dev_scsi, int *good_bad, int *
                 default:
                         log_error("Unknown or bad option '%c' (0x%x)", option, (unsigned) option);
                         retval = -1;
-                        break;
                 }
         }
 
