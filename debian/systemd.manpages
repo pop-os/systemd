@@ -27,10 +27,10 @@ debian/tmp/usr/share/man/man1/systemd-machine-id-setup.1
 debian/tmp/usr/share/man/man1/systemd-mount.1
 debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-pty-forward.1
+debian/tmp/usr/share/man/man1/systemd-pty-forward.1
 debian/tmp/usr/share/man/man1/systemd-run.1
 debian/tmp/usr/share/man/man1/systemd-socket-activate.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-ssh-issue.1
+debian/tmp/usr/share/man/man1/systemd-ssh-issue.1
 debian/tmp/usr/share/man/man1/systemd-ssh-proxy.1
 debian/tmp/usr/share/man/man1/systemd-stdio-bridge.1
 debian/tmp/usr/share/man/man1/systemd-tty-ask-password-agent.1
@@ -109,7 +109,7 @@ debian/tmp/usr/share/man/man7/smbios-type-11.7
 debian/tmp/usr/share/man/man7/systemd.directives.7
 debian/tmp/usr/share/man/man7/systemd.environment-generator.7
 debian/tmp/usr/share/man/man7/systemd.generator.7
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man7/systemd.image-filter.7
+debian/tmp/usr/share/man/man7/systemd.image-filter.7
 debian/tmp/usr/share/man/man7/systemd.image-policy.7
 debian/tmp/usr/share/man/man7/systemd.index.7
 debian/tmp/usr/share/man/man7/systemd.journal-fields.7
@@ -140,15 +140,15 @@ debian/tmp/usr/share/man/man8/systemd-boot-check-no-failures.service.8
 <!stage1> debian/tmp/usr/share/man/man8/systemd-bsod.service.8
 debian/tmp/usr/share/man/man8/systemd-confext.8
 debian/tmp/usr/share/man/man8/systemd-confext.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-confext-initrd.service.8
+debian/tmp/usr/share/man/man8/systemd-confext-initrd.service.8
 debian/tmp/usr/share/man/man8/systemd-debug-generator.8
 debian/tmp/usr/share/man/man8/systemd-environment-d-generator.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset-complete.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset-generator.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset-request.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset.socket.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-factory-reset@.service.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset-complete.service.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset-generator.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset-request.service.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset.socket.8
+debian/tmp/usr/share/man/man8/systemd-factory-reset@.service.8
 debian/tmp/usr/share/man/man8/systemd-fsck.8
 debian/tmp/usr/share/man/man8/systemd-fsck-root.service.8
 debian/tmp/usr/share/man/man8/systemd-fsck@.service.8
@@ -168,9 +168,6 @@ debian/tmp/usr/share/man/man8/systemd-hibernate.service.8
 debian/tmp/usr/share/man/man8/systemd-hostnamed.8
 debian/tmp/usr/share/man/man8/systemd-hostnamed.service.8
 debian/tmp/usr/share/man/man8/systemd-hybrid-sleep.service.8
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-initctl.8
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-initctl.service.8
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-initctl.socket.8
 debian/tmp/usr/share/man/man8/systemd-journald.8
 debian/tmp/usr/share/man/man8/systemd-journald-audit.socket.8
 debian/tmp/usr/share/man/man8/systemd-journald-dev-log.socket.8
@@ -184,7 +181,7 @@ debian/tmp/usr/share/man/man8/systemd-localed.8
 debian/tmp/usr/share/man/man8/systemd-localed.service.8
 debian/tmp/usr/share/man/man8/systemd-logind.8
 debian/tmp/usr/share/man/man8/systemd-logind.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-loop@.service.8
+debian/tmp/usr/share/man/man8/systemd-loop@.service.8
 debian/tmp/usr/share/man/man8/systemd-machine-id-commit.service.8
 debian/tmp/usr/share/man/man8/systemd-makefs.8
 debian/tmp/usr/share/man/man8/systemd-makefs@.service.8
@@ -217,9 +214,8 @@ debian/tmp/usr/share/man/man8/systemd-poweroff.service.8
 debian/tmp/usr/share/man/man8/systemd-pstore.8
 debian/tmp/usr/share/man/man8/systemd-pstore.service.8
 debian/tmp/usr/share/man/man8/systemd-quotacheck.8
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-quotacheck.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-quotacheck@.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-quotacheck-root.service.8
+debian/tmp/usr/share/man/man8/systemd-quotacheck@.service.8
+debian/tmp/usr/share/man/man8/systemd-quotacheck-root.service.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.service.8
 debian/tmp/usr/share/man/man8/systemd-rc-local-generator.8
@@ -243,7 +239,7 @@ debian/tmp/usr/share/man/man8/systemd-sysctl.8
 debian/tmp/usr/share/man/man8/systemd-sysctl.service.8
 debian/tmp/usr/share/man/man8/systemd-sysext.8
 debian/tmp/usr/share/man/man8/systemd-sysext.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-sysext-initrd.service.8
+debian/tmp/usr/share/man/man8/systemd-sysext-initrd.service.8
 debian/tmp/usr/share/man/man8/systemd-system-update-generator.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.service.8
@@ -256,7 +252,7 @@ debian/tmp/usr/share/man/man8/systemd-tmpfiles-clean.timer.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev-early.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup.service.8
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1 pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-tpm2-clear.service.8
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-clear.service.8
 debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup-early.service.8
@@ -266,7 +262,7 @@ debian/tmp/usr/share/man/man8/systemd-update-done.8
 debian/tmp/usr/share/man/man8/systemd-update-done.service.8
 debian/tmp/usr/share/man/man8/systemd-user-sessions.8
 debian/tmp/usr/share/man/man8/systemd-user-sessions.service.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-validatefs@.service.8
+debian/tmp/usr/share/man/man8/systemd-validatefs@.service.8
 debian/tmp/usr/share/man/man8/systemd-volatile-root.8
 debian/tmp/usr/share/man/man8/systemd-volatile-root.service.8
 debian/tmp/usr/share/man/man8/systemd-xdg-autostart-generator.8

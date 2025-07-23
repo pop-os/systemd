@@ -3,8 +3,8 @@ etc/systemd/resolved.conf
 usr/bin/resolvectl
 usr/lib/systemd/resolv.conf
 usr/lib/systemd/systemd-resolved
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-resolved-monitor.socket
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-resolved-varlink.socket
+usr/lib/systemd/system/systemd-resolved-monitor.socket
+usr/lib/systemd/system/systemd-resolved-varlink.socket
 usr/lib/systemd/system/systemd-resolved.service
 usr/lib/sysusers.d/systemd-resolve.conf
 usr/lib/tmpfiles.d/systemd-resolve.conf

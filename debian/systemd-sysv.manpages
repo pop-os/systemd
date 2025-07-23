@@ -1,7 +1,5 @@
 #!/usr/bin/dh-exec
 debian/tmp/usr/share/man/man1/init.1
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/telinit.8
-<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/runlevel.8
 debian/tmp/usr/share/man/man8/shutdown.8
 debian/tmp/usr/share/man/man8/poweroff.8
 debian/tmp/usr/share/man/man8/reboot.8
