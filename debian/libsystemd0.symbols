@@ -38,6 +38,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_255@LIBSYSTEMD_255 255
  LIBSYSTEMD_256@LIBSYSTEMD_256 256~rc1
  LIBSYSTEMD_257@LIBSYSTEMD_257 257~rc1
+ LIBSYSTEMD_258@LIBSYSTEMD_258 258~rc1
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -192,6 +193,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_close_container@LIBSYSTEMD_221 221
  sd_bus_message_copy@LIBSYSTEMD_221 221
  sd_bus_message_dump@LIBSYSTEMD_245 245
+ sd_bus_message_dump_json@LIBSYSTEMD_258 258~rc1
  sd_bus_message_enter_container@LIBSYSTEMD_221 221
  sd_bus_message_exit_container@LIBSYSTEMD_221 221
  sd_bus_message_get_allow_interactive_authorization@LIBSYSTEMD_221 221
@@ -346,6 +348,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_try_close@LIBSYSTEMD_221 221
  sd_bus_unref@LIBSYSTEMD_221 221
  sd_bus_wait@LIBSYSTEMD_221 221
+ sd_device_enumerator_add_all_parents@LIBSYSTEMD_258 258~rc1
  sd_device_enumerator_add_match_parent@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_property@LIBSYSTEMD_240 240
  sd_device_enumerator_add_match_property_required@LIBSYSTEMD_255 255
@@ -389,6 +392,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_get_sysattr_first@LIBSYSTEMD_240 240
  sd_device_get_sysattr_next@LIBSYSTEMD_240 240
  sd_device_get_sysattr_value@LIBSYSTEMD_240 240
+ sd_device_get_sysattr_value_with_size@LIBSYSTEMD_258 258~rc1
  sd_device_get_sysname@LIBSYSTEMD_240 240
  sd_device_get_sysnum@LIBSYSTEMD_240 240
  sd_device_get_syspath@LIBSYSTEMD_240 240
@@ -714,6 +718,8 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_json_variant_string@LIBSYSTEMD_257 257~rc1
  sd_json_variant_strv@LIBSYSTEMD_257 257~rc1
  sd_json_variant_type@LIBSYSTEMD_257 257~rc1
+ sd_json_variant_type_from_string@LIBSYSTEMD_258 258~rc1
+ sd_json_variant_type_to_string@LIBSYSTEMD_258 258~rc1
  sd_json_variant_unbase64@LIBSYSTEMD_257 257~rc1
  sd_json_variant_unhex@LIBSYSTEMD_257 257~rc1
  sd_json_variant_unref@LIBSYSTEMD_257 257~rc1
@@ -756,6 +762,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_pid_notifyf@LIBSYSTEMD_214 214
  sd_pid_notifyf_with_fds@LIBSYSTEMD_254 254
  sd_pidfd_get_cgroup@LIBSYSTEMD_253 253
+ sd_pidfd_get_inode_id@LIBSYSTEMD_258 258~rc1
  sd_pidfd_get_machine_name@LIBSYSTEMD_253 253
  sd_pidfd_get_owner_uid@LIBSYSTEMD_253 253
  sd_pidfd_get_session@LIBSYSTEMD_253 253
@@ -820,10 +827,15 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_varlink_errorb@LIBSYSTEMD_257 257~rc1
  sd_varlink_flush@LIBSYSTEMD_257 257~rc1
  sd_varlink_flush_close_unref@LIBSYSTEMD_257 257~rc1
+ sd_varlink_get_current_method@LIBSYSTEMD_258 258~rc1
  sd_varlink_get_current_parameters@LIBSYSTEMD_257 257~rc1
+ sd_varlink_get_description@LIBSYSTEMD_258 258~rc1
  sd_varlink_get_event@LIBSYSTEMD_257 257~rc1
  sd_varlink_get_events@LIBSYSTEMD_257 257~rc1
  sd_varlink_get_fd@LIBSYSTEMD_257 257~rc1
+ sd_varlink_get_input_fd@LIBSYSTEMD_258 258~rc1
+ sd_varlink_get_n_fds@LIBSYSTEMD_258 258~rc1
+ sd_varlink_get_output_fd@LIBSYSTEMD_258 258~rc1
  sd_varlink_get_peer_gid@LIBSYSTEMD_257 257~rc1
  sd_varlink_get_peer_pid@LIBSYSTEMD_257 257~rc1
  sd_varlink_get_peer_pidfd@LIBSYSTEMD_257 257~rc1
@@ -834,6 +846,8 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_varlink_idl_dump@LIBSYSTEMD_257 257~rc1
  sd_varlink_idl_format@LIBSYSTEMD_257 257~rc1
  sd_varlink_idl_format_full@LIBSYSTEMD_257 257~rc1
+ sd_varlink_idl_parse@LIBSYSTEMD_258 258~rc1
+ sd_varlink_interface_free@LIBSYSTEMD_258 258~rc1
  sd_varlink_invocation@LIBSYSTEMD_257 257~rc1
  sd_varlink_invoke@LIBSYSTEMD_257 257~rc1
  sd_varlink_invokeb@LIBSYSTEMD_257 257~rc1
@@ -850,6 +864,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_varlink_ref@LIBSYSTEMD_257 257~rc1
  sd_varlink_reply@LIBSYSTEMD_257 257~rc1
  sd_varlink_replyb@LIBSYSTEMD_257 257~rc1
+ sd_varlink_reset_fds@LIBSYSTEMD_258 258~rc1
  sd_varlink_send@LIBSYSTEMD_257 257~rc1
  sd_varlink_sendb@LIBSYSTEMD_257 257~rc1
  sd_varlink_server_add_connection@LIBSYSTEMD_257 257~rc1
@@ -871,6 +886,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_varlink_server_listen_address@LIBSYSTEMD_257 257~rc1
  sd_varlink_server_listen_auto@LIBSYSTEMD_257 257~rc1
  sd_varlink_server_listen_fd@LIBSYSTEMD_257 257~rc1
+ sd_varlink_server_listen_name@LIBSYSTEMD_258 258~rc1
  sd_varlink_server_loop_auto@LIBSYSTEMD_257 257~rc1
  sd_varlink_server_new@LIBSYSTEMD_257 257~rc1
  sd_varlink_server_ref@LIBSYSTEMD_257 257~rc3
