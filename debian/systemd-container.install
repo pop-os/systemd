@@ -1,8 +1,8 @@
 #!/usr/bin/dh-exec
 usr/bin/importctl
 <pkg.systemd.upstream> usr/bin/updatectl
-<pkg.systemd.upstream> usr/bin/systemd-vmspawn
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-vmspawn@.service
+usr/bin/systemd-vmspawn
+usr/lib/systemd/system/systemd-vmspawn@.service
 usr/bin/machinectl
 usr/bin/portablectl
 usr/lib/systemd/import-pubring.*
@@ -38,7 +38,7 @@ usr/lib/systemd/system/dbus-org.freedesktop.portable1.service
 usr/lib/systemd/user/machine.slice
 usr/lib/systemd/user/machines.target
 usr/lib/systemd/user/systemd-nspawn@.service
-<pkg.systemd.upstream> usr/lib/systemd/user/systemd-vmspawn@.service
+usr/lib/systemd/user/systemd-vmspawn@.service
 usr/bin/systemd-dissect
 usr/bin/systemd-nspawn
 usr/lib/tmpfiles.d/portables.conf
@@ -64,5 +64,5 @@ usr/share/zsh/vendor-completions/_machinectl
 usr/share/bash-completion/completions/machinectl
 usr/share/bash-completion/completions/portablectl
 usr/share/bash-completion/completions/systemd-nspawn
-<pkg.systemd.upstream> usr/share/bash-completion/completions/systemd-vmspawn
+usr/share/bash-completion/completions/systemd-vmspawn
 usr/share/bash-completion/completions/importctl

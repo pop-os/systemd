@@ -1,7 +1,7 @@
 #!/usr/bin/dh-exec
 debian/tmp/usr/share/man/man1/importctl.1
 <pkg.systemd.upstream> debian/tmp/usr/share/man/man1/updatectl.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-vmspawn.1
+debian/tmp/usr/share/man/man1/systemd-vmspawn.1
 debian/tmp/usr/share/man/man1/mount.ddi.1
 debian/tmp/usr/share/man/man1/systemd-nspawn.1
 debian/tmp/usr/share/man/man5/org.freedesktop.import1.5
