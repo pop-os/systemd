@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -e
+
+# Reload & activate drop-in configuration shipped by this package in
+# /usr/lib/systemd/resolved.conf.d/ after installation/upgrades (LP: #2117730).
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
+    systemctl reload systemd-resolved.service || echo \
+        "WARNING: Could not reload systemd-resolved configuration from /usr/lib/systemd/resolved.conf.d/" 1>&2
+fi
+
+#DEBHELPER#
