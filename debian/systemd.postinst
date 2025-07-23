@@ -76,20 +76,6 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-# begin-remove-after: released:trixie
-# Move the old locale file into /etc. Symlinks will be created by tmpfiles.d later
-if [ -f "$DPKG_ROOT/etc/default/locale" ] && [ ! -L "$DPKG_ROOT/etc/default/locale" ] && [ ! -f "$DPKG_ROOT/etc/locale.conf" ]; then
-    mv "$DPKG_ROOT/etc/default/locale" "$DPKG_ROOT/etc/locale.conf"
-fi
-
-# On upgrade for now keep the current tmpfiles.d (as it used to be after patches),
-# drop in Forky
-if [ -n "$2" ] && dpkg --compare-versions "$2" lt 256~rc3-3 && [ ! -f "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf" ]; then
-    mkdir -p "$DPKG_ROOT/etc/tmpfiles.d/"
-    echo 'D /tmp 1777 root root -' > "$DPKG_ROOT/etc/tmpfiles.d/tmp.conf"
-fi
-# end-remove-after
-
 #DEBHELPER#
 
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
