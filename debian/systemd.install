@@ -551,7 +551,6 @@ var/lib/systemd/
 ../extra/journald.conf.d usr/lib/systemd/
 ../extra/units/getty-static.service usr/lib/systemd/system/
 ../extra/units/rc-local.service.d usr/lib/systemd/system/
-../extra/units/run-lock.mount usr/lib/systemd/system/
 ../extra/units/systemd-fsck-root.service.d/ usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/

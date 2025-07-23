@@ -3,6 +3,11 @@ systemd (258~rc1-1) experimental; urgency=medium
   - Support for legacy cgroupv1 has been completely removed. Any
     remaining override to force back cgroupv1 will no longer work.
 
+  - Support for the legacy debianism of a world-writable /run/lock/
+    has been removed. Unprivileged services must switch to
+    RuntimeDirectories= and unprivileged users must switch to
+    $XDG_RUNTIME_DIR.
+
  -- Luca Boccassi <bluca@debian.org>  Sat, 05 Jul 2025 13:19:15 +0100
 
 systemd (256-2) unstable; urgency=medium

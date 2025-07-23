@@ -19,4 +19,3 @@
 
 # Enable Debian specific units
 /usr/lib/systemd/system/getty-static.service /usr/lib/systemd/system/getty.target.wants/getty-static.service
-/usr/lib/systemd/system/run-lock.mount /usr/lib/systemd/system/local-fs.target.wants/run-lock.mount
