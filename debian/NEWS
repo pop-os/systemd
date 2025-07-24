@@ -8,6 +8,9 @@ systemd (258~rc1-1) experimental; urgency=medium
     RuntimeDirectories= and unprivileged users must switch to
     $XDG_RUNTIME_DIR.
 
+  - Support for the deprecated SysV control interfaces telinit, runlevel and
+    runlevel targets has been removed.
+
  -- Luca Boccassi <bluca@debian.org>  Sat, 05 Jul 2025 13:19:15 +0100
 
 systemd (256-2) unstable; urgency=medium
