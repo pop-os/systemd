@@ -113,6 +113,8 @@ Depends: ${shlibs:Depends},
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
+           elogind,
+           systemctl,
            opensysusers (<< 0.7.3-4.1~),
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
@@ -135,6 +137,8 @@ Multi-Arch: foreign
 Priority: important
 Protected: yes
 Conflicts: sysvinit-core,
+           finit-sysv,
+           runit-init,
            file-rc,
            systemd-shim,
            initscripts,
@@ -627,6 +631,7 @@ Suggests: polkitd,
           ${dlopen:Suggests},
 Provides: resolvconf
 Conflicts: resolvconf,
+           openresolv,
            systemd (<< 257.4-4~),
 Replaces: resolvconf,
 Description: systemd DNS resolver
