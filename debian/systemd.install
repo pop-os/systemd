@@ -506,7 +506,7 @@ usr/share/dbus-1/system-services/org.freedesktop.network1.service
 usr/share/dbus-1/system-services/org.freedesktop.systemd1.service
 usr/share/dbus-1/system-services/org.freedesktop.timedate1.service
 usr/share/doc/systemd/
-<pkg.systemd.upstream> usr/share/factory/
+usr/share/factory/
 usr/share/locale/
 usr/share/mime/packages/io.systemd.xml
 usr/share/polkit-1/actions/io.systemd.credentials.policy
