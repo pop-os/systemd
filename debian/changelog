@@ -1,11 +1,16 @@
-systemd (257.7-1ubuntu2) UNRELEASED; urgency=medium
+systemd (257.7-1ubuntu2) questing; urgency=medium
 
+  [ Lukas Märdian ]
   * d/control,d/systemd-resolved-dnssec*: Add systemd-resolved-dnssec binary,
     shipping a drop-in config from d/extra/resolved.conf.d/ (LP: #2117730)
   * d/t/control: Add new 'dnssec' test case.
   * d/control: Add Recommends to systemd-resolved-dnssec
 
- -- Lukas Märdian <slyon@ubuntu.com>  Tue, 29 Jul 2025 16:19:09 +0200
+  [ Nick Rosbrook ]
+  * test: ignore coredumps for gnusleep in addition to sleep (LP: #2116459)
+  * test: follow /usr/bin/sleep symlink when checking coredumps (LP: #2116465)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 29 Jul 2025 12:11:40 -0400
 
 systemd (257.7-1ubuntu1) questing; urgency=medium
 
