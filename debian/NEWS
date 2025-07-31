@@ -38,8 +38,8 @@ systemd (256~rc3-3) unstable; urgency=medium
 
     It is recommended to check /tmp/ for any leftover files before rebooting
     after installing this update and manually cleaning up, as the directory
-    will longer be cleaned up automatically on boot, as it is overmounted. It
-    is always possible to remount the root filesystem in a local directory
+    will no longer be cleaned up automatically on boot, as it is overmounted.
+    it is always possible to remount the root filesystem in a local directory
     and remove leftovers manually after rebooting, but this will not be done
     automatically to avoid unintential removals. This situation can be easily
     detected by checking the journal after a reboot, as there will be a log
