@@ -63,9 +63,9 @@ remove_shim() {
 
 # shellcheck disable=SC2166
 if [ "$1" = remove -o "$1" = purge ] && bootctl --print-esp-path > /dev/null 2>&1; then
-    for k in /boot/vmlinuz-* ; do
+    for k in /boot/vmlinu[xz]-*; do
         [ -f "$k" ] || continue
-        ver=$(basename "$k" | sed s/^vmlinuz-//)
+        ver=$(basename "$k" | sed s/^vmlinu[xz]-//)
         kernel-install remove "$ver"
     done
 

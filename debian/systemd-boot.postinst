@@ -157,9 +157,9 @@ if [ "$1" = configure ] && bootctl --print-esp-path > /dev/null 2>&1; then
 
     if [ -z "$2" ]; then
         # register existing kernel(s)
-        for k in /boot/vmlinuz-* ; do
+        for k in /boot/vmlinu[xz]-*; do
             [ -f "$k" ] || continue
-            ver=$(basename "$k" | sed s/^vmlinuz-//)
+            ver=$(basename "$k" | sed s/^vmlinu[xz]-//)
             kernel-install add "$ver" "$k"
         done
     fi
