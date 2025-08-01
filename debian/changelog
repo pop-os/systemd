@@ -1,3 +1,9 @@
+systemd (257.7-1ubuntu3) questing; urgency=medium
+
+  * meson.build: build with -Wl,-z,gcs-report=none on arm64 (LP: #2119100)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 01 Aug 2025 11:55:27 -0400
+
 systemd (257.7-1ubuntu2) questing; urgency=medium
 
   [ Lukas Märdian ]
