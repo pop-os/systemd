@@ -1,0 +1,34 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Fri, 1 Aug 2025 10:44:24 -0400
+Subject: meson.build: build with -Wl,-z,gcs-report=none on arm64
+
+With GCC 15 on arm64, we get linker warnings that "GCS is required by -z gcs",
+but the dependency/shared library "lacks the necessary property note."
+To properly fix this, arm64 libraries need to be re-built, and the warning
+cannot be silenced with a fix in systemd alone. Until that is resolved,
+silence this linker warning.
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2119100
+Forwarded: no
+---
+ meson.build | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 7ede6f7..398774b 100644
+--- a/meson.build
++++ b/meson.build
+@@ -457,6 +457,13 @@ possible_link_flags = [
+         '-Wl,-z,relro',
+ ]
+ 
++# LP: #2119100
++if host_machine.cpu_family() == 'aarch64'
++        possible_link_flags += [
++                '-Wl,-z,gcs-report=none',
++        ]
++endif
++
+ if get_option('b_sanitize') == 'none'
+         possible_link_flags += '-Wl,--warn-common'
+ endif
