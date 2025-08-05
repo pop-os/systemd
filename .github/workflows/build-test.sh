@@ -27,6 +27,7 @@ PACKAGES=(
     isc-dhcp-client
     itstool
     kbd
+    libarchive-dev
     libblkid-dev
     libbpf-dev
     libcap-dev
@@ -43,7 +44,6 @@ PACKAGES=(
     libqrencode-dev
     libssl-dev
     libtss2-dev
-    libxen-dev
     libxkbcommon-dev
     libxtables-dev
     libzstd-dev
@@ -69,6 +69,10 @@ COMPILER_VERSION="${COMPILER_VERSION:?}"
 LINKER="${LINKER:?}"
 CRYPTOLIB="${CRYPTOLIB:?}"
 RELEASE="$(lsb_release -cs)"
+
+if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "x86_64" ]; then
+    PACKAGES+=(libxen-dev)
+fi
 
 # Note: As we use postfixed clang/gcc binaries, we need to override $AR
 #       as well, otherwise meson falls back to ar from binutils which
@@ -96,7 +100,7 @@ if [[ "$COMPILER" == clang ]]; then
             sudo tee /etc/apt/sources.list.d/llvm-toolchain.list
     fi
 
-    PACKAGES+=("clang-$COMPILER_VERSION" "lldb-$COMPILER_VERSION" "python3-lldb-$COMPILER_VERSION" "lld-$COMPILER_VERSION" "clangd-$COMPILER_VERSION")
+    PACKAGES+=("clang-$COMPILER_VERSION" "lldb-$COMPILER_VERSION" "python3-lldb-$COMPILER_VERSION" "lld-$COMPILER_VERSION" "clangd-$COMPILER_VERSION" "llvm-$COMPILER_VERSION")
 elif [[ "$COMPILER" == gcc ]]; then
     CC="gcc-$COMPILER_VERSION"
     CXX="g++-$COMPILER_VERSION"
@@ -110,7 +114,11 @@ elif [[ "$COMPILER" == gcc ]]; then
         sudo add-apt-repository -y --no-update ppa:ubuntu-toolchain-r/test
     fi
 
-    PACKAGES+=("gcc-$COMPILER_VERSION" "gcc-$COMPILER_VERSION-multilib")
+    PACKAGES+=("gcc-$COMPILER_VERSION")
+    if [ "$(uname -m)" = "x86_64" ]; then
+        # Only needed for ia32 EFI builds
+        PACKAGES+=("gcc-$COMPILER_VERSION-multilib")
+    fi
 else
     fatal "Unknown compiler: $COMPILER"
 fi
