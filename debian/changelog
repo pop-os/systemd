@@ -1,3 +1,21 @@
+systemd (258~rc2-1) experimental; urgency=medium
+
+  * Install usr/share/factory files and restore nsswitch.conf/pam.d/issue
+    on factory reset
+  * systemd-boot: register interest in systemd-boot-signed trigger
+    (Closes: #1109984)
+  * NEWS: fix typo (Closes: #1109979)
+  * systemd-boot: fix registering/removing uncompressed kernels
+  * d/t/control: prefer systemd-boot-tools if available
+  * systemd-boot: make efibootmgr a dependency. Ensures efivars can be set
+    up correctly
+  * Update upstream source from tag 'upstream/258_rc2' Update to upstream
+    version '258~rc2' with Debian dir
+    164978ce9ff194871416f304705979b7d540a8e2
+  * systemd-container: update lintian overrides for more false positives
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 05 Aug 2025 17:19:48 +0100
+
 systemd (258~rc1-1) experimental; urgency=medium
 
   * ukify: recommend sbsigntool | pesign for signing (Closes: #1108803)
