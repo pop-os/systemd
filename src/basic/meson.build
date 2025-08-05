@@ -129,25 +129,22 @@ foreach item : [
         ['errno',      [],                 '',        ['<errno.h>'],            ],
 ]
 
-        fname = '@0@-list.txt'.format(item[0])
         generate_list = files('generate-@0@-list.sh'.format(item[0]))
         list_txt = custom_target(
                 input : [generate_list, item[1]],
-                output : fname,
+                output : '@0@-list.txt'.format(item[0]),
                 command : [env, 'bash', generate_list, cpp, system_include_args],
                 capture : true)
 
-        fname = '@0@-from-name.gperf'.format(item[0])
         gperf_file = custom_target(
                 input : list_txt,
-                output : fname,
+                output : '@0@-from-name.gperf'.format(item[0]),
                 command : [generate_gperfs, item[0], item[2], '@INPUT@'] + item[3],
                 capture : true)
 
-        fname = '@0@-from-name.inc'.format(item[0])
         target1 = custom_target(
                 input : gperf_file,
-                output : fname,
+                output : '@0@-from-name.inc'.format(item[0]),
                 command : [gperf,
                            '-L', 'ANSI-C', '-t', '--ignore-case',
                            '-N', 'lookup_@0@'.format(item[0]),
@@ -156,11 +153,10 @@ foreach item : [
                            '@INPUT@'],
                 capture : true)
 
-        fname = '@0@-to-name.inc'.format(item[0])
         awkscript = '@0@-to-name.awk'.format(item[0])
         target2 = custom_target(
                 input : [awkscript, list_txt],
-                output : fname,
+                output : '@0@-to-name.inc'.format(item[0]),
                 command : [awk, '-f', '@INPUT0@', '@INPUT1@'],
                 capture : true)
 
@@ -172,44 +168,33 @@ basic_sources += generated_gperf_headers
 
 ############################################################
 
-check_filesystems = find_program('check-filesystems.sh')
-r = run_command(
-        [
-                'env', '--chdir', meson.project_build_root(),
-                check_filesystems, cpp, files('filesystems-gperf.gperf'),
-                system_include_args,
-        ],
-        check: false,
-)
-if r.returncode() != 0
-        warning('Unknown filesystems defined in kernel headers:\n\n' + r.stdout())
-endif
+filesystem_sets_py = files('filesystem-sets.py')
+filesystem_sets_c = custom_target(
+        output : 'filesystem-sets.c',
+        command : [filesystem_sets_py,
+                   'fs-type-to-string',
+                   'filesystem-sets',
+                   'fs-in-group'],
+        capture : true)
+
+filesystems_gperf_gperf = custom_target(
+        output : 'filesystems-gperf.gperf',
+        command : [filesystem_sets_py,
+                   'gperf'],
+        capture : true)
 
 filesystems_gperf_h = custom_target(
-        input : 'filesystems-gperf.gperf',
+        input : filesystems_gperf_gperf,
         output : 'filesystems-gperf.h',
         command : [gperf, '@INPUT@', '--output-file', '@OUTPUT@'])
 
-generate_filesystem_list = find_program('generate-filesystem-list.py')
-fname = 'filesystem-list.inc'
-filesystem_list_inc = custom_target(
-        input : 'filesystems-gperf.gperf',
-        output : fname,
-        command : [generate_filesystem_list,
-                   '@INPUT@'],
-        capture : true)
+generated_sources += [filesystem_sets_c, filesystems_gperf_gperf, filesystems_gperf_h]
+basic_sources += [filesystem_sets_c, filesystems_gperf_h]
 
-generate_filesystem_switch_case_inc = find_program('generate-filesystem-switch-case.py')
-fname = 'filesystem-switch-case.inc'
-filesystem_switch_case_inc = custom_target(
-        input : 'filesystems-gperf.gperf',
-        output : fname,
-        command : [generate_filesystem_switch_case_inc,
-                   '@INPUT@'],
-        capture : true)
-
-generated_sources += [filesystem_list_inc, filesystem_switch_case_inc, filesystems_gperf_h]
-basic_sources += [filesystem_list_inc, filesystem_switch_case_inc, filesystems_gperf_h]
+test('kernel-filesystem-magics',
+     filesystem_sets_py,
+     args : ['check'],
+     env : ['CPP=@0@'.format(cpp)])
 
 libbasic_static = static_library(
         'basic',

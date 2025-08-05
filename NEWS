@@ -98,11 +98,6 @@ CHANGES WITH 258 in spe:
         * The D-Bus method org.freedesktop.systemd1.StartAuxiliaryScope() has
           been removed, which was deprecated since v257.
 
-        * systemd-networkd now supports configuring the timeout for IPv4
-          Duplicate Address Detection via a new setting
-          IPv4DuplicateAddressDetectionTimeoutSec=. The default timeout value
-          has been changed from 7 seconds to 200 milliseconds.
-
         * systemd-networkd previously emitted the machine ID as chassis ID
           through LLDP protocol, but now emits a deterministic ID,
           cryptographically derived from the machine ID as chassis ID. If you
@@ -132,8 +127,8 @@ CHANGES WITH 258 in spe:
           DeviceAllow=/DevicePolicy= (and thus restrict access to device nodes)
           will now also make use of the systemd-creds.socket Varlink
           functionality, and will not attempt to decrypt the credentials
-          in-process (and attempt to try to talk to the TPM for
-          that). Previously, encrypted credentials for per-system services were
+          in-process (and attempt to try to talk to the TPM for that).
+          Previously, encrypted credentials for per-system services were
           incompatible with PrivateDevices= and resulted in automatic extension
           of the DeviceAllow= list. The latter behaviour has been removed.
 
@@ -162,9 +157,9 @@ CHANGES WITH 258 in spe:
         Announcements of Future Feature Removals:
 
         * Support for System V service scripts is deprecated and will be
-          removed in v259. Please make sure to update your software
-          *now* to include a native systemd unit file instead of a legacy
-          System V script to retain compatibility with future systemd releases.
+          removed in v259. Please make sure to update your software *now* to
+          include a native systemd unit file instead of a legacy System V
+          script to retain compatibility with future systemd releases.
 
         * Support for systemd-repart's FactoryReset EFI variable has been
           deprecated and support for it will be removed in v260. Use the newer,
@@ -174,6 +169,10 @@ CHANGES WITH 258 in spe:
 
         * The meson option '-Dintegration-tests=' has been deprecated, and will
           be removed in a future release.
+
+        * The legacy iptables support through libiptc will be removed in v259.
+          Only nftables backend will be supported by systemd-networkd and
+          systemd-nspawn since v259.
 
         Service manager/PID1:
 
@@ -371,6 +370,12 @@ CHANGES WITH 258 in spe:
         * A new PrivateBPF= switch has been added for unit files, which may be
           used to mount a private bpffs instance for the unit's processes.
 
+        * Four new options added to mount the bpffs with the delegate options:
+          BPFDelegateCommands= BPFDelegateMaps=
+          BPFDelegatePrograms= BPFDelegateAttachments=
+          These allow an unprivileged container to use some BPF functionalities.
+          See also https://lwn.net/Articles/947173/
+
         * New user manager services systemd-nspawn@.service and
           systemd-vmspawn@.service and a machines.target unit to manage them
           have been added.
@@ -500,9 +505,19 @@ CHANGES WITH 258 in spe:
 
         systemd-networkd:
 
-        * The [Network] section in .network fails gained a new setting
-          MPLSRouting= which may be used to control Multi-Protocol Label
-          Switching on an interface.
+        * systemd-networkd now supports configuring the timeout for IPv4
+          Duplicate Address Detection via a new setting
+          IPv4DuplicateAddressDetectionTimeoutSec=. The default timeout value
+          has been changed from 7 seconds to 200 milliseconds.
+
+        * systemd-networkd gained support for IPv6 SIP, i.e. DHCPv6 options
+          SD_DHCP6_OPTION_SIP_SERVER_DOMAIN_NAME (21) and
+          SD_DHCP6_OPTION_SIP_SERVER_ADDRESS (22), controlled by a new UseSIP=
+          option in the [DHCPv6] section.
+
+        * A new MPLSRouting= setting in the [Network] section in .network files
+          can be used to control whether Multi-Protocol Label Switching is
+          enabled on an interface.
 
         * A system-wide default for ClientIdentifier= may now be set in
           networkd.conf. (Previously this had to be configured individually in
@@ -522,14 +537,14 @@ CHANGES WITH 258 in spe:
         * .netdev files gained new External=/VNIFilter= settings in [VXLAN]
           section.
 
-        * .netdev files can now configure HSR/SRP network devices too, via he new
-          [HSR] section.
+        * .netdev files can now configure HSR/SRP network devices too, via a
+          new [HSR] section.
 
         * The LLDP client will now pick up the VLAN Id from LLDP data. The LLDP
           sender will now send this field on VLAN devices.
 
-        * The DHCPv4 client in systemd-networkd now also supports BOOTP (via
-          the new BOOTP= setting).
+        * The DHCPv4 client in systemd-networkd now also supports BOOTP (via a
+          new BOOTP= setting).
 
         * The Local= setting in [Tunnel] section gained a new "dhcp_pd" value
           to allow setting the local address based on dhcp-pd addresses.
@@ -677,6 +692,9 @@ CHANGES WITH 258 in spe:
           information, and show the cryptographic algorithms by name instead of
           number.
 
+        * The search domains hard cap has been bumped from 256 to 1024, in order
+          to accommodate complex network setups.
+
         systemd-hostnamed:
 
         * The system hardware's serial number may now be read from DeviceTree
@@ -732,6 +750,9 @@ CHANGES WITH 258 in spe:
           --variables=yes/no. By setting --variables=yes modification of EFI
           variables can be forced now in environments where we'd previously
           automatically turn this off (e.g. in choot() contexts).
+
+        * bootctl's --graceful is now implicitly enabled when running in a
+          chroot, to ease integration in packaging scriptlets.
 
         * systemd-stub gained support for a couple of "extension" CHIDs, that
           are not part of the Microsoft's original spec, and which include EDID
@@ -1461,51 +1482,53 @@ CHANGES WITH 258 in spe:
           control the execution mode of quotacheck.
 
         Contributions from: 16mc1r, A. Wilcox, Aaron Rogers,
-        Adam Williamson, Adrian Vovk, Ahmad Fatoum, Alberto Planas, Alex,
-        Alex Xu (Hello71), Alexander Krabler, Alexander Kurtz,
-        Alexander Shopov, Alexander Stepchenko, Allison Karlitskaya,
-        Aman Verma, Américo Monteiro, AndreFerreiraMsc, Andreas Henriksson,
+        Abderrahim Kitouni, Adam Williamson, Adrian Vovk, Ahmad Fatoum,
+        Alberto Planas, Alex, Alex Xu (Hello71), Alexander Krabler,
+        Alexander Kurtz, Alexander Shopov, Alexander Stepchenko,
+        Allison Karlitskaya, Aman Verma, Américo Monteiro,
+        Andika Triwidada, AndreFerreiraMsc, Andreas Henriksson,
         Andreas Schneider, Andreas Stührk, Andres Beltran, Andrew Sayers,
         Andrii Chubatiuk, André Monteiro, Andy Shevchenko, Ani Sinha,
         Anthony Avina, Anthony Messina, Anton Ryzhov,
         Antonio Alvarez Feijoo, Arian van Putten, Arkadiusz Bokowy,
         Arnaudv6, AsciiWolf, Avram Dorfman, Bastien Nocera,
-        Beniamino Galvani, Busayo Dada, Carlo Teubner, Chris Grant,
-        Chris Hofstaedtler, Chris Mayo, Christian Glombek, Christian Hesse,
-        Colin Foster, Craig McLure, Daan De Meyer, DaanDeMeyer,
-        Dai MIKURUBE, Dan McGregor, Dan Streetman, Daniel Foster,
-        Daniel Rusek, Daniil, David C. Manuelda, David Härdeman,
-        David Rheinsberg, David Tardon, Debarshi Ray, Devilish Spirits,
+        Beniamino Galvani, Brett Holman, Busayo Dada, ButterflyOfFire,
+        Carlo Teubner, Chris Grant, Chris Hofstaedtler, Chris Mayo,
+        Christian Glombek, Christian Hesse, Colin Foster, Cosima Neidahl,
+        Craig McLure, Daan De Meyer, DaanDeMeyer, Dai MIKURUBE,
+        Dan McGregor, Dan Streetman, Daniel Foster, Daniel Rusek, Daniil,
+        David C. Manuelda, David Härdeman, David Rheinsberg,
+        David Tardon, Debarshi Ray, Deli Zhang, Devilish Spirits,
         Dimitri John Ledkov, Duncan Overbruck, Dusty Mabe, Eaterminer,
-        Eisuke Kawashima, Emilio Sepulveda, Emmanuel Ferdman,
+        Eisuke Kawashima, Emilio Sepulveda, Emir SARI, Emmanuel Ferdman,
         Enrico Tagliavini, Erik Larsson, Erin Shepherd, Ettore Atalan,
         Fabian Möller, Fabian Vogt, Federico Giovanardi, Fleuria,
         Florian Schmaus, Franck Bui, Frantisek Sumsal, Frede Braendstrup,
         Gabríel Arthúr Pétursson, Gavin Li, George Tsiamasiotis,
-        Grimmauld, H A, Hang Li, Harrison Vanderbyl, Hendrik Wolff,
-        Henri Aunin, Igor Opaniuk, Itxaka, Ivan Kruglov, Ivan Trubach,
-        Jacob McNamee, James Hilliard, Jan Engelhardt, Jan Kalabza,
-        Jan Macku, Jan Vaclav, Jan Čermák, Jared Baur,
+        Graham Clinch, Grimmauld, H A, Hang Li, Harrison Vanderbyl,
+        Hendrik Wolff, Henri Aunin, Igor Opaniuk, Itxaka, Ivan Kruglov,
+        Ivan Trubach, Jacob McNamee, James Hilliard, Jan Engelhardt,
+        Jan Kalabza, Jan Macku, Jan Vaclav, Jan Čermák, Jared Baur,
         Jaroslav Škarvada, Javier Francisco, Jelle van der Waa,
-        Jeremy Linton, Jesper Nilsson, Jim Spentzos, Joaquim Monteiro,
-        Joey Holtzman, John Rinehart, Jonas Gorski, Jordan Petridis,
-        Jose Ortuno, Jules Lamur, Justinas Kairys, Jörg Behrmann,
-        Katariina Lounento, Khem Raj, KidGrimes, Kurt Borja,
-        Lennart Poettering, Li Tian, Lin Jian, Linus Heckemann,
-        Lorenzo Arena, Louis Sautier, LuK1337, Luca Boccassi,
-        Lucas Adriano Salles, Luke Yeager, Lukáš Nykrýn,
-        Léane GRASSER, Marco Trevisan (Treviño), Marcos Alano,
-        Mario Limonciello, Markus Kurz, Martin Hundebøll, Martin Wilck,
-        Matteo Croce, Matthew Schwartz, Matthias Lisin,
-        Matthieu Baerts (NGI0), Matthieu LAURENT, MaxHearnden,
-        Michael Catanzaro, Michael Ferrari, Michael Limiero,
+        Jeremy Linton, Jesper Nilsson, Jesse Guo, Jim Spentzos,
+        Joaquim Monteiro, Joey Holtzman, John Rinehart, Jonas Gorski,
+        Jordan Petridis, Jose Ortuno, Jules Lamur, Justinas Kairys,
+        Jörg Behrmann, Katariina Lounento, Khem Raj, KidGrimes,
+        Kurt Borja, Lennart Poettering, Li Tian, Lin Jian,
+        Linus Heckemann, Lorenzo Arena, Louis Sautier, LuK1337,
+        Luca Boccassi, Lucas Adriano Salles, Luke Yeager, Lukáš Nykrýn,
+        Luna Jernberg, Léane GRASSER, Marco Trevisan (Treviño),
+        Marcos Alano, Mario Limonciello, Markus Kurz, Martin Hundebøll,
+        Martin Srebotnjak, Martin Wilck, Matteo Croce, Matthew Schwartz,
+        Matthias Lisin, Matthieu Baerts (NGI0), Matthieu LAURENT,
+        MaxHearnden, Michael Catanzaro, Michael Ferrari, Michael Limiero,
         Michael Olbrich, Michal Koutný, Michal Sekletár,
         Michał Moczulski, Mike Yuan, Miroslav Lichvar,
         Morten Hauke Solvang, Muhammad Nuzaihan Bin Kamal Luddin,
         Myrrh Periwinkle, NetSysFire, Nick Labich, Nick Owens,
         Nick Rosbrook, Nils K, Noel Georgi, Nuno Sá, Oliver Schramm,
         Paul Fertser, Pavithra Barithaya, Philip Freeman, Philip Withnall,
-        Piotr Drąg, Pontus Lundkvist, Ricky Tigg, Ronan Pigott,
+        Piotr Drąg, Pontus Lundkvist, Ricky Tigg, RocketDev, Ronan Pigott,
         Rudi Heitbaum, Ryan Blue, Ryan Thompson, Ryan Wilson, Salim B,
         Salvatore Cocuzza, Sam James, Sam Leonard, Samuel Dionne-Riel,
         Sea-Eun Lee, Septatrix, Shubhendra Kushwaha, Silvio Knizek,
@@ -1520,12 +1543,12 @@ CHANGES WITH 258 in spe:
         ZIHCO, Zbigniew Jędrzejewski-Szmek, andrejpodzimek, anonymix007,
         cvlc12, damnkiwi6120, davjav, fishears, hanjinpeng, haxibami,
         herbrechtsmeier, honjow, hsu zangmen, igo95862, jane400, jinyaoguo,
-        joo es, kmeaw, madroach, maia x., msizanoen, naly zzwd,
-        nkraetzschmar, nl6720, peelz, persmule, richfifeg, tim tom, tuxmainy,
-        tytan652, ver4a, victor-ok, vlefebvre, wrvsrx, wtmpx, xinpeng wang,
-        z z, Дамјан Георгиевски, 铝箔
+        joo es, kmeaw, luc-salles, madroach, maia x., msizanoen, naly zzwd,
+        nkraetzschmar, nl6720, peelz, persmule, richfifeg, ssoss, tim tom,
+        tuxmainy, tytan652, ver4a, victor-ok, vlefebvre, wrvsrx, wtmpx,
+        xinpeng wang, z z, Дамјан Георгиевски, 铝箔
 
-        — Edinburgh, 2025/07/23
+        — Edinburgh, 2025/08/05
 
 CHANGES WITH 257:
 

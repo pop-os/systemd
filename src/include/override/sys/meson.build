@@ -17,6 +17,7 @@ arch_list = [
         'powerpc64',
         'riscv32',
         'riscv64',
+        'sh',
         's390',
         's390x',
         'sparc',
@@ -31,11 +32,13 @@ syscall_list_txt = files('syscall-list.txt')
 
 syscall_lists = []
 foreach arch: arch_list
-        syscall_lists += files('syscalls-@0@.txt'.format(arch))
+        # We don't use files() here so that the 'update-syscall-tables' call
+        # above can run if arch_list is extended.
+        syscall_lists += meson.current_source_dir() / 'syscalls-@0@.txt'.format(arch)
 endforeach
-
-generate_syscall_py = find_program('generate-syscall.py')
 
 run_target(
         'update-syscall-header',
-        command : [generate_syscall_py, files('syscall.h')] + syscall_lists)
+        command : [files('generate-syscall.py'),
+                   files('syscall.h'),
+                   syscall_lists])

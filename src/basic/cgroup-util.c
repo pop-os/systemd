@@ -38,7 +38,7 @@
 typedef union {
         struct file_handle file_handle;
         uint8_t space[offsetof(struct file_handle, f_handle) + sizeof(uint64_t)];
-} cg_file_handle;
+} _alignas_(uint64_t) cg_file_handle;
 
 #define CG_FILE_HANDLE_INIT                                     \
         (cg_file_handle) {                                      \
@@ -773,7 +773,7 @@ int cg_is_empty(const char *controller, const char *path) {
         if (empty_or_root(path))
                 return false;
 
-        r = cg_get_keyed_attribute(SYSTEMD_CGROUP_CONTROLLER, path, "cgroup.events", STRV_MAKE("populated"), &t);
+        r = cg_get_keyed_attribute(controller, path, "cgroup.events", STRV_MAKE("populated"), &t);
         if (r == -ENOENT)
                 return true;
         if (r < 0)
