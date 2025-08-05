@@ -4,7 +4,7 @@
 add_test_setup('integration')
 add_test_setup('shell', env : {'TEST_SHELL' : '1'})
 
-integration_test_wrapper = find_program('integration-test-wrapper.py')
+integration_test_wrapper = files('integration-test-wrapper.py')
 integration_tests = []
 integration_test_template = {
         'mkosi-args' : [],
@@ -43,6 +43,7 @@ foreach dirname : [
         'TEST-07-PID1',
         'TEST-08-INITRD',
         'TEST-09-REBOOT',
+        'TEST-10-MOUNT',
         'TEST-13-NSPAWN',
         'TEST-15-DROPIN',
         'TEST-16-EXTEND-TIMEOUT',
