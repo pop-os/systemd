@@ -3,13 +3,13 @@ systemd (258~rc1-1) experimental; urgency=medium
   - Support for legacy cgroupv1 has been completely removed. Any
     remaining override to force back cgroupv1 will no longer work.
 
-  - Support for the legacy debianism of a world-writable /run/lock/
-    has been removed. Unprivileged services must switch to
-    RuntimeDirectories= and unprivileged users must switch to
-    $XDG_RUNTIME_DIR.
-
-  - Support for the deprecated SysV control interfaces telinit, runlevel and
-    runlevel targets has been removed.
+  - Support for various deprecated SysV interfaces has been removed:
+    - world-writable /run/lock/: unprivileged services must switch to
+      RuntimeDirectories= and unprivileged users must switch to
+      $XDG_RUNTIME_DIR. $TMPDIR can be used as a further fallback.
+    - telinit
+    - runlevel
+    - runlevel targets
 
  -- Luca Boccassi <bluca@debian.org>  Sat, 05 Jul 2025 13:19:15 +0100
 
@@ -39,7 +39,7 @@ systemd (256~rc3-3) unstable; urgency=medium
     It is recommended to check /tmp/ for any leftover files before rebooting
     after installing this update and manually cleaning up, as the directory
     will no longer be cleaned up automatically on boot, as it is overmounted.
-    it is always possible to remount the root filesystem in a local directory
+    It is always possible to remount the root filesystem in a local directory
     and remove leftovers manually after rebooting, but this will not be done
     automatically to avoid unintential removals. This situation can be easily
     detected by checking the journal after a reboot, as there will be a log
