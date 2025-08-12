@@ -1,3 +1,12 @@
+systemd (258~rc2-2) unstable; urgency=medium
+
+  * Stop installing /var/lib/systemd in the package. /var/ needs to be
+    handled by tmpfiles.d, not by the package, so that it can be deleted
+    and recreated as needed on first boot.
+  * NEWS: fixlets and adjustments (Closes: #1110569)
+
+ -- Luca Boccassi <bluca@debian.org>  Tue, 12 Aug 2025 21:34:13 +0100
+
 systemd (258~rc2-1) experimental; urgency=medium
 
   * Install usr/share/factory files and restore nsswitch.conf/pam.d/issue
