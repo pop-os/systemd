@@ -11,6 +11,11 @@ systemd (258~rc1-1) experimental; urgency=medium
     - runlevel
     - runlevel targets
 
+  - Support for SysV init scripts is retained for this release, but will
+    be dropped in v259, due by the end of 2025. Any package intending
+    to ship in Forky and work under systemd needs to start shipping a
+    unit file within the Forky development cycle.
+
  -- Luca Boccassi <bluca@debian.org>  Sat, 05 Jul 2025 13:19:15 +0100
 
 systemd (256-2) unstable; urgency=medium
