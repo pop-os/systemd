@@ -10,4 +10,4 @@ usr/lib/systemd/system/systemd-boot-clear-sysfail.service
 usr/lib/systemd/system/systemd-boot-random-seed.service
 usr/lib/systemd/system/systemd-boot-update.service
 ../extra/initramfs etc/
-../extra/kernel etc/
+../extra/kernel usr/share/
