@@ -1,3 +1,15 @@
+systemd (258~rc3-1) unstable; urgency=medium
+
+  * systemd-boot: install kernel hooks to /usr/share/ It is now supported
+    since Trixie, so shim the hooks in /usr/share/ so they can be
+    overridden in /etc/
+  * Update upstream source from tag 'upstream/258_rc3' Update to upstream
+    version '258~rc3' with Debian dir
+    024c11377e68f4e54703104737379ce23e48c7cf
+    (Closes: #1111326 #1110997)
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 20 Aug 2025 15:27:08 +0100
+
 systemd (258~rc2-2) unstable; urgency=medium
 
   * Stop installing /var/lib/systemd in the package. /var/ needs to be
