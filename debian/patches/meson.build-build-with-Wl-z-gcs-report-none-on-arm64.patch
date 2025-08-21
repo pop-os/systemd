@@ -15,7 +15,7 @@ Forwarded: no
  1 file changed, 7 insertions(+)
 
 diff --git a/meson.build b/meson.build
-index 7ede6f7..398774b 100644
+index a4730f0..2a22595 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -457,6 +457,13 @@ possible_link_flags = [

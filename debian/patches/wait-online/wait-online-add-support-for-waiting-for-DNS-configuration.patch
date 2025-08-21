@@ -54,7 +54,7 @@ index e696a2b..2daeabf 100644
          <term><option>--any</option></term>
  
 diff --git a/src/network/meson.build b/src/network/meson.build
-index 295d015..5bcce39 100644
+index 8247759..c78dbbb 100644
 --- a/src/network/meson.build
 +++ b/src/network/meson.build
 @@ -114,6 +114,7 @@ sources = files(

@@ -15,10 +15,10 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2116465
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/test/units/TEST-87-AUX-UTILS-VM.coredump.sh b/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
-index 5b3a148..6daab43 100755
+index 23be2c4..2c7137d 100755
 --- a/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
 +++ b/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
-@@ -97,12 +97,12 @@ EOF
+@@ -98,12 +98,12 @@ EOF
      machinectl start "$CONTAINER"
      timeout "$TIMEOUT" bash -xec "until systemd-run -M '$CONTAINER' -q --wait --pipe true; do sleep .5; done"
  
