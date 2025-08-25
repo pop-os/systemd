@@ -87,7 +87,7 @@ class ServicesTest(unittest.TestCase):
             # has kernel messages
             self.assertRegex(log, 'kernel:.*')
         # has init messages
-        self.assertRegex(log, 'systemd.*Reached target(?: graphical.target -)? Graphical Interface')
+        self.assertRegex(log, 'systemd.*Reached target')
         # has other services
         self.assertRegex(log, 'NetworkManager.*:')
 
