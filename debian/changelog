@@ -1,3 +1,17 @@
+systemd (257.8-0ubuntu1) questing; urgency=medium
+
+  * New upstream stable version 257.8
+    - Bug fixes only
+    - d/gbp.conf: set upstream-branch=upstream/257.x
+    - Update upstream source from tag 'ubuntu/upstream/257.8'
+      Update to upstream version '257.8'
+      with Debian dir 8f881d0950662d924a4334d266ef5606b560f61c
+  * d/rules: drop bpf build workarounds for Ubuntu
+  * test: skip TEST-50-DISSECT.dissect (LP: #2116460)
+  * d/t/boot-and-services: tweak test_rsyslog regexes
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 25 Aug 2025 15:51:41 -0400
+
 systemd (257.7-1ubuntu3) questing; urgency=medium
 
   * meson.build: build with -Wl,-z,gcs-report=none on arm64 (LP: #2119100)
