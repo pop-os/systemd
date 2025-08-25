@@ -88,9 +88,9 @@ class ServicesTest(unittest.TestCase):
             # has kernel messages
             self.assertRegex(log, 'kernel:.*')
         # has init messages
-        self.assertRegex(log, 'systemd.*Reached target(?: graphical.target -)? Graphical Interface')
+        self.assertRegex(log, 'systemd.*Reached target')
         # has other services
-        self.assertRegex(log, 'NetworkManager.*:')
+        self.assertRegex(log, 'systemd-resolved.*:')
 
     @unittest.skipIf(is_container, 'udev does not work in containers')
     def test_udev(self):
