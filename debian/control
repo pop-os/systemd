@@ -611,7 +611,9 @@ Suggests: polkitd,
 Provides: resolvconf
 Conflicts: resolvconf,
            systemd (<< 257.4-4~),
+           systemd-resolved-dnssec,
 Replaces: resolvconf,
+          systemd-resolved-dnssec,
 Description: systemd DNS resolver
  This package provides systemd's DNS resolver and the command line tool to
  manage it.
