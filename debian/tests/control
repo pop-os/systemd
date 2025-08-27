@@ -296,8 +296,3 @@ Depends: systemd (>= 254~),
   uidmap,
   jq,
 Restrictions: needs-root, allow-stderr, isolation-machine, needs-internet, breaks-testbed, skip-not-installable, skippable
-
-Test-Command: resolvectl dnssec | grep "allow-downgrade" && [ -z "$(resolvectl status | grep DNSSEC=no)" ]
-Features: test-name=dnssec
-Depends: systemd-resolved-dnssec
-Restrictions: isolation-container

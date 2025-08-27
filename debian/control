@@ -606,7 +606,6 @@ Depends: ${shlibs:Depends},
          default-dbus-system-bus | dbus-system-bus
 Recommends: ${dlopen:Recommends},
             libidn2-0,
-            systemd-resolved-dnssec,
 Suggests: polkitd,
           ${dlopen:Suggests},
 Provides: resolvconf
@@ -619,18 +618,6 @@ Description: systemd DNS resolver
  .
  Installing this package automatically overwrites /etc/resolv.conf and switches
  it to be managed by systemd-resolved.
-
-Package: systemd-resolved-dnssec
-Multi-Arch: foreign
-Priority: optional
-Architecture: all
-Depends: ${shlibs:Depends},
-         ${misc:Depends},
-         systemd-resolved,
-Description: Drop-in config for systemd DNS resolver, enabling DNSSEC
- This package installs a drop-in configuration to enable the system-wide
- "DNSSEC=allow-downgrade" configuration in /usr/lib/systemd/resolved.conf.d,
- allowing the usage of DNSSEC, while keeping a non-DNSSEC fallback.
 
 Package: systemd-dev
 Architecture: all
