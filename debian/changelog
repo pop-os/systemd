@@ -1,3 +1,17 @@
+systemd (257.8-0ubuntu2) questing; urgency=medium
+
+  [ Lukas Märdian ]
+  * d/[t/]control,d/systemd-resolved-dnssec*: Disable DNSSEC by default.
+    (LP: #2121483)
+
+  [ Nick Rosbrook ]
+  * resolve: re-create link unicast scopes on reload
+  * d/control: Conflicts: and Replaces: systemd-resolved-dnssec
+    Ensures systemd-resolved-dnssec is removed on systems that already have
+    it.
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 27 Aug 2025 16:09:22 -0400
+
 systemd (257.8-0ubuntu1) questing; urgency=medium
 
   * New upstream stable version 257.8
