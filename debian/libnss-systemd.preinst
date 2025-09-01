@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+if { [ "$1" = install ] || [ "$1" = upgrade ]; } &&
+    dpkg --compare-versions "$2" lt-nl "257.8-0ubuntu3"; then
+        # Signal to postinst that the NSS services should be installed on
+        # recent upgraders, since the module is available starting from 232-7
+        # but users may not have a fully configured NSS switch (LP: #2121017).
+        touch "${DPKG_ROOT}/etc/nsswitch.conf.nss.${DPKG_MAINTSCRIPT_PACKAGE}-will-install"
+fi
