@@ -1,4 +1,4 @@
-passwd	last	systemd
-group	last	systemd
-shadow	last	systemd
-gshadow	last	systemd
+passwd	after=files	systemd
+group	after=files	systemd
+shadow	after=files	systemd
+gshadow	after=files	systemd
