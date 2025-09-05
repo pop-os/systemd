@@ -1,3 +1,11 @@
+systemd (258~rc4-1) unstable; urgency=medium
+
+  * Update upstream source from tag 'upstream/258_rc4' Update to upstream
+    version '258~rc4' with Debian dir
+    90746e462e2de5e83f4bcadd50a96a0fefd795de
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 05 Sep 2025 11:37:05 +0100
+
 systemd (258~rc3-1) unstable; urgency=medium
 
   * systemd-boot: install kernel hooks to /usr/share/ It is now supported
