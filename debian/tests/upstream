@@ -25,10 +25,16 @@ RELEASE=$(
 
 cleanup () {
     if [ -f "${workdir}/btrfs/build/meson-logs/testlog.txt" ]; then
-        cp "${workdir}/btrfs/build/meson-logs/testlog.txt" "$AUTOPKGTEST_ARTIFACTS"
+        zstd --force --ultra -22 -o "${AUTOPKGTEST_ARTIFACTS}/testlog.txt.zst" "${workdir}/btrfs/build/meson-logs/testlog.txt"
     fi
     if [ -d "${workdir}/btrfs/build/test/journal" ]; then
         cp -r "${workdir}/btrfs/build/test/journal" "$AUTOPKGTEST_ARTIFACTS"
+        for j in "${AUTOPKGTEST_ARTIFACTS}/journal"/*.journal; do
+            if [ ! -f "$j" ]; then
+                continue
+            fi
+            zstd --force --rm --ultra -22 -o "$j.zst" "$j"
+        done
     fi
     if [ -n "$workdir" ]; then
         umount "$workdir/btrfs" || true
