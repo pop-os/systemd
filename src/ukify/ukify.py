@@ -945,6 +945,19 @@ def pe_add_sections(uki: UKI, output: str) -> None:
         if section.name == '.linux':
             # Old kernels that use EFI handover protocol will be executed inline.
             new_section.IMAGE_SCN_CNT_CODE = True
+
+            # Check if the kernel PE has the NX_COMPAT flag set, if not strip it from the UKI as they need
+            # to have the same value, otherwise when firmwares start enforcing it, booting will fail.
+            # https://microsoft.github.io/mu/WhatAndWhy/enhancedmemoryprotection/
+            # https://www.kraxel.org/blog/2023/12/uefi-nx-linux-boot/
+            try:
+                inner_pe = pefile.PE(data=data, fast_load=True)
+                nxbit = pefile.DLL_CHARACTERISTICS['IMAGE_DLLCHARACTERISTICS_NX_COMPAT']
+                if not inner_pe.OPTIONAL_HEADER.DllCharacteristics & nxbit:
+                    pe.OPTIONAL_HEADER.DllCharacteristics &= ~nxbit
+            except pefile.PEFormatError:
+                # Unit tests build images with bogus data
+                print(f'{section.name} in {uki.executable} is not a valid PE, ignoring', file=sys.stderr)
         else:
             new_section.IMAGE_SCN_CNT_INITIALIZED_DATA = True
 
@@ -956,14 +969,13 @@ def pe_add_sections(uki: UKI, output: str) -> None:
                 if new_section.Misc_VirtualSize > s.SizeOfRawData:
                     raise PEError(f'Not enough space in existing section {section.name} to append new data.')
 
-                padding = bytes(new_section.SizeOfRawData - new_section.Misc_VirtualSize)
+                padding = bytes(s.SizeOfRawData - new_section.Misc_VirtualSize)
                 pe.__data__ = (
                     pe.__data__[: s.PointerToRawData]
                     + data
                     + padding
                     + pe.__data__[pe.sections[i + 1].PointerToRawData :]
                 )
-                s.SizeOfRawData = new_section.SizeOfRawData
                 s.Misc_VirtualSize = new_section.Misc_VirtualSize
                 break
         else:
@@ -1468,7 +1480,7 @@ def inspect_section(
 
     if ttype == 'text':
         try:
-            struct['text'] = data.decode()
+            struct['text'] = data.rstrip(b'\0').replace(b'\0', b'\\0').decode()
         except UnicodeDecodeError as e:
             print(f'Section {name!r} is not valid text: {e}', file=sys.stderr)
             struct['text'] = '(not valid UTF-8)'
