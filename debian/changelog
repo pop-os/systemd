@@ -1,3 +1,29 @@
+systemd (257.9-0ubuntu1) questing; urgency=medium
+
+  [ Nick Rosbrook ]
+  * New upstream stable version 257.9
+    - Bug fixes only
+    - Update upstream source from tag 'ubuntu/upstream/257.9'
+      Update to upstream version '257.9'
+      with Debian dir 991861d2786efe36972fc9cc9d3dcb496264de5a
+  * Drop resolve-re-create-link-unicast-scopes-on-reload.patch
+    Applied upstream: https://github.com/systemd/systemd/commit/fc74fb8cb3
+
+  [ Marco Trevisan (Treviño) ]
+  * debian/libnss-systemd.preinst: force nsswitch.conf update
+    Drop systemd instances in nsswitch.conf, and force postinst to
+    re-generate the file (LP: #2121017)
+  * debian/linbnss-systemd.nss: Install systemd service after files.
+    As suggested by upstream the systemd NSS service should come just after
+    files
+
+  [ Luca Boccassi ]
+  * systemd-boot-tools: change architecture to linux-any.
+    The tool can be used for cross-building, and it's available on
+    all architectures, not just EFI ones (LP: #2122158)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 08 Sep 2025 08:41:33 -0400
+
 systemd (257.8-0ubuntu2) questing; urgency=medium
 
   [ Lukas Märdian ]
