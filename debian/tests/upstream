@@ -127,6 +127,7 @@ Incremental=no
 ${RELEASE:+"Release=${RELEASE}"}
 
 [Content]
+KernelCommandLine=systemd.default_device_timeout_sec=240
 ${local_binaries:+"PackageDirectories=${local_binaries}"}
 
 [Runtime]
