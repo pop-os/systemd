@@ -123,6 +123,7 @@ Depends: systemd-tests,
   libgcrypt20-dev,
   libcryptsetup-dev,
   tzdata-legacy | tzdata,
+  dosfstools,
 Restrictions: needs-root, isolation-container, skip-not-installable, skippable
 
 Tests: boot-smoke
