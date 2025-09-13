@@ -3,4 +3,5 @@
 set -e
 
 export ARTIFACT_DIRECTORY=$AUTOPKGTEST_ARTIFACTS
+export SYSTEMD_LOG_LEVEL=debug
 /usr/lib/systemd/tests/run-unit-tests.py
