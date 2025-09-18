@@ -6,3 +6,5 @@ udev: spare-manual-page
 udev: groff-message * [usr/share/man/*]
 # Needed as a workaround for dpkg bug w.r.t. usrmerge
 udev: conflicts-with-version systemd (<< 255~rc1-4~)
+# These are generic rules, they do not provide any specific hardware access
+udev: appstream-metadata-missing-modalias-provide usr/lib/udev/rules.d/*
