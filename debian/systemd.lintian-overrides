@@ -11,5 +11,5 @@ systemd: possibly-insecure-handling-of-tmp-files-in-maintainer-script /tmp [post
 systemd: groff-message * [usr/share/man/*]
 # Needed as a workaround for dpkg bug w.r.t. usrmerge
 systemd: conflicts-with-version opensysusers (<< 0.7.3-4.1~)
-# These are generic rules, they do not provide any specific hardware access
-systemd: appstream-metadata-missing-modalias-provide usr/lib/udev/rules.d/*
+# These are thousands of device-specific enablements across rules and hwdb, cannot provide appstream for all
+systemd: appstream-metadata-missing-modalias-provide *
