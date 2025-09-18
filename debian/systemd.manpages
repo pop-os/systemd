@@ -40,6 +40,8 @@ debian/tmp/usr/share/man/man1/timedatectl.1
 debian/tmp/usr/share/man/man1/varlinkctl.1
 debian/tmp/usr/share/man/man5/binfmt.d.5
 debian/tmp/usr/share/man/man5/capsule@.service.5
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/confext.conf.5
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/confext.conf.d.5
 debian/tmp/usr/share/man/man5/environment.d.5
 debian/tmp/usr/share/man/man5/extension-release.5
 debian/tmp/usr/share/man/man5/hostname.5
@@ -71,6 +73,8 @@ debian/tmp/usr/share/man/man5/pstore.conf.5
 debian/tmp/usr/share/man/man5/pstore.conf.d.5
 debian/tmp/usr/share/man/man5/sleep.conf.d.5
 debian/tmp/usr/share/man/man5/sysctl.d.5
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/sysext.conf.5
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/sysext.conf.d.5
 debian/tmp/usr/share/man/man5/system.conf.d.5
 debian/tmp/usr/share/man/man5/systemd.automount.5
 debian/tmp/usr/share/man/man5/systemd.device.5
