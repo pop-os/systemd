@@ -1,0 +1,54 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Thu, 18 Sep 2025 09:16:02 -0400
+Subject: basic: validate timezones in get_timezones()
+
+Origin: upstream, https://github.com/systemd/systemd/commit/9fe168a92c87d9b2def3a18d54b0b62c04c4aee0
+Bug-Ubuntu: https://launchpad.net/bugs/2125405
+
+Depending on the packaging of tzdata, /usr/share/zoneinfo/tzdata.zi may
+reference zones or links that are not actually present on the system.
+E.g. on Debian and Ubuntu, there is a tzdata-legacy package that
+contains "legacy" zones and links, but they are still referenced in
+/usr/share/zoneinfo/tzdata.zi shipped by the main tzdata package.
+
+Right now, get_timezoes() does not validate timezones when building the
+list, which makes the following possible:
+
+ $ timedatectl list-timezones | grep "US/Alaska"
+ US/Alaska
+
+ $ timedatectl set-timezone US/Alaska
+ Failed to set time zone: Invalid or not installed time zone 'US/Alaska'
+
+which feels buggy. Hence, simply validate timezones in get_timezones()
+to avoid listing timezones that are not installed.
+---
+ src/basic/time-util.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 29afb08..2425bc2 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -1443,6 +1443,10 @@ static int get_timezones_from_zone1970_tab(char ***ret) {
+                 if (*cc == '#')
+                         continue;
+ 
++                if (!timezone_is_valid(tz, LOG_DEBUG))
++                        /* Don't list unusable timezones. */
++                        continue;
++
+                 r = strv_extend(&zones, tz);
+                 if (r < 0)
+                         return r;
+@@ -1495,6 +1499,10 @@ static int get_timezones_from_tzdata_zi(char ***ret) {
+                         /* Not a line we care about. */
+                         continue;
+ 
++                if (!timezone_is_valid(tz, LOG_DEBUG))
++                        /* Don't list unusable timezones. */
++                        continue;
++
+                 r = strv_extend(&zones, tz);
+                 if (r < 0)
+                         return r;

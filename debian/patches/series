@@ -12,3 +12,4 @@ test-ignore-coredumps-for-gnusleep-in-addition-to-sleep-L.patch
 test-follow-usr-bin-sleep-symlink-when-checking-coredumps.patch
 meson.build-build-with-Wl-z-gcs-report-none-on-arm64.patch
 test-skip-TEST-50-DISSECT.dissect.patch
+lp2125405-basic-validate-timezones-in-get_timezones.patch
