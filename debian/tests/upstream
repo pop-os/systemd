@@ -37,6 +37,12 @@ cleanup () {
     fi
 }
 
+# Force use of gnucp (LP: #2122363)
+if [ "$(readlink -f /usr/bin/cp)" = "/usr/lib/cargo/bin/coreutils/cp" ]; then
+    rm /usr/bin/cp
+    ln -s /usr/bin/gnucp /usr/bin/cp
+fi
+
 # apparmor is not compatible with swtpm
 aa-teardown >/dev/null 2>&1 || true
 # we need user namespaces for some tests running in nspawn
