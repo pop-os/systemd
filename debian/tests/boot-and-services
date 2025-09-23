@@ -236,6 +236,7 @@ profile "violator-test" {
   #include <abstractions/base>
 
   /{usr/,}bin/** rix,
+  file @{coreutil_dirs}* ix,
   /etc/machine-id r,
 }
 ''')
