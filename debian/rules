@@ -182,13 +182,11 @@ ifeq (, $(filter $(DEB_BUILD_PROFILES), stage1 pkg.systemd.nobpf))
 ifneq (,$(filter $(DEB_TARGET_ARCH), amd64 arm64 ppc64el riscv64 s390x))
 CONFFLAGS += \
 	-Dvmlinux-h=provided \
+	-Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h \
 	-Dbpf-framework=enabled \
 	-Dbpf-compiler=clang
 
-ifneq ($(DEB_VENDOR),Ubuntu)
-CONFFLAGS += -Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h
-else
-CONFFLAGS += -Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/vmlinux.h
+ifeq ($(DEB_VENDOR),Ubuntu)
 # TODO: drop this and the alternative build dep once support for Noble is dropped
 #
 # Source: https://git.launchpad.net/ubuntu/+source/xdp-tools/tree/debian/rules
