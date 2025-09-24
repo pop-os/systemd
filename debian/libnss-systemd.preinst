@@ -4,7 +4,7 @@ set -e
 #DEBHELPER#
 
 if { [ "$1" = install ] || [ "$1" = upgrade ]; } &&
-    dpkg --compare-versions "$2" lt-nl "257.8-0ubuntu3"; then
+    dpkg --compare-versions "$2" lt-nl "257.9-0ubuntu2~"; then
 
         # First drop all the systemd instances from nsswitch, to ensure that we're adding them back and in order.
         # The code is the same that is generated for postrm, but we cannot call postrm
