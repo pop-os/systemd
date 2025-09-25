@@ -1,3 +1,12 @@
+systemd (257.9-0ubuntu2) questing; urgency=medium
+
+  * basic: validate timezones in get_timezones() (LP: #2125405)
+  * debian/libnss-systemd.nss: install after 'compat' too (LP: #2125403)
+  * d/t/boot-and-services: use coreutils tunable in apparmor test (LP: #2125614)
+  * d/t/upstream: use GNU cp in test setup (LP: #2122363)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 25 Sep 2025 12:45:39 -0400
+
 systemd (257.9-0ubuntu1) questing; urgency=medium
 
   [ Nick Rosbrook ]
