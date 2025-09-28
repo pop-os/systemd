@@ -124,6 +124,8 @@ Depends: systemd-tests,
   libcryptsetup-dev,
   tzdata-legacy | tzdata,
   dosfstools,
+  bsdutils,
+  bsdextrautils,
 Restrictions: needs-root, isolation-container, skip-not-installable, skippable
 
 Tests: boot-smoke
