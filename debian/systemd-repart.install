@@ -5,4 +5,7 @@ usr/lib/systemd/repart/
 <!stage1> usr/lib/systemd/systemd-sbsign
 usr/lib/systemd/system/initrd-root-fs.target.wants/systemd-repart.service
 usr/lib/systemd/system/sysinit.target.wants/systemd-repart.service
+<pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-repart.socket
 usr/lib/systemd/system/systemd-repart.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-repart@.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-repart.socket

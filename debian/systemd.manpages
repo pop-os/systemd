@@ -25,6 +25,7 @@ debian/tmp/usr/share/man/man1/systemd-inhibit.1
 debian/tmp/usr/share/man/man1/systemd-machine-id-setup.1
 <!stage1> debian/tmp/usr/share/man/man1/systemd-measure.1
 debian/tmp/usr/share/man/man1/systemd-mount.1
+<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-mute-console*.1
 debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
 debian/tmp/usr/share/man/man1/systemd-pty-forward.1

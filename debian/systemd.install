@@ -42,6 +42,7 @@ usr/bin/systemd-id128
 usr/bin/systemd-inhibit
 usr/bin/systemd-machine-id-setup
 usr/bin/systemd-mount
+<pkg.systemd.upstream> usr/bin/systemd-mute-console
 usr/bin/systemd-notify
 usr/bin/systemd-path
 usr/bin/systemd-pty-forward
@@ -247,6 +248,7 @@ usr/lib/systemd/system/sockets.target.wants/systemd-hostnamed.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-logind-varlink.socket
+<pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrlock.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-sysext.socket
@@ -345,6 +347,8 @@ usr/lib/systemd/system/systemd-logind-varlink.socket
 usr/lib/systemd/system/systemd-loop@.service
 usr/lib/systemd/system/systemd-machine-id-commit.service
 usr/lib/systemd/system/systemd-modules-load.service
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-mute-console.socket
+<pkg.systemd.upstream> usr/lib/systemd/system/systemd-mute-console@.service
 usr/lib/systemd/system/systemd-networkd*.service
 usr/lib/systemd/system/systemd-networkd*.socket
 usr/lib/systemd/system/systemd-network-generator.service
@@ -398,6 +402,7 @@ usr/lib/systemd/system/systemd-update-done.service
 usr/lib/systemd/system/systemd-user-sessions.service
 usr/lib/systemd/system/systemd-validatefs@.service
 usr/lib/systemd/system/systemd-volatile-root.service
+<pkg.systemd.upstream> usr/lib/systemd/system/system-systemd\x2dmute\x2dconsole.slice
 usr/lib/systemd/system/system-update-cleanup.service
 usr/lib/systemd/system/system-update-pre.target
 usr/lib/systemd/system/system-update.target
