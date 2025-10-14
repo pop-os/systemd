@@ -1,6 +1,5 @@
 lp2064096-switch-root-use-MS_MOVE-for-run-when-switchig-from-initrd.patch
 wait-online/resolve-rename-varlink_subscription-varlink_query_results.patch
-wait-online/resolved-add-a-helper-to-check-if-DNS-server-is-accessibl.patch
 wait-online/resolved-add-link_get_default_route-helper.patch
 lp2104943-test-network-add-handling-for-Ubuntu-FAN-patches.patch
 test-ignore-coredumps-for-gnusleep-in-addition-to-sleep-L.patch
