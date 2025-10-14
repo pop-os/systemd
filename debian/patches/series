@@ -2,7 +2,6 @@ lp2064096-switch-root-use-MS_MOVE-for-run-when-switchig-from-initrd.patch
 wait-online/resolve-rename-varlink_subscription-varlink_query_results.patch
 wait-online/resolved-add-a-helper-to-check-if-DNS-server-is-accessibl.patch
 wait-online/resolved-add-link_get_default_route-helper.patch
-wait-online/resolved-add-SubscribeDNSConfiguration-to-varlink-API.patch
 wait-online/wait-online-add-support-for-waiting-for-DNS-configuration.patch
 wait-online/test-add-test-for-resolved-SubscribeDNSConfiguration-API.patch
 wait-online/networkd-test-add-basic-tests-for-systemd-networkd-wait-o.patch
