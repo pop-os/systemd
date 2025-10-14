@@ -129,6 +129,9 @@ Depends: systemd-tests,
   libgcrypt20-dev,
   libcryptsetup-dev,
   tzdata-legacy | tzdata,
+  dosfstools,
+  bsdutils,
+  bsdextrautils,
 Restrictions: needs-root, isolation-container, skip-not-installable, skippable
 
 Tests: boot-smoke
@@ -237,7 +240,7 @@ Depends: systemd (>= 254~),
   systemd-timesyncd,
   systemd-oomd,
   systemd-homed,
-  systemd-boot [amd64 arm64 armhf i386 loong64 riscv64],
+  systemd-boot-tools | systemd-boot [amd64 arm64 armhf i386 loong64 riscv64],
   systemd-repart,
   systemd-cryptsetup,
   systemd-boot-efi [amd64 arm64 armhf i386 loong64 riscv64],

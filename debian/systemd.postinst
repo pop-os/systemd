@@ -76,13 +76,6 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-# begin-remove-after: released:trixie
-# Move the old locale file into /etc. Symlinks will be created by tmpfiles.d later
-if [ -f "$DPKG_ROOT/etc/default/locale" ] && [ ! -L "$DPKG_ROOT/etc/default/locale" ] && [ ! -f "$DPKG_ROOT/etc/locale.conf" ]; then
-    mv "$DPKG_ROOT/etc/default/locale" "$DPKG_ROOT/etc/locale.conf"
-fi
-# end-remove-after
-
 # Process all tmpfiles that we ship, including any overrides in
 # runtime-dir/sysadmin-dir/other packages (e.g. rsyslog)
 #

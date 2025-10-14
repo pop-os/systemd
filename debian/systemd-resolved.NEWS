@@ -1,6 +1,6 @@
 systemd (257.4-9) unstable; urgency=medium
 
-  * Starting with systemd/257.4-9 mDNS is disabled in systemd-resolved.
+  - Starting with systemd/257.4-9 mDNS is disabled in systemd-resolved.
     Users relying on mDNS for reachability of a machine MUST mask the
     associated drop-in before upgrading, or the machine will become
     unreachable upon package upgrade. To mask the drop-in, as root:

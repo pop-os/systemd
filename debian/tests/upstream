@@ -25,10 +25,16 @@ RELEASE=$(
 
 cleanup () {
     if [ -f "${workdir}/btrfs/build/meson-logs/testlog.txt" ]; then
-        cp "${workdir}/btrfs/build/meson-logs/testlog.txt" "$AUTOPKGTEST_ARTIFACTS"
+        zstd --force --ultra -20 -o "${AUTOPKGTEST_ARTIFACTS}/testlog.txt.zst" "${workdir}/btrfs/build/meson-logs/testlog.txt"
     fi
     if [ -d "${workdir}/btrfs/build/test/journal" ]; then
         cp -r "${workdir}/btrfs/build/test/journal" "$AUTOPKGTEST_ARTIFACTS"
+        for j in "${AUTOPKGTEST_ARTIFACTS}/journal"/*.journal; do
+            if [ ! -f "$j" ]; then
+                continue
+            fi
+            zstd --force --rm --ultra -20 -o "$j.zst" "$j"
+        done
     fi
     if [ -n "$workdir" ]; then
         umount "$workdir/btrfs" || true
@@ -127,6 +133,7 @@ Incremental=no
 ${RELEASE:+"Release=${RELEASE}"}
 
 [Content]
+KernelCommandLine=systemd.default_device_timeout_sec=240
 ${local_binaries:+"PackageDirectories=${local_binaries}"}
 
 [Runtime]

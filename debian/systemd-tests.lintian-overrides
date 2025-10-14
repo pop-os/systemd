@@ -8,6 +8,11 @@ systemd-tests: hardening-no-bindnow
 systemd-tests: hardening-no-relro
 # test payload, intentional
 systemd-tests: national-encoding [usr/lib/systemd/tests/testdata/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-withx20space.mount]
-systemd-tests: national-encoding [usr/lib/systemd/tests/testdata/test-fstab-generator/test-19-mounts-from-cmdline.expected/remote-fs.target.requires/hoge-withx20space.mount]
-# Intentional: value of config got in a release by mistake, needs to be kept
-systemd-tests: spelling-error-in-binary anually annually [usr/lib/systemd/tests/unit-tests/*]
+# Content for images
+systemd-tests: repeated-path-segment * [*]
+# Test files
+systemd-tests: systemd-service-file-missing-documentation-key [*]
+systemd-tests: systemd-service-file-refers-to-unusual-wantedby-target * [*]
+systemd-tests: wrong-path-for-interpreter /usr/bin/bash != /bin/bash [*]
+# Intentional for integration tests
+systemd-tests: symlink-is-self-recursive .. [usr/lib/systemd/tests/integration-tests/standalone/integration-tests]

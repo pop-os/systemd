@@ -1,8 +1,8 @@
 #!/usr/bin/dh-exec
 usr/bin/importctl
 <pkg.systemd.upstream> usr/bin/updatectl
-<pkg.systemd.upstream> usr/bin/systemd-vmspawn
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-vmspawn@.service
+usr/bin/systemd-vmspawn
+usr/lib/systemd/system/systemd-vmspawn@.service
 usr/bin/machinectl
 usr/bin/portablectl
 usr/lib/systemd/import-pubring.*
@@ -29,17 +29,26 @@ usr/lib/systemd/system/systemd-portabled.service
 usr/lib/systemd/system/systemd-sysupdate*
 usr/lib/systemd/system/var-lib-machines.mount
 usr/lib/systemd/system/machines.target
-<pkg.systemd.upstream> usr/lib/systemd/system/*.target.wants/systemd-machined*
+usr/lib/systemd/system/*.target.wants/systemd-machined*
 usr/lib/systemd/system/*.target.wants/var-lib-machines.mount
 usr/lib/systemd/system/dbus-org.freedesktop.import1.service
 usr/lib/systemd/system/dbus-org.freedesktop.machine1.service
 usr/lib/systemd/system/dbus-org.freedesktop.portable1.service
 <pkg.systemd.upstream> usr/lib/systemd/system/dbus-org.freedesktop.sysupdate1.service
+usr/lib/systemd/user/machine.slice
+usr/lib/systemd/user/machines.target
+<pkg.systemd.upstream> usr/lib/systemd/user/dbus-org.freedesktop.machine1.service
+<pkg.systemd.upstream> usr/lib/systemd/user/sockets.target.wants/systemd-machined.socket
+<pkg.systemd.upstream> usr/lib/systemd/user/systemd-machined.service
+<pkg.systemd.upstream> usr/lib/systemd/user/systemd-machined.socket
+usr/lib/systemd/user/systemd-nspawn@.service
+usr/lib/systemd/user/systemd-vmspawn@.service
 usr/bin/systemd-dissect
 usr/bin/systemd-nspawn
 usr/lib/tmpfiles.d/portables.conf
 usr/lib/tmpfiles.d/systemd-nspawn.conf
 usr/sbin/mount.ddi
+<pkg.systemd.upstream> usr/share/dbus-1/services/org.freedesktop.machine1.service
 usr/share/dbus-1/system.d/org.freedesktop.import1.conf
 usr/share/dbus-1/system.d/org.freedesktop.machine1.conf
 usr/share/dbus-1/system.d/org.freedesktop.portable1.conf
@@ -49,7 +58,7 @@ usr/share/dbus-1/system-services/org.freedesktop.machine1.service
 usr/share/dbus-1/system-services/org.freedesktop.portable1.service
 <pkg.systemd.upstream> usr/share/dbus-1/system-services/org.freedesktop.sysupdate1.service
 usr/share/polkit-1/actions/io.systemd.mount-file-system.policy
-<pkg.systemd.upstream> usr/share/polkit-1/actions/io.systemd.namespace-resource.policy
+usr/share/polkit-1/actions/io.systemd.namespace-resource.policy
 usr/share/polkit-1/actions/org.freedesktop.import1.policy
 usr/share/polkit-1/actions/org.freedesktop.machine1.policy
 usr/share/polkit-1/actions/org.freedesktop.portable1.policy
@@ -60,5 +69,5 @@ usr/share/zsh/vendor-completions/_machinectl
 usr/share/bash-completion/completions/machinectl
 usr/share/bash-completion/completions/portablectl
 usr/share/bash-completion/completions/systemd-nspawn
-<pkg.systemd.upstream> usr/share/bash-completion/completions/systemd-vmspawn
+usr/share/bash-completion/completions/systemd-vmspawn
 usr/share/bash-completion/completions/importctl

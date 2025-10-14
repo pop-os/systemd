@@ -7,7 +7,7 @@ debian/tmp/usr/share/man/man7/udev.7
 debian/tmp/usr/share/man/man8/systemd-hwdb.8
 debian/tmp/usr/share/man/man8/systemd-udevd-control.socket.8
 debian/tmp/usr/share/man/man8/systemd-udevd-kernel.socket.8
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-udevd-varlink.socket.8
+debian/tmp/usr/share/man/man8/systemd-udevd-varlink.socket.8
 debian/tmp/usr/share/man/man8/systemd-udevd.8
 debian/tmp/usr/share/man/man8/systemd-udevd.service.8
 debian/tmp/usr/share/man/man8/udevadm.8

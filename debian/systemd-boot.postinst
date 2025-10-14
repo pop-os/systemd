@@ -66,7 +66,7 @@ remove_shim() {
     rm -f "${esp_path}/EFI/${vendor}/BOOT${efi_arch_upper}.CSV"
     rmdir --ignore-fail-on-non-empty "${esp_path}/EFI/${vendor}" 2>/dev/null || true
 
-    if command -v efibootmgr >/dev/null 2>&1 && efibootmgr | grep -i -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi"; then
+    if efibootmgr | grep -i -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi"; then
         bootentry="$(efibootmgr | grep -i "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi" | cut -d' ' -f1 | sed -e 's/Boot//' -e 's/*//')"
         efibootmgr -q --delete-bootnum --bootnum "$bootentry"
     fi
@@ -132,9 +132,7 @@ install_shim() {
     fi
 
     # 730079007300740065006d0064002d0062006f006f007400 is 'systemd-boot' encoded in UTF-16-LE"
-    if ! command -v efibootmgr >/dev/null 2>&1; then
-        echo "efibootmgr not found, skipping boot entry creation"
-    elif ! efibootmgr | grep -i -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*systemd-boot${efi_arch}.efi\|Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*730079007300740065006d0064002d0062006f006f007400"; then
+    if ! efibootmgr | grep -i -q "Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*systemd-boot${efi_arch}.efi\|Boot.*${vendor_upper}.*EFI\\\\${vendor}\\\\shim${efi_arch}.efi.*730079007300740065006d0064002d0062006f006f007400"; then
         blkpart="$(findmnt -nvo SOURCE "$esp_path")"
         if [ ! -L "/sys/class/block/${blkpart##*/}" ]; then
             return
@@ -157,9 +155,9 @@ if [ "$1" = configure ] && bootctl --print-esp-path > /dev/null 2>&1; then
 
     if [ -z "$2" ]; then
         # register existing kernel(s)
-        for k in /boot/vmlinuz-* ; do
+        for k in /boot/vmlinu[xz]-*; do
             [ -f "$k" ] || continue
-            ver=$(basename "$k" | sed s/^vmlinuz-//)
+            ver=$(basename "$k" | sed s/^vmlinu[xz]-//)
             kernel-install add "$ver" "$k"
         done
     fi

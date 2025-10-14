@@ -94,6 +94,7 @@ Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
             linux-sysctl-defaults,
             networkd-dispatcher,
+            login,
             systemd-timesyncd | time-daemon,
             systemd-resolved,
             systemd-cryptsetup,
@@ -115,6 +116,8 @@ Depends: ${shlibs:Depends},
 Conflicts: consolekit,
            libpam-ck-connector,
            systemd-shim,
+           elogind,
+           systemctl,
            opensysusers (<< 0.7.3-4.1~),
 Breaks: less (<< 563),
         sicherboot (<< 0.1.6),
@@ -137,6 +140,8 @@ Multi-Arch: foreign
 Priority: important
 Protected: yes
 Conflicts: sysvinit-core,
+           finit-sysv,
+           runit-init,
            file-rc,
            systemd-shim,
            initscripts,
@@ -146,7 +151,6 @@ Conflicts: sysvinit-core,
            startpar,
            bfh-container (<< 20211009-22~),
            molly-guard (<< 0.8.2~),
-           progress-linux-container (<< 20221002-11~),
 Replaces: sysvinit-core,
 Pre-Depends: systemd
 Depends: ${misc:Depends},
@@ -430,9 +434,7 @@ Description: libudev development files
 Package: systemd-standalone-sysusers
 Architecture: linux-any
 Conflicts: systemd-sysusers,
-           systemd (<< 249.3-3)
 Replaces: systemd-sysusers,
-          systemd (<< 249.3-3)
 Provides: systemd-sysusers (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -446,9 +448,7 @@ Description: standalone sysusers binary for use in non-systemd systems
 Package: systemd-standalone-tmpfiles
 Architecture: linux-any
 Conflicts: systemd-tmpfiles,
-           systemd (<< 249.3-3)
 Replaces: systemd-tmpfiles,
-          systemd (<< 249.3-3)
 Provides: systemd-tmpfiles (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -523,12 +523,12 @@ Build-Profiles: <!stage1>
 Architecture: amd64 i386 arm64 armhf loong64 riscv64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         efibootmgr,
          systemd (= ${binary:Version}),
          systemd-boot-tools (= ${binary:Version}),
          systemd-boot-efi (= ${binary:Version}) [!amd64 !arm64],
          systemd-boot-efi-signed (>= ${source:Version}) [amd64 arm64] | systemd-boot-efi (= ${binary:Version}) [amd64 arm64],
-Recommends: efibootmgr,
-            shim-signed [amd64 arm64],
+Recommends: shim-signed [amd64 arm64],
             ${dlopen:Recommends},
 Suggests: systemd-ukify,
           ${dlopen:Suggests},
@@ -552,7 +552,9 @@ Depends: ${shlibs:Depends},
 Recommends: ${dlopen:Recommends},
 Suggests: ${dlopen:Suggests},
 Breaks: systemd-boot (<< 257.4-2~),
+        systemd (<< 257.7-2~),
 Replaces: systemd-boot (<< 257.4-2~),
+          systemd (<< 257.7-2~),
 Description: simple UEFI boot manager - tools
  systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
  textual menu to select the entry to boot and an editor for the kernel command
@@ -588,6 +590,7 @@ Recommends: systemd,
             systemd-repart,
             python3-cryptography,
             python3-lz4,
+            sbsigntool | pesign,
 Conflicts: systemd (<< 255.1-1~)
 Replaces: systemd (<< 255.1-1~)
 Description: tool to build Unified Kernel Images
@@ -610,6 +613,7 @@ Suggests: polkitd,
           ${dlopen:Suggests},
 Provides: resolvconf
 Conflicts: resolvconf,
+           openresolv,
            systemd (<< 257.4-4~),
            systemd-resolved-dnssec,
 Replaces: resolvconf,

@@ -6,8 +6,8 @@ usr/lib/systemd/system/sysinit.target.wants/systemd-boot-random-seed.service
 usr/lib/systemd/system/systemd-bless-boot.service
 usr/lib/systemd/system/systemd-bootctl.socket
 usr/lib/systemd/system/systemd-bootctl@.service
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-boot-clear-sysfail.service
+usr/lib/systemd/system/systemd-boot-clear-sysfail.service
 usr/lib/systemd/system/systemd-boot-random-seed.service
 usr/lib/systemd/system/systemd-boot-update.service
 ../extra/initramfs etc/
-../extra/kernel etc/
+../extra/kernel usr/share/
