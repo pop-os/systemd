@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "ansi-color.h"
@@ -13,9 +14,8 @@
 #include "log.h"
 #include "mmap-cache.h"
 #include "rm-rf.h"
-#include "strv.h"
-#include "terminal-util.h"
 #include "tests.h"
+#include "time-util.h"
 
 #define N_ENTRIES 6000
 #define RANDOM_RANGE 77
@@ -88,7 +88,7 @@ static int run_test(const char *verification_key, ssize_t max_iterations) {
 
         assert_se(mkdtemp(t));
         assert_se(chdir(t) >= 0);
-        (void) chattr_path(t, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
+        (void) chattr_path(t, FS_NOCOW_FL, FS_NOCOW_FL);
 
         log_info("Generating a test journal");
 

@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-/* Make sure the net/if.h header is included before any linux/ one */
-#include <net/if.h>
 #include <linux/if_arp.h>
 #include <linux/if_bridge.h>
-#include <netinet/in.h>
+
+#include "sd-netlink.h"
 
 #include "bridge.h"
+#include "conf-parser.h"
 #include "netlink-util.h"
 #include "networkd-manager.h"
 #include "string-table.h"
+#include "string-util.h"
 #include "vlan-util.h"
 
 assert_cc((int) MULTICAST_ROUTER_NONE            == (int) MDB_RTR_TYPE_DISABLED);
@@ -47,6 +48,7 @@ static int netdev_bridge_set_handler(sd_netlink *rtnl, sd_netlink_message *m, Ne
 
 static int netdev_bridge_post_create_message(NetDev *netdev, sd_netlink_message *req) {
         Bridge *b = BRIDGE(netdev);
+        struct br_boolopt_multi bm = {};
         int r;
 
         r = sd_netlink_message_open_container(req, IFLA_LINKINFO);
@@ -138,6 +140,17 @@ static int netdev_bridge_post_create_message(NetDev *netdev, sd_netlink_message 
 
         if (b->fdb_max_learned_set) {
                 r = sd_netlink_message_append_u32(req, IFLA_BR_FDB_MAX_LEARNED, b->fdb_max_learned);
+                if (r < 0)
+                        return r;
+        }
+
+        if (b->linklocal_learn >= 0) {
+                bm.optmask |= 1 << BR_BOOLOPT_NO_LL_LEARN;
+                SET_FLAG(bm.optval, 1 << BR_BOOLOPT_NO_LL_LEARN, !b->linklocal_learn);
+        }
+
+        if (bm.optmask != 0) {
+                r = sd_netlink_message_append_data(req, IFLA_BR_MULTI_BOOLOPT, &bm, sizeof(bm));
                 if (r < 0)
                         return r;
         }
@@ -279,6 +292,7 @@ static void bridge_init(NetDev *netdev) {
         b->default_pvid = VLANID_INVALID;
         b->forward_delay = USEC_INFINITY;
         b->ageing_time = USEC_INFINITY;
+        b->linklocal_learn = -1;
 }
 
 static bool bridge_can_set_mac(NetDev *netdev, const struct hw_addr_data *hw_addr) {

@@ -2,27 +2,30 @@
 
 #include <sys/mount.h>
 
-#include "cap-list.h"
+#include "alloc-util.h"
+#include "bitfield.h"
+#include "capability-list.h"
 #include "cgroup-util.h"
 #include "dns-domain.h"
-#include "env-util.h"
-#include "fs-util.h"
 #include "glyph-util.h"
-#include "hexdecoct.h"
-#include "hostname-util.h"
+#include "hashmap.h"
+#include "hostname-setup.h"
 #include "json-util.h"
 #include "locale-util.h"
+#include "log.h"
 #include "memory-util.h"
 #include "path-util.h"
+#include "percent-util.h"
 #include "pkcs11-util.h"
 #include "rlimit-util.h"
 #include "sha256.h"
 #include "string-table.h"
+#include "string-util.h"
 #include "strv.h"
+#include "time-util.h"
 #include "uid-classification.h"
 #include "user-record.h"
 #include "user-util.h"
-#include "utf8.h"
 
 #define DEFAULT_RATELIMIT_BURST 30
 #define DEFAULT_RATELIMIT_INTERVAL_USEC (1*USEC_PER_MINUTE)
@@ -94,9 +97,16 @@ UserRecord* user_record_new(void) {
                 .drop_caches = -1,
                 .auto_resize_mode = _AUTO_RESIZE_MODE_INVALID,
                 .rebalance_weight = REBALANCE_WEIGHT_UNSET,
+                .tmp_limit = TMPFS_LIMIT_NULL,
+                .dev_shm_limit = TMPFS_LIMIT_NULL,
         };
 
         return h;
+}
+
+sd_json_dispatch_flags_t USER_RECORD_LOAD_FLAGS_TO_JSON_DISPATCH_FLAGS(UserRecordLoadFlags flags) {
+        return (FLAGS_SET(flags, USER_RECORD_LOG) ? SD_JSON_LOG : 0) |
+                (FLAGS_SET(flags, USER_RECORD_PERMISSIVE) ? SD_JSON_PERMISSIVE : 0);
 }
 
 static void pkcs11_encrypted_key_done(Pkcs11EncryptedKey *k) {
@@ -139,6 +149,7 @@ static UserRecord* user_record_free(UserRecord *h) {
         free(h->user_name);
         free(h->realm);
         free(h->user_name_and_realm_auto);
+        strv_free(h->aliases);
         free(h->real_name);
         free(h->email_address);
         erase_and_free(h->password_hint);
@@ -210,6 +221,8 @@ static UserRecord* user_record_free(UserRecord *h) {
         strv_free(h->self_modifiable_fields);
         strv_free(h->self_modifiable_blobs);
         strv_free(h->self_modifiable_privileged);
+
+        free(h->default_area);
 
         sd_json_variant_unref(h->json);
 
@@ -465,7 +478,7 @@ static int json_dispatch_umask(const char *name, sd_json_variant *variant, sd_js
         if (k > 0777)
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
                                 "JSON field '%s' outside of valid range 0%s0777.",
-                                strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                                strna(name), glyph(GLYPH_ELLIPSIS));
 
         *m = (mode_t) k;
         return 0;
@@ -487,7 +500,7 @@ static int json_dispatch_access_mode(const char *name, sd_json_variant *variant,
         if (k > 07777)
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
                                 "JSON field '%s' outside of valid range 0%s07777.",
-                                strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                                strna(name), glyph(GLYPH_ELLIPSIS));
 
         *m = (mode_t) k;
         return 0;
@@ -567,7 +580,7 @@ static int json_dispatch_tasks_or_memory_max(const char *name, sd_json_variant *
         if (k <= 0 || k >= UINT64_MAX)
                 return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
                                 "JSON field '%s' is not in valid range %" PRIu64 "%s%" PRIu64 ".",
-                                strna(name), (uint64_t) 1, special_glyph(SPECIAL_GLYPH_ELLIPSIS), UINT64_MAX-1);
+                                strna(name), (uint64_t) 1, glyph(GLYPH_ELLIPSIS), UINT64_MAX-1);
 
         *limit = k;
         return 0;
@@ -589,7 +602,7 @@ static int json_dispatch_weight(const char *name, sd_json_variant *variant, sd_j
                 return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
                                 "JSON field '%s' is not in valid range %" PRIu64 "%s%" PRIu64 ".",
                                 strna(name), (uint64_t) CGROUP_WEIGHT_MIN,
-                                special_glyph(SPECIAL_GLYPH_ELLIPSIS), (uint64_t) CGROUP_WEIGHT_MAX);
+                                glyph(GLYPH_ELLIPSIS), (uint64_t) CGROUP_WEIGHT_MAX);
 
         *weight = k;
         return 0;
@@ -975,8 +988,42 @@ static int dispatch_rebalance_weight(const char *name, sd_json_variant *variant,
         else
                 return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
                                 "Rebalance weight is out of valid range %" PRIu64 "%s%" PRIu64 ".",
-                                REBALANCE_WEIGHT_MIN, special_glyph(SPECIAL_GLYPH_ELLIPSIS), REBALANCE_WEIGHT_MAX);
+                                REBALANCE_WEIGHT_MIN, glyph(GLYPH_ELLIPSIS), REBALANCE_WEIGHT_MAX);
 
+        return 0;
+}
+
+static int dispatch_tmpfs_limit(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        TmpfsLimit *limit = ASSERT_PTR(userdata);
+        int r;
+
+        if (sd_json_variant_is_null(variant)) {
+                *limit = TMPFS_LIMIT_NULL;
+                return 0;
+        }
+
+        r = sd_json_dispatch_uint64(name, variant, flags, &limit->limit);
+        if (r < 0)
+                return r;
+
+        limit->is_set = true;
+        return 0;
+}
+
+static int dispatch_tmpfs_limit_scale(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        TmpfsLimit *limit = ASSERT_PTR(userdata);
+        int r;
+
+        if (sd_json_variant_is_null(variant)) {
+                *limit = TMPFS_LIMIT_NULL;
+                return 0;
+        }
+
+        r = sd_json_dispatch_uint32(name, variant, flags, &limit->limit_scale);
+        if (r < 0)
+                return r;
+
+        limit->is_set = true;
         return 0;
 }
 
@@ -1085,6 +1132,8 @@ int per_machine_id_match(sd_json_variant *ids, sd_json_dispatch_flags_t flags) {
         sd_id128_t mid;
         int r;
 
+        assert(ids);
+
         r = sd_id128_get_machine(&mid);
         if (r < 0)
                 return json_log(ids, flags, r, "Failed to acquire machine ID: %m");
@@ -1133,6 +1182,8 @@ int per_machine_hostname_match(sd_json_variant *hns, sd_json_dispatch_flags_t fl
         _cleanup_free_ char *hn = NULL;
         int r;
 
+        assert(hns);
+
         r = gethostname_strict(&hn);
         if (r == -ENXIO) {
                 json_log(hns, flags, r, "No hostname set, not matching perMachine hostname record: %m");
@@ -1180,12 +1231,30 @@ int per_machine_match(sd_json_variant *entry, sd_json_dispatch_flags_t flags) {
                         return true;
         }
 
+        m = sd_json_variant_by_key(entry, "matchNotMachineId");
+        if (m) {
+                r = per_machine_id_match(m, flags);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        return true;
+        }
+
         m = sd_json_variant_by_key(entry, "matchHostname");
         if (m) {
                 r = per_machine_hostname_match(m, flags);
                 if (r < 0)
                         return r;
                 if (r > 0)
+                        return true;
+        }
+
+        m = sd_json_variant_by_key(entry, "matchNotHostname");
+        if (m) {
+                r = per_machine_hostname_match(m, flags);
+                if (r < 0)
+                        return r;
+                if (r == 0)
                         return true;
         }
 
@@ -1196,7 +1265,9 @@ static int dispatch_per_machine(const char *name, sd_json_variant *variant, sd_j
 
         static const sd_json_dispatch_field per_machine_dispatch_table[] = {
                 { "matchMachineId",             _SD_JSON_VARIANT_TYPE_INVALID, NULL,                                 0,                                                   0              },
+                { "matchNotMachineId",          _SD_JSON_VARIANT_TYPE_INVALID, NULL,                                 0,                                                   0              },
                 { "matchHostname",              _SD_JSON_VARIANT_TYPE_INVALID, NULL,                                 0,                                                   0              },
+                { "matchNotHostname",           _SD_JSON_VARIANT_TYPE_INVALID, NULL,                                 0,                                                   0              },
                 { "blobDirectory",              SD_JSON_VARIANT_STRING,        json_dispatch_path,                   offsetof(UserRecord, blob_directory),                SD_JSON_STRICT },
                 { "blobManifest",               SD_JSON_VARIANT_OBJECT,        dispatch_blob_manifest,               offsetof(UserRecord, blob_manifest),                 0              },
                 { "iconName",                   SD_JSON_VARIANT_STRING,        sd_json_dispatch_string,              offsetof(UserRecord, icon_name),                     SD_JSON_STRICT },
@@ -1273,6 +1344,11 @@ static int dispatch_per_machine(const char *name, sd_json_variant *variant, sd_j
                 { "selfModifiableFields",       SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_fields),        SD_JSON_STRICT },
                 { "selfModifiableBlobs",        SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_blobs),         SD_JSON_STRICT },
                 { "selfModifiablePrivileged",   SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_privileged),    SD_JSON_STRICT },
+                { "tmpLimit",                   _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit,                 offsetof(UserRecord, tmp_limit),                     0,             },
+                { "tmpLimitScale",              _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit_scale,           offsetof(UserRecord, tmp_limit),                     0,             },
+                { "devShmLimit",                _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit,                 offsetof(UserRecord, dev_shm_limit),                 0,             },
+                { "devShmLimitScale",           _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit_scale,           offsetof(UserRecord, dev_shm_limit),                 0,             },
+                { "defaultArea",                SD_JSON_VARIANT_STRING,        json_dispatch_filename,               offsetof(UserRecord, default_area),                  0              },
                 {},
         };
 
@@ -1326,6 +1402,8 @@ static int dispatch_status(const char *name, sd_json_variant *variant, sd_json_d
                 { "fallbackShell",              SD_JSON_VARIANT_STRING,        json_dispatch_filename_or_path, offsetof(UserRecord, fallback_shell),                0              },
                 { "fallbackHomeDirectory",      SD_JSON_VARIANT_STRING,        json_dispatch_home_directory,   offsetof(UserRecord, fallback_home_directory),       0              },
                 { "useFallback",                SD_JSON_VARIANT_BOOLEAN,       sd_json_dispatch_stdbool,       offsetof(UserRecord, use_fallback),                  0              },
+                { "defaultArea",                SD_JSON_VARIANT_STRING,        json_dispatch_filename,         offsetof(UserRecord, default_area),                  0              },
+                { "aliases",                    SD_JSON_VARIANT_ARRAY,         json_dispatch_user_group_list,  offsetof(UserRecord, aliases),                       SD_JSON_RELAX  },
                 {},
         };
 
@@ -1454,6 +1532,11 @@ int user_group_record_mangle(
         if (USER_RECORD_STRIP_MASK(load_flags) == _USER_RECORD_MASK_MAX) /* strip everything? */
                 return json_log(v, json_flags, SYNTHETIC_ERRNO(EINVAL), "Stripping everything from record, refusing.");
 
+        /* Extra safety: mark the "secret" part (that contains literal passwords and such) as sensitive, so
+         * that it is not included in debug output and erased from memory when we are done. We do this for
+         * any record that passes through here. */
+        sd_json_variant_sensitive(sd_json_variant_by_key(v, "secret"));
+
         /* Check if we have the special sections and if they match our flags set */
         FOREACH_ELEMENT(i, mask_field) {
                 sd_json_variant *e, *k;
@@ -1537,7 +1620,9 @@ int user_record_load(UserRecord *h, sd_json_variant *v, UserRecordLoadFlags load
 
         static const sd_json_dispatch_field user_dispatch_table[] = {
                 { "userName",                   SD_JSON_VARIANT_STRING,        json_dispatch_user_group_name,        offsetof(UserRecord, user_name),                     SD_JSON_RELAX  },
+                { "aliases",                    SD_JSON_VARIANT_ARRAY,         json_dispatch_user_group_list,        offsetof(UserRecord, aliases),                       SD_JSON_RELAX  },
                 { "realm",                      SD_JSON_VARIANT_STRING,        json_dispatch_realm,                  offsetof(UserRecord, realm),                         0              },
+                { "uuid",                       SD_JSON_VARIANT_STRING,        sd_json_dispatch_id128,               offsetof(UserRecord, uuid),                          0              },
                 { "blobDirectory",              SD_JSON_VARIANT_STRING,        json_dispatch_path,                   offsetof(UserRecord, blob_directory),                SD_JSON_STRICT },
                 { "blobManifest",               SD_JSON_VARIANT_OBJECT,        dispatch_blob_manifest,               offsetof(UserRecord, blob_manifest),                 0              },
                 { "realName",                   SD_JSON_VARIANT_STRING,        json_dispatch_gecos,                  offsetof(UserRecord, real_name),                     0              },
@@ -1622,6 +1707,11 @@ int user_record_load(UserRecord *h, sd_json_variant *v, UserRecordLoadFlags load
                 { "selfModifiableFields",       SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_fields),        SD_JSON_STRICT },
                 { "selfModifiableBlobs",        SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_blobs),         SD_JSON_STRICT },
                 { "selfModifiablePrivileged",   SD_JSON_VARIANT_ARRAY,         sd_json_dispatch_strv,                offsetof(UserRecord, self_modifiable_privileged),    SD_JSON_STRICT },
+                { "tmpLimit",                   _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit,                 offsetof(UserRecord, tmp_limit),                     0,             },
+                { "tmpLimitScale",              _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit_scale,           offsetof(UserRecord, tmp_limit),                     0,             },
+                { "devShmLimit",                _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit,                 offsetof(UserRecord, dev_shm_limit),                 0,             },
+                { "devShmLimitScale",           _SD_JSON_VARIANT_TYPE_INVALID, dispatch_tmpfs_limit_scale,           offsetof(UserRecord, dev_shm_limit),                 0,             },
+                { "defaultArea",                SD_JSON_VARIANT_STRING,        json_dispatch_filename,               offsetof(UserRecord, default_area),                  0              },
 
                 { "secret",                     SD_JSON_VARIANT_OBJECT,        dispatch_secret,                      0,                                                   0              },
                 { "privileged",                 SD_JSON_VARIANT_OBJECT,        dispatch_privileged,                  0,                                                   0              },
@@ -1986,11 +2076,14 @@ UserDisposition user_record_disposition(UserRecord *h) {
         if (uid_is_system(h->uid))
                 return USER_SYSTEM;
 
-        if (uid_is_dynamic(h->uid))
+        if (uid_is_dynamic(h->uid) || uid_is_greeter(h->uid))
                 return USER_DYNAMIC;
 
         if (uid_is_container(h->uid))
                 return USER_CONTAINER;
+
+        if (uid_is_foreign(h->uid))
+                return USER_FOREIGN;
 
         if (h->uid > INT32_MAX)
                 return USER_RESERVED;
@@ -2132,6 +2225,32 @@ int user_record_languages(UserRecord *h, char ***ret) {
         return 0;
 }
 
+uint32_t user_record_tmp_limit_scale(UserRecord *h) {
+        assert(h);
+
+        if (h->tmp_limit.is_set)
+                return h->tmp_limit.limit_scale;
+
+        /* By default grant regular users only 80% quota */
+        if (user_record_disposition(h) == USER_REGULAR)
+                return UINT32_SCALE_FROM_PERCENT(80);
+
+        return UINT32_MAX;
+}
+
+uint32_t user_record_dev_shm_limit_scale(UserRecord *h) {
+        assert(h);
+
+        if (h->dev_shm_limit.is_set)
+                return h->dev_shm_limit.limit_scale;
+
+        /* By default grant regular users only 80% quota */
+        if (user_record_disposition(h) == USER_REGULAR)
+                return UINT32_SCALE_FROM_PERCENT(80);
+
+        return UINT32_MAX;
+}
+
 const char** user_record_self_modifiable_fields(UserRecord *h) {
         /* As a rule of thumb: a setting is safe if it cannot be used by a
          * user to give themselves some unfair advantage over other users on
@@ -2152,6 +2271,7 @@ const char** user_record_self_modifiable_fields(UserRecord *h) {
                 "additionalLanguages",
                 "preferredSessionLauncher",
                 "preferredSessionType",
+                "defaultArea",
 
                 /* Authentication methods */
                 "pkcs11TokenUri",
@@ -2609,16 +2729,38 @@ int user_record_test_password_change_required(UserRecord *h) {
         return change_permitted ? 0 : -EROFS;
 }
 
-int user_record_is_root(const UserRecord *u) {
+bool user_record_is_root(const UserRecord *u) {
         assert(u);
 
         return u->uid == 0 || streq_ptr(u->user_name, "root");
 }
 
-int user_record_is_nobody(const UserRecord *u) {
+bool user_record_is_nobody(const UserRecord *u) {
         assert(u);
 
         return u->uid == UID_NOBODY || STRPTR_IN_SET(u->user_name, NOBODY_USER_NAME, "nobody");
+}
+
+bool user_record_matches_user_name(const UserRecord *u, const char *user_name) {
+        assert(u);
+        assert(user_name);
+
+        if (streq_ptr(u->user_name, user_name))
+                return true;
+
+        if (streq_ptr(u->user_name_and_realm_auto, user_name))
+                return true;
+
+        if (strv_contains(u->aliases, user_name))
+                return true;
+
+        const char *realm = strrchr(user_name, '@');
+        if (realm && streq_ptr(realm+1, u->realm))
+                STRV_FOREACH(a, u->aliases)
+                        if (startswith(user_name, *a) == realm)
+                                return true;
+
+        return false;
 }
 
 int suitable_blob_filename(const char *name) {
@@ -2626,6 +2768,21 @@ int suitable_blob_filename(const char *name) {
         return filename_is_valid(name) &&
                in_charset(name, URI_UNRESERVED) &&
                name[0] != '.';
+}
+
+bool userdb_match_is_set(const UserDBMatch *match) {
+        if (!match)
+                return false;
+
+        return !strv_isempty(match->fuzzy_names) ||
+                !FLAGS_SET(match->disposition_mask, USER_DISPOSITION_MASK_ALL) ||
+                match->uid_min > 0 ||
+                match->uid_max < UID_INVALID-1;
+}
+
+void userdb_match_done(UserDBMatch *match) {
+        assert(match);
+        strv_free(match->fuzzy_names);
 }
 
 bool user_name_fuzzy_match(const char *names[], size_t n_names, char **matches) {
@@ -2664,14 +2821,19 @@ bool user_name_fuzzy_match(const char *names[], size_t n_names, char **matches) 
         return false;
 }
 
-int user_record_match(UserRecord *u, const UserDBMatch *match) {
+bool user_record_match(UserRecord *u, const UserDBMatch *match) {
         assert(u);
-        assert(match);
+
+        if (!match)
+                return true;
+
+        if (!uid_is_valid(u->uid))
+                return false;
 
         if (u->uid < match->uid_min || u->uid > match->uid_max)
                 return false;
 
-        if (!FLAGS_SET(match->disposition_mask, UINT64_C(1) << user_record_disposition(u)))
+        if (!BIT_SET(match->disposition_mask, user_record_disposition(u)))
                 return false;
 
         if (!strv_isempty(match->fuzzy_names)) {
@@ -2687,11 +2849,45 @@ int user_record_match(UserRecord *u, const UserDBMatch *match) {
                         u->cifs_user_name,
                 };
 
-                if (!user_name_fuzzy_match(names, ELEMENTSOF(names), match->fuzzy_names))
+                if (!user_name_fuzzy_match(names, ELEMENTSOF(names), match->fuzzy_names) &&
+                    !user_name_fuzzy_match((const char**) u->aliases, strv_length(u->aliases), match->fuzzy_names))
                         return false;
         }
 
         return true;
+}
+
+int json_dispatch_dispositions_mask(const char *name, sd_json_variant *variant, sd_json_dispatch_flags_t flags, void *userdata) {
+        uint64_t *mask = ASSERT_PTR(userdata);
+
+        if (sd_json_variant_is_null(variant)) {
+                *mask = UINT64_MAX;
+                return 0;
+        }
+
+        if (!sd_json_variant_is_array(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an array.", strna(name));
+
+        uint64_t m = 0;
+        for (size_t i = 0; i < sd_json_variant_elements(variant); i++) {
+                sd_json_variant *e;
+                const char *a;
+
+                e = sd_json_variant_by_index(variant, i);
+                if (!sd_json_variant_is_string(e))
+                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an array of strings.", strna(name));
+
+                assert_se(a = sd_json_variant_string(e));
+
+                UserDisposition d = user_disposition_from_string(a);
+                if (d < 0)
+                        return json_log(e, flags, d, "JSON field '%s' contains an invalid user disposition type: %s", strna(name), a);
+
+                m |= INDEX_TO_MASK(uint64_t, d);
+        }
+
+        *mask = m;
+        return 0;
 }
 
 static const char* const user_storage_table[_USER_STORAGE_MAX] = {
@@ -2711,6 +2907,7 @@ static const char* const user_disposition_table[_USER_DISPOSITION_MAX] = {
         [USER_DYNAMIC]   = "dynamic",
         [USER_REGULAR]   = "regular",
         [USER_CONTAINER] = "container",
+        [USER_FOREIGN]   = "foreign",
         [USER_RESERVED]  = "reserved",
 };
 

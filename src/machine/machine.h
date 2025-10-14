@@ -1,12 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-typedef struct Machine Machine;
-typedef enum KillWhom KillWhom;
+#include "sd-id128.h"
 
+#include "copy.h"
 #include "list.h"
-#include "machined.h"
-#include "operation.h"
+#include "machine-forward.h"
 #include "pidref.h"
 #include "time-util.h"
 
@@ -26,32 +25,49 @@ typedef enum MachineClass {
         _MACHINE_CLASS_INVALID = -EINVAL,
 } MachineClass;
 
-enum KillWhom {
+typedef enum KillWhom {
         KILL_LEADER,
+        KILL_SUPERVISOR,
         KILL_ALL,
         _KILL_WHOM_MAX,
         _KILL_WHOM_INVALID = -EINVAL,
-};
+} KillWhom;
 
-struct Machine {
+typedef struct Machine {
         Manager *manager;
 
         char *name;
         sd_id128_t id;
 
+        uid_t uid;
+
         MachineClass class;
 
         char *state_file;
         char *service;
+        /* Note that the root directory is accepted as-is from the caller, including unprivileged users, so
+         * do not use it for anything but informational purposes. */
         char *root_directory;
 
         char *unit;
+        char *subgroup;
         char *scope_job;
+        char *cgroup;
 
-        PidRef leader;
-        sd_event_source *leader_pidfd_event_source;
+        /* Leader: the top-level process that encapsulates the machine itself. For containers that's PID 1,
+         * for VMs that's qemu or whatever process wraps the actual VM code. This process defines the runtime
+         * lifecycle of the machine. In case of containers we can use this reference to enter namespaces,
+         * send signals and so on.
+         *
+         * Supervisor: the process that supervises the machine, if there is any and if that process is
+         * responsible for a single machine. Sending SIGTERM to this process should (non-cooperatively)
+         * terminate the machine. */
+        PidRef leader, supervisor;
+        sd_event_source *leader_pidfd_event_source, *supervisor_pidfd_event_source;
 
         dual_timestamp timestamp;
+
+        sd_event_source *cgroup_empty_event_source;
 
         bool in_gc_queue:1;
         bool started:1;
@@ -71,7 +87,7 @@ struct Machine {
         LIST_HEAD(Operation, operations);
 
         LIST_FIELDS(Machine, gc_queue);
-};
+} Machine;
 
 int machine_new(MachineClass class, const char *name, Machine **ret);
 int machine_link(Manager *manager, Machine *machine);
@@ -100,12 +116,20 @@ MachineState machine_state_from_string(const char *s) _pure_;
 const char* kill_whom_to_string(KillWhom k) _const_;
 KillWhom kill_whom_from_string(const char *s) _pure_;
 
-int machine_openpt(Machine *m, int flags, char **ret_slave);
-int machine_open_terminal(Machine *m, const char *path, int mode);
+int machine_openpt(Machine *m, int flags, char **ret_peer);
 int machine_start_getty(Machine *m, const char *ptmx_name, sd_bus_error *error);
 int machine_start_shell(Machine *m, int ptmx_fd, const char *ptmx_name, const char *user, const char *path, char **args, char **env, sd_bus_error *error);
 #define machine_default_shell_path() ("/bin/sh")
 char** machine_default_shell_args(const char *user);
+
+int machine_copy_from_to_operation(
+                Manager *manager,
+                Machine *machine,
+                const char *host_path,
+                const char *container_path,
+                bool copy_from_container,
+                CopyFlags copy_flags,
+                Operation **ret);
 
 int machine_get_uid_shift(Machine *m, uid_t *ret);
 
@@ -114,6 +138,8 @@ int machine_owns_gid(Machine *m, gid_t host_gid, gid_t *ret_internal_gid);
 
 int machine_translate_uid(Machine *m, uid_t internal_uid, uid_t *ret_host_uid);
 int machine_translate_gid(Machine *m, gid_t internal_gid, gid_t *ret_host_gid);
+
+int machine_open_root_directory(Machine *machine);
 
 typedef enum AcquireMetadata {
         ACQUIRE_METADATA_NO,

@@ -2,14 +2,18 @@
 
 #include <unistd.h>
 
+#include "sd-bus.h"
 #include "sd-messages.h"
 
 #include "alloc-util.h"
+#include "bitfield.h"
 #include "bus-error.h"
 #include "bus-unit-util.h"
-#include "bus-util.h"
 #include "conf-parser.h"
+#include "extract-word.h"
 #include "format-util.h"
+#include "hashmap.h"
+#include "logind.h"
 #include "logind-action.h"
 #include "logind-dbus.h"
 #include "logind-seat-dbus.h"
@@ -17,7 +21,7 @@
 #include "process-util.h"
 #include "special.h"
 #include "string-table.h"
-#include "terminal-util.h"
+#include "strv.h"
 #include "user-util.h"
 
 static const HandleActionData handle_action_data_table[_HANDLE_ACTION_MAX] = {
@@ -158,7 +162,7 @@ int handle_action_get_enabled_sleep_actions(HandleActionSleepMask mask, char ***
         assert(ret);
 
         FOREACH_ELEMENT(i, sleep_actions)
-                if (FLAGS_SET(mask, 1U << *i)) {
+                if (BIT_SET(mask, *i)) {
                         r = strv_extend(&actions, handle_action_to_string(*i));
                         if (r < 0)
                                 return r;
@@ -172,11 +176,10 @@ HandleAction handle_action_sleep_select(Manager *m) {
         assert(m);
 
         FOREACH_ELEMENT(i, sleep_actions) {
-                HandleActionSleepMask action_mask = 1U << *i;
                 const HandleActionData *a;
                 _cleanup_free_ char *load_state = NULL;
 
-                if (!FLAGS_SET(m->handle_action_sleep_mask, action_mask))
+                if (!BIT_SET(m->handle_action_sleep_mask, *i))
                         continue;
 
                 a = ASSERT_PTR(handle_action_lookup(*i));
@@ -234,7 +237,7 @@ static int handle_action_execute(
         /* If the actual operation is inhibited, warn and fail */
         if (inhibit_what_is_valid(inhibit_operation) &&
             !ignore_inhibited &&
-            manager_is_inhibited(m, inhibit_operation, /* block= */ true, NULL, false, false, 0, &offending)) {
+            manager_is_inhibited(m, inhibit_operation, NULL, /* flags= */ 0, UID_INVALID, &offending)) {
                 _cleanup_free_ char *comm = NULL, *u = NULL;
 
                 (void) pidref_get_comm(&offending->pid, &comm);
@@ -327,8 +330,8 @@ static int manager_handle_action_secure_attention_key(
 
         log_struct(LOG_INFO,
                    LOG_MESSAGE("Secure Attention Key sequence pressed on seat %s", seat),
-                   "MESSAGE_ID=" SD_MESSAGE_SECURE_ATTENTION_KEY_PRESS_STR,
-                   "SEAT_ID=%s", seat);
+                   LOG_MESSAGE_ID(SD_MESSAGE_SECURE_ATTENTION_KEY_PRESS_STR),
+                   LOG_ITEM("SEAT_ID=%s", seat));
 
         r = sd_bus_emit_signal(
                         m->bus,
@@ -372,7 +375,7 @@ int manager_handle_action(
 
         /* If the key handling is inhibited, don't do anything */
         if (inhibit_key > 0) {
-                if (manager_is_inhibited(m, inhibit_key, /* block= */ true, NULL, true, false, 0, NULL)) {
+                if (manager_is_inhibited(m, inhibit_key, NULL, MANAGER_IS_INHIBITED_IGNORE_INACTIVE, UID_INVALID, NULL)) {
                         log_debug("Refusing %s operation, %s is inhibited.",
                                   handle_action_to_string(handle),
                                   inhibit_what_to_string(inhibit_key));
@@ -483,7 +486,7 @@ int config_parse_handle_action_sleep(
                         continue;
                 }
 
-                *mask |= 1U << a;
+                SET_BIT(*mask, a);
         }
 
         if (*mask == 0)

@@ -3,12 +3,11 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "bus-util.h"
 #include "capability-util.h"
 #include "efi-api.h"
 #include "fileio.h"
 #include "kmod-setup.h"
-#include "macro.h"
+#include "log.h"
 #include "module-util.h"
 #include "recurse-dir.h"
 #include "string-util.h"
@@ -124,7 +123,7 @@ int kmod_setup(void) {
                 { "virtio_rng",                 NULL,                        false, false, has_virtio_rng     },
 
                 /* we want early logging to hvc consoles if possible, and make sure systemd-getty-generator
-                 * can rely on all consoles being probed already.*/
+                 * can rely on all consoles being probed already. */
                 { "virtio_console",             NULL,                        false, false, has_virtio_console },
 
                 /* Make sure we can send sd-notify messages over vsock as early as possible. */

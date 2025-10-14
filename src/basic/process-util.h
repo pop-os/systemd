@@ -1,37 +1,31 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <errno.h>
-#include <sched.h>
 #include <signal.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/resource.h>
-#include <sys/types.h>
 
-#include "alloc-util.h"
+#include "fileio.h"
 #include "format-util.h"
-#include "macro.h"
-#include "namespace-util.h"
-#include "pidref.h"
-#include "time-util.h"
+#include "forward.h"
+#include "string-util.h"
 
 #define procfs_file_alloca(pid, field)                                  \
         ({                                                              \
                 pid_t _pid_ = (pid);                                    \
                 const char *_field_ = (field);                          \
                 char *_r_;                                              \
-                if (_pid_ == 0) {                                       \
-                        _r_ = newa(char, STRLEN("/proc/self/") + strlen(_field_) + 1); \
-                        strcpy(stpcpy(_r_, "/proc/self/"), _field_);    \
-                } else {                                                \
+                if (_pid_ == 0)                                         \
+                        _r_ = strjoina("/proc/self/", _field_);         \
+                else {                                                  \
+                        assert(_pid_ > 0);                              \
                         _r_ = newa(char, STRLEN("/proc/") + DECIMAL_STR_MAX(pid_t) + 1 + strlen(_field_) + 1); \
                         sprintf(_r_, "/proc/" PID_FMT "/%s", _pid_, _field_); \
                 }                                                       \
                 (const char*) _r_;                                      \
         })
+
+static inline int procfs_file_get_field(pid_t pid, const char *name, const char *key, char **ret) {
+        return get_proc_field(procfs_file_alloca(pid, name), key, ret);
+}
 
 typedef enum ProcessCmdlineFlags {
         PROCESS_CMDLINE_COMM_FALLBACK = 1 << 0,
@@ -50,20 +44,23 @@ int get_process_exe(pid_t pid, char **ret);
 int pid_get_uid(pid_t pid, uid_t *ret);
 int pidref_get_uid(const PidRef *pid, uid_t *ret);
 int get_process_gid(pid_t pid, gid_t *ret);
-int get_process_capeff(pid_t pid, char **ret);
 int get_process_cwd(pid_t pid, char **ret);
 int get_process_root(pid_t pid, char **ret);
 int get_process_environ(pid_t pid, char **ret);
-int get_process_ppid(pid_t pid, pid_t *ret);
+int pid_get_ppid(pid_t pid, pid_t *ret);
+int pidref_get_ppid(const PidRef *pidref, pid_t *ret);
+int pidref_get_ppid_as_pidref(const PidRef *pidref, PidRef *ret);
 int pid_get_start_time(pid_t pid, usec_t *ret);
-int pidref_get_start_time(const PidRef* pid, usec_t *ret);
+int pidref_get_start_time(const PidRef *pid, usec_t *ret);
 int get_process_umask(pid_t pid, mode_t *ret);
 
 int container_get_leader(const char *machine, pid_t *pid);
 
-int namespace_get_leader(pid_t pid, NamespaceType type, pid_t *ret);
+static inline bool SIGINFO_CODE_IS_DEAD(int code) {
+        return IN_SET(code, CLD_EXITED, CLD_KILLED, CLD_DUMPED);
+}
 
-int wait_for_terminate(pid_t pid, siginfo_t *status);
+int wait_for_terminate(pid_t pid, siginfo_t *ret);
 
 typedef enum WaitFlags {
         WAIT_LOG_ABNORMAL             = 1 << 0,
@@ -73,7 +70,9 @@ typedef enum WaitFlags {
         WAIT_LOG = WAIT_LOG_ABNORMAL|WAIT_LOG_NON_ZERO_EXIT_STATUS,
 } WaitFlags;
 
+int pidref_wait_for_terminate_and_check(const char *name, PidRef *pidref, WaitFlags flags);
 int wait_for_terminate_and_check(const char *name, pid_t pid, WaitFlags flags);
+
 int wait_for_terminate_with_timeout(pid_t pid, usec_t timeout);
 
 void sigkill_wait(pid_t pid);
@@ -92,10 +91,10 @@ int getenv_for_pid(pid_t pid, const char *field, char **_value);
 int pid_is_alive(pid_t pid);
 int pidref_is_alive(const PidRef *pidref);
 int pid_is_unwaited(pid_t pid);
-int pidref_is_unwaited(const PidRef *pidref);
+int pidref_is_unwaited(PidRef *pidref);
 int pid_is_my_child(pid_t pid);
-int pidref_is_my_child(const PidRef *pidref);
-int pid_from_same_root_fs(pid_t pid);
+int pidref_is_my_child(PidRef *pidref);
+int pidref_from_same_root_fs(PidRef *a, PidRef *b);
 
 bool is_main_thread(void);
 
@@ -137,17 +136,10 @@ void valgrind_summary_hack(void);
 
 int pid_compare_func(const pid_t *a, const pid_t *b);
 
-static inline bool nice_is_valid(int n) {
-        return n >= PRIO_MIN && n < PRIO_MAX;
-}
+bool nice_is_valid(int n) _const_;
 
-static inline bool sched_policy_is_valid(int i) {
-        return IN_SET(i, SCHED_OTHER, SCHED_BATCH, SCHED_IDLE, SCHED_FIFO, SCHED_RR);
-}
-
-static inline bool sched_priority_is_valid(int i) {
-        return i >= 0 && i <= sched_get_priority_max(SCHED_RR);
-}
+bool sched_policy_is_valid(int i) _const_;
+bool sched_priority_is_valid(int i) _const_;
 
 #define PID_AUTOMATIC ((pid_t) INT_MIN) /* special value indicating "acquire pid from connection peer" */
 
@@ -194,19 +186,9 @@ typedef enum ForkFlags {
         FORK_NEW_USERNS         = 1 << 19, /* Run child in its own user namespace                                💣 DO NOT USE IN THREADED PROGRAMS! 💣 */
         FORK_NEW_NETNS          = 1 << 20, /* Run child in its own network namespace                             💣 DO NOT USE IN THREADED PROGRAMS! 💣 */
         FORK_NEW_PIDNS          = 1 << 21, /* Run child in its own PID namespace                                 💣 DO NOT USE IN THREADED PROGRAMS! 💣 */
+        FORK_FREEZE             = 1 << 22, /* Don't return in child, just call freeze() instead */
+        FORK_PID_ONLY           = 1 << 23, /* Don't open a pidfd referencing the child process */
 } ForkFlags;
-
-int safe_fork_full(
-                const char *name,
-                const int stdio_fds[3],
-                int except_fds[],
-                size_t n_except_fds,
-                ForkFlags flags,
-                pid_t *ret_pid);
-
-static inline int safe_fork(const char *name, ForkFlags flags, pid_t *ret_pid) {
-        return safe_fork_full(name, NULL, NULL, 0, flags, ret_pid);
-}
 
 int pidref_safe_fork_full(
                 const char *name,
@@ -218,6 +200,18 @@ int pidref_safe_fork_full(
 
 static inline int pidref_safe_fork(const char *name, ForkFlags flags, PidRef *ret_pid) {
         return pidref_safe_fork_full(name, NULL, NULL, 0, flags, ret_pid);
+}
+
+int safe_fork_full(
+                const char *name,
+                const int stdio_fds[3],
+                int except_fds[],
+                size_t n_except_fds,
+                ForkFlags flags,
+                pid_t *ret_pid);
+
+static inline int safe_fork(const char *name, ForkFlags flags, pid_t *ret_pid) {
+        return safe_fork_full(name, NULL, NULL, 0, flags, ret_pid);
 }
 
 int namespace_fork(
@@ -251,9 +245,6 @@ assert_cc(TASKS_MAX <= (unsigned long) PID_T_MAX);
 /* Like TAKE_PTR() but for pid_t, resetting them to 0 */
 #define TAKE_PID(pid) TAKE_GENERIC(pid, pid_t, 0)
 
-int pidfd_get_pid(int fd, pid_t *ret);
-int pidfd_verify_pid(int pidfd, pid_t pid);
-
 int setpriority_closest(int priority);
 
 _noreturn_ void freeze(void);
@@ -275,3 +266,4 @@ int proc_dir_read(DIR *d, pid_t *ret);
 int proc_dir_read_pidref(DIR *d, PidRef *ret);
 
 _noreturn_ void report_errno_and_exit(int errno_fd, int error);
+int read_errno(int errno_fd);

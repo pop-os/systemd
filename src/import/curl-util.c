@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <fcntl.h>
+#include "sd-event.h"
 
 #include "alloc-util.h"
 #include "curl-util.h"
 #include "fd-util.h"
-#include "locale-util.h"
+#include "hashmap.h"
+#include "log.h"
 #include "string-util.h"
+#include "time-util.h"
 #include "version.h"
 
 static void curl_glue_check_finished(CurlGlue *g) {
@@ -15,7 +17,7 @@ static void curl_glue_check_finished(CurlGlue *g) {
         assert(g);
 
         /* sd_event_get_exit_code() returns -ENODATA if no exit was scheduled yet */
-        r = sd_event_get_exit_code(g->event, /* ret_code= */ NULL);
+        r = sd_event_get_exit_code(g->event, /* ret= */ NULL);
         if (r >= 0)
                 return; /* exit scheduled? Then don't process this anymore */
         if (r != -ENODATA)
@@ -385,27 +387,17 @@ int curl_header_strdup(const void *contents, size_t sz, const char *field, char 
 }
 
 int curl_parse_http_time(const char *t, usec_t *ret) {
-        _cleanup_(freelocalep) locale_t loc = (locale_t) 0;
-        const char *e;
-        struct tm tm;
-
         assert(t);
         assert(ret);
 
-        loc = newlocale(LC_TIME_MASK, "C", (locale_t) 0);
-        if (loc == (locale_t) 0)
-                return -errno;
-
-        /* RFC822 */
-        e = strptime_l(t, "%a, %d %b %Y %H:%M:%S %Z", &tm, loc);
-        if (!e || *e != 0)
-                /* RFC 850 */
-                e = strptime_l(t, "%A, %d-%b-%y %H:%M:%S %Z", &tm, loc);
-        if (!e || *e != 0)
-                /* ANSI C */
-                e = strptime_l(t, "%a %b %d %H:%M:%S %Y", &tm, loc);
-        if (!e || *e != 0)
+        time_t v = curl_getdate(t, NULL);
+        if (v == (time_t) -1)
                 return -EINVAL;
 
-        return mktime_or_timegm_usec(&tm, /* usec= */ true, ret);
+        if ((usec_t) v >= USEC_INFINITY / USEC_PER_SEC) /* check overflow */
+                return -ERANGE;
+
+        *ret = (usec_t) v * USEC_PER_SEC;
+
+        return 0;
 }

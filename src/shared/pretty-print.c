@@ -1,18 +1,21 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <sys/utsname.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
+#include "chase.h"
 #include "color-util.h"
 #include "conf-files.h"
 #include "constants.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "pager.h"
+#include "fs-util.h"
+#include "log.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "string-util.h"
@@ -76,6 +79,25 @@ bool urlify_enabled(void) {
 #endif
 }
 
+static bool url_suitable_for_osc8(const char *url) {
+        assert(url);
+
+        /* Not all URLs are safe for inclusion in OSC 8 due to charset and length restrictions. Let's detect
+         * which ones those are */
+
+        /* If the URL is longer than 2K let's not try to do OSC 8. As per recommendation in
+         * https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda#length-limits */
+        if (strlen(url) > 2000)
+                return false;
+
+        /* OSC sequences may only contain chars from the 32..126 range, as per ECMA-48 */
+        for (const char *c = url; *c; c++)
+                if (!osc_char_is_valid(*c))
+                        return false;
+
+        return true;
+}
+
 int terminal_urlify(const char *url, const char *text, char **ret) {
         char *n;
 
@@ -87,7 +109,7 @@ int terminal_urlify(const char *url, const char *text, char **ret) {
         if (isempty(text))
                 text = url;
 
-        if (urlify_enabled())
+        if (urlify_enabled() && url_suitable_for_osc8(url))
                 n = strjoin(ANSI_OSC "8;;", url, ANSI_ST,
                             text,
                             ANSI_OSC "8;;" ANSI_ST);
@@ -164,124 +186,164 @@ int terminal_urlify_man(const char *page, const char *section, char **ret) {
         return terminal_urlify(url, text, ret);
 }
 
-typedef enum {
-        LINE_SECTION,
-        LINE_COMMENT,
-        LINE_NORMAL,
-} LineType;
-
-static LineType classify_line_type(const char *line, CatFlags flags) {
-        const char *t = skip_leading_chars(line, WHITESPACE);
-
-        if ((flags & CAT_FORMAT_HAS_SECTIONS) && *t == '[')
-                return LINE_SECTION;
-        if (IN_SET(*t, '#', ';', '\0'))
-                return LINE_COMMENT;
-        return LINE_NORMAL;
-}
-
-static int cat_file(const char *filename, bool newline, CatFlags flags) {
+static int cat_file(const ConfFile *c, bool *newline, CatFlags flags) {
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *urlified = NULL, *section = NULL, *old_section = NULL;
         int r;
 
-        f = fopen(filename, "re");
-        if (!f)
-                return -errno;
+        assert(c);
+        assert(c->original_path);
+        assert(c->resolved_path);
+        assert(c->fd >= 0);
 
-        r = terminal_urlify_path(filename, NULL, &urlified);
+        if (newline) {
+                if (*newline)
+                        putc('\n', stdout);
+                *newline = true;
+        }
+
+        bool resolved = !path_equal(c->original_path, c->resolved_path);
+
+        r = terminal_urlify_path(c->resolved_path, NULL, &urlified);
         if (r < 0)
-                return r;
+                return log_error_errno(r, "Failed to urlify path \"%s\": %m", c->resolved_path);
 
-        printf("%s%s# %s%s\n",
-               newline ? "\n" : "",
+        printf("%s# %s%s%s%s\n",
                ansi_highlight_blue(),
+               resolved ? c->original_path : "",
+               resolved ? " -> " : "",
                urlified,
                ansi_normal());
-        fflush(stdout);
 
-        for (;;) {
+        f = fopen(FORMAT_PROC_FD_PATH(c->fd), "re");
+        if (!f)
+                return log_error_errno(errno, "Failed to open \"%s\": %m", c->resolved_path);
+
+        for (bool continued = false;;) {
                 _cleanup_free_ char *line = NULL;
 
                 r = read_line(f, LONG_LINE_MAX, &line);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to read \"%s\": %m", filename);
+                        return log_error_errno(r, "Failed to read \"%s\": %m", c->resolved_path);
                 if (r == 0)
                         break;
 
-                LineType line_type = classify_line_type(line, flags);
-                if (FLAGS_SET(flags, CAT_TLDR)) {
-                        if (line_type == LINE_SECTION) {
-                                /* The start of a section, let's not print it yet. */
+                const char *l = skip_leading_chars(line, WHITESPACE);
+
+                /* comment */
+                if (*l != '\0' && strchr(COMMENTS, *l)) {
+                        if (!FLAGS_SET(flags, CAT_TLDR))
+                                printf("%s%s%s\n", ansi_highlight_grey(), line, ansi_normal());
+                        continue;
+                }
+
+                /* empty line */
+                if (FLAGS_SET(flags, CAT_TLDR) && (isempty(l) || streq(l, "\\")))
+                        continue;
+
+                /* section */
+                if (FLAGS_SET(flags, CAT_FORMAT_HAS_SECTIONS) && *l == '[' && !continued) {
+                        if (FLAGS_SET(flags, CAT_TLDR))
+                                /* On TLDR, let's not print it yet. */
                                 free_and_replace(section, line);
-                                continue;
-                        }
+                        else
+                                printf("%s%s%s\n", ansi_highlight_cyan(), line, ansi_normal());
+                        continue;
+                }
 
-                        if (line_type == LINE_COMMENT)
-                                continue;
+                /* normal line */
 
-                        /* Before we print the actual line, print the last section header */
-                        if (section) {
-                                /* Do not print redundant section headers */
-                                if (!streq_ptr(section, old_section))
-                                        printf("%s%s%s\n",
-                                               ansi_highlight_cyan(),
-                                               section,
-                                               ansi_normal());
+                /* Before we print the line, print the last section header. */
+                if (FLAGS_SET(flags, CAT_TLDR) && section) {
+                        /* Do not print redundant section headers */
+                        if (!streq_ptr(section, old_section))
+                                printf("%s%s%s\n", ansi_highlight_cyan(), section, ansi_normal());
 
-                                free_and_replace(old_section, section);
-                        }
+                        free_and_replace(old_section, section);
+                }
+
+                /* Check if the line ends with a backslash. */
+                bool escaped = false;
+                char *e;
+                for (e = line; *e != '\0'; e++) {
+                        if (escaped)
+                                escaped = false;
+                        else if (*e == '\\')
+                                escaped = true;
+                }
+
+                /* Highlight the trailing backslash. */
+                if (escaped) {
+                        assert(e > line);
+                        *(e-1) = '\0';
+
+                        if (!strextend(&line, ansi_highlight_red(), "\\", ansi_normal()))
+                                return log_oom();
                 }
 
                 /* Highlight the left side (directive) of a Foo=bar assignment */
-                if (FLAGS_SET(flags, CAT_FORMAT_HAS_SECTIONS) && line_type == LINE_NORMAL) {
+                if (FLAGS_SET(flags, CAT_FORMAT_HAS_SECTIONS) && !continued) {
                         const char *p = strchr(line, '=');
                         if (p) {
-                                _cleanup_free_ char *highlighted = NULL, *directive = NULL;
+                                _cleanup_free_ char *directive = NULL;
 
                                 directive = strndup(line, p - line);
                                 if (!directive)
                                         return log_oom();
 
-                                highlighted = strjoin(ansi_highlight_green(),
-                                                      directive,
-                                                      "=",
-                                                      ansi_normal(),
-                                                      p + 1);
-                                if (!highlighted)
-                                        return log_oom();
-
-                                free_and_replace(line, highlighted);
+                                printf("%s%s=%s%s\n", ansi_highlight_green(), directive, ansi_normal(), p + 1);
+                                continued = escaped;
+                                continue;
                         }
                 }
 
-                printf("%s%s%s\n",
-                       line_type == LINE_SECTION ? ansi_highlight_cyan() :
-                       line_type == LINE_COMMENT ? ansi_highlight_grey() :
-                       "",
-                       line,
-                       line_type != LINE_NORMAL ? ansi_normal() : "");
+                /* Otherwise, print the line as is. */
+                printf("%s\n", line);
+                continued = escaped;
         }
 
         return 0;
 }
 
-int cat_files(const char *file, char **dropins, CatFlags flags) {
+int cat_files_full(const ConfFile *file, ConfFile * const *dropins, size_t n_dropins, CatFlags flags) {
+        bool newline = false;
+        int ret = 0;
+
+        assert(dropins || n_dropins == 0);
+
+        if (file)
+                ret = cat_file(file, &newline, flags);
+
+        FOREACH_ARRAY(i, dropins, n_dropins)
+                RET_GATHER(ret, cat_file(*i, &newline, flags));
+
+        return ret;
+}
+
+static int cat_file_by_path(const char *p, bool *newline, CatFlags flags) {
+        _cleanup_(conf_file_freep) ConfFile *c = NULL;
         int r;
 
-        if (file) {
-                r = cat_file(file, /* newline= */ false, flags);
-                if (r < 0)
-                        return log_warning_errno(r, "Failed to cat %s: %m", file);
-        }
+        assert(p);
 
-        STRV_FOREACH(path, dropins) {
-                r = cat_file(*path, /* newline= */ file || path != dropins, flags);
-                if (r < 0)
-                        return log_warning_errno(r, "Failed to cat %s: %m", *path);
-        }
+        r = conf_file_new(p, /* root = */ NULL, CHASE_MUST_BE_REGULAR, &c);
+        if (r < 0)
+                return log_error_errno(r, "Failed to chase '%s': %m", p);
 
-        return 0;
+        return cat_file(c, newline, flags);
+}
+
+int cat_files(const char *file, char **dropins, CatFlags flags) {
+        bool newline = false;
+        int ret = 0;
+
+        if (file)
+                ret = cat_file_by_path(file, &newline, flags);
+
+        STRV_FOREACH(path, dropins)
+                RET_GATHER(ret, cat_file_by_path(*path, &newline, flags));
+
+        return ret;
 }
 
 void print_separator(void) {
@@ -293,12 +355,13 @@ void print_separator(void) {
                 size_t c = columns();
 
                 flockfile(stdout);
-                fputs_unlocked(ANSI_GREY_UNDERLINE, stdout);
+                fputs_unlocked(ansi_grey_underline(), stdout);
 
                 for (size_t i = 0; i < c; i++)
                         fputc_unlocked(' ', stdout);
 
-                fputs_unlocked(ANSI_NORMAL "\n\n", stdout);
+                fputs_unlocked(ansi_normal(), stdout);
+                fputs_unlocked("\n\n", stdout);
                 funlockfile(stdout);
         } else
                 fputs("\n\n", stdout);
@@ -346,7 +409,7 @@ static int guess_type(const char **name, char ***ret_prefixes, bool *ret_is_coll
         } else if (path_equal(n, "systemd/relabel-extra.d")) {
                 coll = run = true;
                 ext = ".relabel";
-        } else if (PATH_IN_SET(n, "systemd/system-preset", "systemd/user-preset")) {
+        } else if (PATH_IN_SET(n, "systemd/system-preset", "systemd/user-preset", "systemd/initrd-preset")) {
                 coll = true;
                 ext = ".preset";
         }
@@ -358,8 +421,7 @@ static int guess_type(const char **name, char ***ret_prefixes, bool *ret_is_coll
 }
 
 int conf_files_cat(const char *root, const char *name, CatFlags flags) {
-        _cleanup_strv_free_ char **dirs = NULL, **files = NULL;
-        _cleanup_free_ char *path = NULL;
+        _cleanup_strv_free_ char **dirs = NULL;
         char **prefixes = NULL; /* explicit initialization to appease gcc */
         bool is_collection;
         const char *extension;
@@ -390,17 +452,18 @@ int conf_files_cat(const char *root, const char *name, CatFlags flags) {
         }
 
         /* First locate the main config file, if any */
+        _cleanup_(conf_file_freep) ConfFile *c = NULL;
         if (!is_collection) {
                 STRV_FOREACH(prefix, prefixes) {
-                        path = path_join(root, *prefix, name);
-                        if (!path)
+                        _cleanup_free_ char *p = path_join(*prefix, name);
+                        if (!p)
                                 return log_oom();
-                        if (access(path, F_OK) == 0)
+
+                        if (conf_file_new(p, root, CHASE_MUST_BE_REGULAR, &c) >= 0)
                                 break;
-                        path = mfree(path);
                 }
 
-                if (!path)
+                if (!c)
                         printf("%s# Main configuration file %s not found%s\n",
                                ansi_highlight_magenta(),
                                name,
@@ -408,7 +471,10 @@ int conf_files_cat(const char *root, const char *name, CatFlags flags) {
         }
 
         /* Then locate the drop-ins, if any */
-        r = conf_files_list_strv(&files, extension, root, 0, (const char* const*) dirs);
+        ConfFile **dropins = NULL;
+        size_t n_dropins = 0;
+        CLEANUP_ARRAY(dropins, n_dropins, conf_file_free_many);
+        r = conf_files_list_strv_full(extension, root, CONF_FILES_REGULAR | CONF_FILES_FILTER_MASKED, (const char* const*) dirs, &dropins, &n_dropins);
         if (r < 0)
                 return log_error_errno(r, "Failed to query file list: %m");
 
@@ -416,7 +482,7 @@ int conf_files_cat(const char *root, const char *name, CatFlags flags) {
         if (is_collection)
                 flags |= CAT_FORMAT_HAS_SECTIONS;
 
-        return cat_files(path, files, flags);
+        return cat_files_full(c, dropins, n_dropins, flags);
 }
 
 int terminal_tint_color(double hue, char **ret) {
@@ -430,7 +496,7 @@ int terminal_tint_color(double hue, char **ret) {
                 return log_debug_errno(r, "Unable to get terminal background color: %m");
 
         double s, v;
-        rgb_to_hsv(red, green, blue, /* h= */ NULL, &s, &v);
+        rgb_to_hsv(red, green, blue, /* ret_h= */ NULL, &s, &v);
 
         if (v > 50) /* If the background is bright, then pull down saturation */
                 s = 25;
@@ -464,6 +530,9 @@ bool shall_tint_background(void) {
 }
 
 void draw_progress_bar_unbuffered(const char *prefix, double percentage) {
+        if (!on_tty())
+                return;
+
         fputc('\r', stderr);
         if (prefix) {
                 fputs(prefix, stderr);
@@ -499,14 +568,14 @@ void draw_progress_bar_unbuffered(const char *prefix, double percentage) {
                                                 fprintf(stderr, "\x1B[38;2;%u;%u;%um", r8, g8, b8);
                                         }
 
-                                        fputs(special_glyph(SPECIAL_GLYPH_HORIZONTAL_FAT), stderr);
+                                        fputs(glyph(GLYPH_HORIZONTAL_FAT), stderr);
                                 } else if (i+1 < length && !separator_done) {
                                         fputs(ansi_normal(), stderr);
                                         fputc(' ', stderr);
                                         separator_done = true;
                                         fputs(ansi_grey(), stderr);
                                 } else
-                                        fputs(special_glyph(SPECIAL_GLYPH_HORIZONTAL_DOTTED), stderr);
+                                        fputs(glyph(GLYPH_HORIZONTAL_DOTTED), stderr);
                         }
 
                         fputs(ansi_normal(), stderr);
@@ -527,6 +596,9 @@ void draw_progress_bar_unbuffered(const char *prefix, double percentage) {
 }
 
 void clear_progress_bar_unbuffered(const char *prefix) {
+        if (!on_tty())
+                return;
+
         fputc('\r', stderr);
 
         if (terminal_is_dumb())
@@ -536,13 +608,16 @@ void clear_progress_bar_unbuffered(const char *prefix) {
                       stderr);
         else
                 /* Undo Windows Terminal progress indication again. */
-                fputs(ANSI_OSC "9;4;0;;" ANSI_ST
+                fputs(ANSI_OSC "9;4;0;" ANSI_ST
                       ANSI_ERASE_TO_END_OF_LINE, stderr);
 
         fputc('\r', stderr);
 }
 
 void draw_progress_bar(const char *prefix, double percentage) {
+        if (!on_tty())
+                return;
+
         /* We are going output a bunch of small strings that shall appear as a single line to STDERR which is
          * unbuffered by default. Let's temporarily turn on full buffering, so that this is passed to the tty
          * as a single buffer, to make things more efficient. */
@@ -554,6 +629,9 @@ int draw_progress_barf(double percentage, const char *prefixf, ...) {
         _cleanup_free_ char *s = NULL;
         va_list ap;
         int r;
+
+        if (!on_tty())
+                return 0;
 
         va_start(ap, prefixf);
         r = vasprintf(&s, prefixf, ap);
@@ -567,6 +645,9 @@ int draw_progress_barf(double percentage, const char *prefixf, ...) {
 }
 
 void clear_progress_bar(const char *prefix) {
+        if (!on_tty())
+                return;
+
         WITH_BUFFERED_STDERR;
         clear_progress_bar_unbuffered(prefix);
 }

@@ -33,22 +33,25 @@
       <command>systemd-run</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="opt" rep="repeat">PATH OPTIONS</arg>
-      <arg choice="req"><replaceable>COMMAND</replaceable></arg>
+      <arg choice="req"><replaceable>COMMAND</replaceable>
       <arg choice="opt" rep="repeat">ARGS</arg>
+      </arg>
     </cmdsynopsis>
     <cmdsynopsis>
       <command>systemd-run</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="opt" rep="repeat">SOCKET OPTIONS</arg>
-      <arg choice="req"><replaceable>COMMAND</replaceable></arg>
+      <arg choice="req"><replaceable>COMMAND</replaceable>
       <arg choice="opt" rep="repeat">ARGS</arg>
+      </arg>
     </cmdsynopsis>
     <cmdsynopsis>
       <command>systemd-run</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="opt" rep="repeat">TIMER OPTIONS</arg>
-      <arg choice="req"><replaceable>COMMAND</replaceable></arg>
+      <arg choice="req"><replaceable>COMMAND</replaceable>
       <arg choice="opt" rep="repeat">ARGS</arg>
+      </arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -185,18 +188,14 @@
       <varlistentry>
         <term><option>--expand-environment=<replaceable>BOOL</replaceable></option></term>
 
-        <listitem><para>Expand environment variables in command arguments. If enabled, environment variables
-        specified as <literal>${<replaceable>VARIABLE</replaceable>}</literal> will be expanded in the same
-        way as in commands specified via <varname>ExecStart=</varname> in units. With
+        <listitem><para>Expand environment variables in command arguments. If enabled (the default),
+        environment variables specified as <literal>${<replaceable>VARIABLE</replaceable>}</literal> will be
+        expanded in the same way as in commands specified via <varname>ExecStart=</varname> in units. With
         <varname>--scope</varname>, this expansion is performed by <command>systemd-run</command> itself, and
         in other cases by the service manager that spawns the command. Note that this is similar to, but not
         the same as variable expansion in
         <citerefentry project='man-pages'><refentrytitle>bash</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         and other shells.</para>
-
-        <para>The default is to enable this option in all cases, except for <varname>--scope</varname> where
-        it is disabled by default, for backward compatibility reasons. Note that this will be changed in a
-        future release, where it will be switched to enabled by default as well.</para>
 
         <para>See
         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
@@ -332,6 +331,20 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>--pty-late</option></term>
+        <term><option>-T</option></term>
+
+        <listitem><para>Much like <option>--pty</option>, but the PTY communication only begins once the unit
+        start is complete. This effectively means PTY input during <varname>ExecStartPre=</varname> of a
+        service is not available while using <option>--pty-late</option>, while it is available using
+        <option>--pty</option>, for most service types. However, if this option is used, access to the
+        invoking TTY is available for password queries (see <option>--no-ask-password</option> below) during
+        unit start-up.</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--pipe</option></term>
         <term><option>-P</option></term>
 
@@ -382,6 +395,17 @@
         message explaining how to terminate the TTY connection.</para>
 
         <xi:include href="version-info.xml" xpointer="v219"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-v</option></term>
+        <term><option>--verbose</option></term>
+
+        <listitem>
+          <para>Display unit log output while running.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -480,13 +504,30 @@
         all units that ran and failed are kept in memory until the user explicitly resets their failure state with
         <command>systemctl reset-failed</command> or an equivalent command. On the other hand, units that ran
         successfully are unloaded immediately. If this option is turned on the "garbage collection" of units is more
-        aggressive, and unloads units regardless if they exited successfully or failed. This option is a shortcut for
+        aggressive, and unloads units regardless of whether they exited successfully or failed. This option is a shortcut for
         <command>--property=CollectMode=inactive-or-failed</command>, see the explanation for
         <varname>CollectMode=</varname> in
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for further
         information.</para>
 
         <xi:include href="version-info.xml" xpointer="v236"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--job-mode=<replaceable>MODE</replaceable></option></term>
+
+        <listitem>
+          <para>When queuing a new job, this option controls how to deal with
+          already queued jobs.</para>
+
+          <para>The option takes the same mode values as
+          <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
+          <option>--job-mode=</option> option. The default job mode is <literal>fail</literal>.</para>
+
+          <para>Running <option>--job-mode=help</option> shows a list of available job modes.</para>
+
+          <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -524,6 +565,16 @@
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
       <xi:include href="standard-options.xml" xpointer="json" />
+
+      <varlistentry id='no-pager'>
+        <term><option>--no-pager</option></term>
+
+        <listitem><para>Do not pipe output into a pager. This currently only applies to
+        <option>--help</option>. (The pager is not started during normal operation.)</para>
+
+        <xi:include href="version-info.xml" xpointer="v258"/>
+        </listitem>
+      </varlistentry>
     </variablelist>
 
     <para>All command line arguments after the first non-option argument become part of the command line of

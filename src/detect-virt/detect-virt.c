@@ -1,13 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <getopt.h>
-#include <stdbool.h>
-#include <stdlib.h>
 
 #include "alloc-util.h"
 #include "build.h"
 #include "confidential-virt.h"
+#include "log.h"
 #include "main-func.h"
 #include "pretty-print.h"
 #include "string-table.h"
@@ -190,7 +188,6 @@ static int run(int argc, char *argv[]) {
                 v = detect_virtualization();
                 if (v < 0)
                         return log_error_errno(v, "Failed to check for virtualization: %m");
-                break;
         }
 
         if (!arg_quiet)

@@ -1,21 +1,24 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
-#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "async.h"
 #include "fs-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
+#include "rm-rf.h"
 #include "signal-util.h"
-#include "time-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 
 TEST(asynchronous_sync) {
-        ASSERT_OK(asynchronous_sync(NULL));
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        ASSERT_OK(asynchronous_sync(&pidref));
+        ASSERT_OK(pidref_wait_for_terminate(&pidref, /* ret= */ NULL));
 }
 
 static void wait_fd_closed(int fd) {
@@ -81,7 +84,7 @@ TEST(asynchronous_rm_rf) {
         /* Do this once more, from a subreaper. Which is nice, because we can watch the async child even
          * though detached */
 
-        r = safe_fork("(subreaper)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT, NULL);
+        r = safe_fork("(subreaper)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REOPEN_LOG|FORK_LOG|FORK_WAIT, NULL);
         ASSERT_OK(r);
 
         if (r == 0) {
@@ -100,7 +103,7 @@ TEST(asynchronous_rm_rf) {
                 for (;;) {
                         siginfo_t si = {};
 
-                        ASSERT_OK(waitid(P_ALL, 0, &si, WEXITED));
+                        ASSERT_OK_ERRNO(waitid(P_ALL, 0, &si, WEXITED));
 
                         if (access(tt, F_OK) < 0) {
                                 assert_se(errno == ENOENT);

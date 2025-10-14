@@ -1,15 +1,19 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "sd-device.h"
+#include "sd-id128.h"
 
+#include "alloc-util.h"
 #include "blkid-util.h"
 #include "blockdev-util.h"
 #include "chase.h"
 #include "errno-util.h"
 #include "escape.h"
 #include "fd-util.h"
+#include "log.h"
 #include "mountpoint-util.h"
 #include "pcrextend-util.h"
+#include "string-util.h"
 #include "strv.h"
 
 static int device_get_file_system_word(
@@ -97,7 +101,7 @@ int pcrextend_file_system_word(const char *path, char **ret_word, char **ret_nor
         if (dfd < 0)
                 return log_error_errno(dfd, "Failed to open path '%s': %m", path);
 
-        r = fd_is_mount_point(dfd, NULL, 0);
+        r = is_mount_point_at(dfd, NULL, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine if path '%s' is mount point: %m", normalized_path);
         if (r == 0)

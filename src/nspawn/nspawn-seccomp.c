@@ -1,16 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+#include <linux/capability.h>
 #include <linux/netlink.h>
-#include <sys/capability.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 
-#include "alloc-util.h"
 #include "log.h"
 #include "nspawn-seccomp.h"
 #include "seccomp-util.h"
-#include "string-util.h"
 #include "strv.h"
 
 #if HAVE_SECCOMP
@@ -34,6 +30,7 @@ static int add_syscall_filters(
                 { 0,                  "@file-system"                 },
                 { 0,                  "@io-event"                    },
                 { 0,                  "@ipc"                         },
+                { 0,                  "@keyring"                     },
                 { 0,                  "@mount"                       },
                 { 0,                  "@network-io"                  },
                 { 0,                  "@process"                     },
@@ -117,7 +114,6 @@ static int add_syscall_filters(
                  * The following syscalls and groups are knowingly excluded:
                  *
                  * @cpu-emulation
-                 * @keyring           (NB: keyring is not namespaced!)
                  * @obsolete
                  * @pkey
                  * @swap

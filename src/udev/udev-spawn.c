@@ -1,25 +1,36 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <unistd.h>
+
 #include "sd-event.h"
 
+#include "build-path.h"
 #include "device-private.h"
 #include "device-util.h"
 #include "errno-util.h"
+#include "event-util.h"
+#include "exec-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
+#include "format-util.h"
+#include "hashmap.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "string-util.h"
 #include "strv.h"
+#include "time-util.h"
 #include "udev-builtin.h"
 #include "udev-event.h"
 #include "udev-spawn.h"
 #include "udev-trace.h"
+#include "udev-worker.h"
 
 typedef struct Spawn {
         sd_device *device;
         const char *cmd;
-        pid_t pid;
+        PidRef pidref;
         usec_t timeout_warn_usec;
         usec_t timeout_usec;
         int timeout_signal;
@@ -118,10 +129,10 @@ static int on_spawn_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
         DEVICE_TRACE_POINT(spawn_timeout, spawn->device, spawn->cmd);
 
         log_device_error(spawn->device, "Spawned process '%s' ["PID_FMT"] timed out after %s, killing.",
-                         spawn->cmd, spawn->pid,
+                         spawn->cmd, spawn->pidref.pid,
                          FORMAT_TIMESPAN(spawn->timeout_usec, USEC_PER_SEC));
 
-        kill_and_sigcont(spawn->pid, spawn->timeout_signal);
+        (void) pidref_kill_and_sigcont(&spawn->pidref, spawn->timeout_signal);
         return 1;
 }
 
@@ -129,7 +140,7 @@ static int on_spawn_timeout_warning(sd_event_source *s, uint64_t usec, void *use
         Spawn *spawn = ASSERT_PTR(userdata);
 
         log_device_warning(spawn->device, "Spawned process '%s' ["PID_FMT"] is taking longer than %s to complete.",
-                           spawn->cmd, spawn->pid,
+                           spawn->cmd, spawn->pidref.pid,
                            FORMAT_TIMESPAN(spawn->timeout_warn_usec, USEC_PER_SEC));
 
         return 1;
@@ -203,7 +214,7 @@ static int spawn_wait(Spawn *spawn) {
                         return log_device_debug_errno(spawn->device, r, "Failed to create stderr event source: %m");
         }
 
-        r = sd_event_add_child(e, &sigchld_source, spawn->pid, WEXITED, on_spawn_sigchld, spawn);
+        r = event_add_child_pidref(e, &sigchld_source, &spawn->pidref, WEXITED, on_spawn_sigchld, spawn);
         if (r < 0)
                 return log_device_debug_errno(spawn->device, r, "Failed to create sigchild event source: %m");
         /* SIGCHLD should be processed after IO is complete */
@@ -222,11 +233,6 @@ int udev_event_spawn(
                 size_t result_size,
                 bool *ret_truncated) {
 
-        _cleanup_close_pair_ int outpipe[2] = EBADF_PAIR, errpipe[2] = EBADF_PAIR;
-        _cleanup_strv_free_ char **argv = NULL;
-        char **envp = NULL;
-        Spawn spawn;
-        pid_t pid;
         int r;
 
         assert(event);
@@ -244,8 +250,8 @@ int udev_event_spawn(
                 return 0;
         }
 
-        int timeout_signal = event->worker ? event->worker->timeout_signal : SIGKILL;
-        usec_t timeout_usec = event->worker ? event->worker->timeout_usec : DEFAULT_WORKER_TIMEOUT_USEC;
+        int timeout_signal = event->worker ? event->worker->config.timeout_signal : SIGKILL;
+        usec_t timeout_usec = event->worker ? event->worker->config.timeout_usec : DEFAULT_WORKER_TIMEOUT_USEC;
         usec_t now_usec = now(CLOCK_MONOTONIC);
         usec_t age_usec = usec_sub_unsigned(now_usec, event->birth_usec);
         usec_t cmd_timeout_usec = usec_sub_unsigned(timeout_usec, age_usec);
@@ -255,16 +261,19 @@ int udev_event_spawn(
                                                 FORMAT_TIMESPAN(age_usec, 1), FORMAT_TIMESPAN(timeout_usec, 1), cmd);
 
         /* pipes from child to parent */
+        _cleanup_close_pair_ int outpipe[2] = EBADF_PAIR;
         if (result || log_get_max_level() >= LOG_INFO)
                 if (pipe2(outpipe, O_NONBLOCK|O_CLOEXEC) != 0)
                         return log_device_error_errno(event->dev, errno,
                                                       "Failed to create pipe for command '%s': %m", cmd);
 
+        _cleanup_close_pair_ int errpipe[2] = EBADF_PAIR;
         if (log_get_max_level() >= LOG_INFO)
                 if (pipe2(errpipe, O_NONBLOCK|O_CLOEXEC) != 0)
                         return log_device_error_errno(event->dev, errno,
                                                       "Failed to create pipe for command '%s': %m", cmd);
 
+        _cleanup_strv_free_ char **argv = NULL;
         r = strv_split_full(&argv, cmd, NULL, EXTRACT_UNQUOTE | EXTRACT_RELAX | EXTRACT_RETAIN_ESCAPE);
         if (r < 0)
                 return log_device_error_errno(event->dev, r, "Failed to split command: %m");
@@ -284,23 +293,34 @@ int udev_event_spawn(
                 free_and_replace(argv[0], program);
         }
 
+        char *found;
+        _cleanup_close_ int fd_executable = r = pin_callout_binary(argv[0], &found);
+        if (r < 0)
+                return log_device_error_errno(event->dev, r, "Failed to find and pin callout binary \"%s\": %m", argv[0]);
+
+        log_device_debug(event->dev, "Found callout binary: \"%s\".", found);
+        free_and_replace(argv[0], found);
+
+        char **envp;
         r = device_get_properties_strv(event->dev, &envp);
         if (r < 0)
                 return log_device_error_errno(event->dev, r, "Failed to get device properties");
 
         log_device_debug(event->dev, "Starting '%s'", cmd);
 
-        r = safe_fork_full("(spawn)",
-                           (int[]) { -EBADF, outpipe[WRITE_END], errpipe[WRITE_END] },
-                           NULL, 0,
-                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REARRANGE_STDIO|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE,
-                           &pid);
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        r = pidref_safe_fork_full(
+                        "(spawn)",
+                        (int[]) { -EBADF, outpipe[WRITE_END], errpipe[WRITE_END] },
+                        &fd_executable, 1,
+                        FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REARRANGE_STDIO|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE,
+                        &pidref);
         if (r < 0)
                 return log_device_error_errno(event->dev, r,
                                               "Failed to fork() to execute command '%s': %m", cmd);
         if (r == 0) {
                 DEVICE_TRACE_POINT(spawn_exec, event->dev, cmd);
-                execve(argv[0], argv, envp);
+                (void) fexecve_or_execve(fd_executable, argv[0], argv, envp);
                 _exit(EXIT_FAILURE);
         }
 
@@ -308,10 +328,10 @@ int udev_event_spawn(
         outpipe[WRITE_END] = safe_close(outpipe[WRITE_END]);
         errpipe[WRITE_END] = safe_close(errpipe[WRITE_END]);
 
-        spawn = (Spawn) {
+        Spawn spawn = {
                 .device = event->dev,
                 .cmd = cmd,
-                .pid = pid,
+                .pidref = pidref, /* Do not take ownership */
                 .accept_failure = accept_failure,
                 .timeout_warn_usec = udev_warn_timeout(cmd_timeout_usec),
                 .timeout_usec = cmd_timeout_usec,
@@ -347,26 +367,26 @@ void udev_event_execute_run(UdevEvent *event) {
         ORDERED_HASHMAP_FOREACH_KEY(val, command, event->run_list) {
                 UdevBuiltinCommand builtin_cmd = PTR_TO_UDEV_BUILTIN_CMD(val);
 
-                if (builtin_cmd != _UDEV_BUILTIN_INVALID) {
+                if (builtin_cmd >= 0) {
                         log_device_debug(event->dev, "Running built-in command \"%s\"", command);
                         r = udev_builtin_run(event, builtin_cmd, command);
                         if (r < 0)
                                 log_device_debug_errno(event->dev, r, "Failed to run built-in command \"%s\", ignoring: %m", command);
                 } else {
-                        if (event->worker && event->worker->exec_delay_usec > 0) {
+                        if (event->worker && event->worker->config.exec_delay_usec > 0) {
                                 usec_t now_usec = now(CLOCK_MONOTONIC);
                                 usec_t age_usec = usec_sub_unsigned(now_usec, event->birth_usec);
 
-                                if (event->worker->exec_delay_usec >= usec_sub_unsigned(event->worker->timeout_usec, age_usec)) {
+                                if (event->worker->config.exec_delay_usec >= usec_sub_unsigned(event->worker->config.timeout_usec, age_usec)) {
                                         log_device_warning(event->dev,
                                                            "Cannot delay execution of \"%s\" for %s, skipping.",
-                                                           command, FORMAT_TIMESPAN(event->worker->exec_delay_usec, USEC_PER_SEC));
+                                                           command, FORMAT_TIMESPAN(event->worker->config.exec_delay_usec, USEC_PER_SEC));
                                         continue;
                                 }
 
                                 log_device_debug(event->dev, "Delaying execution of \"%s\" for %s.",
-                                                 command, FORMAT_TIMESPAN(event->worker->exec_delay_usec, USEC_PER_SEC));
-                                (void) usleep_safe(event->worker->exec_delay_usec);
+                                                 command, FORMAT_TIMESPAN(event->worker->config.exec_delay_usec, USEC_PER_SEC));
+                                (void) usleep_safe(event->worker->config.exec_delay_usec);
                         }
 
                         log_device_debug(event->dev, "Running command \"%s\"", command);

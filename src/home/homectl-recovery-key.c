@@ -6,12 +6,11 @@
 #include "homectl-recovery-key.h"
 #include "json-util.h"
 #include "libcrypt-util.h"
+#include "log.h"
 #include "memory-util.h"
 #include "qrcode-util.h"
-#include "random-util.h"
 #include "recovery-key.h"
 #include "strv.h"
-#include "terminal-util.h"
 
 static int add_privileged(sd_json_variant **v, const char *hashed) {
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *e = NULL, *w = NULL, *l = NULL;
@@ -32,7 +31,7 @@ static int add_privileged(sd_json_variant **v, const char *hashed) {
 
         r = sd_json_variant_append_array(&l, e);
         if (r < 0)
-                return log_error_errno(r, "Failed append recovery key: %m");
+                return log_error_errno(r, "Failed to append recovery key: %m");
 
         r = sd_json_variant_set_field(&w, "recoveryKey", l);
         if (r < 0)
@@ -142,7 +141,7 @@ int identity_add_recovery_key(sd_json_variant **v) {
         fprintf(stderr,
                 "A secret recovery key has been generated for this account:\n\n"
                 "    %s%s%s",
-                emoji_enabled() ? special_glyph(SPECIAL_GLYPH_LOCK_AND_KEY) : "",
+                emoji_enabled() ? glyph(GLYPH_LOCK_AND_KEY) : "",
                 emoji_enabled() ? " " : "",
                 ansi_highlight());
         fflush(stderr);

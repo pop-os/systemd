@@ -26,24 +26,26 @@ __contains_word() {
 
 __get_users() {
     local a b
-    loginctl list-users --no-legend --no-pager | { while read a b; do echo " $b"; done; };
+    loginctl list-users --no-legend --no-pager 2>/dev/null |
+        { while read -r a b; do echo " $b"; done; }
 }
 
 __get_slices() {
     local a b
-    systemctl list-units -t slice --no-legend --no-pager --plain | { while read a b; do echo " $a"; done; };
+    systemctl list-units -t slice --no-legend --no-pager --plain 2>/dev/null |
+        { while read -r a b; do echo " $a"; done; }
 }
 
 __get_machines() {
     local a b
-    { machinectl list --full --max-addresses=0 --no-legend --no-pager 2>/dev/null; echo ".host"; } | \
-	{ while read a b; do echo " $a"; done; } | \
+    { machinectl list --full --max-addresses=0 --no-legend --no-pager 2>/dev/null; echo ".host"; } |
+        { while read -r a b; do echo " $a"; done; } |
         sort -u
 }
 
 __get_env() {
     local a
-    env | { while read a; do echo " ${a%%=*}"; done; };
+    env | { while read -r a; do [[ $a =~ ^[A-Za-z0-9_]+= ]] && echo " ${a%%=*}"; done; }
 }
 
 __get_interfaces(){
@@ -66,7 +68,8 @@ _systemd_nspawn() {
 
     local -A OPTS=(
         [STANDALONE]='-h --help --version --private-network -b --boot --read-only -q --quiet --share-system
-                      --keep-unit -n --network-veth -j -x --ephemeral -a --as-pid2 -U --suppress-sync=yes'
+                      --keep-unit -n --network-veth -j -x --ephemeral -a --as-pid2 -U --suppress-sync=yes
+                      --cleanup'
         [ARG]='-D --directory -u --user --uuid --capability --drop-capability --link-journal --bind --bind-ro
                       -M --machine -S --slice -E --setenv -Z --selinux-context -L --selinux-apifs-context
                       --register --network-interface --network-bridge --personality -i --image --image-policy --tmpfs
@@ -157,7 +160,7 @@ _systemd_nspawn() {
                 comps='yes no'
                 ;;
             --private-users)
-                comps='yes no pick'
+                comps='yes no pick identity managed'
                 ;;
             --network-namespace-path)
                 comps=$( compgen -A file -- "$cur" )

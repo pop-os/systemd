@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "af-list.h"
+#include "alloc-util.h"
 #include "daemon-util.h"
-#include "data-fd-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "hashmap.h"
 #include "iovec-util.h"
 #include "json-util.h"
+#include "memfd-util.h"
 #include "networkd-address.h"
 #include "networkd-json.h"
 #include "networkd-link.h"
@@ -14,6 +17,7 @@
 #include "networkd-nexthop.h"
 #include "networkd-route.h"
 #include "networkd-serialize.h"
+#include "string-util.h"
 
 int manager_serialize(Manager *manager) {
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL, *array = NULL;
@@ -60,6 +64,7 @@ int manager_serialize(Manager *manager) {
 
         if (!v) {
                 log_debug("There is nothing to serialize.");
+                (void) notify_remove_fd_warn("manager-serialization");
                 return 0;
         }
 
@@ -69,7 +74,7 @@ int manager_serialize(Manager *manager) {
                 return r;
 
         _cleanup_close_ int fd = -EBADF;
-        fd = acquire_data_fd(dump);
+        fd = memfd_new_and_seal_string("serialization", dump);
         if (fd < 0)
                 return fd;
 
@@ -442,7 +447,7 @@ int manager_deserialize(Manager *manager) {
                 return log_debug_errno(errno, "Failed to fdopen() serialization file descriptor: %m");
 
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
-        unsigned err_line, err_column;
+        unsigned err_line = 0, err_column = 0;
         r = sd_json_parse_file(
                         f,
                         /* path = */ NULL,

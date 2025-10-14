@@ -226,6 +226,21 @@ This field is optional, when unset the user should not be considered part of any
 A user record with a realm set is never compatible (for the purpose of updates,
 see above) with a user record without one set, even if the `userName` field matches.
 
+`aliases` → An array of strings, each being a valid UNIX user name. If
+specified, a list of additional UNIX user names this record shall be known
+under. These are *alias* names only, the name in `userName` is always the
+primary name. Typically, a user record that carries this field shall be
+retrievable and resolvable under every name listed here, pretty much everywhere
+the primary user name is. If logging in is attempted via an alias name it
+should be normalized to the primary name.
+
+`uuid` -> A string containing a lowercase UUID that identifies this user.
+The UUID should be assigned to the user at creation, be the same across multiple machines,
+and never change (even if the user's username, realm, or other identifying attributes change).
+When the user database is backed by Microsoft Active Directory, this field should contain
+the value from the [objectGUID](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-ada3/937eb5c6-f6b3-4652-a276-5d6bb8979658)
+attribute. The same UUID can be retrieved via `mbr_uid_to_uuid` on macOS.
+
 `blobDirectory` → The absolute path to a world-readable copy of the user's blob
 directory. See [Blob Directories](/USER_RECORD_BLOB_DIRS) for more details.
 
@@ -259,14 +274,17 @@ It's probably wise to use a location string processable by geo-location subsyste
 Example: `Berlin, Germany` or `Basement, Room 3a`.
 
 `disposition` → A string, one of `intrinsic`, `system`, `dynamic`, `regular`,
-`container`, `reserved`. If specified clarifies the disposition of the user,
+`container`, `foreign`, `reserved`. If specified clarifies the disposition of the user,
 i.e. the context it is defined in.
 For regular, "human" users this should be `regular`, for system users (i.e. users that system services run under, and similar) this should be `system`.
 The `intrinsic` disposition should be used only for the two users that have special meaning to the OS kernel itself,
 i.e. the `root` and `nobody` users.
 The `container` string should be used for users that are used by an OS container, and hence will show up in `ps` listings
 and such, but are only defined in container context.
-Finally `reserved` should be used for any users outside of these use-cases.
+The `foreign` string should be used for users from UID ranges which are used
+for OS images from foreign systems, i.e. where local resolution would not make
+sense.
+Finally, `reserved` should be used for any users outside of these use-cases.
 Note that this property is entirely optional and applications are assumed to be able to derive the
 disposition of a user automatically from a record even in absence of this
 field, based on other fields, for example the numeric UID. By setting this
@@ -301,6 +319,7 @@ and its value to set for the user's login session, in a format compatible with
 environment variable listed here is automatically set by
 [`pam_systemd`](https://www.freedesktop.org/software/systemd/man/pam_systemd.html)
 for all login sessions of the user.
+
 `timeZone` → A string indicating a preferred timezone to use for the user. When
 logging in
 [`pam_systemd`](https://www.freedesktop.org/software/systemd/man/pam_systemd.html)
@@ -332,6 +351,7 @@ will automatically initialize the login process' nice level to this value with,
 which is then inherited by all the user's processes, see
 [`setpriority()`](https://man7.org/linux/man-pages/man2/setpriority.2.html) for
 more information.
+
 `resourceLimits` → An object, where each key refers to a Linux resource limit
 (such as `RLIMIT_NOFILE` and similar).
 Their values should be an object with two keys `cur` and `max` for the soft and hard resource limit.
@@ -608,6 +628,29 @@ is allowed to edit.
 `selfModifiablePrivileged` →  Similar to `selfModifiableFields`, but it lists fields in
 the `privileged` section that the user is allowed to edit.
 
+`tmpLimit` → A numeric value encoding a disk quota limit in bytes enforced on
+`/tmp/` on login, in case it is backed by volatile file system (such as
+`tmpfs`).
+
+`tmpLimitScale` → Similar, but encodes a relative value, normalized to
+`UINT32_MAX` as 100%. This value is applied relative to the file system
+size. If both `tmpLimit` and `tmpLimitScale` are set, the lower of the two
+should be enforced. If neither field is set the implementation might apply a
+default limit.
+
+`devShmLimit`, `devShmLimitScale` → Similar to the previous two, but apply to
+`/dev/shm/` rather than `/tmp/`.
+
+`defaultArea` → The default home directory "area" to enter after logging
+in. Areas are named subdirectories below `~/Areas/` of the user, and can be used
+to maintain separate secondary home directories within the primary home
+directory of the user. Typically, a home directory "area" can be specified at
+login time, but if that's not done, and `defaultArea` is set, this area is
+selected. The value must be a string that qualifies as a valid filename. After
+login, the `$HOME` environment variable will point to `~/Areas/` of the user,
+suffixed by the selected area name, and `$XDG_AREA` will be set to the area
+string (unprefixed).
+
 `privileged` → An object, which contains the fields of the `privileged` section
 of the user record, see below.
 
@@ -740,32 +783,45 @@ If any of the specified IDs match the system's local machine ID
 (As a special case, if only a single machine ID is listed this field may be a single
 string rather than an array of strings.)
 
+`matchNotMachineId` → Similar to `matchMachineId` but implements the inverse
+match: this section only applies if the local machine ID does *not* match any
+of the listed IDs.
+
 `matchHostname` → An array of strings that are valid hostnames.
 If any of the specified hostnames match the system's local hostname, the fields in this object are honored.
-If both `matchHostname` and `matchMachineId` are used within the same array entry, the object is honored when either match succeeds,
-i.e. the two match types are combined in OR, not in AND.
 (As a special case, if only a single hostname is listed this field may be a single string rather than an array of strings.)
 
-These two are the only two fields specific to this section.
-All other fields that may be used in this section are identical to the equally named ones in the
+`matchNotHostname` → Similar to `matchHostname`, but implement the inverse
+match, as above.
+
+If any of these four fields are used within the same array entry, the object is
+honored when either match succeeds, i.e. the match types are combined in OR,
+not in AND.
+
+These four are the only fields specific to this section. All other fields that
+may be used in this section are identical to the equally named ones in the
 `regular` section (i.e. at the top-level object). Specifically, these are:
 
-`blobDirectory`, `blobManifest`, `iconName`, `location`, `shell`, `umask`, `environment`, `timeZone`,
-`preferredLanguage`, `additionalLanguages`, `niceLevel`, `resourceLimits`, `locked`, `notBeforeUSec`,
-`notAfterUSec`, `storage`, `diskSize`, `diskSizeRelative`, `skeletonDirectory`,
-`accessMode`, `tasksMax`, `memoryHigh`, `memoryMax`, `cpuWeight`, `ioWeight`,
+`blobDirectory`, `blobManifest`, `iconName`, `location`, `shell`, `umask`,
+`environment`, `timeZone`, `preferredLanguage`, `additionalLanguages`,
+`niceLevel`, `resourceLimits`, `locked`, `notBeforeUSec`, `notAfterUSec`,
+`storage`, `diskSize`, `diskSizeRelative`, `skeletonDirectory`, `accessMode`,
+`tasksMax`, `memoryHigh`, `memoryMax`, `cpuWeight`, `ioWeight`,
 `mountNoDevices`, `mountNoSuid`, `mountNoExecute`, `cifsDomain`,
 `cifsUserName`, `cifsService`, `cifsExtraMountOptions`, `imagePath`, `uid`,
 `gid`, `memberOf`, `fileSystemType`, `partitionUuid`, `luksUuid`,
 `fileSystemUuid`, `luksDiscard`, `luksOfflineDiscard`, `luksCipher`,
 `luksCipherMode`, `luksVolumeKeySize`, `luksPbkdfHashAlgorithm`,
-`luksPbkdfType`, `luksPbkdfForceIterations`, `luksPbkdfTimeCostUSec`, `luksPbkdfMemoryCost`,
-`luksPbkdfParallelThreads`, `luksSectorSize`, `autoResizeMode`, `rebalanceWeight`,
-`rateLimitIntervalUSec`, `rateLimitBurst`, `enforcePasswordPolicy`,
-`autoLogin`, `preferredSessionType`, `preferredSessionLauncher`, `stopDelayUSec`, `killProcesses`,
+`luksPbkdfType`, `luksPbkdfForceIterations`, `luksPbkdfTimeCostUSec`,
+`luksPbkdfMemoryCost`, `luksPbkdfParallelThreads`, `luksSectorSize`,
+`autoResizeMode`, `rebalanceWeight`, `rateLimitIntervalUSec`, `rateLimitBurst`,
+`enforcePasswordPolicy`, `autoLogin`, `preferredSessionType`,
+`preferredSessionLauncher`, `stopDelayUSec`, `killProcesses`,
 `passwordChangeMinUSec`, `passwordChangeMaxUSec`, `passwordChangeWarnUSec`,
 `passwordChangeInactiveUSec`, `passwordChangeNow`, `pkcs11TokenUri`,
-`fido2HmacCredential`, `selfModifiableFields`, `selfModifiableBlobs`, `selfModifiablePrivileged`.
+`fido2HmacCredential`, `selfModifiableFields`, `selfModifiableBlobs`,
+`selfModifiablePrivileged`, `tmpLimit`, `tmpLimitScale`, `devShmLimit`,
+`devShmLimitScale`.
 
 ## Fields in the `binding` section
 
@@ -815,6 +871,18 @@ This section is arranged similarly to the `binding` section: the `status`
 sub-object of the top-level user record object is keyed by the machine ID,
 which points to the object with the fields defined here.
 The following fields are defined:
+
+`aliases` → An array of strings, each being a valid UNIX user name. This is
+similar to the top-level field of the same name. The purpose of this field is
+to allow user record providers to dynamically insert additional alias names
+into the user record, depending on the precise query. This is useful to
+implement case-insensitive user names (or support for similar non-normalized
+user record naming), as it allows the provider to insert the precise
+casing/spelling of the user name used for the look-up in the record data,
+without this being part of the persisted record. Note that clients doing a
+look-up typically re-validate user records against the lookup keys they
+provided, hence it's essential that any dynamic alias name appears in the
+user record, without this being part of the persistent part of the record.
 
 `diskUsage` → An unsigned 64-bit integer.
 The currently used disk space of the home directory in bytes.
@@ -1150,6 +1218,6 @@ systems. It would hence look like this:
                         "key" : "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA/QT6kQWOAMhDJf56jBmszEQQpJHqDsGDMZOdiptBgRk=\n-----END PUBLIC KEY-----\n"
                 }
         ],
-        "userName" : "grobie",
+        "userName" : "grobie"
 }
 ```

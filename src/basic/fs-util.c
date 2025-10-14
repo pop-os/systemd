@@ -1,42 +1,32 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <stddef.h>
+#include <linux/falloc.h>
 #include <stdlib.h>
 #include <sys/file.h>
-#include <linux/falloc.h>
-#include <linux/magic.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "btrfs.h"
 #include "chattr-util.h"
 #include "dirent-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "fs-util.h"
 #include "hostname-util.h"
 #include "label.h"
 #include "lock-util.h"
 #include "log.h"
-#include "macro.h"
-#include "missing_fcntl.h"
-#include "missing_fs.h"
-#include "missing_syscall.h"
 #include "mkdir.h"
-#include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "random-util.h"
 #include "ratelimit.h"
 #include "stat-util.h"
-#include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "time-util.h"
 #include "tmpfile-util.h"
 #include "umask-util.h"
-#include "user-util.h"
 
 int rmdir_parents(const char *path, const char *stop) {
         char *p;
@@ -66,7 +56,7 @@ int rmdir_parents(const char *path, const char *stop) {
                 assert(*slash == '/');
                 *slash = '\0';
 
-                if (path_startswith_full(stop, p, /* accept_dot_dot= */ false))
+                if (path_startswith_full(stop, p, PATH_STARTSWITH_REFUSE_DOT_DOT))
                         return 0;
 
                 if (rmdir(p) < 0 && errno != ENOENT)
@@ -76,6 +66,11 @@ int rmdir_parents(const char *path, const char *stop) {
 
 int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) {
         int r;
+
+        assert(olddirfd >= 0 || olddirfd == AT_FDCWD);
+        assert(oldpath);
+        assert(newdirfd >= 0 || newdirfd == AT_FDCWD);
+        assert(newpath);
 
         /* Try the ideal approach first */
         if (renameat2(olddirfd, oldpath, newdirfd, newpath, RENAME_NOREPLACE) >= 0)
@@ -293,15 +288,20 @@ int fchmod_opath(int fd, mode_t m) {
          * - fchmod(2) only operates on open files (i. e., fds with an open file description);
          * - fchmodat(2) does not have a flag arg like fchownat(2) does, so no way to pass AT_EMPTY_PATH;
          *   + it should not be confused with the libc fchmodat(3) interface, which adds 4th flag argument,
-         *     but does not support AT_EMPTY_PATH (only supports AT_SYMLINK_NOFOLLOW);
+         *     and supports AT_EMPTY_PATH since v2.39 (previously only supported AT_SYMLINK_NOFOLLOW). So if
+         *     the kernel has fchmodat2(2), since v2.39 glibc will call into it directly. If the kernel
+         *     doesn't, or glibc is older than v2.39, glibc's internal fallback will return EINVAL if
+         *     AT_EMPTY_PATH is passed.
          * - fchmodat2(2) supports all the AT_* flags, but is still very recent.
          *
-         * We try to use fchmodat2(), and, if it is not supported, resort
-         * to the /proc/self/fd dance. */
+         * We try to use fchmodat(3) first, and on EINVAL fall back to fchmodat2(), and, if that is also not
+         * supported, resort to the /proc/self/fd dance. */
 
         assert(fd >= 0);
 
-        if (fchmodat2(fd, "", m, AT_EMPTY_PATH) >= 0)
+        if (fchmodat(fd, "", m, AT_EMPTY_PATH) >= 0)
+                return 0;
+        if (errno == EINVAL && fchmodat2(fd, "", m, AT_EMPTY_PATH) >= 0) /* glibc too old? */
                 return 0;
         if (!IN_SET(errno, ENOSYS, EPERM)) /* Some container managers block unknown syscalls with EPERM */
                 return -errno;
@@ -371,6 +371,10 @@ int fd_warn_permissions(const char *path, int fd) {
         return stat_warn_permissions(path, &st);
 }
 
+int access_nofollow(const char *path, int mode) {
+        return RET_NERRNO(faccessat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW));
+}
+
 int touch_fd(int fd, usec_t stamp) {
         assert(fd >= 0);
 
@@ -420,6 +424,10 @@ int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gi
         return RET_GATHER(ret, touch_fd(fd, stamp));
 }
 
+int touch(const char *path) {
+        return touch_file(path, false, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
+}
+
 int symlinkat_idempotent(const char *from, int atfd, const char *to, bool make_relative) {
         _cleanup_free_ char *relpath = NULL;
         int r;
@@ -454,14 +462,14 @@ int symlinkat_idempotent(const char *from, int atfd, const char *to, bool make_r
         return 0;
 }
 
-int symlinkat_atomic_full(const char *from, int atfd, const char *to, bool make_relative) {
-        _cleanup_free_ char *relpath = NULL, *t = NULL;
+int symlinkat_atomic_full(const char *from, int atfd, const char *to, SymlinkFlags flags) {
         int r;
 
         assert(from);
         assert(to);
 
-        if (make_relative) {
+        _cleanup_free_ char *relpath = NULL;
+        if (FLAGS_SET(flags, SYMLINK_MAKE_RELATIVE)) {
                 r = path_make_relative_parent(to, from, &relpath);
                 if (r < 0)
                         return r;
@@ -469,12 +477,25 @@ int symlinkat_atomic_full(const char *from, int atfd, const char *to, bool make_
                 from = relpath;
         }
 
+        _cleanup_free_ char *t = NULL;
         r = tempfn_random(to, NULL, &t);
         if (r < 0)
                 return r;
 
-        if (symlinkat(from, atfd, t) < 0)
-                return -errno;
+        bool call_label_ops_post = false;
+        if (FLAGS_SET(flags, SYMLINK_LABEL)) {
+                r = label_ops_pre(atfd, to, S_IFLNK);
+                if (r < 0)
+                        return r;
+
+                call_label_ops_post = true;
+        }
+
+        r = RET_NERRNO(symlinkat(from, atfd, t));
+        if (call_label_ops_post)
+                RET_GATHER(r, label_ops_post(atfd, t, /* created= */ r >= 0));
+        if (r < 0)
+                return r;
 
         r = RET_NERRNO(renameat(atfd, t, atfd, to));
         if (r < 0) {
@@ -530,7 +551,7 @@ int mkfifoat_atomic(int atfd, const char *path, mode_t mode) {
         return 0;
 }
 
-int get_files_in_directory(const char *path, char ***list) {
+int get_files_in_directory(const char *path, char ***ret_list) {
         _cleanup_strv_free_ char **l = NULL;
         _cleanup_closedir_ DIR *d = NULL;
         size_t n = 0;
@@ -549,7 +570,7 @@ int get_files_in_directory(const char *path, char ***list) {
                 if (!dirent_is_file(de))
                         continue;
 
-                if (list) {
+                if (ret_list) {
                         /* one extra slot is needed for the terminating NULL */
                         if (!GREEDY_REALLOC(l, n + 2))
                                 return -ENOMEM;
@@ -563,8 +584,8 @@ int get_files_in_directory(const char *path, char ***list) {
                         n++;
         }
 
-        if (list)
-                *list = TAKE_PTR(l);
+        if (ret_list)
+                *ret_list = TAKE_PTR(l);
 
         return n;
 }
@@ -669,6 +690,26 @@ int unlink_or_warn(const char *filename) {
                         return log_error_errno(errno, "Failed to remove \"%s\": %m", filename);
 
         return 0;
+}
+
+char *rmdir_and_free(char *p) {
+        PROTECT_ERRNO;
+
+        if (!p)
+                return NULL;
+
+        (void) rmdir(p);
+        return mfree(p);
+}
+
+char* unlink_and_free(char *p) {
+        PROTECT_ERRNO;
+
+        if (!p)
+                return NULL;
+
+        (void) unlink(p);
+        return mfree(p);
 }
 
 int access_fd(int fd, int mode) {
@@ -783,7 +824,7 @@ int unlinkat_deallocate(int fd, const char *name, UnlinkDeallocateFlags flags) {
                 }
         }
 
-        /* Don't dallocate if there's nothing to deallocate or if the file is linked elsewhere */
+        /* Don't deallocate if there's nothing to deallocate or if the file is linked elsewhere */
         if (st.st_blocks == 0 || st.st_nlink > 0)
                 return 0;
 
@@ -1031,7 +1072,7 @@ int open_mkdir_at_full(int dirfd, const char *path, int flags, XOpenFlags xopen_
 
         if (flags & ~(O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_EXCL|O_NOATIME|O_NOFOLLOW|O_PATH))
                 return -EINVAL;
-        if ((flags & O_ACCMODE) != O_RDONLY)
+        if ((flags & O_ACCMODE_STRICT) != O_RDONLY)
                 return -EINVAL;
 
         /* Note that O_DIRECTORY|O_NOFOLLOW is implied, but we allow specifying it anyway. The following
@@ -1123,6 +1164,9 @@ int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_
 
         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
 
+        /* An inode cannot be both a directory and a regular file at the same time. */
+        assert(!(FLAGS_SET(open_flags, O_DIRECTORY) && FLAGS_SET(xopen_flags, XO_REGULAR)));
+
         /* This is like openat(), but has a few tricks up its sleeves, extending behaviour:
          *
          *   • O_DIRECTORY|O_CREAT is supported, which causes a directory to be created, and immediately
@@ -1133,10 +1177,24 @@ int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_
          *   • If the path is specified NULL or empty, behaves like fd_reopen().
          *
          *   • If XO_NOCOW is specified will turn on the NOCOW btrfs flag on the file, if available.
+         *
+         *   • if XO_REGULAR is specified will return an error if inode is not a regular file.
+         *
+         *   • If mode is specified as MODE_INVALID, we'll use 0755 for dirs, and 0644 for regular files.
          */
+
+        if (mode == MODE_INVALID)
+                mode = (open_flags & O_DIRECTORY) ? 0755 : 0644;
 
         if (isempty(path)) {
                 assert(!FLAGS_SET(open_flags, O_CREAT|O_EXCL));
+
+                if (FLAGS_SET(xopen_flags, XO_REGULAR)) {
+                        r = fd_verify_regular(dir_fd);
+                        if (r < 0)
+                                return r;
+                }
+
                 return fd_reopen(dir_fd, open_flags & ~O_NOFOLLOW);
         }
 
@@ -1166,10 +1224,66 @@ int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_
                 open_flags &= ~(O_EXCL|O_CREAT);
         }
 
-        fd = openat_report_new(dir_fd, path, open_flags, mode, &made_file);
-        if (fd < 0) {
-                r = fd;
-                goto error;
+        if (FLAGS_SET(xopen_flags, XO_REGULAR)) {
+                /* Guarantee we return a regular fd only, and don't open the file unless we verified it
+                 * first */
+
+                if (FLAGS_SET(open_flags, O_PATH)) {
+                        fd = openat(dir_fd, path, open_flags, mode);
+                        if (fd < 0) {
+                                r = -errno;
+                                goto error;
+                        }
+
+                        r = fd_verify_regular(fd);
+                        if (r < 0)
+                                goto error;
+
+                } else if (FLAGS_SET(open_flags, O_CREAT|O_EXCL)) {
+                        /* In O_EXCL mode we can just create the thing, everything is dealt with for us */
+                        fd = openat(dir_fd, path, open_flags, mode);
+                        if (fd < 0) {
+                                r = -errno;
+                                goto error;
+                        }
+
+                        made_file = true;
+                } else {
+                        /* Otherwise pin the inode first via O_PATH */
+                        _cleanup_close_ int inode_fd = openat(dir_fd, path, O_PATH|O_CLOEXEC|(open_flags & O_NOFOLLOW));
+                        if (inode_fd < 0) {
+                                if (errno != ENOENT || !FLAGS_SET(open_flags, O_CREAT)) {
+                                        r = -errno;
+                                        goto error;
+                                }
+
+                                /* Doesn't exist yet, then try to create it */
+                                fd = openat(dir_fd, path, open_flags|O_CREAT|O_EXCL, mode);
+                                if (fd < 0) {
+                                        r = -errno;
+                                        goto error;
+                                }
+
+                                made_file = true;
+                        } else {
+                                /* OK, we pinned it. Now verify it's actually a regular file, and then reopen it */
+                                r = fd_verify_regular(inode_fd);
+                                if (r < 0)
+                                        goto error;
+
+                                fd = fd_reopen(inode_fd, open_flags & ~(O_NOFOLLOW|O_CREAT));
+                                if (fd < 0) {
+                                        r = fd;
+                                        goto error;
+                                }
+                        }
+                }
+        } else {
+                fd = openat_report_new(dir_fd, path, open_flags, mode, &made_file);
+                if (fd < 0) {
+                        r = fd;
+                        goto error;
+                }
         }
 
         if (call_label_ops_post) {
@@ -1181,8 +1295,8 @@ int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_
         }
 
         if (FLAGS_SET(xopen_flags, XO_NOCOW)) {
-                r = chattr_fd(fd, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
-                if (r < 0 && !ERRNO_IS_NOT_SUPPORTED(r))
+                r = chattr_fd(fd, FS_NOCOW_FL, FS_NOCOW_FL);
+                if (r < 0 && !ERRNO_IS_IOCTL_NOT_SUPPORTED(r))
                         goto error;
         }
 
@@ -1245,26 +1359,25 @@ int xopenat_lock_full(
 }
 
 int link_fd(int fd, int newdirfd, const char *newpath) {
-        int r, k;
+        int r;
 
         assert(fd >= 0);
         assert(newdirfd >= 0 || newdirfd == AT_FDCWD);
         assert(newpath);
 
-        /* Try linking via /proc/self/fd/ first. */
-        r = RET_NERRNO(linkat(AT_FDCWD, FORMAT_PROC_FD_PATH(fd), newdirfd, newpath, AT_SYMLINK_FOLLOW));
-        if (r != -ENOENT)
-                return r;
+        /* Try to link via AT_EMPTY_PATH first. This fails with ENOENT if we don't have CAP_DAC_READ_SEARCH
+         * on kernels < 6.10, in which case we'd then resort to /proc/self/fd/ dance.
+         *
+         * See also: https://github.com/torvalds/linux/commit/42bd2af5950456d46fdaa91c3a8fb02e680f19f5 */
+        r = RET_NERRNO(linkat(fd, "", newdirfd, newpath, AT_EMPTY_PATH));
+        if (r == -ENOENT) {
+                r = RET_NERRNO(linkat(AT_FDCWD, FORMAT_PROC_FD_PATH(fd), newdirfd, newpath, AT_SYMLINK_FOLLOW));
+                if (r == -ENOENT && proc_mounted() == 0) /* No proc_fd_enoent_errno() here because we don't
+                                                            know if it's the target path that's missing. */
+                        return -ENOSYS;
+        }
 
-        /* Fall back to symlinking via AT_EMPTY_PATH as fallback (this requires CAP_DAC_READ_SEARCH and a
-         * more recent kernel, but does not require /proc/ mounted) */
-        k = proc_mounted();
-        if (k < 0)
-                return r;
-        if (k > 0)
-                return -EBADF;
-
-        return RET_NERRNO(linkat(fd, "", newdirfd, newpath, AT_EMPTY_PATH));
+        return r;
 }
 
 int linkat_replace(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) {

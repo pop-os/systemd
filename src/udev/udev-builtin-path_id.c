@@ -5,14 +5,10 @@
  * Logic based on Hannes Reinecke's shell script.
  */
 
-#include <ctype.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
 #include <linux/usb/ch11.h>
-#include <stdarg.h>
 #include <stdio.h>
-#include <unistd.h>
+#include <stdlib.h>
 
 #include "alloc-util.h"
 #include "device-private.h"
@@ -21,10 +17,8 @@
 #include "fd-util.h"
 #include "parse-util.h"
 #include "string-util.h"
-#include "strv.h"
 #include "sysexits.h"
 #include "udev-builtin.h"
-#include "udev-util.h"
 
 _printf_(2,3)
 static void path_prepend(char **path, const char *fmt, ...) {
@@ -59,30 +53,23 @@ static void path_prepend(char **path, const char *fmt, ...) {
 ** See drivers/scsi/scsi_scan.c::scsilun_to_int() for more details.
 */
 static int format_lun_number(sd_device *dev, char **path) {
-        const char *sysnum;
-        unsigned long lun;
+        unsigned lun;
         int r;
 
-        r = sd_device_get_sysnum(dev, &sysnum);
-        if (r < 0)
-                return r;
-        if (!sysnum)
-                return -ENOENT;
-
-        r = safe_atolu_full(sysnum, 10, &lun);
+        r = device_get_sysnum_unsigned(dev, &lun);
         if (r < 0)
                 return r;
         if (lun < 256)
                 /* address method 0, peripheral device addressing with bus id of zero */
-                path_prepend(path, "lun-%lu", lun);
+                path_prepend(path, "lun-%u", lun);
         else
                 /* handle all other lun addressing methods by using a variant of the original lun format */
-                path_prepend(path, "lun-0x%04lx%04lx00000000", lun & 0xffff, (lun >> 16) & 0xffff);
+                path_prepend(path, "lun-0x%04x%04x00000000", lun & 0xffff, (lun >> 16) & 0xffff);
 
         return 0;
 }
 
-static sd_device *skip_subsystem(sd_device *dev, const char *subsys) {
+static sd_device* skip_subsystem(sd_device *dev, const char *subsys) {
         sd_device *parent;
 
         assert(dev);
@@ -96,7 +83,7 @@ static sd_device *skip_subsystem(sd_device *dev, const char *subsys) {
          */
 
         for (parent = dev; ; ) {
-                if (!device_in_subsystem(parent, subsys))
+                if (device_in_subsystem(parent, subsys) <= 0)
                         break;
 
                 dev = parent;
@@ -107,7 +94,7 @@ static sd_device *skip_subsystem(sd_device *dev, const char *subsys) {
         return dev;
 }
 
-static sd_device *handle_scsi_fibre_channel(sd_device *parent, char **path) {
+static sd_device* handle_scsi_fibre_channel(sd_device *parent, char **path) {
         sd_device *targetdev;
         _cleanup_(sd_device_unrefp) sd_device *fcdev = NULL;
         const char *port, *sysname;
@@ -130,7 +117,7 @@ static sd_device *handle_scsi_fibre_channel(sd_device *parent, char **path) {
         return parent;
 }
 
-static sd_device *handle_scsi_sas_wide_port(sd_device *parent, char **path) {
+static sd_device* handle_scsi_sas_wide_port(sd_device *parent, char **path) {
         sd_device *targetdev, *target_parent;
         _cleanup_(sd_device_unrefp) sd_device *sasdev = NULL;
         const char *sas_address, *sysname;
@@ -155,12 +142,10 @@ static sd_device *handle_scsi_sas_wide_port(sd_device *parent, char **path) {
         return parent;
 }
 
-static sd_device *handle_scsi_sas(sd_device *parent, char **path) {
+static sd_device* handle_scsi_sas(sd_device *parent, char **path) {
         sd_device *targetdev, *target_parent, *port, *expander;
         _cleanup_(sd_device_unrefp) sd_device *target_sasdev = NULL, *expander_sasdev = NULL, *port_sasdev = NULL;
-        const char *sas_address = NULL;
-        const char *phy_id;
-        const char *sysname;
+        const char *sas_address = NULL, *phy_id, *sysname;
         unsigned num_phys;
         _cleanup_free_ char *lun = NULL;
 
@@ -216,12 +201,11 @@ static sd_device *handle_scsi_sas(sd_device *parent, char **path) {
         return parent;
 }
 
-static sd_device *handle_scsi_iscsi(sd_device *parent, char **path) {
+static sd_device* handle_scsi_iscsi(sd_device *parent, char **path) {
         sd_device *transportdev;
         _cleanup_(sd_device_unrefp) sd_device *sessiondev = NULL, *conndev = NULL;
-        const char *target, *connname, *addr, *port;
+        const char *target, *connname, *addr, *port, *sysname, *sysnum;
         _cleanup_free_ char *lun = NULL;
-        const char *sysname, *sysnum;
 
         assert(parent);
         assert(path);
@@ -244,7 +228,7 @@ static sd_device *handle_scsi_iscsi(sd_device *parent, char **path) {
         if (sd_device_get_sysattr_value(sessiondev, "targetname", &target) < 0)
                 return NULL;
 
-        if (sd_device_get_sysnum(transportdev, &sysnum) < 0 || !sysnum)
+        if (sd_device_get_sysnum(transportdev, &sysnum) < 0)
                 return NULL;
         connname = strjoina("connection", sysnum, ":0");
         if (sd_device_new_from_subsystem_sysname(&conndev, "iscsi_connection", connname) < 0)
@@ -260,7 +244,7 @@ static sd_device *handle_scsi_iscsi(sd_device *parent, char **path) {
         return parent;
 }
 
-static sd_device *handle_scsi_ata(sd_device *parent, char **path, char **compat_path) {
+static sd_device* handle_scsi_ata(sd_device *parent, char **path, char **compat_path) {
         sd_device *targetdev, *target_parent;
         _cleanup_(sd_device_unrefp) sd_device *atadev = NULL;
         const char *port_no, *sysname, *name;
@@ -302,7 +286,7 @@ static sd_device *handle_scsi_ata(sd_device *parent, char **path, char **compat_
         return parent;
 }
 
-static sd_device *handle_scsi_default(sd_device *parent, char **path) {
+static sd_device* handle_scsi_default(sd_device *parent, char **path) {
         sd_device *hostdev;
         int host, bus, target, lun;
         const char *name, *base, *pos;
@@ -376,9 +360,8 @@ static sd_device *handle_scsi_default(sd_device *parent, char **path) {
         return hostdev;
 }
 
-static sd_device *handle_scsi_hyperv(sd_device *parent, char **path, size_t guid_str_len) {
-        sd_device *hostdev;
-        sd_device *vmbusdev;
+static sd_device* handle_scsi_hyperv(sd_device *parent, char **path, size_t guid_str_len) {
+        sd_device *hostdev, *vmbusdev;
         const char *guid_str;
         _cleanup_free_ char *lun = NULL;
         char guid[39];
@@ -412,10 +395,10 @@ static sd_device *handle_scsi_hyperv(sd_device *parent, char **path, size_t guid
         return parent;
 }
 
-static sd_device *handle_scsi(sd_device *parent, char **path, char **compat_path, bool *supported_parent) {
+static sd_device* handle_scsi(sd_device *parent, char **path, char **compat_path, bool *supported_parent) {
         const char *id, *name;
 
-        if (!device_is_devtype(parent, "scsi_device"))
+        if (device_is_devtype(parent, "scsi_device") <= 0)
                 return parent;
 
         /* firewire */
@@ -455,7 +438,7 @@ static sd_device *handle_scsi(sd_device *parent, char **path, char **compat_path
         return handle_scsi_default(parent, path);
 }
 
-static sd_device *handle_cciss(sd_device *parent, char **path) {
+static sd_device* handle_cciss(sd_device *parent, char **path) {
         const char *str;
         unsigned controller, disk;
 
@@ -526,11 +509,11 @@ static int get_usb_revision(sd_device *dev) {
         }
 }
 
-static sd_device *handle_usb(sd_device *parent, char **path) {
+static sd_device* handle_usb(sd_device *parent, char **path) {
         const char *str, *port;
         int r;
 
-        if (!device_is_devtype(parent, "usb_interface") && !device_is_devtype(parent, "usb_device"))
+        if (device_is_devtype(parent, "usb_interface") <= 0 && device_is_devtype(parent, "usb_device") <= 0)
                 return parent;
 
         if (sd_device_get_sysname(parent, &str) < 0)
@@ -564,7 +547,7 @@ static sd_device *handle_usb(sd_device *parent, char **path) {
         return parent;
 }
 
-static sd_device *handle_bcma(sd_device *parent, char **path) {
+static sd_device* handle_bcma(sd_device *parent, char **path) {
         const char *sysname;
         unsigned core;
 
@@ -578,7 +561,7 @@ static sd_device *handle_bcma(sd_device *parent, char **path) {
 }
 
 /* Handle devices of AP bus in System z platform. */
-static sd_device *handle_ap(sd_device *parent, char **path) {
+static sd_device* handle_ap(sd_device *parent, char **path) {
         const char *type, *func;
 
         assert(parent);
@@ -643,10 +626,10 @@ static int find_real_nvme_parent(sd_device *dev, sd_device **ret) {
         return 0;
 }
 
-static void add_id_with_usb_revision(sd_device *dev, EventMode mode, char *path) {
+static void add_id_with_usb_revision(UdevEvent *event, char *path) {
         char *p;
 
-        assert(dev);
+        assert(event);
         assert(path);
 
         /* When the path contains the USB revision, let's adds ID_PATH_WITH_USB_REVISION property and
@@ -660,13 +643,13 @@ static void add_id_with_usb_revision(sd_device *dev, EventMode mode, char *path)
         if (p[1] != '-')
                 return;
 
-        (void) udev_builtin_add_property(dev, mode, "ID_PATH_WITH_USB_REVISION", path);
+        (void) udev_builtin_add_property(event, "ID_PATH_WITH_USB_REVISION", path);
 
         /* Drop the USB revision specifier for backward compatibility. */
         memmove(p - 1, p + 1, strlen(p + 1) + 1);
 }
 
-static void add_id_tag(sd_device *dev, EventMode mode, const char *path) {
+static void add_id_tag(UdevEvent *event, const char *path) {
         char tag[UDEV_NAME_SIZE];
         size_t i = 0;
 
@@ -694,7 +677,7 @@ static void add_id_tag(sd_device *dev, EventMode mode, const char *path) {
                 i--;
         tag[i] = '\0';
 
-        (void) udev_builtin_add_property(dev, mode, "ID_PATH_TAG", tag);
+        (void) udev_builtin_add_property(event, "ID_PATH_TAG", tag);
 }
 
 static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
@@ -710,95 +693,95 @@ static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
 
                 if (sd_device_get_sysname(parent, &sysname) < 0) {
                         ;
-                } else if (device_in_subsystem(parent, "scsi_tape")) {
+                } else if (device_in_subsystem(parent, "scsi_tape") > 0) {
                         handle_scsi_tape(parent, &path);
-                } else if (device_in_subsystem(parent, "scsi")) {
+                } else if (device_in_subsystem(parent, "scsi") > 0) {
                         parent = handle_scsi(parent, &path, &compat_path, &supported_parent);
                         supported_transport = true;
-                } else if (device_in_subsystem(parent, "cciss")) {
+                } else if (device_in_subsystem(parent, "cciss") > 0) {
                         parent = handle_cciss(parent, &path);
                         supported_transport = true;
-                } else if (device_in_subsystem(parent, "usb")) {
+                } else if (device_in_subsystem(parent, "usb") > 0) {
                         parent = handle_usb(parent, &path);
                         supported_transport = true;
-                } else if (device_in_subsystem(parent, "bcma")) {
+                } else if (device_in_subsystem(parent, "bcma") > 0) {
                         parent = handle_bcma(parent, &path);
                         supported_transport = true;
-                } else if (device_in_subsystem(parent, "serio")) {
+                } else if (device_in_subsystem(parent, "serio") > 0) {
                         const char *sysnum;
 
-                        if (sd_device_get_sysnum(parent, &sysnum) >= 0 && sysnum) {
+                        if (sd_device_get_sysnum(parent, &sysnum) >= 0) {
                                 path_prepend(&path, "serio-%s", sysnum);
                                 parent = skip_subsystem(parent, "serio");
                         }
-                } else if (device_in_subsystem(parent, "pci")) {
+                } else if (device_in_subsystem(parent, "pci") > 0) {
                         path_prepend(&path, "pci-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "pci-%s", sysname);
                         parent = skip_subsystem(parent, "pci");
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "platform")) {
+                } else if (device_in_subsystem(parent, "platform") > 0) {
                         path_prepend(&path, "platform-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "platform-%s", sysname);
                         parent = skip_subsystem(parent, "platform");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "amba")) {
+                } else if (device_in_subsystem(parent, "amba") > 0) {
                         path_prepend(&path, "amba-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "amba-%s", sysname);
                         parent = skip_subsystem(parent, "amba");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "acpi")) {
+                } else if (device_in_subsystem(parent, "acpi") > 0) {
                         path_prepend(&path, "acpi-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "acpi-%s", sysname);
                         parent = skip_subsystem(parent, "acpi");
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "xen")) {
+                } else if (device_in_subsystem(parent, "xen") > 0) {
                         path_prepend(&path, "xen-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "xen-%s", sysname);
                         parent = skip_subsystem(parent, "xen");
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "virtio")) {
+                } else if (device_in_subsystem(parent, "virtio") > 0) {
                         parent = skip_subsystem(parent, "virtio");
                         supported_transport = true;
-                } else if (device_in_subsystem(parent, "scm")) {
+                } else if (device_in_subsystem(parent, "scm") > 0) {
                         path_prepend(&path, "scm-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "scm-%s", sysname);
                         parent = skip_subsystem(parent, "scm");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "ccw")) {
+                } else if (device_in_subsystem(parent, "ccw") > 0) {
                         path_prepend(&path, "ccw-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "ccw-%s", sysname);
                         parent = skip_subsystem(parent, "ccw");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "ccwgroup")) {
+                } else if (device_in_subsystem(parent, "ccwgroup") > 0) {
                         path_prepend(&path, "ccwgroup-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "ccwgroup-%s", sysname);
                         parent = skip_subsystem(parent, "ccwgroup");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "ap")) {
+                } else if (device_in_subsystem(parent, "ap") > 0) {
                         parent = handle_ap(parent, &path);
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "iucv")) {
+                } else if (device_in_subsystem(parent, "iucv") > 0) {
                         path_prepend(&path, "iucv-%s", sysname);
                         if (compat_path)
                                 path_prepend(&compat_path, "iucv-%s", sysname);
                         parent = skip_subsystem(parent, "iucv");
                         supported_transport = true;
                         supported_parent = true;
-                } else if (device_in_subsystem(parent, "nvme") || device_in_subsystem(parent, "nvme-subsystem")) {
+                } else if (device_in_subsystem(parent, "nvme", "nvme-subsystem") > 0) {
                         const char *nsid;
 
                         if (sd_device_get_sysattr_value(dev, "nsid", &nsid) >= 0) {
@@ -806,7 +789,7 @@ static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
                                 if (compat_path)
                                         path_prepend(&compat_path, "nvme-%s", nsid);
 
-                                if (device_in_subsystem(parent, "nvme-subsystem")) {
+                                if (device_in_subsystem(parent, "nvme-subsystem") > 0) {
                                         r = find_real_nvme_parent(dev, &dev_other_branch);
                                         if (r < 0)
                                                 return r;
@@ -818,10 +801,10 @@ static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
                                 supported_parent = true;
                                 supported_transport = true;
                         }
-                } else if (device_in_subsystem(parent, "spi")) {
+                } else if (device_in_subsystem(parent, "spi") > 0) {
                         const char *sysnum;
 
-                        if (sd_device_get_sysnum(parent, &sysnum) >= 0 && sysnum) {
+                        if (sd_device_get_sysnum(parent, &sysnum) >= 0) {
                                 path_prepend(&path, "cs-%s", sysnum);
                                 parent = skip_subsystem(parent, "spi");
                         }
@@ -849,14 +832,14 @@ static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
          * devices do not expose their buses and do not provide a unique
          * and predictable name that way.
          */
-        if (device_in_subsystem(dev, "block") && !supported_transport)
+        if (device_in_subsystem(dev, "block") > 0 && !supported_transport)
                 return -ENOENT;
 
-        add_id_with_usb_revision(dev, event->event_mode, path);
+        add_id_with_usb_revision(event, path);
 
-        (void) udev_builtin_add_property(dev, event->event_mode, "ID_PATH", path);
+        (void) udev_builtin_add_property(event, "ID_PATH", path);
 
-        add_id_tag(dev, event->event_mode, path);
+        add_id_tag(event, path);
 
         /*
          * Compatible link generation for ATA devices
@@ -864,7 +847,7 @@ static int builtin_path_id(UdevEvent *event, int argc, char *argv[]) {
          * ID_PATH_ATA_COMPAT
          */
         if (compat_path)
-                (void) udev_builtin_add_property(dev, event->event_mode, "ID_PATH_ATA_COMPAT", compat_path);
+                (void) udev_builtin_add_property(event, "ID_PATH_ATA_COMPAT", compat_path);
 
         return 0;
 }

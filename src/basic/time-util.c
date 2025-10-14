@@ -1,28 +1,24 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <ctype.h>
-#include <errno.h>
-#include <limits.h>
 #include <stdlib.h>
 #include <sys/mman.h>
-#include <sys/time.h>
 #include <sys/timerfd.h>
-#include <sys/types.h>
+#include <threads.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "errno-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "io-util.h"
 #include "log.h"
-#include "macro.h"
-#include "missing_threads.h"
-#include "missing_timerfd.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "stat-util.h"
+#include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -1137,19 +1133,14 @@ static const char* extract_multiplier(const char *p, usec_t *ret) {
 
 int parse_time(const char *t, usec_t *ret, usec_t default_unit) {
         const char *p, *s;
-        usec_t usec = 0;
-        bool something = false;
 
         assert(t);
         assert(default_unit > 0);
 
-        p = t;
-
-        p += strspn(p, WHITESPACE);
+        p = skip_leading_chars(t, /* bad = */ NULL);
         s = startswith(p, "infinity");
         if (s) {
-                s += strspn(s, WHITESPACE);
-                if (*s != 0)
+                if (!in_charset(s, WHITESPACE))
                         return -EINVAL;
 
                 if (ret)
@@ -1157,13 +1148,14 @@ int parse_time(const char *t, usec_t *ret, usec_t default_unit) {
                 return 0;
         }
 
-        for (;;) {
+        usec_t usec = 0;
+
+        for (bool something = false;;) {
                 usec_t multiplier = default_unit, k;
                 long long l;
                 char *e;
 
-                p += strspn(p, WHITESPACE);
-
+                p = skip_leading_chars(p, /* bad = */ NULL);
                 if (*p == 0) {
                         if (!something)
                                 return -EINVAL;
@@ -1615,7 +1607,7 @@ int get_timezone(char **ret) {
 
         assert(ret);
 
-        r = readlink_malloc("/etc/localtime", &t);
+        r = readlink_malloc(etc_localtime(), &t);
         if (r == -ENOENT)
                 /* If the symlink does not exist, assume "UTC", like glibc does */
                 return strdup_to(ret, "UTC");
@@ -1631,6 +1623,15 @@ int get_timezone(char **ret) {
         return strdup_to(ret, e);
 }
 
+const char* etc_localtime(void) {
+        static const char *cached = NULL;
+
+        if (!cached)
+                cached = secure_getenv("SYSTEMD_ETC_LOCALTIME") ?: "/etc/localtime";
+
+        return cached;
+}
+
 int mktime_or_timegm_usec(
                 struct tm *tm, /* input + normalized output */
                 bool utc,
@@ -1640,7 +1641,7 @@ int mktime_or_timegm_usec(
 
         assert(tm);
 
-        if (tm->tm_year < 69) /* early check for negative (i.e. before 1970) time_t (Note that in some timezones the epoch is in the year 1969!)*/
+        if (tm->tm_year < 69) /* early check for negative (i.e. before 1970) time_t (Note that in some timezones the epoch is in the year 1969!) */
                 return -ERANGE;
         if ((usec_t) tm->tm_year > CONST_MIN(USEC_INFINITY / USEC_PER_YEAR, (usec_t) TIME_T_MAX / (365U * 24U * 60U * 60U)) - 1900) /* early check for possible overrun of usec_t or time_t */
                 return -ERANGE;
@@ -1790,7 +1791,7 @@ DEFINE_STRING_TABLE_LOOKUP_TO_STRING(timestamp_style, TimestampStyle);
 TimestampStyle timestamp_style_from_string(const char *s) {
         TimestampStyle t;
 
-        t = (TimestampStyle) string_table_lookup(timestamp_style_table, ELEMENTSOF(timestamp_style_table), s);
+        t = (TimestampStyle) string_table_lookup_from_string(timestamp_style_table, ELEMENTSOF(timestamp_style_table), s);
         if (t >= 0)
                 return t;
         if (STRPTR_IN_SET(s, "µs", "μs")) /* accept both µ symbols in unicode, i.e. micro symbol + Greek small letter mu. */

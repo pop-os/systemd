@@ -1,14 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "alloc-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "format-util.h"
-#include "macro.h"
+#include "namespace-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "sort-util.h"
@@ -186,9 +184,6 @@ int uid_map_read_one(FILE *f, uid_t *ret_base, uid_t *ret_shift, uid_t *ret_rang
         int r;
 
         assert(f);
-        assert(ret_base);
-        assert(ret_shift);
-        assert(ret_range);
 
         errno = 0;
         r = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT "\n", &uid_base, &uid_shift, &uid_range);
@@ -197,12 +192,41 @@ int uid_map_read_one(FILE *f, uid_t *ret_base, uid_t *ret_shift, uid_t *ret_rang
         assert(r >= 0);
         if (r != 3)
                 return -EBADMSG;
+        if (uid_range <= 0)
+                return -EBADMSG;
 
-        *ret_base = uid_base;
-        *ret_shift = uid_shift;
-        *ret_range = uid_range;
+        if (ret_base)
+                *ret_base = uid_base;
+        if (ret_shift)
+                *ret_shift = uid_shift;
+        if (ret_range)
+                *ret_range = uid_range;
 
         return 0;
+}
+
+unsigned uid_range_size(const UIDRange *range) {
+        if (!range)
+                return 0;
+
+        unsigned n = 0;
+
+        FOREACH_ARRAY(e, range->entries, range->n_entries)
+                n += e->nr;
+
+        return n;
+}
+
+bool uid_range_is_empty(const UIDRange *range) {
+
+        if (!range)
+                return true;
+
+        FOREACH_ARRAY(e, range->entries, range->n_entries)
+                if (e->nr > 0)
+                        return false;
+
+        return true;
 }
 
 int uid_range_load_userns(const char *path, UIDRangeUsernsMode mode, UIDRange **ret) {
@@ -262,10 +286,7 @@ int uid_range_load_userns(const char *path, UIDRangeUsernsMode mode, UIDRange **
 }
 
 int uid_range_load_userns_by_fd(int userns_fd, UIDRangeUsernsMode mode, UIDRange **ret) {
-        _cleanup_(close_pairp) int pfd[2] = EBADF_PAIR;
         _cleanup_(sigkill_waitp) pid_t pid = 0;
-        ssize_t n;
-        char x;
         int r;
 
         assert(userns_fd >= 0);
@@ -273,46 +294,9 @@ int uid_range_load_userns_by_fd(int userns_fd, UIDRangeUsernsMode mode, UIDRange
         assert(mode < _UID_RANGE_USERNS_MODE_MAX);
         assert(ret);
 
-        if (pipe2(pfd, O_CLOEXEC) < 0)
-                return -errno;
-
-        r = safe_fork_full(
-                        "(sd-mkuserns)",
-                        /* stdio_fds= */ NULL,
-                        (int[]) { pfd[1], userns_fd }, 2,
-                        FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGKILL,
-                        &pid);
+        r = userns_enter_and_pin(userns_fd, &pid);
         if (r < 0)
                 return r;
-        if (r == 0) {
-                /* Child. */
-
-                if (setns(userns_fd, CLONE_NEWUSER) < 0) {
-                        log_debug_errno(errno, "Failed to join userns: %m");
-                        _exit(EXIT_FAILURE);
-                }
-
-                userns_fd = safe_close(userns_fd);
-
-                n = write(pfd[1], &(const char) { 'x' }, 1);
-                if (n < 0) {
-                        log_debug_errno(errno, "Failed to write to fifo: %m");
-                        _exit(EXIT_FAILURE);
-                }
-                assert(n == 1);
-
-                freeze();
-        }
-
-        pfd[1] = safe_close(pfd[1]);
-
-        n = read(pfd[0], &x, 1);
-        if (n < 0)
-                return -errno;
-        if (n == 0)
-                return -EPROTO;
-        assert(n == 1);
-        assert(x == 'x');
 
         const char *p = procfs_file_alloca(
                         pid,
@@ -359,4 +343,38 @@ bool uid_range_equal(const UIDRange *a, const UIDRange *b) {
         }
 
         return true;
+}
+
+int uid_map_search_root(pid_t pid, UIDRangeUsernsMode mode, uid_t *ret) {
+        int r;
+
+        assert(pid_is_valid(pid));
+        assert(IN_SET(mode, UID_RANGE_USERNS_OUTSIDE, GID_RANGE_USERNS_OUTSIDE));
+
+        const char *p = procfs_file_alloca(pid, mode == UID_RANGE_USERNS_OUTSIDE ? "uid_map" : "gid_map");
+        _cleanup_fclose_ FILE *f = fopen(p, "re");
+        if (!f) {
+                if (errno != ENOENT)
+                        return -errno;
+
+                r = proc_mounted();
+                if (r < 0)
+                        return -ENOENT; /* original error, if we can't determine /proc/ state */
+
+                return r ? -ENOPKG : -ENOSYS;
+        }
+
+        for (;;) {
+                uid_t uid_base = UID_INVALID, uid_shift = UID_INVALID;
+
+                r = uid_map_read_one(f, &uid_base, &uid_shift, /* ret_range= */ NULL);
+                if (r < 0)
+                        return r;
+
+                if (uid_base == 0) {
+                        if (ret)
+                                *ret = uid_shift;
+                        return 0;
+                }
+        }
 }

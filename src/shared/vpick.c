@@ -2,13 +2,18 @@
 
 #include <sys/stat.h>
 
+#include "alloc-util.h"
 #include "architecture.h"
+#include "bitfield.h"
 #include "chase.h"
 #include "fd-util.h"
-#include "fs-util.h"
+#include "log.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "recurse-dir.h"
+#include "stat-util.h"
+#include "string-util.h"
+#include "strv.h"
 #include "vpick.h"
 
 void pick_result_done(PickResult *p) {
@@ -108,7 +113,7 @@ static int errno_from_mode(uint32_t type_mask, mode_t found) {
         if (type_mask == 0) /* type doesn't matter */
                 return 0;
 
-        if (FLAGS_SET(type_mask, UINT32_C(1) << IFTODT(found)))
+        if (BIT_SET(type_mask, IFTODT(found)))
                 return 0;
 
         if (type_mask == (UINT32_C(1) << DT_BLK))
@@ -150,7 +155,7 @@ static int pin_choice(
                 r = chaseat(toplevel_fd,
                             inode_path,
                             CHASE_AT_RESOLVE_IN_ROOT,
-                            FLAGS_SET(flags, PICK_RESOLVE) ? &resolved_path : 0,
+                            FLAGS_SET(flags, PICK_RESOLVE) ? &resolved_path : NULL,
                             inode_fd < 0 ? &inode_fd : NULL);
                 if (r < 0)
                         return r;
@@ -161,14 +166,15 @@ static int pin_choice(
 
         struct stat st;
         if (fstat(inode_fd, &st) < 0)
-                return log_debug_errno(errno, "Failed to stat discovered inode '%s': %m", prefix_roota(toplevel_path, inode_path));
+                return log_debug_errno(errno, "Failed to stat discovered inode '%s%s': %m",
+                                       empty_to_root(toplevel_path), skip_leading_slash(inode_path));
 
         if (filter->type_mask != 0 &&
-            !FLAGS_SET(filter->type_mask, UINT32_C(1) << IFTODT(st.st_mode)))
+            !BIT_SET(filter->type_mask, IFTODT(st.st_mode)))
                 return log_debug_errno(
                                 SYNTHETIC_ERRNO(errno_from_mode(filter->type_mask, st.st_mode)),
-                                "Inode '%s' has wrong type, found '%s'.",
-                                prefix_roota(toplevel_path, inode_path),
+                                "Inode '%s/%s' has wrong type, found '%s'.",
+                                empty_to_root(toplevel_path), skip_leading_slash(inode_path),
                                 inode_type_to_string(st.st_mode));
 
         _cleanup_(pick_result_done) PickResult result = {
@@ -295,7 +301,8 @@ static int make_choice(
                         return 0;
                 }
                 if (r < 0)
-                        return log_debug_errno(r, "Failed to open '%s': %m", prefix_roota(toplevel_path, p));
+                        return log_debug_errno(r, "Failed to open '%s/%s': %m",
+                                               empty_to_root(toplevel_path), skip_leading_slash(p));
 
                 return pin_choice(
                                 toplevel_path,
@@ -316,11 +323,13 @@ static int make_choice(
         /* Convert O_PATH to a regular directory fd */
         dir_fd = fd_reopen(inode_fd, O_DIRECTORY|O_RDONLY|O_CLOEXEC);
         if (dir_fd < 0)
-                return log_debug_errno(dir_fd, "Failed to reopen '%s' as directory: %m", prefix_roota(toplevel_path, inode_path));
+                return log_debug_errno(dir_fd, "Failed to reopen '%s/%s' as directory: %m",
+                                       empty_to_root(toplevel_path), skip_leading_slash(inode_path));
 
         r = readdir_all(dir_fd, 0, &de);
         if (r < 0)
-                return log_debug_errno(r, "Failed to read directory '%s': %m", prefix_roota(toplevel_path, inode_path));
+                return log_debug_errno(r, "Failed to read directory '%s/%s': %m",
+                                       empty_to_root(toplevel_path), skip_leading_slash(inode_path));
 
         if (filter->architecture < 0) {
                 architectures = local_architectures;
@@ -464,7 +473,8 @@ static int make_choice(
 
         object_fd = openat(dir_fd, best_filename, O_CLOEXEC|O_PATH);
         if (object_fd < 0)
-                return log_debug_errno(errno, "Failed to open '%s': %m", prefix_roota(toplevel_path, p));
+                return log_debug_errno(errno, "Failed to open '%s/%s': %m",
+                                       empty_to_root(toplevel_path), skip_leading_slash(inode_path));
 
         return pin_choice(
                         toplevel_path,
@@ -596,7 +606,7 @@ int path_pick(
                 filter_type_mask = filter->type_mask;
                 if (slash_suffix) {
                         /* If the pattern is suffixed by a / then we are looking for directories apparently. */
-                        if (filter_type_mask != 0 && !FLAGS_SET(filter_type_mask, UINT32_C(1) << DT_DIR))
+                        if (filter_type_mask != 0 && !BIT_SET(filter_type_mask, DT_DIR))
                                 return log_debug_errno(SYNTHETIC_ERRNO(errno_from_mode(filter_type_mask, S_IFDIR)),
                                                        "Specified pattern ends in '/', but not looking for directories, refusing.");
                         filter_type_mask = UINT32_C(1) << DT_DIR;
@@ -679,6 +689,41 @@ int path_pick_update_warn(
                 free_and_replace(*path, result.path);
 
         return 1;
+}
+
+int path_uses_vpick(const char *path) {
+        _cleanup_free_ char *dir = NULL, *parent = NULL, *fname = NULL;
+        int r;
+
+        assert(path);
+
+        r = path_extract_filename(path, &fname);
+        if (r == -EADDRNOTAVAIL)
+                return 0;
+        if (r < 0)
+                return r;
+
+        /* ...PATH/NAME.SUFFIX.v */
+        if (endswith(fname, ".v"))
+                return 1;
+
+        /* ...PATH.v/NAME___.SUFFIX */
+        if (!strrstr(fname, "___"))
+                return 0;
+
+        r = path_extract_directory(path, &dir);
+        if (IN_SET(r, -EDESTADDRREQ, -EADDRNOTAVAIL)) /* only filename specified (no dir), or root or "." */
+                return 0;
+        if (r < 0)
+                return r;
+
+        r = path_extract_filename(dir, &parent);
+        if (r == -EADDRNOTAVAIL)
+                return 0;
+        if (r < 0)
+                return r;
+
+        return !!endswith(parent, ".v");
 }
 
 const PickFilter pick_filter_image_raw = {

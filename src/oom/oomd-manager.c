@@ -1,23 +1,32 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "sd-bus.h"
 #include "sd-daemon.h"
+#include "sd-event.h"
 #include "sd-json.h"
 
+#include "alloc-util.h"
 #include "bus-log-control-api.h"
+#include "bus-object.h"
 #include "bus-util.h"
-#include "bus-polkit.h"
 #include "cgroup-util.h"
+#include "constants.h"
+#include "daemon-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "format-util.h"
 #include "json-util.h"
-#include "memory-util.h"
 #include "memstream-util.h"
-#include "oomd-manager-bus.h"
+#include "oomd-conf.h"
 #include "oomd-manager.h"
+#include "oomd-manager-bus.h"
+#include "parse-util.h"
 #include "path-util.h"
 #include "percent-util.h"
+#include "set.h"
+#include "string-util.h"
+#include "time-util.h"
 #include "varlink-io.systemd.oom.h"
+#include "varlink-io.systemd.service.h"
 #include "varlink-util.h"
 
 typedef struct ManagedOOMMessage {
@@ -219,7 +228,6 @@ static int recursively_get_cgroup_context(Hashmap *new_h, const char *path) {
 
         do {
                 _cleanup_free_ char *cg_path = NULL;
-                bool oom_group;
 
                 cg_path = path_join(empty_to_root(path), subpath);
                 if (!cg_path)
@@ -227,7 +235,7 @@ static int recursively_get_cgroup_context(Hashmap *new_h, const char *path) {
 
                 subpath = mfree(subpath);
 
-                r = cg_get_attribute_as_bool("memory", cg_path, "memory.oom.group", &oom_group);
+                r = cg_get_attribute_as_bool("memory", cg_path, "memory.oom.group");
                 /* The cgroup might be gone. Skip it as a candidate since we can't get information on it. */
                 if (r == -ENOMEM)
                         return r;
@@ -235,8 +243,7 @@ static int recursively_get_cgroup_context(Hashmap *new_h, const char *path) {
                         log_debug_errno(r, "Failed to read memory.oom.group from %s, ignoring: %m", cg_path);
                         return 0;
                 }
-
-                if (oom_group)
+                if (r > 0)
                         r = oomd_insert_cgroup_context(NULL, new_h, cg_path);
                 else
                         r = recursively_get_cgroup_context(new_h, cg_path);
@@ -649,6 +656,18 @@ Manager* manager_free(Manager *m) {
         return mfree(m);
 }
 
+static int manager_dispatch_reload_signal(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+        Manager *m = ASSERT_PTR(userdata);
+
+        (void) notify_reloading();
+
+        manager_set_defaults(m);
+        manager_parse_config_file(m);
+
+        (void) sd_notify(/* unset_environment= */ false, NOTIFY_READY_MESSAGE);
+        return 0;
+}
+
 int manager_new(Manager **ret) {
         _cleanup_(manager_freep) Manager *m = NULL;
         int r;
@@ -659,11 +678,18 @@ int manager_new(Manager **ret) {
         if (!m)
                 return -ENOMEM;
 
+        manager_set_defaults(m);
+        manager_parse_config_file(m);
+
         r = sd_event_default(&m->event);
         if (r < 0)
                 return r;
 
         (void) sd_event_set_watchdog(m->event, true);
+
+        r = sd_event_add_signal(m->event, /* ret= */ NULL, SIGHUP | SD_EVENT_SIGNAL_PROCMASK, manager_dispatch_reload_signal, m);
+        if (r < 0)
+                return r;
 
         r = sd_event_set_signal_exit(m->event, true);
         if (r < 0)
@@ -725,13 +751,21 @@ static int manager_varlink_init(Manager *m, int fd) {
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate varlink server object: %m");
 
-        r = sd_varlink_server_add_interface(s, &vl_interface_io_systemd_oom);
+        r = sd_varlink_server_add_interface_many(
+                        s,
+                        &vl_interface_io_systemd_oom,
+                        &vl_interface_io_systemd_service);
         if (r < 0)
-                return log_error_errno(r, "Failed to add oom interface to varlink server: %m");
+                return log_error_errno(r, "Failed to add Varlink interfaces to varlink server: %m");
 
-        r = sd_varlink_server_bind_method(s, "io.systemd.oom.ReportManagedOOMCGroups", process_managed_oom_request);
+        r = sd_varlink_server_bind_method_many(
+                        s,
+                        "io.systemd.oom.ReportManagedOOMCGroups", process_managed_oom_request,
+                        "io.systemd.service.Ping",                varlink_method_ping,
+                        "io.systemd.service.SetLogLevel",         varlink_method_set_log_level,
+                        "io.systemd.service.GetEnvironment",      varlink_method_get_environment);
         if (r < 0)
-                return log_error_errno(r, "Failed to register varlink method: %m");
+                return log_error_errno(r, "Failed to register varlink methods: %m");
 
         if (fd < 0)
                 r = sd_varlink_server_listen_address(s, VARLINK_ADDR_PATH_MANAGED_OOM_USER, 0666);
@@ -753,35 +787,13 @@ static int manager_varlink_init(Manager *m, int fd) {
 int manager_start(
                 Manager *m,
                 bool dry_run,
-                int swap_used_limit_permyriad,
-                int mem_pressure_limit_permyriad,
-                usec_t mem_pressure_usec,
                 int fd) {
 
-        unsigned long l, f;
         int r;
 
         assert(m);
 
         m->dry_run = dry_run;
-
-        m->swap_used_limit_permyriad = swap_used_limit_permyriad >= 0 ? swap_used_limit_permyriad : DEFAULT_SWAP_USED_LIMIT_PERCENT * 100;
-        assert(m->swap_used_limit_permyriad <= 10000);
-
-        if (mem_pressure_limit_permyriad >= 0) {
-                assert(mem_pressure_limit_permyriad <= 10000);
-
-                l = mem_pressure_limit_permyriad / 100;
-                f = mem_pressure_limit_permyriad % 100;
-        } else {
-                l = DEFAULT_MEM_PRESSURE_LIMIT_PERCENT;
-                f = 0;
-        }
-        r = store_loadavg_fixed_point(l, f, &m->default_mem_pressure_limit);
-        if (r < 0)
-                return r;
-
-        m->default_mem_pressure_duration_usec = mem_pressure_usec;
 
         r = manager_connect_bus(m);
         if (r < 0)

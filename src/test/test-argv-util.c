@@ -8,7 +8,6 @@
 #endif
 
 #include "argv-util.h"
-#include "missing_sched.h"
 #include "process-util.h"
 #include "tests.h"
 #include "virt.h"
@@ -126,7 +125,6 @@ TEST(argv_help) {
         assert_se(argv_looks_like_help(5, STRV_MAKE("program", "--help", "arg1", "-h", "--help")));
         assert_se(!argv_looks_like_help(4, STRV_MAKE("program","arg1", "arg2", "-H")));
         assert_se(!argv_looks_like_help(3, STRV_MAKE("program", "--Help", "arg2")));
-
 }
 
 static int intro(void) {

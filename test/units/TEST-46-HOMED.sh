@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# shellcheck disable=SC2016,SC2209
+
 set -eux
 set -o pipefail
 
@@ -26,6 +28,10 @@ inspect() {
     homectl inspect --json=pretty "$USERNAME"
 }
 
+wait_for_exist() {
+    timeout 2m bash -c "until homectl inspect '${1:?}'; do sleep 2; done"
+}
+
 wait_for_state() {
     timeout 2m bash -c "until homectl inspect '${1:?}' | grep -qF 'State: $2'; do sleep 2; done"
 }
@@ -40,6 +46,9 @@ systemctl service-log-level systemd-homed debug
 # Create a tmpfs to use as backing store for the home dir. That way we can enforce a size limit nicely.
 mkdir -p /home
 mount -t tmpfs tmpfs /home -o size=290M
+
+# Make sure systemd-homed takes notice of the overmounted /home/
+systemctl kill -sUSR1 systemd-homed
 
 TMP_SKEL=$(mktemp -d)
 echo hogehoge >"$TMP_SKEL"/hoge
@@ -528,7 +537,7 @@ for opt in json multiplexer output synthesize with-dropin with-nss with-varlink;
 done
 
 # FIXME: sshd seems to crash inside asan currently, skip the actual ssh test hence
-if command -v ssh &>/dev/null && command -v sshd &>/dev/null && ! [[ -v ASAN_OPTIONS ]]; then
+if command -v ssh >/dev/null && command -v sshd >/dev/null && ! [[ -v ASAN_OPTIONS ]]; then
     at_exit() {
         set +e
 
@@ -572,12 +581,11 @@ if command -v ssh &>/dev/null && command -v sshd &>/dev/null && ! [[ -v ASAN_OPT
         if [[ -f "$dir/pam.d/sshd" ]]; then
             mv "$dir/pam.d/sshd" "$dir/pam.d/sshd.bak"
             cat >"$dir/pam.d/sshd" <<EOF
+auth [success=done authtok_err=bad perm_denied=bad maxtries=bad default=ignore] pam_systemd_home.so
 auth    sufficient pam_unix.so nullok
-auth    sufficient pam_systemd_home.so debug
 auth    required   pam_deny.so
-account sufficient pam_systemd_home.so debug
-account sufficient pam_unix.so
-account required   pam_permit.so
+account [success=done authtok_expired=bad new_authtok_reqd=bad maxtries=bad acct_expired=bad default=ignore] pam_systemd_home.so
+account required   pam_unix.so
 session optional   pam_systemd_home.so debug
 session optional   pam_systemd.so
 session required   pam_unix.so
@@ -627,6 +635,218 @@ EOF
     trap - EXIT
     at_exit
 fi
+
+NEWPASSWORD=hunter4711 homectl create aliastest --storage=directory --alias=aliastest2 --alias=aliastest3 --realm=myrealm
+
+homectl inspect aliastest
+homectl inspect aliastest2
+homectl inspect aliastest3
+homectl inspect aliastest@myrealm
+homectl inspect aliastest2@myrealm
+homectl inspect aliastest3@myrealm
+
+userdbctl user aliastest
+userdbctl user aliastest2
+userdbctl user aliastest3
+userdbctl user aliastest@myrealm
+userdbctl user aliastest2@myrealm
+userdbctl user aliastest3@myrealm
+
+getent passwd aliastest
+getent passwd aliastest2
+getent passwd aliastest3
+getent passwd aliastest@myrealm
+getent passwd aliastest2@myrealm
+getent passwd aliastest3@myrealm
+
+homectl remove aliastest
+
+NEWPASSWORD=quux homectl create tmpfsquota --storage=subvolume --dev-shm-limit=50K --tmp-limit=50K -P
+for p in /dev/shm /tmp; do
+    if findmnt -n -o options "$p" | grep -q usrquota; then
+        # Check if we can display the quotas. If we cannot, than it's likely
+        # that PID1 was also not able to set the limits and we should not fail
+        # in the tests below.
+        /usr/lib/systemd/tests/unit-tests/manual/test-display-quota tmpfsquota "$p" || set +e
+
+        run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u tmpfsquota dd if=/dev/zero of="$p/quotatestfile1" bs=1024 count=30
+        (! run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u tmpfsquota dd if=/dev/zero of="$p/quotatestfile2" bs=1024 count=30)
+        run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u tmpfsquota rm "$p/quotatestfile1" "$p/quotatestfile2"
+        run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u tmpfsquota dd if=/dev/zero of="$p/quotatestfile1" bs=1024 count=30
+        run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u tmpfsquota rm "$p/quotatestfile1"
+
+        set -e
+    fi
+done
+
+systemctl stop user@"$(id -u tmpfsquota)".service
+wait_for_state tmpfsquota inactive
+homectl remove tmpfsquota
+
+NEWPASSWORD=quux homectl create subareatest --storage=subvolume -P
+run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest mkdir Areas
+run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest cp -av /etc/skel Areas/furb
+run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest cp -av /etc/skel Areas/molb
+run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest ln -s /home/srub Areas/srub
+run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest ln -s /root Areas/root
+
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo $HOME')" = "/home/subareatest"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo x$XDG_AREA')" = "x"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $HOME')" = "/home/subareatest/Areas/furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_AREA')" = "furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/furb"
+
+PASSWORD=quux homectl update subareatest --default-area=molb
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo $HOME')" = "/home/subareatest/Areas/molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo $XDG_AREA')" = "molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $HOME')" = "/home/subareatest/Areas/furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_AREA')" = "furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/furb"
+
+# Install a PK rule that allows 'subareatest' user to invoke run0 without password, just for testing
+cat >/usr/share/polkit-1/rules.d/subareatest.rules <<'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "subareatest") {
+        return polkit.Result.YES;
+    }
+});
+EOF
+
+# Test "recursive" operation
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb sh -c 'echo $HOME')" = "/home/subareatest/Areas/molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb sh -c 'echo $XDG_AREA')" = "molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/molb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $HOME')" = "/home/subareatest/Areas/furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_AREA')" = "furb"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=molb run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=furb sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/furb"
+
+# Test symlinked area
+mkdir -p /home/srub
+chown subareatest:subareatest /home/srub
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=srub sh -c 'echo $HOME')" = "/home/srub"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=srub sh -c 'echo $XDG_AREA')" = "srub"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=srub sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)/Areas/srub"
+
+# Verify that login into an area not owned by target user will be redirected to main area
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=root sh -c 'echo $HOME')" = "/home/subareatest"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=root sh -c 'echo x$XDG_AREA')" = "x"
+test "$(run0 --property=SetCredential=pam.authtok.systemd-run0:quux -u subareatest --area=root sh -c 'echo $XDG_RUNTIME_DIR')" = "/run/user/$(id -u subareatest)"
+
+systemctl stop user@"$(id -u subareatest)".service
+
+wait_for_state subareatest inactive
+homectl remove subareatest
+
+# Test signing key logic
+homectl list-signing-keys | grep -q local.public
+(! (homectl list-signing-keys | grep -q signtest.public))
+
+IDENTITY='{"userName":"signtest","storage":"directory","disposition":"regular","privileged":{"hashedPassword":["$y$j9T$I5Wxfm.fyg.RRWlgWw.rI1$gnQqGtbpPexqxZJkWMq8FxQi5Swc.CWeKtM8LwvEUB6"]},"enforcePasswordPolicy":false,"lastChangeUSec":1740677608017608,"lastPasswordChangeUSec":1740677608017608,"signature":[{"data":"Gl4wtc0sMjVnsH6FQwG/0M+x0nLI5cvvdtSSCttUu1gNtXqYn0UI4wZi/7zX35ERht6XHWDlP4d6V8HiAst4Dg==","key":"-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6uvVaP1vh7O6nIbiOcvyIHRl4ihYSs0R7ctxtz2Zu7E=\n-----END PUBLIC KEY-----\n"}],"secret":{"password":["test"]}}'
+
+# Try with stripping the foreign signature first, this should just work
+echo "$IDENTITY" | homectl create -P --identity=- --seize=yes
+wait_for_state signtest inactive
+homectl remove signtest
+
+# No try again, and don't strip the signature. It will be refused.
+(! (echo "$IDENTITY" | homectl create -P --identity=- --seize=no))
+
+print_public_key() {
+    cat <<EOF
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA6uvVaP1vh7O6nIbiOcvyIHRl4ihYSs0R7ctxtz2Zu7E=
+-----END PUBLIC KEY-----
+EOF
+}
+
+# Let's now add the signing key
+print_public_key | homectl add-signing-key --key-name=signtest.public
+homectl get-signing-key signtest.public | cmp - <(print_public_key)
+homectl list-signing-keys | grep -q local.public
+homectl list-signing-keys | grep -q signtest.public
+
+# Now create the account with this, it should work now
+echo "$IDENTITY" | homectl create -P --identity=- --seize=no
+
+# Verify we can log in
+PASSWORD="test" homectl with signtest true
+
+# Remove the key, and check again ,should fail now
+wait_for_state signtest inactive
+homectl remove-signing-key signtest.public
+wait_for_state signtest inactive
+(! PASSWORD="test" homectl with signtest true)
+
+# Verify key is really gone
+homectl list-signing-keys | grep -q local.public
+(! (homectl list-signing-keys | grep -q signtest.public))
+
+# Test unregister + adopt
+mkdir /home/elsewhere
+mv /home/signtest.homedir /home/elsewhere/
+wait_for_state signtest absent
+homectl unregister signtest
+print_public_key | homectl add-signing-key --key-name=signtest.public
+homectl adopt /home/elsewhere/signtest.homedir
+PASSWORD="test" homectl with signtest true
+
+# Test register
+wait_for_state signtest inactive
+homectl unregister signtest
+homectl register /home/elsewhere/signtest.homedir/.identity
+wait_for_state signtest absent
+homectl unregister signtest
+
+# Test automatic fixation for anything in /home/
+mv /home/elsewhere/signtest.homedir /home
+rmdir /home/elsewhere
+wait_for_exist signtest
+PASSWORD="test" homectl with signtest true
+
+# add signing key via credential
+wait_for_state signtest inactive
+homectl remove-signing-key signtest.public
+(! (homectl list-signing-keys | grep -q signtest.public))
+systemd-run --wait -p "SetCredential=home.add-signing-key.signtest.public:$(print_public_key)" homectl firstboot
+homectl list-signing-keys | grep -q signtest.public
+
+# register user via credential
+mkdir /home/elsewhere2
+mv /home/signtest.homedir /home/elsewhere2/
+wait_for_state signtest absent
+homectl unregister signtest
+systemd-run --wait -p "LoadCredential=home.register.signtest:/home/elsewhere2/signtest.homedir/.identity" homectl firstboot
+homectl inspect signtest
+wait_for_state signtest absent
+homectl unregister signtest
+mv /home/elsewhere2/signtest.homedir /home/
+rmdir /home/elsewhere2
+
+# Remove it all again
+wait_for_exist signtest
+homectl remove-signing-key signtest.public
+homectl remove signtest
+
+# Test positive and negative matching
+NEWPASSWORD=test homectl create --storage=directory --nice=5 -P matchtest
+homectl inspect matchtest
+homectl inspect matchtest | grep "Nice: 5"
+PASSWORD=test homectl update -N --nice=7 -T --nice=3 matchtest
+homectl inspect matchtest
+homectl inspect matchtest | grep "Nice: 3"
+PASSWORD=test homectl update -A --default-area=quux1 matchtest
+homectl inspect matchtest
+homectl inspect matchtest | grep "Area: quux1"
+PASSWORD=test homectl update -N --default-area=quux2 matchtest
+homectl inspect matchtest
+homectl inspect matchtest | grep "Area: quux1"
+PASSWORD=test homectl update -T --default-area=quux3 matchtest
+homectl inspect matchtest
+homectl inspect matchtest | grep "Area: quux3"
+homectl remove matchtest
 
 systemd-analyze log-level info
 

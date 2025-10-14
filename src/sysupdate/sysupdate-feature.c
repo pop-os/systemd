@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "alloc-util.h"
 #include "conf-parser.h"
 #include "hash-funcs.h"
 #include "path-util.h"
-#include "sysupdate-feature.h"
+#include "string-util.h"
 #include "sysupdate.h"
+#include "sysupdate-feature.h"
 #include "web-util.h"
 
 static Feature *feature_free(Feature *f) {
@@ -77,7 +79,6 @@ static int config_parse_url_specifiers(
 
         return free_and_replace(*s, resolved);
 }
-
 
 int feature_read_definition(Feature *f, const char *path, const char *const *dirs) {
         assert(f);

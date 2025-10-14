@@ -16,15 +16,21 @@
 
 #include "chid.h"
 #include "chid-fundamental.h"
-#include "efi.h"
-#include "sha1-fundamental.h"
+#include "edid.h"
+#if SD_BOOT
+#include "efi-log.h"
+#endif
+#include "efi-string.h"
 #include "smbios.h"
 #include "util.h"
 
 /* Validate the descriptor macros a bit that they match our expectations */
 assert_cc(DEVICE_DESCRIPTOR_DEVICETREE == UINT32_C(0x1000001C));
+assert_cc(DEVICE_DESCRIPTOR_UEFI_FW == UINT32_C(0x2000001C));
 assert_cc(DEVICE_SIZE_FROM_DESCRIPTOR(DEVICE_DESCRIPTOR_DEVICETREE) == sizeof(Device));
 assert_cc(DEVICE_TYPE_FROM_DESCRIPTOR(DEVICE_DESCRIPTOR_DEVICETREE) == DEVICE_TYPE_DEVICETREE);
+assert_cc(DEVICE_SIZE_FROM_DESCRIPTOR(DEVICE_DESCRIPTOR_UEFI_FW) == sizeof(Device));
+assert_cc(DEVICE_TYPE_FROM_DESCRIPTOR(DEVICE_DESCRIPTOR_UEFI_FW) == DEVICE_TYPE_UEFI_FW);
 
 /**
  * smbios_to_hashable_string() - Convert ascii smbios string to stripped char16_t.
@@ -58,13 +64,10 @@ typedef struct SmbiosInfo {
 } SmbiosInfo;
 
 static void smbios_info_populate(SmbiosInfo *ret_info) {
-        static RawSmbiosInfo raw = {};
-        static bool raw_info_populated = false;
+        assert(ret_info);
 
-        if (!raw_info_populated) {
-                smbios_raw_info_populate(&raw);
-                raw_info_populated = true;
-        }
+        RawSmbiosInfo raw;
+        smbios_raw_info_get_cached(&raw);
 
         ret_info->smbios_fields[CHID_SMBIOS_MANUFACTURER] = smbios_to_hashable_string(raw.manufacturer);
         ret_info->smbios_fields[CHID_SMBIOS_PRODUCT_NAME] = smbios_to_hashable_string(raw.product_name);
@@ -72,6 +75,8 @@ static void smbios_info_populate(SmbiosInfo *ret_info) {
         ret_info->smbios_fields[CHID_SMBIOS_FAMILY] = smbios_to_hashable_string(raw.family);
         ret_info->smbios_fields[CHID_SMBIOS_BASEBOARD_PRODUCT] = smbios_to_hashable_string(raw.baseboard_product);
         ret_info->smbios_fields[CHID_SMBIOS_BASEBOARD_MANUFACTURER] = smbios_to_hashable_string(raw.baseboard_manufacturer);
+
+        edid_get_discovered_panel_id(&ret_info->smbios_fields[CHID_EDID_PANEL]);
 }
 
 static void smbios_info_done(SmbiosInfo *info) {
@@ -91,7 +96,7 @@ static EFI_STATUS populate_board_chids(EFI_GUID ret_chids[static CHID_TYPES_MAX]
         return EFI_SUCCESS;
 }
 
-EFI_STATUS chid_match(const void *hwid_buffer, size_t hwid_length, const Device **ret_device) {
+EFI_STATUS chid_match(const void *hwid_buffer, size_t hwid_length, uint32_t match_type, const Device **ret_device) {
         EFI_STATUS status;
 
         if ((uintptr_t) hwid_buffer % alignof(Device) != 0)
@@ -100,11 +105,16 @@ EFI_STATUS chid_match(const void *hwid_buffer, size_t hwid_length, const Device 
         const Device *devices = ASSERT_PTR(hwid_buffer);
 
         EFI_GUID chids[CHID_TYPES_MAX] = {};
-        static const size_t priority[] = { 3, 6, 8, 10, 4, 5, 7, 9, 11 }; /* From most to least specific. */
+        static const size_t priority[] = { EXTRA_CHID_BASE + 2, EXTRA_CHID_BASE + 1, EXTRA_CHID_BASE + 0,
+                                           3, 6, 8, 10, 4, 5, 7, 9, 11 }; /* From most to least specific. */
 
         status = populate_board_chids(chids);
         if (EFI_STATUS_IS_ERROR(status))
+#if SD_BOOT
                 return log_error_status(status, "Failed to populate board CHIDs: %m");
+#else
+                return status;
+#endif
 
         size_t n_devices = 0;
 
@@ -113,7 +123,8 @@ EFI_STATUS chid_match(const void *hwid_buffer, size_t hwid_length, const Device 
 
                 if (devices[n_devices].descriptor == DEVICE_DESCRIPTOR_EOL)
                         break;
-                if (devices[n_devices].descriptor != DEVICE_DESCRIPTOR_DEVICETREE)
+                if (!IN_SET(DEVICE_TYPE_FROM_DESCRIPTOR(devices[n_devices].descriptor),
+                            DEVICE_TYPE_UEFI_FW, DEVICE_TYPE_DEVICETREE))
                         return EFI_UNSUPPORTED;
                 n_devices++;
         }
@@ -125,6 +136,8 @@ EFI_STATUS chid_match(const void *hwid_buffer, size_t hwid_length, const Device 
                 FOREACH_ARRAY(dev, devices, n_devices) {
                         /* Can't take a pointer to a packed struct member, so copy to a local variable */
                         EFI_GUID chid = dev->chid;
+                        if (DEVICE_TYPE_FROM_DESCRIPTOR(dev->descriptor) != match_type)
+                                continue;
                         if (efi_guid_equal(&chids[*i], &chid)) {
                                 *ret_device = dev;
                                 return EFI_SUCCESS;

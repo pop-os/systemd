@@ -3,7 +3,11 @@
 
 #include "efi.h"
 
-/* This is the actual PE format of the section header*/
+/* PE flags in the Characteristics attribute of the optional header indicating executable code */
+#define PE_CODE 0x00000020
+#define PE_EXECUTE 0x20000000
+
+/* This is the actual PE format of the section header */
 typedef struct PeSectionHeader {
         uint8_t  Name[8];
         uint32_t VirtualSize;
@@ -53,4 +57,8 @@ EFI_STATUS pe_memory_locate_sections(
                 const char *const section_names[],
                 PeSectionVector sections[]);
 
-EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_compat_address, size_t *ret_size_in_memory);
+EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_entry_point, uint32_t *ret_compat_entry_point, uint64_t *ret_image_base, size_t *ret_size_in_memory);
+
+EFI_STATUS pe_kernel_check_no_relocation(const void *base);
+
+bool pe_kernel_check_nx_compat(const void *base);

@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "conf-parser.h"
-#include "constants.h"
 #include "home-util.h"
 #include "homed-conf.h"
+#include "string-util.h"
+#include "user-record.h"
 
 int manager_parse_config_file(Manager *m) {
 
@@ -41,5 +42,4 @@ int config_parse_default_file_system_type(
         }
 
         return free_and_strdup_warn(s, empty_to_null(rvalue));
-
 }

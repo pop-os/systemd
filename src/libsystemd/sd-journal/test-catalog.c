@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <fcntl.h>
 #include <locale.h>
 #include <unistd.h>
 
@@ -10,12 +8,8 @@
 #include "alloc-util.h"
 #include "catalog.h"
 #include "fd-util.h"
-#include "fs-util.h"
+#include "hashmap.h"
 #include "log.h"
-#include "macro.h"
-#include "path-util.h"
-#include "string-util.h"
-#include "strv.h"
 #include "tests.h"
 #include "tmpfile-util.h"
 
@@ -28,31 +22,29 @@ static const char *no_catalog_dirs[] = {
 static OrderedHashmap* test_import(const char* contents, ssize_t size, int code) {
         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-catalog.XXXXXX";
         _cleanup_close_ int fd = -EBADF;
-        OrderedHashmap *h;
+        OrderedHashmap *h = NULL;
 
         if (size < 0)
                 size = strlen(contents);
-
-        assert_se(h = ordered_hashmap_new(&catalog_hash_ops));
 
         fd = mkostemp_safe(name);
         assert_se(fd >= 0);
         assert_se(write(fd, contents, size) == size);
 
-        assert_se(catalog_import_file(h, name) == code);
+        assert_se(catalog_import_file(&h, fd, name) == code);
 
         return h;
 }
 
 static void test_catalog_import_invalid(void) {
-        _cleanup_ordered_hashmap_free_free_free_ OrderedHashmap *h = NULL;
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *h = NULL;
 
         h = test_import("xxx", -1, -EINVAL);
         assert_se(ordered_hashmap_isempty(h));
 }
 
 static void test_catalog_import_badid(void) {
-        _unused_ _cleanup_ordered_hashmap_free_free_free_ OrderedHashmap *h = NULL;
+        _unused_ _cleanup_ordered_hashmap_free_ OrderedHashmap *h = NULL;
         const char *input =
 "-- 0027229ca0644181a76c4e92458afaff dededededededededededededededede\n" \
 "Subject: message\n" \
@@ -62,7 +54,7 @@ static void test_catalog_import_badid(void) {
 }
 
 static void test_catalog_import_one(void) {
-        _cleanup_ordered_hashmap_free_free_free_ OrderedHashmap *h = NULL;
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *h = NULL;
         char *payload;
 
         const char *input =
@@ -86,7 +78,7 @@ static void test_catalog_import_one(void) {
 }
 
 static void test_catalog_import_merge(void) {
-        _cleanup_ordered_hashmap_free_free_free_ OrderedHashmap *h = NULL;
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *h = NULL;
         char *payload;
 
         const char *input =
@@ -118,7 +110,7 @@ static void test_catalog_import_merge(void) {
 }
 
 static void test_catalog_import_merge_no_body(void) {
-        _cleanup_ordered_hashmap_free_free_free_ OrderedHashmap *h = NULL;
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *h = NULL;
         char *payload;
 
         const char *input =
@@ -222,10 +214,10 @@ int main(int argc, char *argv[]) {
 
         test_catalog_update(database);
 
-        r = catalog_list(stdout, database, true);
+        r = catalog_list(NULL, database, true);
         assert_se(r >= 0);
 
-        r = catalog_list(stdout, database, false);
+        r = catalog_list(NULL, database, false);
         assert_se(r >= 0);
 
         assert_se(catalog_get(database, SD_MESSAGE_COREDUMP, &text) >= 0);

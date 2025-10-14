@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "fd-util.h"
-#include "fileio.h"
+
+#include "alloc-util.h"
+#include "extract-word.h"
 #include "hostname-util.h"
 #include "log.h"
-#include "macro.h"
 #include "memstream-util.h"
 #include "netif-naming-scheme.h"
 #include "network-generator.h"
@@ -21,7 +21,7 @@
   ip={dhcp|on|any|dhcp6|auto6|either6|link6|link-local}
   ip=<interface>:{dhcp|on|any|dhcp6|auto6|link6|link-local}[:[<mtu>][:<macaddr>]]
   ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|link6|ibft|link-local}[:[<mtu>][:<macaddr>]]
-  ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|link6|ibft|link-local}[:[<dns1>][:<dns2>]]
+  ip=<client-IP>:[<peer>]:<gateway-IP>:<netmask>:<client_hostname>:<interface>:{none|off|dhcp|on|any|dhcp6|auto6|link6|ibft|link-local}[:[<dns1>][:[<dns2>][:[<ntp>]]]]
   rd.route=<net>/<netmask>:<gateway>[:<interface>]
   nameserver=<IP> [nameserver=<IP> ...]
   rd.peerdns=0
@@ -197,6 +197,7 @@ static Network* network_free(Network *network) {
         strv_free(network->vlan);
         free(network->bridge);
         free(network->bond);
+        free(network->ntp);
 
         while ((address = network->addresses))
                 address_free(address);
@@ -208,6 +209,11 @@ static Network* network_free(Network *network) {
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Network*, network_free);
+
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(
+                network_hash_ops,
+                char, string_hash_func, string_compare_func,
+                Network, network_free);
 
 static int network_new(Context *context, const char *name, Network **ret) {
         _cleanup_(network_freep) Network *network = NULL;
@@ -234,7 +240,7 @@ static int network_new(Context *context, const char *name, Network **ret) {
                 .dhcp_use_dns = -1,
         };
 
-        r = hashmap_ensure_put(&context->networks_by_name, &string_hash_ops, network->ifname, network);
+        r = hashmap_ensure_put(&context->networks_by_name, &network_hash_ops, network->ifname, network);
         if (r < 0)
                 return r;
 
@@ -277,6 +283,11 @@ static NetDev* netdev_free(NetDev *netdev) {
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(NetDev*, netdev_free);
 
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(
+                netdev_hash_ops,
+                char, string_hash_func, string_compare_func,
+                NetDev, netdev_free);
+
 static int netdev_new(Context *context, const char *_kind, const char *_ifname, NetDev **ret) {
         _cleanup_(netdev_freep) NetDev *netdev = NULL;
         _cleanup_free_ char *kind = NULL, *ifname = NULL;
@@ -306,7 +317,7 @@ static int netdev_new(Context *context, const char *_kind, const char *_ifname, 
                 .ifname = TAKE_PTR(ifname),
         };
 
-        r = hashmap_ensure_put(&context->netdevs_by_name, &string_hash_ops, netdev->ifname, netdev);
+        r = hashmap_ensure_put(&context->netdevs_by_name, &netdev_hash_ops, netdev->ifname, netdev);
         if (r < 0)
                 return r;
 
@@ -355,6 +366,11 @@ static Link* link_free(Link *link) {
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_free);
 
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(
+                link_hash_ops,
+                char, string_hash_func, string_compare_func,
+                Link, link_free);
+
 static int link_new(
                 Context *context,
                 const char *name,
@@ -398,7 +414,7 @@ static int link_new(
                 .mac = *mac,
         };
 
-        r = hashmap_ensure_put(&context->links_by_filename, &string_hash_ops, link->filename, link);
+        r = hashmap_ensure_put(&context->links_by_filename, &link_hash_ops, link->filename, link);
         if (r < 0)
                 return r;
 
@@ -635,6 +651,27 @@ static int network_set_bond(Context *context, const char *ifname, const char *va
         return free_and_strdup(&network->bond, value);
 }
 
+static int network_set_ntp(Context *context, const char *ifname, const char *value) {
+        Network *network;
+        int r;
+
+        assert(context);
+        assert(ifname);
+
+        if (isempty(value))
+                return 0;
+
+        r = in_addr_from_string_auto(value, NULL, NULL);
+        if (r < 0)
+                return log_debug_errno(r, "Invalid NTP address '%s' for '%s'", value, ifname);
+
+        r = network_acquire(context, ifname, &network);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to acquire network for '%s': %m", ifname);
+
+        return free_and_strdup(&network->ntp, value);
+}
+
 static int parse_cmdline_ip_mtu_mac(Context *context, const char *ifname, const char *value) {
         _cleanup_free_ char *mtu = NULL;
         int r;
@@ -850,6 +887,18 @@ static int parse_cmdline_ip_address(Context *context, int family, const char *va
         if (r < 0)
                 return r;
 
+        /* Next, try [:<ntp>] */
+        _cleanup_free_ char *ntp = NULL;
+        r = extract_ip_address_str(AF_UNSPEC, &p, &ntp);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to parse NTP address in ip=%s: %m", value);
+        if (r == 0)
+                return 0;
+
+        r = network_set_ntp(context, ifname, ntp);
+        if (r < 0)
+                return r;
+
         /* refuse unexpected trailing strings */
         if (!isempty(p))
                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Unexpected trailing string in 'ip=%s'.", value);
@@ -872,7 +921,7 @@ static int parse_cmdline_ip_interface(Context *context, const char *value) {
                 return log_debug_errno(r < 0 ? r : SYNTHETIC_ERRNO(EINVAL), "Failed to parse interface name in ip=%s: %m", value);
 
         if (isempty(ifname))
-                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Missing interface name in ip=%s: %m", value);
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Missing interface name in ip=%s.", value);
 
         r = extract_first_word(&p, &dhcp_type, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
         if (r <= 0)
@@ -1272,9 +1321,9 @@ void context_clear(Context *context) {
         if (!context)
                 return;
 
-        hashmap_free_with_destructor(context->networks_by_name, network_free);
-        hashmap_free_with_destructor(context->netdevs_by_name, netdev_free);
-        hashmap_free_with_destructor(context->links_by_filename, link_free);
+        hashmap_free(context->networks_by_name);
+        hashmap_free(context->netdevs_by_name);
+        hashmap_free(context->links_by_filename);
 }
 
 static int address_dump(Address *address, FILE *f) {
@@ -1357,6 +1406,9 @@ void network_dump(Network *network, FILE *f) {
 
         if (network->bond)
                 fprintf(f, "Bond=%s\n", network->bond);
+
+        if (network->ntp)
+                fprintf(f, "NTP=%s\n", network->ntp);
 
         fputs("\n[DHCP]\n", f);
 

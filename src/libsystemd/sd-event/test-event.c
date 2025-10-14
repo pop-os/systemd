@@ -1,23 +1,17 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#if HAVE_PIDFD_OPEN
-#include <sys/pidfd.h>
-#endif
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "sd-event.h"
 
 #include "alloc-util.h"
-#include "exec-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "fs-util.h"
 #include "log.h"
-#include "macro.h"
-#include "missing_syscall.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pidfd-util.h"
 #include "process-util.h"
 #include "random-util.h"
 #include "rm-rf.h"
@@ -25,6 +19,7 @@
 #include "stdio-util.h"
 #include "string-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 
 static int prepare_handler(sd_event_source *s, void *userdata) {
@@ -199,7 +194,7 @@ static int post_handler(sd_event_source *s, void *userdata) {
         return 2;
 }
 
-static void test_basic_one(bool with_pidfd) {
+TEST(basic) {
         sd_event *e = NULL;
         sd_event_source *w = NULL, *x = NULL, *y = NULL, *z = NULL, *q = NULL, *t = NULL;
         static const char ch = 'x';
@@ -207,10 +202,6 @@ static void test_basic_one(bool with_pidfd) {
             d[2] = EBADF_PAIR, k[2] = EBADF_PAIR;
         uint64_t event_now;
         int64_t priority;
-
-        log_info("/* %s(pidfd=%s) */", __func__, yes_no(with_pidfd));
-
-        assert_se(setenv("SYSTEMD_PIDFD", yes_no(with_pidfd), 1) >= 0);
 
         assert_se(pipe(a) >= 0);
         assert_se(pipe(b) >= 0);
@@ -302,13 +293,6 @@ static void test_basic_one(bool with_pidfd) {
         safe_close_pair(b);
         safe_close_pair(d);
         safe_close_pair(k);
-
-        assert_se(unsetenv("SYSTEMD_PIDFD") >= 0);
-}
-
-TEST(basic) {
-        test_basic_one(true);   /* test with pidfd */
-        test_basic_one(false);  /* test without pidfd */
 }
 
 TEST(sd_event_now) {
@@ -584,13 +568,7 @@ TEST(pidfd) {
 
         assert_se(pid > 1);
 
-        pidfd = pidfd_open(pid, 0);
-        if (pidfd < 0) {
-                /* No pidfd_open() supported or blocked? */
-                assert_se(ERRNO_IS_NOT_SUPPORTED(errno) || ERRNO_IS_PRIVILEGE(errno));
-                (void) wait_for_terminate(pid, NULL);
-                return;
-        }
+        ASSERT_OK(pidfd = pidfd_open(pid, 0));
 
         pid2 = fork();
         if (pid2 == 0)

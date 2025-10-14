@@ -20,9 +20,10 @@ xsltproc_flags = [
         '--stringparam', 'man.copyright.section.enabled', '0',
         '--stringparam', 'systemd.version', '@0@'.format(meson.project_version()),
         '--path',
-        '@0@:@1@:@2@'.format(meson.current_build_dir(),
+        '@0@:@1@:@2@:@3@'.format(meson.current_build_dir(),
                              meson.current_source_dir(),
-                             libshared_build_dir)]
+                             libshared_build_dir,
+                             libcore_build_dir)]
 
 custom_man_xsl = files('custom-man.xsl')
 custom_html_xsl = files('custom-html.xsl')
@@ -89,7 +90,9 @@ foreach tuple : manpages
                                         output : htmlalias,
                                         command : [ln, '-fs', html, '@OUTPUT@'])
                                 if want_html
-                                        meson.add_install_script(sh, '-c', ln_s.format(docdir / 'html' / html, docdir / 'html' / htmlalias))
+                                        install_symlink(htmlalias,
+                                                        pointing_to : html,
+                                                        install_dir : docdir / 'html')
                                         p2 += link
                                 endif
                                 html_pages += link
@@ -128,8 +131,8 @@ systemd_index_xml = custom_target(
         output : 'systemd.index.xml',
         command : [make_man_index_py, '@OUTPUT@'] + nonindex_xml_files)
 
-foreach tuple : xsltproc.found() ? [['systemd.directives', '7', systemd_directives_xml],
-                                    ['systemd.index',      '7', systemd_index_xml]] : []
+foreach tuple : xsltproc.found() and have_lxml ? [['systemd.directives', '7', systemd_directives_xml],
+                                                  ['systemd.index',      '7', systemd_index_xml]] : []
         stem = tuple[0]
         section = tuple[1]
         xml = tuple[2]
@@ -143,7 +146,7 @@ foreach tuple : xsltproc.found() ? [['systemd.directives', '7', systemd_directiv
                 input : xml,
                 output : man,
                 command : xslt_cmd + [custom_man_xsl, '@INPUT@'],
-                install : want_man and have_lxml,
+                install : want_man,
                 install_dir : mandirn)
         man_pages += p1
 
@@ -155,7 +158,9 @@ foreach tuple : xsltproc.found() ? [['systemd.directives', '7', systemd_directiv
                         output : htmlalias,
                         command : [ln, '-fs', html, '@OUTPUT@'])
                 if want_html
-                        meson.add_install_script(sh, '-c', ln_s.format(docdir / 'html' / html, docdir / 'html' / htmlalias))
+                        install_symlink(htmlalias,
+                                        pointing_to : html,
+                                        install_dir : docdir / 'html')
                         p2 += link
                 endif
                 html_pages += link
@@ -166,7 +171,7 @@ foreach tuple : xsltproc.found() ? [['systemd.directives', '7', systemd_directiv
                 output : html,
                 command : xslt_cmd + [custom_html_xsl, '@INPUT@'],
                 depends : [man_page_depends, p2],
-                install : want_html and have_lxml,
+                install : want_html,
                 install_dir : docdir / 'html')
         html_pages += p3
 endforeach
@@ -261,6 +266,7 @@ simple_examples = files(
         'sd-bus-container-read.c',
         'sd_bus_error-example.c',
         'sd_bus_service_reconnect.c',
+        'sd_device_enumerator_add_match_parent-example.c',
         'sd_device_enumerator_new-example.c',
         'send-unit-files-changed.c',
         'vtable-example.c',

@@ -1,13 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "alloc-util.h"
 #include "escape.h"
 #include "hexdecoct.h"
-#include "macro.h"
+#include "string-util.h"
 #include "strv.h"
 #include "utf8.h"
 
@@ -80,10 +79,15 @@ char* cescape_length(const char *s, size_t n) {
         const char *f;
         char *r, *t;
 
+        /* Does C style string escaping. May be reversed with cunescape(). */
+
         assert(s || n == 0);
 
-        /* Does C style string escaping. May be reversed with
-         * cunescape(). */
+        if (n == SIZE_MAX)
+                n = strlen(s);
+
+        if (n > (SIZE_MAX - 1) / 4)
+                return NULL;
 
         r = new(char, n*4 + 1);
         if (!r)
@@ -95,12 +99,6 @@ char* cescape_length(const char *s, size_t n) {
         *t = 0;
 
         return r;
-}
-
-char* cescape(const char *s) {
-        assert(s);
-
-        return cescape_length(s, strlen(s));
 }
 
 int cunescape_one(const char *p, size_t length, char32_t *ret, bool *eight_bit, bool accept_nul) {
@@ -301,6 +299,9 @@ ssize_t cunescape_length_with_prefix(const char *s, size_t length, const char *p
 
         /* Undoes C style string escaping, and optionally prefixes it. */
 
+        if (length == SIZE_MAX)
+                length = strlen(s);
+
         pl = strlen_ptr(prefix);
 
         ans = new(char, pl+length+1);
@@ -365,6 +366,8 @@ char* xescape_full(const char *s, const char *bad, size_t console_width, XEscape
         char *ans, *t, *prev, *prev2;
         const char *f;
 
+        assert(s);
+
         /* Escapes all chars in bad, in addition to \ and all special chars, in \xFF style escaping. May be
          * reversed with cunescape(). If XESCAPE_8_BIT is specified, characters >= 127 are let through
          * unchanged. This corresponds to non-ASCII printable characters in pre-unicode encodings.
@@ -397,7 +400,7 @@ char* xescape_full(const char *s, const char *bad, size_t console_width, XEscape
 
                 if ((unsigned char) *f < ' ' ||
                     (!FLAGS_SET(flags, XESCAPE_8_BIT) && (unsigned char) *f >= 127) ||
-                    *f == '\\' || strchr(bad, *f)) {
+                    *f == '\\' || (bad && strchr(bad, *f))) {
                         if ((size_t) (t - ans) + 4 + 3 * force_ellipsis > console_width)
                                 break;
 
@@ -437,7 +440,7 @@ char* xescape_full(const char *s, const char *bad, size_t console_width, XEscape
 
 char* escape_non_printable_full(const char *str, size_t console_width, XEscapeFlags flags) {
         if (FLAGS_SET(flags, XESCAPE_8_BIT))
-                return xescape_full(str, "", console_width, flags);
+                return xescape_full(str, /* bad= */ NULL, console_width, flags);
         else
                 return utf8_escape_non_printable_full(str,
                                                       console_width,
@@ -447,7 +450,7 @@ char* escape_non_printable_full(const char *str, size_t console_width, XEscapeFl
 char* octescape(const char *s, size_t len) {
         char *buf, *t;
 
-        /* Escapes all chars in bad, in addition to \ and " chars, in \nnn style escaping. */
+        /* Escapes \ and " chars, in \nnn style escaping. */
 
         assert(s || len == 0);
 
@@ -477,12 +480,18 @@ char* octescape(const char *s, size_t len) {
         return buf;
 }
 
-char* decescape(const char *s, const char *bad, size_t len) {
+char* decescape(const char *s, size_t len, const char *bad) {
         char *buf, *t;
 
         /* Escapes all chars in bad, in addition to \ and " chars, in \nnn decimal style escaping. */
 
         assert(s || len == 0);
+
+        if (len == SIZE_MAX)
+                len = strlen(s);
+
+        if (len > (SIZE_MAX - 1) / 4)
+                return NULL;
 
         t = buf = new(char, len * 4 + 1);
         if (!buf)
@@ -589,7 +598,7 @@ char* shell_maybe_quote(const char *s, ShellEscapeFlags flags) {
         return str_realloc(buf);
 }
 
-char* quote_command_line(char **argv, ShellEscapeFlags flags) {
+char* quote_command_line(char * const *argv, ShellEscapeFlags flags) {
         _cleanup_free_ char *result = NULL;
 
         assert(argv);

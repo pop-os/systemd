@@ -1,22 +1,23 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-/* Make sure the net/if.h header is included before any linux/ one */
-#include <net/if.h>
 #include <linux/if_bridge.h>
 
-#include "netlink-util.h"
+#include "sd-netlink.h"
+
+#include "conf-parser.h"
+#include "hashmap.h"
 #include "networkd-bridge-mdb.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-network.h"
 #include "networkd-queue.h"
+#include "networkd-util.h"
 #include "string-util.h"
 #include "vlan-util.h"
 
 #define STATIC_BRIDGE_MDB_ENTRIES_PER_NETWORK_MAX 1024U
 
-/* remove MDB entry. */
-BridgeMDB *bridge_mdb_free(BridgeMDB *mdb) {
+static BridgeMDB* bridge_mdb_free(BridgeMDB *mdb) {
         if (!mdb)
                 return NULL;
 
@@ -32,7 +33,11 @@ BridgeMDB *bridge_mdb_free(BridgeMDB *mdb) {
 
 DEFINE_SECTION_CLEANUP_FUNCTIONS(BridgeMDB, bridge_mdb_free);
 
-/* create a new MDB entry or get an existing one. */
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(
+                bridge_mdb_hash_ops_by_section,
+                ConfigSection, config_section_hash_func, config_section_compare_func,
+                BridgeMDB, bridge_mdb_free);
+
 static int bridge_mdb_new_static(
                 Network *network,
                 const char *filename,
@@ -74,7 +79,7 @@ static int bridge_mdb_new_static(
                 .type = _BRIDGE_MDB_ENTRY_TYPE_INVALID,
         };
 
-        r = hashmap_ensure_put(&network->bridge_mdb_entries_by_section, &config_section_hash_ops, mdb->section, mdb);
+        r = hashmap_ensure_put(&network->bridge_mdb_entries_by_section, &bridge_mdb_hash_ops_by_section, mdb->section, mdb);
         if (r < 0)
                 return r;
 
@@ -90,13 +95,7 @@ static int bridge_mdb_configure_handler(sd_netlink *rtnl, sd_netlink_message *m,
         assert(link);
 
         r = sd_netlink_message_get_errno(m);
-        if (r == -EINVAL && streq_ptr(link->kind, "bridge") && link->master_ifindex <= 0) {
-                /* To configure bridge MDB entries on bridge master, 1bc844ee0faa1b92e3ede00bdd948021c78d7088 (v5.4) is required. */
-                if (!link->manager->bridge_mdb_on_master_not_supported) {
-                        log_link_warning_errno(link, r, "Kernel seems not to support bridge MDB entries on bridge master, ignoring: %m");
-                        link->manager->bridge_mdb_on_master_not_supported = true;
-                }
-        } else if (r < 0 && r != -EEXIST) {
+        if (r < 0 && r != -EEXIST) {
                 log_link_message_warning_errno(link, m, r, "Could not add MDB entry");
                 link_enter_failed(link);
                 return 1;
@@ -299,7 +298,6 @@ static int bridge_mdb_verify(BridgeMDB *mdb) {
                                                          "%s: MulticastGroupAddress= is the multicast all nodes address. "
                                                          "Ignoring [BridgeMDB] section from line %u.",
                                                          mdb->section->filename, mdb->section->line);
-                        break;
                 }
                 break;
         default:

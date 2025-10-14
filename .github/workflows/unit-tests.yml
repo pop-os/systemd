@@ -14,20 +14,30 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.run_phase }}-${{ matrix.cryptolib }}-${{ github.ref }}
+      group: ${{ github.workflow }}-${{ matrix.run_phase }}-${{ github.ref }}-${{ matrix.runner }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
+        runner: [ ubuntu-24.04 ]
         run_phase: [GCC, GCC_ASAN_UBSAN, CLANG, CLANG_RELEASE, CLANG_ASAN_UBSAN, CLANG_ASAN_UBSAN_NO_DEPS]
-        cryptolib: [auto]
         include:
           - run_phase: GCC
-            cryptolib: openssl
+          - run_phase: GCC
+            runner: ubuntu-24.04-arm
+          - run_phase: GCC
+            runner: ubuntu-24.04-ppc64le
+          - run_phase: GCC
+            runner: ubuntu-24.04-s390x
           - run_phase: CLANG
-            cryptolib: gcrypt
+          - run_phase: CLANG
+            runner: ubuntu-24.04-arm
+          - run_phase: CLANG
+            runner: ubuntu-24.04-ppc64le
+          - run_phase: CLANG
+            runner: ubuntu-24.04-s390x
     steps:
       - name: Repository checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -38,8 +48,6 @@ jobs:
           sudo sed -i '/^XDG_/d' /etc/environment
           # Pass only specific env variables through sudo, to avoid having
           # the already existing XDG_* stuff on the "other side"
-          sudo --preserve-env=CRYPTOLIB,GITHUB_ACTIONS,CI .github/workflows/unit-tests.sh SETUP
+          sudo --preserve-env=GITHUB_ACTIONS,CI .github/workflows/unit-tests.sh SETUP
       - name: Build & test
-        run: sudo --preserve-env=CRYPTOLIB,GITHUB_ACTIONS,CI .github/workflows/unit-tests.sh RUN_${{ matrix.run_phase }}
-        env:
-          CRYPTOLIB: ${{ matrix.cryptolib }}
+        run: sudo --preserve-env=GITHUB_ACTIONS,CI .github/workflows/unit-tests.sh RUN_${{ matrix.run_phase }}

@@ -1,25 +1,30 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <malloc.h>
 #include <poll.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "sd-daemon.h"
+#include "sd-event.h"
 #include "sd-varlink.h"
 
 #include "alloc-util.h"
 #include "errno-list.h"
 #include "errno-util.h"
 #include "escape.h"
+#include "extract-word.h"
 #include "fd-util.h"
+#include "format-util.h"
 #include "glyph-util.h"
 #include "hashmap.h"
 #include "io-util.h"
 #include "iovec-util.h"
 #include "json-util.h"
 #include "list.h"
+#include "log.h"
+#include "mkdir.h"
 #include "path-util.h"
 #include "process-util.h"
-#include "set.h"
 #include "socket-util.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -39,6 +44,7 @@
 #define VARLINK_BUFFER_MAX (16U*1024U*1024U)
 #define VARLINK_READ_SIZE (64U*1024U)
 #define VARLINK_COLLECT_MAX 1024U
+#define VARLINK_QUEUE_MAX (64U*1024U)
 
 static const char* const varlink_state_table[_VARLINK_STATE_MAX] = {
         [VARLINK_IDLE_CLIENT]              = "idle-client",
@@ -109,7 +115,7 @@ static void varlink_set_state(sd_varlink *v, VarlinkState state) {
         else
                 varlink_log(v, "Changing state %s %s %s",
                             varlink_state_to_string(v->state),
-                            special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                            glyph(GLYPH_ARROW_RIGHT),
                             varlink_state_to_string(state));
 
         v->state = state;
@@ -133,12 +139,14 @@ static int varlink_new(sd_varlink **ret) {
 
                 .ucred = UCRED_INVALID,
 
+                .peer_pidfd = -EBADF,
+
                 .timestamp = USEC_INFINITY,
                 .timeout = VARLINK_DEFAULT_TIMEOUT_USEC,
 
-                .af = -1,
+                .allow_fd_passing_input = -1,
 
-                .peer_pidfd = -EBADF,
+                .af = -1,
         };
 
         *ret = v;
@@ -321,15 +329,11 @@ static int varlink_connect_ssh_unix(sd_varlink **ret, const char *where) {
         if (!h)
                 return log_oom_debug();
 
-        _cleanup_free_ char *c = strdup(e + 1);
-        if (!c)
-                return log_oom_debug();
-
-        if (!path_is_absolute(c))
-                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Remote AF_UNIX socket path is not absolute, refusing: %s", c);
+        if (!path_is_absolute(e + 1))
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Remote AF_UNIX socket path is not absolute, refusing: %s", e + 1);
 
         _cleanup_free_ char *p = NULL;
-        r = path_simplify_alloc(c, &p);
+        r = path_simplify_alloc(e + 1, &p);
         if (r < 0)
                 return r;
 
@@ -629,6 +633,7 @@ static void varlink_clear(sd_varlink *v) {
 
         LIST_CLEAR(queue, v->output_queue, varlink_json_queue_item_free);
         v->output_queue_tail = NULL;
+        v->n_output_queue = 0;
 
         v->event = sd_event_unref(v->event);
 
@@ -846,7 +851,7 @@ static int varlink_read(sd_varlink *v) {
         p = v->input_buffer + v->input_buffer_index + v->input_buffer_size;
         rs = MALLOC_SIZEOF_SAFE(v->input_buffer) - (v->input_buffer_index + v->input_buffer_size);
 
-        if (v->allow_fd_passing_input) {
+        if (v->allow_fd_passing_input > 0) {
                 iov = IOVEC_MAKE(p, rs);
 
                 /* Allocate the fd buffer on the heap, since we need a lot of space potentially */
@@ -890,14 +895,14 @@ static int varlink_read(sd_varlink *v) {
                 return n;
         if (n == 0) { /* EOF */
 
-                if (v->allow_fd_passing_input)
+                if (v->allow_fd_passing_input > 0)
                         cmsg_close_all(&mh);
 
                 v->read_disconnected = true;
                 return 1;
         }
 
-        if (v->allow_fd_passing_input) {
+        if (v->allow_fd_passing_input > 0) {
                 struct cmsghdr *cmsg;
 
                 cmsg = cmsg_find(&mh, SOL_SOCKET, SCM_RIGHTS, (socklen_t) -1);
@@ -1197,8 +1202,9 @@ static int generic_method_get_info(
         assert(link);
         assert(link->server);
 
-        if (sd_json_variant_elements(parameters) != 0)
-                return sd_varlink_error_invalid_parameter(link, parameters);
+        r = sd_varlink_dispatch(link, parameters, /* dispatch_table = */ NULL, /* userdata = */ NULL);
+        if (r != 0)
+                return r;
 
         sd_varlink_interface *interface;
         HASHMAP_FOREACH(interface, link->server->interfaces) {
@@ -1542,6 +1548,25 @@ _public_ int sd_varlink_dispatch_again(sd_varlink *v) {
         return 0;
 }
 
+_public_ int sd_varlink_get_current_method(sd_varlink *v, const char **ret) {
+        assert_return(v, -EINVAL);
+
+        if (!v->current)
+                return -ENODATA;
+
+        sd_json_variant *p = sd_json_variant_by_key(v->current, "method");
+        if (!p)
+                return -ENODATA;
+
+        const char *s = sd_json_variant_string(p);
+        if (!s)
+                return -ENODATA;
+
+        if (ret)
+                *ret = s;
+        return 0;
+}
+
 _public_ int sd_varlink_get_current_parameters(sd_varlink *v, sd_json_variant **ret) {
         sd_json_variant *p;
 
@@ -1673,6 +1698,30 @@ _public_ int sd_varlink_get_fd(sd_varlink *v) {
         return v->input_fd;
 }
 
+_public_ int sd_varlink_get_input_fd(sd_varlink *v) {
+
+        assert_return(v, -EINVAL);
+
+        if (v->state == VARLINK_DISCONNECTED)
+                return varlink_log_errno(v, SYNTHETIC_ERRNO(ENOTCONN), "Not connected.");
+        if (v->input_fd < 0)
+                return varlink_log_errno(v, SYNTHETIC_ERRNO(EBADF), "No valid input fd.");
+
+        return v->input_fd;
+}
+
+_public_ int sd_varlink_get_output_fd(sd_varlink *v) {
+
+        assert_return(v, -EINVAL);
+
+        if (v->state == VARLINK_DISCONNECTED)
+                return varlink_log_errno(v, SYNTHETIC_ERRNO(ENOTCONN), "Not connected.");
+        if (v->output_fd < 0)
+                return varlink_log_errno(v, SYNTHETIC_ERRNO(EBADF), "No valid output fd.");
+
+        return v->output_fd;
+}
+
 _public_ int sd_varlink_get_events(sd_varlink *v) {
         int ret = 0;
 
@@ -1755,6 +1804,7 @@ _public_ int sd_varlink_flush(sd_varlink *v) {
 
 static void varlink_detach_server(sd_varlink *v) {
         sd_varlink_server *saved_server;
+
         assert(v);
 
         if (!v->server)
@@ -1899,6 +1949,9 @@ static int varlink_enqueue_json(sd_varlink *v, sd_json_variant *m) {
         if (v->n_pushed_fds == 0 && !v->output_queue)
                 return varlink_format_json(v, m);
 
+        if (v->n_output_queue >= VARLINK_QUEUE_MAX)
+                return -ENOBUFS;
+
         /* Otherwise add a queue entry for this */
         q = varlink_json_queue_item_new(m, v->pushed_fds, v->n_pushed_fds);
         if (!q)
@@ -1908,6 +1961,7 @@ static int varlink_enqueue_json(sd_varlink *v, sd_json_variant *m) {
 
         LIST_INSERT_AFTER(queue, v->output_queue, v->output_queue_tail, q);
         v->output_queue_tail = q;
+        v->n_output_queue++;
         return 0;
 }
 
@@ -1921,6 +1975,9 @@ static int varlink_format_queue(sd_varlink *v) {
 
         while (v->output_queue) {
                 _cleanup_free_ int *array = NULL;
+
+                assert(v->n_output_queue > 0);
+
                 VarlinkJsonQueueItem *q = v->output_queue;
 
                 if (v->n_output_fds > 0) /* unwritten fds? if we'd add more we'd corrupt the fd message boundaries, hence wait */
@@ -1945,6 +2002,7 @@ static int varlink_format_queue(sd_varlink *v) {
                 LIST_REMOVE(queue, v->output_queue, q);
                 if (!v->output_queue)
                         v->output_queue_tail = NULL;
+                v->n_output_queue--;
 
                 varlink_json_queue_item_free(q);
         }
@@ -2496,12 +2554,13 @@ _public_ int sd_varlink_replyb(sd_varlink *v, ...) {
         return sd_varlink_reply(v, parameters);
 }
 
-static int varlink_reset_fds(sd_varlink *v) {
+_public_ int sd_varlink_reset_fds(sd_varlink *v) {
         assert_return(v, -EINVAL);
 
         /* Closes all currently pending fds to send. This may be used whenever the caller is in the process
          * of putting together a message with fds, and then eventually something fails and they need to
-         * rollback the fds. Note that this is implicitly called whenever an error reply is sent, see above. */
+         * rollback the fds. Note that this is implicitly called whenever an error reply is sent, see
+         * below. */
 
         close_many(v->output_fds, v->n_output_fds);
         v->n_output_fds = 0;
@@ -2527,7 +2586,7 @@ _public_ int sd_varlink_error(sd_varlink *v, const char *error_id, sd_json_varia
          * fails. In that case the pushed fds need to be flushed out again. Under the assumption that it
          * never makes sense to send fds along with errors we simply flush them out here beforehand, so that
          * the callers don't need to do this explicitly. */
-        varlink_reset_fds(v);
+        sd_varlink_reset_fds(v);
 
         r = varlink_sanitize_parameters(&parameters);
         if (r < 0)
@@ -2633,10 +2692,21 @@ _public_ int sd_varlink_error_invalid_parameter_name(sd_varlink *v, const char *
 }
 
 _public_ int sd_varlink_error_errno(sd_varlink *v, int error) {
+
+        /* This generates a system error return that includes the Linux error number, and error name. The
+         * error number is kinda Linux specific (and to some degree the error name too), hence let's indicate
+         * the origin of the system error. This way interpretation of the error should not leave questions
+         * open, even to foreign systems. */
+
+        error = abs(error);
+        const char *name = errno_name_no_fallback(error);
+
         return sd_varlink_errorbo(
                         v,
                         SD_VARLINK_ERROR_SYSTEM,
-                        SD_JSON_BUILD_PAIR("errno", SD_JSON_BUILD_INTEGER(abs(error))));
+                        SD_JSON_BUILD_PAIR_STRING("origin", "linux"),
+                        SD_JSON_BUILD_PAIR_INTEGER("errno", error),
+                        JSON_BUILD_PAIR_STRING_NON_EMPTY("errnoName", name));
 }
 
 _public_ int sd_varlink_notify(sd_varlink *v, sd_json_variant *parameters) {
@@ -2705,16 +2775,15 @@ _public_ int sd_varlink_notifyb(sd_varlink *v, ...) {
         return sd_varlink_notify(v, parameters);
 }
 
-_public_ int sd_varlink_dispatch(sd_varlink *v, sd_json_variant *parameters, const sd_json_dispatch_field table[], void *userdata) {
+_public_ int sd_varlink_dispatch(sd_varlink *v, sd_json_variant *parameters, const sd_json_dispatch_field dispatch_table[], void *userdata) {
         const char *bad_field = NULL;
         int r;
 
         assert_return(v, -EINVAL);
-        assert_return(table, -EINVAL);
 
         /* A wrapper around json_dispatch_full() that returns a nice InvalidParameter error if we hit a problem with some field. */
 
-        r = sd_json_dispatch_full(parameters, table, /* bad= */ NULL, /* flags= */ 0, userdata, &bad_field);
+        r = sd_json_dispatch_full(parameters, dispatch_table, /* bad= */ NULL, /* flags= */ 0, userdata, &bad_field);
         if (r < 0) {
                 if (bad_field)
                         return sd_varlink_error_invalid_parameter_name(v, bad_field);
@@ -2858,6 +2927,12 @@ _public_ int sd_varlink_set_description(sd_varlink *v, const char *description) 
         assert_return(v, -EINVAL);
 
         return free_and_strdup(&v->description, description);
+}
+
+_public_ const char* sd_varlink_get_description(sd_varlink *v) {
+        assert_return(v, NULL);
+
+        return v->description;
 }
 
 static int io_callback(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
@@ -3086,7 +3161,7 @@ _public_ int sd_varlink_peek_fd(sd_varlink *v, size_t i) {
         /* Returns one of the file descriptors that were received along with the current message. This does
          * not duplicate the fd nor invalidate it, it hence remains in our possession. */
 
-        if (!v->allow_fd_passing_input)
+        if (v->allow_fd_passing_input <= 0)
                 return -EPERM;
 
         if (i >= v->n_input_fds)
@@ -3112,13 +3187,22 @@ _public_ int sd_varlink_take_fd(sd_varlink *v, size_t i) {
          * we'll invalidate the reference to it under our possession. If called twice in a row will return
          * -EBADF */
 
-        if (!v->allow_fd_passing_input)
+        if (v->allow_fd_passing_input <= 0)
                 return -EPERM;
 
         if (i >= v->n_input_fds)
                 return -ENXIO;
 
         return TAKE_FD(v->input_fds[i]);
+}
+
+_public_ int sd_varlink_get_n_fds(sd_varlink *v) {
+        assert_return(v, -EINVAL);
+
+        if (v->allow_fd_passing_input <= 0)
+                return -EPERM;
+
+        return (int) v->n_input_fds;
 }
 
 static int verify_unix_socket(sd_varlink *v) {
@@ -3165,20 +3249,29 @@ _public_ int sd_varlink_set_allow_fd_passing_input(sd_varlink *v, int b) {
 
         assert_return(v, -EINVAL);
 
-        if (v->allow_fd_passing_input == !!b)
+        if (v->allow_fd_passing_input >= 0 && (v->allow_fd_passing_input > 0) == !!b)
                 return 0;
 
-        if (!b) {
-                v->allow_fd_passing_input = false;
-                return 1;
+        r = verify_unix_socket(v);
+        if (r < 0) {
+                assert(v->allow_fd_passing_input <= 0);
+
+                if (!b) {
+                        v->allow_fd_passing_input = false;
+                        return 0;
+                }
+
+                return r;
         }
 
-        r = verify_unix_socket(v);
-        if (r < 0)
-                return r;
+        if (!v->server || FLAGS_SET(v->server->flags, SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT)) {
+                r = setsockopt_int(v->input_fd, SOL_SOCKET, SO_PASSRIGHTS, !!b);
+                if (r < 0 && !ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                        log_debug_errno(r, "Failed to set SO_PASSRIGHTS socket option: %m");
+        }
 
-        v->allow_fd_passing_input = true;
-        return 0;
+        v->allow_fd_passing_input = !!b;
+        return 1;
 }
 
 _public_ int sd_varlink_set_allow_fd_passing_output(sd_varlink *v, int b) {
@@ -3189,17 +3282,12 @@ _public_ int sd_varlink_set_allow_fd_passing_output(sd_varlink *v, int b) {
         if (v->allow_fd_passing_output == !!b)
                 return 0;
 
-        if (!b) {
-                v->allow_fd_passing_output = false;
-                return 1;
-        }
-
         r = verify_unix_socket(v);
         if (r < 0)
                 return r;
 
-        v->allow_fd_passing_output = true;
-        return 0;
+        v->allow_fd_passing_output = !!b;
+        return 1;
 }
 
 _public_ int sd_varlink_set_input_sensitive(sd_varlink *v) {
@@ -3214,7 +3302,14 @@ _public_ int sd_varlink_server_new(sd_varlink_server **ret, sd_varlink_server_fl
         int r;
 
         assert_return(ret, -EINVAL);
-        assert_return((flags & ~(SD_VARLINK_SERVER_ROOT_ONLY|SD_VARLINK_SERVER_MYSELF_ONLY|SD_VARLINK_SERVER_ACCOUNT_UID|SD_VARLINK_SERVER_INHERIT_USERDATA|SD_VARLINK_SERVER_INPUT_SENSITIVE)) == 0, -EINVAL);
+        assert_return((flags & ~(SD_VARLINK_SERVER_ROOT_ONLY|
+                                 SD_VARLINK_SERVER_MYSELF_ONLY|
+                                 SD_VARLINK_SERVER_ACCOUNT_UID|
+                                 SD_VARLINK_SERVER_INHERIT_USERDATA|
+                                 SD_VARLINK_SERVER_INPUT_SENSITIVE|
+                                 SD_VARLINK_SERVER_ALLOW_FD_PASSING_INPUT|
+                                 SD_VARLINK_SERVER_ALLOW_FD_PASSING_OUTPUT|
+                                 SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT)) == 0, -EINVAL);
 
         s = new(sd_varlink_server, 1);
         if (!s)
@@ -3385,7 +3480,7 @@ _public_ int sd_varlink_server_add_connection_pair(
                         ucred = *override_ucred;
                 else {
                         if (input_fd != output_fd)
-                                return varlink_server_log_errno(server, SYNTHETIC_ERRNO(EOPNOTSUPP), "Cannot determine peer identity of connection with separate input/output, refusing: %m");
+                                return varlink_server_log_errno(server, SYNTHETIC_ERRNO(EOPNOTSUPP), "Cannot determine peer identity of connection with separate input/output, refusing.");
 
                         r = getpeercred(input_fd, &ucred);
                         if (r < 0)
@@ -3410,6 +3505,12 @@ _public_ int sd_varlink_server_add_connection_pair(
         if (r < 0)
                 return r;
 
+        /* Link up the server and the connection, and take reference in both directions. Note that the
+         * reference on the connection is left dangling. It will be dropped when the connection is closed,
+         * which happens in varlink_close(), including in the event loop quit callback. */
+        v->server = sd_varlink_server_ref(server);
+        sd_varlink_ref(v);
+
         v->input_fd = input_fd;
         v->output_fd = output_fd;
         if (server->flags & SD_VARLINK_SERVER_INHERIT_USERDATA)
@@ -3424,11 +3525,8 @@ _public_ int sd_varlink_server_add_connection_pair(
         if (asprintf(&desc, "%s-%i-%i", varlink_server_description(server), input_fd, output_fd) >= 0)
                 v->description = TAKE_PTR(desc);
 
-        /* Link up the server and the connection, and take reference in both directions. Note that the
-         * reference on the connection is left dangling. It will be dropped when the connection is closed,
-         * which happens in varlink_close(), including in the event loop quit callback. */
-        v->server = sd_varlink_server_ref(server);
-        sd_varlink_ref(v);
+        (void) sd_varlink_set_allow_fd_passing_input(v, FLAGS_SET(server->flags, SD_VARLINK_SERVER_ALLOW_FD_PASSING_INPUT));
+        (void) sd_varlink_set_allow_fd_passing_output(v, FLAGS_SET(server->flags, SD_VARLINK_SERVER_ALLOW_FD_PASSING_OUTPUT));
 
         varlink_set_state(v, VARLINK_IDLE_SERVER);
 
@@ -3546,6 +3644,13 @@ _public_ int sd_varlink_server_listen_fd(sd_varlink_server *s, int fd) {
         if (r < 0)
                 return r;
 
+        /* If fd passing is disabled on server, and SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT flag is set,
+         * turn off SO_PASSRIGHTS immediately on listening socket. The conditionalization behind a flag
+         * is needed to retain backwards compat, where implementations would register a connection callback
+         * to enable fd passing after accept(), which might race with clients wrt SO_PASSRIGHTS state. */
+        if (FLAGS_SET(s->flags, SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT))
+                (void) setsockopt_int(fd, SOL_SOCKET, SO_PASSRIGHTS, FLAGS_SET(s->flags, SD_VARLINK_SERVER_ALLOW_FD_PASSING_INPUT));
+
         r = varlink_server_create_listen_fd_socket(s, fd, &ss);
         if (r < 0)
                 return r;
@@ -3563,7 +3668,18 @@ _public_ int sd_varlink_server_listen_address(sd_varlink_server *s, const char *
 
         assert_return(s, -EINVAL);
         assert_return(address, -EINVAL);
-        assert_return((m & ~0777) == 0, -EINVAL);
+        assert_return((m & ~(0777|SD_VARLINK_SERVER_MODE_MKDIR_0755)) == 0, -EINVAL);
+
+        /* Validate that the definition of our flag doesn't collide with the official mode_t bits. Thankfully
+         * the bit values of mode_t flags are fairly well established (POSIX and all), hence we should be
+         * safe here. */
+        assert_cc(((S_IFMT|07777) & SD_VARLINK_SERVER_MODE_MKDIR_0755) == 0);
+
+        if (FLAGS_SET(m, SD_VARLINK_SERVER_MODE_MKDIR_0755) && path_is_absolute(address)) {
+                r = mkdir_parents(address, 0755);
+                if (r < 0)
+                        return r;
+        }
 
         r = sockaddr_un_set_path(&sockaddr.un, address);
         if (r < 0)
@@ -3575,6 +3691,10 @@ _public_ int sd_varlink_server_listen_address(sd_varlink_server *s, const char *
                 return -errno;
 
         fd = fd_move_above_stdio(fd);
+
+        /* See the comment in sd_varlink_server_listen_fd() */
+        if (FLAGS_SET(s->flags, SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT))
+                (void) setsockopt_int(fd, SOL_SOCKET, SO_PASSRIGHTS, FLAGS_SET(s->flags, SD_VARLINK_SERVER_ALLOW_FD_PASSING_INPUT));
 
         (void) sockaddr_un_unlink(&sockaddr.un);
 
@@ -3659,13 +3779,14 @@ _public_ int sd_varlink_server_add_connection_stdio(sd_varlink_server *s, sd_var
         return 0;
 }
 
-_public_ int sd_varlink_server_listen_auto(sd_varlink_server *s) {
+_public_ int sd_varlink_server_listen_name(sd_varlink_server *s, const char *name) {
         _cleanup_strv_free_ char **names = NULL;
         int r, m, n = 0;
 
         assert_return(s, -EINVAL);
+        assert_return(name, -EINVAL);
 
-        /* Adds all passed fds marked as "varlink" to our varlink server. These fds can either refer to a
+        /* Adds all passed fds marked as "name" to our varlink server. These fds can either refer to a
          * listening socket or to a connection socket.
          *
          * See https://varlink.org/#activation for the environment variables this is backed by and the
@@ -3679,7 +3800,7 @@ _public_ int sd_varlink_server_listen_auto(sd_varlink_server *s) {
                 int b, fd;
                 socklen_t l = sizeof(b);
 
-                if (!streq(names[i], "varlink"))
+                if (!streq(names[i], name))
                         continue;
 
                 fd = SD_LISTEN_FDS_START + i;
@@ -3698,6 +3819,18 @@ _public_ int sd_varlink_server_listen_auto(sd_varlink_server *s) {
 
                 n++;
         }
+
+        return n;
+}
+
+_public_ int sd_varlink_server_listen_auto(sd_varlink_server *s) {
+        int r, n;
+
+        assert_return(s, -EINVAL);
+
+        n = sd_varlink_server_listen_name(s, "varlink");
+        if (n < 0)
+                return n;
 
         /* Let's listen on an explicitly specified address */
         const char *e = secure_getenv("SYSTEMD_VARLINK_LISTEN");
@@ -4127,6 +4260,8 @@ _public_ int sd_varlink_error_to_errno(const char *error, sd_json_variant *param
                 { SD_VARLINK_ERROR_EXPECTED_MORE,          -EBADE         },
         };
 
+        int r;
+
         if (!error)
                 return 0;
 
@@ -4134,20 +4269,46 @@ _public_ int sd_varlink_error_to_errno(const char *error, sd_json_variant *param
                 if (streq(error, t->error))
                         return t->value;
 
-        if (streq(error, SD_VARLINK_ERROR_SYSTEM) && parameters) {
-                sd_json_variant *e;
+        /* This following tries to reverse the operation sd_varlink_error_errno() applies to turn errnos into
+         * varlink errors */
+        if (!streq(error, SD_VARLINK_ERROR_SYSTEM))
+                return -EBADR;
 
-                e = sd_json_variant_by_key(parameters, "errno");
-                if (sd_json_variant_is_integer(e)) {
-                        int64_t i;
+        if (!parameters)
+                return -EBADR;
 
-                        i = sd_json_variant_integer(e);
-                        if (i > 0 && i < ERRNO_MAX)
-                                return -i;
-                }
+        /* If an origin is set, check if it's Linux, otherwise don't translate */
+        sd_json_variant *e = sd_json_variant_by_key(parameters, "origin");
+        if (e && (!sd_json_variant_is_string(e) ||
+                  !streq(sd_json_variant_string(e), "linux")))
+                return -EBADR;
+
+        /* If a name is specified, go by name */
+        e = sd_json_variant_by_key(parameters, "errnoName");
+        if (e) {
+                if (!sd_json_variant_is_string(e))
+                        return -EBADR;
+
+                r = errno_from_name(sd_json_variant_string(e));
+                if (r < 0)
+                        return -EBADR;
+
+                assert(r > 0);
+                return -r;
         }
 
-        return -EBADR; /* Catch-all */
+        /* Finally, use the provided error number, if there is one */
+        e = sd_json_variant_by_key(parameters, "errno");
+        if (!e)
+                return -EBADR;
+        if (!sd_json_variant_is_integer(e))
+                return -EBADR;
+
+        int64_t i = sd_json_variant_integer(e);
+        if (i <= 0 || i > ERRNO_MAX)
+                return -EBADR;
+
+        return (int) -i;
 }
 
 _public_ int sd_varlink_error_is_invalid_parameter(const char *error, sd_json_variant *parameter, const char *name) {

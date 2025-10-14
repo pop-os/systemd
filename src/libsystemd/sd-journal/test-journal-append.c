@@ -6,8 +6,6 @@
 #include <unistd.h>
 
 #include "chattr-util.h"
-#include "fd-util.h"
-#include "fs-util.h"
 #include "iovec-util.h"
 #include "journal-file-util.h"
 #include "log.h"
@@ -15,9 +13,8 @@
 #include "parse-util.h"
 #include "random-util.h"
 #include "rm-rf.h"
-#include "strv.h"
-#include "terminal-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 
 static int journal_append_message(JournalFile *mj, const char *message) {
@@ -57,7 +54,7 @@ static int journal_corrupt_and_append(uint64_t start_offset, uint64_t step) {
 
         assert_se(mkdtemp_malloc("/tmp/journal-append-XXXXXX", &tempdir) >= 0);
         assert_se(chdir(tempdir) >= 0);
-        (void) chattr_path(tempdir, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
+        (void) chattr_path(tempdir, FS_NOCOW_FL, FS_NOCOW_FL);
 
         log_debug("Opening journal %s/system.journal", tempdir);
 
@@ -137,7 +134,7 @@ static int journal_corrupt_and_append(uint64_t start_offset, uint64_t step) {
                 r = journal_append_message(mj, message);
                 if (r < 0) {
                         /* We care only about crashes or sanitizer errors,
-                         * failed write without any crash is a success */
+                         * failing to write without any crash is a success */
                         log_info_errno(r, "Failed to write to the journal: %m");
                         break;
                 }

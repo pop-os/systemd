@@ -1,38 +1,46 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "sd-id128.h"
 
 #include "alloc-util.h"
-#include "blockdev-util.h"
 #include "build-path.h"
 #include "chase.h"
 #include "conf-parser.h"
 #include "dirent-util.h"
+#include "errno-util.h"
 #include "event-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
+#include "fs-util.h"
 #include "glyph-util.h"
 #include "gpt.h"
+#include "hashmap.h"
 #include "hexdecoct.h"
 #include "install-file.h"
 #include "mkdir.h"
+#include "notify-recv.h"
 #include "parse-helpers.h"
 #include "parse-util.h"
 #include "percent-util.h"
+#include "pidref.h"
 #include "process-util.h"
-#include "random-util.h"
 #include "rm-rf.h"
 #include "signal-util.h"
-#include "socket-util.h"
 #include "specifier.h"
-#include "stat-util.h"
 #include "stdio-util.h"
 #include "strv.h"
 #include "sync-util.h"
+#include "sysupdate.h"
 #include "sysupdate-feature.h"
+#include "sysupdate-instance.h"
 #include "sysupdate-pattern.h"
 #include "sysupdate-resource.h"
 #include "sysupdate-transfer.h"
-#include "sysupdate.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 #include "web-util.h"
 
@@ -401,7 +409,7 @@ static int config_parse_resource_ptype(
         r = gpt_partition_type_from_string(rvalue, &rr->partition_type);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed parse partition type, ignoring: %s", rvalue);
+                           "Failed to parse partition type, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -429,7 +437,7 @@ static int config_parse_partition_uuid(
         r = sd_id128_from_string(rvalue, &t->partition_uuid);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed parse partition UUID, ignoring: %s", rvalue);
+                           "Failed to parse partition UUID, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -457,7 +465,7 @@ static int config_parse_partition_flags(
         r = safe_atou64(rvalue, &t->partition_flags);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed parse partition flags, ignoring: %s", rvalue);
+                           "Failed to parse partition flags, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -596,7 +604,7 @@ int transfer_read_definition(Transfer *t, const char *path, const char **dirs, H
              !IN_SET(t->target.type, RESOURCE_DIRECTORY, RESOURCE_SUBVOLUME)))
                 return log_syntax(NULL, LOG_ERR, path, 1, SYNTHETIC_ERRNO(EINVAL),
                                   "Target type '%s' is incompatible with source type '%s', refusing.",
-                                  resource_type_to_string(t->source.type), resource_type_to_string(t->target.type));
+                                  resource_type_to_string(t->target.type), resource_type_to_string(t->source.type));
 
         if (!t->source.path && !t->source.path_auto)
                 return log_syntax(NULL, LOG_ERR, path, 1, SYNTHETIC_ERRNO(EINVAL),
@@ -815,7 +823,7 @@ int transfer_vacuum(
                 assert(oldest->resource);
 
                 log_info("%s Removing %s '%s' (%s).",
-                         special_glyph(SPECIAL_GLYPH_RECYCLING),
+                         glyph(GLYPH_RECYCLING),
                          space == UINT64_MAX ? "disabled" : "old",
                          oldest->path,
                          resource_type_to_string(oldest->resource->type));
@@ -849,7 +857,6 @@ int transfer_vacuum(
 
                 default:
                         assert_not_reached();
-                        break;
                 }
 
                 instance_free(oldest);
@@ -945,14 +952,12 @@ static int callout_context_new(const Transfer *t, const Instance *i, TransferPro
 }
 
 static int helper_on_exit(sd_event_source *s, const siginfo_t *si, void *userdata) {
-        _cleanup_(callout_context_freep) CalloutContext *ctx = ASSERT_PTR(userdata);
+        CalloutContext *ctx = ASSERT_PTR(userdata);
         int r;
 
         assert(s);
         assert(si);
         assert(ctx);
-
-        pidref_done(&ctx->pid);
 
         if (si->si_code == CLD_EXITED) {
                 if (si->si_status == EXIT_SUCCESS) {
@@ -977,56 +982,25 @@ static int helper_on_exit(sd_event_source *s, const siginfo_t *si, void *userdat
 }
 
 static int helper_on_notify(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
-        char buf[NOTIFY_BUFFER_MAX+1];
-        struct iovec iovec = {
-                .iov_base = buf,
-                .iov_len = sizeof(buf)-1,
-        };
-        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control;
-        struct msghdr msghdr = {
-                .msg_iov = &iovec,
-                .msg_iovlen = 1,
-                .msg_control = &control,
-                .msg_controllen = sizeof(control),
-        };
-        struct ucred *ucred;
         CalloutContext *ctx = ASSERT_PTR(userdata);
-        char *progress_str, *errno_str;
-        int progress;
-        ssize_t n;
         int r;
 
-        n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
-        if (ERRNO_IS_NEG_TRANSIENT(n))
-                return 0;
-        if (n == -ECHRNG) {
-                log_warning_errno(n, "Got message with truncated control data (unexpected fds sent?), ignoring.");
-                return 0;
-        }
-        if (n == -EXFULL) {
-                log_warning_errno(n, "Got message with truncated payload data, ignoring.");
-                return 0;
-        }
-        if (n < 0)
-                return (int) n;
+        assert(fd >= 0);
 
-        cmsg_close_all(&msghdr);
-
-        ucred = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
-        if (!ucred || ucred->pid <= 0) {
-                log_warning("Got notification datagram lacking credential information, ignoring.");
+        _cleanup_free_ char *buf = NULL;
+        _cleanup_(pidref_done) PidRef sender_pid = PIDREF_NULL;
+        r = notify_recv(fd, &buf, /* ret_ucred= */ NULL, &sender_pid);
+        if (r == -EAGAIN)
                 return 0;
-        }
-        if (ucred->pid != ctx->pid.pid) {
+        if (r < 0)
+                return r;
+
+        if (!pidref_equal(&ctx->pid, &sender_pid)) {
                 log_warning("Got notification datagram from unexpected peer, ignoring.");
                 return 0;
         }
 
-        buf[n] = 0;
-
-        progress_str = find_line_startswith(buf, "X_IMPORT_PROGRESS=");
-        errno_str = find_line_startswith(buf, "ERRNO=");
-
+        char *errno_str = find_line_startswith(buf, "ERRNO=");
         if (errno_str) {
                 truncate_nl(errno_str);
                 r = parse_errno(errno_str);
@@ -1038,9 +1012,11 @@ static int helper_on_notify(sd_event_source *s, int fd, uint32_t revents, void *
                 }
         }
 
+        char *progress_str = find_line_startswith(buf, "X_IMPORT_PROGRESS=");
         if (progress_str) {
                 truncate_nl(progress_str);
-                progress = parse_percent(progress_str);
+
+                int progress = parse_percent(progress_str);
                 if (progress < 0)
                         log_warning("Got invalid percent value '%s', ignoring.", progress_str);
                 else {
@@ -1060,11 +1036,7 @@ static int run_callout(
                 const Instance *instance,
                 TransferProgress callback,
                 void *userdata) {
-        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        _cleanup_(sd_event_source_unrefp) sd_event_source *exit_source = NULL, *notify_source = NULL;
-        _cleanup_close_ int fd = -EBADF;
-        _cleanup_free_ char *bind_name = NULL;
-        union sockaddr_union bsa;
+
         int r;
 
         assert(name);
@@ -1072,11 +1044,11 @@ static int run_callout(
         assert(cmdline[0]);
 
         _cleanup_(callout_context_freep) CalloutContext *ctx = NULL;
-
         r = callout_context_new(transfer, instance, callback, name, userdata, &ctx);
         if (r < 0)
                 return log_oom();
 
+        _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         r = sd_event_new(&event);
         if (r < 0)
                 return log_error_errno(r, "Failed to create event: %m");
@@ -1089,23 +1061,15 @@ static int run_callout(
         if (r < 0)
                 return log_error_errno(r, "Failed to register signal to event: %m");
 
-        fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-        if (fd < 0)
-                return log_error_errno(errno, "Failed to create UNIX socket for notification: %m");
-
-        if (asprintf(&bind_name, "@%" PRIx64 "/sysupdate/" PID_FMT "/notify", random_u64(), getpid_cached()) < 0)
-                return log_oom();
-
-        r = sockaddr_un_set_path(&bsa.un, bind_name);
+        _cleanup_free_ char *bind_name = NULL;
+        r = notify_socket_prepare(
+                        event,
+                        SD_EVENT_PRIORITY_NORMAL - 5,
+                        helper_on_notify,
+                        ctx,
+                        &bind_name);
         if (r < 0)
-                return log_error_errno(r, "Failed to set socket path: %m");
-
-        if (bind(fd, &bsa.sa, r) < 0)
-                return log_error_errno(errno, "Failed to bind to notification socket: %m");
-
-        r = setsockopt_int(fd, SOL_SOCKET, SO_PASSCRED, true);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set socket options: %m");
+                return log_error_errno(r, "Failed to prepare notify socket: %m");
 
         r = pidref_safe_fork(ctx->name, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM|FORK_LOG, &ctx->pid);
         if (r < 0)
@@ -1122,27 +1086,14 @@ static int run_callout(
         }
 
         /* Quit the loop w/ when child process exits */
-        r = event_add_child_pidref(event, &exit_source, &ctx->pid, WEXITED, helper_on_exit, (void*) ctx);
+        _cleanup_(sd_event_source_unrefp) sd_event_source *exit_source = NULL;
+        r = event_add_child_pidref(event, &exit_source, &ctx->pid, WEXITED, helper_on_exit, ctx);
         if (r < 0)
                 return log_error_errno(r, "Failed to add child process to event loop: %m");
 
         r = sd_event_source_set_child_process_own(exit_source, true);
         if (r < 0)
                 return log_error_errno(r, "Failed to take ownership of child process: %m");
-
-        /* Propagate sd_notify calls */
-        r = sd_event_add_io(event, &notify_source, fd, EPOLLIN, helper_on_notify, TAKE_PTR(ctx));
-        if (r < 0)
-                return log_error_errno(r, "Failed to add notification propagation to event loop: %m");
-
-        (void) sd_event_source_set_description(notify_source, "notify-socket");
-
-        (void) sd_event_source_set_priority(notify_source, SD_EVENT_PRIORITY_NORMAL - 5);
-
-        r = sd_event_source_set_io_fd_own(notify_source, true);
-        if (r < 0)
-                return log_error_errno(r, "Event loop failed to take ownership of notification source: %m");
-        TAKE_FD(fd);
 
         /* Process events until the helper quits */
         return sd_event_loop(event);
@@ -1180,7 +1131,7 @@ int transfer_acquire_instance(Transfer *t, Instance *i, TransferProgress cb, voi
 
         if (RESOURCE_IS_FILESYSTEM(t->target.type)) {
 
-                if (!path_is_valid_full(formatted_pattern, /* accept_dot_dot = */ false))
+                if (!path_is_safe(formatted_pattern))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Formatted pattern is not suitable as file name, refusing: %s", formatted_pattern);
 
                 t->final_path = path_join(t->target.path, formatted_pattern);
@@ -1221,7 +1172,7 @@ int transfer_acquire_instance(Transfer *t, Instance *i, TransferProgress cb, voi
 
         assert(where);
 
-        log_info("%s Acquiring %s %s %s...", special_glyph(SPECIAL_GLYPH_DOWNLOAD), i->path, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), where);
+        log_info("%s Acquiring %s %s %s...", glyph(GLYPH_DOWNLOAD), i->path, glyph(GLYPH_ARROW_RIGHT), where);
 
         if (RESOURCE_IS_URL(i->resource->type)) {
                 /* For URL sources we require the SHA256 sum to be known so that we can validate the
@@ -1547,7 +1498,7 @@ int transfer_install_instance(
                         assert_not_reached();
 
                 if (resolve_link_path && root) {
-                        r = chase(link_path, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved, NULL);
+                        r = chase(link_path, root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT|CHASE_TRIGGER_AUTOFS, &resolved, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to resolve current symlink path '%s': %m", link_path);
 
@@ -1567,11 +1518,11 @@ int transfer_install_instance(
                         if (r < 0)
                                 return log_error_errno(r, "Failed to update current symlink '%s' %s '%s': %m",
                                                        link_path,
-                                                       special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                                                       glyph(GLYPH_ARROW_RIGHT),
                                                        relative);
 
                         log_info("Updated symlink '%s' %s '%s'.",
-                                 link_path, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), relative);
+                                 link_path, glyph(GLYPH_ARROW_RIGHT), relative);
                 }
         }
 

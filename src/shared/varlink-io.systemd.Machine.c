@@ -38,6 +38,10 @@ static SD_VARLINK_DEFINE_METHOD(
                 SD_VARLINK_DEFINE_INPUT(leader,                  SD_VARLINK_INT,    SD_VARLINK_NULLABLE),
                 SD_VARLINK_FIELD_COMMENT("The leader PID as ProcessId structure. If both the leader and leaderProcessId parameters are specified they must reference the same process. Typically one would only specify one or the other however. It's generally recommended to specify leaderProcessId as it references a process in a robust way without risk of identifier recycling."),
                 SD_VARLINK_DEFINE_INPUT_BY_TYPE(leaderProcessId, ProcessId,         SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("The supervisor PID as simple positive integer."),
+                SD_VARLINK_DEFINE_INPUT(supervisor,              SD_VARLINK_INT,    SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("The supervisor PID as ProcessId structure. If both the supervisor and supervisorProcessId parameters are specified they must reference the same process. Typically only one or the other would be specified. It's generally recommended to specify supervisorProcessId as it references a process in a robust way without risk of identifier recycling."),
+                SD_VARLINK_DEFINE_INPUT_BY_TYPE(supervisorProcessId, ProcessId,         SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_INPUT(rootDirectory,           SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_INPUT(ifIndices,               SD_VARLINK_INT,    SD_VARLINK_ARRAY|SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_INPUT(vSockCid,                SD_VARLINK_INT,    SD_VARLINK_NULLABLE),
@@ -58,7 +62,7 @@ static SD_VARLINK_DEFINE_METHOD(
 static SD_VARLINK_DEFINE_METHOD(
                 Kill,
                 VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
-                SD_VARLINK_FIELD_COMMENT("Identifier that specifies what precisely to send the signal to (either 'leader' or 'all')."),
+                SD_VARLINK_FIELD_COMMENT("Identifier that specifies what precisely to send the signal to (either 'leader', 'supervisor', or 'all')."),
                 SD_VARLINK_DEFINE_INPUT(whom, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_FIELD_COMMENT("Numeric UNIX signal integer."),
                 SD_VARLINK_DEFINE_INPUT(signal, SD_VARLINK_INT, 0));
@@ -79,6 +83,8 @@ static SD_VARLINK_DEFINE_METHOD_FULL(
                 SD_VARLINK_DEFINE_OUTPUT(class, SD_VARLINK_STRING, 0),
                 SD_VARLINK_FIELD_COMMENT("Leader process PID of this machine"),
                 SD_VARLINK_DEFINE_OUTPUT_BY_TYPE(leader, ProcessId, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Supervisor process PID of this machine"),
+                SD_VARLINK_DEFINE_OUTPUT_BY_TYPE(supervisor, ProcessId, SD_VARLINK_NULLABLE),
                 SD_VARLINK_FIELD_COMMENT("Root directory of this machine, if known, relative to host file system"),
                 SD_VARLINK_DEFINE_OUTPUT(rootDirectory, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_FIELD_COMMENT("The service manager unit this machine resides in"),
@@ -96,7 +102,11 @@ static SD_VARLINK_DEFINE_METHOD_FULL(
                 SD_VARLINK_FIELD_COMMENT("OS release information of the machine. It contains an array of key value pairs read from the os-release(5) file in the image."),
                 SD_VARLINK_DEFINE_OUTPUT(OSRelease, SD_VARLINK_STRING, SD_VARLINK_NULLABLE|SD_VARLINK_ARRAY),
                 SD_VARLINK_FIELD_COMMENT("Return the base UID/GID of the machine"),
-                SD_VARLINK_DEFINE_OUTPUT(UIDShift, SD_VARLINK_INT, SD_VARLINK_NULLABLE));
+                SD_VARLINK_DEFINE_OUTPUT(UIDShift, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Subcgroup path of the machine, relative to the unit's cgroup path"),
+                SD_VARLINK_DEFINE_OUTPUT(subgroup, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Numeric UNIX UID of the user who registered the machine"),
+                SD_VARLINK_DEFINE_OUTPUT(UID, SD_VARLINK_INT, SD_VARLINK_NULLABLE));
 
 static SD_VARLINK_DEFINE_ENUM_TYPE(
                 MachineOpenMode,
@@ -125,6 +135,69 @@ static SD_VARLINK_DEFINE_METHOD(
                 SD_VARLINK_FIELD_COMMENT("Path to the allocated pseudo TTY"),
                 SD_VARLINK_DEFINE_OUTPUT(ptyPath, SD_VARLINK_STRING, 0));
 
+static SD_VARLINK_DEFINE_METHOD(
+                MapFrom,
+                VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
+                SD_VARLINK_FIELD_COMMENT("UID in the machine to map to host UID"),
+                SD_VARLINK_DEFINE_INPUT(uid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("GID in the machine to map to host GID"),
+                SD_VARLINK_DEFINE_INPUT(gid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Mapped UID"),
+                SD_VARLINK_DEFINE_OUTPUT(uid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Mapped GID"),
+                SD_VARLINK_DEFINE_OUTPUT(gid, SD_VARLINK_INT, SD_VARLINK_NULLABLE));
+
+static SD_VARLINK_DEFINE_METHOD(
+                MapTo,
+                SD_VARLINK_FIELD_COMMENT("Host UID to map to machine UID"),
+                SD_VARLINK_DEFINE_INPUT(uid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Host GID to map to machine GID"),
+                SD_VARLINK_DEFINE_INPUT(gid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Mapped UID"),
+                SD_VARLINK_DEFINE_OUTPUT(uid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Mapped GID"),
+                SD_VARLINK_DEFINE_OUTPUT(gid, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("Machine's name which owns mapped UID/GID"),
+                SD_VARLINK_DEFINE_OUTPUT(machineName, SD_VARLINK_STRING, SD_VARLINK_NULLABLE));
+
+static SD_VARLINK_DEFINE_METHOD(
+                BindMount,
+                VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
+                SD_VARLINK_FIELD_COMMENT("The source directory/file on the host. The path must be absolute."),
+                SD_VARLINK_DEFINE_INPUT(source, SD_VARLINK_STRING, 0),
+                SD_VARLINK_FIELD_COMMENT("The destination directory/file in the container. The path must be absolute. If null, it's equal to 'source'"),
+                SD_VARLINK_DEFINE_INPUT(destination, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("If true, the bind mount shall be read-only"),
+                SD_VARLINK_DEFINE_INPUT(readOnly, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("The destination mount point shall be created first, if it is missing"),
+                SD_VARLINK_DEFINE_INPUT(mkdir, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE));
+
+static SD_VARLINK_DEFINE_METHOD(
+                CopyFrom,
+                VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
+                SD_VARLINK_FIELD_COMMENT("The absolute path to source directory/file in the container"),
+                SD_VARLINK_DEFINE_INPUT(source, SD_VARLINK_STRING, 0),
+                SD_VARLINK_FIELD_COMMENT("The absolute path to destination directory/file on the host. If null, it's equal to 'source'."),
+                SD_VARLINK_DEFINE_INPUT(destination, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("If true the destination will be replaced"),
+                SD_VARLINK_DEFINE_INPUT(replace, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE));
+
+static SD_VARLINK_DEFINE_METHOD(
+                CopyTo,
+                VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
+                SD_VARLINK_FIELD_COMMENT("The absolute path to source directory/file on the host"),
+                SD_VARLINK_DEFINE_INPUT(source, SD_VARLINK_STRING, 0),
+                SD_VARLINK_FIELD_COMMENT("The absolute path to destination directory/file in the container. If null, it's equal to 'source'"),
+                SD_VARLINK_DEFINE_INPUT(destination, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_FIELD_COMMENT("If true the destination will be replaced"),
+                SD_VARLINK_DEFINE_INPUT(replace, SD_VARLINK_BOOL, SD_VARLINK_NULLABLE));
+
+static SD_VARLINK_DEFINE_METHOD(
+                OpenRootDirectory,
+                VARLINK_DEFINE_MACHINE_LOOKUP_AND_POLKIT_INPUT_FIELDS,
+                SD_VARLINK_FIELD_COMMENT("File descriptor of opened root directory"),
+                SD_VARLINK_DEFINE_OUTPUT(fileDescriptor, SD_VARLINK_INT, 0));
+
 static SD_VARLINK_DEFINE_ERROR(NoSuchMachine);
 static SD_VARLINK_DEFINE_ERROR(MachineExists);
 static SD_VARLINK_DEFINE_ERROR(NoPrivateNetworking);
@@ -133,6 +206,10 @@ static SD_VARLINK_DEFINE_ERROR(NoUIDShift);
 static SD_VARLINK_DEFINE_ERROR(NotAvailable);
 static SD_VARLINK_DEFINE_ERROR(NotSupported);
 static SD_VARLINK_DEFINE_ERROR(NoIPC);
+static SD_VARLINK_DEFINE_ERROR(NoSuchUser);
+static SD_VARLINK_DEFINE_ERROR(NoSuchGroup);
+static SD_VARLINK_DEFINE_ERROR(UserInHostRange);
+static SD_VARLINK_DEFINE_ERROR(GroupInHostRange);
 
 SD_VARLINK_DEFINE_INTERFACE(
                 io_systemd_Machine,
@@ -157,6 +234,18 @@ SD_VARLINK_DEFINE_INTERFACE(
                 &vl_type_MachineOpenMode,
                 SD_VARLINK_SYMBOL_COMMENT("Allocates a pseudo TTY in the container in various modes"),
                 &vl_method_Open,
+                SD_VARLINK_SYMBOL_COMMENT("Maps given machine's UID/GID to host's UID/GID"),
+                &vl_method_MapFrom,
+                SD_VARLINK_SYMBOL_COMMENT("Maps given host's UID/GID to a machine and corresponding UID/GID"),
+                &vl_method_MapTo,
+                SD_VARLINK_SYMBOL_COMMENT("Bind mounts a file or directory from the host into the container"),
+                &vl_method_BindMount,
+                SD_VARLINK_SYMBOL_COMMENT("Copy files or directories from a container into the host"),
+                &vl_method_CopyFrom,
+                SD_VARLINK_SYMBOL_COMMENT("Copy files or directories from the host into a container"),
+                &vl_method_CopyTo,
+                SD_VARLINK_SYMBOL_COMMENT("Opens machine's root directory"),
+                &vl_method_OpenRootDirectory,
                 SD_VARLINK_SYMBOL_COMMENT("No matching machine currently running"),
                 &vl_error_NoSuchMachine,
                 &vl_error_MachineExists,
@@ -171,4 +260,12 @@ SD_VARLINK_DEFINE_INTERFACE(
                 SD_VARLINK_SYMBOL_COMMENT("Requested operation is not supported"),
                 &vl_error_NotSupported,
                 SD_VARLINK_SYMBOL_COMMENT("There is no IPC service (such as system bus or varlink) in the container"),
-                &vl_error_NoIPC);
+                &vl_error_NoIPC,
+                SD_VARLINK_SYMBOL_COMMENT("No such user"),
+                &vl_error_NoSuchUser,
+                SD_VARLINK_SYMBOL_COMMENT("No such group"),
+                &vl_error_NoSuchGroup,
+                SD_VARLINK_SYMBOL_COMMENT("User belongs to host UID range"),
+                &vl_error_UserInHostRange,
+                SD_VARLINK_SYMBOL_COMMENT("Group belongs to host GID range"),
+                &vl_error_GroupInHostRange);

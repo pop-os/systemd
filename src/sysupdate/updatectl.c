@@ -4,27 +4,26 @@
 #include <locale.h>
 
 #include "sd-bus.h"
+#include "sd-event.h"
 #include "sd-json.h"
 
+#include "alloc-util.h"
 #include "build.h"
 #include "bus-error.h"
 #include "bus-label.h"
 #include "bus-locator.h"
 #include "bus-map-properties.h"
 #include "bus-util.h"
-#include "conf-files.h"
-#include "conf-parser.h"
-#include "errno-list.h"
-#include "fd-util.h"
-#include "fileio.h"
+#include "errno-util.h"
 #include "format-table.h"
-#include "fs-util.h"
+#include "hashmap.h"
 #include "json-util.h"
 #include "main-func.h"
-#include "os-util.h"
 #include "pager.h"
-#include "path-util.h"
+#include "polkit-agent.h"
 #include "pretty-print.h"
+#include "runtime-scope.h"
+#include "string-util.h"
 #include "strv.h"
 #include "sysupdate-update-set-flags.h"
 #include "sysupdate-util.h"
@@ -37,7 +36,7 @@ static bool arg_reboot = false;
 static bool arg_offline = false;
 static bool arg_now = false;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
-static char *arg_host = NULL;
+static const char *arg_host = NULL;
 
 #define SYSUPDATE_HOST_PATH "/org/freedesktop/sysupdate1/target/host"
 #define SYSUPDATE_TARGET_INTERFACE "org.freedesktop.sysupdate1.Target"
@@ -421,7 +420,7 @@ static int list_versions_finished(sd_bus_message *reply, void *userdata, sd_bus_
         color = update_set_flags_to_color(v.flags);
 
         if (urlify_enabled() && !strv_isempty(v.changelog)) {
-                version_link = strjoin(v.version, special_glyph(SPECIAL_GLYPH_EXTERNAL_LINK));
+                version_link = strjoin(v.version, glyph(GLYPH_EXTERNAL_LINK));
                 if (!version_link)
                         return log_oom();
         }
@@ -688,10 +687,10 @@ static int check_describe_finished(sd_bus_message *reply, void *userdata, sd_bus
                 return bus_log_parse_error(r);
 
         if (urlify_enabled() && !strv_isempty(v.changelog))
-                lnk = special_glyph(SPECIAL_GLYPH_EXTERNAL_LINK);
+                lnk = glyph(GLYPH_EXTERNAL_LINK);
 
         update = strjoin(empty_to_dash(current), " ",
-                         special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), " ",
+                         glyph(GLYPH_ARROW_RIGHT), " ",
                          v.version, strempty(lnk));
         if (!update)
                 return log_oom();
@@ -831,7 +830,7 @@ static int update_render_progress(sd_event_source *source, void *userdata) {
 
         if (!terminal_is_dumb()) {
                 for (size_t i = 0; i <= n; i++)
-                        fputs("\n", stderr); /* Possibly scroll the terminal to make room (including total)*/
+                        fputs("\n", stderr); /* Possibly scroll the terminal to make room (including total) */
 
                 fprintf(stderr, "\e[%zuF", n+1); /* Go back */
 
@@ -965,7 +964,8 @@ static int update_interrupted(sd_event_source *source, void *userdata) {
                                op->job_path,
                                "org.freedesktop.sysupdate1.Job",
                                "Cancel",
-                               &error, /* reply= */ NULL,
+                               &error,
+                               /* ret_reply= */ NULL,
                                NULL);
         if (r < 0)
                 return log_bus_error(r, &error, NULL, "call Cancel");
@@ -1328,7 +1328,7 @@ static int list_features(sd_bus *bus) {
                         return r;
 
                 if (urlify_enabled() && f.documentation) {
-                        name_link = strjoin(f.name, special_glyph(SPECIAL_GLYPH_EXTERNAL_LINK));
+                        name_link = strjoin(f.name, glyph(GLYPH_EXTERNAL_LINK));
                         if (!name_link)
                                 return log_oom();
                 }
@@ -1413,7 +1413,7 @@ static int verb_enable(int argc, char **argv, void *userdata) {
                                        SYSUPDATE_TARGET_INTERFACE,
                                        "SetFeatureEnabled",
                                        &error,
-                                       /* reply= */ NULL,
+                                       /* ret_reply= */ NULL,
                                        "sit",
                                        *feature,
                                        (int) enable,
@@ -1614,6 +1614,8 @@ static int run(int argc, char *argv[]) {
 
         if (arg_transport == BUS_TRANSPORT_LOCAL)
                 polkit_agent_open();
+
+        (void) sd_bus_set_allow_interactive_authorization(bus, true);
 
         return dispatch_verb(argc, argv, verbs, bus);
 }

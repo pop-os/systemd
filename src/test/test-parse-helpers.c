@@ -1,10 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <linux/in.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
-#include <stdio.h>
 
-#include "macro.h"
 #include "parse-helpers.h"
 #include "tests.h"
 
@@ -125,7 +123,6 @@ TEST(path_simplify_and_warn) {
         assert_se(test_path_simplify_and_warn_one("/aaaa", "/aaaa", 0) == 0);
         assert_se(test_path_simplify_and_warn_one("/aaaa", "/aaaa", PATH_CHECK_ABSOLUTE) == 0);
         assert_se(test_path_simplify_and_warn_one("/aaaa", "/aaaa", PATH_CHECK_RELATIVE) == -EINVAL);
-
 }
 
 DEFINE_TEST_MAIN(LOG_INFO);

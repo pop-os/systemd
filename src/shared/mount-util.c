@@ -1,44 +1,35 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
-#include <linux/loop.h>
-#if WANT_LINUX_FS_H
-#include <linux/fs.h>
-#endif
 
 #include "alloc-util.h"
 #include "chase.h"
 #include "dissect-image.h"
-#include "exec-util.h"
+#include "errno-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "fstab-util.h"
 #include "glyph-util.h"
 #include "hashmap.h"
-#include "initrd-util.h"
-#include "label-util.h"
 #include "libmount-util.h"
-#include "missing_mount.h"
-#include "missing_syscall.h"
+#include "log.h"
 #include "mkdir-label.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
 #include "namespace-util.h"
-#include "parse-util.h"
+#include "os-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "set.h"
 #include "sort-util.h"
 #include "stat-util.h"
-#include "stdio-util.h"
-#include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tmpfile-util.h"
@@ -53,14 +44,14 @@ int umount_recursive_full(const char *prefix, int flags, char **keep) {
 
         f = fopen("/proc/self/mountinfo", "re"); /* Pin the file, in case we unmount /proc/ as part of the logic here */
         if (!f)
-                return log_debug_errno(errno, "Failed to open /proc/self/mountinfo: %m");
+                return log_debug_errno(errno, "Failed to open %s: %m", "/proc/self/mountinfo");
 
         for (;;) {
                 _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
                 _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
                 bool again = false;
 
-                r = libmount_parse("/proc/self/mountinfo", f, &table, &iter);
+                r = libmount_parse_mountinfo(f, &table, &iter);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
@@ -217,7 +208,7 @@ int bind_remount_recursive_with_mountinfo(
 
                 rewind(proc_self_mountinfo);
 
-                r = libmount_parse("/proc/self/mountinfo", proc_self_mountinfo, &table, &iter);
+                r = libmount_parse_mountinfo(proc_self_mountinfo, &table, &iter);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
@@ -462,7 +453,7 @@ int bind_remount_one(const char *path, unsigned long new_flags, unsigned long fl
 
         proc_self_mountinfo = fopen("/proc/self/mountinfo", "re");
         if (!proc_self_mountinfo)
-                return log_debug_errno(errno, "Failed to open /proc/self/mountinfo: %m");
+                return log_debug_errno(errno, "Failed to open %s: %m", "/proc/self/mountinfo");
 
         return bind_remount_one_with_mountinfo(path, new_flags, flags_mask, proc_self_mountinfo);
 }
@@ -536,11 +527,13 @@ int mount_switch_root_full(const char *path, unsigned long mount_propagation_fla
                 }
         }
 
+        log_debug("Successfully switched root to '%s'.", path);
+
         /* Finally, let's establish the requested propagation flags. */
         if (mount_propagation_flag == 0)
                 return 0;
 
-        if (mount(NULL, ".", NULL, mount_propagation_flag | MS_REC, 0) < 0)
+        if (mount(NULL, ".", NULL, mount_propagation_flag | MS_REC, NULL) < 0)
                 return log_debug_errno(errno, "Failed to turn new rootfs '%s' into %s mount: %m",
                                        mount_propagation_flag_to_string(mount_propagation_flag), path);
 
@@ -716,7 +709,7 @@ int mount_verbose_full(
                           what, where, strnull(fl), strempty(o));
         else if (f & MS_MOVE)
                 log_debug("Moving mount %s %s %s (%s \"%s\")...",
-                          what, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), where, strnull(fl), strempty(o));
+                          what, glyph(GLYPH_ARROW_RIGHT), where, strnull(fl), strempty(o));
         else
                 log_debug("Mounting %s (%s) on %s (%s \"%s\")...",
                           strna(what), strna(type), where, strnull(fl), strempty(o));
@@ -734,16 +727,62 @@ int mount_verbose_full(
 
 int umount_verbose(
                 int error_log_level,
-                const char *what,
+                const char *where,
                 int flags) {
 
-        assert(what);
+        assert(where);
 
-        log_debug("Umounting %s...", what);
+        log_debug("Unmounting '%s'...", where);
 
-        if (umount2(what, flags) < 0)
-                return log_full_errno(error_log_level, errno,
-                                      "Failed to unmount %s: %m", what);
+        if (umount2(where, flags) < 0)
+                return log_full_errno(error_log_level, errno, "Failed to unmount '%s': %m", where);
+
+        return 0;
+}
+
+int umountat_detach_verbose(
+                int error_log_level,
+                int fd,
+                const char *where) {
+
+        /* Similar to umountat_verbose(), but goes by fd + path. This implies MNT_DETACH, since to do this we
+         * must pin the inode in question via an fd. */
+
+        assert(fd >= 0 || fd == AT_FDCWD);
+
+        /* If neither fd nor path are specified take this as reference to the cwd */
+        if (fd == AT_FDCWD && isempty(where))
+                return umount_verbose(error_log_level, ".", MNT_DETACH|UMOUNT_NOFOLLOW);
+
+        /* If we don't actually take the fd into consideration for this operation shortcut things, so that we
+         * don't have to open the inode */
+        if (fd == AT_FDCWD || path_is_absolute(where))
+                return umount_verbose(error_log_level, where, MNT_DETACH|UMOUNT_NOFOLLOW);
+
+        _cleanup_free_ char *prefix = NULL;
+        const char *p;
+        if (fd_get_path(fd, &prefix) < 0)
+                p = "<fd>"; /* if we can't get the path, return something vaguely useful */
+        else
+                p = prefix;
+        _cleanup_free_ char *joined = isempty(where) ? strdup(p) : path_join(p, where);
+
+        log_debug("Unmounting '%s'...", strna(joined));
+
+        _cleanup_close_ int inode_fd = -EBADF;
+        int mnt_fd;
+        if (isempty(where))
+                mnt_fd = fd;
+        else {
+                inode_fd = openat(fd, where, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+                if (inode_fd < 0)
+                        return log_full_errno(error_log_level, errno, "Failed to pin '%s': %m", strna(joined));
+
+                mnt_fd = inode_fd;
+        }
+
+        if (umount2(FORMAT_PROC_FD_PATH(mnt_fd), MNT_DETACH) < 0)
+                return log_full_errno(error_log_level, errno, "Failed to unmount '%s': %m", strna(joined));
 
         return 0;
 }
@@ -910,10 +949,7 @@ static int mount_in_namespace_legacy(
 
         /* Second, we mount the source file or directory to a directory inside of our MS_SLAVE playground. */
         mount_tmp = strjoina(mount_slave, "/mount");
-        if (flags & MOUNT_IN_NAMESPACE_IS_IMAGE)
-                r = mkdir_p(mount_tmp, 0700);
-        else
-                r = make_mount_point_inode_from_stat(chased_src_st, mount_tmp, 0700);
+        r = make_mount_point_inode_from_mode(AT_FDCWD, mount_tmp, (flags & MOUNT_IN_NAMESPACE_IS_IMAGE) ? S_IFDIR : chased_src_st->st_mode, 0700);
         if (r < 0) {
                 log_debug_errno(r, "Failed to create temporary mount point %s: %m", mount_tmp);
                 goto finish;
@@ -928,12 +964,9 @@ static int mount_in_namespace_legacy(
                                 mount_tmp,
                                 options,
                                 image_policy,
-                                /* required_host_os_release_id= */ NULL,
-                                /* required_host_os_release_id_like= */ NULL,
-                                /* required_host_os_release_version_id= */ NULL,
-                                /* required_host_os_release_sysext_level= */ NULL,
-                                /* required_host_os_release_confext_level= */ NULL,
-                                /* required_sysext_scope= */ NULL,
+                                /* image_filter= */ NULL,
+                                /* extension_release_data= */ NULL,
+                                /* required_class= */ _IMAGE_CLASS_INVALID,
                                 /* verity= */ NULL,
                                 /* ret_image= */ NULL);
         else
@@ -991,8 +1024,18 @@ static int mount_in_namespace_legacy(
                 goto finish;
         }
 
-        r = namespace_fork("(sd-bindmnt)", "(sd-bindmnt-inner)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM,
-                           pidns_fd, mntns_fd, -1, -1, root_fd, &child);
+        r = namespace_fork(
+                        "(sd-bindmnt)",
+                        "(sd-bindmnt-inner)",
+                        /* except_fds= */ NULL,
+                        /* n_except_fds= */ 0,
+                        FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGTERM,
+                        pidns_fd,
+                        mntns_fd,
+                        /* netns_fd= */ -EBADF,
+                        /* userns_fd= */ -EBADF,
+                        root_fd,
+                        &child);
         if (r < 0)
                 goto finish;
         if (r == 0) {
@@ -1000,12 +1043,15 @@ static int mount_in_namespace_legacy(
 
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
 
-                if (flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY) {
-                        if (!(flags & MOUNT_IN_NAMESPACE_IS_IMAGE)) {
-                                (void) mkdir_parents(dest, 0755);
-                                (void) make_mount_point_inode_from_stat(chased_src_st, dest, 0700);
-                        } else
-                                (void) mkdir_p(dest, 0755);
+                _cleanup_close_ int dest_fd = -EBADF;
+                _cleanup_free_ char *dest_fn = NULL;
+                r = chase(dest, /* root= */ NULL, CHASE_PARENT|CHASE_EXTRACT_FILENAME|((flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY) ? CHASE_MKDIR_0755 : 0), &dest_fn, &dest_fd);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to pin parent directory of mount '%s', ignoring: %m", dest);
+                else if (flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY) {
+                        r = make_mount_point_inode_from_mode(dest_fd, dest_fn, (flags & MOUNT_IN_NAMESPACE_IS_IMAGE) ? S_IFDIR : chased_src_st->st_mode, 0700);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to make mount point inode of mount '%s', ignoring: %m", dest);
                 }
 
                 /* Fifth, move the mount to the right place inside */
@@ -1019,7 +1065,7 @@ static int mount_in_namespace_legacy(
                 if (!mount_inside)
                         report_errno_and_exit(errno_pipe_fd[1], log_oom_debug());
 
-                r = mount_nofollow_verbose(LOG_DEBUG, mount_inside, dest, NULL, MS_MOVE, NULL);
+                r = mount_nofollow_verbose(LOG_DEBUG, mount_inside, dest_fd >= 0 ? FORMAT_PROC_FD_PATH(dest_fd) : dest, /* fstype= */ NULL, MS_MOVE, /* options= */ NULL);
                 if (r < 0)
                         report_errno_and_exit(errno_pipe_fd[1], r);
 
@@ -1096,7 +1142,7 @@ static int mount_in_namespace(
         if (r < 0)
                 return log_debug_errno(r, "Failed to retrieve FDs of the target process' namespace: %m");
 
-        r = inode_same_at(mntns_fd, "", AT_FDCWD, "/proc/self/ns/mnt", AT_EMPTY_PATH);
+        r = is_our_namespace(mntns_fd, NAMESPACE_MOUNT);
         if (r < 0)
                 return log_debug_errno(r, "Failed to determine if mount namespaces are equal: %m");
         /* We can't add new mounts at runtime if the process wasn't started in a namespace */
@@ -1140,12 +1186,9 @@ static int mount_in_namespace(
                                 /* dest= */ NULL,
                                 options,
                                 image_policy,
-                                /* required_host_os_release_id= */ NULL,
-                                /* required_host_os_release_id_like= */ NULL,
-                                /* required_host_os_release_version_id= */ NULL,
-                                /* required_host_os_release_sysext_level= */ NULL,
-                                /* required_host_os_release_confext_level= */ NULL,
-                                /* required_sysext_scope= */ NULL,
+                                /* image_filter= */ NULL,
+                                /* extension_release_data= */ NULL,
+                                /* required_class= */ _IMAGE_CLASS_INVALID,
                                 /* verity= */ NULL,
                                 &img);
                 if (r < 0)
@@ -1191,8 +1234,14 @@ static int mount_in_namespace(
         if (r == 0) {
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
 
+                _cleanup_close_ int dest_fd = -EBADF;
+                _cleanup_free_ char *dest_fn = NULL;
+                r = chase(dest, /* root= */ NULL, CHASE_PARENT|CHASE_EXTRACT_FILENAME|((flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY) ? CHASE_MKDIR_0755 : 0), &dest_fn, &dest_fd);
+                if (r < 0)
+                        report_errno_and_exit(errno_pipe_fd[1], r);
+
                 if (flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY)
-                        (void) mkdir_parents(dest, 0755);
+                        (void) make_mount_point_inode_from_mode(dest_fd, dest_fn, img ? S_IFDIR : st.st_mode, 0700);
 
                 if (img) {
                         DissectImageFlags f =
@@ -1212,12 +1261,8 @@ static int mount_in_namespace(
                                         /* uid_range= */ UID_INVALID,
                                         /* userns_fd= */ -EBADF,
                                         f);
-                } else {
-                        if (flags & MOUNT_IN_NAMESPACE_MAKE_FILE_OR_DIRECTORY)
-                                (void) make_mount_point_inode_from_stat(&st, dest, 0700);
-
+                } else
                         r = mount_exchange_graceful(new_mount_fd, dest, /* mount_beneath= */ true);
-                }
 
                 report_errno_and_exit(errno_pipe_fd[1], r);
         }
@@ -1300,7 +1345,7 @@ int fd_make_mount_point(int fd) {
 
         assert(fd >= 0);
 
-        r = fd_is_mount_point(fd, NULL, 0);
+        r = is_mount_point_at(fd, NULL, 0);
         if (r < 0)
                 return log_debug_errno(r, "Failed to determine whether file descriptor is a mount point: %m");
         if (r > 0)
@@ -1313,18 +1358,34 @@ int fd_make_mount_point(int fd) {
         return 1;
 }
 
-int make_userns(uid_t uid_shift, uid_t uid_range, uid_t source_owner, uid_t dest_owner, RemountIdmapping idmapping) {
+int make_userns(uid_t uid_shift,
+                uid_t uid_range,
+                uid_t source_owner,
+                uid_t dest_owner,
+                RemountIdmapping idmapping) {
+
         _cleanup_close_ int userns_fd = -EBADF;
         _cleanup_free_ char *line = NULL;
+        uid_t source_base = 0;
 
         /* Allocates a userns file descriptor with the mapping we need. For this we'll fork off a child
          * process whose only purpose is to give us a new user namespace. It's killed when we got it. */
 
         if (!userns_shift_range_valid(uid_shift, uid_range))
-                return -EINVAL;
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid UID range for user namespace.");
 
-        if (IN_SET(idmapping, REMOUNT_IDMAPPING_NONE, REMOUNT_IDMAPPING_HOST_ROOT)) {
-                if (asprintf(&line, UID_FMT " " UID_FMT " " UID_FMT "\n", 0u, uid_shift, uid_range) < 0)
+        switch (idmapping) {
+
+        case REMOUNT_IDMAPPING_FOREIGN_WITH_HOST_ROOT:
+                source_base = FOREIGN_UID_BASE;
+                _fallthrough_;
+
+        case REMOUNT_IDMAPPING_NONE:
+        case REMOUNT_IDMAPPING_HOST_ROOT:
+
+                if (asprintf(&line,
+                             UID_FMT " " UID_FMT " " UID_FMT "\n",
+                             source_base, uid_shift, uid_range) < 0)
                         return log_oom_debug();
 
                 /* If requested we'll include an entry in the mapping so that the host root user can make
@@ -1341,36 +1402,72 @@ int make_userns(uid_t uid_shift, uid_t uid_range, uid_t source_owner, uid_t dest
                 if (idmapping == REMOUNT_IDMAPPING_HOST_ROOT)
                         if (strextendf(&line,
                                        UID_FMT " " UID_FMT " " UID_FMT "\n",
-                                       UID_MAPPED_ROOT, 0u, 1u) < 0)
+                                       UID_MAPPED_ROOT, (uid_t) 0u, (uid_t) 1u) < 0)
                                 return log_oom_debug();
-        }
 
-        if (idmapping == REMOUNT_IDMAPPING_HOST_OWNER) {
+                break;
+
+        case REMOUNT_IDMAPPING_HOST_OWNER:
                 /* Remap the owner of the bind mounted directory to the root user within the container. This
                  * way every file written by root within the container to the bind-mounted directory will
                  * be owned by the original user from the host. All other users will remain unmapped. */
-                if (asprintf(&line, UID_FMT " " UID_FMT " " UID_FMT "\n", source_owner, uid_shift, 1u) < 0)
+                if (asprintf(&line,
+                             UID_FMT " " UID_FMT " " UID_FMT "\n",
+                             source_owner, uid_shift, (uid_t) 1u) < 0)
                         return log_oom_debug();
-        }
+                break;
 
-        if (idmapping == REMOUNT_IDMAPPING_HOST_OWNER_TO_TARGET_OWNER) {
+        case REMOUNT_IDMAPPING_HOST_OWNER_TO_TARGET_OWNER:
                 /* Remap the owner of the bind mounted directory to the owner of the target directory
                  * within the container. This way every file written by target directory owner within the
                  * container to the bind-mounted directory will be owned by the original host user.
                  * All other users will remain unmapped. */
-                if (asprintf(
-                             &line,
+                if (asprintf(&line,
                              UID_FMT " " UID_FMT " " UID_FMT "\n",
-                             source_owner, dest_owner, 1u) < 0)
+                             source_owner, dest_owner, (uid_t) 1u) < 0)
                         return log_oom_debug();
+                break;
+
+        default:
+                assert_not_reached();
         }
 
         /* We always assign the same UID and GID ranges */
-        userns_fd = userns_acquire(line, line);
+        userns_fd = userns_acquire(line, line, /* setgroups_deny= */ true);
         if (userns_fd < 0)
                 return log_debug_errno(userns_fd, "Failed to acquire new userns: %m");
 
         return TAKE_FD(userns_fd);
+}
+
+int open_tree_attr_with_fallback(int dir_fd, const char *path, unsigned int flags, struct mount_attr *attr) {
+        _cleanup_close_ int fd = -EBADF;
+
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+        assert(attr);
+
+        if (isempty(path)) {
+                path = "";
+                flags |= AT_EMPTY_PATH;
+        }
+
+        fd = open_tree_attr(dir_fd, path, flags, attr, sizeof(struct mount_attr));
+        if (fd >= 0)
+                return TAKE_FD(fd);
+        if (!ERRNO_IS_NOT_SUPPORTED(errno))
+                return log_debug_errno(errno, "Failed to open tree and set mount attributes: %m");
+
+        if (attr->attr_clr & MOUNT_ATTR_IDMAP)
+                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Cannot clear idmap from mount without open_tree_attr()");
+
+        fd = open_tree(dir_fd, path, flags);
+        if (fd < 0)
+                return log_debug_errno(errno, "Failed to open tree: %m");
+
+        if (mount_setattr(fd, "", AT_EMPTY_PATH | (flags & AT_RECURSIVE), attr, sizeof(struct mount_attr)) < 0)
+                return log_debug_errno(errno, "Failed to change mount attributes: %m");
+
+        return TAKE_FD(fd);
 }
 
 int remount_idmap_fd(
@@ -1401,22 +1498,19 @@ int remount_idmap_fd(
         CLEANUP_ARRAY(mount_fds, n_mounts_fds, close_many_and_free);
 
         for (size_t i = 0; i < n; i++) {
-                int mntfd;
-
-                /* Clone the mount point */
-                mntfd = mount_fds[n_mounts_fds] = open_tree(-EBADF, paths[i], OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
-                if (mount_fds[n_mounts_fds] < 0)
-                        return log_debug_errno(errno, "Failed to open tree of mounted filesystem '%s': %m", paths[i]);
-
-                n_mounts_fds++;
-
-                /* Set the user namespace mapping attribute on the cloned mount point */
-                if (mount_setattr(mntfd, "", AT_EMPTY_PATH,
-                                  &(struct mount_attr) {
+                /* Clone the mount point and et the user namespace mapping attribute on the cloned mount point. */
+                mount_fds[n_mounts_fds] = open_tree_attr_with_fallback(
+                                AT_FDCWD,
+                                paths[i],
+                                OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC,
+                                &(struct mount_attr) {
                                           .attr_set = MOUNT_ATTR_IDMAP | extra_mount_attr_set,
                                           .userns_fd = userns_fd,
-                                  }, sizeof(struct mount_attr)) < 0)
-                        return log_debug_errno(errno, "Failed to change bind mount attributes for clone of '%s': %m", paths[i]);
+                                });
+                if (mount_fds[n_mounts_fds] < 0)
+                        return mount_fds[n_mounts_fds];
+
+                n_mounts_fds++;
         }
 
         for (size_t i = n; i > 0; i--) { /* Unmount the paths right-to-left */
@@ -1503,7 +1597,7 @@ int get_sub_mounts(const char *prefix, SubMount **ret_mounts, size_t *ret_n_moun
         assert(ret_mounts);
         assert(ret_n_mounts);
 
-        r = libmount_parse("/proc/self/mountinfo", NULL, &table, &iter);
+        r = libmount_parse_mountinfo(/* source = */ NULL, &table, &iter);
         if (r < 0)
                 return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
@@ -1620,17 +1714,17 @@ int bind_mount_submounts(
         return ret;
 }
 
-int make_mount_point_inode_from_stat(const struct stat *st, const char *dest, mode_t mode) {
-        assert(st);
+int make_mount_point_inode_from_mode(int dir_fd, const char *dest, mode_t source_mode, mode_t target_mode) {
+        assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
         assert(dest);
 
-        if (S_ISDIR(st->st_mode))
-                return mkdir_label(dest, mode);
+        if (S_ISDIR(source_mode))
+                return mkdirat_label(dir_fd, dest, target_mode & 07777);
         else
-                return RET_NERRNO(mknod(dest, S_IFREG|(mode & ~0111), 0));
+                return RET_NERRNO(mknodat(dir_fd, dest, S_IFREG|(target_mode & 07666), 0)); /* Mask off X bit */
 }
 
-int make_mount_point_inode_from_path(const char *source, const char *dest, mode_t mode) {
+int make_mount_point_inode_from_path(const char *source, const char *dest, mode_t access_mode) {
         struct stat st;
 
         assert(source);
@@ -1639,7 +1733,7 @@ int make_mount_point_inode_from_path(const char *source, const char *dest, mode_
         if (stat(source, &st) < 0)
                 return -errno;
 
-        return make_mount_point_inode_from_stat(&st, dest, mode);
+        return make_mount_point_inode_from_mode(AT_FDCWD, dest, st.st_mode, access_mode);
 }
 
 int trigger_automount_at(int dir_fd, const char *path) {
@@ -1800,6 +1894,25 @@ int make_fsmount(
         return TAKE_FD(mnt_fd);
 }
 
+char* umount_and_rmdir_and_free(char *p) {
+        if (!p)
+                return NULL;
+
+        PROTECT_ERRNO;
+        (void) umount_recursive(p, 0);
+        (void) rmdir(p);
+        return mfree(p);
+}
+
+char* umount_and_free(char *p) {
+        if (!p)
+                return NULL;
+
+        PROTECT_ERRNO;
+        (void) umount_recursive(p, 0);
+        return mfree(p);
+}
+
 char* umount_and_unlink_and_free(char *p) {
         if (!p)
                 return NULL;
@@ -1810,11 +1923,12 @@ char* umount_and_unlink_and_free(char *p) {
         return mfree(p);
 }
 
-static int path_get_mount_info_at(
+int path_get_mount_info_at(
                 int dir_fd,
                 const char *path,
                 char **ret_fstype,
-                char **ret_options) {
+                char **ret_options,
+                char **ret_source) {
 
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
@@ -1826,9 +1940,12 @@ static int path_get_mount_info_at(
         if (r < 0)
                 return log_debug_errno(r, "Failed to get mount ID: %m");
 
-        /* When getting options is requested, do not pass filename, otherwise utab will not read, and
-         * userspace options like "_netdev" will be lost. */
-        r = libmount_parse(ret_options ? NULL : "/proc/self/mountinfo", /* source = */ NULL, &table, &iter);
+        /* When getting options is requested, we also need to parse utab, otherwise userspace options like
+         * "_netdev" will be lost. */
+        if (ret_options)
+                r = libmount_parse_with_utab(&table, &iter);
+        else
+                r = libmount_parse_mountinfo(/* source = */ NULL, &table, &iter);
         if (r < 0)
                 return log_debug_errno(r, "Failed to parse /proc/self/mountinfo: %m");
 
@@ -1844,7 +1961,7 @@ static int path_get_mount_info_at(
                 if (mnt_fs_get_id(fs) != mnt_id)
                         continue;
 
-                _cleanup_free_ char *fstype = NULL, *options = NULL;
+                _cleanup_free_ char *fstype = NULL, *options = NULL, *source = NULL;
 
                 if (ret_fstype) {
                         fstype = strdup(strempty(mnt_fs_get_fstype(fs)));
@@ -1858,10 +1975,18 @@ static int path_get_mount_info_at(
                                 return log_oom_debug();
                 }
 
+                if (ret_source) {
+                        source = strdup(strempty(mnt_fs_get_source(fs)));
+                        if (!source)
+                                return log_oom_debug();
+                }
+
                 if (ret_fstype)
                         *ret_fstype = TAKE_PTR(fstype);
                 if (ret_options)
                         *ret_options = TAKE_PTR(options);
+                if (ret_source)
+                        *ret_source = TAKE_PTR(source);
 
                 return 0;
         }
@@ -1884,7 +2009,7 @@ int path_is_network_fs_harder_at(int dir_fd, const char *path) {
                 return r;
 
         _cleanup_free_ char *fstype = NULL, *options = NULL;
-        r = path_get_mount_info_at(fd, /* path = */ NULL, &fstype, &options);
+        r = path_get_mount_info_at(fd, /* path = */ NULL, &fstype, &options, /* ret_source = */ NULL);
         if (r < 0)
                 return r;
 

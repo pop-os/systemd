@@ -481,8 +481,8 @@
         downloaded resources (specifically: validate the GPG signatures for downloaded
         <filename>SHA256SUMS</filename> manifest files, via their detached signature files
         <filename>SHA256SUMS.gpg</filename> in combination with the system keyring
-        <filename>/usr/lib/systemd/import-pubring.gpg</filename> or
-        <filename>/etc/systemd/import-pubring.gpg</filename>).</para>
+        <filename>/usr/lib/systemd/import-pubring.pgp</filename> or
+        <filename>/etc/systemd/import-pubring.pgp</filename>).</para>
 
         <para>This option is essential to provide integrity guarantees for downloaded resources and thus
         should be left enabled, outside of test environments.</para>
@@ -675,7 +675,7 @@
 
         <listitem><para>Specifies what anchor point <varname>Path=</varname> should be relative to. Takes one
         of <constant>root</constant>, <constant>esp</constant>, <constant>xbootldr</constant>,
-        <constant>boot</constant> or <constant>directory</constant>. If unspecified, defaults to
+        <constant>boot</constant> or <constant>explicit</constant>. If unspecified, defaults to
         <constant>root</constant>.</para>
 
         <para>If set to <constant>root</constant>, <constant>esp</constant>, <constant>xbootldr</constant>,

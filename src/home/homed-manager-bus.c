@@ -1,16 +1,31 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <linux/capability.h>
+#include <grp.h>
+#include <pwd.h>
+#include <unistd.h>
+
+#include "sd-bus.h"
+#include "sd-event.h"
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
+#include "bus-message-util.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
+#include "fileio.h"
 #include "format-util.h"
 #include "home-util.h"
 #include "homed-bus.h"
 #include "homed-home-bus.h"
-#include "homed-manager-bus.h"
+#include "homed-home.h"
 #include "homed-manager.h"
+#include "homed-manager-bus.h"
+#include "homed-operation.h"
+#include "log.h"
+#include "openssl-util.h"
+#include "path-util.h"
+#include "set.h"
+#include "string-util.h"
 #include "strv.h"
 #include "user-record-sign.h"
 #include "user-record-util.h"
@@ -36,7 +51,7 @@ static int property_get_auto_login(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(h, m->homes_by_name) {
+        HASHMAP_FOREACH(h, m->homes_by_uid) {
                 _cleanup_strv_free_ char **seats = NULL;
                 _cleanup_free_ char *home_path = NULL;
 
@@ -96,11 +111,9 @@ static int lookup_user_name(
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_HOME, "Client's UID " UID_FMT " not managed.", uid);
 
         } else {
-
-                if (!valid_user_group_name(user_name, 0))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "User name %s is not valid", user_name);
-
-                h = hashmap_get(m->homes_by_name, user_name);
+                r = manager_get_home_by_name(m, user_name, &h);
+                if (r < 0)
+                        return r;
                 if (!h)
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_HOME, "No home for user %s known", user_name);
         }
@@ -230,7 +243,7 @@ static int method_list_homes(
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_get_user_record_by_name(
@@ -341,6 +354,31 @@ static int method_deactivate_home(sd_bus_message *message, void *userdata, sd_bu
         return generic_home_method(userdata, message, bus_home_method_deactivate, error);
 }
 
+static int check_for_conflicts(Manager *m, const char *name, sd_bus_error *error) {
+        int r;
+
+        assert(m);
+        assert(name);
+
+        Home *other = hashmap_get(m->homes_by_name, name);
+        if (other)
+                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s exists already, refusing.", name);
+
+        r = getpwnam_malloc(name, /* ret= */ NULL);
+        if (r >= 0)
+                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s exists in the NSS user database, refusing.", name);
+        if (r != -ESRCH)
+                return r;
+
+        r = getgrnam_malloc(name, /* ret= */ NULL);
+        if (r >= 0)
+                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s conflicts with an NSS group by the same name, refusing.", name);
+        if (r != -ESRCH)
+                return r;
+
+        return 0;
+}
+
 static int validate_and_allocate_home(Manager *m, UserRecord *hr, Hashmap *blobs, Home **ret, sd_bus_error *error) {
         _cleanup_(user_record_unrefp) UserRecord *signed_hr = NULL;
         bool signed_locally;
@@ -355,21 +393,32 @@ static int validate_and_allocate_home(Manager *m, UserRecord *hr, Hashmap *blobs
         if (r < 0)
                 return r;
 
-        other = hashmap_get(m->homes_by_name, hr->user_name);
-        if (other)
-                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s exists already, refusing.", hr->user_name);
-
-        r = getpwnam_malloc(hr->user_name, /* ret= */ NULL);
-        if (r >= 0)
-                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s exists in the NSS user database, refusing.", hr->user_name);
-        if (r != -ESRCH)
+        r = check_for_conflicts(m, hr->user_name, error);
+        if (r < 0)
                 return r;
 
-        r = getgrnam_malloc(hr->user_name, /* ret= */ NULL);
-        if (r >= 0)
-                return sd_bus_error_setf(error, BUS_ERROR_USER_NAME_EXISTS, "Specified user name %s conflicts with an NSS group by the same name, refusing.", hr->user_name);
-        if (r != -ESRCH)
-                return r;
+        if (hr->realm) {
+                r = check_for_conflicts(m, user_record_user_name_and_realm(hr), error);
+                if (r < 0)
+                        return r;
+        }
+
+        STRV_FOREACH(a, hr->aliases) {
+                r = check_for_conflicts(m, *a, error);
+                if (r < 0)
+                        return r;
+
+                if (hr->realm) {
+                        _cleanup_free_ char *alias_with_realm = NULL;
+                        alias_with_realm = strjoin(*a, "@", hr->realm);
+                        if (!alias_with_realm)
+                                return -ENOMEM;
+
+                        r = check_for_conflicts(m, alias_with_realm, error);
+                        if (r < 0)
+                                return r;
+                }
+        }
 
         if (blobs) {
                 const char *failed = NULL;
@@ -453,7 +502,7 @@ static int method_register_home(
 
         assert(message);
 
-        r = bus_message_read_home_record(message, USER_RECORD_LOAD_EMBEDDED|USER_RECORD_PERMISSIVE, &hr, error);
+        r = bus_message_read_home_record(message, USER_RECORD_EXTRACT_EMBEDDED|USER_RECORD_PERMISSIVE, &hr, error);
         if (r < 0)
                 return r;
 
@@ -477,6 +526,47 @@ static int method_register_home(
                 return r;
 
         TAKE_PTR(h);
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+static int method_adopt_home(
+                sd_bus_message *message,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        const char *image_path = NULL;
+        uint64_t flags = 0;
+        r = sd_bus_message_read(message, "st", &image_path, &flags);
+        if (r < 0)
+                return r;
+
+        if (!path_is_absolute(image_path) || !path_is_safe(image_path))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Specified path is not absolute or not valid: %s", image_path);
+        if (flags != 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Flags field must be zero.");
+
+        r = bus_verify_polkit_async(
+                        message,
+                        "org.freedesktop.home1.create-home",
+                        /* details= */ NULL,
+                        &m->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        r = manager_adopt_home(m, image_path);
+        if (r == -EMEDIUMTYPE)
+                return sd_bus_error_setf(error, BUS_ERROR_UNRECOGNIZED_HOME_FORMAT, "Unrecognized format of home directory: %s", image_path);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -508,7 +598,7 @@ static int method_create_home(sd_bus_message *message, void *userdata, sd_bus_er
                 if (r < 0)
                         return r;
                 if ((flags & ~SD_HOMED_CREATE_FLAGS_ALL) != 0)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags provided.");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags provided.");
         }
 
         r = bus_verify_polkit_async(
@@ -636,7 +726,7 @@ static int method_lock_all_homes(sd_bus_message *message, void *userdata, sd_bus
          * for every suitable home we have and only when all of them completed we send a reply indicating
          * completion. */
 
-        HASHMAP_FOREACH(h, m->homes_by_name) {
+        HASHMAP_FOREACH(h, m->homes_by_uid) {
 
                 if (!home_shall_suspend(h))
                         continue;
@@ -675,7 +765,7 @@ static int method_deactivate_all_homes(sd_bus_message *message, void *userdata, 
          * systemd-homed.service itself since we want to allow restarting of it without tearing down all home
          * directories. */
 
-        HASHMAP_FOREACH(h, m->homes_by_name) {
+        HASHMAP_FOREACH(h, m->homes_by_uid) {
 
                 if (!o) {
                         o = operation_new(OPERATION_DEACTIVATE_ALL, message);
@@ -704,18 +794,286 @@ static int method_rebalance(sd_bus_message *message, void *userdata, sd_bus_erro
         int r;
 
         r = manager_schedule_rebalance(m, /* immediately= */ true);
+        if (r < 0)
+                return r;
         if (r == 0)
                 return sd_bus_reply_method_errorf(message, BUS_ERROR_REBALANCE_NOT_NEEDED, "No home directories need rebalancing.");
+
+        /* Keep a reference to this message, so that we can reply to it once we are done */
+        r = set_ensure_consume(&m->rebalance_queued_method_calls, &bus_message_hash_ops, sd_bus_message_ref(message));
+        if (r < 0)
+                return log_error_errno(r, "Failed to track rebalance bus message: %m");
+        assert(r > 0);
+
+        return 1;
+}
+
+static int method_list_signing_keys(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        r = sd_bus_message_new_method_return(message, &reply);
         if (r < 0)
                 return r;
 
-        /* Keep a reference to this message, so that we can reply to it once we are done */
-        r = set_ensure_put(&m->rebalance_queued_method_calls, &bus_message_hash_ops, message);
+        r = sd_bus_message_open_container(reply, 'a', "(sst)");
         if (r < 0)
-                return log_error_errno(r, "Failed to track rebalance bus message: %m");
+                return r;
 
-        sd_bus_message_ref(message);
-        return 1;
+        /* Add our own key pair first */
+        r = manager_acquire_key_pair(m);
+        if (r < 0)
+                return r;
+
+        _cleanup_free_ char *pem = NULL;
+        r = openssl_pubkey_to_pem(m->private_key, &pem);
+        if (r < 0)
+                return log_error_errno(r, "Failed to convert public key to PEM: %m");
+
+        r = sd_bus_message_append(
+                        reply,
+                        "(sst)",
+                        "local.public",
+                        pem,
+                        UINT64_C(0));
+        if (r < 0)
+                return r;
+
+        /* And then all public keys we recognize */
+        EVP_PKEY *pkey;
+        const char *fn;
+        HASHMAP_FOREACH_KEY(pkey, fn, m->public_keys) {
+                pem = mfree(pem);
+                r = openssl_pubkey_to_pem(pkey, &pem);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to convert public key to PEM: %m");
+
+                r = sd_bus_message_append(
+                                reply,
+                                "(sst)",
+                                fn,
+                                pem,
+                                UINT64_C(0));
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_send(reply);
+}
+
+static int method_get_signing_key(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        const char *fn;
+        r = sd_bus_message_read(message, "s", &fn);
+        if (r < 0)
+                return r;
+
+        /* Make sure the local key is loaded. */
+        r = manager_acquire_key_pair(m);
+        if (r < 0)
+                return r;
+
+        EVP_PKEY *pkey;
+
+        if (streq(fn, "local.public"))
+                pkey = m->private_key;
+        else
+                pkey = hashmap_get(m->public_keys, fn);
+        if (!pkey)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_KEY, "No key with name: %s", fn);
+
+        _cleanup_free_ char *pem = NULL;
+        r = openssl_pubkey_to_pem(pkey, &pem);
+        if (r < 0)
+                return log_error_errno(r, "Failed to convert public key to PEM: %m");
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        r = sd_bus_message_new_method_return(message, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(
+                        reply,
+                        "st",
+                        pem,
+                        UINT64_C(0));
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_send(reply);
+}
+
+static bool valid_public_key_name(const char *fn) {
+        assert(fn);
+
+        /* Checks if the specified name is valid to export, i.e. is a filename, ends in ".public". */
+
+        if (!filename_is_valid(fn))
+                return false;
+
+        const char *e = endswith(fn, ".public");
+        if (!e)
+                return false;
+
+        return e != fn;
+}
+
+static bool manager_has_public_key(Manager *m, EVP_PKEY *needle) {
+        int r;
+
+        assert(m);
+
+        EVP_PKEY *pkey;
+        HASHMAP_FOREACH(pkey, m->public_keys) {
+                r = EVP_PKEY_eq(pkey, needle);
+                if (r > 0)
+                        return true;
+
+                /* EVP_PKEY_eq() returns -1 and -2 too under some conditions, which we'll all treat as "not the same" */
+        }
+
+        r = EVP_PKEY_eq(m->private_key, needle);
+        if (r > 0)
+                return true;
+
+        return false;
+}
+
+static int method_add_signing_key(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        const char *fn, *pem;
+        uint64_t flags;
+        r = sd_bus_message_read(message, "sst", &fn, &pem, &flags);
+        if (r < 0)
+                return r;
+
+        if (flags != 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Flags parameter must be zero.");
+        if (!valid_public_key_name(fn))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key name not valid: %s", fn);
+        if (streq(fn, "local.public"))
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Refusing to write local public key.");
+
+        if (hashmap_contains(m->public_keys, fn))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key name already exists: %s", fn);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        "org.freedesktop.home1.manage-signing-keys",
+                        /* details= */ NULL,
+                        &m->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        _cleanup_(EVP_PKEY_freep) EVP_PKEY *pkey = NULL;
+        r = openssl_pubkey_from_pem(pem, /* pem_size= */ SIZE_MAX, &pkey);
+        if (r == -EIO)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key invalid: %s", fn);
+        if (r < 0)
+                return r;
+
+        /* Make sure the local key is loaded before can detect conflicts */
+        r = manager_acquire_key_pair(m);
+        if (r < 0)
+                return r;
+
+        if (manager_has_public_key(m, pkey))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key already exists: %s", fn);
+
+        _cleanup_free_ char *pem_reformatted = NULL;
+        r = openssl_pubkey_to_pem(pkey, &pem_reformatted);
+        if (r < 0)
+                return log_error_errno(r, "Failed to convert public key to PEM: %m");
+
+        _cleanup_free_ char *fn_copy = strdup(fn);
+        if (!fn_copy)
+                return log_oom();
+
+        _cleanup_free_ char *p = path_join("/var/lib/systemd/home/", fn);
+        if (!p)
+                return log_oom();
+
+        r = write_string_file(p, pem_reformatted, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_MODE_0444);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write public key PEM to '%s': %m", p);
+
+        r = hashmap_ensure_put(&m->public_keys, &public_key_hash_ops, fn_copy, pkey);
+        if (r < 0) {
+                (void) unlink(p);
+                return log_error_errno(r, "Failed to add public key to set: %m");
+        }
+
+        TAKE_PTR(fn_copy);
+        TAKE_PTR(pkey);
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+static int method_remove_signing_key(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        const char *fn;
+        uint64_t flags;
+        r = sd_bus_message_read(message, "st", &fn, &flags);
+        if (r < 0)
+                return r;
+
+        if (flags != 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Flags parameter must be zero.");
+
+        if (!valid_public_key_name(fn))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key name not valid: %s", fn);
+
+        if (streq(fn, "local.public"))
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Refusing to remove local key.");
+
+        if (!hashmap_contains(m->public_keys, fn))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Public key name does not exist: %s", fn);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        "org.freedesktop.home1.manage-signing-keys",
+                        /* details= */ NULL,
+                        &m->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        _cleanup_free_ char *p = path_join("/var/lib/systemd/home/", fn);
+        if (!p)
+                return log_oom();
+
+        if (unlink(p) < 0)
+                return log_error_errno(errno, "Failed to remove '%s': %m", p);
+
+        _cleanup_(EVP_PKEY_freep) EVP_PKEY *pkey = NULL;
+        _cleanup_free_ char *fn_free = NULL;
+        pkey = ASSERT_PTR(hashmap_remove2(m->public_keys, fn, (void**) &fn_free));
+
+        return sd_bus_reply_method_return(message, NULL);
 }
 
 static const sd_bus_vtable manager_vtable[] = {
@@ -784,6 +1142,11 @@ static const sd_bus_vtable manager_vtable[] = {
                                 SD_BUS_ARGS("s", user_record),
                                 SD_BUS_NO_RESULT,
                                 method_register_home,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("AdoptHome",
+                                SD_BUS_ARGS("s", image_path, "t", flags),
+                                SD_BUS_NO_RESULT,
+                                method_adopt_home,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
 
         /* Remove the JSON record from homed, but don't remove actual $HOME  */
@@ -898,6 +1261,27 @@ static const sd_bus_vtable manager_vtable[] = {
                                 SD_BUS_NO_RESULT,
                                 method_release_home,
                                 0),
+
+        SD_BUS_METHOD_WITH_ARGS("ListSigningKeys",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("a(sst)", keys),
+                                method_list_signing_keys,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetSigningKey",
+                                SD_BUS_RESULT("s", name),
+                                SD_BUS_RESULT("s", der, "t", flags),
+                                method_get_signing_key,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("AddSigningKey",
+                                SD_BUS_RESULT("s", name, "s", pem, "t", flags),
+                                SD_BUS_NO_RESULT,
+                                method_add_signing_key,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("RemoveSigningKey",
+                                SD_BUS_RESULT("s", name, "t", flags),
+                                SD_BUS_NO_RESULT,
+                                method_remove_signing_key,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
 
         /* An operation that acts on all homes that allow it */
         SD_BUS_METHOD("LockAllHomes", NULL, NULL, method_lock_all_homes, 0),

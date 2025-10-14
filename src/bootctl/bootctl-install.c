@@ -1,5 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
+#include <unistd.h>
+
+#include "alloc-util.h"
+#include "boot-entry.h"
 #include "bootctl.h"
 #include "bootctl-install.h"
 #include "bootctl-random-seed.h"
@@ -9,7 +14,9 @@
 #include "dirent-util.h"
 #include "efi-api.h"
 #include "efi-fundamental.h"
+#include "efivars.h"
 #include "env-file.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -17,13 +24,17 @@
 #include "id128-util.h"
 #include "io-util.h"
 #include "kernel-config.h"
-#include "os-util.h"
+#include "log.h"
+#include "openssl-util.h"
 #include "parse-argument.h"
 #include "path-util.h"
 #include "pe-binary.h"
 #include "rm-rf.h"
 #include "stat-util.h"
+#include "string-util.h"
+#include "strv.h"
 #include "sync-util.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "utf8.h"
@@ -332,7 +343,7 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
         assert(esp_path);
         assert(source_path);
 
-        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -344,7 +355,7 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
                 if (!endswith_no_case(de->d_name, ".efi"))
                         continue;
 
-                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, /* xopen_flags= */ 0, /* mode= */ 0);
+                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, XO_REGULAR, /* mode= */ 0);
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to open \"%s/%s\" for reading: %m", p, de->d_name);
 
@@ -385,10 +396,10 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!p)
                 return log_oom();
 
-        r = chase(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+        r = chase(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &source_path, NULL);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+                r = chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &source_path, NULL);
         if (r < 0)
                 return log_error_errno(r,
                                        "Failed to resolve path %s%s%s: %m",
@@ -400,7 +411,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!q)
                 return log_oom();
 
-        r = chase(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &dest_path, NULL);
+        r = chase(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT|CHASE_TRIGGER_AUTOFS, &dest_path, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", q, esp_path);
 
@@ -417,7 +428,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
                 v = strjoina("/EFI/BOOT/BOOT", e);
                 ascii_strupper(strrchr(v, '/') + 1);
 
-                r = chase(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &default_dest_path, NULL);
+                r = chase(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT|CHASE_TRIGGER_AUTOFS, &default_dest_path, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", v, esp_path);
 
@@ -438,11 +449,11 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
         _cleanup_free_ char *path = NULL;
         int r;
 
-        r = chase_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+        r = chase_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &path, &d);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
-        if (r == -ENOENT && arg_graceful) {
+                r = chase_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &path, &d);
+        if (r == -ENOENT && arg_graceful() != ARG_GRACEFUL_NO) {
                 log_debug("Source directory does not exist, ignoring.");
                 return 0;
         }
@@ -470,7 +481,7 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
                 k = copy_one_file(esp_path, de->d_name, force);
                 /* Don't propagate an error code if no update necessary, installed version already equal or
                  * newer version, or other boot loader in place. */
-                if (arg_graceful && IN_SET(k, -ESTALE, -ESRCH))
+                if (arg_graceful() != ARG_GRACEFUL_NO && IN_SET(k, -ESTALE, -ESRCH))
                         continue;
                 RET_GATHER(r, k);
         }
@@ -623,7 +634,7 @@ static int install_secure_boot_auto_enroll(const char *esp, X509 *certificate, E
         if (r < 0)
                 return r;
 
-        _cleanup_close_ int keys_fd = chase_and_open("loader/keys/auto", esp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY, NULL);
+        _cleanup_close_ int keys_fd = chase_and_open("loader/keys/auto", esp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, O_DIRECTORY, NULL);
         if (keys_fd < 0)
                 return log_error_errno(keys_fd, "Failed to chase loader/keys/auto in the ESP: %m");
 
@@ -688,7 +699,7 @@ static int install_secure_boot_auto_enroll(const char *esp, X509 *certificate, E
                                                ERR_error_string(ERR_get_error(), NULL));
 
                 _cleanup_free_ uint8_t *sig = NULL;
-                int sigsz = i2d_PKCS7_SIGNED(p7->d.sign, &sig);
+                int sigsz = i2d_PKCS7(p7, &sig);
                 if (sigsz < 0)
                         return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to convert PKCS7 signature to DER: %s",
                                                ERR_error_string(ERR_get_error(), NULL));
@@ -870,22 +881,11 @@ static int install_variables(
         uint16_t slot;
         int r;
 
-        if (arg_root) {
-                log_info("Acting on %s, skipping EFI variable setup.",
-                         arg_image ? "image" : "root directory");
-                return 0;
-        }
-
-        if (!is_efi_boot()) {
-                log_warning("Not booted with EFI, skipping EFI variable setup.");
-                return 0;
-        }
-
-        r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
+        r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, F_OK, NULL);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
-                return log_error_errno(r, "Cannot access \"%s/%s\": %m", esp_path, path);
+                return log_error_errno(r, "Cannot access \"%s/%s\": %m", esp_path, skip_leading_slash(path));
 
         r = find_slot(uuid, path, &slot);
         if (r < 0) {
@@ -940,7 +940,7 @@ static int are_we_installed(const char *esp_path) {
         if (!p)
                 return log_oom();
 
-        log_debug("Checking whether %s contains any files%s", p, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+        log_debug("Checking whether %s contains any files%s", p, glyph(GLYPH_ELLIPSIS));
         r = dir_is_empty(p, /* ignore_hidden_or_backup= */ false);
         if (r < 0 && r != -ENOENT)
                 return log_error_errno(r, "Failed to check whether %s contains any files: %m", p);
@@ -961,7 +961,9 @@ int verb_install(int argc, char *argv[], void *userdata) {
         /* Invoked for both "update" and "install" */
 
         install = streq(argv[0], "install");
-        graceful = !install && arg_graceful; /* support graceful mode for updates */
+
+        /* Support graceful mode only for updates, unless forcibly enabled in chroot environments */
+        graceful = arg_graceful() == ARG_GRACEFUL_FORCE || (!install && arg_graceful() != ARG_GRACEFUL_NO);
 
         if (arg_secure_boot_auto_enroll) {
                 if (arg_certificate_source_type == OPENSSL_CERTIFICATE_SOURCE_FILE) {
@@ -989,9 +991,12 @@ int verb_install(int argc, char *argv[], void *userdata) {
                                 arg_private_key_source,
                                 arg_private_key,
                                 &(AskPasswordRequest) {
+                                        .tty_fd = -EBADF,
                                         .id = "bootctl-private-key-pin",
                                         .keyring = arg_private_key,
                                         .credential = "bootctl.private-key-pin",
+                                        .until = USEC_INFINITY,
+                                        .hup_fd = -EBADF,
                                 },
                                 &private_key,
                                 &ui);
@@ -1077,7 +1082,7 @@ int verb_install(int argc, char *argv[], void *userdata) {
 
         (void) sync_everything();
 
-        if (!arg_touch_variables)
+        if (!touch_variables())
                 return 0;
 
         if (arg_arch_all) {
@@ -1094,7 +1099,7 @@ static int remove_boot_efi(const char *esp_path) {
         _cleanup_free_ char *p = NULL;
         int r, c = 0;
 
-        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -1107,7 +1112,7 @@ static int remove_boot_efi(const char *esp_path) {
                 if (!endswith_no_case(de->d_name, ".efi"))
                         continue;
 
-                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, /* xopen_flags= */ 0, /* mode= */ 0);
+                fd = xopenat_full(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY|O_NOFOLLOW, XO_REGULAR, /* mode= */ 0);
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to open \"%s/%s\" for reading: %m", p, de->d_name);
 
@@ -1138,9 +1143,10 @@ static int remove_boot_efi(const char *esp_path) {
 }
 
 static int rmdir_one(const char *prefix, const char *suffix) {
-        const char *p;
+        _cleanup_free_ char *p = path_join(prefix, suffix);
+        if (!p)
+                return log_oom();
 
-        p = prefix_roota(prefix, suffix);
         if (rmdir(p) < 0) {
                 bool ignore = IN_SET(errno, ENOENT, ENOTEMPTY);
 
@@ -1180,10 +1186,12 @@ static int remove_entry_directory(const char *root) {
 }
 
 static int remove_binaries(const char *esp_path) {
-        const char *p;
         int r, q;
 
-        p = prefix_roota(esp_path, "/EFI/systemd");
+        _cleanup_free_ char *p = path_join(esp_path, "/EFI/systemd");
+        if (!p)
+                return log_oom();
+
         r = rm_rf(p, REMOVE_ROOT|REMOVE_PHYSICAL);
 
         q = remove_boot_efi(esp_path);
@@ -1194,12 +1202,13 @@ static int remove_binaries(const char *esp_path) {
 }
 
 static int remove_file(const char *root, const char *file) {
-        const char *p;
-
         assert(root);
         assert(file);
 
-        p = prefix_roota(root, file);
+        _cleanup_free_ char *p = path_join(root, file);
+        if (!p)
+                return log_oom();
+
         if (unlink(p) < 0) {
                 log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
                                "Failed to unlink file \"%s\": %m", p);
@@ -1214,9 +1223,6 @@ static int remove_file(const char *root, const char *file) {
 static int remove_variables(sd_id128_t uuid, const char *path, bool in_order) {
         uint16_t slot;
         int r;
-
-        if (arg_root || !is_efi_boot())
-                return 0;
 
         r = find_slot(uuid, path, &slot);
         if (r != 1)
@@ -1242,6 +1248,7 @@ static int remove_loader_variables(void) {
                        EFI_LOADER_VARIABLE_STR("LoaderConfigTimeout"),
                        EFI_LOADER_VARIABLE_STR("LoaderConfigTimeoutOneShot"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryDefault"),
+                       EFI_LOADER_VARIABLE_STR("LoaderEntrySysFail"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryLastBooted"),
                        EFI_LOADER_VARIABLE_STR("LoaderEntryOneShot"),
                        EFI_LOADER_VARIABLE_STR("LoaderSystemToken")) {
@@ -1336,7 +1343,7 @@ int verb_remove(int argc, char *argv[], void *userdata) {
 
         (void) sync_everything();
 
-        if (!arg_touch_variables)
+        if (!touch_variables())
                 return r;
 
         if (arg_arch_all) {
@@ -1360,7 +1367,7 @@ int verb_is_installed(int argc, char *argv[], void *userdata) {
         int r;
 
         r = acquire_esp(/* unprivileged_mode= */ false,
-                        /* graceful= */ arg_graceful,
+                        /* graceful= */ arg_graceful() != ARG_GRACEFUL_NO,
                         NULL, NULL, NULL, NULL, NULL);
         if (r < 0)
                 return r;

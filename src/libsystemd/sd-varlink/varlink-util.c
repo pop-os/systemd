@@ -2,8 +2,10 @@
 
 #include "alloc-util.h"
 #include "errno-util.h"
+#include "log.h"
+#include "pidref.h"
+#include "set.h"
 #include "string-util.h"
-#include "varlink-internal.h"
 #include "varlink-util.h"
 #include "version.h"
 
@@ -19,7 +21,7 @@ int varlink_get_peer_pidref(sd_varlink *v, PidRef *ret) {
 
         int pidfd = sd_varlink_get_peer_pidfd(v);
         if (pidfd < 0) {
-                if (!ERRNO_IS_NEG_NOT_SUPPORTED(pidfd) && pidfd != -EINVAL)
+                if (!ERRNO_IS_NEG_IOCTL_NOT_SUPPORTED(pidfd))
                         return pidfd;
 
                 pid_t pid;
@@ -57,9 +59,13 @@ int varlink_call_and_log(
         r = sd_varlink_call(v, method, parameters, &reply, &error_id);
         if (r < 0)
                 return log_error_errno(r, "Failed to issue %s() varlink call: %m", method);
-        if (error_id)
-                return log_error_errno(sd_varlink_error_to_errno(error_id, reply),
-                                         "Failed to issue %s() varlink call: %s", method, error_id);
+        if (error_id) {
+                r = sd_varlink_error_to_errno(error_id, reply); /* If this is a system errno style error, output it with %m */
+                if (r != -EBADR)
+                        return log_error_errno(r, "Failed to issue %s() varlink call: %m", method);
+
+                return log_error_errno(r, "Failed to issue %s() varlink call: %s", method, error_id);
+        }
 
         if (ret_parameters)
                 *ret_parameters = TAKE_PTR(reply);
@@ -89,6 +95,19 @@ int varlink_callb_and_log(
         return varlink_call_and_log(v, method, parameters, ret_parameters);
 }
 
+int varlink_many_notify(Set *s, sd_json_variant *parameters) {
+        sd_varlink *link;
+        int r = 1;
+
+        if (set_isempty(s))
+                return 0;
+
+        SET_FOREACH(link, s)
+                RET_GATHER(r, sd_varlink_notify(link, parameters));
+
+        return r;
+}
+
 int varlink_many_notifyb(Set *s, ...) {
         int r;
 
@@ -105,12 +124,7 @@ int varlink_many_notifyb(Set *s, ...) {
         if (r < 0)
                 return r;
 
-        r = 1;
-        sd_varlink *link;
-        SET_FOREACH(link, s)
-                RET_GATHER(r, sd_varlink_notify(link, parameters));
-
-        return r;
+        return varlink_many_notify(s, parameters);
 }
 
 int varlink_many_reply(Set *s, sd_json_variant *parameters) {
@@ -160,7 +174,7 @@ int varlink_server_new(
         _cleanup_(sd_varlink_server_unrefp) sd_varlink_server *s = NULL;
         int r;
 
-        r = sd_varlink_server_new(&s, flags);
+        r = sd_varlink_server_new(&s, flags|SD_VARLINK_SERVER_FD_PASSING_INPUT_STRICT);
         if (r < 0)
                 return log_debug_errno(r, "Failed to allocate varlink server object: %m");
 
@@ -171,5 +185,21 @@ int varlink_server_new(
         sd_varlink_server_set_userdata(s, userdata);
 
         *ret = TAKE_PTR(s);
+        return 0;
+}
+
+int varlink_check_privileged_peer(sd_varlink *vl) {
+        int r;
+
+        assert(vl);
+
+        uid_t uid;
+        r = sd_varlink_get_peer_uid(vl, &uid);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to get peer UID: %m");
+
+        if (uid != 0)
+                return sd_varlink_error(vl, SD_VARLINK_ERROR_PERMISSION_DENIED, /* parameters= */ NULL);
+
         return 0;
 }

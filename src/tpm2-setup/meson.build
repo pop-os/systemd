@@ -13,6 +13,15 @@ executables += [
                         libopenssl,
                 ],
         },
+        libexec_template + {
+                'name' : 'systemd-tpm2-clear',
+                'sources' : files('tpm2-clear.c'),
+                'conditions' : [
+                        'ENABLE_BOOTLOADER',
+                        'HAVE_OPENSSL',
+                        'HAVE_TPM2',
+                ],
+        },
         generator_template + {
                 'name' : 'systemd-tpm2-generator',
                 'sources' : files('tpm2-generator.c'),

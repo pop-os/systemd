@@ -1,26 +1,21 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
-#if WANT_LINUX_FS_H
 #include <linux/fs.h>
-#endif
-#include <linux/magic.h>
 #include <sys/ioctl.h>
+#include <sys/kcmp.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "dirent-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "fs-util.h"
-#include "io-util.h"
-#include "macro.h"
-#include "missing_fcntl.h"
-#include "missing_fs.h"
-#include "missing_syscall.h"
+#include "log.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -29,7 +24,7 @@
 #include "sort-util.h"
 #include "stat-util.h"
 #include "stdio-util.h"
-#include "tmpfile-util.h"
+#include "string-util.h"
 
 /* The maximum number of iterations in the loop to close descriptors in the fallback case
  * when /proc/self/fd/ is inaccessible. */
@@ -609,24 +604,6 @@ int same_fd(int a, int b) {
         return fa == fb;
 }
 
-void cmsg_close_all(struct msghdr *mh) {
-        assert(mh);
-
-        struct cmsghdr *cmsg;
-        CMSG_FOREACH(cmsg, mh) {
-                if (cmsg->cmsg_level != SOL_SOCKET)
-                        continue;
-
-                if (cmsg->cmsg_type == SCM_RIGHTS)
-                        close_many(CMSG_TYPED_DATA(cmsg, int),
-                                   (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int));
-                else if (cmsg->cmsg_type == SCM_PIDFD) {
-                        assert(cmsg->cmsg_len == CMSG_LEN(sizeof(int)));
-                        safe_close(*CMSG_TYPED_DATA(cmsg, int));
-                }
-        }
-}
-
 bool fdname_is_valid(const char *s) {
         const char *p;
 
@@ -992,7 +969,7 @@ int fd_verify_safe_flags_full(int fd, int extra_flags) {
          *             and since we refuse O_PATH it should be safe.
          *
          * RAW_O_LARGEFILE: glibc secretly sets this and neglects to hide it from us if we call fcntl.
-         *                  See comment in missing_fcntl.h for more details about this.
+         *                  See comment in src/basic/include/fcntl.h for more details about this.
          *
          * If 'extra_flags' is specified as non-zero the included flags are also allowed.
          */
@@ -1003,16 +980,16 @@ int fd_verify_safe_flags_full(int fd, int extra_flags) {
         if (flags < 0)
                 return -errno;
 
-        unexpected_flags = flags & ~(O_ACCMODE|O_NOFOLLOW|RAW_O_LARGEFILE|extra_flags);
+        unexpected_flags = flags & ~(O_ACCMODE_STRICT|O_NOFOLLOW|RAW_O_LARGEFILE|extra_flags);
         if (unexpected_flags != 0)
                 return log_debug_errno(SYNTHETIC_ERRNO(EREMOTEIO),
                                        "Unexpected flags set for extrinsic fd: 0%o",
                                        (unsigned) unexpected_flags);
 
-        return flags & (O_ACCMODE | extra_flags); /* return the flags variable, but remove the noise */
+        return flags & (O_ACCMODE_STRICT | extra_flags); /* return the flags variable, but remove the noise */
 }
 
-int read_nr_open(void) {
+unsigned read_nr_open(void) {
         _cleanup_free_ char *nr_open = NULL;
         int r;
 
@@ -1023,9 +1000,9 @@ int read_nr_open(void) {
         if (r < 0)
                 log_debug_errno(r, "Failed to read /proc/sys/fs/nr_open, ignoring: %m");
         else {
-                int v;
+                unsigned v;
 
-                r = safe_atoi(nr_open, &v);
+                r = safe_atou(nr_open, &v);
                 if (r < 0)
                         log_debug_errno(r, "Failed to parse /proc/sys/fs/nr_open value '%s', ignoring: %m", nr_open);
                 else
@@ -1033,7 +1010,7 @@ int read_nr_open(void) {
         }
 
         /* If we fail, fall back to the hard-coded kernel limit of 1024 * 1024. */
-        return 1024 * 1024;
+        return NR_OPEN_DEFAULT;
 }
 
 int fd_get_diskseq(int fd, uint64_t *ret) {
@@ -1086,62 +1063,62 @@ int path_is_root_at(int dir_fd, const char *path) {
 }
 
 int fds_are_same_mount(int fd1, int fd2) {
-        STRUCT_NEW_STATX_DEFINE(st1);
-        STRUCT_NEW_STATX_DEFINE(st2);
+        struct statx sx1 = {}, sx2 = {}; /* explicitly initialize the struct to make msan silent. */
         int r;
 
         assert(fd1 >= 0);
         assert(fd2 >= 0);
 
-        r = statx_fallback(fd1, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &st1.sx);
-        if (r < 0)
-                return r;
+        if (statx(fd1, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sx1) < 0)
+                return -errno;
 
-        r = statx_fallback(fd2, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &st2.sx);
-        if (r < 0)
-                return r;
+        if (statx(fd2, "", AT_EMPTY_PATH, STATX_TYPE|STATX_INO|STATX_MNT_ID, &sx2) < 0)
+                return -errno;
 
         /* First, compare inode. If these are different, the fd does not point to the root directory "/". */
-        if (!statx_inode_same(&st1.sx, &st2.sx))
+        if (!statx_inode_same(&sx1, &sx2))
                 return false;
 
         /* Note, statx() does not provide the mount ID and path_get_mnt_id_at() does not work when an old
          * kernel is used. In that case, let's assume that we do not have such spurious mount points in an
          * early boot stage, and silently skip the following check. */
 
-        if (!FLAGS_SET(st1.nsx.stx_mask, STATX_MNT_ID)) {
+        if (!FLAGS_SET(sx1.stx_mask, STATX_MNT_ID)) {
                 int mntid;
 
                 r = path_get_mnt_id_at_fallback(fd1, "", &mntid);
-                if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
-                        return true; /* skip the mount ID check */
                 if (r < 0)
                         return r;
                 assert(mntid >= 0);
 
-                st1.nsx.stx_mnt_id = mntid;
-                st1.nsx.stx_mask |= STATX_MNT_ID;
+                sx1.stx_mnt_id = mntid;
+                sx1.stx_mask |= STATX_MNT_ID;
         }
 
-        if (!FLAGS_SET(st2.nsx.stx_mask, STATX_MNT_ID)) {
+        if (!FLAGS_SET(sx2.stx_mask, STATX_MNT_ID)) {
                 int mntid;
 
                 r = path_get_mnt_id_at_fallback(fd2, "", &mntid);
-                if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
-                        return true; /* skip the mount ID check */
                 if (r < 0)
                         return r;
                 assert(mntid >= 0);
 
-                st2.nsx.stx_mnt_id = mntid;
-                st2.nsx.stx_mask |= STATX_MNT_ID;
+                sx2.stx_mnt_id = mntid;
+                sx2.stx_mask |= STATX_MNT_ID;
         }
 
-        return statx_mount_same(&st1.nsx, &st2.nsx);
+        return statx_mount_same(&sx1, &sx2);
+}
+
+char* format_proc_fd_path(char buf[static PROC_FD_PATH_MAX], int fd) {
+        assert(buf);
+        assert(fd >= 0);
+        assert_se(snprintf_ok(buf, PROC_FD_PATH_MAX, "/proc/self/fd/%i", fd));
+        return buf;
 }
 
 const char* accmode_to_string(int flags) {
-        switch (flags & O_ACCMODE) {
+        switch (flags & O_ACCMODE_STRICT) {
         case O_RDONLY:
                 return "ro";
         case O_WRONLY:

@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <sys/sysmacros.h>
+
+#include "alloc-util.h"
 #include "device-util.h"
 #include "errno-util.h"
 #include "parse-util.h"
@@ -8,6 +11,7 @@
 #include "udev-event.h"
 #include "udev-format.h"
 #include "udev-util.h"
+#include "udev-worker.h"
 
 typedef enum {
         FORMAT_SUBST_DEVNODE,
@@ -57,7 +61,7 @@ static const struct subst_map_entry map[] = {
            { .name = "sys",      .fmt = 'S', .type = FORMAT_SUBST_SYS           },
 };
 
-static const char *format_type_to_string(FormatSubstitutionType t) {
+static const char* format_type_to_string(FormatSubstitutionType t) {
         FOREACH_ELEMENT(entry, map)
                 if (entry->type == t)
                         return entry->name;

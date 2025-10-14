@@ -1,22 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include <errno.h>
 #include <getopt.h>
-#include <stddef.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "creds-util.h"
+#include "errno-util.h"
+#include "log.h"
+#include "parse-argument.h"
 #include "parse-util.h"
-#include "process-util.h"
 #include "static-destruct.h"
 #include "strv.h"
 #include "syslog-util.h"
 #include "time-util.h"
-#include "udevadm.h"
 #include "udev-ctrl.h"
+#include "udev-varlink.h"
+#include "udevadm.h"
+#include "varlink-util.h"
 #include "virt.h"
 
 static char **arg_env = NULL;
@@ -27,6 +27,8 @@ static bool arg_exit = false;
 static int arg_max_children = -1;
 static int arg_log_level = -1;
 static int arg_start_exec_queue = -1;
+static int arg_trace = -1;
+static bool arg_revert = false;
 static bool arg_load_credentials = false;
 
 STATIC_DESTRUCTOR_REGISTER(arg_env, strv_freep);
@@ -39,7 +41,9 @@ static bool arg_has_control_commands(void) {
                 arg_reload ||
                 !strv_isempty(arg_env) ||
                 arg_max_children >= 0 ||
-                arg_ping;
+                arg_ping ||
+                arg_trace >= 0 ||
+                arg_revert;
 }
 
 static int help(void) {
@@ -55,6 +59,8 @@ static int help(void) {
                "  -p --property=KEY=VALUE  Set a global property for all events\n"
                "  -m --children-max=N      Maximum number of children\n"
                "     --ping                Wait for udev to respond to a ping message\n"
+               "     --trace=BOOL          Enable/disable trace logging\n"
+               "     --revert              Revert previously set configurations\n"
                "  -t --timeout=SECONDS     Maximum time to block for a reply\n"
                "     --load-credentials    Load udev rules from credentials\n",
                program_invocation_short_name);
@@ -65,6 +71,8 @@ static int help(void) {
 static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_PING = 0x100,
+                ARG_TRACE,
+                ARG_REVERT,
                 ARG_LOAD_CREDENTIALS,
         };
 
@@ -80,6 +88,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "env",              required_argument, NULL, 'p'                  }, /* alias for -p */
                 { "children-max",     required_argument, NULL, 'm'                  },
                 { "ping",             no_argument,       NULL, ARG_PING             },
+                { "trace",            required_argument, NULL, ARG_TRACE            },
+                { "revert",           no_argument,       NULL, ARG_REVERT           },
                 { "timeout",          required_argument, NULL, 't'                  },
                 { "load-credentials", no_argument,       NULL, ARG_LOAD_CREDENTIALS },
                 { "version",          no_argument,       NULL, 'V'                  },
@@ -140,6 +150,18 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_ping = true;
                         break;
 
+                case ARG_TRACE:
+                        r = parse_boolean_argument("--trace=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+
+                        arg_trace = r;
+                        break;
+
+                case ARG_REVERT:
+                        arg_revert = true;
+                        break;
+
                 case 't':
                         r = parse_sec(optarg, &arg_timeout);
                         if (r < 0)
@@ -174,7 +196,7 @@ static int parse_argv(int argc, char *argv[]) {
         return 1;
 }
 
-static int send_control_commands(void) {
+static int send_control_commands_via_ctrl(void) {
         _cleanup_(udev_ctrl_unrefp) UdevCtrl *uctrl = NULL;
         int r;
 
@@ -234,6 +256,77 @@ static int send_control_commands(void) {
         r = udev_ctrl_wait(uctrl, arg_timeout);
         if (r < 0)
                 return log_error_errno(r, "Failed to wait for daemon to reply: %m");
+
+        return 0;
+}
+
+static int send_control_commands(void) {
+        _cleanup_(sd_varlink_flush_close_unrefp) sd_varlink *link = NULL;
+        int r;
+
+        r = udev_varlink_connect(&link, arg_timeout);
+        if (ERRNO_IS_NEG_DISCONNECT(r) || r == -ENOENT) {
+                log_debug_errno(r, "Failed to connect to udev via varlink, falling back to use legacy control socket, ignoring: %m");
+                return send_control_commands_via_ctrl();
+        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to connect to udev via varlink: %m");
+
+        if (arg_exit)
+                return varlink_call_and_log(link, "io.systemd.Udev.Exit", /* parameters = */ NULL, /* reply = */ NULL);
+
+        if (arg_revert) {
+                r = varlink_call_and_log(link, "io.systemd.Udev.Revert", /* parameters = */ NULL, /* reply = */ NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_log_level >= 0) {
+                r = varlink_callbo_and_log(link, "io.systemd.service.SetLogLevel", /* reply = */ NULL,
+                                           SD_JSON_BUILD_PAIR_INTEGER("level", arg_log_level));
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_start_exec_queue >= 0) {
+                r = varlink_call_and_log(link, arg_start_exec_queue ? "io.systemd.Udev.StartExecQueue" : "io.systemd.Udev.StopExecQueue",
+                                         /* parameters = */ NULL, /* reply = */ NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_reload) {
+                r = varlink_call_and_log(link, "io.systemd.service.Reload", /* parameters = */ NULL, /* reply = */ NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        if (!strv_isempty(arg_env)) {
+                r = varlink_callbo_and_log(link, "io.systemd.Udev.SetEnvironment", /* reply = */ NULL,
+                                           SD_JSON_BUILD_PAIR_STRV("assignments", arg_env));
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_max_children >= 0) {
+                r = varlink_callbo_and_log(link, "io.systemd.Udev.SetChildrenMax", /* reply = */ NULL,
+                                           SD_JSON_BUILD_PAIR_UNSIGNED("number", arg_max_children));
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_ping) {
+                r = varlink_call_and_log(link, "io.systemd.service.Ping", /* parameters = */ NULL, /* reply = */ NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_trace >= 0) {
+                r = varlink_callbo_and_log(link, "io.systemd.Udev.SetTrace", /* reply = */ NULL,
+                                           SD_JSON_BUILD_PAIR_BOOLEAN("enable", arg_trace));
+                if (r < 0)
+                        return r;
+        }
 
         return 0;
 }

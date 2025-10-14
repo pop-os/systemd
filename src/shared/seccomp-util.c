@@ -1,31 +1,37 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
+/* This needs to be included before the seccomp headers, otherwise missing syscalls will be defined in this
+ * file and pass the ifdef, but they won't be defined in the seccomp headers so things like
+ * SCMP_SYS(fchmodat2) will resolve as empty and fail the build with older glibc/libseccomp. */
+#include <sys/syscall.h>
 #include <fcntl.h>
 #include <linux/seccomp.h>
-#include <stddef.h>
+#include <sched.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
 
-/* include missing_syscall_def.h earlier to make __SNR_foo mapped to __NR_foo. */
-#include "missing_syscall_def.h"
-#include <seccomp.h>
+#ifdef ARCH_MIPS
+#include <asm/sgidefs.h>
+#endif
 
 #include "af-list.h"
 #include "alloc-util.h"
 #include "env-util.h"
 #include "errno-list.h"
-#include "macro.h"
+#include "log.h"
 #include "namespace-util.h"
 #include "nsflags.h"
 #include "nulstr-util.h"
+#include "parse-util.h"
 #include "process-util.h"
 #include "seccomp-util.h"
 #include "set.h"
 #include "string-util.h"
 #include "strv.h"
+
+#if HAVE_SECCOMP
 
 /* This array will be modified at runtime as seccomp_restrict_archs is called. */
 uint32_t seccomp_local_archs[] = {
@@ -530,6 +536,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "oldlstat\0"
                 "oldstat\0"
                 "open\0"
+                "open_tree\0"
                 "openat\0"
                 "openat2\0"
                 "readlink\0"
@@ -652,7 +659,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "mount\0"
                 "mount_setattr\0"
                 "move_mount\0"
-                "open_tree\0"
+                "open_tree_attr\0"
                 "pivot_root\0"
                 "umount\0"
                 "umount2\0"
@@ -988,7 +995,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .help = "All known syscalls declared in the kernel",
                 .value =
                 "@obsolete\0"
-#include "syscall-list.h"
+#include "syscall-list.inc"
         },
 };
 
@@ -1537,7 +1544,7 @@ int seccomp_protect_syslog(void) {
                                 0);
 
                 if (r < 0) {
-                        log_debug_errno(r, "Failed to add syslog() rule for architecture %s, skipping %m", seccomp_arch_to_string(arch));
+                        log_debug_errno(r, "Failed to add syslog() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
                         continue;
                 }
 
@@ -1545,7 +1552,7 @@ int seccomp_protect_syslog(void) {
                 if (ERRNO_IS_NEG_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
-                        log_debug_errno(r, "Failed to install syslog protection rules for architecture %s, skipping %m",
+                        log_debug_errno(r, "Failed to install syslog protection rules for architecture %s, skipping: %m",
                                         seccomp_arch_to_string(arch));
         }
 
@@ -1600,7 +1607,6 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                         /* These we either know we don't support (i.e. are the ones that do use socketcall()), or we
                          * don't know */
                         supported = false;
-                        break;
                 }
 
                 if (!supported)
@@ -2021,12 +2027,11 @@ int seccomp_restrict_archs(Set *archs) {
         return 0;
 }
 
-int parse_syscall_archs(char **l, Set **ret_archs) {
-        _cleanup_set_free_ Set *archs = NULL;
+int parse_syscall_archs(char **l, Set **archs) {
         int r;
 
         assert(l);
-        assert(ret_archs);
+        assert(archs);
 
         STRV_FOREACH(s, l) {
                 uint32_t a;
@@ -2035,12 +2040,11 @@ int parse_syscall_archs(char **l, Set **ret_archs) {
                 if (r < 0)
                         return -EINVAL;
 
-                r = set_ensure_put(&archs, NULL, UINT32_TO_PTR(a + 1));
+                r = set_ensure_put(archs, NULL, UINT32_TO_PTR(a + 1));
                 if (r < 0)
                         return -ENOMEM;
         }
 
-        *ret_archs = TAKE_PTR(archs);
         return 0;
 }
 
@@ -2526,4 +2530,22 @@ int seccomp_suppress_sync(void) {
         }
 
         return 0;
+}
+
+#endif
+
+bool seccomp_errno_or_action_is_valid(int n) {
+        return n == SECCOMP_ERROR_NUMBER_KILL || errno_is_valid(n);
+}
+
+int seccomp_parse_errno_or_action(const char *p) {
+        if (streq_ptr(p, "kill"))
+                return SECCOMP_ERROR_NUMBER_KILL;
+        return parse_errno(p);
+}
+
+const char* seccomp_errno_or_action_to_string(int num) {
+        if (num == SECCOMP_ERROR_NUMBER_KILL)
+                return "kill";
+        return errno_name_no_fallback(num);
 }

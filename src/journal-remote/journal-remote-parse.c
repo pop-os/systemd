@@ -1,24 +1,25 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include "alloc-util.h"
-#include "fd-util.h"
-#include "journal-remote-parse.h"
-#include "parse-util.h"
-#include "string-util.h"
+#include "sd-event.h"
 
-void source_free(RemoteSource *source) {
+#include "alloc-util.h"
+#include "journal-remote-parse.h"
+#include "log.h"
+
+RemoteSource* source_free(RemoteSource *source) {
         if (!source)
-                return;
+                return NULL;
 
         journal_importer_cleanup(&source->importer);
 
-        log_debug("Writer ref count %u", source->writer->n_ref);
+        log_trace("Writer ref count %u", source->writer->n_ref);
         writer_unref(source->writer);
 
         sd_event_source_unref(source->event);
         sd_event_source_unref(source->buffer_event);
 
-        free(source);
+        free(source->encoding);
+        return mfree(source);
 }
 
 /**

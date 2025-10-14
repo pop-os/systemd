@@ -3,19 +3,21 @@
   Copyright © 2014 Intel Corporation. All rights reserved.
 ***/
 
-#include <arpa/inet.h>
-#include <netinet/icmp6.h>
-#include <linux/if.h>
 #include <linux/if_arp.h>
+#include <linux/rtnetlink.h>
+#include <netinet/icmp6.h>
 
 #include "sd-ndisc.h"
 
+#include "conf-parser.h"
+#include "errno-util.h"
 #include "event-util.h"
-#include "missing_network.h"
+#include "missing-network.h"
 #include "ndisc-router-internal.h"
-#include "networkd-address-generation.h"
 #include "networkd-address.h"
+#include "networkd-address-generation.h"
 #include "networkd-dhcp6.h"
+#include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-ndisc.h"
 #include "networkd-nexthop.h"
@@ -23,7 +25,10 @@
 #include "networkd-route.h"
 #include "networkd-state-file.h"
 #include "networkd-sysctl.h"
-#include "sort-util.h"
+#include "ordered-set.h"
+#include "set.h"
+#include "siphash24.h"
+#include "socket-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -41,6 +46,10 @@
 
 static int ndisc_drop_outdated(Link *link, const struct in6_addr *router, usec_t timestamp_usec);
 
+char* ndisc_dnssl_domain(const NDiscDNSSL *n) {
+        return ((char*) n) + ALIGN(sizeof(NDiscDNSSL));
+}
+
 bool link_ndisc_enabled(Link *link) {
         assert(link);
 
@@ -56,7 +65,10 @@ bool link_ndisc_enabled(Link *link) {
         if (!link->network)
                 return false;
 
-        if (!link_may_have_ipv6ll(link, /* check_multicast = */ true))
+        if (!link_multicast_enabled(link))
+                return false;
+
+        if (!link_ipv6ll_enabled_harder(link))
                 return false;
 
         /* Honor explicitly specified value. */
@@ -89,11 +101,11 @@ void network_adjust_ndisc(Network *network) {
         /* When RouterAllowList=, PrefixAllowList= or RouteAllowList= are specified, then
          * RouterDenyList=, PrefixDenyList= or RouteDenyList= are ignored, respectively. */
         if (!set_isempty(network->ndisc_allow_listed_router))
-                network->ndisc_deny_listed_router = set_free_free(network->ndisc_deny_listed_router);
+                network->ndisc_deny_listed_router = set_free(network->ndisc_deny_listed_router);
         if (!set_isempty(network->ndisc_allow_listed_prefix))
-                network->ndisc_deny_listed_prefix = set_free_free(network->ndisc_deny_listed_prefix);
+                network->ndisc_deny_listed_prefix = set_free(network->ndisc_deny_listed_prefix);
         if (!set_isempty(network->ndisc_allow_listed_route_prefix))
-                network->ndisc_deny_listed_route_prefix = set_free_free(network->ndisc_deny_listed_route_prefix);
+                network->ndisc_deny_listed_route_prefix = set_free(network->ndisc_deny_listed_route_prefix);
 }
 
 static int ndisc_check_ready(Link *link);
@@ -215,7 +227,7 @@ static int ndisc_remove_unused_nexthops(Link *link) {
 
 #define NDISC_NEXTHOP_APP_ID SD_ID128_MAKE(76,d2,0f,1f,76,1e,44,d1,97,3a,52,5c,05,68,b5,0d)
 
-static uint32_t ndisc_generate_nexthop_id(NextHop *nexthop, Link *link, sd_id128_t app_id, uint64_t trial) {
+static uint32_t ndisc_generate_nexthop_id(const NextHop *nexthop, Link *link, sd_id128_t app_id, uint64_t trial) {
         assert(nexthop);
         assert(link);
 
@@ -232,7 +244,7 @@ static uint32_t ndisc_generate_nexthop_id(NextHop *nexthop, Link *link, sd_id128
         return (uint32_t) ((result & 0xffffffff) ^ (result >> 32));
 }
 
-static bool ndisc_nexthop_equal(NextHop *a, NextHop *b) {
+static bool ndisc_nexthop_equal(const NextHop *a, const NextHop *b) {
         assert(a);
         assert(b);
 
@@ -250,9 +262,11 @@ static bool ndisc_nexthop_equal(NextHop *a, NextHop *b) {
         return true;
 }
 
-static bool ndisc_take_nexthop_id(NextHop *nexthop, NextHop *existing, Manager *manager) {
+static bool ndisc_take_nexthop_id(NextHop *nexthop, const NextHop *existing, Manager *manager) {
         assert(nexthop);
+        assert(nexthop->id == 0);
         assert(existing);
+        assert(existing->id > 0);
         assert(manager);
 
         if (!ndisc_nexthop_equal(nexthop, existing))
@@ -300,7 +314,7 @@ static int ndisc_nexthop_find_id(NextHop *nexthop, Link *link) {
         return false;
 }
 
-static int ndisc_nexthop_new(Route *route, Link *link, NextHop **ret) {
+static int ndisc_nexthop_new(const Route *route, Link *link, NextHop **ret) {
         _cleanup_(nexthop_unrefp) NextHop *nexthop = NULL;
         int r;
 
@@ -368,8 +382,9 @@ static int ndisc_nexthop_handler(sd_netlink *rtnl, sd_netlink_message *m, Reques
         int r;
 
         assert(link);
+        assert(nexthop);
 
-        r = nexthop_configure_handler_internal(m, link, "Could not set NDisc route");
+        r = nexthop_configure_handler_internal(m, link, nexthop);
         if (r <= 0)
                 return r;
 
@@ -439,8 +454,9 @@ static int ndisc_route_handler(sd_netlink *rtnl, sd_netlink_message *m, Request 
 
         assert(req);
         assert(link);
+        assert(route);
 
-        r = route_configure_handler_internal(rtnl, m, req, "Could not set NDisc route");
+        r = route_configure_handler_internal(m, req, route);
         if (r <= 0)
                 return r;
 
@@ -513,7 +529,7 @@ static int ndisc_request_route(Route *route, Link *link) {
                         ndisc_set_route_priority(link, route);
 
                         existing = ASSERT_PTR(req->userdata);
-                        if (!route_can_update(existing, route)) {
+                        if (!route_can_update(link->manager, existing, route)) {
                                 if (existing->source == NETWORK_CONFIG_SOURCE_STATIC) {
                                         log_link_debug(link, "Found a pending route request that conflicts with new request based on a received RA, ignoring request.");
                                         return 0;
@@ -534,7 +550,7 @@ static int ndisc_request_route(Route *route, Link *link) {
                         route->pref = pref_original;
                         ndisc_set_route_priority(link, route);
 
-                        if (!route_can_update(existing, route)) {
+                        if (!route_can_update(link->manager, existing, route)) {
                                 if (existing->source == NETWORK_CONFIG_SOURCE_STATIC) {
                                         log_link_debug(link, "Found an existing route that conflicts with new route based on a received RA, ignoring request.");
                                         return 0;
@@ -668,8 +684,9 @@ static int ndisc_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Reques
         int r;
 
         assert(link);
+        assert(address);
 
-        r = address_configure_handler_internal(rtnl, m, link, "Could not set NDisc address");
+        r = address_configure_handler_internal(m, link, address);
         if (r <= 0)
                 return r;
 
@@ -1081,11 +1098,10 @@ static int ndisc_router_drop_default(Link *link, sd_ndisc_router *rt) {
         HASHMAP_FOREACH(route_gw, link->network->routes_by_section) {
                 _cleanup_(route_unrefp) Route *tmp = NULL;
 
-                if (!route_gw->gateway_from_dhcp_or_ra)
+                if (route_gw->source != NETWORK_CONFIG_SOURCE_NDISC)
                         continue;
 
-                if (route_gw->nexthop.family != AF_INET6)
-                        continue;
+                assert(route_gw->nexthop.family == AF_INET6);
 
                 r = route_dup(route_gw, NULL, &tmp);
                 if (r < 0)
@@ -1156,11 +1172,10 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         HASHMAP_FOREACH(route_gw, link->network->routes_by_section) {
                 _cleanup_(route_unrefp) Route *route = NULL;
 
-                if (!route_gw->gateway_from_dhcp_or_ra)
+                if (route_gw->source != NETWORK_CONFIG_SOURCE_NDISC)
                         continue;
 
-                if (route_gw->nexthop.family != AF_INET6)
-                        continue;
+                assert(route_gw->nexthop.family == AF_INET6);
 
                 r = route_dup(route_gw, NULL, &route);
                 if (r < 0)
@@ -1373,7 +1388,7 @@ static int ndisc_router_process_hop_limit(Link *link, sd_ndisc_router *rt) {
          * the first Router Advertisement was received.
          *
          * If the received Cur Hop Limit value is non-zero, the host SHOULD set
-         * its CurHopLimit variable to the received value.*/
+         * its CurHopLimit variable to the received value. */
         if (hop_limit <= 0)
                 return 0;
 
@@ -1847,11 +1862,11 @@ static int ndisc_router_process_rdnss(Link *link, sd_ndisc_router *rt, bool zero
 }
 
 static void ndisc_dnssl_hash_func(const NDiscDNSSL *x, struct siphash *state) {
-        siphash24_compress_string(NDISC_DNSSL_DOMAIN(x), state);
+        siphash24_compress_string(ndisc_dnssl_domain(x), state);
 }
 
 static int ndisc_dnssl_compare_func(const NDiscDNSSL *a, const NDiscDNSSL *b) {
-        return strcmp(NDISC_DNSSL_DOMAIN(a), NDISC_DNSSL_DOMAIN(b));
+        return strcmp(ndisc_dnssl_domain(a), ndisc_dnssl_domain(b));
 }
 
 DEFINE_PRIVATE_HASH_OPS_WITH_KEY_DESTRUCTOR(
@@ -1898,7 +1913,7 @@ static int ndisc_router_process_dnssl(Link *link, sd_ndisc_router *rt, bool zero
                 if (!s)
                         return log_oom();
 
-                strcpy(NDISC_DNSSL_DOMAIN(s), *j);
+                strcpy(ndisc_dnssl_domain(s), *j);
 
                 if (lifetime_usec == 0) {
                         /* The entry is outdated. */

@@ -7,6 +7,7 @@ libefitest = static_library(
         'efitest',
         files(
                 'bcd.c',
+                'chid.c',
                 'efi-string.c',
         ),
         build_by_default : false,
@@ -14,6 +15,7 @@ libefitest = static_library(
                 basic_includes,
                 include_directories('.'),
         ],
+        implicit_include_directories : false,
         dependencies : userspace)
 
 efitest_base = {
@@ -25,6 +27,20 @@ efitest_base = {
 efi_test_template = test_template + efitest_base
 efi_fuzz_template = fuzz_template + efitest_base
 
+if conf.get('ENABLE_UKIFY') == 1
+        test_hwids_section_c = custom_target(
+                input : ['hwids/device1.json', 'hwids/device2.json', 'hwids/device3.json', 'hwids/device4.json'],
+                output : 'test-hwids-section.c',
+                command : [files('generate-hwids-section.py'),
+                           meson.current_source_dir()/'hwids'],
+                capture : true,
+                build_by_default : want_tests != 'false')
+else
+        test_hwids_section_c = []
+endif
+
+generated_sources += test_hwids_section_c
+
 executables += [
         efi_test_template + {
                 'sources' : files('test-bcd.c'),
@@ -34,6 +50,11 @@ executables += [
         efi_test_template + {
                 'sources' : files('test-efi-string.c'),
                 'conditions' : ['ENABLE_BOOTLOADER'],
+        },
+        efi_test_template + {
+                'sources' : files('test-chid-match.c') +
+                            test_hwids_section_c,
+                'conditions' : ['ENABLE_BOOTLOADER', 'ENABLE_UKIFY'],
         },
         efi_fuzz_template + {
                 'sources' : files('fuzz-bcd.c'),
@@ -54,6 +75,12 @@ if conf.get('ENABLE_BOOTLOADER') != 1
 endif
 
 efi_conf = configuration_data()
+
+# import several configs from userspace
+foreach name : ['HAVE_WARNING_ZERO_LENGTH_BOUNDS', 'HAVE_WARNING_ZERO_AS_NULL_POINTER_CONSTANT']
+        efi_conf.set10(name, conf.get(name) == 1)
+endforeach
+
 efi_conf.set10('ENABLE_TPM', get_option('tpm'))
 
 foreach ctype : ['color-normal', 'color-entry', 'color-highlight', 'color-edit']
@@ -66,6 +93,7 @@ endforeach
 efi_conf.set_quoted('PROJECT_VERSION', project_major_version)
 efi_conf.set_quoted('VERSION_TAG', version_tag)
 efi_conf.set('PROJECT_URL', conf.get('PROJECT_URL'))
+efi_conf.set_quoted('RELATIVE_SOURCE_PATH', relative_source_path)
 
 if meson.is_cross_build() and get_option('sbat-distro') == 'auto'
         warning('Auto detection of SBAT information not supported when cross-building, disabling SBAT.')
@@ -118,15 +146,15 @@ if efi_conf.get('SBAT_DISTRO', '') != ''
 endif
 
 configure_file(
-        output : 'efi_config.h',
+        output : 'efi-config.h',
         configuration : efi_conf)
 
 ############################################################
 
 efi_includes = [
-        build_dir_include,
         fundamental_include,
         include_directories('.'),
+        version_include,
 ]
 
 efi_c_args = [
@@ -134,7 +162,7 @@ efi_c_args = [
         '-ffreestanding',
         '-fno-strict-aliasing',
         '-fshort-wchar',
-        '-include', 'efi_config.h',
+        '-include', 'efi-config.h',
 ]
 
 efi_c_args += cc.get_supported_arguments(
@@ -152,7 +180,6 @@ if get_option('mode') == 'developer' and get_option('debug')
 endif
 
 efi_c_ld_args = [
-        '-lgcc',
         '-nostdlib',
         '-static-pie',
         '-Wl,--entry=efi_main',
@@ -175,6 +202,17 @@ efi_c_ld_args = [
         '-z', 'relro',
         '-z', 'separate-code',
 ]
+
+linker_sanity_code = 'void a(void) {}; void _start(void) { a(); }'
+linker_sanity_args = ['-nostdlib', '-Wl,--fatal-warnings']
+
+# Check if libgcc is available and then use it. It is needed for gcc builds
+# and for ia32 builds with clang.
+if cc.links(linker_sanity_code,
+            name : 'libgcc is available',
+            args : [linker_sanity_args, '-lgcc'])
+        efi_c_ld_args += ['-lgcc']
+endif
 
 efi_c_ld_args += cc.get_supported_link_arguments(
         # binutils >= 2.38
@@ -227,8 +265,6 @@ efi_arch_c_ld_args = {
         'x86'    : ['-m32'],
 }
 
-linker_sanity_code = 'void a(void) {}; void _start(void) { a(); }'
-linker_sanity_args = ['-nostdlib', '-Wl,--fatal-warnings']
 if not cc.links(linker_sanity_code,
                 name : 'linker supports -static-pie',
                 args : [linker_sanity_args, '-static-pie'])
@@ -259,12 +295,14 @@ libefi_sources = files(
         'device-path-util.c',
         'devicetree.c',
         'drivers.c',
+        'edid.c',
+        'efi-efivars.c',
+        'efi-firmware.c',
+        'efi-log.c',
         'efi-string.c',
-        'efivars.c',
         'export-vars.c',
         'graphics.c',
         'initrd.c',
-        'log.c',
         'measure.c',
         'part-discovery.c',
         'pe.c',
@@ -272,13 +310,16 @@ libefi_sources = files(
         'secure-boot.c',
         'shim.c',
         'smbios.c',
+        'sysfail.c',
         'ticks.c',
+        'url-discovery.c',
         'util.c',
         'vmm.c',
 )
 
 systemd_boot_sources = files(
         'boot.c',
+        'line-edit.c',
 )
 
 stub_sources = files(
@@ -304,6 +345,11 @@ endif
 if host_machine.cpu_family() in ['aarch64', 'arm', 'x86_64', 'x86']
         systemd_boot_sources += files('bcd.c')
 endif
+
+sources += libefi_sources
+sources += systemd_boot_sources
+sources += stub_sources
+sources += addon_sources
 
 boot_targets = []
 efi_elf_binaries = []
@@ -343,6 +389,7 @@ foreach archspec : efi_archspecs
                 libefi_sources,
                 version_h,
                 include_directories : efi_includes,
+                implicit_include_directories : false,
                 c_args : archspec['c_args'],
                 gnu_symbol_visibility : 'hidden',
                 override_options : efi_override_options,
@@ -350,6 +397,7 @@ foreach archspec : efi_archspecs
 
         kwargs = {
                 'include_directories' : efi_includes,
+                'implicit_include_directories' : false,
                 'c_args' : archspec['c_args'],
                 'link_args' : archspec['link_args'],
                 'gnu_symbol_visibility' : 'hidden',

@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <dlfcn.h>
-#include <stdlib.h>
-
+#include "apparmor-util.h"
 #include "bpf-dlopen.h"
 #include "compress.h"
 #include "cryptsetup-util.h"
@@ -11,7 +9,6 @@
 #include "idn-util.h"
 #include "libarchive-util.h"
 #include "libfido2-util.h"
-#include "macro.h"
 #include "main-func.h"
 #include "module-util.h"
 #include "password-quality-util-passwdqc.h"
@@ -96,6 +93,10 @@ static int run(int argc, char **argv) {
 
 #if HAVE_KMOD
         assert_se(dlopen_libkmod() >= 0);
+#endif
+
+#if HAVE_APPARMOR
+        assert_se(dlopen_libapparmor() >= 0);
 #endif
 
         return 0;

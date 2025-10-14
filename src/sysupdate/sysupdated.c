@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "sd-bus.h"
 #include "sd-json.h"
 
@@ -9,9 +13,11 @@
 #include "bus-get-properties.h"
 #include "bus-label.h"
 #include "bus-log-control-api.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
 #include "bus-util.h"
 #include "common-signal.h"
+#include "constants.h"
 #include "discover-image.h"
 #include "dropin.h"
 #include "env-util.h"
@@ -19,18 +25,24 @@
 #include "event-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "hashmap.h"
 #include "log.h"
 #include "main-func.h"
 #include "memfd-util.h"
-#include "mkdir-label.h"
+#include "notify-recv.h"
 #include "os-util.h"
+#include "parse-util.h"
+#include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
+#include "runtime-scope.h"
 #include "service-util.h"
 #include "signal-util.h"
-#include "socket-util.h"
 #include "string-table.h"
+#include "strv.h"
 #include "sysupdate-util.h"
+#include "utf8.h"
 
 #define FEATURES_DROPIN_NAME "systemd-sysupdate-enabled"
 
@@ -45,7 +57,9 @@ typedef struct Manager {
 
         Hashmap *polkit_registry;
 
-        sd_event_source *notify_event;
+        char *notify_socket_path;
+
+        RuntimeScope runtime_scope; /* For now only RUNTIME_SCOPE_SYSTEM */
 } Manager;
 
 /* Forward declare so that jobs can call it on exit */
@@ -453,7 +467,7 @@ static int job_start(Job *j) {
                 };
                 size_t k = 2;
 
-                if (setenv("NOTIFY_SOCKET", "/run/systemd/sysupdate/notify", /* overwrite= */ 1) < 0) {
+                if (setenv("NOTIFY_SOCKET", j->manager->notify_socket_path, /* overwrite= */ 1) < 0) {
                         log_error_errno(errno, "setenv() failed: %m");
                         _exit(EXIT_FAILURE);
                 }
@@ -874,7 +888,7 @@ static int target_method_list_finish(
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int target_method_list(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -1268,7 +1282,7 @@ static int target_method_get_appstream(sd_bus_message *msg, void *userdata, sd_b
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int target_method_list_features(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -1307,7 +1321,7 @@ static int target_method_list_features(sd_bus_message *msg, void *userdata, sd_b
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int target_method_describe_feature(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -1634,7 +1648,7 @@ static Manager *manager_free(Manager *m) {
         hashmap_free(m->jobs);
 
         m->bus = sd_bus_flush_close_unref(m->bus);
-        sd_event_source_unref(m->notify_event);
+        free(m->notify_socket_path);
         sd_event_unref(m->event);
 
         return mfree(m);
@@ -1643,65 +1657,39 @@ static Manager *manager_free(Manager *m) {
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager *, manager_free);
 
 static int manager_on_notify(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
-        char buf[NOTIFY_BUFFER_MAX+1];
-        struct iovec iovec = {
-                .iov_base = buf,
-                .iov_len = sizeof(buf)-1,
-        };
-        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control;
-        struct msghdr msghdr = {
-                .msg_iov = &iovec,
-                .msg_iovlen = 1,
-                .msg_control = &control,
-                .msg_controllen = sizeof(control),
-        };
-        struct ucred *ucred;
         Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(fd >= 0);
+
+        _cleanup_(pidref_done) PidRef sender_pidref = PIDREF_NULL;
+        _cleanup_free_ char *buf = NULL;
+        r = notify_recv(fd, &buf, /* ret_ucred= */ NULL, &sender_pidref);
+        if (r == -EAGAIN)
+                return 0;
+        if (r < 0)
+                return r;
+
         Job *j;
-        ssize_t n;
-        char *version, *progress, *errno_str, *ready;
-
-        n = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
-        if (ERRNO_IS_NEG_TRANSIENT(n))
-                return 0;
-        if (n == -ECHRNG) {
-                log_warning_errno(n, "Got message with truncated control data (unexpected fds sent?), ignoring.");
-                return 0;
-        }
-        if (n == -EXFULL) {
-                log_warning_errno(n, "Got message with truncated payload data, ignoring.");
-                return 0;
-        }
-        if (n < 0)
-                return (int) n;
-
-        cmsg_close_all(&msghdr);
-
-        ucred = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
-        if (!ucred || ucred->pid <= 0) {
-                log_warning("Got notification datagram lacking credential information, ignoring.");
-                return 0;
-        }
-
         HASHMAP_FOREACH(j, m->jobs) {
-                pid_t pid;
-                assert_se(sd_event_source_get_child_pid(j->child, &pid) >= 0);
+                PidRef child_pidref = PIDREF_NULL;
 
-                if (ucred->pid == pid)
+                r = event_source_get_child_pidref(j->child, &child_pidref);
+                if (r < 0)
+                        return log_warning_errno(r, "Failed to get child pidref: %m");
+
+                if (pidref_equal(&sender_pidref, &child_pidref))
                         break;
         }
-
         if (!j) {
                 log_warning("Got notification datagram from unexpected peer, ignoring.");
                 return 0;
         }
 
-        buf[n] = 0;
-
-        version = find_line_startswith(buf, "X_SYSUPDATE_VERSION=");
-        progress = find_line_startswith(buf, "X_SYSUPDATE_PROGRESS=");
-        errno_str = find_line_startswith(buf, "ERRNO=");
-        ready = find_line_startswith(buf, "READY=1");
+        char *version = find_line_startswith(buf, "X_SYSUPDATE_VERSION=");
+        char *progress = find_line_startswith(buf, "X_SYSUPDATE_PROGRESS=");
+        char *errno_str = find_line_startswith(buf, "ERRNO=");
+        const char *ready = find_line_startswith(buf, "READY=1");
 
         if (version)
                 job_on_version(j, truncate_nl(version));
@@ -1721,18 +1709,17 @@ static int manager_on_notify(sd_event_source *s, int fd, uint32_t revents, void 
 
 static int manager_new(Manager **ret) {
         _cleanup_(manager_freep) Manager *m = NULL;
-        _cleanup_close_ int notify_fd = -EBADF;
-        static const union sockaddr_union sa = {
-                .un.sun_family = AF_UNIX,
-                .un.sun_path = "/run/systemd/sysupdate/notify",
-        };
         int r;
 
         assert(ret);
 
-        m = new0(Manager, 1);
+        m = new(Manager, 1);
         if (!m)
                 return -ENOMEM;
+
+        *m = (Manager) {
+                .runtime_scope = RUNTIME_SCOPE_SYSTEM,
+        };
 
         r = sd_event_default(&m->event);
         if (r < 0)
@@ -1751,36 +1738,20 @@ static int manager_new(Manager **ret) {
 
         r = sd_event_add_memory_pressure(m->event, NULL, NULL, NULL);
         if (r < 0)
-                log_debug_errno(r, "Failed allocate memory pressure event source, ignoring: %m");
+                log_debug_errno(r, "Failed to allocate memory pressure event source, ignoring: %m");
 
         r = sd_bus_default_system(&m->bus);
         if (r < 0)
                 return r;
 
-        notify_fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
-        if (notify_fd < 0)
-                return -errno;
-
-        (void) mkdir_parents_label(sa.un.sun_path, 0755);
-        (void) sockaddr_un_unlink(&sa.un);
-
-        if (bind(notify_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0)
-                return -errno;
-
-        r = setsockopt_int(notify_fd, SOL_SOCKET, SO_PASSCRED, true);
+        r = notify_socket_prepare(
+                        m->event,
+                        SD_EVENT_PRIORITY_NORMAL - 1, /* Make this processed before SIGCHLD. */
+                        manager_on_notify,
+                        m,
+                        &m->notify_socket_path);
         if (r < 0)
                 return r;
-
-        r = sd_event_add_io(m->event, &m->notify_event, notify_fd, EPOLLIN, manager_on_notify, m);
-        if (r < 0)
-                return r;
-
-        (void) sd_event_source_set_description(m->notify_event, "notify-socket");
-
-        r = sd_event_source_set_io_fd_own(m->notify_event, true);
-        if (r < 0)
-                return r;
-        TAKE_FD(notify_fd);
 
         *ret = TAKE_PTR(m);
         return 0;
@@ -1791,11 +1762,7 @@ static int manager_enumerate_image_class(Manager *m, TargetClass class) {
         Image *image;
         int r;
 
-        images = hashmap_new(&image_hash_ops);
-        if (!images)
-                return -ENOMEM;
-
-        r = image_discover((ImageClass) class, NULL, images);
+        r = image_discover(m->runtime_scope, (ImageClass) class, NULL, &images);
         if (r < 0)
                 return r;
 
@@ -1803,7 +1770,7 @@ static int manager_enumerate_image_class(Manager *m, TargetClass class) {
                 _cleanup_(target_freep) Target *t = NULL;
                 bool have = false;
 
-                if (IMAGE_IS_HOST(image))
+                if (image_is_host(image))
                         continue; /* We already enroll the host ourselves */
 
                 r = target_new(m, class, image->name, image->path, &t);
@@ -1944,7 +1911,7 @@ static int method_list_targets(sd_bus_message *msg, void *userdata, sd_bus_error
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_list_jobs(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -1977,7 +1944,7 @@ static int method_list_jobs(sd_bus_message *msg, void *userdata, sd_bus_error *e
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static int method_list_appstream(sd_bus_message *msg, void *userdata, sd_bus_error *error) {
@@ -2013,7 +1980,7 @@ static int method_list_appstream(sd_bus_message *msg, void *userdata, sd_bus_err
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 static const sd_bus_vtable manager_vtable[] = {

@@ -1,40 +1,31 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <sys/mount.h>
-#include <sys/wait.h>
+#include "sd-bus.h"
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
-#include "bus-internal.h"
 #include "bus-label.h"
-#include "bus-locator.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
+#include "bus-util.h"
 #include "copy.h"
-#include "env-file.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
-#include "fileio.h"
-#include "format-util.h"
-#include "fs-util.h"
+#include "hashmap.h"
 #include "in-addr-util.h"
 #include "local-addresses.h"
-#include "machine-dbus.h"
 #include "machine.h"
-#include "missing_capability.h"
-#include "mkdir.h"
+#include "machine-dbus.h"
+#include "machined.h"
 #include "mount-util.h"
-#include "mountpoint-util.h"
 #include "namespace-util.h"
-#include "os-util.h"
+#include "operation.h"
 #include "path-util.h"
-#include "process-util.h"
 #include "signal-util.h"
+#include "string-util.h"
 #include "strv.h"
-#include "terminal-util.h"
-#include "tmpfile-util.h"
-#include "user-util.h"
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_class, machine_class, MachineClass);
 static BUS_DEFINE_PROPERTY_GET2(property_get_state, "s", Machine, machine_get_state, machine_state_to_string);
@@ -70,10 +61,12 @@ int bus_machine_method_unregister(sd_bus_message *message, void *userdata, sd_bu
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         "org.freedesktop.machine1.manage-machines",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -100,10 +93,12 @@ int bus_machine_method_terminate(sd_bus_message *message, void *userdata, sd_bus
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         "org.freedesktop.machine1.manage-machines",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -148,10 +143,12 @@ int bus_machine_method_kill(sd_bus_message *message, void *userdata, sd_bus_erro
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         "org.freedesktop.machine1.manage-machines",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -212,7 +209,7 @@ int bus_machine_method_get_addresses(sd_bus_message *message, void *userdata, sd
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int bus_machine_method_get_ssh_info(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -233,7 +230,7 @@ int bus_machine_method_get_ssh_info(sd_bus_message *message, void *userdata, sd_
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -268,10 +265,12 @@ int bus_machine_method_open_pty(sd_bus_message *message, void *userdata, sd_bus_
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         m->class == MACHINE_HOST ? "org.freedesktop.machine1.host-open-pty" : "org.freedesktop.machine1.open-pty",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -291,7 +290,7 @@ int bus_machine_method_open_pty(sd_bus_message *message, void *userdata, sd_bus_
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int bus_machine_method_open_login(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -309,10 +308,12 @@ int bus_machine_method_open_login(sd_bus_message *message, void *userdata, sd_bu
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         m->class == MACHINE_HOST ? "org.freedesktop.machine1.host-login" : "org.freedesktop.machine1.login",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -336,7 +337,7 @@ int bus_machine_method_open_login(sd_bus_message *message, void *userdata, sd_bu
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -355,6 +356,25 @@ int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bu
         if (r < 0)
                 return r;
         user = isempty(user) ? "root" : user;
+
+        /* Ensure only root can shell into the root namespace, unless it's specifically the host machine,
+         * which is owned by uid 0 anyway and cannot be self-registered. This is to avoid unprivileged
+         * users registering a process they own in the root user namespace, and then shelling in as root
+         * or another user. Note that the shell operation is privileged and requires 'auth_admin', so we
+         * do not need to check the caller's uid, as that will be checked by polkit, and if they machine's
+         * and the caller's do not match, authorization will be required. It's only the case where the
+         * caller owns the machine that will be shortcut and needs to be checked here. */
+        if (m->uid != 0 && m->class != MACHINE_HOST) {
+                r = pidref_in_same_namespace(&PIDREF_MAKE_FROM_PID(1), &m->leader, NAMESPACE_USER);
+                if (r < 0)
+                        return r;
+                if (r != 0)
+                        return sd_bus_error_set(
+                                        error,
+                                        SD_BUS_ERROR_ACCESS_DENIED,
+                                        "Only root may shell into the root user namespace");
+        }
+
         r = sd_bus_message_read_strv(message, &args_wire);
         if (r < 0)
                 return r;
@@ -393,10 +413,12 @@ int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bu
                 NULL
         };
 
-        r = bus_verify_polkit_async(
+        r = bus_verify_polkit_async_full(
                         message,
                         m->class == MACHINE_HOST ? "org.freedesktop.machine1.host-shell" : "org.freedesktop.machine1.shell",
                         details,
+                        m->uid,
+                        /* flags= */ 0,
                         &m->manager->polkit_registry,
                         error);
         if (r < 0)
@@ -420,7 +442,7 @@ int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bu
         if (r < 0)
                 return r;
 
-        return sd_bus_send(NULL, reply, NULL);
+        return sd_bus_message_send(reply);
 }
 
 int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -456,6 +478,7 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
                 NULL
         };
 
+        /* NB: For now not opened up to owner of machine without auth */
         r = bus_verify_polkit_async(
                         message,
                         "org.freedesktop.machine1.manage-machines",
@@ -492,15 +515,11 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
 }
 
 int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        _cleanup_free_ char *host_basename = NULL, *container_basename = NULL;
         const char *src, *dest, *host_path, *container_path;
-        _cleanup_close_pair_ int errno_pipe_fd[2] = EBADF_PAIR;
         CopyFlags copy_flags = COPY_REFLINK|COPY_MERGE|COPY_HARDLINKS;
-        _cleanup_close_ int hostfd = -EBADF;
         Machine *m = ASSERT_PTR(userdata);
+        Manager *manager = m->manager;
         bool copy_from;
-        pid_t child;
-        uid_t uid_shift;
         int r;
 
         assert(message);
@@ -545,20 +564,17 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
                 NULL
         };
 
+        /* NB: For now not opened up to owner of machine without auth */
         r = bus_verify_polkit_async(
                         message,
                         "org.freedesktop.machine1.manage-machines",
                         details,
-                        &m->manager->polkit_registry,
+                        &manager->polkit_registry,
                         error);
         if (r < 0)
                 return r;
         if (r == 0)
                 return 1; /* Will call us back */
-
-        r = machine_get_uid_shift(m, &uid_shift);
-        if (r < 0)
-                return r;
 
         copy_from = strstr(sd_bus_message_get_member(message), "CopyFrom");
 
@@ -570,83 +586,12 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
                 container_path = dest;
         }
 
-        r = path_extract_filename(host_path, &host_basename);
+        Operation *op;
+        r = machine_copy_from_to_operation(manager, m, host_path, container_path, copy_from, copy_flags, &op);
         if (r < 0)
-                return sd_bus_error_set_errnof(error, r, "Failed to extract file name of '%s' path: %m", host_path);
+                return sd_bus_error_set_errnof(error, r, "Failed to copy from/to machine '%s': %m", m->name);
 
-        r = path_extract_filename(container_path, &container_basename);
-        if (r < 0)
-                return sd_bus_error_set_errnof(error, r, "Failed to extract file name of '%s' path: %m", container_path);
-
-        hostfd = open_parent(host_path, O_CLOEXEC, 0);
-        if (hostfd < 0)
-                return sd_bus_error_set_errnof(error, hostfd, "Failed to open host directory %s: %m", host_path);
-
-        if (pipe2(errno_pipe_fd, O_CLOEXEC|O_NONBLOCK) < 0)
-                return sd_bus_error_set_errnof(error, errno, "Failed to create pipe: %m");
-
-        r = safe_fork("(sd-copy)", FORK_RESET_SIGNALS, &child);
-        if (r < 0)
-                return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
-        if (r == 0) {
-                int containerfd;
-                const char *q;
-                int mntfd;
-
-                errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
-
-                q = procfs_file_alloca(m->leader.pid, "ns/mnt");
-                mntfd = open(q, O_RDONLY|O_NOCTTY|O_CLOEXEC);
-                if (mntfd < 0) {
-                        r = log_error_errno(errno, "Failed to open mount namespace of leader: %m");
-                        goto child_fail;
-                }
-
-                if (setns(mntfd, CLONE_NEWNS) < 0) {
-                        r = log_error_errno(errno, "Failed to join namespace of leader: %m");
-                        goto child_fail;
-                }
-
-                containerfd = open_parent(container_path, O_CLOEXEC, 0);
-                if (containerfd < 0) {
-                        r = log_error_errno(containerfd, "Failed to open destination directory: %m");
-                        goto child_fail;
-                }
-
-                /* Run the actual copy operation. Note that when a UID shift is set we'll either clamp the UID/GID to
-                 * 0 or to the actual UID shift depending on the direction we copy. If no UID shift is set we'll copy
-                 * the UID/GIDs as they are. */
-                if (copy_from)
-                        r = copy_tree_at(containerfd, container_basename, hostfd, host_basename, uid_shift == 0 ? UID_INVALID : 0, uid_shift == 0 ? GID_INVALID : 0, copy_flags, NULL, NULL);
-                else
-                        r = copy_tree_at(hostfd, host_basename, containerfd, container_basename, uid_shift == 0 ? UID_INVALID : uid_shift, uid_shift == 0 ? GID_INVALID : uid_shift, copy_flags, NULL, NULL);
-
-                hostfd = safe_close(hostfd);
-                containerfd = safe_close(containerfd);
-
-                if (r < 0) {
-                        r = log_error_errno(r, "Failed to copy tree: %m");
-                        goto child_fail;
-                }
-
-                _exit(EXIT_SUCCESS);
-
-        child_fail:
-                (void) write(errno_pipe_fd[1], &r, sizeof(r));
-                _exit(EXIT_FAILURE);
-        }
-
-        errno_pipe_fd[1] = safe_close(errno_pipe_fd[1]);
-
-        /* Copying might take a while, hence install a watch on the child, and return */
-
-        r = operation_new_with_bus_reply(m->manager, m, child, message, errno_pipe_fd[0], /* ret= */ NULL);
-        if (r < 0) {
-                (void) sigkill_wait(child);
-                return r;
-        }
-        errno_pipe_fd[0] = -EBADF;
-
+        operation_attach_bus_reply(op, message);
         return 1;
 }
 
@@ -663,6 +608,7 @@ int bus_machine_method_open_root_directory(sd_bus_message *message, void *userda
                 NULL
         };
 
+        /* NB: For now not opened up to owner of machine without auth */
         r = bus_verify_polkit_async(
                         message,
                         "org.freedesktop.machine1.manage-machines",
@@ -674,71 +620,11 @@ int bus_machine_method_open_root_directory(sd_bus_message *message, void *userda
         if (r == 0)
                 return 1; /* Will call us back */
 
-        switch (m->class) {
-
-        case MACHINE_HOST:
-                fd = open("/", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
-                if (fd < 0)
-                        return -errno;
-
-                break;
-
-        case MACHINE_CONTAINER: {
-                _cleanup_close_ int mntns_fd = -EBADF, root_fd = -EBADF;
-                _cleanup_close_pair_ int pair[2] = EBADF_PAIR;
-                pid_t child;
-
-                r = pidref_namespace_open(&m->leader,
-                                          /* ret_pidns_fd = */ NULL,
-                                          &mntns_fd,
-                                          /* ret_netns_fd = */ NULL,
-                                          /* ret_userns_fd = */ NULL,
-                                          &root_fd);
-                if (r < 0)
-                        return r;
-
-                if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
-                        return -errno;
-
-                r = namespace_fork("(sd-openrootns)", "(sd-openroot)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
-                                   -1, mntns_fd, -1, -1, root_fd, &child);
-                if (r < 0)
-                        return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
-                if (r == 0) {
-                        _cleanup_close_ int dfd = -EBADF;
-
-                        pair[0] = safe_close(pair[0]);
-
-                        dfd = open("/", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
-                        if (dfd < 0)
-                                _exit(EXIT_FAILURE);
-
-                        r = send_one_fd(pair[1], dfd, 0);
-                        dfd = safe_close(dfd);
-                        if (r < 0)
-                                _exit(EXIT_FAILURE);
-
-                        _exit(EXIT_SUCCESS);
-                }
-
-                pair[1] = safe_close(pair[1]);
-
-                r = wait_for_terminate_and_check("(sd-openrootns)", child, 0);
-                if (r < 0)
-                        return sd_bus_error_set_errnof(error, r, "Failed to wait for child: %m");
-                if (r != EXIT_SUCCESS)
-                        return sd_bus_error_set(error, SD_BUS_ERROR_FAILED, "Child died abnormally.");
-
-                fd = receive_one_fd(pair[0], MSG_DONTWAIT);
-                if (fd < 0)
-                        return fd;
-
-                break;
-        }
-
-        default:
+        fd = machine_open_root_directory(m);
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(fd))
                 return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Opening the root directory is only supported on container machines.");
-        }
+        if (fd < 0)
+                return sd_bus_error_set_errnof(error, fd, "Failed to open root directory of machine '%s': %m", m->name);
 
         return sd_bus_reply_method_return(message, "h", fd);
 }
@@ -866,7 +752,11 @@ static const sd_bus_vtable machine_vtable[] = {
         SD_BUS_PROPERTY("Service", "s", NULL, offsetof(Machine, service), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Unit", "s", NULL, offsetof(Machine, unit), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Scope", "s", NULL, offsetof(Machine, unit), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("Leader", "u", NULL, offsetof(Machine, leader.pid), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Subgroup", "s", NULL, offsetof(Machine, subgroup), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Leader", "u", bus_property_get_pid, offsetof(Machine, leader.pid), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LeaderPIDFDId", "t", bus_property_get_pidfdid, offsetof(Machine, leader), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Supervisor", "u", bus_property_get_pid, offsetof(Machine, supervisor.pid), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("SupervisorPIDFDId", "t", bus_property_get_pidfdid, offsetof(Machine, supervisor), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Class", "s", property_get_class, offsetof(Machine, class), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RootDirectory", "s", NULL, offsetof(Machine, root_directory), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("NetworkInterfaces", "ai", property_get_netif, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -874,6 +764,7 @@ static const sd_bus_vtable machine_vtable[] = {
         SD_BUS_PROPERTY("SSHAddress", "s", NULL, offsetof(Machine, ssh_address), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SSHPrivateKeyPath", "s", NULL, offsetof(Machine, ssh_private_key_path), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("State", "s", property_get_state, 0, 0),
+        SD_BUS_PROPERTY("UID", "u", bus_property_get_uid, offsetof(Machine, uid), SD_BUS_VTABLE_PROPERTY_CONST),
 
         SD_BUS_METHOD("Terminate",
                       NULL,

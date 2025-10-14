@@ -1,33 +1,67 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include "sd-bus.h"
+
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
 #include "bus-locator.h"
 #include "bus-log-control-api.h"
 #include "bus-message-util.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
+#include "bus-util.h"
 #include "dns-domain.h"
 #include "format-util.h"
-#include "memory-util.h"
-#include "missing_capability.h"
 #include "path-util.h"
+#include "resolve-util.h"
 #include "resolved-bus.h"
 #include "resolved-def.h"
+#include "resolved-dns-answer.h"
+#include "resolved-dns-delegate.h"
+#include "resolved-dns-delegate-bus.h"
+#include "resolved-dns-dnssec.h"
+#include "resolved-dns-packet.h"
+#include "resolved-dns-query.h"
+#include "resolved-dns-question.h"
+#include "resolved-dns-rr.h"
+#include "resolved-dns-scope.h"
+#include "resolved-dns-search-domain.h"
+#include "resolved-dns-server.h"
 #include "resolved-dns-stream.h"
+#include "resolved-dns-stub.h"
 #include "resolved-dns-synthesize.h"
-#include "resolved-dnssd-bus.h"
+#include "resolved-dns-transaction.h"
 #include "resolved-dnssd.h"
+#include "resolved-dnssd-bus.h"
+#include "resolved-link.h"
 #include "resolved-link-bus.h"
+#include "resolved-manager.h"
 #include "resolved-resolv-conf.h"
+#include "set.h"
 #include "socket-netlink.h"
-#include "stdio-util.h"
-#include "strv.h"
-#include "syslog-util.h"
-#include "user-util.h"
+#include "string-util.h"
 #include "utf8.h"
 
 BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_resolve_support, resolve_support, ResolveSupport);
+
+static int dns_query_new_for_bus(
+                Manager *m,
+                DnsQuery **ret,
+                DnsQuestion *question_utf8,
+                DnsQuestion *question_idna,
+                DnsPacket *question_bypass,
+                int ifindex,
+                uint64_t flags,
+                sd_bus_error *error) {
+
+        int r;
+
+        r = dns_query_new(m, ret, question_utf8, question_idna, question_bypass, ifindex, flags);
+        if (r == -ENOANO)
+                return sd_bus_error_set(error, BUS_ERROR_DNS_REFUSED, "DNS query type refused.");
+        return r;
+}
 
 static int query_on_bus_track(sd_bus_track *t, void *userdata) {
         DnsQuery *q = ASSERT_PTR(userdata);
@@ -343,51 +377,6 @@ finish:
         }
 }
 
-static int validate_and_mangle_flags(
-                const char *name,
-                uint64_t *flags,
-                uint64_t ok,
-                sd_bus_error *error) {
-
-        assert(flags);
-
-        /* Checks that the client supplied interface index and flags parameter actually are valid and make
-         * sense in our method call context. Specifically:
-         *
-         * 1. Checks that the interface index is either 0 (meaning *all* interfaces) or positive
-         *
-         * 2. Only the protocols flags and a bunch of NO_XYZ flags are set, at most. Plus additional flags
-         *    specific to our method, passed in the "ok" parameter.
-         *
-         * 3. If zero protocol flags are specified it is automatically turned into *all* protocols. This way
-         *    clients can simply pass 0 as flags and all will work as it should. They can also use this so
-         *    that clients don't have to know all the protocols resolved implements, but can just specify 0
-         *    to mean "all supported protocols".
-         */
-
-        if (*flags & ~(SD_RESOLVED_PROTOCOLS_ALL|
-                       SD_RESOLVED_NO_CNAME|
-                       SD_RESOLVED_NO_VALIDATE|
-                       SD_RESOLVED_NO_SYNTHESIZE|
-                       SD_RESOLVED_NO_CACHE|
-                       SD_RESOLVED_NO_ZONE|
-                       SD_RESOLVED_NO_TRUST_ANCHOR|
-                       SD_RESOLVED_NO_NETWORK|
-                       SD_RESOLVED_NO_STALE|
-                       SD_RESOLVED_RELAX_SINGLE_LABEL|
-                       ok))
-                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
-
-        if ((*flags & SD_RESOLVED_PROTOCOLS_ALL) == 0) /* If no protocol is enabled, enable all */
-                *flags |= SD_RESOLVED_PROTOCOLS_ALL;
-
-        /* Imply SD_RESOLVED_NO_SEARCH if permitted and name is dot suffixed. */
-        if (name && FLAGS_SET(ok, SD_RESOLVED_NO_SEARCH) && dns_name_dot_suffixed(name) > 0)
-                *flags |= SD_RESOLVED_NO_SEARCH;
-
-        return 0;
-}
-
 static int parse_as_address(sd_bus_message *m, int ifindex, const char *hostname, int family, uint64_t flags) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ char *canonical = NULL;
@@ -501,9 +490,8 @@ static int bus_method_resolve_hostname(sd_bus_message *message, void *userdata, 
         if (!IN_SET(family, AF_INET, AF_INET6, AF_UNSPEC))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unknown address family %i", family);
 
-        r = validate_and_mangle_flags(hostname, &flags, SD_RESOLVED_NO_SEARCH, error);
-        if (r < 0)
-                return r;
+        if (validate_and_mangle_query_flags(m, &flags, hostname, SD_RESOLVED_NO_SEARCH) < 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
 
         r = parse_as_address(message, ifindex, hostname, family, flags);
         if (r != 0)
@@ -525,7 +513,7 @@ static int bus_method_resolve_hostname(sd_bus_message *message, void *userdata, 
 
         bus_client_log(message, "hostname resolution");
 
-        r = dns_query_new(m, &q, question_utf8, question_idna ?: question_utf8, NULL, ifindex, flags);
+        r = dns_query_new_for_bus(m, &q, question_utf8, question_idna ?: question_utf8, NULL, ifindex, flags, error);
         if (r < 0)
                 return r;
 
@@ -656,9 +644,8 @@ static int bus_method_resolve_address(sd_bus_message *message, void *userdata, s
         if (ifindex < 0)
                 return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid interface index");
 
-        r = validate_and_mangle_flags(NULL, &flags, 0, error);
-        if (r < 0)
-                return r;
+        if (validate_and_mangle_query_flags(m, &flags, /* name = */ NULL, /* ok = */ 0) < 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
 
         r = dns_question_new_reverse(&question, family, &a);
         if (r < 0)
@@ -666,7 +653,7 @@ static int bus_method_resolve_address(sd_bus_message *message, void *userdata, s
 
         bus_client_log(message, "address resolution");
 
-        r = dns_query_new(m, &q, question, question, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH);
+        r = dns_query_new_for_bus(m, &q, question, question, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH, error);
         if (r < 0)
                 return r;
 
@@ -825,9 +812,8 @@ static int bus_method_resolve_record(sd_bus_message *message, void *userdata, sd
         if (dns_type_is_obsolete(type))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Specified DNS resource record type %" PRIu16 " is obsolete.", type);
 
-        r = validate_and_mangle_flags(name, &flags, 0, error);
-        if (r < 0)
-                return r;
+        if (validate_and_mangle_query_flags(m, &flags, name, SD_RESOLVED_NO_SEARCH) < 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
 
         question = dns_question_new(1);
         if (!question)
@@ -845,7 +831,7 @@ static int bus_method_resolve_record(sd_bus_message *message, void *userdata, sd
 
         /* Setting SD_RESOLVED_CLAMP_TTL: let's request that the TTL is fixed up for locally cached entries,
          * after all we return it in the wire format blob. */
-        r = dns_query_new(m, &q, question, question, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH|SD_RESOLVED_CLAMP_TTL);
+        r = dns_query_new_for_bus(m, &q, question, question, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH|SD_RESOLVED_CLAMP_TTL, error);
         if (r < 0)
                 return r;
 
@@ -1058,7 +1044,6 @@ static void resolve_service_all_complete(DnsQuery *query) {
 
                         default:
                                 bad = aux;
-                                break;
                         }
                 }
 
@@ -1209,6 +1194,8 @@ static int resolve_service_hostname(DnsQuery *q, DnsResourceRecord *rr, int ifin
                 return r;
 
         r = dns_query_new(q->manager, &aux, question, question, NULL, ifindex, q->flags|SD_RESOLVED_NO_SEARCH);
+        if (r == -ENOANO)
+                return reply_method_errorf(q, BUS_ERROR_DNS_REFUSED, "DNS query type refused.");
         if (r < 0)
                 return r;
 
@@ -1358,9 +1345,12 @@ static int bus_method_resolve_service(sd_bus_message *message, void *userdata, s
         if (name && !type)
                 return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Service name cannot be specified without service type.");
 
-        r = validate_and_mangle_flags(name, &flags, SD_RESOLVED_NO_TXT|SD_RESOLVED_NO_ADDRESS, error);
-        if (r < 0)
-                return r;
+        if (validate_and_mangle_query_flags(m, &flags, name, SD_RESOLVED_NO_TXT|SD_RESOLVED_NO_ADDRESS) < 0)
+                return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
+
+        /* Refuse the method if SRV is filtered. */
+        if (set_contains(m->refuse_record_types, INT_TO_PTR(DNS_TYPE_SRV)))
+                return sd_bus_error_set(error, BUS_ERROR_DNS_REFUSED, "DNS query type refused.");
 
         r = dns_question_new_service(&question_utf8, name, type, domain, !(flags & SD_RESOLVED_NO_TXT), false);
         if (r < 0)
@@ -1372,7 +1362,7 @@ static int bus_method_resolve_service(sd_bus_message *message, void *userdata, s
 
         bus_client_log(message, "service resolution");
 
-        r = dns_query_new(m, &q, question_utf8, question_idna, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH);
+        r = dns_query_new_for_bus(m, &q, question_utf8, question_idna, NULL, ifindex, flags|SD_RESOLVED_NO_SEARCH, error);
         if (r < 0)
                 return r;
 
@@ -1857,24 +1847,24 @@ static int bus_method_reset_server_features(sd_bus_message *message, void *userd
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int dnssd_service_on_bus_track(sd_bus_track *t, void *userdata) {
-        DnssdService *s = ASSERT_PTR(userdata);
+static int dnssd_registered_service_on_bus_track(sd_bus_track *t, void *userdata) {
+        DnssdRegisteredService *s = ASSERT_PTR(userdata);
 
         assert(t);
 
         log_debug("Client of active request vanished, destroying DNS-SD service.");
-        dnssd_service_free(s);
+        dnssd_registered_service_free(s);
 
         return 0;
 }
 
 static int bus_method_register_service(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-        _cleanup_(dnssd_service_freep) DnssdService *service = NULL;
+        _cleanup_(dnssd_registered_service_freep) DnssdRegisteredService *service = NULL;
         _cleanup_(sd_bus_track_unrefp) sd_bus_track *bus_track = NULL;
         const char *id, *name_template, *type;
         _cleanup_free_ char *path = NULL;
-        DnssdService *s = NULL;
+        DnssdRegisteredService *s = NULL;
         Manager *m = ASSERT_PTR(userdata);
         uid_t euid;
         int r;
@@ -1884,7 +1874,7 @@ static int bus_method_register_service(sd_bus_message *message, void *userdata, 
         if (m->mdns_support != RESOLVE_SUPPORT_YES)
                 return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Support for MulticastDNS is disabled");
 
-        service = new0(DnssdService, 1);
+        service = new0(DnssdRegisteredService, 1);
         if (!service)
                 return log_oom();
 
@@ -1910,7 +1900,7 @@ static int bus_method_register_service(sd_bus_message *message, void *userdata, 
         if (!dnssd_srv_type_is_valid(type))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "DNS-SD service type '%s' is invalid", type);
 
-        s = hashmap_get(m->dnssd_services, id);
+        s = hashmap_get(m->dnssd_registered_services, id);
         if (s)
                 return sd_bus_error_setf(error, BUS_ERROR_DNSSD_SERVICE_EXISTS, "DNS-SD service '%s' exists already", id);
 
@@ -2023,11 +2013,11 @@ static int bus_method_register_service(sd_bus_message *message, void *userdata, 
         if (r == 0)
                 return 1; /* Polkit will call us back */
 
-        r = hashmap_ensure_put(&m->dnssd_services, &string_hash_ops, service->id, service);
+        r = hashmap_ensure_put(&m->dnssd_registered_services, &string_hash_ops, service->id, service);
         if (r < 0)
                 return r;
 
-        r = sd_bus_track_new(sd_bus_message_get_bus(message), &bus_track, dnssd_service_on_bus_track, service);
+        r = sd_bus_track_new(sd_bus_message_get_bus(message), &bus_track, dnssd_registered_service_on_bus_track, service);
         if (r < 0)
                 return r;
 
@@ -2046,7 +2036,7 @@ static int bus_method_register_service(sd_bus_message *message, void *userdata, 
 
 static int call_dnssd_method(Manager *m, sd_bus_message *message, sd_bus_message_handler_t handler, sd_bus_error *error) {
         _cleanup_free_ char *name = NULL;
-        DnssdService *s = NULL;
+        DnssdRegisteredService *s = NULL;
         const char *path;
         int r;
 
@@ -2064,7 +2054,7 @@ static int call_dnssd_method(Manager *m, sd_bus_message *message, sd_bus_message
         if (r < 0)
                 return r;
 
-        s = hashmap_get(m->dnssd_services, name);
+        s = hashmap_get(m->dnssd_registered_services, name);
         if (!s)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_DNSSD_SERVICE, "DNS-SD service '%s' not known", name);
 
@@ -2077,6 +2067,64 @@ static int bus_method_unregister_service(sd_bus_message *message, void *userdata
         assert(message);
 
         return call_dnssd_method(m, message, bus_dnssd_method_unregister, error);
+}
+
+static int bus_method_get_delegate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_free_ char *p = NULL;
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        const char *id;
+        r = sd_bus_message_read(message, "s", &id);
+        if (r < 0)
+                return r;
+
+        DnsDelegate *d = hashmap_get(m->delegates, id);
+        if (!d)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_DELEGATE, "Delegate '%s' not known", id);
+
+        p = dns_delegate_bus_path(d);
+        if (!p)
+                return -ENOMEM;
+
+        return sd_bus_reply_method_return(message, "o", p);
+}
+
+static int bus_method_list_delegates(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        Manager *m = ASSERT_PTR(userdata);
+        int r;
+
+        assert(message);
+
+        r = sd_bus_message_new_method_return(message, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_open_container(reply, 'a', "(so)");
+        if (r < 0)
+                return r;
+
+        DnsDelegate *d;
+        HASHMAP_FOREACH(d, m->delegates) {
+                _cleanup_free_ char *p = NULL;
+
+                p = dns_delegate_bus_path(d);
+                if (!p)
+                        return -ENOMEM;
+
+                r = sd_bus_message_append(reply, "(so)", d->id, p);
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_send(reply);
 }
 
 static const sd_bus_vtable resolve_vtable[] = {
@@ -2217,6 +2265,16 @@ static const sd_bus_vtable resolve_vtable[] = {
                                 SD_BUS_NO_RESULT,
                                 bus_method_reset_server_features,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetDelegate",
+                                SD_BUS_ARGS("s", id),
+                                SD_BUS_RESULT("o", path),
+                                bus_method_get_delegate,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("ListDelegates",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("a(so)", delegates),
+                                bus_method_list_delegates,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
 
         SD_BUS_VTABLE_END,
 };
@@ -2226,7 +2284,8 @@ const BusObjectImplementation manager_object = {
         "org.freedesktop.resolve1.Manager",
         .vtables = BUS_VTABLES(resolve_vtable),
         .children = BUS_IMPLEMENTATIONS(&link_object,
-                                        &dnssd_object),
+                                        &dnssd_object,
+                                        &dns_delegate_object),
 };
 
 static int match_prepare_for_sleep(sd_bus_message *message, void *userdata, sd_bus_error *ret_error) {
@@ -2298,20 +2357,19 @@ int manager_connect_bus(Manager *m) {
         return 0;
 }
 
-int _manager_send_changed(Manager *manager, const char *property, ...) {
+int manager_send_changed_strv(Manager *manager, char **properties) {
         assert(manager);
 
         if (sd_bus_is_ready(manager->bus) <= 0)
                 return 0;
 
-        char **l = strv_from_stdarg_alloca(property);
-
         int r = sd_bus_emit_properties_changed_strv(
                         manager->bus,
                         "/org/freedesktop/resolve1",
                         "org.freedesktop.resolve1.Manager",
-                        l);
+                        properties);
         if (r < 0)
-                log_notice_errno(r, "Failed to emit notification about changed property %s: %m", property);
+                log_notice_errno(r, "Failed to emit notification about changed properties: %m");
+
         return r;
 }

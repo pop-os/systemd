@@ -3,25 +3,24 @@
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
-#include <errno.h>
-#include <stdint.h>
 #include <stdlib.h>
+#include <threads.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "cgroup-util.h"
 #include "dirent-util.h"
 #include "env-util.h"
-#include "errno-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "macro.h"
-#include "missing_threads.h"
+#include "log.h"
+#include "namespace-util.h"
+#include "parse-util.h"
 #include "process-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "uid-range.h"
+#include "strv.h"
 #include "virt.h"
 
 enum {
@@ -104,35 +103,40 @@ static Virtualization detect_vm_device_tree(void) {
 
         r = read_one_line_file("/proc/device-tree/hypervisor/compatible", &hvtype);
         if (r == -ENOENT) {
-                _cleanup_closedir_ DIR *dir = NULL;
-                _cleanup_free_ char *compat = NULL;
-
                 if (access("/proc/device-tree/ibm,partition-name", F_OK) == 0 &&
                     access("/proc/device-tree/hmc-managed?", F_OK) == 0 &&
                     access("/proc/device-tree/chosen/qemu,graphic-width", F_OK) != 0)
                         return VIRTUALIZATION_POWERVM;
 
-                dir = opendir("/proc/device-tree");
+                _cleanup_closedir_ DIR *dir = opendir("/proc/device-tree");
                 if (!dir) {
                         if (errno == ENOENT) {
-                                log_debug_errno(errno, "/proc/device-tree: %m");
+                                log_debug_errno(errno, "/proc/device-tree/ does not exist");
                                 return VIRTUALIZATION_NONE;
                         }
-                        return -errno;
+                        return log_debug_errno(errno, "Opening /proc/device-tree/ failed: %m");
                 }
 
-                FOREACH_DIRENT(de, dir, return -errno)
+                FOREACH_DIRENT(de, dir, return log_debug_errno(errno, "Failed to enumerate /proc/device-tree/ contents: %m"))
                         if (strstr(de->d_name, "fw-cfg")) {
                                 log_debug("Virtualization QEMU: \"fw-cfg\" present in /proc/device-tree/%s", de->d_name);
                                 return VIRTUALIZATION_QEMU;
                         }
 
+                _cleanup_free_ char *compat = NULL;
                 r = read_one_line_file("/proc/device-tree/compatible", &compat);
                 if (r < 0 && r != -ENOENT)
-                        return r;
-                if (r >= 0 && streq(compat, "qemu,pseries")) {
-                        log_debug("Virtualization %s found in /proc/device-tree/compatible", compat);
-                        return VIRTUALIZATION_QEMU;
+                        return log_debug_errno(r, "Failed to read /proc/device-tree/compatible: %m");
+                if (r >= 0) {
+                        if (streq(compat, "qemu,pseries")) {
+                                log_debug("Virtualization %s found in /proc/device-tree/compatible", compat);
+                                return VIRTUALIZATION_QEMU;
+                        }
+                        if (streq(compat, "linux,dummy-virt")) {
+                                /* https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/linux%2Cdummy-virt.yaml */
+                                log_debug("Generic virtualization %s found in /proc/device-tree/compatible", compat);
+                                return VIRTUALIZATION_VM_OTHER;
+                        }
                 }
 
                 log_debug("No virtualization found in /proc/device-tree/*");
@@ -427,8 +431,8 @@ static Virtualization detect_vm_zvm(void) {
         _cleanup_free_ char *t = NULL;
         int r;
 
-        r = get_proc_field("/proc/sysinfo", "VM00 Control Program", WHITESPACE, &t);
-        if (r == -ENOENT)
+        r = get_proc_field("/proc/sysinfo", "VM00 Control Program", &t);
+        if (IN_SET(r, -ENOENT, -ENODATA))
                 return VIRTUALIZATION_NONE;
         if (r < 0)
                 return r;
@@ -591,80 +595,6 @@ static const char *const container_table[_VIRTUALIZATION_MAX] = {
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(container, int);
 
-static int running_in_cgroupns(void) {
-        int r;
-
-        if (!cg_ns_supported())
-                return false;
-
-        r = namespace_is_init(NAMESPACE_CGROUP);
-        if (r < 0)
-                log_debug_errno(r, "Failed to test if in root cgroup namespace, ignoring: %m");
-        else if (r > 0)
-                return false;
-
-        // FIXME: We really should drop the heuristics below.
-
-        r = cg_all_unified();
-        if (r < 0)
-                return r;
-
-        if (r) {
-                /* cgroup v2 */
-
-                r = access("/sys/fs/cgroup/cgroup.events", F_OK);
-                if (r < 0) {
-                        if (errno != ENOENT)
-                                return -errno;
-                        /* All kernel versions have cgroup.events in nested cgroups. */
-                        return false;
-                }
-
-                /* There's no cgroup.type in the root cgroup, and future kernel versions
-                 * are unlikely to add it since cgroup.type is something that makes no sense
-                 * whatsoever in the root cgroup. */
-                r = access("/sys/fs/cgroup/cgroup.type", F_OK);
-                if (r == 0)
-                        return true;
-                if (r < 0 && errno != ENOENT)
-                        return -errno;
-
-                /* On older kernel versions, there's no cgroup.type */
-                r = access("/sys/kernel/cgroup/features", F_OK);
-                if (r < 0) {
-                        if (errno != ENOENT)
-                                return -errno;
-                        /* This is an old kernel that we know for sure has cgroup.events
-                         * only in nested cgroups. */
-                        return true;
-                }
-
-                /* This is a recent kernel, and cgroup.type doesn't exist, so we must be
-                 * in the root cgroup. */
-                return false;
-        } else {
-                /* cgroup v1 */
-
-                /* If systemd controller is not mounted, do not even bother. */
-                r = access("/sys/fs/cgroup/systemd", F_OK);
-                if (r < 0) {
-                        if (errno != ENOENT)
-                                return -errno;
-                        return false;
-                }
-
-                /* release_agent only exists in the root cgroup. */
-                r = access("/sys/fs/cgroup/systemd/release_agent", F_OK);
-                if (r < 0) {
-                        if (errno != ENOENT)
-                                return -errno;
-                        return true;
-                }
-
-                return false;
-        }
-}
-
 static int running_in_pidns(void) {
         int r;
 
@@ -736,7 +666,7 @@ Virtualization detect_container(void) {
         /* proot doesn't use PID namespacing, so we can just check if we have a matching tracer for this
          * invocation without worrying about it being elsewhere.
          */
-        r = get_proc_field("/proc/self/status", "TracerPid", WHITESPACE, &p);
+        r = get_proc_field("/proc/self/status", "TracerPid", &p);
         if (r < 0)
                 log_debug_errno(r, "Failed to read our own trace PID, ignoring: %m");
         else if (!streq(p, "0")) {
@@ -818,15 +748,6 @@ check_files:
         if (v != VIRTUALIZATION_NONE)
                 goto finish;
 
-        r = running_in_cgroupns();
-        if (r > 0) {
-                log_debug("Running in a cgroup namespace, assuming unknown container manager.");
-                v = VIRTUALIZATION_CONTAINER_OTHER;
-                goto finish;
-        }
-        if (r < 0)
-                log_debug_errno(r, "Failed to detect cgroup namespace: %m");
-
         /* Finally, the root pid namespace has an hardcoded inode number of 0xEFFFFFFC since kernel 3.8, so
          * if all else fails we can check the inode number of our pid namespace and compare it. */
         if (running_in_pidns() > 0) {
@@ -868,72 +789,14 @@ Virtualization detect_virtualization(void) {
         return detect_vm();
 }
 
-static int userns_has_mapping(const char *name) {
-        _cleanup_fclose_ FILE *f = NULL;
-        uid_t base, shift, range;
-        int r;
-
-        f = fopen(name, "re");
-        if (!f) {
-                log_debug_errno(errno, "Failed to open %s: %m", name);
-                return errno == ENOENT ? false : -errno;
-        }
-
-        r = uid_map_read_one(f, &base, &shift, &range);
-        if (r == -ENOMSG) {
-                log_debug("%s is empty, we're in an uninitialized user namespace.", name);
-                return true;
-        }
-        if (r < 0)
-                return log_debug_errno(r, "Failed to read %s: %m", name);
-
-        if (base == 0 && shift == 0 && range == UINT32_MAX) {
-                /* The kernel calls mappings_overlap() and does not allow overlaps */
-                log_debug("%s has a full 1:1 mapping", name);
-                return false;
-        }
-
-        /* Anything else implies that we are in a user namespace */
-        log_debug("Mapping found in %s, we're in a user namespace.", name);
-        return true;
-}
-
 int running_in_userns(void) {
-        _cleanup_free_ char *line = NULL;
         int r;
 
         r = namespace_is_init(NAMESPACE_USER);
         if (r < 0)
-                log_debug_errno(r, "Failed to test if in root user namespace, ignoring: %m");
-        else if (r > 0)
-                return false;
+                return log_debug_errno(r, "Failed to test if in root user namespace, ignoring: %m");
 
-        // FIXME: We really should drop the heuristics below.
-
-        r = userns_has_mapping("/proc/self/uid_map");
-        if (r != 0)
-                return r;
-
-        r = userns_has_mapping("/proc/self/gid_map");
-        if (r != 0)
-                return r;
-
-        /* "setgroups" file was added in kernel v3.18-rc6-15-g9cc46516dd. It is also possible to compile a
-         * kernel without CONFIG_USER_NS, in which case "setgroups" also does not exist. We cannot
-         * distinguish those two cases, so assume that we're running on a stripped-down recent kernel, rather
-         * than on an old one, and if the file is not found, return false. */
-        r = read_virtual_file("/proc/self/setgroups", SIZE_MAX, &line, NULL);
-        if (r < 0) {
-                log_debug_errno(r, "/proc/self/setgroups: %m");
-                return r == -ENOENT ? false : r;
-        }
-
-        strstrip(line); /* remove trailing newline */
-
-        r = streq(line, "deny");
-        /* See user_namespaces(7) for a description of this "setgroups" contents. */
-        log_debug("/proc/self/setgroups contains \"%s\", %s user namespace", line, r ? "in" : "not in");
-        return r;
+        return !r;
 }
 
 int running_in_chroot(void) {
@@ -953,17 +816,17 @@ int running_in_chroot(void) {
         if (getenv_bool("SYSTEMD_IGNORE_CHROOT") > 0)
                 return 0;
 
-        r = inode_same("/proc/1/root", "/", 0);
+        r = inode_same("/proc/1/root", "/", /* flags = */ 0);
         if (r == -ENOENT) {
                 r = proc_mounted();
                 if (r == 0) {
                         if (getpid_cached() == 1)
                                 return false; /* We will mount /proc, assuming we're not in a chroot. */
 
-                        log_debug("/proc is not mounted, assuming we're in a chroot.");
+                        log_debug("/proc/ is not mounted, assuming we're in a chroot.");
                         return true;
                 }
-                if (r > 0)  /* If we have fake /proc/, we can't do the check properly. */
+                if (r > 0) /* If we have fake /proc/, we can't do the check properly. */
                         return -ENOSYS;
         }
         if (r < 0)

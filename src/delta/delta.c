@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <getopt.h>
-#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
 #include "build.h"
 #include "chase.h"
 #include "dirent-util.h"
+#include "errno-util.h"
+#include "extract-word.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "glyph-util.h"
@@ -18,15 +18,12 @@
 #include "nulstr-util.h"
 #include "pager.h"
 #include "parse-argument.h"
-#include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
-#include "signal-util.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
-#include "terminal-util.h"
 
 static const char prefixes[] =
         "/etc\0"
@@ -89,7 +86,7 @@ static int notify_override_masked(const char *top, const char *bottom) {
 
         printf("%s%s%s     %s %s %s\n",
                ansi_highlight_red(), "[MASKED]", ansi_normal(),
-               top, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), bottom);
+               top, glyph(GLYPH_ARROW_RIGHT), bottom);
         return 1;
 }
 
@@ -99,7 +96,7 @@ static int notify_override_equivalent(const char *top, const char *bottom) {
 
         printf("%s%s%s %s %s %s\n",
                ansi_highlight_green(), "[EQUIVALENT]", ansi_normal(),
-               top, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), bottom);
+               top, glyph(GLYPH_ARROW_RIGHT), bottom);
         return 1;
 }
 
@@ -109,7 +106,7 @@ static int notify_override_redirected(const char *top, const char *bottom) {
 
         printf("%s%s%s %s %s %s\n",
                ansi_highlight(), "[REDIRECTED]", ansi_normal(),
-               top, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), bottom);
+               top, glyph(GLYPH_ARROW_RIGHT), bottom);
         return 1;
 }
 
@@ -119,7 +116,7 @@ static int notify_override_overridden(const char *top, const char *bottom) {
 
         printf("%s%s%s %s %s %s\n",
                ansi_highlight(), "[OVERRIDDEN]", ansi_normal(),
-               top, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), bottom);
+               top, glyph(GLYPH_ARROW_RIGHT), bottom);
         return 1;
 }
 
@@ -129,7 +126,7 @@ static int notify_override_extended(const char *top, const char *bottom) {
 
         printf("%s%s%s   %s %s %s\n",
                ansi_highlight(), "[EXTENDED]", ansi_normal(),
-               top, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), bottom);
+               top, glyph(GLYPH_ARROW_RIGHT), bottom);
         return 1;
 }
 
@@ -184,11 +181,48 @@ static int found_override(const char *top, const char *bottom) {
         return r;
 }
 
+DEFINE_PRIVATE_HASH_OPS_FULL(
+                drop_hash_ops,
+                char, string_hash_func, string_compare_func, free,
+                OrderedHashmap, ordered_hashmap_free);
+
+static int path_put(OrderedHashmap **h, const char *dir_path, const char *filename, bool override) {
+        int r;
+
+        assert(h);
+        assert(dir_path);
+        assert(filename);
+
+        if (override) {
+                _unused_ _cleanup_free_ char *old = NULL;
+                free(ordered_hashmap_remove2(*h, filename, (void**) &old));
+        } else if (ordered_hashmap_contains(*h, filename))
+                return 0;
+
+        _cleanup_free_ char *p = path_join(dir_path, filename);
+        if (!p)
+                return -ENOMEM;
+
+        _cleanup_free_ char *f = strdup(filename);
+        if (!f)
+                return -ENOMEM;
+
+        r = ordered_hashmap_ensure_put(h, &path_hash_ops_free_free, f, p);
+        if (r < 0)
+                return r;
+        assert(r > 0);
+
+        TAKE_PTR(f);
+        TAKE_PTR(p);
+        return 1;
+}
+
 static int enumerate_dir_d(
-                OrderedHashmap *top,
-                OrderedHashmap *bottom,
-                OrderedHashmap *drops,
-                const char *toppath, const char *drop) {
+                OrderedHashmap **top,
+                OrderedHashmap **bottom,
+                OrderedHashmap **drops,
+                const char *toppath,
+                const char *drop) {
 
         _cleanup_free_ char *unit = NULL;
         _cleanup_free_ char *path = NULL;
@@ -220,70 +254,48 @@ static int enumerate_dir_d(
         strv_sort(list);
 
         STRV_FOREACH(file, list) {
-                OrderedHashmap *h;
-                int k;
-                char *p;
-                char *d;
 
                 if (!endswith(*file, ".conf"))
                         continue;
 
-                p = path_join(path, *file);
-                if (!p)
-                        return -ENOMEM;
-                d = p + strlen(toppath) + 1;
+                log_debug("Adding at top: %s %s %s/%s", *file, glyph(GLYPH_ARROW_RIGHT), path, *file);
+                r = path_put(top, path, *file, /* override = */ false);
+                if (r < 0)
+                        return r;
 
-                log_debug("Adding at top: %s %s %s", d, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
-                k = ordered_hashmap_put(top, d, p);
-                if (k >= 0) {
-                        p = strdup(p);
-                        if (!p)
-                                return -ENOMEM;
-                        d = p + strlen(toppath) + 1;
-                } else if (k != -EEXIST) {
-                        free(p);
-                        return k;
-                }
+                log_debug("Adding at bottom: %s %s %s/%s", *file, glyph(GLYPH_ARROW_RIGHT), path, *file);
+                r = path_put(bottom, path, *file, /* override = */ true);
+                if (r < 0)
+                        return r;
 
-                log_debug("Adding at bottom: %s %s %s", d, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
-                free(ordered_hashmap_remove(bottom, d));
-                k = ordered_hashmap_put(bottom, d, p);
-                if (k < 0) {
-                        free(p);
-                        return k;
-                }
-
-                h = ordered_hashmap_get(drops, unit);
+                OrderedHashmap *h = ordered_hashmap_get(*drops, unit);
                 if (!h) {
-                        h = ordered_hashmap_new(&string_hash_ops);
+                        h = ordered_hashmap_new(&path_hash_ops_free_free);
                         if (!h)
                                 return -ENOMEM;
-                        ordered_hashmap_put(drops, unit, h);
+                        r = ordered_hashmap_ensure_put(drops, &drop_hash_ops, unit, h);
+                        if (r < 0) {
+                                ordered_hashmap_free(h);
+                                return r;
+                        }
                         unit = strdup(unit);
                         if (!unit)
                                 return -ENOMEM;
                 }
 
-                p = strdup(p);
-                if (!p)
-                        return -ENOMEM;
-
-                log_debug("Adding to drops: %s %s %s %s %s",
-                          unit, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), basename(p), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
-                k = ordered_hashmap_put(h, basename(p), p);
-                if (k < 0) {
-                        free(p);
-                        if (k != -EEXIST)
-                                return k;
-                }
+                log_debug("Adding to drops: %s %s %s %s %s/%s",
+                          unit, glyph(GLYPH_ARROW_RIGHT), *file, glyph(GLYPH_ARROW_RIGHT), path, *file);
+                r = path_put(&h, path, *file, /* override = */ false);
+                if (r < 0)
+                        return r;
         }
         return 0;
 }
 
 static int enumerate_dir(
-                OrderedHashmap *top,
-                OrderedHashmap *bottom,
-                OrderedHashmap *drops,
+                OrderedHashmap **top,
+                OrderedHashmap **bottom,
+                OrderedHashmap **drops,
                 const char *path, bool dropins) {
 
         _cleanup_closedir_ DIR *d = NULL;
@@ -339,66 +351,42 @@ static int enumerate_dir(
         }
 
         STRV_FOREACH(t, files) {
-                _cleanup_free_ char *p = NULL;
-
-                p = path_join(path, *t);
-                if (!p)
-                        return -ENOMEM;
-
-                log_debug("Adding at top: %s %s %s", basename(p), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
-                r = ordered_hashmap_put(top, basename(p), p);
-                if (r >= 0) {
-                        p = strdup(p);
-                        if (!p)
-                                return -ENOMEM;
-                } else if (r != -EEXIST)
-                        return r;
-
-                log_debug("Adding at bottom: %s %s %s", basename(p), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
-                free(ordered_hashmap_remove(bottom, basename(p)));
-                r = ordered_hashmap_put(bottom, basename(p), p);
+                log_debug("Adding at top: %s %s %s/%s", *t, glyph(GLYPH_ARROW_RIGHT), path, *t);
+                r = path_put(top, path, *t, /* override = */ false);
                 if (r < 0)
                         return r;
-                p = NULL;
+
+                log_debug("Adding at bottom: %s %s %s/%s", *t, glyph(GLYPH_ARROW_RIGHT), path, *t);
+                r = path_put(bottom, path, *t, /* override = */ true);
+                if (r < 0)
+                        return r;
         }
 
         return 0;
 }
 
 static int process_suffix(const char *suffix, const char *onlyprefix) {
-        char *f, *key;
-        OrderedHashmap *top, *bottom, *drops, *h;
-        int r = 0, k, n_found = 0;
-        bool dropins;
+        int r, ret = 0;
 
         assert(suffix);
         assert(!startswith(suffix, "/"));
         assert(!strstr(suffix, "//"));
 
-        dropins = nulstr_contains(have_dropins, suffix);
+        bool dropins = nulstr_contains(have_dropins, suffix);
 
-        top = ordered_hashmap_new(&string_hash_ops);
-        bottom = ordered_hashmap_new(&string_hash_ops);
-        drops = ordered_hashmap_new(&string_hash_ops);
-        if (!top || !bottom || !drops) {
-                r = -ENOMEM;
-                goto finish;
-        }
-
+        _cleanup_ordered_hashmap_free_ OrderedHashmap *top = NULL, *bottom = NULL, *drops = NULL;
         NULSTR_FOREACH(p, prefixes) {
                 _cleanup_free_ char *t = NULL;
 
                 t = path_join(p, suffix);
-                if (!t) {
-                        r = -ENOMEM;
-                        goto finish;
-                }
+                if (!t)
+                        return -ENOMEM;
 
-                k = enumerate_dir(top, bottom, drops, t, dropins);
-                if (r == 0)
-                        r = k;
+                RET_GATHER(ret, enumerate_dir(&top, &bottom, &drops, t, dropins));
         }
 
+        int n_found = 0;
+        char *f, *key;
         ORDERED_HASHMAP_FOREACH_KEY(f, key, top) {
                 char *o;
 
@@ -409,33 +397,22 @@ static int process_suffix(const char *suffix, const char *onlyprefix) {
                         if (path_equal(o, f)) {
                                 notify_override_unchanged(f);
                         } else {
-                                k = found_override(f, o);
-                                if (k < 0)
-                                        r = k;
+                                r = found_override(f, o);
+                                if (r < 0)
+                                        RET_GATHER(ret, r);
                                 else
-                                        n_found += k;
+                                        n_found += r;
                         }
                 }
 
-                h = ordered_hashmap_get(drops, key);
+                OrderedHashmap *h = ordered_hashmap_get(drops, key);
                 if (h)
                         ORDERED_HASHMAP_FOREACH(o, h)
                                 if (!onlyprefix || startswith(o, onlyprefix))
                                         n_found += notify_override_extended(f, o);
         }
 
-finish:
-        ordered_hashmap_free_free(top);
-        ordered_hashmap_free_free(bottom);
-
-        ORDERED_HASHMAP_FOREACH_KEY(h, key, drops) {
-                ordered_hashmap_free_free(ordered_hashmap_remove(drops, key));
-                ordered_hashmap_remove(drops, key);
-                free(key);
-        }
-        ordered_hashmap_free(drops);
-
-        return r < 0 ? r : n_found;
+        return ret < 0 ? ret : n_found;
 }
 
 static int process_suffixes(const char *onlyprefix) {

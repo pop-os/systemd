@@ -1,27 +1,22 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <ctype.h>
-#include <net/if.h>
 #include <unistd.h>
 
 #include "sd-id128.h"
 
 #include "alloc-util.h"
 #include "devnum-util.h"
-#include "fd-util.h"
 #include "fileio.h"
 #include "format-ifname.h"
 #include "format-table.h"
 #include "format-util.h"
-#include "fs-util.h"
 #include "glyph-util.h"
 #include "gunicode.h"
-#include "id128-util.h"
 #include "in-addr-util.h"
 #include "memory-util.h"
 #include "memstream-util.h"
 #include "pager.h"
-#include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
@@ -29,6 +24,7 @@
 #include "sort-util.h"
 #include "stat-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "strxcpyx.h"
 #include "terminal-util.h"
 #include "time-util.h"
@@ -170,7 +166,7 @@ Table *table_new_raw(size_t n_columns) {
         if (!t)
                 return NULL;
 
-        *t = (struct Table) {
+        *t = (Table) {
                 .n_columns = n_columns,
                 .header = true,
                 .width = SIZE_MAX,
@@ -1348,7 +1344,7 @@ int table_hide_column_from_display_internal(Table *t, ...) {
                         return r;
         }
 
-        for (size_t i = 0; i < t->n_display_map; i++) {
+        FOREACH_ARRAY(i, t->display_map, t->n_display_map) {
                 bool listed = false;
                 va_list ap;
 
@@ -1359,7 +1355,7 @@ int table_hide_column_from_display_internal(Table *t, ...) {
                         column = va_arg(ap, size_t);
                         if (column == SIZE_MAX)
                                 break;
-                        if (column == t->display_map[i]) {
+                        if (column == *i) {
                                 listed = true;
                                 break;
                         }
@@ -1369,7 +1365,7 @@ int table_hide_column_from_display_internal(Table *t, ...) {
                 if (listed)
                         continue;
 
-                t->display_map[cur++] = t->display_map[i];
+                t->display_map[cur++] = *i;
         }
 
         t->n_display_map = cur;
@@ -1651,7 +1647,7 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 return yes_no(d->boolean);
 
         case TABLE_BOOLEAN_CHECKMARK:
-                return special_glyph(d->boolean ? SPECIAL_GLYPH_CHECK_MARK : SPECIAL_GLYPH_CROSS_MARK);
+                return glyph(d->boolean ? GLYPH_CHECK_MARK : GLYPH_CROSS_MARK);
 
         case TABLE_TIMESTAMP:
         case TABLE_TIMESTAMP_UTC:
@@ -2190,7 +2186,7 @@ static char *align_string_mem(const char *str, const char *url, size_t new_lengt
         return ret;
 }
 
-static bool table_data_isempty(TableData *d) {
+static bool table_data_isempty(const TableData *d) {
         assert(d);
 
         if (d->type == TABLE_EMPTY)
@@ -2204,7 +2200,7 @@ static bool table_data_isempty(TableData *d) {
         return false;
 }
 
-static const char* table_data_color(TableData *d) {
+static const char* table_data_color(const TableData *d) {
         assert(d);
 
         if (d->color)
@@ -2220,17 +2216,11 @@ static const char* table_data_color(TableData *d) {
         return NULL;
 }
 
-static const char* table_data_rgap_color(TableData *d) {
-        assert(d);
-
-        return d->rgap_color ?: d->rgap_color;
-}
-
-static const char* table_data_underline(TableData *d) {
+static const char* table_data_underline(const TableData *d) {
         assert(d);
 
         if (d->underline)
-                return /* cescape( */ansi_add_underline_grey()/* ) */;
+                return ansi_add_underline_grey();
 
         if (d->type == TABLE_HEADER)
                 return ansi_add_underline();
@@ -2238,7 +2228,7 @@ static const char* table_data_underline(TableData *d) {
         return NULL;
 }
 
-static const char* table_data_rgap_underline(TableData *d) {
+static const char* table_data_rgap_underline(const TableData *d) {
         assert(d);
 
         if (d->rgap_underline)
@@ -2347,7 +2337,7 @@ int table_print(Table *t, FILE *f) {
 
                                         req_width = MAX(req_width,
                                                         utf8_console_width(last) +
-                                                        utf8_console_width(special_glyph(SPECIAL_GLYPH_ELLIPSIS)));
+                                                        utf8_console_width(glyph(GLYPH_ELLIPSIS)));
                                 }
 
                                 /* Determine the biggest width that any cell in this column would like to have */
@@ -2569,7 +2559,7 @@ int table_print(Table *t, FILE *f) {
                                                  * right after. This will truncate the ellipsis and add a new
                                                  * one. */
 
-                                                padded = strjoin(field, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                                                padded = strjoin(field, glyph(GLYPH_ELLIPSIS));
                                                 if (!padded)
                                                         return -ENOMEM;
 
@@ -2642,7 +2632,7 @@ int table_print(Table *t, FILE *f) {
                                 if (color || underline)
                                         fputs(ANSI_NORMAL, f);
 
-                                gap_color = table_data_rgap_color(d);
+                                gap_color = d->rgap_color;
                                 gap_underline = table_data_rgap_underline(d);
                         }
 

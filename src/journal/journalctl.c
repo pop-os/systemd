@@ -1,27 +1,40 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
+#include <locale.h>
 
 #include "sd-journal.h"
 
 #include "build.h"
+#include "dissect-image.h"
+#include "extract-word.h"
 #include "glob-util.h"
 #include "id128-print.h"
+#include "image-policy.h"
 #include "journalctl.h"
 #include "journalctl-authenticate.h"
 #include "journalctl-catalog.h"
 #include "journalctl-misc.h"
 #include "journalctl-show.h"
 #include "journalctl-varlink.h"
-#include "locale-util.h"
+#include "log.h"
+#include "loop-util.h"
 #include "main-func.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
+#include "output-mode.h"
+#include "pager.h"
 #include "parse-argument.h"
+#include "parse-util.h"
+#include "pcre2-util.h"
 #include "pretty-print.h"
+#include "set.h"
 #include "static-destruct.h"
 #include "string-table.h"
+#include "string-util.h"
+#include "strv.h"
 #include "syslog-util.h"
+#include "time-util.h"
 
 #define DEFAULT_FSS_INTERVAL_USEC (15*USEC_PER_MINUTE)
 
@@ -45,7 +58,7 @@ bool arg_no_tail = false;
 bool arg_truncate_newline = false;
 bool arg_quiet = false;
 bool arg_merge = false;
-bool arg_boot = false;
+int arg_boot = -1; /* tristate */
 sd_id128_t arg_boot_id = {};
 int arg_boot_offset = 0;
 bool arg_dmesg = false;
@@ -92,7 +105,8 @@ Set *arg_output_fields = NULL;
 char *arg_pattern = NULL;
 pcre2_code *arg_compiled_pattern = NULL;
 PatternCompileCase arg_case = PATTERN_COMPILE_CASE_AUTO;
-static ImagePolicy *arg_image_policy = NULL;
+ImagePolicy *arg_image_policy = NULL;
+bool arg_synchronize_on_exit = false;
 
 STATIC_DESTRUCTOR_REGISTER(arg_cursor, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_cursor_file, freep);
@@ -267,6 +281,8 @@ static int help(void) {
                "     --no-tail               Show all lines, even in follow mode\n"
                "     --truncate-newline      Truncate entries by first newline character\n"
                "  -q --quiet                 Do not show info messages and privilege warning\n"
+               "     --synchronize-on-exit=BOOL\n"
+               "                             Wait for Journal synchronization before exiting\n"
                "\n%3$sPager Control Options:%4$s\n"
                "     --no-pager              Do not pipe output into a pager\n"
                "  -e --pager-end             Immediately jump to the end in the pager\n"
@@ -355,6 +371,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_OUTPUT_FIELDS,
                 ARG_NAMESPACE,
                 ARG_LIST_NAMESPACES,
+                ARG_SYNCHRONIZE_ON_EXIT,
         };
 
         static const struct option options[] = {
@@ -428,6 +445,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "output-fields",        required_argument, NULL, ARG_OUTPUT_FIELDS        },
                 { "namespace",            required_argument, NULL, ARG_NAMESPACE            },
                 { "list-namespaces",      no_argument,       NULL, ARG_LIST_NAMESPACES      },
+                { "synchronize-on-exit",  required_argument, NULL, ARG_SYNCHRONIZE_ON_EXIT  },
                 {}
         };
 
@@ -452,12 +470,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case 'e':
                         arg_pager_flags |= PAGER_JUMP_TO_END;
-
-                        if (arg_lines == ARG_LINES_DEFAULT)
-                                arg_lines = 1000;
-
-                        arg_boot = true;
-
                         break;
 
                 case 'f':
@@ -563,7 +575,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'k':
-                        arg_boot = arg_dmesg = true;
+                        arg_dmesg = true;
                         break;
 
                 case ARG_SYSTEM:
@@ -977,6 +989,14 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
                 }
+
+                case ARG_SYNCHRONIZE_ON_EXIT:
+                        r = parse_boolean_argument("--synchronize-on-exit", optarg, &arg_synchronize_on_exit);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -987,11 +1007,19 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_no_tail)
                 arg_lines = ARG_LINES_ALL;
 
-        if (arg_follow && !arg_since_set && arg_lines == ARG_LINES_DEFAULT)
-                arg_lines = 10;
+        if (arg_lines == ARG_LINES_DEFAULT) {
+                if (arg_follow && !arg_since_set)
+                        arg_lines = 10;
+                else if (FLAGS_SET(arg_pager_flags, PAGER_JUMP_TO_END))
+                        arg_lines = 1000;
+        }
 
-        if (arg_follow && !arg_merge && !arg_boot) {
-                arg_boot = true;
+        if (arg_boot < 0)
+                /* Show the current boot if -f/--follow, -k/--dmesg, or -e/--pager-end is specified unless
+                 * -m/--merge is specified. */
+                arg_boot = !arg_merge && (arg_follow || arg_dmesg || FLAGS_SET(arg_pager_flags, PAGER_JUMP_TO_END));
+        if (!arg_boot) {
+                /* Clear the boot ID and offset if -b/--boot is unspecified for safety. */
                 arg_boot_id = SD_ID128_NULL;
                 arg_boot_offset = 0;
         }
@@ -1161,4 +1189,4 @@ static int run(int argc, char *argv[]) {
         }
 }
 
-DEFINE_MAIN_FUNCTION_WITH_POSITIVE_SIGNAL(run);
+DEFINE_MAIN_FUNCTION(run);

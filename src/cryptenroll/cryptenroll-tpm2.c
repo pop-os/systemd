@@ -6,17 +6,19 @@
 #include "ask-password-api.h"
 #include "cryptenroll-tpm2.h"
 #include "cryptsetup-tpm2.h"
+#include "cryptsetup-util.h"
 #include "env-util.h"
 #include "errno-util.h"
-#include "fileio.h"
 #include "hexdecoct.h"
 #include "json-util.h"
 #include "log.h"
 #include "memory-util.h"
 #include "random-util.h"
 #include "sha256.h"
+#include "strv.h"
 #include "tpm2-util.h"
 
+#if HAVE_TPM2
 static int search_policy_hash(
                 struct crypt_device *cd,
                 const struct iovec policy_hash[],
@@ -119,16 +121,18 @@ static int get_pin(char **ret_pin_str, TPM2Flags *ret_flags) {
                                                 SYNTHETIC_ERRNO(ENOKEY), "Too many attempts, giving up.");
 
                         AskPasswordRequest req = {
+                                .tty_fd = -EBADF,
                                 .message = "Please enter TPM2 PIN:",
                                 .icon = "drive-harddisk",
                                 .keyring = "tpm2-pin",
                                 .credential = "cryptenroll.new-tpm2-pin",
+                                .until = USEC_INFINITY,
+                                .hup_fd = -EBADF,
                         };
 
                         pin = strv_free_erase(pin);
                         r = ask_password_auto(
                                         &req,
-                                        /* until= */ USEC_INFINITY,
                                         /* flags= */ 0,
                                         &pin);
                         if (r < 0)
@@ -139,7 +143,6 @@ static int get_pin(char **ret_pin_str, TPM2Flags *ret_flags) {
 
                         r = ask_password_auto(
                                         &req,
-                                        USEC_INFINITY,
                                         /* flags= */ 0,
                                         &pin2);
                         if (r < 0)
@@ -163,6 +166,7 @@ static int get_pin(char **ret_pin_str, TPM2Flags *ret_flags) {
 
         return 0;
 }
+#endif
 
 int load_volume_key_tpm2(
                 struct crypt_device *cd,
@@ -171,6 +175,7 @@ int load_volume_key_tpm2(
                 void *ret_vk,
                 size_t *ret_vks) {
 
+#if HAVE_TPM2
         _cleanup_(iovec_done_erase) struct iovec decrypted_key = {};
         _cleanup_(erase_and_freep) char *passphrase = NULL;
         ssize_t passphrase_size;
@@ -278,6 +283,9 @@ int load_volume_key_tpm2(
                 return log_error_errno(r, "Unlocking via TPM2 device failed: %m");
 
         return r;
+#else
+        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "TPM2 unlocking not supported.");
+#endif
 }
 
 int enroll_tpm2(struct crypt_device *cd,
@@ -295,6 +303,7 @@ int enroll_tpm2(struct crypt_device *cd,
                 const char *pcrlock_path,
                 int *ret_slot_to_wipe) {
 
+#if HAVE_TPM2
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL, *signature_json = NULL;
         _cleanup_(erase_and_freep) char *base64_encoded = NULL;
         _cleanup_(iovec_done) struct iovec srk = {}, pubkey = {};
@@ -604,4 +613,7 @@ int enroll_tpm2(struct crypt_device *cd,
 
         *ret_slot_to_wipe = slot_to_wipe;
         return keyslot;
+#else
+        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "TPM2 key enrollment not supported.");
+#endif
 }

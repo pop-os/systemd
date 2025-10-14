@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-
 #include "alloc-util.h"
 #include "compress.h"
 #include "fuzz.h"
@@ -43,7 +41,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         }
 
         size_t csize;
-        r = compress_blob(alg, h->data, data_len, buf, size, &csize);
+        r = compress_blob(alg, h->data, data_len, buf, size, &csize, /* level = */ -1);
         if (r < 0) {
                 log_error_errno(r, "Compression failed: %m");
                 return 0;

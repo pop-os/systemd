@@ -1,16 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <dirent.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include "macro.h"
-#include "time-util.h"
+#include "forward.h"
 
 #define LONG_LINE_MAX (1U*1024U*1024U)
 
@@ -29,6 +20,7 @@ typedef enum {
         WRITE_STRING_FILE_MODE_0444                  = 1 << 11,
         WRITE_STRING_FILE_SUPPRESS_REDUNDANT_VIRTUAL = 1 << 12,
         WRITE_STRING_FILE_LABEL                      = 1 << 13,
+        WRITE_STRING_FILE_OPEN_NONBLOCKING           = 1 << 14,
 } WriteStringFileFlags;
 
 typedef enum {
@@ -56,6 +48,9 @@ int write_string_file_full(int dir_fd, const char *fn, const char *line, WriteSt
 static inline int write_string_file_at(int dir_fd, const char *fn, const char *line, WriteStringFileFlags flags) {
         return write_string_file_full(dir_fd, fn, line, flags, NULL, NULL);
 }
+static inline int write_string_file_fd(int dir_fd, const char *line, WriteStringFileFlags flags) {
+        return write_string_file_at(dir_fd, NULL, line, flags);
+}
 static inline int write_string_file(const char *fn, const char *line, WriteStringFileFlags flags) {
         return write_string_file_at(AT_FDCWD, fn, line, flags);
 }
@@ -75,8 +70,10 @@ static inline int read_full_file(const char *filename, char **ret_contents, size
         return read_full_file_full(AT_FDCWD, filename, UINT64_MAX, SIZE_MAX, 0, NULL, ret_contents, ret_size);
 }
 
-int read_virtual_file_fd(int fd, size_t max_size, char **ret_contents, size_t *ret_size);
 int read_virtual_file_at(int dir_fd, const char *filename, size_t max_size, char **ret_contents, size_t *ret_size);
+static inline int read_virtual_file_fd(int fd, size_t max_size, char **ret_contents, size_t *ret_size) {
+        return read_virtual_file_at(fd, NULL, max_size, ret_contents, ret_size);
+}
 static inline int read_virtual_file(const char *filename, size_t max_size, char **ret_contents, size_t *ret_size) {
         return read_virtual_file_at(AT_FDCWD, filename, max_size, ret_contents, ret_size);
 }
@@ -90,15 +87,12 @@ static inline int read_full_stream(FILE *f, char **ret_contents, size_t *ret_siz
 }
 
 int verify_file_at(int dir_fd, const char *fn, const char *blob, bool accept_extra_nl);
-static inline int verify_file(const char *fn, const char *blob, bool accept_extra_nl) {
-        return verify_file_at(AT_FDCWD, fn, blob, accept_extra_nl);
-}
 
-int executable_is_script(const char *path, char **interpreter);
+int script_get_shebang_interpreter(const char *path, char **ret);
 
-int get_proc_field(const char *filename, const char *pattern, const char *terminator, char **field);
+int get_proc_field(const char *path, const char *key, char **ret);
 
-DIR *xopendirat(int dirfd, const char *name, int flags);
+DIR* xopendirat(int dir_fd, const char *name, int flags);
 
 typedef enum XfopenFlags {
         XFOPEN_UNLOCKED = 1 << 0, /* call __fsetlocking(FSETLOCKING_BYCALLER) after opened */
@@ -148,22 +142,20 @@ typedef enum ReadLineFlags {
 } ReadLineFlags;
 
 int read_line_full(FILE *f, size_t limit, ReadLineFlags flags, char **ret);
+static inline int read_line(FILE *f, size_t limit, char **ret) {
+        return read_line_full(f, limit, 0, ret);
+}
+static inline int read_nul_string(FILE *f, size_t limit, char **ret) {
+        return read_line_full(f, limit, READ_LINE_ONLY_NUL, ret);
+}
+
+int read_stripped_line(FILE *f, size_t limit, char **ret);
 
 static inline bool file_offset_beyond_memory_size(off_t x) {
         if (x < 0) /* off_t is signed, filter that out */
                 return false;
         return (uint64_t) x > (uint64_t) SIZE_MAX;
 }
-
-static inline int read_line(FILE *f, size_t limit, char **ret) {
-        return read_line_full(f, limit, 0, ret);
-}
-
-static inline int read_nul_string(FILE *f, size_t limit, char **ret) {
-        return read_line_full(f, limit, READ_LINE_ONLY_NUL, ret);
-}
-
-int read_stripped_line(FILE *f, size_t limit, char **ret);
 
 int safe_fgetc(FILE *f, char *ret);
 

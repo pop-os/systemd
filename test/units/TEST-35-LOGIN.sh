@@ -528,9 +528,7 @@ EOF
     # become idle again. 'Lock' signal is sent out for each session, we have at
     # least one session, so minimum of 2 "Lock" signals must have been sent.
     journalctl --sync
-    set +o pipefail
     timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m 1 -q 'Sent message type=signal .* member=Lock'
-    set -o pipefail
 
     # We need to know that a new message was sent after waking up,
     # so we must track how many happened before sleeping to check we have extra.
@@ -541,10 +539,8 @@ EOF
 
     # Wait again
     journalctl --sync
-    set +o pipefail
     timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m "$((locks + 1))" -q 'Sent message type=signal .* member=Lock'
     timeout -v 35 journalctl -b -u systemd-logind.service --since="$ts" -n all --follow | grep -m 2 -q -F 'System idle. Will be locked now.'
-    set -o pipefail
 }
 
 testcase_session_properties() {
@@ -705,15 +701,22 @@ background_at_return() {
 
 testcase_background() {
 
-    local uid TRANSIENTUNIT1 TRANSIENTUNIT2
+    local uid TRANSIENTUNIT0 TRANSIENTUNIT1 TRANSIENTUNIT2
 
     uid=$(id -u logind-test-user)
 
     systemctl stop user@"$uid".service
 
     PAMSERVICE="pamserv$RANDOM"
+    TRANSIENTUNIT0="none$RANDOM.service"
     TRANSIENTUNIT1="bg$RANDOM.service"
     TRANSIENTUNIT2="bgg$RANDOM.service"
+    TRANSIENTUNIT3="bggg$RANDOM.service"
+    TRANSIENTUNIT4="bgggg$RANDOM.service"
+    RUN0UNIT0="run0$RANDOM.service"
+    RUN0UNIT1="runn0$RANDOM.service"
+    RUN0UNIT2="runnn0$RANDOM.service"
+    RUN0UNIT3="runnnn0$RANDOM.service"
 
     trap background_at_return RETURN
 
@@ -725,6 +728,13 @@ account required   pam_permit.so
 session optional   pam_systemd.so debug
 session required   pam_unix.so
 EOF
+
+    systemd-run -u "$TRANSIENTUNIT0" -p PAMName="$PAMSERVICE" -p "Environment=XDG_SESSION_CLASS=none" -p Type=exec -p User=logind-test-user sleep infinity
+
+    # This was a 'none' service, so logind should take no action
+    (! systemctl is-active user@"$uid".service )
+
+    systemctl stop "$TRANSIENTUNIT0"
 
     systemd-run -u "$TRANSIENTUNIT1" -p PAMName="$PAMSERVICE" -p "Environment=XDG_SESSION_CLASS=background-light" -p Type=exec -p User=logind-test-user sleep infinity
 
@@ -741,6 +751,58 @@ EOF
     systemctl stop "$TRANSIENTUNIT2"
 
     systemctl stop user@"$uid".service
+
+    # Now check that system users automatically get the light session class assigned
+    systemd-sysusers --inline "u lightuser"
+
+    systemd-run -u "$TRANSIENTUNIT3" -p PAMName="$PAMSERVICE" -p "Environment=XDG_SESSION_TYPE=unspecified" -p Type=exec -p User=lightuser sleep infinity
+    loginctl | grep lightuser | grep -q background-light
+    systemctl stop "$TRANSIENTUNIT3"
+
+    systemd-run -u "$TRANSIENTUNIT4" -p PAMName="$PAMSERVICE" -p "Environment=XDG_SESSION_TYPE=tty" -p Type=exec -p User=lightuser sleep infinity
+    loginctl | grep lightuser | grep -q user-light
+    systemctl stop "$TRANSIENTUNIT4"
+
+    # Now check that run0's session class control works
+    systemd-run --service-type=notify run0 -u lightuser --unit="$RUN0UNIT0" sleep infinity
+    loginctl | grep lightuser | grep -qw background-light
+    systemctl stop "$RUN0UNIT0"
+
+    systemd-run --service-type=notify run0 -u lightuser --unit="$RUN0UNIT1" --lightweight=yes sleep infinity
+    loginctl | grep lightuser | grep -qw background-light
+    systemctl stop "$RUN0UNIT1"
+
+    systemd-run --service-type=notify run0 -u lightuser --unit="$RUN0UNIT2" --lightweight=no sleep infinity
+    loginctl | grep lightuser | grep -qw background
+    systemctl stop "$RUN0UNIT2"
+
+    systemd-run --service-type=notify run0 -u root --unit="$RUN0UNIT3" sleep infinity
+    loginctl | grep root | grep -qw background-light
+    systemctl stop "$RUN0UNIT3"
+}
+
+testcase_varlink() {
+    varlinkctl introspect /run/systemd/io.systemd.Login
+}
+
+testcase_restart() {
+    local classes unit c
+
+    classes='user user-early user-incomplete greeter lock-screen background background-light manager manager-early'
+
+    for c in $classes; do
+        unit="user-sleeper-$c.service"
+        systemd-run --service-type=notify run0  --setenv XDG_SESSION_CLASS="$c" -u logind-test-user --unit="$unit" sleep infinity
+    done
+
+    systemctl restart systemd-logind
+
+    for c in $classes; do
+        unit="user-sleeper-$c.service"
+        systemctl --quiet is-active "$unit"
+        loginctl | grep logind-test-user | grep -qw "$c"
+        systemctl kill "$unit"
+    done
 }
 
 setup_test_user

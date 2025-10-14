@@ -1,43 +1,53 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <stddef.h>
+#include <linux/magic.h>
+#include <stdlib.h>
 #include <sys/mount.h>
+#include <unistd.h>
+
+#include "sd-daemon.h"
 
 #include "blockdev-util.h"
 #include "bus-unit-util.h"
 #include "chase.h"
 #include "chown-recursive.h"
 #include "copy.h"
+#include "cryptsetup-util.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "filesystems.h"
 #include "format-util.h"
-#include "fs-util.h"
+#include "hashmap.h"
 #include "home-util.h"
+#include "homework-fido2.h"
+#include "homework-password-cache.h"
+#include "homework-pkcs11.h"
 #include "homework.h"
 #include "homework-blob.h"
 #include "homework-cifs.h"
 #include "homework-directory.h"
-#include "homework-fido2.h"
 #include "homework-fscrypt.h"
 #include "homework-luks.h"
 #include "homework-mount.h"
-#include "homework-pkcs11.h"
 #include "json-util.h"
 #include "libcrypt-util.h"
+#include "loop-util.h"
 #include "main-func.h"
 #include "memory-util.h"
-#include "missing_magic.h"
 #include "mount-util.h"
-#include "parse-util.h"
 #include "path-util.h"
 #include "recovery-key.h"
 #include "rm-rf.h"
 #include "stat-util.h"
+#include "string-util.h"
 #include "strv.h"
 #include "sync-util.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
+#include "user-record.h"
+#include "user-record-util.h"
 #include "user-util.h"
 #include "virt.h"
 
@@ -543,7 +553,6 @@ int home_sync_and_statfs(int root_fd, struct statfs *ret) {
 static int read_identity_file(int root_fd, sd_json_variant **ret) {
         _cleanup_fclose_ FILE *identity_file = NULL;
         _cleanup_close_ int identity_fd = -EBADF;
-        unsigned line, column;
         int r;
 
         assert(root_fd >= 0);
@@ -561,6 +570,7 @@ static int read_identity_file(int root_fd, sd_json_variant **ret) {
         if (!identity_file)
                 return log_oom();
 
+        unsigned line = 0, column = 0;
         r = sd_json_parse_file(identity_file, ".identity", SD_JSON_PARSE_SENSITIVE, ret, &line, &column);
         if (r < 0)
                 return log_error_errno(r, "[.identity:%u:%u] Failed to parse JSON data: %m", line, column);
@@ -927,36 +937,29 @@ static int home_activate(UserRecord *h, UserRecord **ret_home) {
         if (r < 0)
                 return r;
         if (r == USER_TEST_ABSENT)
-                return log_error_errno(SYNTHETIC_ERRNO(ENOENT), "Image path %s is missing, refusing.", user_record_image_path(h));
+                return log_error_errno(SYNTHETIC_ERRNO(ENETUNREACH), "Image path %s is missing, refusing.", user_record_image_path(h));
 
         switch (user_record_storage(h)) {
 
         case USER_LUKS:
                 r = home_activate_luks(h, flags, &setup, &cache, &new_home);
-                if (r < 0)
-                        return r;
-
                 break;
 
         case USER_SUBVOLUME:
         case USER_DIRECTORY:
         case USER_FSCRYPT:
                 r = home_activate_directory(h, flags, &setup, &cache, &new_home);
-                if (r < 0)
-                        return r;
-
                 break;
 
         case USER_CIFS:
                 r = home_activate_cifs(h, flags, &setup, &cache, &new_home);
-                if (r < 0)
-                        return r;
-
                 break;
 
         default:
                 assert_not_reached();
         }
+        if (r < 0)
+                return r;
 
         /* Note that the returned object might either be a reference to an updated version of the existing
          * home object, or a reference to a newly allocated home object. The caller has to be able to deal
@@ -1071,7 +1074,7 @@ static int copy_skel(UserRecord *h, int root_fd, const char *skel) {
         assert(h);
         assert(root_fd >= 0);
 
-        r = chase(skel, /* root= */ NULL, /* flags= */ 0, /* ret_path= */ NULL, &skel_fd);
+        r = chase(skel, /* root= */ NULL, CHASE_MUST_BE_DIRECTORY, /* ret_path= */ NULL, &skel_fd);
         if (r == -ENOENT) {
                 log_info("Skeleton directory %s missing, ignoring.", skel);
                 return 0;
@@ -1080,7 +1083,7 @@ static int copy_skel(UserRecord *h, int root_fd, const char *skel) {
         r = copy_tree_at(
                         skel_fd, /* from= */ NULL,
                         root_fd, ".",
-                        h->uid, h->gid,
+                        h->uid, user_record_gid(h),
                         COPY_MERGE|COPY_REPLACE,
                         /* denylist= */ NULL,
                         /* subvolumes= */ NULL);
@@ -1606,7 +1609,7 @@ static int home_validate_update(UserRecord *h, HomeSetup *setup, HomeSetupFlags 
         if (r < 0)
                 return r;
         if (r == USER_TEST_ABSENT)
-                return log_error_errno(SYNTHETIC_ERRNO(ENOENT), "Image path %s does not exist", user_record_image_path(h));
+                return log_error_errno(SYNTHETIC_ERRNO(ENETUNREACH), "Image path %s does not exist", user_record_image_path(h));
 
         switch (user_record_storage(h)) {
 
@@ -1807,7 +1810,7 @@ static int home_passwd(UserRecord *h, UserRecord **ret_home) {
                 break;
 
         default:
-                break;
+                ;
         }
 
         r = home_store_header_identity_luks(new_home, &setup, header_home);
@@ -1991,7 +1994,6 @@ static int run(int argc, char *argv[]) {
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
         _cleanup_fclose_ FILE *opened_file = NULL;
         _cleanup_hashmap_free_ Hashmap *blobs = NULL;
-        unsigned line = 0, column = 0;
         const char *json_path = NULL, *blob_filename;
         FILE *json_file;
         usec_t start;
@@ -2022,6 +2024,7 @@ static int run(int argc, char *argv[]) {
                 json_file = stdin;
         }
 
+        unsigned line = 0, column = 0;
         r = sd_json_parse_file(json_file, json_path, SD_JSON_PARSE_SENSITIVE, &v, &line, &column);
         if (r < 0)
                 return log_error_errno(r, "[%s:%u:%u] Failed to parse JSON data: %m", json_path, line, column);
@@ -2102,6 +2105,7 @@ static int run(int argc, char *argv[]) {
          * ENOSPC          → not enough disk space for operation
          * EKEYREVOKED     → user record has not suitable hashed password or pkcs#11 entry, we cannot authenticate
          * EADDRINUSE      → home image is already used elsewhere (lock taken)
+         * ENETUNREACH     → backing storage is currently not (image is ENOENT, or AF_UNIX socket to connect to is ENOENT)
          */
 
         if (streq(argv[1], "activate"))

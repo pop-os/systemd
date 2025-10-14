@@ -8,6 +8,8 @@ test_hashmap_ordered_c = custom_target(
         capture : true,
         build_by_default : want_tests != 'false')
 
+generated_sources += test_hashmap_ordered_c
+
 path = run_command(sh, '-c', 'echo "$PATH"', check: true).stdout().strip()
 test_env = {
         'PATH' : meson.project_build_root() + ':' + path,
@@ -21,21 +23,33 @@ endif
 
 ############################################################
 
-generate_sym_test_py = find_program('generate-sym-test.py')
+generate_sym_test_py = files('generate-sym-test.py')
 
 test_libsystemd_sym_c = custom_target(
-        input : [libsystemd_sym_path] + systemd_headers + libsystemd_sources,
+        input : [libsystemd_sym_path,
+                 systemd_headers,
+                 libsystemd_sources],
         output : 'test-libsystemd-sym.c',
-        command : [generate_sym_test_py, libsystemd_sym_path, libsystemd_dir_path] + systemd_headers,
+        command : [generate_sym_test_py,
+                   libsystemd_sym_path,
+                   libsystemd_dir_path,
+                   systemd_headers],
         capture : true,
         build_by_default : want_tests != 'false')
 
 test_libudev_sym_c = custom_target(
-        input : [libudev_sym_path, libudev_h_path] + libudev_sources,
+        input : [libudev_sym_path,
+                 libudev_h_path,
+                 libudev_sources],
         output : 'test-libudev-sym.c',
-        command : [generate_sym_test_py, libudev_sym_path, libudev_dir_path, libudev_h_path],
+        command : [generate_sym_test_py,
+                   libudev_sym_path,
+                   libudev_dir_path,
+                   libudev_h_path],
         capture : true,
         build_by_default : want_tests != 'false')
+
+generated_sources += [test_libsystemd_sym_c, test_libudev_sym_c]
 
 ############################################################
 
@@ -45,14 +59,15 @@ simple_tests += files(
         'test-argv-util.c',
         'test-audit-util.c',
         'test-barrier.c',
+        'test-binfmt-util.c',
         'test-bitfield.c',
         'test-bitmap.c',
         'test-blockdev-util.c',
         'test-bootspec.c',
         'test-build-path.c',
+        'test-bus-unit-util.c',
         'test-bus-util.c',
         'test-calendarspec.c',
-        'test-cgroup-setup.c',
         'test-cgroup-util.c',
         'test-cgroup.c',
         'test-chase.c',
@@ -102,6 +117,7 @@ simple_tests += files(
         'test-hostname-setup.c',
         'test-hostname-util.c',
         'test-id128.c',
+        'test-image-filter.c',
         'test-image-policy.c',
         'test-import-util.c',
         'test-in-addr-prefix-util.c',
@@ -130,10 +146,13 @@ simple_tests += files(
         'test-modhex.c',
         'test-mountpoint-util.c',
         'test-net-naming-scheme.c',
+        'test-notify-recv.c',
+        'test-nsresource.c',
         'test-nulstr-util.c',
         'test-open-file.c',
         'test-ordered-set.c',
         'test-os-util.c',
+        'test-osc-context.c',
         'test-parse-argument.c',
         'test-parse-helpers.c',
         'test-path-lookup.c',
@@ -175,6 +194,7 @@ simple_tests += files(
         'test-strxcpyx.c',
         'test-sysctl-util.c',
         'test-terminal-util.c',
+        'test-tests.c',
         'test-tmpfile-util.c',
         'test-udev-util.c',
         'test-uid-classification.c',
@@ -213,8 +233,7 @@ executables += [
                             generated_gperf_headers,
         },
         test_template + {
-                'sources' : files('test-arphrd-util.c') +
-                            generated_gperf_headers,
+                'sources' : files('test-arphrd-util.c')
         },
         test_template + {
                 'sources' : files('test-ask-password-api.c'),
@@ -237,12 +256,11 @@ executables += [
                 'type' : 'manual',
         },
         test_template + {
-                'sources' : files('test-cap-list.c') +
-                            generated_gperf_headers,
+                'sources' : files('test-capability-list.c'),
                 'dependencies' : libcap,
         },
         test_template + {
-                'sources' : files('test-capability.c'),
+                'sources' : files('test-capability-util.c'),
                 'dependencies' : libcap,
         },
         test_template + {
@@ -260,8 +278,12 @@ executables += [
         },
         test_template + {
                 'sources' : files('test-cryptolib.c'),
-                'dependencies' : lib_openssl_or_gcrypt,
-                'conditions' : ['HAVE_OPENSSL_OR_GCRYPT'],
+                'dependencies' : libopenssl,
+                'conditions' : ['HAVE_OPENSSL'],
+        },
+        test_template + {
+                'sources' : files('test-display-quota.c'),
+                'type' : 'manual',
         },
         test_template + {
                 'sources' : files('test-dlopen-so.c'),
@@ -274,7 +296,10 @@ executables += [
                 # only static linking apart from libdl, to make sure that the
                 # module is linked to all libraries that it uses.
                 'sources' : files('test-dlopen.c'),
-                'link_with' : libbasic_static,
+                'link_with' : [
+                        libc_wrapper_static,
+                        libbasic_static,
+                ],
                 'dependencies' : libdl,
                 'install' : false,
                 'type' : 'manual',
@@ -297,8 +322,7 @@ executables += [
                 'timeout' : 180,
         },
         test_template + {
-                'sources' : files('test-ip-protocol-list.c') +
-                            shared_generated_gperf_headers,
+                'sources' : files('test-ip-protocol-list.c'),
         },
         test_template + {
                 'sources' : files('test-ipcrm.c'),
@@ -351,15 +375,17 @@ executables += [
                         'test-nss-hosts.c',
                         'nss-test-util.c',
                 ),
-                'dependencies' : libdl,
+                'extract' : files('nss-test-util.c'),
+                'dependencies' : [
+                        libdl,
+                        libseccomp,
+                ],
                 'conditions' : ['ENABLE_NSS'],
                 'timeout' : 120,
         },
         test_template + {
-                'sources' : files(
-                        'test-nss-users.c',
-                        'nss-test-util.c',
-                ),
+                'sources' : files('test-nss-users.c'),
+                'objects' : ['test-nss-hosts'],
                 'dependencies' : libdl,
                 'conditions' : ['ENABLE_NSS'],
         },
@@ -371,6 +397,11 @@ executables += [
         test_template + {
                 'sources' : files('test-parse-util.c'),
                 'dependencies' : libm,
+        },
+        test_template + {
+                'sources' : files('test-shift-uid.c'),
+                'dependencies' : libacl,
+                'type' : 'manual',
         },
         test_template + {
                 'sources' : files('test-process-util.c'),
@@ -408,7 +439,10 @@ executables += [
         },
         test_template + {
                 'sources' : files('test-sizeof.c'),
-                'link_with' : libbasic_static,
+                'link_with' : [
+                        libc_wrapper_static,
+                        libbasic_static,
+                ],
         },
         test_template + {
                 'sources' : files('test-time-util.c'),
@@ -444,29 +478,11 @@ executables += [
                 'suite' : 'libsystemd',
         },
         test_template + {
-                'name' : 'test-libsystemd-static-sym',
-                'sources' : test_libsystemd_sym_c,
-                'link_with' : install_libsystemd_static,
-                'build_by_default' : want_tests != 'false' and static_libsystemd != 'false',
-                'install' : install_tests and static_libsystemd != 'false',
-                'suite' : 'libsystemd',
-        },
-        test_template + {
                 'name' : 'test-libudev-sym',
                 'sources' : test_libudev_sym_c,
                 'include_directories' : libudev_includes,
                 'c_args' : ['-Wno-deprecated-declarations'] + test_cflags,
                 'link_with' : libudev,
-                'suite' : 'libudev',
-        },
-        test_template + {
-                'name' : 'test-libudev-static-sym',
-                'sources' : test_libudev_sym_c,
-                'include_directories' : libudev_includes,
-                'c_args' : ['-Wno-deprecated-declarations'] + test_cflags,
-                'link_with' : install_libudev_static,
-                'build_by_default' : want_tests != 'false' and static_libudev != 'false',
-                'install' : install_tests and static_libudev != 'false',
                 'suite' : 'libudev',
         },
 
@@ -485,6 +501,12 @@ executables += [
         core_test_template + {
                 'sources' : files('test-bpf-restrict-fs.c'),
                 'dependencies' : common_test_dependencies,
+        },
+        core_test_template + {
+                'sources' : files('test-bpf-token.c'),
+                'dependencies' : common_test_dependencies + libbpf,
+                'conditions' : ['BPF_FRAMEWORK'],
+                'type' : 'manual',
         },
         core_test_template + {
                 'sources' : files('test-cgroup-cpu.c'),
@@ -588,6 +610,7 @@ executables += [
         test_template + {
                 'sources' : files('../libsystemd/sd-device/test-sd-device-thread.c'),
                 'link_with' : [
+                        libc_wrapper_static,
                         libbasic_static,
                         libsystemd,
                 ],
@@ -596,6 +619,7 @@ executables += [
         test_template + {
                 'sources' : files('../libudev/test-udev-device-thread.c'),
                 'link_with' : [
+                        libc_wrapper_static,
                         libbasic_static,
                         libudev,
                 ],
@@ -608,8 +632,32 @@ executables += [
                         libudev_basic,
                 ],
         },
-        test_template + {
-                'sources' : files('test-aux-scope.c'),
-                'type' : 'manual',
-        },
 ]
+
+if static_libsystemd != 'false'
+        executables += [
+                test_template + {
+                        'name' : 'test-libsystemd-static-sym',
+                        'sources' : test_libsystemd_sym_c,
+                        'link_with' : install_libsystemd_static,
+                        'build_by_default' : want_tests != 'false',
+                        'install' : install_tests,
+                        'suite' : 'libsystemd',
+                },
+        ]
+endif
+
+if static_libudev != 'false'
+        executables += [
+                test_template + {
+                        'name' : 'test-libudev-static-sym',
+                        'sources' : test_libudev_sym_c,
+                        'include_directories' : libudev_includes,
+                        'c_args' : ['-Wno-deprecated-declarations'] + test_cflags,
+                        'link_with' : install_libudev_static,
+                        'build_by_default' : want_tests != 'false',
+                        'install' : install_tests,
+                        'suite' : 'libudev',
+                },
+        ]
+endif

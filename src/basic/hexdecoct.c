@@ -1,13 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <ctype.h>
-#include <errno.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <stdio.h>
 
 #include "alloc-util.h"
 #include "hexdecoct.h"
-#include "macro.h"
 #include "memory-util.h"
 #include "string-util.h"
 
@@ -865,6 +862,9 @@ void hexdump(FILE *f, const void *p, size_t s) {
         unsigned n = 0;
 
         assert(b || s == 0);
+
+        if (s == SIZE_MAX)
+                s = strlen(p);
 
         if (!f)
                 f = stdout;

@@ -1,28 +1,27 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-/* Make sure the net/if.h header is included before any linux/ one */
-#include <net/if.h>
 #include <linux/fib_rules.h>
 
-#include "af-list.h"
+#include "sd-netlink.h"
+
 #include "alloc-util.h"
 #include "conf-parser.h"
-#include "fileio.h"
-#include "format-util.h"
+#include "errno-util.h"
 #include "hashmap.h"
-#include "ip-protocol-list.h"
 #include "netlink-util.h"
 #include "network-util.h"
+#include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-queue.h"
 #include "networkd-route-util.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-util.h"
+#include "ordered-set.h"
 #include "parse-util.h"
-#include "socket-util.h"
+#include "set.h"
+#include "siphash24.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "strv.h"
 #include "user-util.h"
 
 static const char *const fr_act_type_table[__FR_ACT_MAX] = {
@@ -550,6 +549,23 @@ static void log_routing_policy_rule_debug(const RoutingPolicyRule *rule, const c
                        strna(rule->iif), strna(rule->oif), strna(table));
 }
 
+static void routing_policy_rule_forget(Manager *manager, RoutingPolicyRule *rule, const char *msg) {
+        assert(manager);
+        assert(rule);
+        assert(msg);
+
+        Request *req;
+        if (routing_policy_rule_get_request(manager, rule, rule->family, &req) >= 0)
+                routing_policy_rule_enter_removed(req->userdata);
+
+        if (!rule->manager && routing_policy_rule_get(manager, rule, rule->family, &rule) < 0)
+                return;
+
+        routing_policy_rule_enter_removed(rule);
+        log_routing_policy_rule_debug(rule, "Forgetting", NULL, manager);
+        routing_policy_rule_detach(rule);
+}
+
 static int routing_policy_rule_set_netlink_message(const RoutingPolicyRule *rule, sd_netlink_message *m) {
         int r;
 
@@ -708,16 +724,8 @@ static int routing_policy_rule_remove_handler(sd_netlink *rtnl, sd_netlink_messa
                                        (r == -ENOENT || !rule->manager) ? LOG_DEBUG : LOG_WARNING,
                                        r, "Could not drop routing policy rule, ignoring");
 
-                if (rule->manager) {
-                        /* If the rule cannot be removed, then assume the rule is already removed. */
-                        log_routing_policy_rule_debug(rule, "Forgetting", NULL, manager);
-
-                        Request *req;
-                        if (routing_policy_rule_get_request(manager, rule, rule->family, &req) >= 0)
-                                routing_policy_rule_enter_removed(req->userdata);
-
-                        routing_policy_rule_detach(rule);
-                }
+                /* If the rule cannot be removed, then assume the rule is already removed. */
+                routing_policy_rule_forget(manager, rule, "Forgetting");
         }
 
         return 1;
@@ -813,20 +821,11 @@ int link_drop_routing_policy_rules(Link *link, bool only_static) {
                 if (rule->protocol == RTPROT_KERNEL)
                         continue;
 
-                if (only_static) {
-                        /* When 'only_static' is true, mark only static rules. */
-                        if (rule->source != NETWORK_CONFIG_SOURCE_STATIC)
-                                continue;
-                } else {
-                        /* Do not mark foreign rules when KeepConfiguration= is enabled. */
-                        if (rule->source == NETWORK_CONFIG_SOURCE_FOREIGN &&
-                            link->network &&
-                            FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_STATIC))
-                                continue;
-                }
-
                 /* Ignore rules not assigned yet or already removing. */
                 if (!routing_policy_rule_exists(rule))
+                        continue;
+
+                if (!link_should_mark_config(link, only_static, rule->source, rule->protocol))
                         continue;
 
                 routing_policy_rule_mark(rule);
@@ -1050,31 +1049,7 @@ int link_request_static_routing_policy_rules(Link *link) {
         return 0;
 }
 
-static const RoutingPolicyRule kernel_rules[] = {
-        { .family = AF_INET,  .priority_set = true, .priority = 0,     .table = RT_TABLE_LOCAL,   .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, },
-        { .family = AF_INET,  .priority_set = true, .priority = 1000,  .table = RT_TABLE_UNSPEC,  .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, .l3mdev = true },
-        { .family = AF_INET,  .priority_set = true, .priority = 32766, .table = RT_TABLE_MAIN,    .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, },
-        { .family = AF_INET,  .priority_set = true, .priority = 32767, .table = RT_TABLE_DEFAULT, .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, },
-        { .family = AF_INET6, .priority_set = true, .priority = 0,     .table = RT_TABLE_LOCAL,   .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, },
-        { .family = AF_INET6, .priority_set = true, .priority = 1000,  .table = RT_TABLE_UNSPEC,  .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, .l3mdev = true },
-        { .family = AF_INET6, .priority_set = true, .priority = 32766, .table = RT_TABLE_MAIN,    .action = FR_ACT_TO_TBL, .uid_range.start = UID_INVALID, .uid_range.end = UID_INVALID, .suppress_prefixlen = -1, .suppress_ifgroup = -1, },
-};
-
-static bool routing_policy_rule_is_created_by_kernel(const RoutingPolicyRule *rule) {
-        assert(rule);
-
-        FOREACH_ELEMENT(i, kernel_rules)
-                if (routing_policy_rule_equal(rule, i, i->family, i->priority))
-                        return true;
-
-        return false;
-}
-
 int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Manager *m) {
-        _cleanup_(routing_policy_rule_unrefp) RoutingPolicyRule *tmp = NULL;
-        RoutingPolicyRule *rule = NULL;
-        Request *req = NULL;
-        uint16_t type;
         int r;
 
         assert(rtnl);
@@ -1088,6 +1063,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Man
                 return 0;
         }
 
+        uint16_t type;
         r = sd_netlink_message_get_type(message, &type);
         if (r < 0) {
                 log_warning_errno(r, "rtnl: could not get message type, ignoring: %m");
@@ -1097,6 +1073,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Man
                 return 0;
         }
 
+        _cleanup_(routing_policy_rule_unrefp) RoutingPolicyRule *tmp = NULL;
         r = routing_policy_rule_new(&tmp);
         if (r < 0) {
                 log_oom();
@@ -1251,36 +1228,27 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Man
                 return 0;
         }
 
-        /* If FRA_PROTOCOL is supported by kernel, then the attribute is always appended. If the received
-         * message does not have FRA_PROTOCOL, then we need to adjust the protocol of the rule. That requires
-         * all properties compared in the routing_policy_rule_compare_func(), hence it must be done after
-         * reading them. */
+        /* The kernel always sets the FRA_PROTOCOL attribute, and it is necessary for comparing rules.
+         * Hence, -ENODATA here is critical. */
         r = sd_netlink_message_read_u8(message, FRA_PROTOCOL, &tmp->protocol);
-        if (r == -ENODATA)
-                /* As .network files does not have setting to specify protocol, we can assume the
-                 * protocol of the received rule is RTPROT_KERNEL or RTPROT_STATIC. */
-                tmp->protocol = routing_policy_rule_is_created_by_kernel(tmp) ? RTPROT_KERNEL : RTPROT_STATIC;
-        else if (r < 0) {
+        if (r < 0) {
                 log_warning_errno(r, "rtnl: could not get FRA_PROTOCOL attribute, ignoring: %m");
                 return 0;
         }
 
+        RoutingPolicyRule *rule = NULL;
         (void) routing_policy_rule_get(m, tmp, tmp->family, &rule);
-        (void) routing_policy_rule_get_request(m, tmp, tmp->family, &req);
 
         if (type == RTM_DELRULE) {
-                if (rule) {
-                        routing_policy_rule_enter_removed(rule);
-                        log_routing_policy_rule_debug(rule, "Forgetting removed", NULL, m);
-                        routing_policy_rule_detach(rule);
-                } else
+                if (rule)
+                        routing_policy_rule_forget(m, rule, "Forgetting removed");
+                else
                         log_routing_policy_rule_debug(tmp, "Kernel removed unknown", NULL, m);
-
-                if (req)
-                        routing_policy_rule_enter_removed(req->userdata);
-
                 return 0;
         }
+
+        Request *req = NULL;
+        (void) routing_policy_rule_get_request(m, tmp, tmp->family, &req);
 
         bool is_new = false;
         if (!rule) {

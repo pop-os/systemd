@@ -46,12 +46,12 @@ FSTAB_GENERAL=(
     "/dev/test22    /initrd/mount                       ext2        defaults,x-systemd.rw-only,x-initrd.mount 0 1"
     "/dev/test23    /initrd/mount/nofail                ext3        defaults,nofail,x-initrd.mount 0 1"
     "/dev/test24    /initrd/mount/deps                  ext4        x-initrd.mount,x-systemd.before=early.service,x-systemd.after=late.service 0 1"
+    "/dev/test25    /x-systemd.validatefs               xfs         x-systemd.validatefs 0 0"
 
     # Incomplete, but valid entries
-    "/dev/incomplete1 /incomplete1"
-    "/dev/incomplete2 /incomplete2                      ext4"
-    "/dev/incomplete3 /incomplete3                      ext4        defaults"
-    "/dev/incomplete4 /incomplete4                      ext4        defaults 0"
+    "/dev/incomplete1 /incomplete1                      ext4"
+    "/dev/incomplete2 /incomplete2                      ext4        defaults"
+    "/dev/incomplete3 /incomplete3                      ext4        defaults 0"
 
     # Remote filesystems
     "/dev/remote1   /nfs                                nfs         bg 0 0"
@@ -282,6 +282,9 @@ check_fstab_mount_units() {
             elif [[ "$opt" == x-systemd.growfs ]]; then
                 service="$(systemd-escape --template=systemd-growfs@.service --path "$where")"
                 link_endswith "$out_dir/${unit}.wants/$service" "/lib/systemd/system/systemd-growfs@.service"
+            elif [[ "$opt" == x-systemd.validatefs ]]; then
+                service="$(systemd-escape --template=systemd-validatefs@.service --path "$where")"
+                link_endswith "$out_dir/${unit}.wants/$service" "/lib/systemd/system/systemd-validatefs@.service"
             elif [[ "$opt" == bg ]] && [[ "$fstype" =~ ^(nfs|nfs4)$ ]]; then
                 # We "convert" nfs bg mounts to fg, so we can do the job-control
                 # ourselves

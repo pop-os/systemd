@@ -1,14 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include <inttypes.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <sys/types.h>
-#include <uchar.h>
-
-#include "string-util.h"
-#include "missing_type.h"
+#include "forward.h"
 
 /* What characters are special in the shell? */
 /* must be escaped outside and inside double-quotes */
@@ -41,9 +34,11 @@ typedef enum ShellEscapeFlags {
         SHELL_ESCAPE_EMPTY = 1 << 2, /* Format empty arguments as "". */
 } ShellEscapeFlags;
 
-char* cescape(const char *s);
-char* cescape_length(const char *s, size_t n);
 int cescape_char(char c, char *buf);
+char* cescape_length(const char *s, size_t n) _nonnull_if_nonzero_(1, 2);
+static inline char* cescape(const char *s) {
+        return cescape_length(s, SIZE_MAX);
+}
 
 int cunescape_one(const char *p, size_t length, char32_t *ret, bool *eight_bit, bool accept_nul);
 
@@ -52,7 +47,7 @@ static inline ssize_t cunescape_length(const char *s, size_t length, UnescapeFla
         return cunescape_length_with_prefix(s, length, NULL, flags, ret);
 }
 static inline ssize_t cunescape(const char *s, UnescapeFlags flags, char **ret) {
-        return cunescape_length(s, strlen(s), flags, ret);
+        return cunescape_length(s, SIZE_MAX, flags, ret);
 }
 
 typedef enum XEscapeFlags {
@@ -65,9 +60,9 @@ static inline char* xescape(const char *s, const char *bad) {
         return xescape_full(s, bad, SIZE_MAX, 0);
 }
 char* octescape(const char *s, size_t len);
-char* decescape(const char *s, const char *bad, size_t len);
+char* decescape(const char *s, size_t len, const char *bad) _nonnull_if_nonzero_(1, 2);
 char* escape_non_printable_full(const char *str, size_t console_width, XEscapeFlags flags);
 
 char* shell_escape(const char *s, const char *bad);
 char* shell_maybe_quote(const char *s, ShellEscapeFlags flags);
-char* quote_command_line(char **argv, ShellEscapeFlags flags);
+char* quote_command_line(char * const *argv, ShellEscapeFlags flags);

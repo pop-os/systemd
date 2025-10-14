@@ -3,30 +3,33 @@
 #include <fcntl.h>
 #include <linux/oom.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <sys/eventfd.h>
 #include <sys/mount.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "strv.h"
 #if HAVE_VALGRIND_VALGRIND_H
 #include <valgrind/valgrind.h>
 #endif
 
+#include "sd-daemon.h"
+
 #include "alloc-util.h"
 #include "architecture.h"
-#include "dirent-util.h"
+#include "argv-util.h"
 #include "errno-list.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "ioprio-util.h"
 #include "log.h"
-#include "macro.h"
-#include "missing_sched.h"
-#include "missing_syscall.h"
 #include "namespace-util.h"
 #include "parse-util.h"
+#include "pidfd-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "procfs-util.h"
 #include "rlimit-util.h"
@@ -35,6 +38,7 @@
 #include "string-util.h"
 #include "terminal-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "user-util.h"
 #include "virt.h"
 
@@ -69,7 +73,7 @@ static void test_pid_get_comm_one(pid_t pid) {
         ASSERT_OK(pid_get_cmdline(pid, 1, 0, &d));
         log_info("PID"PID_FMT" cmdline truncated to 1: '%s'", pid, d);
 
-        r = get_process_ppid(pid, &e);
+        r = pid_get_ppid(pid, &e);
         if (pid == 1)
                 ASSERT_ERROR(r, EADDRNOTAVAIL);
         else
@@ -81,9 +85,7 @@ static void test_pid_get_comm_one(pid_t pid) {
 
         ASSERT_TRUE(pid_is_kernel_thread(pid) == 0 || pid != 1);
 
-        r = get_process_exe(pid, &f);
-        if (r != -EACCES)
-                ASSERT_OK(r);
+        ASSERT_OK_OR(get_process_exe(pid, &f), -EACCES);
         log_info("PID"PID_FMT" exe: '%s'", pid, strna(f));
 
         ASSERT_OK_ZERO(pid_get_uid(pid, &u));
@@ -92,9 +94,7 @@ static void test_pid_get_comm_one(pid_t pid) {
         ASSERT_OK_ZERO(get_process_gid(pid, &g));
         log_info("PID"PID_FMT" GID: "GID_FMT, pid, g);
 
-        r = get_process_environ(pid, &env);
-        if (r != -EACCES)
-                ASSERT_OK(r);
+        ASSERT_OK_OR(get_process_environ(pid, &env), -EACCES);
         log_info("PID"PID_FMT" strlen(environ): %zi", pid, env ? (ssize_t)strlen(env) : (ssize_t)-errno);
 
         if (!detect_container() && pid == 1)
@@ -111,7 +111,8 @@ TEST(pid_get_comm) {
                 (void) parse_pid(saved_argv[1], &pid);
                 test_pid_get_comm_one(pid);
         } else {
-                TEST_REQ_RUNNING_SYSTEMD(test_pid_get_comm_one(1));
+                if (sd_booted() > 0)
+                        test_pid_get_comm_one(1);
                 test_pid_get_comm_one(getpid());
         }
 }
@@ -122,34 +123,34 @@ static void test_pid_get_cmdline_one(pid_t pid) {
         int r;
 
         r = pid_get_cmdline(pid, SIZE_MAX, 0, &c);
-        log_info("PID "PID_FMT": %s", pid, r >= 0 ? c : errno_to_name(r));
+        log_info("PID "PID_FMT": %s", pid, r >= 0 ? c : ERRNO_NAME(r));
 
         r = pid_get_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_COMM_FALLBACK, &d);
-        log_info("      %s", r >= 0 ? d : errno_to_name(r));
+        log_info("      %s", r >= 0 ? d : ERRNO_NAME(r));
 
         r = pid_get_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE, &e);
-        log_info("      %s", r >= 0 ? e : errno_to_name(r));
+        log_info("      %s", r >= 0 ? e : ERRNO_NAME(r));
 
         r = pid_get_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE | PROCESS_CMDLINE_COMM_FALLBACK, &f);
-        log_info("      %s", r >= 0 ? f : errno_to_name(r));
+        log_info("      %s", r >= 0 ? f : ERRNO_NAME(r));
 
         r = pid_get_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE_POSIX, &g);
-        log_info("      %s", r >= 0 ? g : errno_to_name(r));
+        log_info("      %s", r >= 0 ? g : ERRNO_NAME(r));
 
         r = pid_get_cmdline(pid, SIZE_MAX, PROCESS_CMDLINE_QUOTE_POSIX | PROCESS_CMDLINE_COMM_FALLBACK, &h);
-        log_info("      %s", r >= 0 ? h : errno_to_name(r));
+        log_info("      %s", r >= 0 ? h : ERRNO_NAME(r));
 
         r = pid_get_cmdline_strv(pid, 0, &strv_a);
         if (r >= 0)
-                ASSERT_NOT_NULL(joined = strv_join(strv_a, "\", \""));
-        log_info("      \"%s\"", r >= 0 ? joined : errno_to_name(r));
+                ASSERT_NOT_NULL((joined = strv_join(strv_a, "\", \"")));
+        log_info("      \"%s\"", r >= 0 ? joined : ERRNO_NAME(r));
 
         joined = mfree(joined);
 
         r = pid_get_cmdline_strv(pid, PROCESS_CMDLINE_COMM_FALLBACK, &strv_b);
         if (r >= 0)
-                ASSERT_NOT_NULL(joined = strv_join(strv_b, "\", \""));
-        log_info("      \"%s\"", r >= 0 ? joined : errno_to_name(r));
+                ASSERT_NOT_NULL((joined = strv_join(strv_b, "\", \"")));
+        log_info("      \"%s\"", r >= 0 ? joined : ERRNO_NAME(r));
 }
 
 TEST(pid_get_cmdline) {
@@ -160,9 +161,7 @@ TEST(pid_get_cmdline) {
 
         for (;;) {
                 pid_t pid;
-
-                r = proc_dir_read(d, &pid);
-                ASSERT_OK(r);
+                ASSERT_OK(r = proc_dir_read(d, &pid));
 
                 if (r == 0) /* EOF */
                         break;
@@ -579,7 +578,7 @@ TEST(getpid_cached) {
         siginfo_t si;
         pid_t a, b, c, d, e, f, child;
 
-        a = raw_getpid();
+        a = getpid();
         b = getpid_cached();
         c = getpid();
 
@@ -591,7 +590,7 @@ TEST(getpid_cached) {
 
         if (child == 0) {
                 /* In child */
-                a = raw_getpid();
+                a = getpid();
                 b = getpid_cached();
                 c = getpid();
 
@@ -600,7 +599,7 @@ TEST(getpid_cached) {
                 _exit(EXIT_SUCCESS);
         }
 
-        d = raw_getpid();
+        d = getpid();
         e = getpid_cached();
         f = getpid();
 
@@ -657,6 +656,24 @@ TEST(safe_fork) {
         ASSERT_OK(wait_for_terminate(pid, &status));
         ASSERT_EQ(status.si_code, CLD_EXITED);
         ASSERT_EQ(status.si_status, 88);
+
+        _cleanup_(pidref_done) PidRef child = PIDREF_NULL;
+        r = pidref_safe_fork("(test-child)", FORK_DETACH, &child);
+        if (r == 0) {
+                /* Don't freeze so this doesn't linger around forever in case something goes wrong. */
+                usleep_safe(100 * USEC_PER_SEC);
+                _exit(EXIT_SUCCESS);
+        }
+
+        ASSERT_OK_POSITIVE(r);
+        ASSERT_GT(child.pid, 0);
+        ASSERT_OK(pidref_get_ppid(&child, &pid));
+        ASSERT_OK(pidref_kill(&child, SIGKILL));
+
+        if (is_reaper_process())
+                ASSERT_EQ(pid, getpid_cached());
+        else
+                ASSERT_NE(pid, getpid_cached());
 }
 
 TEST(pid_to_ptr) {
@@ -701,7 +718,7 @@ TEST(ioprio_class_from_to_string) {
         test_ioprio_class_from_to_string_one("0", IOPRIO_CLASS_NONE, IOPRIO_CLASS_BE);
         test_ioprio_class_from_to_string_one("1", 1, 1);
         test_ioprio_class_from_to_string_one("7", 7, 7);
-        test_ioprio_class_from_to_string_one("8", 8, 8);
+        test_ioprio_class_from_to_string_one("8", -EINVAL, -EINVAL);
         test_ioprio_class_from_to_string_one("9", -EINVAL, -EINVAL);
         test_ioprio_class_from_to_string_one("-1", -EINVAL, -EINVAL);
 }
@@ -813,18 +830,18 @@ TEST(setpriority_closest) {
         }
 }
 
-TEST(get_process_ppid) {
+TEST(pid_get_ppid) {
         uint64_t limit;
         int r;
 
-        ASSERT_ERROR(get_process_ppid(1, NULL), EADDRNOTAVAIL);
+        ASSERT_ERROR(pid_get_ppid(1, NULL), EADDRNOTAVAIL);
 
         /* the process with the PID above the global limit definitely doesn't exist. Verify that */
         ASSERT_OK(procfs_get_pid_max(&limit));
         log_debug("kernel.pid_max = %"PRIu64, limit);
 
         if (limit < INT_MAX) {
-                r = get_process_ppid(limit + 1, NULL);
+                r = pid_get_ppid(limit + 1, NULL);
                 log_debug_errno(r, "get_process_limit(%"PRIu64") → %d/%m", limit + 1, r);
                 assert(r == -ESRCH);
         }
@@ -833,7 +850,7 @@ TEST(get_process_ppid) {
                 _cleanup_free_ char *c1 = NULL, *c2 = NULL;
                 pid_t ppid;
 
-                r = get_process_ppid(pid, &ppid);
+                r = pid_get_ppid(pid, &ppid);
                 if (r == -EADDRNOTAVAIL) {
                         log_info("No further parent PID");
                         break;
@@ -847,6 +864,29 @@ TEST(get_process_ppid) {
                 log_info("Parent of " PID_FMT " (%s) is " PID_FMT " (%s).", pid, c1, ppid, c2);
 
                 pid = ppid;
+        }
+
+        /* the same via pidref */
+        _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
+        ASSERT_OK(pidref_set_self(&pidref));
+        for (;;) {
+                _cleanup_free_ char *c1 = NULL, *c2 = NULL;
+                _cleanup_(pidref_done) PidRef parent = PIDREF_NULL;
+                r = pidref_get_ppid_as_pidref(&pidref, &parent);
+                if (r == -EADDRNOTAVAIL) {
+                        log_info("No further parent PID");
+                        break;
+                }
+
+                ASSERT_OK(r);
+
+                ASSERT_OK(pidref_get_cmdline(&pidref, SIZE_MAX, PROCESS_CMDLINE_COMM_FALLBACK, &c1));
+                ASSERT_OK(pidref_get_cmdline(&parent, SIZE_MAX, PROCESS_CMDLINE_COMM_FALLBACK, &c2));
+
+                log_info("Parent of " PID_FMT " (%s) is " PID_FMT " (%s).", pidref.pid, c1, parent.pid, c2);
+
+                pidref_done(&pidref);
+                pidref = TAKE_PIDREF(parent);
         }
 }
 
@@ -984,7 +1024,7 @@ TEST(pid_get_start_time) {
 
         _cleanup_(pidref_done_sigkill_wait) PidRef child = PIDREF_NULL;
 
-        ASSERT_OK(pidref_safe_fork("(stub)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_REOPEN_LOG, &child));
+        ASSERT_OK_POSITIVE(pidref_safe_fork("(stub)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_REOPEN_LOG|FORK_FREEZE, &child));
 
         usec_t start_time2;
         ASSERT_OK(pidref_get_start_time(&child, &start_time2));
@@ -992,6 +1032,102 @@ TEST(pid_get_start_time) {
         log_info("child starttime: " USEC_FMT, start_time2);
 
         ASSERT_GE(start_time2, start_time);
+}
+
+TEST(pidref_from_same_root_fs) {
+        int r;
+
+        _cleanup_(pidref_done) PidRef pid1 = PIDREF_NULL, self = PIDREF_NULL;
+
+        ASSERT_OK(pidref_set_self(&self));
+        ASSERT_OK(pidref_set_pid(&pid1, 1));
+
+        ASSERT_OK_POSITIVE(pidref_from_same_root_fs(&self, &self));
+        ASSERT_OK_POSITIVE(pidref_from_same_root_fs(&pid1, &pid1));
+
+        r = pidref_from_same_root_fs(&pid1, &self);
+        if (ERRNO_IS_NEG_PRIVILEGE(r))
+                return (void) log_tests_skipped("skipping pidref_from_same_root_fs() test, lacking privileged.");
+        ASSERT_OK(r);
+        log_info("PID1 and us have the same rootfs: %s", yes_no(r));
+
+        int q = pidref_from_same_root_fs(&self, &pid1);
+        ASSERT_OK(q);
+        ASSERT_EQ(r, q);
+
+        _cleanup_(pidref_done_sigkill_wait) PidRef child1 = PIDREF_NULL;
+        ASSERT_OK(pidref_safe_fork("(child1)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_REOPEN_LOG|FORK_FREEZE, &child1));
+        ASSERT_OK_POSITIVE(pidref_from_same_root_fs(&self, &child1));
+
+        _cleanup_close_ int efd = eventfd(0, EFD_CLOEXEC);
+        ASSERT_OK_ERRNO(efd);
+
+        _cleanup_(pidref_done_sigkill_wait) PidRef child2 = PIDREF_NULL;
+        r = pidref_safe_fork("(child2)", FORK_RESET_SIGNALS|FORK_REOPEN_LOG, &child2);
+        ASSERT_OK(r);
+
+        if (r == 0) {
+                ASSERT_OK_ERRNO(chroot("/usr"));
+                uint64_t u = 1;
+
+                ASSERT_OK_EQ_ERRNO(write(efd, &u, sizeof(u)), (ssize_t) sizeof(u));
+                freeze();
+        }
+
+        uint64_t u;
+        ASSERT_OK_EQ_ERRNO(read(efd, &u, sizeof(u)), (ssize_t) sizeof(u));
+
+        ASSERT_OK_ZERO(pidref_from_same_root_fs(&self, &child2));
+        ASSERT_OK_ZERO(pidref_from_same_root_fs(&child2, &self));
+}
+
+TEST(pidfd_get_inode_id_self_cached) {
+        int r;
+
+        log_info("pid=" PID_FMT, getpid_cached());
+
+        uint64_t id;
+        r = pidfd_get_inode_id_self_cached(&id);
+        if (ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                log_info("pidfdid not supported");
+        else {
+                assert(r >= 0);
+                log_info("pidfdid=%" PRIu64, id);
+        }
+}
+
+TEST(getenv_for_pid) {
+        _cleanup_strv_free_ char **copy_env = NULL;
+        pid_t pid = getpid_cached();
+        int r;
+
+        ASSERT_NOT_NULL(copy_env = strv_copy(environ));
+
+        ASSERT_OK(r = pidref_safe_fork("(getenv_for_pid)", FORK_WAIT, NULL));
+        if (r == 0) {
+                STRV_FOREACH(e, copy_env) {
+                        const char *v = strchr(*e, '=');
+                        if (!v)
+                                continue;
+
+                        _cleanup_free_ char *k = NULL;
+                        ASSERT_NOT_NULL(k = strndup(*e, v - *e));
+
+                        v++;
+
+                        _cleanup_free_ char *value = NULL;
+                        ASSERT_OK_POSITIVE(getenv_for_pid(pid, k, &value));
+                        ASSERT_STREQ(value, v);
+                }
+
+                if (!strv_find_startswith(copy_env, "HOGEHOGE")) {
+                        char *value = POINTER_MAX;
+                        ASSERT_OK_ZERO(getenv_for_pid(pid, "HOGEHOGE", &value));
+                        ASSERT_NULL(value);
+                }
+
+                _exit(EXIT_SUCCESS);
+        }
 }
 
 static int intro(void) {

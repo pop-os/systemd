@@ -1,20 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
-#include <inttypes.h>
-#include <limits.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <poll.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/inotify.h>
 #include <sys/signalfd.h>
 #include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/uio.h>
-#include <sys/un.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -22,7 +13,6 @@
 #include "ansi-color.h"
 #include "ask-password-api.h"
 #include "creds-util.h"
-#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
@@ -33,11 +23,8 @@
 #include "iovec-util.h"
 #include "keyring-util.h"
 #include "log.h"
-#include "macro.h"
-#include "memory-util.h"
-#include "missing_syscall.h"
-#include "mkdir-label.h"
 #include "nulstr-util.h"
+#include "parse-util.h"
 #include "path-lookup.h"
 #include "plymouth-util.h"
 #include "process-util.h"
@@ -72,7 +59,7 @@ static int lookup_key(const char *keyname, key_serial_t *ret) {
         assert(keyname);
         assert(ret);
 
-        serial = request_key("user", keyname, /* callout_info= */ NULL, /* dest_keyring= */ 0);
+        serial = request_key("user", keyname, /* callout_info= */ NULL, /* destringid= */ 0);
         if (serial == -1)
                 return negative_errno();
 
@@ -309,9 +296,7 @@ static int backspace_string(int ttyfd, const char *str) {
 
 int ask_password_plymouth(
                 const AskPasswordRequest *req,
-                usec_t until,
                 AskPasswordFlags flags,
-                const char *flag_file,
                 char ***ret) {
 
         _cleanup_close_ int fd = -EBADF, inotify_fd = -EBADF;
@@ -321,19 +306,20 @@ int ask_password_plymouth(
         char buffer[LINE_MAX];
         size_t p = 0;
 
+        assert(req);
         assert(ret);
 
         if (FLAGS_SET(flags, ASK_PASSWORD_HEADLESS))
                 return -ENOEXEC;
 
-        const char *message = req && req->message ? req->message : "Password:";
+        const char *message = req->message ?: "Password:";
 
-        if (flag_file) {
+        if (req->flag_file) {
                 inotify_fd = inotify_init1(IN_CLOEXEC|IN_NONBLOCK);
                 if (inotify_fd < 0)
                         return -errno;
 
-                if (inotify_add_watch(inotify_fd, flag_file, IN_ATTRIB) < 0) /* for the link count */
+                if (inotify_add_watch(inotify_fd, req->flag_file, IN_ATTRIB) < 0) /* for the link count */
                         return -errno;
         }
 
@@ -357,25 +343,40 @@ int ask_password_plymouth(
 
         enum {
                 POLL_SOCKET,
-                POLL_INOTIFY, /* Must be last, because optional */
+                POLL_TWO,
+                POLL_THREE,
                 _POLL_MAX,
         };
 
         struct pollfd pollfd[_POLL_MAX] = {
-                [POLL_SOCKET]  = { .fd = fd,         .events = POLLIN },
-                [POLL_INOTIFY] = { .fd = inotify_fd, .events = POLLIN },
+                [POLL_SOCKET] = {
+                        .fd = fd,
+                        .events = POLLIN,
+                },
         };
-        size_t n_pollfd = inotify_fd >= 0 ? _POLL_MAX : _POLL_MAX-1;
+        size_t n_pollfd = POLL_SOCKET + 1, inotify_idx = SIZE_MAX, hup_fd_idx = SIZE_MAX;
+        if (inotify_fd >= 0)
+                pollfd[inotify_idx = n_pollfd++] = (struct pollfd) {
+                        .fd = inotify_fd,
+                        .events = POLLIN,
+                };
+        if (req->hup_fd >= 0)
+                pollfd[hup_fd_idx = n_pollfd++] = (struct pollfd) {
+                        .fd = req->hup_fd,
+                        .events = POLLHUP,
+                };
+
+        assert(n_pollfd <= _POLL_MAX);
 
         for (;;) {
                 usec_t timeout;
 
-                if (until > 0)
-                        timeout = usec_sub_unsigned(until, now(CLOCK_MONOTONIC));
+                if (req->until > 0)
+                        timeout = usec_sub_unsigned(req->until, now(CLOCK_MONOTONIC));
                 else
                         timeout = USEC_INFINITY;
 
-                if (flag_file && access(flag_file, F_OK) < 0)
+                if (req->flag_file && access(req->flag_file, F_OK) < 0)
                         return -errno;
 
                 r = ppoll_usec(pollfd, n_pollfd, timeout);
@@ -386,7 +387,10 @@ int ask_password_plymouth(
                 if (r == 0)
                         return -ETIME;
 
-                if (inotify_fd >= 0 && pollfd[POLL_INOTIFY].revents != 0)
+                if (req->hup_fd >= 0 && pollfd[hup_fd_idx].revents & POLLHUP)
+                        return -ECONNRESET;
+
+                if (inotify_fd >= 0 && pollfd[inotify_idx].revents != 0)
                         (void) flush_fd(inotify_fd);
 
                 if (pollfd[POLL_SOCKET].revents == 0)
@@ -464,11 +468,8 @@ int ask_password_plymouth(
 #define SKIPPED "(skipped)"
 
 int ask_password_tty(
-                int ttyfd,
                 const AskPasswordRequest *req,
-                usec_t until,
                 AskPasswordFlags flags,
-                const char *flag_file,
                 char ***ret) {
 
         bool reset_tty = false, dirty = false, use_color = false, press_tab_visible = false;
@@ -479,6 +480,7 @@ int ask_password_tty(
         size_t p = 0, codepoint = 0;
         int r;
 
+        assert(req);
         assert(ret);
 
         if (FLAGS_SET(flags, ASK_PASSWORD_HEADLESS))
@@ -487,22 +489,21 @@ int ask_password_tty(
         if (FLAGS_SET(flags, ASK_PASSWORD_NO_TTY))
                 return -EUNATCH;
 
-        const char *message = req && req->message ? req->message : "Password:";
-        const char *keyring = req ? req->keyring : NULL;
+        const char *message = req->message ?: "Password:";
+        const char *keyring = req->keyring;
 
         if (!FLAGS_SET(flags, ASK_PASSWORD_HIDE_EMOJI) && emoji_enabled())
-                message = strjoina(special_glyph(SPECIAL_GLYPH_LOCK_AND_KEY), " ", message);
+                message = strjoina(glyph(GLYPH_LOCK_AND_KEY), " ", message);
 
-        if (flag_file || (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && keyring)) {
+        if (req->flag_file || (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && keyring)) {
                 inotify_fd = inotify_init1(IN_CLOEXEC|IN_NONBLOCK);
                 if (inotify_fd < 0)
                         return -errno;
         }
-        if (flag_file) {
-                if (inotify_add_watch(inotify_fd, flag_file, IN_ATTRIB /* for the link count */) < 0)
+        if (req->flag_file)
+                if (inotify_add_watch(inotify_fd, req->flag_file, IN_ATTRIB /* for the link count */) < 0)
                         return -errno;
-        }
-        if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && req && keyring) {
+        if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && keyring) {
                 r = ask_password_keyring(req, flags, ret);
                 if (r >= 0)
                         return 0;
@@ -529,8 +530,11 @@ int ask_password_tty(
         CLEANUP_ERASE(passphrase);
 
         /* If the caller didn't specify a TTY, then use the controlling tty, if we can. */
-        if (ttyfd < 0)
+        int ttyfd;
+        if (req->tty_fd < 0)
                 ttyfd = cttyfd = open("/dev/tty", O_RDWR|O_NOCTTY|O_CLOEXEC);
+        else
+                ttyfd = req->tty_fd;
 
         if (ttyfd >= 0) {
                 if (tcgetattr(ttyfd, &old_termios) < 0)
@@ -570,28 +574,44 @@ int ask_password_tty(
 
         enum {
                 POLL_TTY,
-                POLL_INOTIFY, /* Must be last, because optional */
+                POLL_TWO,
+                POLL_THREE,
                 _POLL_MAX,
         };
 
         struct pollfd pollfd[_POLL_MAX] = {
-                [POLL_TTY]     = { .fd = ttyfd >= 0 ? ttyfd : STDIN_FILENO, .events = POLLIN },
-                [POLL_INOTIFY] = { .fd = inotify_fd,                        .events = POLLIN },
+                [POLL_TTY]     = {
+                        .fd = ttyfd >= 0 ? ttyfd : STDIN_FILENO,
+                        .events = POLLIN,
+                },
         };
-        size_t n_pollfd = inotify_fd >= 0 ? _POLL_MAX : _POLL_MAX-1;
+        size_t n_pollfd = POLL_TTY + 1, inotify_idx = SIZE_MAX, hup_fd_idx = SIZE_MAX;
+
+        if (inotify_fd >= 0)
+                pollfd[inotify_idx = n_pollfd++] = (struct pollfd) {
+                        .fd = inotify_fd,
+                        .events = POLLIN,
+                };
+        if (req->hup_fd >= 0)
+                pollfd[hup_fd_idx = n_pollfd++] = (struct pollfd) {
+                        .fd = req->hup_fd,
+                        .events = POLLHUP,
+                };
+
+        assert(n_pollfd <= _POLL_MAX);
 
         for (;;) {
                 _cleanup_(erase_char) char c;
                 usec_t timeout;
                 ssize_t n;
 
-                if (until > 0)
-                        timeout = usec_sub_unsigned(until, now(CLOCK_MONOTONIC));
+                if (req->until > 0)
+                        timeout = usec_sub_unsigned(req->until, now(CLOCK_MONOTONIC));
                 else
                         timeout = USEC_INFINITY;
 
-                if (flag_file) {
-                        r = RET_NERRNO(access(flag_file, F_OK));
+                if (req->flag_file) {
+                        r = RET_NERRNO(access(req->flag_file, F_OK));
                         if (r < 0)
                                 goto finish;
                 }
@@ -606,7 +626,12 @@ int ask_password_tty(
                         goto finish;
                 }
 
-                if (inotify_fd >= 0 && pollfd[POLL_INOTIFY].revents != 0 && keyring) {
+                if (req->hup_fd >= 0 && pollfd[hup_fd_idx].revents & POLLHUP) {
+                        r = -ECONNRESET;
+                        goto finish;
+                }
+
+                if (inotify_fd >= 0 && pollfd[inotify_idx].revents != 0 && keyring) {
                         (void) flush_fd(inotify_fd);
 
                         r = ask_password_keyring(req, flags, ret);
@@ -707,9 +732,8 @@ int ask_password_tty(
                         if (ttyfd >= 0)
                                 (void) loop_write(ttyfd, NO_ECHO, SIZE_MAX);
 
-                } else if (p >= sizeof(passphrase)-1) {
-
-                        /* Reached the size limit */
+                } else if (char_is_cc(c) || p >= sizeof(passphrase)-1) {
+                        /* Don't accept control chars or overly long passphrases */
                         if (ttyfd >= 0)
                                 (void) loop_write(ttyfd, "\a", 1);
 
@@ -724,7 +748,7 @@ int ask_password_tty(
                                                 (void) loop_write(ttyfd, passphrase + codepoint, n);
                                         else
                                                 (void) loop_write(ttyfd,
-                                                                  special_glyph(SPECIAL_GLYPH_BULLET),
+                                                                  glyph(GLYPH_BULLET),
                                                                   SIZE_MAX);
                                         codepoint = p;
                                 }
@@ -794,13 +818,14 @@ static int create_socket(const char *askpwdir, char **ret) {
         if (r < 0)
                 return r;
 
+        (void) setsockopt_int(fd, SOL_SOCKET, SO_PASSRIGHTS, false);
+
         *ret = TAKE_PTR(path);
         return TAKE_FD(fd);
 }
 
 int ask_password_agent(
                 const AskPasswordRequest *req,
-                usec_t until,
                 AskPasswordFlags flags,
                 char ***ret) {
 
@@ -812,6 +837,7 @@ int ask_password_agent(
         sigset_t mask, oldmask;
         int r;
 
+        assert(req);
         assert(ret);
 
         if (FLAGS_SET(flags, ASK_PASSWORD_HEADLESS))
@@ -819,6 +845,10 @@ int ask_password_agent(
 
         if (FLAGS_SET(flags, ASK_PASSWORD_NO_AGENT))
                 return -EUNATCH;
+
+        /* We don't support the flag file concept for now when querying via the agent logic */
+        if (req->flag_file)
+                return -EOPNOTSUPP;
 
         assert_se(sigemptyset(&mask) >= 0);
         assert_se(sigset_add_many(&mask, SIGINT, SIGTERM) >= 0);
@@ -839,7 +869,7 @@ int ask_password_agent(
                 goto finish;
         }
 
-        if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && req && req->keyring) {
+        if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) && req->keyring) {
                 r = ask_password_keyring(req, flags, ret);
                 if (r >= 0) {
                         r = 0;
@@ -891,19 +921,17 @@ int ask_password_agent(
                 socket_name,
                 FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED),
                 FLAGS_SET(flags, ASK_PASSWORD_ECHO),
-                until,
+                req->until,
                 FLAGS_SET(flags, ASK_PASSWORD_SILENT));
 
-        if (req) {
-                if (req->message)
-                        fprintf(f, "Message=%s\n", req->message);
+        if (req->message)
+                fprintf(f, "Message=%s\n", req->message);
 
-                if (req->icon)
-                        fprintf(f, "Icon=%s\n", req->icon);
+        if (req->icon)
+                fprintf(f, "Icon=%s\n", req->icon);
 
-                if (req->id)
-                        fprintf(f, "Id=%s\n", req->id);
-        }
+        if (req->id)
+                fprintf(f, "Id=%s\n", req->id);
 
         if (fchmod(fileno(f), 0644) < 0) {
                 r = -errno;
@@ -924,16 +952,29 @@ int ask_password_agent(
         enum {
                 POLL_SOCKET,
                 POLL_SIGNAL,
-                POLL_INOTIFY, /* Must be last, because optional */
+                POLL_THREE,
+                POLL_FOUR,
                 _POLL_MAX
         };
 
         struct pollfd pollfd[_POLL_MAX] = {
                 [POLL_SOCKET]  = { .fd = socket_fd,  .events = POLLIN },
                 [POLL_SIGNAL]  = { .fd = signal_fd,  .events = POLLIN },
-                [POLL_INOTIFY] = { .fd = inotify_fd, .events = POLLIN },
         };
-        size_t n_pollfd = inotify_fd >= 0 ? _POLL_MAX : _POLL_MAX - 1;
+        size_t n_pollfd = POLL_SIGNAL + 1, inotify_idx = SIZE_MAX, hup_fd_idx = SIZE_MAX;
+
+        if (inotify_fd >= 0)
+                pollfd[inotify_idx = n_pollfd++] = (struct pollfd) {
+                        .fd = inotify_fd,
+                        .events = POLLIN,
+                };
+        if (req->hup_fd >= 0)
+                pollfd[hup_fd_idx = n_pollfd ++] = (struct pollfd) {
+                        .fd = req->hup_fd,
+                        .events = POLLHUP,
+                };
+
+        assert(n_pollfd <= _POLL_MAX);
 
         for (;;) {
                 CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control;
@@ -943,8 +984,8 @@ int ask_password_agent(
                 usec_t timeout;
                 ssize_t n;
 
-                if (until > 0)
-                        timeout = usec_sub_unsigned(until, now(CLOCK_MONOTONIC));
+                if (req->until > 0)
+                        timeout = usec_sub_unsigned(req->until, now(CLOCK_MONOTONIC));
                 else
                         timeout = USEC_INFINITY;
 
@@ -963,10 +1004,13 @@ int ask_password_agent(
                         goto finish;
                 }
 
-                if (inotify_fd >= 0 && pollfd[POLL_INOTIFY].revents != 0) {
+                if (req->hup_fd >= 0 && pollfd[hup_fd_idx].revents & POLLHUP)
+                        return -ECONNRESET;
+
+                if (inotify_fd >= 0 && pollfd[inotify_idx].revents != 0) {
                         (void) flush_fd(inotify_fd);
 
-                        if (req && req->keyring) {
+                        if (req->keyring) {
                                 r = ask_password_keyring(req, flags, ret);
                                 if (r >= 0) {
                                         r = 0;
@@ -1057,7 +1101,7 @@ int ask_password_agent(
                 log_debug("Invalid packet");
         }
 
-        if (req && req->keyring)
+        if (req->keyring)
                 (void) add_to_keyring_and_log(req->keyring, flags, l);
 
         *ret = TAKE_PTR(l);
@@ -1103,22 +1147,33 @@ static int ask_password_credential(const AskPasswordRequest *req, AskPasswordFla
 
 int ask_password_auto(
                 const AskPasswordRequest *req,
-                usec_t until,
                 AskPasswordFlags flags,
                 char ***ret) {
 
         int r;
 
+        assert(req);
         assert(ret);
 
-        if (!FLAGS_SET(flags, ASK_PASSWORD_NO_CREDENTIAL) && req && req->credential) {
+        /* Returns the following well-known errors:
+         *
+         *      -ETIME → a timeout was specified and hit
+         *    -EUNATCH → couldn't ask interactively and no cached password available either
+         *     -ENOENT → the specified flag file disappeared
+         *  -ECANCELED → the user explicitly cancelled the request
+         *      -EINTR → SIGINT/SIGTERM where received during the query
+         *    -ENOEXEC → headless mode was requested but no password could be acquired non-interactively
+         * -ECONNRESET → a POLLHUP has been seen on the specified hup_fd
+         */
+
+        if (!FLAGS_SET(flags, ASK_PASSWORD_NO_CREDENTIAL) && req->credential) {
                 r = ask_password_credential(req, flags, ret);
                 if (r != -ENOKEY)
                         return r;
         }
 
         if (FLAGS_SET(flags, ASK_PASSWORD_ACCEPT_CACHED) &&
-            req && req->keyring &&
+            req->keyring &&
             (FLAGS_SET(flags, ASK_PASSWORD_NO_TTY) || !isatty_safe(STDIN_FILENO)) &&
             FLAGS_SET(flags, ASK_PASSWORD_NO_AGENT)) {
                 r = ask_password_keyring(req, flags, ret);
@@ -1127,10 +1182,10 @@ int ask_password_auto(
         }
 
         if (!FLAGS_SET(flags, ASK_PASSWORD_NO_TTY) && isatty_safe(STDIN_FILENO))
-                return ask_password_tty(-EBADF, req, until, flags, NULL, ret);
+                return ask_password_tty(req, flags, ret);
 
         if (!FLAGS_SET(flags, ASK_PASSWORD_NO_AGENT))
-                return ask_password_agent(req, until, flags, ret);
+                return ask_password_agent(req, flags, ret);
 
         return -EUNATCH;
 }

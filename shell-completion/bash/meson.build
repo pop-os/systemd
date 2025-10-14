@@ -27,7 +27,7 @@ items = [['busctl',              ''],
          ['systemd-delta',       ''],
          ['systemd-detect-virt', ''],
          ['systemd-id128',       ''],
-         ['systemd-nspawn',      ''],
+         ['systemd-nspawn',      'ENABLE_NSPAWN'],
          ['systemd-path',        ''],
          ['systemd-run',         ''],
          ['systemd-vpick',       ''],
@@ -52,7 +52,8 @@ items = [['busctl',              ''],
          ['systemd-resolve',     'ENABLE_RESOLVE'],
          ['systemd-sysext',      'ENABLE_SYSEXT'],
          ['systemd-vmspawn',     'ENABLE_VMSPAWN'],
-         ['timedatectl',         'ENABLE_TIMEDATED']]
+         ['timedatectl',         'ENABLE_TIMEDATED'],
+         ['userdbctl',           'ENABLE_USERDB']]
 
 foreach item : items
         if bashcompletiondir != 'no' and (item[1] == '' or conf.get(item[1]) == 1)

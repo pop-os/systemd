@@ -1,14 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <getopt.h>
-#include <limits.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
+#include "alloc-util.h"
 #include "build.h"
 #include "conf-files.h"
 #include "constants.h"
@@ -99,7 +95,7 @@ static int sysctl_write_or_warn(const char *key, const char *value, bool ignore_
                  * permission problem here, since that's how container managers usually protected their
                  * sysctls.)
                  * In all other cases log an error and make the tool fail. */
-                if (ignore_failure || (!arg_strict && (r == -EROFS || ERRNO_IS_PRIVILEGE(r))))
+                if (ignore_failure || (!arg_strict && ERRNO_IS_NEG_FS_WRITE_REFUSED(r)))
                         log_debug_errno(r, "Couldn't write '%s' to '%s', ignoring: %m", value, key);
                 else if (ignore_enoent && r == -ENOENT)
                         log_warning_errno(r, "Couldn't write '%s' to '%s', ignoring: %m", value, key);
@@ -353,6 +349,7 @@ static int help(void) {
                "     --tldr             Show non-comment parts of configuration\n"
                "     --prefix=PATH      Only apply rules with the specified prefix\n"
                "     --no-pager         Do not pipe output into a pager\n"
+               "     --strict           Fail on any kind of failures\n"
                "\nSee the %s for details.\n",
                program_invocation_short_name,
                link);

@@ -565,9 +565,9 @@ EOF
 
     output=$(sfdisk --dump "$imgs/zzz")
 
-    assert_in "$imgs/zzz1 : start=        2048, size=       20480, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=39107B09-615D-48FB-BA37-C663885FCE67, name=\"esp\"" "$output"
-    assert_in "$imgs/zzz2 : start=       22528, size=       65536, type=${root_guid}, uuid=${root_uuid}, name=\"root-${architecture}\", attrs=\"GUID:59\"" "$output"
-    assert_in "$imgs/zzz3 : start=       88064, size=       65536, type=${usr_guid}, uuid=${usr_uuid}, name=\"usr-${architecture}\", attrs=\"GUID:60\"" "$output"
+    assert_in "$imgs/zzz1 : start=        2048, size=      532480, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=39107B09-615D-48FB-BA37-C663885FCE67, name=\"esp\"" "$output"
+    assert_in "$imgs/zzz2 : start=      534528, size=       65536, type=${root_guid}, uuid=${root_uuid}, name=\"root-${architecture}\", attrs=\"GUID:59\"" "$output"
+    assert_in "$imgs/zzz3 : start=      600064, size=       65536, type=${usr_guid}, uuid=${usr_uuid}, name=\"usr-${architecture}\", attrs=\"GUID:60\"" "$output"
 
     if systemd-detect-virt --quiet --container; then
         echo "Skipping second part of copy blocks tests in container."
@@ -897,6 +897,34 @@ EOF
     assert_eq "$drh" "$hrh"
     assert_eq "$hrh" "$srh"
 
+    # Check that offline signing works and the resulting image is valid
+
+    output=$(systemd-repart --offline="$OFFLINE" \
+                            --definitions="$defs" \
+                            --seed="$seed" \
+                            --dry-run=no \
+                            --empty=create \
+                            --size=auto \
+                            --json=pretty \
+                            --defer-partitions=root-${architecture}-verity-sig \
+                            "$imgs/offline")
+
+    offline_drh=$(jq -r ".[] | select(.type == \"root-${architecture}\") | .roothash" <<<"$output")
+
+    echo -n "$offline_drh" | \
+        openssl smime -sign -in /dev/stdin \
+                      -inkey "$defs/verity.key" \
+                      -signer "$defs/verity.crt" \
+                      -noattr -binary -outform der \
+                      -out "$imgs/offline.roothash.p7s"
+
+    systemd-repart --offline "$OFFLINE" \
+                   --definitions "$defs" \
+                   --dry-run no \
+                   --join-signature "$offline_drh:$imgs/offline.roothash.p7s" \
+                   --certificate "$defs/verity.crt" \
+                   "$imgs/offline"
+
     # Check that we can dissect, mount and unmount a repart verity image. (and that the image UUID is deterministic)
 
     if systemd-detect-virt --quiet --container; then
@@ -907,6 +935,11 @@ EOF
     systemd-dissect "$imgs/verity" --root-hash "$drh"
     systemd-dissect "$imgs/verity" --root-hash "$drh" --json=short | grep -q '"imageUuid":"1d2ce291-7cce-4f7d-bc83-fdb49ad74ebd"'
     systemd-dissect "$imgs/verity" --root-hash "$drh" -M "$imgs/mnt"
+    systemd-dissect -U "$imgs/mnt"
+
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh"
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh" --json=short | grep -q '"imageUuid":"1d2ce291-7cce-4f7d-bc83-fdb49ad74ebd"'
+    systemd-dissect "$imgs/offline" --root-hash "$offline_drh" -M "$imgs/mnt"
     systemd-dissect -U "$imgs/mnt"
 }
 
@@ -1342,6 +1375,16 @@ EOF
     assert_in "${loop}p3 : start= *${start}, size= *${size}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=DB081670-07AE-48CA-9F5E-813D5E40B976, name=\"linux-generic-2\"" "$output"
 }
 
+testcase_sector() {
+    # Valid block sizes on the Linux block layer are >= 512 and <= PAGE_SIZE, and
+    # must be powers of 2. Which leaves exactly four different ones to test on
+    # typical hardware
+    test_sector 512
+    test_sector 1024
+    test_sector 2048
+    test_sector 4096
+}
+
 testcase_dropped_partitions() {
     local workdir image defs
 
@@ -1540,7 +1583,7 @@ EOF
     systemd-repart --empty=create --size=auto --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      532480, type=${esp_guid}" "$output"
     assert_not_in "${image}2" "$output"
 
     # Disk with small ESP => ESP grows
@@ -1553,12 +1596,12 @@ EOF
     systemd-repart --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      532480, type=${esp_guid}" "$output"
     assert_not_in "${image}2" "$output"
 
     # Disk with small ESP that can't grow => XBOOTLDR created
 
-    truncate -s 150M "$image"
+    truncate -s 400M "$image"
     sfdisk "$image" <<EOF
 label: gpt
 size=10M, type=${esp_guid},
@@ -1569,7 +1612,7 @@ EOF
 
     output=$(sfdisk -d "$image")
     assert_in "${image}1 : start=        2048, size=       20480, type=${esp_guid}" "$output"
-    assert_in "${image}3 : start=       43008, size=      264152, type=${xbootldr_guid}" "$output"
+    assert_in "${image}3 : start=       43008, size=      776152, type=${xbootldr_guid}" "$output"
 
     # Disk with existing XBOOTLDR partition => XBOOTLDR grows, small ESP created
 
@@ -1581,8 +1624,59 @@ EOF
     systemd-repart --dry-run=no --definitions="$defs" "$image"
 
     output=$(sfdisk -d "$image")
-    assert_in "${image}1 : start=        2048, size=      204800, type=${xbootldr_guid}" "$output"
-    assert_in "${image}2 : start=      206848, size=      100312, type=${esp_guid}" "$output"
+    assert_in "${image}1 : start=        2048, size=      284632, type=${xbootldr_guid}" "$output"
+    assert_in "${image}2 : start=      286680, size=      532480, type=${esp_guid}" "$output"
+}
+
+testcase_btrfs() {
+    local defs imgs output root
+
+    if ! systemd-analyze compare-versions "$(btrfs --version | head -n 1 | awk '{ print $2 }')" ge v6.12; then
+        echo "btrfs-progs is not installed or older than v6.12, skipping test."
+        return 0
+    fi
+
+    if [[ "$OFFLINE" != "yes" ]]; then
+        return 0
+    fi
+
+    defs="$(mktemp --directory "/tmp/test-repart.defs.XXXXXXXXXX")"
+    imgs="$(mktemp --directory "/var/tmp/test-repart.imgs.XXXXXXXXXX")"
+    root="$(mktemp --directory "/var/test-repart.root.XXXXXXXXXX")"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$defs' '$imgs' '$root'" RETURN
+    chmod 0755 "$defs"
+
+    echo "*** testcase for btrfs ***"
+
+    tee "$defs/root.conf" <<EOF
+[Partition]
+Type=root
+Format=btrfs
+MakeDirectories=/@ /@home
+Subvolumes=/@ /@home
+DefaultSubvolume=/@
+MountPoint=/:"subvol=@,zstd:1,noatime,lazytime"
+MountPoint=/home:"subvol=@home,zstd:1,noatime,lazytime"
+EOF
+
+    mkdir -p "$root"/etc
+
+    systemd-repart --pretty=yes \
+                   --definitions "$defs" \
+                   --empty=create \
+                   --size=1G \
+                   --seed="$seed" \
+                   --dry-run=no \
+                   --offline=yes \
+                   --generate-fstab "$root"/etc/fstab \
+                   "$imgs/btrfs.img"
+
+    sfdisk --dump "$imgs/btrfs.img"
+
+    cat "$root"/etc/fstab
+    grep -q 'UUID=[0-9a-f-]* / btrfs discard,rw,nodev,suid,exec,subvol=@,zstd:1,noatime,lazytime 0 1' "$root"/etc/fstab
+    grep -q 'UUID=[0-9a-f-]* /home btrfs discard,rw,nodev,suid,exec,subvol=@home,zstd:1,noatime,lazytime 0 1' "$root"/etc/fstab
 }
 
 OFFLINE="yes"
@@ -1593,13 +1687,5 @@ if ! systemd-detect-virt --container; then
     OFFLINE="no"
     run_testcases
 fi
-
-# Valid block sizes on the Linux block layer are >= 512 and <= PAGE_SIZE, and
-# must be powers of 2. Which leaves exactly four different ones to test on
-# typical hardware
-test_sector 512
-test_sector 1024
-test_sector 2048
-test_sector 4096
 
 touch /testok

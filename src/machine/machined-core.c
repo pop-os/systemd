@@ -1,40 +1,62 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <unistd.h>
+
+#include "sd-event.h"
+
 #include "cgroup-util.h"
 #include "copy.h"
+#include "discover-image.h"
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "iovec-util.h"
+#include "hashmap.h"
+#include "local-addresses.h"
+#include "log.h"
+#include "machine.h"
 #include "machined.h"
+#include "namespace-util.h"
+#include "os-util.h"
 #include "process-util.h"
-#include "socket-util.h"
 #include "strv.h"
 #include "user-util.h"
 
 int manager_get_machine_by_pidref(Manager *m, const PidRef *pidref, Machine **ret) {
-        Machine *mm;
-        int r;
+        _cleanup_(pidref_done) PidRef current = PIDREF_NULL;
+        Machine *mm = NULL;
 
         assert(m);
         assert(pidref_is_set(pidref));
         assert(ret);
 
-        mm = hashmap_get(m->machines_by_leader, pidref);
-        if (!mm) {
-                _cleanup_free_ char *unit = NULL;
+        for (;;) {
+                /* First, compare by leader */
+                mm = hashmap_get(m->machines_by_leader, pidref);
+                if (mm)
+                        break;
 
-                r = cg_pidref_get_unit(pidref, &unit);
-                if (r >= 0)
+                /* Then look for the unit */
+                _cleanup_free_ char *unit = NULL;
+                if (cg_pidref_get_unit(pidref, &unit) >= 0) {
                         mm = hashmap_get(m->machines_by_unit, unit);
-        }
-        if (!mm) {
-                *ret = NULL;
-                return 0;
+                        if (mm)
+                                break;
+                }
+
+                /* Maybe this process is in per-user unit? If so, let's go up the process tree, and check
+                 * that, we should eventually hit PID 1 of the container tree, which we should be able to
+                 * recognize. */
+                _cleanup_(pidref_done) PidRef parent = PIDREF_NULL;
+                if (pidref_get_ppid_as_pidref(pidref, &parent) < 0)
+                        break;
+
+                pidref_done(&current);
+                current = TAKE_PIDREF(parent);
+                pidref = &current;
         }
 
         *ret = mm;
-        return 1;
+        return !!mm;
 }
 
 int manager_add_machine(Manager *m, const char *name, Machine **ret) {
@@ -140,13 +162,16 @@ void manager_gc(Manager *m, bool drop_not_started) {
 
                 /* First, if we are not closing yet, initiate stopping */
                 if (machine_may_gc(machine, drop_not_started) &&
-                    machine_get_state(machine) != MACHINE_CLOSING)
+                    machine_get_state(machine) != MACHINE_CLOSING) {
+                        log_debug("Stopping machine '%s' due to GC.", machine->name);
                         machine_stop(machine);
+                }
 
                 /* Now, the stop probably made this referenced
                  * again, but if it didn't, then it's time to let it
                  * go entirely. */
                 if (machine_may_gc(machine, drop_not_started)) {
+                        log_debug("Finalizing machine '%s' due to GC.", machine->name);
                         machine_finalize(machine);
                         machine_free(machine);
                 }
@@ -182,7 +207,7 @@ void manager_enqueue_gc(Manager *m) {
         (void) sd_event_source_set_description(m->deferred_gc_event_source, "deferred-gc");
 }
 
-int machine_get_addresses(Machine* machine, struct local_address **ret_addresses) {
+int machine_get_addresses(Machine *machine, struct local_address **ret_addresses) {
         assert(machine);
         assert(ret_addresses);
 
@@ -206,7 +231,7 @@ int machine_get_addresses(Machine* machine, struct local_address **ret_addresses
                 pid_t child;
                 int r;
 
-                r = in_same_namespace(/* pid1 = */ 0, machine->leader.pid, NAMESPACE_NET);
+                r = pidref_in_same_namespace(/* pid1 = */ NULL, &machine->leader, NAMESPACE_NET);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to check if container has private network: %m");
                 if (r > 0)
@@ -229,11 +254,11 @@ int machine_get_addresses(Machine* machine, struct local_address **ret_addresses
                                    /* except_fds = */ NULL,
                                    /* n_except_fds = */ 0,
                                    FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
-                                   /* pidns_fd = */ -1,
-                                   /* mntns_fd = */ -1,
+                                   /* pidns_fd = */ -EBADF,
+                                   /* mntns_fd = */ -EBADF,
                                    netns_fd,
-                                   /* userns_fd = */ -1,
-                                   /* root_fd = */ -1,
+                                   /* userns_fd = */ -EBADF,
+                                   /* root_fd = */ -EBADF,
                                    &child);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to fork(): %m");
@@ -346,8 +371,8 @@ int machine_get_os_release(Machine *machine, char ***ret_os_release) {
                                    FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
                                    pidns_fd,
                                    mntns_fd,
-                                   /* netns_fd = */ -1,
-                                   /* userns_fd = */ -1,
+                                   /* netns_fd = */ -EBADF,
+                                   /* userns_fd = */ -EBADF,
                                    root_fd,
                                    &child);
                 if (r < 0)
@@ -440,7 +465,7 @@ int manager_acquire_image(Manager *m, const char *name, Image **ret) {
                 return log_debug_errno(r, "Failed to enable source: %m") ;
 
         _cleanup_(image_unrefp) Image *image = NULL;
-        r = image_find(IMAGE_MACHINE, name, NULL, &image);
+        r = image_find(m->runtime_scope, IMAGE_MACHINE, name, NULL, &image);
         if (r < 0)
                 return log_debug_errno(r, "Failed to find image: %m");
 
@@ -467,7 +492,7 @@ int rename_image_and_update_cache(Manager *m, Image *image, const char* new_name
         /* The image is cached with its name, hence it is necessary to remove from the cache before renaming. */
         assert_se(hashmap_remove_value(m->image_cache, image->name, image));
 
-        r = image_rename(image, new_name);
+        r = image_rename(image, new_name, m->runtime_scope);
         if (r < 0) {
                 image = image_unref(image);
                 return r;

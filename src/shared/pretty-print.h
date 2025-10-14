@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
+#include <stdio.h>
+#include <string.h>
+
 #include "ansi-color.h"
+#include "fileio.h"
+#include "forward.h"
 #include "glyph-util.h"
-#include "terminal-util.h"
 
 #define CYLON_BUFFER_EXTRA (2*STRLEN(ANSI_RED) + STRLEN(ANSI_HIGHLIGHT_RED) + 2*STRLEN(ANSI_NORMAL))
 
@@ -26,6 +30,7 @@ typedef enum CatFlags {
         CAT_TLDR                = 1 << 2,  /* Only print comments and relevant section headers */
 } CatFlags;
 
+int cat_files_full(const ConfFile *file, ConfFile * const *dropins, size_t n_dropins, CatFlags flags);
 int cat_files(const char *file, char **dropins, CatFlags flags);
 int conf_files_cat(const char *root, const char *name, CatFlags flags);
 
@@ -34,13 +39,13 @@ int conf_files_cat(const char *root, const char *name, CatFlags flags);
 
 static inline const char* red_cross_mark_internal(char buffer[static RED_CROSS_MARK_MAX]) {
         assert(buffer);
-        assert_se(stpcpy(stpcpy(stpcpy(buffer, ansi_highlight_red()), special_glyph(SPECIAL_GLYPH_CROSS_MARK)), ansi_normal()) < buffer + RED_CROSS_MARK_MAX);
+        assert_se(stpcpy(stpcpy(stpcpy(buffer, ansi_highlight_red()), glyph(GLYPH_CROSS_MARK)), ansi_normal()) < buffer + RED_CROSS_MARK_MAX);
         return buffer;
 }
 
 static inline const char* green_check_mark_internal(char buffer[static GREEN_CHECK_MARK_MAX]) {
         assert(buffer);
-        assert_se(stpcpy(stpcpy(stpcpy(buffer, ansi_highlight_green()), special_glyph(SPECIAL_GLYPH_CHECK_MARK)), ansi_normal()) < buffer + GREEN_CHECK_MARK_MAX);
+        assert_se(stpcpy(stpcpy(stpcpy(buffer, ansi_highlight_green()), glyph(GLYPH_CHECK_MARK)), ansi_normal()) < buffer + GREEN_CHECK_MARK_MAX);
         return buffer;
 }
 

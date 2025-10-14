@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <dirent.h>
-#include <errno.h>
-#include <sys/prctl.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "bitfield.h"
@@ -18,19 +15,16 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "hashmap.h"
-#include "macro.h"
-#include "missing_syscall.h"
+#include "log.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "serialize.h"
-#include "set.h"
-#include "signal-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "tmpfile-util.h"
+#include "time-util.h"
 
 #define EXIT_SKIP_REMAINING 77
 
@@ -99,7 +93,7 @@ static int do_execute(
                 char *envp[],
                 ExecDirFlags flags) {
 
-        _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
+        _cleanup_hashmap_free_ Hashmap *pids = NULL;
         bool parallel_execution;
         int r;
 
@@ -113,12 +107,6 @@ static int do_execute(
         assert(!strv_isempty(paths));
 
         parallel_execution = FLAGS_SET(flags, EXEC_DIR_PARALLEL) && !callbacks;
-
-        if (parallel_execution) {
-                pids = hashmap_new(NULL);
-                if (!pids)
-                        return log_oom();
-        }
 
         /* Abort execution of this process after the timeout. We simply rely on SIGALRM as
          * default action terminating the process, and turn on alarm(). */
@@ -152,11 +140,13 @@ static int do_execute(
                 }
 
                 if (DEBUG_LOGGING) {
-                        _cleanup_free_ char *args = NULL;
-                        if (argv)
-                                args = quote_command_line(strv_skip(argv, 1), SHELL_ESCAPE_EMPTY);
+                        _cleanup_free_ char *s = NULL;
 
-                        log_debug("About to execute %s%s%s", t, argv ? " " : "", argv ? strnull(args) : "");
+                        char **args = strv_skip(argv, 1);
+                        if (args)
+                                s = quote_command_line(args, SHELL_ESCAPE_EMPTY);
+
+                        log_debug("About to execute %s%s%s", t, args ? " " : "", args ? strnull(s) : "");
                 }
 
                 if (FLAGS_SET(flags, EXEC_DIR_WARN_WORLD_WRITABLE)) {
@@ -176,7 +166,7 @@ static int do_execute(
                         continue;
 
                 if (parallel_execution) {
-                        r = hashmap_put(pids, PID_TO_PTR(pid), t);
+                        r = hashmap_ensure_put(&pids, &trivial_hash_ops_value_free, PID_TO_PTR(pid), t);
                         if (r < 0)
                                 return log_oom();
                         t = NULL;
@@ -199,8 +189,9 @@ static int do_execute(
                         }
 
                         if (callbacks) {
-                                if (lseek(fd, 0, SEEK_SET) < 0)
-                                        return log_error_errno(errno, "Failed to seek on serialization fd: %m");
+                                r = finish_serialization_fd(fd);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to finish serialization fd: %m");
 
                                 r = callbacks[STDOUT_GENERATE](TAKE_FD(fd), callback_args[STDOUT_GENERATE]);
                                 if (r < 0)
@@ -290,12 +281,14 @@ int execute_strv(
         if (!callbacks)
                 return 0;
 
-        if (lseek(fd, 0, SEEK_SET) < 0)
-                return log_error_errno(errno, "Failed to rewind serialization fd: %m");
+        r = finish_serialization_fd(fd);
+        if (r < 0)
+                return log_error_errno(r, "Failed to finish serialization fd: %m");
 
         r = callbacks[STDOUT_CONSUME](TAKE_FD(fd), callback_args[STDOUT_CONSUME]);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse returned data: %m");
+
         return 0;
 }
 
@@ -314,7 +307,12 @@ int execute_directories(
 
         assert(!strv_isempty((char* const*) directories));
 
-        r = conf_files_list_strv(&paths, NULL, NULL, CONF_FILES_EXECUTABLE|CONF_FILES_REGULAR|CONF_FILES_FILTER_MASKED, directories);
+        r = conf_files_list_strv(
+                        &paths,
+                        /* suffix= */ NULL,
+                        /* root= */ NULL,
+                        CONF_FILES_EXECUTABLE|CONF_FILES_REGULAR|CONF_FILES_FILTER_MASKED,
+                        directories);
         if (r < 0)
                 return log_error_errno(r, "Failed to enumerate executables: %m");
 
@@ -488,9 +486,11 @@ static const char* const exec_command_strings[] = {
         "ignore-failure", /* EXEC_COMMAND_IGNORE_FAILURE */
         "privileged",     /* EXEC_COMMAND_FULLY_PRIVILEGED */
         "no-setuid",      /* EXEC_COMMAND_NO_SETUID */
-        "ambient",        /* EXEC_COMMAND_AMBIENT_MAGIC */
         "no-env-expand",  /* EXEC_COMMAND_NO_ENV_EXPAND */
+        "via-shell",      /* EXEC_COMMAND_VIA_SHELL */
 };
+
+assert_cc((1 << ELEMENTSOF(exec_command_strings)) - 1 == _EXEC_COMMAND_FLAGS_ALL);
 
 const char* exec_command_flags_to_string(ExecCommandFlags i) {
         for (size_t idx = 0; idx < ELEMENTSOF(exec_command_strings); idx++)
@@ -503,12 +503,14 @@ const char* exec_command_flags_to_string(ExecCommandFlags i) {
 ExecCommandFlags exec_command_flags_from_string(const char *s) {
         ssize_t idx;
 
-        idx = string_table_lookup(exec_command_strings, ELEMENTSOF(exec_command_strings), s);
+        if (streq(s, "ambient")) /* Compatibility with ambient hack, removed in v258, map to no bits set */
+                return 0;
 
+        idx = string_table_lookup_from_string(exec_command_strings, ELEMENTSOF(exec_command_strings), s);
         if (idx < 0)
                 return _EXEC_COMMAND_FLAGS_INVALID;
-        else
-                return 1 << idx;
+
+        return 1 << idx;
 }
 
 int fexecve_or_execve(int executable_fd, const char *executable, char *const argv[], char *const envp[]) {
@@ -543,13 +545,27 @@ int fexecve_or_execve(int executable_fd, const char *executable, char *const arg
         return -errno;
 }
 
-int _fork_agent(const char *name, const int except[], size_t n_except, pid_t *ret_pid, const char *path, ...) {
-        size_t n, i;
-        va_list ap;
-        char **l;
+int shall_fork_agent(void) {
         int r;
 
-        assert(path);
+        /* Check if we have a controlling terminal. If not (ENXIO here), we aren't actually invoked
+         * interactively on a terminal, hence fail. */
+        r = get_ctty_devnr(0, NULL);
+        if (r == -ENXIO)
+                return false;
+        if (r < 0)
+                return r;
+
+        if (!is_main_thread())
+                return -EPERM;
+
+        return true;
+}
+
+int _fork_agent(const char *name, char * const *argv, const int except[], size_t n_except, pid_t *ret_pid) {
+        int r;
+
+        assert(!strv_isempty(argv));
 
         /* Spawns a temporary TTY agent, making sure it goes away when we go away */
 
@@ -577,52 +593,36 @@ int _fork_agent(const char *name, const int except[], size_t n_except, pid_t *re
                  * that when systemctl is started via popen() or a similar call that expects to read EOF we
                  * actually do generate EOF and not delay this indefinitely by keeping an unused copy of
                  * stdin around. */
-                fd = open("/dev/tty", stdin_is_tty ? O_WRONLY : (stdout_is_tty && stderr_is_tty) ? O_RDONLY : O_RDWR);
+                fd = open_terminal("/dev/tty", stdin_is_tty ? O_WRONLY : (stdout_is_tty && stderr_is_tty) ? O_RDONLY : O_RDWR);
                 if (fd < 0) {
-                        if (errno != ENXIO) {
-                                log_error_errno(errno, "Failed to open /dev/tty: %m");
-                                _exit(EXIT_FAILURE);
-                        }
-
-                        /* If we get ENXIO here we have no controlling TTY even though stdout/stderr are
-                         * connected to a TTY. That's a weird setup, but let's handle it gracefully: let's
-                         * skip the forking of the agents, given the TTY setup is not in order. */
-                } else {
-                        if (!stdin_is_tty && dup2(fd, STDIN_FILENO) < 0) {
-                                log_error_errno(errno, "Failed to dup2 /dev/tty to STDIN: %m");
-                                _exit(EXIT_FAILURE);
-                        }
-
-                        if (!stdout_is_tty && dup2(fd, STDOUT_FILENO) < 0) {
-                                log_error_errno(errno, "Failed to dup2 /dev/tty to STDOUT: %m");
-                                _exit(EXIT_FAILURE);
-                        }
-
-                        if (!stderr_is_tty && dup2(fd, STDERR_FILENO) < 0) {
-                                log_error_errno(errno, "Failed to dup2 /dev/tty to STDERR: %m");
-                                _exit(EXIT_FAILURE);
-                        }
-
-                        fd = safe_close_above_stdio(fd);
+                        log_error_errno(fd, "Failed to open %s: %m", "/dev/tty");
+                        _exit(EXIT_FAILURE);
                 }
+
+                if (!stdin_is_tty && dup2(fd, STDIN_FILENO) < 0) {
+                        log_error_errno(errno, "Failed to dup2 /dev/tty to STDIN: %m");
+                        _exit(EXIT_FAILURE);
+                }
+
+                if (!stdout_is_tty && dup2(fd, STDOUT_FILENO) < 0) {
+                        log_error_errno(errno, "Failed to dup2 /dev/tty to STDOUT: %m");
+                        _exit(EXIT_FAILURE);
+                }
+
+                if (!stderr_is_tty && dup2(fd, STDERR_FILENO) < 0) {
+                        log_error_errno(errno, "Failed to dup2 /dev/tty to STDERR: %m");
+                        _exit(EXIT_FAILURE);
+                }
+
+                fd = safe_close_above_stdio(fd);
         }
 
         /* Count arguments */
-        va_start(ap, path);
-        for (n = 0; va_arg(ap, char*); n++)
-                ;
-        va_end(ap);
+        execv(argv[0], argv);
 
-        /* Allocate strv */
-        l = newa(char*, n + 1);
-
-        /* Fill in arguments */
-        va_start(ap, path);
-        for (i = 0; i <= n; i++)
-                l[i] = va_arg(ap, char*);
-        va_end(ap);
-
-        execv(path, l);
-        log_error_errno(errno, "Failed to execute %s: %m", path);
+        /* Let's treat missing agent binary as a graceful issue (in order to support splitting out the Polkit
+         * or password agents into separate, optional distro packages), and not complain loudly. */
+        log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
+                       "Failed to execute %s: %m", argv[0]);
         _exit(EXIT_FAILURE);
 }

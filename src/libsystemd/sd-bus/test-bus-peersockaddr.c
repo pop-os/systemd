@@ -6,11 +6,10 @@
 #include "sd-bus.h"
 
 #include "bus-dump.h"
-#include "bus-util.h"
 #include "fd-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "socket-util.h"
-#include "sort-util.h"
 #include "tests.h"
 #include "user-util.h"
 
@@ -39,7 +38,7 @@ static bool gid_list_same(const gid_t *a, size_t n, const gid_t *b, size_t m) {
                 gid_list_contained(b, m, a, n);
 }
 
-static void *server(void *p) {
+static void* server(void *p) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_close_ int listen_fd = PTR_TO_INT(p), fd = -EBADF;
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *c = NULL;
@@ -81,7 +80,7 @@ static void *server(void *p) {
                 _cleanup_(pidref_done) PidRef pidref = PIDREF_NULL;
 
                 assert_se(pidref_set_pidfd_take(&pidref, pidfd) >= 0);
-                assert_se(pidref.pid == getpid_cached());
+                assert_se(pidref_is_self(&pidref));
         }
 
         const gid_t *gl = NULL;

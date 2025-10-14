@@ -25,11 +25,15 @@ enum {
         END_INSTANCE_DEVICE_PATH_SUBTYPE = 0x01,
         END_ENTIRE_DEVICE_PATH_SUBTYPE   = 0xff,
 
+        HW_MEMMAP_DP                     = 0x03,
+
         MEDIA_HARDDRIVE_DP               = 0x01,
         MEDIA_VENDOR_DP                  = 0x03,
         MEDIA_FILEPATH_DP                = 0x04,
         MEDIA_PIWG_FW_FILE_DP            = 0x06,
         MEDIA_PIWG_FW_VOL_DP             = 0x07,
+
+        MSG_URI_DP                       = 24,
 };
 
 struct _packed_ EFI_DEVICE_PATH_PROTOCOL {
@@ -42,6 +46,13 @@ typedef struct {
         EFI_DEVICE_PATH Header;
         EFI_GUID Guid;
 } _packed_ VENDOR_DEVICE_PATH;
+
+typedef struct {
+        EFI_DEVICE_PATH Header;
+        uint32_t MemoryType;
+        EFI_PHYSICAL_ADDRESS StartingAddress;
+        EFI_PHYSICAL_ADDRESS EndingAddress;
+} _packed_ MEMMAP_DEVICE_PATH;
 
 #define MBR_TYPE_PCAT                        0x01U
 #define MBR_TYPE_EFI_PARTITION_TABLE_HEADER  0x02U
@@ -66,6 +77,11 @@ typedef struct {
         EFI_DEVICE_PATH Header;
         char16_t PathName[];
 } _packed_ FILEPATH_DEVICE_PATH;
+
+typedef struct {
+        EFI_DEVICE_PATH Header;
+        char Uri[];
+} _packed_ URI_DEVICE_PATH;
 
 typedef struct {
         char16_t* (EFIAPI *ConvertDeviceNodeToText)(

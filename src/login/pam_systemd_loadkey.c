@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <security/_pam_macros.h>
 #include <security/pam_ext.h>
 #include <security/pam_misc.h>
@@ -8,10 +7,9 @@
 #include <security/pam_modutil.h>
 
 #include "keyring-util.h"
-#include "macro.h"
-#include "missing_syscall.h"
 #include "nulstr-util.h"
 #include "pam-util.h"
+#include "string-util.h"
 #include "strv.h"
 
 /* By default, this module retrieves the key stored by systemd-cryptsetup.
@@ -73,7 +71,7 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
 
         /* Split the key by NUL. Set the last item as authtok. */
 
-        _cleanup_(strv_free_erasep) char **passwords = strv_parse_nulstr(p, n);
+        _cleanup_strv_free_erase_ char **passwords = strv_parse_nulstr(p, n);
         if (!passwords)
                 return pam_log_oom(handle);
 

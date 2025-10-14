@@ -2,15 +2,19 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
-#include <sd-bus.h>
-#include <sd-event.h>
+#include "sd-bus.h"
+#include "sd-event.h"
 
 #include "bus-locator.h"
 #include "bus-wait-for-jobs.h"
 #include "fd-util.h"
+#include "format-util.h"
+#include "hashmap.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "random-util.h"
@@ -18,6 +22,7 @@
 #include "signal-util.h"
 #include "socket-util.h"
 #include "tests.h"
+#include "time-util.h"
 #include "tmpfile-util.h"
 #include "unit-def.h"
 
@@ -43,7 +48,7 @@ static void *fake_pressure_thread(void *p) {
         ASSERT_STREQ(buf, "hello");
         assert_se(write(cfd, &(const char) { 'z' }, 1) == 1);
 
-        return 0;
+        return NULL;
 }
 
 static int fake_pressure_callback(sd_event_source *s, void *userdata) {
@@ -86,7 +91,7 @@ TEST(fake_pressure) {
         socket_fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
         assert_se(socket_fd >= 0);
         assert_se(sockaddr_un_set_path(&sa.un, k) >= 0);
-        assert_se(bind(socket_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) >= 0);
+        assert_se(bind(socket_fd, &sa.sa, sockaddr_un_len(&sa.un)) >= 0);
         assert_se(listen(socket_fd, 1) >= 0);
 
         /* Ideally we'd just allocate this on the stack, but AddressSanitizer doesn't like it if threads

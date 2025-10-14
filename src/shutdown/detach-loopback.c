@@ -5,7 +5,6 @@
 
 #include <linux/loop.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
 
 #if HAVE_VALGRIND_MEMCHECK_H
 #include <valgrind/memcheck.h>
@@ -19,6 +18,7 @@
 #include "device-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
+#include "list.h"
 #include "shutdown.h"
 
 typedef struct LoopbackDevice {

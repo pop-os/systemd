@@ -1,17 +1,17 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
-#include <sys/epoll.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-id128.h"
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-internal.h"
-#include "bus-polkit.h"
+#include "bus-object.h"
 #include "bus-util.h"
+#include "dbus.h"
 #include "dbus-automount.h"
 #include "dbus-cgroup.h"
 #include "dbus-device.h"
@@ -29,20 +29,23 @@
 #include "dbus-target.h"
 #include "dbus-timer.h"
 #include "dbus-unit.h"
-#include "dbus.h"
+#include "errno-util.h"
 #include "fd-util.h"
+#include "fdset.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "log.h"
+#include "manager.h"
+#include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "selinux-access.h"
 #include "serialize.h"
-#include "service.h"
+#include "set.h"
 #include "special.h"
 #include "string-util.h"
 #include "strv.h"
-#include "strxcpyx.h"
 #include "umask-util.h"
-#include "user-util.h"
 
 #define CONNECTIONS_MAX 4096
 
@@ -59,68 +62,13 @@ void bus_send_pending_reload_message(Manager *m) {
         /* If we cannot get rid of this message we won't dispatch any D-Bus messages, so that we won't end up wanting
          * to queue another message. */
 
-        r = sd_bus_send(NULL, m->pending_reload_message, NULL);
+        r = sd_bus_message_send(m->pending_reload_message);
         if (r < 0)
                 log_warning_errno(r, "Failed to send queued reload message, ignoring: %m");
 
         m->pending_reload_message = sd_bus_message_unref(m->pending_reload_message);
 
         return;
-}
-
-int bus_forward_agent_released(Manager *m, const char *path) {
-        int r;
-
-        assert(m);
-        assert(path);
-
-        if (!MANAGER_IS_SYSTEM(m))
-                return 0;
-
-        if (!m->system_bus)
-                return 0;
-
-        /* If we are running a system instance we forward the agent message on the system bus, so that the user
-         * instances get notified about this, too */
-
-        r = sd_bus_emit_signal(m->system_bus,
-                               "/org/freedesktop/systemd1/agent",
-                               "org.freedesktop.systemd1.Agent",
-                               "Released",
-                               "s", path);
-        if (r < 0)
-                return log_debug_errno(r, "Failed to propagate agent release message: %m");
-
-        return 1;
-}
-
-static int signal_agent_released(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-        Manager *m = ASSERT_PTR(userdata);
-        const char *cgroup;
-        uid_t sender_uid;
-        int r;
-
-        assert(message);
-
-        /* only accept org.freedesktop.systemd1.Agent from UID=0 */
-        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_EUID, &creds);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_creds_get_euid(creds, &sender_uid);
-        if (r < 0 || sender_uid != 0)
-                return 0;
-
-        /* parse 'cgroup-empty' notification */
-        r = sd_bus_message_read(message, "s", &cgroup);
-        if (r < 0) {
-                bus_log_parse_error(r);
-                return 0;
-        }
-
-        manager_notify_cgroup_empty(m, cgroup);
-        return 0;
 }
 
 static int signal_disconnected(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -390,9 +338,8 @@ static int bus_cgroup_context_find(sd_bus *bus, const char *path, const char *in
         return 1;
 }
 
-static int bus_exec_context_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error) {
+static int bus_unit_exec_context_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error) {
         Manager *m = ASSERT_PTR(userdata);
-        ExecContext *c;
         Unit *u;
         int r;
 
@@ -407,6 +354,27 @@ static int bus_exec_context_find(sd_bus *bus, const char *path, const char *inte
 
         if (!streq_ptr(interface, unit_dbus_interface_from_type(u->type)))
                 return 0;
+
+        if (!UNIT_HAS_EXEC_CONTEXT(u))
+                return 0;
+
+        *found = u;
+        return 1;
+}
+
+static int bus_exec_context_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error) {
+        ExecContext *c;
+        int r;
+
+        assert(bus);
+        assert(path);
+        assert(interface);
+        assert(found);
+
+        Unit *u;
+        r = bus_unit_exec_context_find(bus, path, interface, userdata, (void**) &u, error);
+        if (r <= 0)
+                return r;
 
         c = unit_get_exec_context(u);
         if (!c)
@@ -495,6 +463,7 @@ static const BusObjectImplementation bus_mount_object = {
                 { bus_unit_cgroup_vtable, bus_unit_cgroup_find },
                 { bus_cgroup_vtable,      bus_cgroup_context_find },
                 { bus_exec_vtable,        bus_exec_context_find },
+                { bus_unit_exec_vtable,   bus_unit_exec_context_find },
                 { bus_kill_vtable,        bus_kill_context_find }),
 };
 
@@ -523,6 +492,7 @@ static const BusObjectImplementation bus_service_object = {
                 { bus_unit_cgroup_vtable, bus_unit_cgroup_find },
                 { bus_cgroup_vtable,      bus_cgroup_context_find },
                 { bus_exec_vtable,        bus_exec_context_find },
+                { bus_unit_exec_vtable,   bus_unit_exec_context_find },
                 { bus_kill_vtable,        bus_kill_context_find }),
 };
 
@@ -543,6 +513,7 @@ static const BusObjectImplementation bus_socket_object = {
                 { bus_unit_cgroup_vtable, bus_unit_cgroup_find },
                 { bus_cgroup_vtable,      bus_cgroup_context_find },
                 { bus_exec_vtable,        bus_exec_context_find },
+                { bus_unit_exec_vtable,   bus_unit_exec_context_find },
                 { bus_kill_vtable,        bus_kill_context_find }),
 };
 
@@ -554,6 +525,7 @@ static const BusObjectImplementation bus_swap_object = {
                 { bus_unit_cgroup_vtable, bus_unit_cgroup_find },
                 { bus_cgroup_vtable,      bus_cgroup_context_find },
                 { bus_exec_vtable,        bus_exec_context_find },
+                { bus_unit_exec_vtable,   bus_unit_exec_context_find },
                 { bus_kill_vtable,        bus_kill_context_find }),
 };
 
@@ -773,6 +745,24 @@ static int bus_on_connection(sd_event_source *s, int fd, uint32_t revents, void 
         return 0;
 }
 
+static int bus_track_coldplug(sd_bus *bus, sd_bus_track **t, char * const *l) {
+        int r;
+
+        assert(bus);
+        assert(t);
+
+        if (strv_isempty(l))
+                return 0;
+
+        if (!*t) {
+                r = sd_bus_track_new(bus, t, NULL, NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        return bus_track_add_name_many(*t, l);
+}
+
 static int bus_setup_api(Manager *m, sd_bus *bus) {
         char *name;
         Unit *u;
@@ -859,33 +849,16 @@ int bus_init_api(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to set up API bus: %m");
 
+        r = bus_get_instance_id(bus, &m->bus_id);
+        if (r < 0)
+                log_warning_errno(r, "Failed to query API bus instance ID, not deserializing subscriptions: %m");
+        else if (sd_id128_is_null(m->deserialized_bus_id) || sd_id128_equal(m->bus_id, m->deserialized_bus_id))
+                (void) bus_track_coldplug(bus, &m->subscribed, m->subscribed_as_strv);
+        m->subscribed_as_strv = strv_free(m->subscribed_as_strv);
+        m->deserialized_bus_id = SD_ID128_NULL;
+
         m->api_bus = TAKE_PTR(bus);
-
         return 0;
-}
-
-static void bus_setup_system(Manager *m, sd_bus *bus) {
-        int r;
-
-        assert(m);
-        assert(bus);
-
-        /* if we are a user instance we get the Released message via the system bus */
-        if (MANAGER_IS_USER(m)) {
-                r = sd_bus_match_signal_async(
-                                bus,
-                                NULL,
-                                NULL,
-                                "/org/freedesktop/systemd1/agent",
-                                "org.freedesktop.systemd1.Agent",
-                                "Released",
-                                signal_agent_released, NULL, m);
-                if (r < 0)
-                        log_warning_errno(r, "Failed to request Released match on system bus: %m");
-        }
-
-        log_debug("Successfully connected to system bus.");
-        return;
 }
 
 int bus_init_system(Manager *m) {
@@ -912,9 +885,9 @@ int bus_init_system(Manager *m) {
                         return r;
         }
 
-        bus_setup_system(m, bus);
-
         m->system_bus = TAKE_PTR(bus);
+
+        log_debug("Successfully connected to system bus.");
 
         return 0;
 }
@@ -948,7 +921,7 @@ int bus_init_private(Manager *m) {
                 r = sockaddr_un_set_path(&sa.un, p);
         }
         if (r < 0)
-                return log_error_errno(r, "Failed set socket path for private bus: %m");
+                return log_error_errno(r, "Failed to set socket path for private bus: %m");
         sa_len = r;
 
         (void) sockaddr_un_unlink(&sa.un);
@@ -1002,8 +975,20 @@ static void destroy_bus(Manager *m, sd_bus **bus) {
         }
 
         /* Get rid of tracked clients on this bus */
-        if (m->subscribed && sd_bus_track_get_bus(m->subscribed) == *bus)
+        if (m->subscribed && sd_bus_track_get_bus(m->subscribed) == *bus) {
+                _cleanup_strv_free_ char **subscribed = NULL;
+                int r;
+
+                r = bus_track_to_strv(m->subscribed, &subscribed);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to serialize api subscribers, ignoring: %m");
+                strv_free_and_replace(m->subscribed_as_strv, subscribed);
+
+                m->deserialized_bus_id = m->bus_id;
+                m->bus_id = SD_ID128_NULL;
+
                 m->subscribed = sd_bus_track_unref(m->subscribed);
+        }
 
         HASHMAP_FOREACH(j, m->jobs)
                 if (j->bus_track && sd_bus_track_get_bus(j->bus_track) == *bus)
@@ -1062,7 +1047,6 @@ void bus_done(Manager *m) {
 
         assert(!m->subscribed);
 
-        m->deserialized_subscribed = strv_free(m->deserialized_subscribed);
         m->polkit_registry = hashmap_free(m->polkit_registry);
 }
 
@@ -1151,31 +1135,6 @@ void bus_track_serialize(sd_bus_track *t, FILE *f, const char *prefix) {
         }
 }
 
-int bus_track_coldplug(Manager *m, sd_bus_track **t, bool recursive, char **l) {
-        int r;
-
-        assert(m);
-        assert(t);
-
-        if (strv_isempty(l))
-                return 0;
-
-        if (!m->api_bus)
-                return 0;
-
-        if (!*t) {
-                r = sd_bus_track_new(m->api_bus, t, NULL, NULL);
-                if (r < 0)
-                        return r;
-        }
-
-        r = sd_bus_track_set_recursive(*t, recursive);
-        if (r < 0)
-                return r;
-
-        return bus_track_add_name_many(*t, l);
-}
-
 uint64_t manager_bus_n_queued_write(Manager *m) {
         uint64_t c = 0;
         sd_bus *b;
@@ -1225,6 +1184,7 @@ void dump_bus_properties(FILE *f) {
         vtable_dump_bus_properties(f, bus_cgroup_vtable);
         vtable_dump_bus_properties(f, bus_device_vtable);
         vtable_dump_bus_properties(f, bus_exec_vtable);
+        vtable_dump_bus_properties(f, bus_unit_exec_vtable);
         vtable_dump_bus_properties(f, bus_job_vtable);
         vtable_dump_bus_properties(f, bus_kill_vtable);
         vtable_dump_bus_properties(f, bus_manager_vtable);

@@ -1,36 +1,19 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#if HAVE_PIDFD_OPEN
-#include <sys/pidfd.h>
-#endif
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include "alloc-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "missing_magic.h"
-#include "missing_syscall.h"
-#include "missing_wait.h"
+#include "format-util.h"
+#include "hash-funcs.h"
+#include "log.h"
 #include "parse-util.h"
+#include "pidfd-util.h"
 #include "pidref.h"
 #include "process-util.h"
-#include "signal-util.h"
-#include "stat-util.h"
-
-static int pidfd_inode_ids_supported(void) {
-        static int cached = -1;
-
-        if (cached >= 0)
-                return cached;
-
-        _cleanup_close_ int fd = pidfd_open(getpid_cached(), 0);
-        if (fd < 0) {
-                if (ERRNO_IS_NOT_SUPPORTED(errno))
-                        return (cached = false);
-
-                return -errno;
-        }
-
-        return (cached = fd_is_fs_type(fd, PID_FS_MAGIC));
-}
+#include "siphash24.h"
 
 int pidref_acquire_pidfd_id(PidRef *pidref) {
         int r;
@@ -49,23 +32,22 @@ int pidref_acquire_pidfd_id(PidRef *pidref) {
         if (pidref->fd_id > 0)
                 return 0;
 
-        r = pidfd_inode_ids_supported();
-        if (r < 0)
+        r = pidfd_get_inode_id(pidref->fd, &pidref->fd_id);
+        if (r < 0) {
+                if (!ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                        log_debug_errno(r, "Failed to get inode number of pidfd for pid " PID_FMT ": %m",
+                                        pidref->pid);
                 return r;
-        if (r == 0)
-                return -EOPNOTSUPP;
+        }
 
-        struct stat st;
-
-        if (fstat(pidref->fd, &st) < 0)
-                return log_debug_errno(errno, "Failed to get inode number of pidfd for pid " PID_FMT ": %m",
-                                       pidref->pid);
-
-        pidref->fd_id = (uint64_t) st.st_ino;
         return 0;
 }
 
 bool pidref_equal(PidRef *a, PidRef *b) {
+
+        /* If this is the very same structure, it definitely refers to the same process */
+        if (a == b)
+                return true;
 
         if (!pidref_is_set(a))
                 return !pidref_is_set(b);
@@ -85,8 +67,14 @@ bool pidref_equal(PidRef *a, PidRef *b) {
                 if (a->fd_id == 0 || b->fd_id == 0)
                         return true;
         } else {
+                /* If the other side is remote, then this is not the same */
                 if (pidref_is_remote(b))
                         return false;
+
+                /* PID1 cannot exit, hence it cannot change pidfs ids, hence no point in comparing them, we
+                 * can shortcut things */
+                if (a->pid == 1)
+                        return true;
 
                 /* Try to compare pidfds using their inode numbers. This way we can ensure that we
                  * don't spuriously consider two PidRefs equal if the pid has been reused once. Note
@@ -100,19 +88,22 @@ bool pidref_equal(PidRef *a, PidRef *b) {
 }
 
 int pidref_set_pid(PidRef *pidref, pid_t pid) {
+        uint64_t pidfdid = 0;
         int fd;
 
         assert(pidref);
 
         if (pid < 0)
                 return -ESRCH;
-        if (pid == 0)
+        if (pid == 0) {
                 pid = getpid_cached();
+                (void) pidfd_get_inode_id_self_cached(&pidfdid);
+        }
 
         fd = pidfd_open(pid, 0);
         if (fd < 0) {
-                /* Graceful fallback in case the kernel doesn't support pidfds or is out of fds */
-                if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno) && !ERRNO_IS_RESOURCE(errno))
+                /* Graceful fallback in case the kernel is out of fds */
+                if (!ERRNO_IS_RESOURCE(errno))
                         return log_debug_errno(errno, "Failed to open pidfd for pid " PID_FMT ": %m", pid);
 
                 fd = -EBADF;
@@ -121,8 +112,36 @@ int pidref_set_pid(PidRef *pidref, pid_t pid) {
         *pidref = (PidRef) {
                 .fd = fd,
                 .pid = pid,
+                .fd_id = pidfdid,
         };
 
+        return 0;
+}
+
+int pidref_set_pid_and_pidfd_id(
+                PidRef *pidref,
+                pid_t pid,
+                uint64_t pidfd_id) {
+
+        int r;
+
+        assert(pidref);
+
+        _cleanup_(pidref_done) PidRef n = PIDREF_NULL;
+        r = pidref_set_pid(&n, pid);
+        if (r < 0)
+                return r;
+
+        if (pidfd_id > 0) {
+                r = pidref_acquire_pidfd_id(&n);
+                if (r < 0 && !ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                        return r;
+
+                if (n.fd_id != pidfd_id)
+                        return -ESRCH;
+        }
+
+        *pidref = TAKE_PIDREF(n);
         return 0;
 }
 
@@ -246,37 +265,32 @@ PidRef* pidref_free(PidRef *pidref) {
         return mfree(pidref);
 }
 
-int pidref_copy(const PidRef *pidref, PidRef *dest) {
-        _cleanup_close_ int dup_fd = -EBADF;
-        pid_t dup_pid = 0;
+int pidref_copy(const PidRef *pidref, PidRef *ret) {
+        _cleanup_(pidref_done) PidRef copy = PIDREF_NULL;
 
         /* If NULL is passed we'll generate a PidRef that refers to no process. This makes it easy to
          * copy pidref fields that might or might not reference a process yet. */
 
-        assert(dest);
+        assert(ret);
 
         if (pidref) {
                 if (pidref_is_remote(pidref)) /* Propagate remote flag */
-                        dup_fd = -EREMOTE;
+                        copy.fd = -EREMOTE;
                 else if (pidref->fd >= 0) {
-                        dup_fd = fcntl(pidref->fd, F_DUPFD_CLOEXEC, 3);
-                        if (dup_fd < 0) {
+                        copy.fd = fcntl(pidref->fd, F_DUPFD_CLOEXEC, 3);
+                        if (copy.fd < 0) {
                                 if (!ERRNO_IS_RESOURCE(errno))
                                         return -errno;
 
-                                dup_fd = -EBADF;
+                                copy.fd = -EBADF;
                         }
                 }
 
-                if (pidref->pid > 0)
-                        dup_pid = pidref->pid;
+                copy.pid = pidref->pid;
+                copy.fd_id = pidref->fd_id;
         }
 
-        *dest = (PidRef) {
-                .fd = TAKE_FD(dup_fd),
-                .pid = dup_pid,
-        };
-
+        *ret = TAKE_PIDREF(copy);
         return 0;
 }
 
@@ -410,17 +424,32 @@ int pidref_verify(const PidRef *pidref) {
         return 1; /* We have a pidfd and it still points to the PID we have, hence all is *really* OK → return 1 */
 }
 
-bool pidref_is_self(const PidRef *pidref) {
-        if (!pidref)
+bool pidref_is_self(PidRef *pidref) {
+        if (!pidref_is_set(pidref))
                 return false;
 
         if (pidref_is_remote(pidref))
                 return false;
 
-        return pidref->pid == getpid_cached();
+        if (pidref->pid != getpid_cached())
+                return false;
+
+        /* PID1 cannot exit, hence no point in comparing pidfd IDs, they can never change */
+        if (pidref->pid == 1)
+                return true;
+
+        /* Also compare pidfd ID if we can get it */
+        if (pidref_acquire_pidfd_id(pidref) < 0)
+                return true;
+
+        uint64_t self_id;
+        if (pidfd_get_inode_id_self_cached(&self_id) < 0)
+                return true;
+
+        return pidref->fd_id == self_id;
 }
 
-int pidref_wait(const PidRef *pidref, siginfo_t *ret, int options) {
+int pidref_wait(PidRef *pidref, siginfo_t *ret, int options) {
         int r;
 
         if (!pidref_is_set(pidref))
@@ -429,29 +458,24 @@ int pidref_wait(const PidRef *pidref, siginfo_t *ret, int options) {
         if (pidref_is_remote(pidref))
                 return -EREMOTE;
 
-        if (pidref->pid == 1 || pidref->pid == getpid_cached())
+        if (pidref->pid == 1 || pidref_is_self(pidref))
                 return -ECHILD;
 
         siginfo_t si = {};
-
-        if (pidref->fd >= 0) {
+        if (pidref->fd >= 0)
                 r = RET_NERRNO(waitid(P_PIDFD, pidref->fd, &si, options));
-                if (r >= 0) {
-                        if (ret)
-                                *ret = si;
-                        return r;
-                }
-                if (r != -EINVAL) /* P_PIDFD was added in kernel 5.4 only */
-                        return r;
-        }
+        else
+                r = RET_NERRNO(waitid(P_PID, pidref->pid, &si, options));
+        if (r < 0)
+                return r;
 
-        r = RET_NERRNO(waitid(P_PID, pidref->pid, &si, options));
-        if (r >= 0 && ret)
+        if (ret)
                 *ret = si;
-        return r;
+
+        return 0;
 }
 
-int pidref_wait_for_terminate(const PidRef *pidref, siginfo_t *ret) {
+int pidref_wait_for_terminate(PidRef *pidref, siginfo_t *ret) {
         int r;
 
         for (;;) {
@@ -465,12 +489,36 @@ bool pidref_is_automatic(const PidRef *pidref) {
         return pidref && pid_is_automatic(pidref->pid);
 }
 
-static void pidref_hash_func(const PidRef *pidref, struct siphash *state) {
+void pidref_hash_func(const PidRef *pidref, struct siphash *state) {
         siphash24_compress_typesafe(pidref->pid, state);
 }
 
-static int pidref_compare_func(const PidRef *a, const PidRef *b) {
-        return CMP(a->pid, b->pid);
+int pidref_compare_func(const PidRef *a, const PidRef *b) {
+        int r;
+
+        assert(a);
+        assert(b);
+
+        r = CMP(pidref_is_set(a), pidref_is_set(b));
+        if (r != 0)
+                return r;
+
+        r = CMP(pidref_is_automatic(a), pidref_is_automatic(b));
+        if (r != 0)
+                return r;
+
+        r = CMP(pidref_is_remote(a), pidref_is_remote(b));
+        if (r != 0)
+                return r;
+
+        r = CMP(a->pid, b->pid);
+        if (r != 0)
+                return r;
+
+        if (a->fd_id != 0 && b->fd_id != 0)
+                return CMP(a->fd_id, b->fd_id);
+
+        return 0;
 }
 
 DEFINE_HASH_OPS(pidref_hash_ops, PidRef, pidref_hash_func, pidref_compare_func);

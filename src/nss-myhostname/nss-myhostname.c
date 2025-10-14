@@ -1,16 +1,14 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <net/if.h>
 #include <netdb.h>
 #include <nss.h>
-#include <stdlib.h>
 
 #include "alloc-util.h"
 #include "errno-util.h"
+#include "hostname-setup.h"
 #include "hostname-util.h"
 #include "local-addresses.h"
-#include "macro.h"
 #include "nss-util.h"
 #include "resolve-util.h"
 #include "signal-util.h"
@@ -45,7 +43,7 @@ enum nss_status _nss_myhostname_gethostbyname4_r(
         char *r_name;
 
         PROTECT_ERRNO;
-        BLOCK_SIGNALS(NSS_SIGNALS_BLOCK);
+        NSS_ENTRYPOINT_BEGIN;
 
         assert(name);
         assert(pat);
@@ -328,7 +326,7 @@ enum nss_status _nss_myhostname_gethostbyname3_r(
         int n_addresses = 0;
 
         PROTECT_ERRNO;
-        BLOCK_SIGNALS(NSS_SIGNALS_BLOCK);
+        NSS_ENTRYPOINT_BEGIN;
 
         assert(name);
         assert(host);
@@ -427,7 +425,7 @@ enum nss_status _nss_myhostname_gethostbyaddr2_r(
         unsigned n;
 
         PROTECT_ERRNO;
-        BLOCK_SIGNALS(NSS_SIGNALS_BLOCK);
+        NSS_ENTRYPOINT_BEGIN;
 
         assert(addr);
         assert(host);

@@ -1,18 +1,18 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <unistd.h>
+
 #include "alloc-util.h"
 #include "bootctl.h"
 #include "bootctl-random-seed.h"
-#include "bootctl-util.h"
-#include "efi-api.h"
+#include "efivars.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "find-esp.h"
 #include "fs-util.h"
 #include "glyph-util.h"
 #include "io-util.h"
-#include "mkdir.h"
-#include "path-util.h"
+#include "log.h"
 #include "random-util.h"
 #include "sha256.h"
 #include "tmpfile-util.h"
@@ -34,19 +34,21 @@ static int random_seed_verify_permissions(int fd, mode_t expected_type) {
 
         if (((st.st_mode ^ expected_type) & S_IFMT) != 0)
                 return log_error_errno(SYNTHETIC_ERRNO(EBADF),
-                                       "Unexpected inode type when validating random seed access mode on %s: %m", full_path);
+                                       "Unexpected inode type when validating random seed access mode on '%s'.", full_path);
 
         if ((st.st_mode & 0007) == 0) /* All world bits are off? Then all is good */
                 return 0;
 
         if (S_ISREG(expected_type))
-                log_warning("%s Random seed file '%s' is world accessible, which is a security hole! %s",
-                            special_glyph(SPECIAL_GLYPH_WARNING_SIGN), full_path, special_glyph(SPECIAL_GLYPH_WARNING_SIGN));
-        else {
-                assert(S_ISDIR(expected_type));
-                log_warning("%s Mount point '%s' which backs the random seed file is world accessible, which is a security hole! %s",
-                            special_glyph(SPECIAL_GLYPH_WARNING_SIGN), full_path, special_glyph(SPECIAL_GLYPH_WARNING_SIGN));
-        }
+                log_error("%s%sRandom seed file '%s' is world accessible, which is a security hole!%s%s",
+                          optional_glyph(GLYPH_WARNING_SIGN), optional_glyph(GLYPH_SPACE),
+                          full_path,
+                          optional_glyph(GLYPH_SPACE), optional_glyph(GLYPH_WARNING_SIGN));
+        else
+                log_error("%s%s Mount point '%s' which backs the random seed file is world accessible, which is a security hole! %s%s",
+                          optional_glyph(GLYPH_WARNING_SIGN), optional_glyph(GLYPH_SPACE),
+                          full_path,
+                          optional_glyph(GLYPH_SPACE), optional_glyph(GLYPH_WARNING_SIGN));
 
         return 1;
 }
@@ -56,19 +58,8 @@ static int set_system_token(void) {
         size_t token_size;
         int r;
 
-        if (!arg_touch_variables)
+        if (!touch_variables())
                 return 0;
-
-        if (arg_root) {
-                log_warning("Acting on %s, skipping EFI variable setup.",
-                             arg_image ? "image" : "root directory");
-                return 0;
-        }
-
-        if (!is_efi_boot()) {
-                log_notice("Not booted with EFI, skipping EFI variable setup.");
-                return 0;
-        }
 
         r = getenv_bool("SYSTEMD_WRITE_SYSTEM_TOKEN");
         if (r < 0) {
@@ -105,7 +96,7 @@ static int set_system_token(void) {
         WITH_UMASK(0077) {
                 r = efi_set_variable(EFI_LOADER_VARIABLE_STR("LoaderSystemToken"), buffer, sizeof(buffer));
                 if (r < 0) {
-                        if (!arg_graceful)
+                        if (arg_graceful() == ARG_GRACEFUL_NO)
                                 return log_error_errno(r, "Failed to write 'LoaderSystemToken' EFI variable: %m");
 
                         if (r == -EINVAL)
@@ -222,7 +213,7 @@ int verb_random_seed(int argc, char *argv[], void *userdata) {
         r = find_esp_and_warn(arg_root, arg_esp_path, false, &arg_esp_path, NULL, NULL, NULL, NULL, NULL);
         if (r == -ENOKEY) {
                 /* find_esp_and_warn() doesn't warn about ENOKEY, so let's do that on our own */
-                if (!arg_graceful)
+                if (arg_graceful() == ARG_GRACEFUL_NO)
                         return log_error_errno(r, "Unable to find ESP.");
 
                 log_notice("No ESP found, not initializing random seed.");

@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <stdlib.h>
+
 #include "sd-path.h"
 
 #include "alloc-util.h"
@@ -36,7 +38,12 @@ static int from_environment(const char *envname, const char *fallback, const cha
         return -ENXIO;
 }
 
-static int from_home_dir(const char *envname, const char *suffix, char **buffer, const char **ret) {
+static int from_home_dir(
+                const char *envname,
+                const char *suffix,
+                char **buffer,
+                const char **ret) {
+
         _cleanup_free_ char *h = NULL;
         int r;
 
@@ -295,6 +302,10 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
                 *ret = PREFIX_NOSLASH "/lib/systemd/user-preset";
                 return 0;
 
+        case SD_PATH_SYSTEMD_INITRD_PRESET:
+                *ret = PREFIX_NOSLASH "/lib/systemd/initrd-preset";
+                return 0;
+
         case SD_PATH_SYSTEMD_SYSTEM_CONF:
                 *ret = SYSTEM_CONFIG_UNIT_DIR;
                 return 0;
@@ -350,6 +361,30 @@ static int get_path(uint64_t type, char **buffer, const char **ret) {
         case SD_PATH_SYSTEMD_USER_ENVIRONMENT_GENERATOR:
                 *ret = USER_ENV_GENERATOR_DIR;
                 return 0;
+
+        case SD_PATH_SYSTEM_CREDENTIAL_STORE:
+                *ret = "/etc/credstore";
+                return 0;
+
+        case SD_PATH_SYSTEM_CREDENTIAL_STORE_ENCRYPTED:
+                *ret = "/etc/credstore.encrypted";
+                return 0;
+
+        case SD_PATH_USER_CREDENTIAL_STORE:
+                r = xdg_user_config_dir("credstore", buffer);
+                if (r < 0)
+                        return r;
+
+                *ret = *buffer;
+                return 0;
+
+        case SD_PATH_USER_CREDENTIAL_STORE_ENCRYPTED:
+                r = xdg_user_config_dir("credstore.encrypted", buffer);
+                if (r < 0)
+                        return r;
+
+                *ret = *buffer;
+                return 0;
         }
 
         return -EOPNOTSUPP;
@@ -366,12 +401,12 @@ static int get_path_alloc(uint64_t type, const char *suffix, char **ret) {
         if (r < 0)
                 return r;
 
-        if (suffix) {
+        if (!isempty(suffix)) {
                 char *suffixed = path_join(p, suffix);
                 if (!suffixed)
                         return -ENOMEM;
 
-                path_simplify(suffixed);
+                path_simplify_full(suffixed, PATH_SIMPLIFY_KEEP_TRAILING_SLASH);
 
                 free_and_replace(buffer, suffixed);
         } else if (!buffer) {
@@ -601,7 +636,54 @@ static int get_search(uint64_t type, char ***ret) {
         case SD_PATH_SYSTEMD_SEARCH_NETWORK:
                 return strv_from_nulstr(ret, NETWORK_DIRS_NULSTR);
 
+        case SD_PATH_SYSTEM_SEARCH_CREDENTIAL_STORE:
+        case SD_PATH_SYSTEM_SEARCH_CREDENTIAL_STORE_ENCRYPTED: {
+                const char *suffix =
+                        type == SD_PATH_SYSTEM_SEARCH_CREDENTIAL_STORE_ENCRYPTED ? "credstore.encrypted" : "credstore";
+
+                _cleanup_strv_free_ char **l = NULL;
+                FOREACH_STRING(d, CONF_PATHS("")) {
+                        char *j = path_join(d, suffix);
+                        if (!j)
+                                return -ENOMEM;
+
+                        r = strv_consume(&l, TAKE_PTR(j));
+                        if (r < 0)
+                                return r;
+                }
+
+                *ret = TAKE_PTR(l);
+                return 0;
         }
+
+        case SD_PATH_USER_SEARCH_CREDENTIAL_STORE:
+        case SD_PATH_USER_SEARCH_CREDENTIAL_STORE_ENCRYPTED: {
+                const char *suffix =
+                        type == SD_PATH_USER_SEARCH_CREDENTIAL_STORE_ENCRYPTED ? "credstore.encrypted" : "credstore";
+
+                static const uint64_t dirs[] = {
+                        SD_PATH_USER_CONFIGURATION,
+                        SD_PATH_USER_RUNTIME,
+                        SD_PATH_USER_LIBRARY_PRIVATE,
+                };
+
+                _cleanup_strv_free_ char **l = NULL;
+                FOREACH_ELEMENT(d, dirs) {
+                        _cleanup_free_ char *p = NULL;
+                        r = sd_path_lookup(*d, suffix, &p);
+                        if (r == -ENXIO)
+                                continue;
+                        if (r < 0)
+                                return r;
+
+                        r = strv_consume(&l, TAKE_PTR(p));
+                        if (r < 0)
+                                return r;
+                }
+
+                *ret = TAKE_PTR(l);
+                return 0;
+        }}
 
         return -EOPNOTSUPP;
 }
@@ -637,7 +719,7 @@ _public_ int sd_path_lookup_strv(uint64_t type, const char *suffix, char ***ret)
                         if (!path_extend(i, suffix))
                                 return -ENOMEM;
 
-                        path_simplify(*i);
+                        path_simplify_full(*i, PATH_SIMPLIFY_KEEP_TRAILING_SLASH);
                 }
 
         *ret = TAKE_PTR(l);

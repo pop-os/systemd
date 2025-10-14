@@ -1,90 +1,69 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <errno.h>
 #include <fcntl.h>
+#include <linux/prctl.h>
 #include <poll.h>
-#include <sys/file.h>
 #include <sys/mman.h>
-#include <sys/personality.h>
+#include <sys/mount.h>
 #include <sys/prctl.h>
-#include <sys/shm.h>
-#include <sys/types.h>
-#include <sys/un.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <utmpx.h>
-
-#include <linux/fs.h> /* Must be included after <sys/mount.h> */
-
-#include "sd-messages.h"
 
 #include "af-list.h"
 #include "alloc-util.h"
 #include "async.h"
-#include "cap-list.h"
+#include "bitfield.h"
+#include "capability-list.h"
 #include "capability-util.h"
 #include "cgroup-setup.h"
-#include "constants.h"
+#include "coredump-util.h"
 #include "cpu-set-util.h"
+#include "dissect-image.h"
+#include "dynamic-user.h"
 #include "env-file.h"
 #include "env-util.h"
-#include "errno-list.h"
 #include "escape.h"
-#include "exec-credential.h"
 #include "execute.h"
 #include "execute-serialize.h"
-#include "exit-status.h"
 #include "fd-util.h"
+#include "fdset.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "fs-util.h"
 #include "glob-util.h"
 #include "hexdecoct.h"
+#include "image-policy.h"
+#include "io-util.h"
 #include "ioprio-util.h"
-#include "lock-util.h"
 #include "log.h"
-#include "macro.h"
 #include "manager.h"
-#include "manager-dump.h"
-#include "memory-util.h"
-#include "missing_fs.h"
-#include "missing_prctl.h"
-#include "mkdir-label.h"
+#include "mkdir.h"
+#include "namespace-util.h"
 #include "namespace.h"
+#include "nsflags.h"
+#include "open-file.h"
+#include "ordered-set.h"
+#include "osc-context.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pidref.h"
 #include "process-util.h"
 #include "rlimit-util.h"
 #include "rm-rf.h"
 #include "seccomp-util.h"
 #include "securebits-util.h"
-#include "selinux-util.h"
 #include "serialize.h"
+#include "set.h"
 #include "sort-util.h"
-#include "special.h"
-#include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
 #include "tmpfile-util.h"
-#include "umask-util.h"
-#include "unit-serialize.h"
-#include "user-util.h"
 #include "utmp-wtmp.h"
-
-static bool is_terminal_input(ExecInput i) {
-        return IN_SET(i,
-                      EXEC_INPUT_TTY,
-                      EXEC_INPUT_TTY_FORCE,
-                      EXEC_INPUT_TTY_FAIL);
-}
-
-static bool is_terminal_output(ExecOutput o) {
-        return IN_SET(o,
-                      EXEC_OUTPUT_TTY,
-                      EXEC_OUTPUT_KMSG_AND_CONSOLE,
-                      EXEC_OUTPUT_JOURNAL_AND_CONSOLE);
-}
+#include "vpick.h"
 
 const char* exec_context_tty_path(const ExecContext *context) {
         assert(context);
@@ -128,11 +107,12 @@ int exec_context_apply_tty_size(
                                 rows == UINT_MAX ? &rows : NULL,
                                 cols == UINT_MAX ? &cols : NULL);
 
-        /* If we got nothing so far and we are talking to a physical device, and the TTY reset logic is on,
-         * then let's query dimensions from the ANSI driver. */
+        /* If we got nothing so far and we are talking to a physical device, then let's query dimensions from
+         * the ANSI terminal driver. Note that we will not bother with this in case terminal reset via ansi
+         * sequences is not enabled, as the DSR logic relies on ANSI sequences after all, and if we shall not
+         * use those during initialization we need to skip it. */
         if (rows == UINT_MAX && cols == UINT_MAX &&
-            context->tty_reset &&
-            terminal_is_pty_fd(output_fd) == 0 &&
+            exec_context_shall_ansi_seq_reset(context) &&
             isatty_safe(input_fd)) {
                 r = terminal_get_size_by_dsr(input_fd, output_fd, &rows, &cols);
                 if (r < 0)
@@ -142,7 +122,7 @@ int exec_context_apply_tty_size(
         return terminal_set_size_fd(output_fd, tty_path, rows, cols);
 }
 
-void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p) {
+void exec_context_tty_reset(const ExecContext *context, const ExecParameters *parameters, sd_id128_t invocation_id) {
         _cleanup_close_ int _fd = -EBADF, lock_fd = -EBADF;
         int fd, r;
 
@@ -155,10 +135,9 @@ void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p)
 
         const char *path = exec_context_tty_path(context);
 
-        if (p && p->stdout_fd >= 0 && isatty_safe(p->stdout_fd))
-                fd = p->stdout_fd;
-        else if (path && (context->tty_path || is_terminal_input(context->std_input) ||
-                        is_terminal_output(context->std_output) || is_terminal_output(context->std_error))) {
+        if (parameters && parameters->stdout_fd >= 0 && isatty_safe(parameters->stdout_fd))
+                fd = parameters->stdout_fd;
+        else if (path && exec_context_has_tty(context)) {
                 fd = _fd = open_terminal(path, O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
                 if (fd < 0)
                         return (void) log_debug_errno(fd, "Failed to open terminal '%s', ignoring: %m", path);
@@ -177,11 +156,31 @@ void exec_context_tty_reset(const ExecContext *context, const ExecParameters *p)
                 log_warning_errno(lock_fd, "Failed to lock /dev/console, proceeding without lock: %m");
 
         if (context->tty_reset)
-                (void) terminal_reset_defensive(fd, /* switch_to_text= */ true);
+                (void) terminal_reset_defensive(
+                                fd,
+                                TERMINAL_RESET_SWITCH_TO_TEXT |
+                                (exec_context_shall_ansi_seq_reset(context) ? TERMINAL_RESET_FORCE_ANSI_SEQ : TERMINAL_RESET_AVOID_ANSI_SEQ));
 
         r = exec_context_apply_tty_size(context, fd, fd, path);
         if (r < 0)
                 log_debug_errno(r, "Failed to configure TTY dimensions, ignoring: %m");
+
+        if (!sd_id128_is_null(invocation_id) && exec_context_shall_ansi_seq_reset(context)) {
+                sd_id128_t context_id;
+
+                r = osc_context_id_from_invocation_id(invocation_id, &context_id);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to derive context ID from invocation ID, ignoring: %m");
+                else {
+                        _cleanup_free_ char *seq = NULL;
+
+                        r = osc_context_close(context_id, &seq);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to acquire OSC close sequence, ignoring: %m");
+                        else
+                                (void) loop_write(fd, seq, SIZE_MAX);
+                }
+        }
 
         if (context->tty_vhangup)
                 (void) terminal_vhangup_fd(fd);
@@ -210,24 +209,18 @@ bool exec_needs_ipc_namespace(const ExecContext *context) {
         return context->private_ipc || context->ipc_namespace_path;
 }
 
-static bool can_apply_cgroup_namespace(const ExecContext *context, const ExecParameters *params) {
-        return cg_all_unified() > 0 && ns_type_supported(NAMESPACE_CGROUP);
-}
-
 static bool needs_cgroup_namespace(ProtectControlGroups i) {
         return IN_SET(i, PROTECT_CONTROL_GROUPS_PRIVATE, PROTECT_CONTROL_GROUPS_STRICT);
 }
 
-ProtectControlGroups exec_get_protect_control_groups(const ExecContext *context, const ExecParameters *params) {
+ProtectControlGroups exec_get_protect_control_groups(const ExecContext *context) {
         assert(context);
 
         /* If cgroup namespace is configured via ProtectControlGroups=private or strict but we can't actually
-         * use cgroup namespace, either from not having unified hierarchy or kernel support, we ignore the
-         * setting and do not unshare the namespace. ProtectControlGroups=private and strict get downgraded
-         * to no and yes respectively. This ensures that strict always gets a read-only mount of /sys/fs/cgroup.
-         *
-         * TODO: Remove fallback once cgroupv1 support is removed in v258. */
-        if (needs_cgroup_namespace(context->protect_control_groups) && !can_apply_cgroup_namespace(context, params)) {
+         * use cgroup namespace, we ignore the setting and do not unshare the namespace.
+         * ProtectControlGroups=private and strict get downgraded to no and yes respectively. This ensures
+         * that strict always gets a read-only mount of /sys/fs/cgroup/. */
+        if (needs_cgroup_namespace(context->protect_control_groups) && !namespace_type_supported(NAMESPACE_CGROUP)) {
                 if (context->protect_control_groups == PROTECT_CONTROL_GROUPS_PRIVATE)
                         return PROTECT_CONTROL_GROUPS_NO;
                 if (context->protect_control_groups == PROTECT_CONTROL_GROUPS_STRICT)
@@ -236,28 +229,32 @@ ProtectControlGroups exec_get_protect_control_groups(const ExecContext *context,
         return context->protect_control_groups;
 }
 
-bool exec_needs_cgroup_namespace(const ExecContext *context, const ExecParameters *params) {
+bool exec_needs_cgroup_namespace(const ExecContext *context) {
         assert(context);
 
-        return needs_cgroup_namespace(exec_get_protect_control_groups(context, params));
+        return needs_cgroup_namespace(exec_get_protect_control_groups(context));
 }
 
-bool exec_needs_cgroup_mount(const ExecContext *context, const ExecParameters *params) {
+bool exec_needs_cgroup_mount(const ExecContext *context) {
         assert(context);
 
-        return exec_get_protect_control_groups(context, params) != PROTECT_CONTROL_GROUPS_NO;
+        return exec_get_protect_control_groups(context) != PROTECT_CONTROL_GROUPS_NO;
 }
 
-bool exec_is_cgroup_mount_read_only(const ExecContext *context, const ExecParameters *params) {
+bool exec_is_cgroup_mount_read_only(const ExecContext *context) {
         assert(context);
 
-        return IN_SET(exec_get_protect_control_groups(context, params), PROTECT_CONTROL_GROUPS_YES, PROTECT_CONTROL_GROUPS_STRICT);
+        return IN_SET(exec_get_protect_control_groups(context), PROTECT_CONTROL_GROUPS_YES, PROTECT_CONTROL_GROUPS_STRICT);
 }
 
-bool exec_needs_pid_namespace(const ExecContext *context) {
+bool exec_needs_pid_namespace(const ExecContext *context, const ExecParameters *params) {
         assert(context);
 
-        return context->private_pids != PRIVATE_PIDS_NO && ns_type_supported(NAMESPACE_PID);
+        /* PID namespaces don't really make sense for control processes so let's not use them for those. */
+        if (params && FLAGS_SET(params->flags, EXEC_IS_CONTROL))
+                return false;
+
+        return context->private_pids != PRIVATE_PIDS_NO && namespace_type_supported(NAMESPACE_PID);
 }
 
 bool exec_needs_mount_namespace(
@@ -309,11 +306,12 @@ bool exec_needs_mount_namespace(
             context->protect_kernel_tunables ||
             context->protect_kernel_modules ||
             context->protect_kernel_logs ||
-            exec_needs_cgroup_mount(context, params) ||
+            exec_needs_cgroup_mount(context) ||
             context->protect_proc != PROTECT_PROC_DEFAULT ||
             context->proc_subset != PROC_SUBSET_ALL ||
+            context->private_bpf != PRIVATE_BPF_NO ||
             exec_needs_ipc_namespace(context) ||
-            exec_needs_pid_namespace(context))
+            exec_needs_pid_namespace(context, params))
                 return true;
 
         if (context->root_directory) {
@@ -346,6 +344,38 @@ bool exec_needs_mount_namespace(
         return false;
 }
 
+const char* exec_get_private_notify_socket_path(const ExecContext *context, const ExecParameters *params, bool needs_sandboxing) {
+        assert(context);
+        assert(params);
+
+        if (!params->notify_socket)
+                return NULL;
+
+        if (!needs_sandboxing)
+                return NULL;
+
+        if (!context->root_directory && !context->root_image)
+                return NULL;
+
+        if (!exec_context_get_effective_mount_apivfs(context))
+                return NULL;
+
+        if (!FLAGS_SET(params->flags, EXEC_APPLY_CHROOT))
+                return NULL;
+
+        return "/run/host/notify";
+}
+
+int exec_log_level_max(const ExecContext *context, const ExecParameters *params) {
+        assert(context);
+        assert(params);
+
+        if (params->debug_invocation)
+                return LOG_DEBUG;
+
+        return context->log_level_max < 0 ? log_get_max_level() : context->log_level_max;
+}
+
 bool exec_directory_is_private(const ExecContext *context, ExecDirectoryType type) {
         assert(context);
 
@@ -361,19 +391,23 @@ bool exec_directory_is_private(const ExecContext *context, ExecDirectoryType typ
         return true;
 }
 
+int exec_params_needs_control_subcgroup(const ExecParameters *params) {
+        /* Keep this in sync with exec_params_get_cgroup_path(). */
+        return FLAGS_SET(params->flags, EXEC_CGROUP_DELEGATE|EXEC_CONTROL_CGROUP|EXEC_IS_CONTROL);
+}
+
 int exec_params_get_cgroup_path(
                 const ExecParameters *params,
                 const CGroupContext *c,
+                const char *prefix,
                 char **ret) {
 
         const char *subgroup = NULL;
         char *p;
 
         assert(params);
+        assert(c);
         assert(ret);
-
-        if (!params->cgroup_path)
-                return -EINVAL;
 
         /* If we are called for a unit where cgroup delegation is on, and the payload created its own populated
          * subcgroup (which we expect it to do, after all it asked for delegation), then we cannot place the control
@@ -384,6 +418,7 @@ int exec_params_get_cgroup_path(
          * this is not necessary, the cgroup is still empty. We distinguish these cases with the EXEC_CONTROL_CGROUP
          * flag, which is only passed for the former statements, not for the latter. */
 
+        /* Keep this in sync with exec_params_needs_control_subcgroup(). */
         if (FLAGS_SET(params->flags, EXEC_CGROUP_DELEGATE) && (FLAGS_SET(params->flags, EXEC_CONTROL_CGROUP) || c->delegate_subgroup)) {
                 if (FLAGS_SET(params->flags, EXEC_IS_CONTROL))
                         subgroup = ".control";
@@ -392,9 +427,9 @@ int exec_params_get_cgroup_path(
         }
 
         if (subgroup)
-                p = path_join(params->cgroup_path, subgroup);
+                p = path_join(prefix, subgroup);
         else
-                p = strdup(params->cgroup_path);
+                p = strdup(strempty(prefix));
         if (!p)
                 return -ENOMEM;
 
@@ -419,7 +454,7 @@ static void log_command_line(Unit *unit, const char *msg, const char *executable
         _cleanup_free_ char *cmdline = quote_command_line(argv, SHELL_ESCAPE_EMPTY);
 
         log_unit_struct(unit, LOG_DEBUG,
-                        "EXECUTABLE=%s", executable,
+                        LOG_ITEM("EXECUTABLE=%s", executable),
                         LOG_UNIT_MESSAGE(unit, "%s: %s", msg, strnull(cmdline)),
                         LOG_UNIT_INVOCATION_ID(unit));
 }
@@ -435,7 +470,7 @@ int exec_spawn(
                 const CGroupContext *cgroup_context,
                 PidRef *ret) {
 
-        _cleanup_free_ char *subcgroup_path = NULL, *max_log_levels = NULL, *executor_path = NULL;
+        _cleanup_free_ char *subcgroup_path = NULL, *max_log_levels = NULL;
         _cleanup_fdset_free_ FDSet *fdset = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
@@ -443,6 +478,7 @@ int exec_spawn(
         assert(unit);
         assert(unit->manager);
         assert(unit->manager->executor_fd >= 0);
+        assert(unit->manager->executor_path);
         assert(command);
         assert(context);
         assert(params);
@@ -461,19 +497,30 @@ int exec_spawn(
            want to log from the parent, so we use the possibly inaccurate path here. */
         log_command_line(unit, "About to execute", command->path, command->argv);
 
-        if (params->cgroup_path) {
-                r = exec_params_get_cgroup_path(params, cgroup_context, &subcgroup_path);
+        /* We cannot spawn the main service process into the subcgroup as it might need to unshare the cgroup
+         * namespace first if one is configured to make sure the root of the cgroup namespace is the service
+         * cgroup and not the subcgroup. However, when running control commands on a live service, the
+         * commands have to be spawned inside a subcgroup, otherwise we violate the no inner processes rule
+         * of cgroupv2 as the main service process might already have enabled controllers by writing to
+         * cgroup.subtree_control. */
+
+        const char *cgtarget;
+        if (exec_params_needs_control_subcgroup(params)) {
+                r = exec_params_get_cgroup_path(params, cgroup_context, params->cgroup_path, &subcgroup_path);
                 if (r < 0)
                         return log_unit_error_errno(unit, r, "Failed to acquire subcgroup path: %m");
                 if (r > 0) {
                         /* If there's a subcgroup, then let's create it here now (the main cgroup was already
                          * realized by the unit logic) */
 
-                        r = cg_create(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path);
+                        r = cg_create(subcgroup_path);
                         if (r < 0)
                                 return log_unit_error_errno(unit, r, "Failed to create subcgroup '%s': %m", subcgroup_path);
                 }
-        }
+
+                cgtarget = subcgroup_path;
+        } else
+                cgtarget = params->cgroup_path;
 
         /* In order to avoid copy-on-write traps and OOM-kills when pid1's memory.current is above the
          * child's memory.max, serialize all the state needed to start the unit, and pass it to the
@@ -494,8 +541,9 @@ int exec_spawn(
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to serialize parameters: %m");
 
-        if (fseeko(f, 0, SEEK_SET) < 0)
-                return log_unit_error_errno(unit, errno, "Failed to reseek on serialization stream: %m");
+        r = finish_serialization_file(f);
+        if (r < 0)
+                return log_unit_error_errno(unit, r, "Failed to finish serialization stream: %m");
 
         r = fd_cloexec(fileno(f), false);
         if (r < 0)
@@ -511,10 +559,6 @@ int exec_spawn(
         r = log_max_levels_to_string(context->log_level_max >= 0 ? context->log_level_max : log_get_max_level(), &max_log_levels);
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to convert max log levels to string: %m");
-
-        r = fd_get_path(unit->manager->executor_fd, &executor_path);
-        if (r < 0)
-                return log_unit_error_errno(unit, r, "Failed to get executor path from fd: %m");
 
         char serialization_fd_number[DECIMAL_STR_MAX(int)];
         xsprintf(serialization_fd_number, "%i", fileno(f));
@@ -535,29 +579,29 @@ int exec_spawn(
         /* The executor binary is pinned, to avoid compatibility problems during upgrades. */
         r = posix_spawn_wrapper(
                         FORMAT_PROC_FD_PATH(unit->manager->executor_fd),
-                        STRV_MAKE(executor_path,
+                        STRV_MAKE(unit->manager->executor_path,
                                   "--deserialize", serialization_fd_number,
                                   "--log-level", max_log_levels,
                                   "--log-target", log_target_to_string(manager_get_executor_log_target(unit->manager))),
                         environ,
-                        cg_unified() > 0 ? subcgroup_path : NULL,
+                        cgtarget,
                         &pidref);
 
         /* Drop the ambient set again, so no processes other than sd-executore spawned from the manager inherit it. */
         (void) capability_ambient_set_apply(0, /* also_inherit= */ false);
 
-        if (r == -EUCLEAN && subcgroup_path)
+        if (r == -EUCLEAN && cgtarget)
                 return log_unit_error_errno(unit, r,
                                             "Failed to spawn process into cgroup '%s', because the cgroup "
                                             "or one of its parents or siblings is in the threaded mode.",
-                                            subcgroup_path);
+                                            cgtarget);
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to spawn executor: %m");
         /* We add the new process to the cgroup both in the child (so that we can be sure that no user code is ever
          * executed outside of the cgroup) and in the parent (so that we can be sure that when we kill the cgroup the
          * process will be killed too). */
-        if (r == 0 && subcgroup_path)
-                (void) cg_attach(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path, pidref.pid);
+        if (r == 0 && cgtarget)
+                (void) cg_attach(cgtarget, pidref.pid);
         /* r > 0: Already in the right cgroup thanks to CLONE_INTO_CGROUP */
 
         log_unit_debug(unit, "Forked %s as " PID_FMT " (%s CLONE_INTO_CGROUP)",
@@ -587,6 +631,7 @@ void exec_context_init(ExecContext *c) {
                 .timeout_clean_usec = USEC_INFINITY,
                 .capability_bounding_set = CAP_MASK_UNSET,
                 .restrict_namespaces = NAMESPACE_FLAGS_INITIAL,
+                .delegate_namespaces = NAMESPACE_FLAGS_INITIAL,
                 .log_level_max = -1,
 #if HAVE_SECCOMP
                 .syscall_errno = SECCOMP_ERROR_NUMBER_KILL,
@@ -597,6 +642,7 @@ void exec_context_init(ExecContext *c) {
                 .mount_apivfs = -1,
                 .bind_log_sockets = -1,
                 .memory_ksm = -1,
+                .private_var_tmp = _PRIVATE_TMP_INVALID,
                 .set_login_environment = -1,
         };
 
@@ -660,7 +706,7 @@ void exec_context_done(ExecContext *c) {
         c->n_temporary_filesystems = 0;
         c->mount_images = mount_image_free_many(c->mount_images, &c->n_mount_images);
 
-        cpu_set_reset(&c->cpu_set);
+        cpu_set_done(&c->cpu_set);
         numa_policy_reset(&c->numa_policy);
 
         c->utmp_id = mfree(c->utmp_id);
@@ -668,7 +714,7 @@ void exec_context_done(ExecContext *c) {
         c->apparmor_profile = mfree(c->apparmor_profile);
         c->smack_process_label = mfree(c->smack_process_label);
 
-        c->restrict_filesystems = set_free_free(c->restrict_filesystems);
+        c->restrict_filesystems = set_free(c->restrict_filesystems);
 
         c->syscall_filter = hashmap_free(c->syscall_filter);
         c->syscall_archs = set_free(c->syscall_archs);
@@ -681,8 +727,8 @@ void exec_context_done(ExecContext *c) {
         c->log_level_max = -1;
 
         exec_context_free_log_extra_fields(c);
-        c->log_filter_allowed_patterns = set_free_free(c->log_filter_allowed_patterns);
-        c->log_filter_denied_patterns = set_free_free(c->log_filter_denied_patterns);
+        c->log_filter_allowed_patterns = set_free(c->log_filter_allowed_patterns);
+        c->log_filter_denied_patterns = set_free(c->log_filter_denied_patterns);
 
         c->log_ratelimit = (RateLimit) {};
 
@@ -701,6 +747,8 @@ void exec_context_done(ExecContext *c) {
         c->root_image_policy = image_policy_free(c->root_image_policy);
         c->mount_image_policy = image_policy_free(c->mount_image_policy);
         c->extension_image_policy = image_policy_free(c->extension_image_policy);
+
+        c->private_hostname = mfree(c->private_hostname);
 }
 
 int exec_context_destroy_runtime_directory(const ExecContext *c, const char *runtime_prefix) {
@@ -750,7 +798,7 @@ int exec_context_destroy_mount_ns_dir(Unit *u) {
         if (!p)
                 return -ENOMEM;
 
-        /* This is only filled transiently (see mount_in_namespace()), should be empty or even non-existent*/
+        /* This is only filled transiently (see mount_in_namespace()), should be empty or even non-existent. */
         if (rmdir(p) < 0 && errno != ENOENT)
                 log_unit_debug_errno(u, errno, "Unable to remove propagation dir '%s', ignoring: %m", p);
 
@@ -849,7 +897,7 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
         assert(ret);
 
         STRV_FOREACH(i, c->environment_files) {
-                _cleanup_globfree_ glob_t pglob = {};
+                _cleanup_strv_free_ char **paths = NULL;
                 bool ignore = false;
                 char *fn = *i;
 
@@ -865,7 +913,7 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                 }
 
                 /* Filename supports globbing, take all matching files */
-                r = safe_glob(fn, 0, &pglob);
+                r = safe_glob(fn, /* flags = */ 0, &paths);
                 if (r < 0) {
                         if (ignore)
                                 continue;
@@ -873,9 +921,9 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                 }
 
                 /* When we don't match anything, -ENOENT should be returned */
-                assert(pglob.gl_pathc > 0);
+                assert(!strv_isempty(paths));
 
-                FOREACH_ARRAY(path, pglob.gl_pathv, pglob.gl_pathc) {
+                STRV_FOREACH(path, paths) {
                         _cleanup_strv_free_ char **p = NULL;
 
                         r = load_env_file(NULL, *path, &p);
@@ -892,7 +940,7 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                                         .path = *path,
                                 };
 
-                                p = strv_env_clean_with_callback(p, invalid_env, &info);
+                                strv_env_clean_with_callback(p, invalid_env, &info);
                         }
 
                         if (!v)
@@ -928,7 +976,7 @@ static bool tty_may_match_dev_console(const char *tty) {
                 return true; /* if we could not resolve, assume it may */
 
         /* "tty0" means the active VC, so it may be the same sometimes */
-        return path_equal(resolved, tty) || (streq(resolved, "tty0") && tty_is_vc(tty));
+        return path_equal(skip_dev_prefix(resolved), tty) || (streq(skip_dev_prefix(resolved), "tty0") && tty_is_vc(tty));
 }
 
 static bool exec_context_may_touch_tty(const ExecContext *ec) {
@@ -937,15 +985,34 @@ static bool exec_context_may_touch_tty(const ExecContext *ec) {
         return ec->tty_reset ||
                 ec->tty_vhangup ||
                 ec->tty_vt_disallocate ||
-                is_terminal_input(ec->std_input) ||
-                is_terminal_output(ec->std_output) ||
-                is_terminal_output(ec->std_error);
+                exec_input_is_terminal(ec->std_input) ||
+                ec->std_output == EXEC_OUTPUT_TTY ||
+                ec->std_error == EXEC_OUTPUT_TTY;
 }
 
 bool exec_context_may_touch_console(const ExecContext *ec) {
 
         return exec_context_may_touch_tty(ec) &&
                tty_may_match_dev_console(exec_context_tty_path(ec));
+}
+
+bool exec_context_shall_ansi_seq_reset(const ExecContext *c) {
+        assert(c);
+
+        /* Determines whether ANSI sequences shall be used during any terminal initialisation:
+         *
+         * 1. If the reset logic is enabled at all, this is an immediate no.
+         *
+         * 2. If $TERM is set to anything other than "dumb", it's a yes.
+         */
+
+        if (!c->tty_reset)
+                return false;
+
+        /* FIXME:
+         * On invocation, we generate $TERM based on settings for StandardOutput= and friends and the kernel
+         * command line options, or propagate $TERM from the service manager. See setup_term_environment(). */
+        return !streq_ptr(strv_env_get(c->environment, "TERM"), "dumb");
 }
 
 static void strv_fprintf(FILE *f, char **l) {
@@ -1044,9 +1111,10 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 "%sRestrictRealtime: %s\n"
                 "%sRestrictSUIDSGID: %s\n"
                 "%sKeyringMode: %s\n"
-                "%sProtectHostname: %s\n"
+                "%sProtectHostname: %s%s%s\n"
                 "%sProtectProc: %s\n"
-                "%sProcSubset: %s\n",
+                "%sProcSubset: %s\n"
+                "%sPrivateBPF: %s\n",
                 prefix, c->umask,
                 prefix, empty_to_root(c->working_directory),
                 prefix, empty_to_root(c->root_directory),
@@ -1071,9 +1139,23 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 prefix, yes_no(c->restrict_realtime),
                 prefix, yes_no(c->restrict_suid_sgid),
                 prefix, exec_keyring_mode_to_string(c->keyring_mode),
-                prefix, yes_no(c->protect_hostname),
+                prefix, protect_hostname_to_string(c->protect_hostname), c->private_hostname ? ":" : "", strempty(c->private_hostname),
                 prefix, protect_proc_to_string(c->protect_proc),
-                prefix, proc_subset_to_string(c->proc_subset));
+                prefix, proc_subset_to_string(c->proc_subset),
+                prefix, private_bpf_to_string(c->private_bpf));
+
+        if (c->private_bpf == PRIVATE_BPF_YES) {
+                _cleanup_free_ char
+                        *commands = bpf_delegate_commands_to_string(c->bpf_delegate_commands),
+                        *maps = bpf_delegate_maps_to_string(c->bpf_delegate_maps),
+                        *programs = bpf_delegate_programs_to_string(c->bpf_delegate_programs),
+                        *attachments = bpf_delegate_attachments_to_string(c->bpf_delegate_attachments);
+
+                fprintf(f, "%sBPFDelegateCommands: %s\n", prefix, strna(commands));
+                fprintf(f, "%sBPFDelegateMaps: %s\n", prefix, strna(maps));
+                fprintf(f, "%sBPFDelegatePrograms: %s\n", prefix, strna(programs));
+                fprintf(f, "%sBPFDelegateAttachments: %s\n", prefix, strna(attachments));
+        }
 
         if (c->set_login_environment >= 0)
                 fprintf(f, "%sSetLoginEnvironment: %s\n", prefix, yes_no(c->set_login_environment > 0));
@@ -1167,7 +1249,7 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                                 prefix, rlimit_to_string(i), c->rlimit[i]->rlim_cur);
                 }
 
-        if (c->ioprio_set) {
+        if (c->ioprio_is_set) {
                 _cleanup_free_ char *class_str = NULL;
 
                 r = ioprio_class_to_string_alloc(ioprio_prio_class(c->ioprio), &class_str);
@@ -1529,7 +1611,7 @@ int exec_context_get_effective_ioprio(const ExecContext *c) {
 
         assert(c);
 
-        if (c->ioprio_set)
+        if (c->ioprio_is_set)
                 return c->ioprio;
 
         p = ioprio_get(IOPRIO_WHO_PROCESS, 0);
@@ -1584,7 +1666,7 @@ void exec_context_free_log_extra_fields(ExecContext *c) {
         c->n_log_extra_fields = 0;
 }
 
-void exec_context_revert_tty(ExecContext *c) {
+void exec_context_revert_tty(ExecContext *c, sd_id128_t invocation_id) {
         _cleanup_close_ int fd = -EBADF;
         const char *path;
         struct stat st;
@@ -1593,7 +1675,7 @@ void exec_context_revert_tty(ExecContext *c) {
         assert(c);
 
         /* First, reset the TTY (possibly kicking everybody else from the TTY) */
-        exec_context_tty_reset(c, /* parameters= */ NULL);
+        exec_context_tty_reset(c, /* parameters= */ NULL, invocation_id);
 
         /* And then undo what chown_terminal() did earlier. Note that we only do this if we have a path
          * configured. If the TTY was passed to us as file descriptor we assume the TTY is opened and managed
@@ -1641,7 +1723,7 @@ int exec_context_get_clean_directories(
         assert(ret);
 
         for (ExecDirectoryType t = 0; t < _EXEC_DIRECTORY_TYPE_MAX; t++) {
-                if (!FLAGS_SET(mask, 1U << t))
+                if (!BIT_SET(mask, t))
                         continue;
 
                 if (!prefix[t])
@@ -1924,19 +2006,57 @@ char** exec_context_get_address_families(const ExecContext *c) {
 }
 
 char** exec_context_get_restrict_filesystems(const ExecContext *c) {
-        _cleanup_strv_free_ char **l = NULL;
-
         assert(c);
 
 #if HAVE_LIBBPF
-        l = set_get_strv(c->restrict_filesystems);
+        char **l = set_get_strv(c->restrict_filesystems);
         if (!l)
                 return NULL;
 
-        strv_sort(l);
+        return strv_sort(l);
+#else
+        return strv_new(NULL);
 #endif
+}
 
-        return l ? TAKE_PTR(l) : strv_new(NULL);
+bool exec_context_restrict_namespaces_set(const ExecContext *c) {
+        assert(c);
+
+        return (c->restrict_namespaces & NAMESPACE_FLAGS_ALL) != NAMESPACE_FLAGS_ALL;
+}
+
+bool exec_context_restrict_filesystems_set(const ExecContext *c) {
+        assert(c);
+
+        return c->restrict_filesystems_allow_list ||
+          !set_isempty(c->restrict_filesystems);
+}
+
+bool exec_context_with_rootfs(const ExecContext *c) {
+        assert(c);
+
+        /* Checks if RootDirectory= or RootImage= are used */
+
+        return !empty_or_root(c->root_directory) || c->root_image;
+}
+
+int exec_context_has_vpicked_extensions(const ExecContext *context) {
+        int r;
+
+        assert(context);
+
+        FOREACH_ARRAY(mi, context->extension_images, context->n_extension_images) {
+                r = path_uses_vpick(mi->source);
+                if (r != 0)
+                        return r;
+        }
+        STRV_FOREACH(ed, context->extension_directories) {
+                r = path_uses_vpick(*ed);
+                if (r != 0)
+                        return r;
+        }
+
+        return 0;
 }
 
 void exec_status_start(ExecStatus *s, pid_t pid, const dual_timestamp *ts) {
@@ -2883,17 +3003,6 @@ static const char* const exec_preserve_mode_table[_EXEC_PRESERVE_MODE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(exec_preserve_mode, ExecPreserveMode, EXEC_PRESERVE_YES);
-
-/* This table maps ExecDirectoryType to the setting it is configured with in the unit */
-static const char* const exec_directory_type_table[_EXEC_DIRECTORY_TYPE_MAX] = {
-        [EXEC_DIRECTORY_RUNTIME]       = "RuntimeDirectory",
-        [EXEC_DIRECTORY_STATE]         = "StateDirectory",
-        [EXEC_DIRECTORY_CACHE]         = "CacheDirectory",
-        [EXEC_DIRECTORY_LOGS]          = "LogsDirectory",
-        [EXEC_DIRECTORY_CONFIGURATION] = "ConfigurationDirectory",
-};
-
-DEFINE_STRING_TABLE_LOOKUP(exec_directory_type, ExecDirectoryType);
 
 /* This table maps ExecDirectoryType to the symlink setting it is configured with in the unit */
 static const char* const exec_directory_type_symlink_table[_EXEC_DIRECTORY_TYPE_MAX] = {

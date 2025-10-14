@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "argv-util.h"
 #include "chattr-util.h"
 #include "iovec-util.h"
 #include "journal-authenticate.h"
@@ -11,6 +12,7 @@
 #include "log.h"
 #include "rm-rf.h"
 #include "tests.h"
+#include "time-util.h"
 
 static bool arg_keep = false;
 
@@ -20,7 +22,7 @@ static void mkdtemp_chdir_chattr(char *path) {
 
         /* Speed up things a bit on btrfs, ensuring that CoW is turned off for all files created in our
          * directory during the test run */
-        (void) chattr_path(path, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
+        (void) chattr_path(path, FS_NOCOW_FL, FS_NOCOW_FL);
 }
 
 static void test_non_empty_one(void) {

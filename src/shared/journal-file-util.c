@@ -3,20 +3,20 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "sd-event.h"
+
+#include "alloc-util.h"
 #include "chattr-util.h"
 #include "copy.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "format-util.h"
 #include "journal-authenticate.h"
 #include "journal-file-util.h"
 #include "journal-internal.h"
 #include "log.h"
-#include "path-util.h"
-#include "random-util.h"
+#include "log-ratelimit.h"
 #include "set.h"
-#include "stat-util.h"
-#include "sync-util.h"
+#include "string-util.h"
 
 #define PAYLOAD_BUFFER_SIZE (16U * 1024U)
 #define MINIMUM_HOLE_SIZE (1U * 1024U * 1024U / 2U)
@@ -206,7 +206,7 @@ static void journal_file_set_offline_internal(JournalFile *f) {
                          * copy all data to a new file without the NOCOW flag set. */
 
                         if (f->archive) {
-                                r = chattr_fd(f->fd, 0, FS_NOCOW_FL, NULL);
+                                r = chattr_fd(f->fd, 0, FS_NOCOW_FL);
                                 if (r >= 0)
                                         continue;
 
@@ -469,7 +469,7 @@ int journal_file_rotate(
         if (r < 0)
                 return r;
 
-        set_clear_with_destructor(deferred_closes, journal_file_offline_close);
+        set_clear(deferred_closes);
 
         r = journal_file_open(
                         /* fd= */ -EBADF,
@@ -525,7 +525,7 @@ int journal_file_open_reliably(
                     -EIDRM))            /* File has been deleted */
                 return r;
 
-        if ((open_flags & O_ACCMODE) == O_RDONLY)
+        if ((open_flags & O_ACCMODE_STRICT) == O_RDONLY)
                 return r;
 
         if (!(open_flags & O_CREAT))
@@ -540,7 +540,7 @@ int journal_file_open_reliably(
         /* The file is corrupted. Try opening it read-only as the template before rotating to inherit its
          * sequence number and ID. */
         r = journal_file_open(-EBADF, fname,
-                              (open_flags & ~(O_ACCMODE|O_CREAT|O_EXCL)) | O_RDONLY,
+                              (open_flags & ~(O_ACCMODE_STRICT|O_CREAT|O_EXCL)) | O_RDONLY,
                               file_flags, 0, compress_threshold_bytes, NULL,
                               mmap_cache, /* template = */ NULL, &old_file);
         if (r < 0)
@@ -553,3 +553,8 @@ int journal_file_open_reliably(
         return journal_file_open(-EBADF, fname, open_flags, file_flags, mode, compress_threshold_bytes, metrics,
                                  mmap_cache, /* template = */ old_file, ret);
 }
+
+DEFINE_HASH_OPS_WITH_VALUE_DESTRUCTOR(
+                journal_file_hash_ops_offline_close,
+                void, trivial_hash_func, trivial_compare_func,
+                JournalFile, journal_file_offline_close);

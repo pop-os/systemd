@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <sys/epoll.h>
-#if HAVE_PIDFD_OPEN
-#include <sys/pidfd.h>
-#endif
+#include <linux/magic.h>
+#include <malloc.h>
+#include <stdlib.h>
 #include <sys/timerfd.h>
 #include <sys/wait.h>
+#include <threads.h>
+#include <unistd.h>
 
 #include "sd-daemon.h"
 #include "sd-event.h"
@@ -13,42 +14,40 @@
 #include "sd-messages.h"
 
 #include "alloc-util.h"
-#include "env-util.h"
+#include "errno-util.h"
 #include "event-source.h"
 #include "fd-util.h"
-#include "fs-util.h"
+#include "format-util.h"
 #include "glyph-util.h"
 #include "hashmap.h"
 #include "hexdecoct.h"
 #include "list.h"
+#include "log.h"
 #include "logarithm.h"
-#include "macro.h"
-#include "mallinfo-util.h"
 #include "memory-util.h"
-#include "missing_magic.h"
-#include "missing_syscall.h"
-#include "missing_threads.h"
 #include "origin-id.h"
 #include "path-util.h"
+#include "pidfd-util.h"
 #include "prioq.h"
 #include "process-util.h"
 #include "psi-util.h"
 #include "set.h"
 #include "signal-util.h"
+#include "siphash24.h"
 #include "socket-util.h"
 #include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "strv.h"
 #include "strxcpyx.h"
 #include "time-util.h"
 
 #define DEFAULT_ACCURACY_USEC (250 * USEC_PER_MSEC)
 
-static bool EVENT_SOURCE_WATCH_PIDFD(sd_event_source *s) {
+static bool EVENT_SOURCE_WATCH_PIDFD(const sd_event_source *s) {
         /* Returns true if this is a PID event source and can be implemented by watching EPOLLIN */
         return s &&
                 s->type == SOURCE_CHILD &&
-                s->child.pidfd >= 0 &&
                 s->child.options == WEXITED;
 }
 
@@ -140,10 +139,10 @@ struct sd_event {
         Hashmap *inotify_data; /* indexed by priority */
 
         /* A list of inode structures that still have an fd open, that we need to close before the next loop iteration */
-        LIST_HEAD(struct inode_data, inode_data_to_close_list);
+        LIST_HEAD(InodeData, inode_data_to_close_list);
 
         /* A list of inotify objects that already have events buffered which aren't processed yet */
-        LIST_HEAD(struct inotify_data, buffered_inotify_data_list);
+        LIST_HEAD(InotifyData, buffered_inotify_data_list);
 
         /* A list of memory pressure event sources that still need their subscription string written */
         LIST_HEAD(sd_event_source, memory_pressure_write_list);
@@ -183,7 +182,7 @@ DEFINE_PRIVATE_ORIGIN_ID_HELPERS(sd_event, event);
 static thread_local sd_event *default_event = NULL;
 
 static void source_disconnect(sd_event_source *s);
-static void event_gc_inode_data(sd_event *e, struct inode_data *d);
+static void event_gc_inode_data(sd_event *e, InodeData *d);
 
 static sd_event* event_resolve(sd_event *e) {
         return e == SD_EVENT_DEFAULT ? default_event : e;
@@ -433,7 +432,7 @@ _public_ int sd_event_new(sd_event** ret) {
 
         if (secure_getenv("SD_EVENT_PROFILE_DELAYS")) {
                 log_debug("Event loop profiling enabled. Logarithmic histogram of event loop iterations in the range 2^0 %s 2^63 us will be logged every 5s.",
-                          special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                          glyph(GLYPH_ELLIPSIS));
                 e->profile_delays = true;
         }
 
@@ -989,7 +988,7 @@ static void source_disconnect(sd_event_source *s) {
                                 s->event->n_online_child_sources--;
                         }
 
-                        (void) hashmap_remove(s->event->child_sources, PID_TO_PTR(s->child.pid));
+                        assert_se(hashmap_remove(s->event->child_sources, PID_TO_PTR(s->child.pid)));
                 }
 
                 if (EVENT_SOURCE_WATCH_PIDFD(s))
@@ -1012,11 +1011,11 @@ static void source_disconnect(sd_event_source *s) {
                 break;
 
         case SOURCE_INOTIFY: {
-                struct inode_data *inode_data;
+                InodeData *inode_data;
 
                 inode_data = s->inotify.inode_data;
                 if (inode_data) {
-                        struct inotify_data *inotify_data;
+                        InotifyData *inotify_data;
                         assert_se(inotify_data = inode_data->inotify_data);
 
                         /* Detach this event source from the inode object */
@@ -1076,6 +1075,8 @@ static void source_disconnect(sd_event_source *s) {
 }
 
 static sd_event_source* source_free(sd_event_source *s) {
+        int r;
+
         assert(s);
 
         source_disconnect(s);
@@ -1087,33 +1088,21 @@ static sd_event_source* source_free(sd_event_source *s) {
                 /* Eventually the kernel will do this automatically for us, but for now let's emulate this (unreliably) in userspace. */
 
                 if (s->child.process_owned) {
+                        assert(s->child.pid > 0);
+                        assert(s->child.pidfd >= 0);
 
                         if (!s->child.exited) {
-                                bool sent = false;
-
-                                if (s->child.pidfd >= 0) {
-                                        if (pidfd_send_signal(s->child.pidfd, SIGKILL, NULL, 0) < 0) {
-                                                if (errno == ESRCH) /* Already dead */
-                                                        sent = true;
-                                                else if (!ERRNO_IS_NOT_SUPPORTED(errno))
-                                                        log_debug_errno(errno, "Failed to kill process " PID_FMT " via pidfd_send_signal(), re-trying via kill(): %m",
-                                                                        s->child.pid);
-                                        } else
-                                                sent = true;
-                                }
-
-                                if (!sent)
-                                        if (kill(s->child.pid, SIGKILL) < 0)
-                                                if (errno != ESRCH) /* Already dead */
-                                                        log_debug_errno(errno, "Failed to kill process " PID_FMT " via kill(), ignoring: %m",
-                                                                        s->child.pid);
+                                r = RET_NERRNO(pidfd_send_signal(s->child.pidfd, SIGKILL, NULL, 0));
+                                if (r < 0 && r != -ESRCH)
+                                        log_debug_errno(r, "Failed to kill process " PID_FMT ", ignoring: %m",
+                                                        s->child.pid);
                         }
 
                         if (!s->child.waited) {
                                 siginfo_t si = {};
 
                                 /* Reap the child if we can */
-                                (void) waitid(P_PID, s->child.pid, &si, WEXITED);
+                                (void) waitid(P_PIDFD, s->child.pidfd, &si, WEXITED);
                         }
                 }
 
@@ -1580,11 +1569,6 @@ static int child_exit_callback(sd_event_source *s, const siginfo_t *si, void *us
         return sd_event_exit(sd_event_source_get_event(s), PTR_TO_INT(userdata));
 }
 
-static bool shall_use_pidfd(void) {
-        /* Mostly relevant for debugging, i.e. this is used in test-event.c to test the event loop once with and once without pidfd */
-        return secure_getenv_bool("SYSTEMD_PIDFD") != 0;
-}
-
 _public_ int sd_event_add_child(
                 sd_event *e,
                 sd_event_source **ret,
@@ -1632,34 +1616,29 @@ _public_ int sd_event_add_child(
         if (!s)
                 return -ENOMEM;
 
+        /* We always take a pidfd here if we can, even if we wait for anything else than WEXITED, so that we
+         * pin the PID, and make regular waitid() handling race-free. */
+
+        s->child.pidfd = pidfd_open(pid, 0);
+        if (s->child.pidfd < 0)
+                return -errno;
+
+        s->child.pidfd_owned = true; /* If we allocate the pidfd we own it by default */
+
         s->wakeup = WAKEUP_EVENT_SOURCE;
         s->child.options = options;
         s->child.callback = callback;
         s->userdata = userdata;
         s->enabled = SD_EVENT_ONESHOT;
 
-        /* We always take a pidfd here if we can, even if we wait for anything else than WEXITED, so that we
-         * pin the PID, and make regular waitid() handling race-free. */
-
-        if (shall_use_pidfd()) {
-                s->child.pidfd = pidfd_open(pid, 0);
-                if (s->child.pidfd < 0) {
-                        /* Propagate errors unless the syscall is not supported or blocked */
-                        if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno))
-                                return -errno;
-                } else
-                        s->child.pidfd_owned = true; /* If we allocate the pidfd we own it by default */
-        } else
-                s->child.pidfd = -EBADF;
-
         if (EVENT_SOURCE_WATCH_PIDFD(s)) {
-                /* We have a pidfd and we only want to watch for exit */
+                /* We only want to watch for exit */
                 r = source_child_pidfd_register(s, s->enabled);
                 if (r < 0)
                         return r;
 
         } else {
-                /* We have no pidfd or we shall wait for some other event than WEXITED */
+                /* We shall wait for some other event than WEXITED */
                 r = event_make_signal_data(e, SIGCHLD, NULL);
                 if (r < 0)
                         return r;
@@ -1729,16 +1708,11 @@ _public_ int sd_event_add_child_pidfd(
 
         s->wakeup = WAKEUP_EVENT_SOURCE;
         s->child.pidfd = pidfd;
-        s->child.pid = pid;
         s->child.options = options;
         s->child.callback = callback;
         s->child.pidfd_owned = false; /* If we got the pidfd passed in we don't own it by default (similar to the IO fd case) */
         s->userdata = userdata;
         s->enabled = SD_EVENT_ONESHOT;
-
-        r = hashmap_put(e->child_sources, PID_TO_PTR(pid), s);
-        if (r < 0)
-                return r;
 
         if (EVENT_SOURCE_WATCH_PIDFD(s)) {
                 /* We only want to watch for WEXITED */
@@ -1754,6 +1728,11 @@ _public_ int sd_event_add_child_pidfd(
                 e->need_process_child = true;
         }
 
+        r = hashmap_put(e->child_sources, PID_TO_PTR(pid), s);
+        if (r < 0)
+                return r;
+
+        s->child.pid = pid;
         e->n_online_child_sources++;
 
         if (ret)
@@ -1889,9 +1868,7 @@ _public_ int sd_event_trim_memory(void) {
 
         log_debug("Memory pressure event, trimming malloc() memory.");
 
-#if HAVE_GENERIC_MALLINFO
-        generic_mallinfo before_mallinfo = generic_mallinfo_get();
-#endif
+        struct mallinfo2 before_mallinfo = mallinfo2();
 
         usec_t before_timestamp = now(CLOCK_MONOTONIC);
         hashmap_trim_pools();
@@ -1905,24 +1882,16 @@ _public_ int sd_event_trim_memory(void) {
 
         usec_t period = after_timestamp - before_timestamp;
 
-#if HAVE_GENERIC_MALLINFO
-        generic_mallinfo after_mallinfo = generic_mallinfo_get();
-        size_t l = LESS_BY((size_t) before_mallinfo.hblkhd, (size_t) after_mallinfo.hblkhd) +
-                LESS_BY((size_t) before_mallinfo.arena, (size_t) after_mallinfo.arena);
+        struct mallinfo2 after_mallinfo = mallinfo2();
+        size_t l = LESS_BY(before_mallinfo.hblkhd, after_mallinfo.hblkhd) +
+                LESS_BY(before_mallinfo.arena, after_mallinfo.arena);
         log_struct(LOG_DEBUG,
                    LOG_MESSAGE("Memory trimming took %s, returned %s to OS.",
                                FORMAT_TIMESPAN(period, 0),
                                FORMAT_BYTES(l)),
-                   "MESSAGE_ID=" SD_MESSAGE_MEMORY_TRIM_STR,
-                   "TRIMMED_BYTES=%zu", l,
-                   "TRIMMED_USEC=" USEC_FMT, period);
-#else
-        log_struct(LOG_DEBUG,
-                   LOG_MESSAGE("Memory trimming took %s.",
-                               FORMAT_TIMESPAN(period, 0)),
-                   "MESSAGE_ID=" SD_MESSAGE_MEMORY_TRIM_STR,
-                   "TRIMMED_USEC=" USEC_FMT, period);
-#endif
+                   LOG_MESSAGE_ID(SD_MESSAGE_MEMORY_TRIM_STR),
+                   LOG_ITEM("TRIMMED_BYTES=%zu", l),
+                   LOG_ITEM("TRIMMED_USEC=" USEC_FMT, period));
 
         return 0;
 }
@@ -2134,7 +2103,7 @@ _public_ int sd_event_add_memory_pressure(
         return 0;
 }
 
-static void event_free_inotify_data(sd_event *e, struct inotify_data *d) {
+static void event_free_inotify_data(sd_event *e, InotifyData *d) {
         assert(e);
 
         if (!d)
@@ -2161,13 +2130,9 @@ static void event_free_inotify_data(sd_event *e, struct inotify_data *d) {
         free(d);
 }
 
-static int event_make_inotify_data(
-                sd_event *e,
-                int64_t priority,
-                struct inotify_data **ret) {
-
+static int event_make_inotify_data(sd_event *e, int64_t priority, InotifyData **ret) {
         _cleanup_close_ int fd = -EBADF;
-        struct inotify_data *d;
+        InotifyData *d;
         int r;
 
         assert(e);
@@ -2185,11 +2150,11 @@ static int event_make_inotify_data(
 
         fd = fd_move_above_stdio(fd);
 
-        d = new(struct inotify_data, 1);
+        d = new(InotifyData, 1);
         if (!d)
                 return -ENOMEM;
 
-        *d = (struct inotify_data) {
+        *d = (InotifyData) {
                 .wakeup = WAKEUP_INOTIFY_DATA,
                 .fd = TAKE_FD(fd),
                 .priority = priority,
@@ -2222,7 +2187,7 @@ static int event_make_inotify_data(
         return 1;
 }
 
-static int inode_data_compare(const struct inode_data *x, const struct inode_data *y) {
+static int inode_data_compare(const InodeData *x, const InodeData *y) {
         int r;
 
         assert(x);
@@ -2235,19 +2200,16 @@ static int inode_data_compare(const struct inode_data *x, const struct inode_dat
         return CMP(x->ino, y->ino);
 }
 
-static void inode_data_hash_func(const struct inode_data *d, struct siphash *state) {
+static void inode_data_hash_func(const InodeData *d, struct siphash *state) {
         assert(d);
 
         siphash24_compress_typesafe(d->dev, state);
         siphash24_compress_typesafe(d->ino, state);
 }
 
-DEFINE_PRIVATE_HASH_OPS(inode_data_hash_ops, struct inode_data, inode_data_hash_func, inode_data_compare);
+DEFINE_PRIVATE_HASH_OPS(inode_data_hash_ops, InodeData, inode_data_hash_func, inode_data_compare);
 
-static void event_free_inode_data(
-                sd_event *e,
-                struct inode_data *d) {
-
+static void event_free_inode_data(sd_event *e, InodeData *d) {
         assert(e);
 
         if (!d)
@@ -2283,16 +2245,14 @@ static void event_free_inode_data(
         free(d);
 }
 
-static void event_gc_inotify_data(
-                sd_event *e,
-                struct inotify_data *d) {
-
+static void event_gc_inotify_data(sd_event *e, InotifyData *d) {
         assert(e);
 
-        /* GCs the inotify data object if we don't need it anymore. That's the case if we don't want to watch
-         * any inode with it anymore, which in turn happens if no event source of this priority is interested
-         * in any inode any longer. That said, we maintain an extra busy counter: if non-zero we'll delay GC
-         * (under the expectation that the GC is called again once the counter is decremented). */
+        /* Collects the InotifyData object if we don't need it anymore. That's the case if we don't want to
+         * watch any inode with it anymore, which in turn happens if no event source of this priority is
+         * interested in any inode any longer. That said, we maintain an extra busy counter: if non-zero
+         * we'll delay GC (under the expectation that the GC is called again once the counter is
+         * decremented). */
 
         if (!d)
                 return;
@@ -2306,11 +2266,8 @@ static void event_gc_inotify_data(
         event_free_inotify_data(e, d);
 }
 
-static void event_gc_inode_data(
-                sd_event *e,
-                struct inode_data *d) {
-
-        struct inotify_data *inotify_data;
+static void event_gc_inode_data(sd_event *e, InodeData *d) {
+        InotifyData *inotify_data;
 
         assert(e);
 
@@ -2328,18 +2285,18 @@ static void event_gc_inode_data(
 
 static int event_make_inode_data(
                 sd_event *e,
-                struct inotify_data *inotify_data,
+                InotifyData *inotify_data,
                 dev_t dev,
                 ino_t ino,
-                struct inode_data **ret) {
+                InodeData **ret) {
 
-        struct inode_data *d, key;
+        InodeData *d, key;
         int r;
 
         assert(e);
         assert(inotify_data);
 
-        key = (struct inode_data) {
+        key = (InodeData) {
                 .ino = ino,
                 .dev = dev,
         };
@@ -2356,11 +2313,11 @@ static int event_make_inode_data(
         if (r < 0)
                 return r;
 
-        d = new(struct inode_data, 1);
+        d = new(InodeData, 1);
         if (!d)
                 return -ENOMEM;
 
-        *d = (struct inode_data) {
+        *d = (InodeData) {
                 .dev = dev,
                 .ino = ino,
                 .wd = -1,
@@ -2380,7 +2337,7 @@ static int event_make_inode_data(
         return 1;
 }
 
-static uint32_t inode_data_determine_mask(struct inode_data *d) {
+static uint32_t inode_data_determine_mask(InodeData *d) {
         bool excl_unlink = true;
         uint32_t combined = 0;
 
@@ -2405,7 +2362,7 @@ static uint32_t inode_data_determine_mask(struct inode_data *d) {
         return (combined & ~(IN_ONESHOT|IN_DONT_FOLLOW|IN_ONLYDIR|IN_EXCL_UNLINK)) | (excl_unlink ? IN_EXCL_UNLINK : 0);
 }
 
-static int inode_data_realize_watch(sd_event *e, struct inode_data *d) {
+static int inode_data_realize_watch(sd_event *e, InodeData *d) {
         uint32_t combined_mask;
         int wd, r;
 
@@ -2462,8 +2419,8 @@ static int event_add_inotify_fd_internal(
 
         _cleanup_close_ int donated_fd = donate ? fd : -EBADF;
         _cleanup_(source_freep) sd_event_source *s = NULL;
-        struct inotify_data *inotify_data = NULL;
-        struct inode_data *inode_data = NULL;
+        InotifyData *inotify_data = NULL;
+        InodeData *inode_data = NULL;
         struct stat st;
         int r;
 
@@ -2747,8 +2704,10 @@ _public_ int sd_event_source_get_io_revents(sd_event_source *s, uint32_t *ret) {
         assert_return(s, -EINVAL);
         assert_return(ret, -EINVAL);
         assert_return(s->type == SOURCE_IO, -EDOM);
-        assert_return(s->pending, -ENODATA);
         assert_return(!event_origin_changed(s->event), -ECHILD);
+
+        if (!s->pending)
+                return -ENODATA;
 
         *ret = s->io.revents;
         return 0;
@@ -2773,8 +2732,8 @@ _public_ int sd_event_source_get_priority(sd_event_source *s, int64_t *ret) {
 
 _public_ int sd_event_source_set_priority(sd_event_source *s, int64_t priority) {
         bool rm_inotify = false, rm_inode = false;
-        struct inotify_data *new_inotify_data = NULL;
-        struct inode_data *new_inode_data = NULL;
+        InotifyData *new_inotify_data = NULL;
+        InodeData *new_inode_data = NULL;
         int r;
 
         assert_return(s, -EINVAL);
@@ -2785,7 +2744,7 @@ _public_ int sd_event_source_set_priority(sd_event_source *s, int64_t priority) 
                 return 0;
 
         if (s->type == SOURCE_INOTIFY) {
-                struct inode_data *old_inode_data;
+                InodeData *old_inode_data;
 
                 assert(s->inotify.inode_data);
                 old_inode_data = s->inotify.inode_data;
@@ -3016,13 +2975,13 @@ static int event_source_online(
 
         case SOURCE_CHILD:
                 if (EVENT_SOURCE_WATCH_PIDFD(s)) {
-                        /* yes, we have pidfd */
+                        /* yes, we can rely on pidfd */
 
                         r = source_child_pidfd_register(s, enabled);
                         if (r < 0)
                                 return r;
                 } else {
-                        /* no pidfd, or something other to watch for than WEXITED */
+                        /* something other to watch for than WEXITED */
 
                         r = event_make_signal_data(s->event, SIGCHLD, NULL);
                         if (r < 0) {
@@ -3215,9 +3174,6 @@ _public_ int sd_event_source_get_child_pidfd(sd_event_source *s) {
         assert_return(s->type == SOURCE_CHILD, -EDOM);
         assert_return(!event_origin_changed(s->event), -ECHILD);
 
-        if (s->child.pidfd < 0)
-                return -EOPNOTSUPP;
-
         return s->child.pidfd;
 }
 
@@ -3226,53 +3182,26 @@ _public_ int sd_event_source_send_child_signal(sd_event_source *s, int sig, cons
         assert_return(s->type == SOURCE_CHILD, -EDOM);
         assert_return(!event_origin_changed(s->event), -ECHILD);
         assert_return(SIGNAL_VALID(sig), -EINVAL);
+        assert(s->child.pidfd >= 0);
 
-        /* If we already have seen indication the process exited refuse sending a signal early. This way we
-         * can be sure we don't accidentally kill the wrong process on PID reuse when pidfds are not
-         * available. */
+        /* If we already have seen indication the process exited refuse sending a signal early. */
         if (s->child.exited)
                 return -ESRCH;
+        assert(!s->child.waited);
 
-        if (s->child.pidfd >= 0) {
-                siginfo_t copy;
+        /* pidfd_send_signal() changes the siginfo_t argument. This is weird, let's hence copy the structure here. */
+        siginfo_t copy;
+        if (si)
+                copy = *si;
 
-                /* pidfd_send_signal() changes the siginfo_t argument. This is weird, let's hence copy the
-                 * structure here */
-                if (si)
-                        copy = *si;
-
-                if (pidfd_send_signal(s->child.pidfd, sig, si ? &copy : NULL, 0) < 0) {
-                        /* Let's propagate the error only if the system call is not implemented or prohibited */
-                        if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno))
-                                return -errno;
-                } else
-                        return 0;
-        }
-
-        /* Flags are only supported for pidfd_send_signal(), not for rt_sigqueueinfo(), hence let's refuse
-         * this here. */
-        if (flags != 0)
-                return -EOPNOTSUPP;
-
-        if (si) {
-                /* We use rt_sigqueueinfo() only if siginfo_t is specified. */
-                siginfo_t copy = *si;
-
-                if (rt_sigqueueinfo(s->child.pid, sig, &copy) < 0)
-                        return -errno;
-        } else if (kill(s->child.pid, sig) < 0)
-                return -errno;
-
-        return 0;
+        return RET_NERRNO(pidfd_send_signal(s->child.pidfd, sig, si ? &copy : NULL, flags));
 }
 
 _public_ int sd_event_source_get_child_pidfd_own(sd_event_source *s) {
         assert_return(s, -EINVAL);
         assert_return(s->type == SOURCE_CHILD, -EDOM);
         assert_return(!event_origin_changed(s->event), -ECHILD);
-
-        if (s->child.pidfd < 0)
-                return -EOPNOTSUPP;
+        assert(s->child.pidfd >= 0);
 
         return s->child.pidfd_owned;
 }
@@ -3281,9 +3210,7 @@ _public_ int sd_event_source_set_child_pidfd_own(sd_event_source *s, int own) {
         assert_return(s, -EINVAL);
         assert_return(s->type == SOURCE_CHILD, -EDOM);
         assert_return(!event_origin_changed(s->event), -ECHILD);
-
-        if (s->child.pidfd < 0)
-                return -EOPNOTSUPP;
+        assert(s->child.pidfd >= 0);
 
         s->child.pidfd_owned = own;
         return 0;
@@ -3704,7 +3631,7 @@ static int process_timer(
                          * again. */
                         assert(s->ratelimited);
 
-                        r = event_source_leave_ratelimit(s, /* run_callback */ true);
+                        r = event_source_leave_ratelimit(s, /* run_callback = */ true);
                         if (r < 0)
                                 return r;
                         else if (r == 1)
@@ -3742,9 +3669,9 @@ static int process_child(sd_event *e, int64_t threshold, int64_t *ret_min_priori
 
         e->need_process_child = false;
 
-        /* So, this is ugly. We iteratively invoke waitid() with P_PID + WNOHANG for each PID we wait
-         * for, instead of using P_ALL. This is because we only want to get child information of very
-         * specific child processes, and not all of them. We might not have processed the SIGCHLD event
+        /* So, this is ugly. We iteratively invoke waitid() + WNOHANG with each child process we shall wait for,
+         * instead of using P_ALL. This is because we only want to get child information of very specific
+         * child processes, and not all of them. We might not have processed the SIGCHLD event
          * of a previous invocation and we don't want to maintain a unbounded *per-child* event queue,
          * hence we really don't want anything flushed out of the kernel's queue that we don't care
          * about. Since this is O(n) this means that if you have a lot of processes you probably want
@@ -3755,6 +3682,7 @@ static int process_child(sd_event *e, int64_t threshold, int64_t *ret_min_priori
 
         HASHMAP_FOREACH(s, e->child_sources) {
                 assert(s->type == SOURCE_CHILD);
+                assert(s->child.pidfd >= 0);
 
                 if (s->priority > threshold)
                         continue;
@@ -3774,23 +3702,21 @@ static int process_child(sd_event *e, int64_t threshold, int64_t *ret_min_priori
                         continue;
 
                 zero(s->child.siginfo);
-                if (waitid(P_PID, s->child.pid, &s->child.siginfo,
+                if (waitid(P_PIDFD, s->child.pidfd, &s->child.siginfo,
                            WNOHANG | (s->child.options & WEXITED ? WNOWAIT : 0) | s->child.options) < 0)
                         return negative_errno();
 
                 if (s->child.siginfo.si_pid != 0) {
-                        bool zombie = IN_SET(s->child.siginfo.si_code, CLD_EXITED, CLD_KILLED, CLD_DUMPED);
+                        bool zombie = SIGINFO_CODE_IS_DEAD(s->child.siginfo.si_code);
 
                         if (zombie)
                                 s->child.exited = true;
-
-                        if (!zombie && (s->child.options & WEXITED)) {
-                                /* If the child isn't dead then let's immediately remove the state
-                                 * change from the queue, since there's no benefit in leaving it
-                                 * queued. */
+                        else if (s->child.options & WEXITED) {
+                                /* If the child isn't dead then let's immediately remove the state change
+                                 * from the queue, since there's no benefit in leaving it queued. */
 
                                 assert(s->child.options & (WSTOPPED|WCONTINUED));
-                                (void) waitid(P_PID, s->child.pid, &s->child.siginfo, WNOHANG|(s->child.options & (WSTOPPED|WCONTINUED)));
+                                (void) waitid(P_PIDFD, s->child.pidfd, &s->child.siginfo, WNOHANG|(s->child.options & (WSTOPPED|WCONTINUED)));
                         }
 
                         r = source_set_pending(s, true);
@@ -3811,6 +3737,7 @@ static int process_pidfd(sd_event *e, sd_event_source *s, uint32_t revents) {
         assert(e);
         assert(s);
         assert(s->type == SOURCE_CHILD);
+        assert(s->child.pidfd >= 0);
 
         if (s->pending)
                 return 0;
@@ -3821,14 +3748,19 @@ static int process_pidfd(sd_event *e, sd_event_source *s, uint32_t revents) {
         if (!EVENT_SOURCE_WATCH_PIDFD(s))
                 return 0;
 
+        /* Note that pidfd would also generate EPOLLHUP when the process gets reaped. But at this point we
+         * only permit EPOLLIN, under the assumption that upon EPOLLHUP the child source should already
+         * be set to pending, and we would have returned early above. */
+        assert(!s->child.exited);
+
         zero(s->child.siginfo);
-        if (waitid(P_PID, s->child.pid, &s->child.siginfo, WNOHANG | WNOWAIT | s->child.options) < 0)
+        if (waitid(P_PIDFD, s->child.pidfd, &s->child.siginfo, WNOHANG | WNOWAIT | s->child.options) < 0)
                 return -errno;
 
         if (s->child.siginfo.si_pid == 0)
                 return 0;
 
-        if (IN_SET(s->child.siginfo.si_code, CLD_EXITED, CLD_KILLED, CLD_DUMPED))
+        if (SIGINFO_CODE_IS_DEAD(s->child.siginfo.si_code))
                 s->child.exited = true;
 
         return source_set_pending(s, true);
@@ -3896,7 +3828,7 @@ static int process_signal(sd_event *e, struct signal_data *d, uint32_t events, i
         }
 }
 
-static int event_inotify_data_read(sd_event *e, struct inotify_data *d, uint32_t revents, int64_t threshold) {
+static int event_inotify_data_read(sd_event *e, InotifyData *d, uint32_t revents, int64_t threshold) {
         ssize_t n;
 
         assert(e);
@@ -3930,7 +3862,7 @@ static int event_inotify_data_read(sd_event *e, struct inotify_data *d, uint32_t
         return 1;
 }
 
-static void event_inotify_data_drop(sd_event *e, struct inotify_data *d, size_t sz) {
+static void event_inotify_data_drop(sd_event *e, InotifyData *d, size_t sz) {
         assert(e);
         assert(d);
         assert(sz <= d->buffer_filled);
@@ -3946,7 +3878,7 @@ static void event_inotify_data_drop(sd_event *e, struct inotify_data *d, size_t 
                 LIST_REMOVE(buffered, e->buffered_inotify_data_list, d);
 }
 
-static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
+static int event_inotify_data_process(sd_event *e, InotifyData *d) {
         int r;
 
         assert(e);
@@ -3968,7 +3900,7 @@ static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
                         return -EIO;
 
                 if (d->buffer.ev.mask & IN_Q_OVERFLOW) {
-                        struct inode_data *inode_data;
+                        InodeData *inode_data;
 
                         /* The queue overran, let's pass this event to all event sources connected to this inotify
                          * object */
@@ -3984,7 +3916,7 @@ static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
                                                 return r;
                                 }
                 } else {
-                        struct inode_data *inode_data;
+                        InodeData *inode_data;
 
                         /* Find the inode object for this watch descriptor. If IN_IGNORED is set we also remove it from
                          * our watch descriptor table. */
@@ -4244,15 +4176,13 @@ static int source_dispatch(sd_event_source *s) {
                 break;
 
         case SOURCE_CHILD: {
-                bool zombie;
-
-                zombie = IN_SET(s->child.siginfo.si_code, CLD_EXITED, CLD_KILLED, CLD_DUMPED);
+                bool zombie = SIGINFO_CODE_IS_DEAD(s->child.siginfo.si_code);
 
                 r = s->child.callback(s, &s->child.siginfo, s->userdata);
 
                 /* Now, reap the PID for good. */
                 if (zombie) {
-                        (void) waitid(P_PID, s->child.pid, &s->child.siginfo, WNOHANG|WEXITED);
+                        (void) waitid(P_PIDFD, s->child.pidfd, &s->child.siginfo, WNOHANG|WEXITED);
                         s->child.waited = true;
                 }
 
@@ -4273,7 +4203,7 @@ static int source_dispatch(sd_event_source *s) {
 
         case SOURCE_INOTIFY: {
                 struct sd_event *e = s->event;
-                struct inotify_data *d;
+                InotifyData *d;
                 size_t sz;
 
                 assert(s->inotify.inode_data);
@@ -4448,7 +4378,7 @@ static int process_watchdog(sd_event *e) {
 }
 
 static void event_close_inode_data_fds(sd_event *e) {
-        struct inode_data *d;
+        InodeData *d;
 
         assert(e);
 
@@ -5186,7 +5116,7 @@ _public_ int sd_event_source_set_ratelimit(sd_event_source *s, uint64_t interval
 
         /* When ratelimiting is configured we'll always reset the rate limit state first and start fresh,
          * non-ratelimited. */
-        r = event_source_leave_ratelimit(s, /* run_callback */ false);
+        r = event_source_leave_ratelimit(s, /* run_callback = */ false);
         if (r < 0)
                 return r;
 
@@ -5249,7 +5179,7 @@ _public_ int sd_event_source_leave_ratelimit(sd_event_source *s) {
         if (!s->ratelimited)
                 return 0;
 
-        r = event_source_leave_ratelimit(s, /* run_callback */ false);
+        r = event_source_leave_ratelimit(s, /* run_callback = */ false);
         if (r < 0)
                 return r;
 
