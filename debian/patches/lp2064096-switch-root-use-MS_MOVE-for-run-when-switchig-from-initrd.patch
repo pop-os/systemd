@@ -34,10 +34,10 @@ just go back to MS_MOVE when switching from the initrd.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/shared/switch-root.c b/src/shared/switch-root.c
-index 621161a..a1c53ba 100644
+index d5f34c5..1b6c7fe 100644
 --- a/src/shared/switch-root.c
 +++ b/src/shared/switch-root.c
-@@ -42,7 +42,7 @@ int switch_root(const char *new_root,
+@@ -34,7 +34,7 @@ int switch_root(const char *new_root,
                  { "/dev",             MS_BIND|MS_REC,  MS_BIND|MS_REC }, /* Recursive, because we want to save the original /dev/shm/ + /dev/pts/ and similar */
                  { "/sys",             MS_BIND|MS_REC,  MS_BIND|MS_REC }, /* Similar, we want to retain various API VFS, or the cgroupv1 /sys/fs/cgroup/ tree */
                  { "/proc",            MS_BIND|MS_REC,  MS_BIND|MS_REC }, /* Similar */

@@ -15,7 +15,7 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2116465
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/test/units/TEST-87-AUX-UTILS-VM.coredump.sh b/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
-index 23be2c4..2c7137d 100755
+index 97911e7..423d0bb 100755
 --- a/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
 +++ b/test/units/TEST-87-AUX-UTILS-VM.coredump.sh
 @@ -98,12 +98,12 @@ EOF

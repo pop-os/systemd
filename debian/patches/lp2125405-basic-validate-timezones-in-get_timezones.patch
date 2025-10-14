@@ -27,10 +27,10 @@ to avoid listing timezones that are not installed.
  1 file changed, 8 insertions(+)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 29afb08..2425bc2 100644
+index 55931a2..43ef5e4 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1443,6 +1443,10 @@ static int get_timezones_from_zone1970_tab(char ***ret) {
+@@ -1435,6 +1435,10 @@ static int get_timezones_from_zone1970_tab(char ***ret) {
                  if (*cc == '#')
                          continue;
  
@@ -41,7 +41,7 @@ index 29afb08..2425bc2 100644
                  r = strv_extend(&zones, tz);
                  if (r < 0)
                          return r;
-@@ -1495,6 +1499,10 @@ static int get_timezones_from_tzdata_zi(char ***ret) {
+@@ -1487,6 +1491,10 @@ static int get_timezones_from_tzdata_zi(char ***ret) {
                          /* Not a line we care about. */
                          continue;
  
