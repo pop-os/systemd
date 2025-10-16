@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.17pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 16 Oct 2025 11:53:34 -0600
+
 systemd (249.11-0ubuntu3.17) jammy; urgency=medium
 
   [ Nick Rosbrook ]
