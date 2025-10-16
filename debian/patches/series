@@ -54,3 +54,4 @@ lp2115391-pcrlock-handle-measurement-logs-where-hash-algs-in-header.patch
 lp2115418-network-dhcp6-consider-the-DHCPv6-protocol-as-finish.patch
 test-fall-back-to-SYSLOG_IDENTIFIER-matching-where-necess.patch
 lp2125405-basic-validate-timezones-in-get_timezones.patch
+ukify-fix-insertion-of-padding-in-merged-sections.patch
