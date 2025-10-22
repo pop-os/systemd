@@ -20,6 +20,4 @@ systemd-boot-id-compat.patch
 system76-usb.patch
 timesyncd-disable.patch
 systemd-resolvconf.patch
-pang13.patch
-pang14.patch
 disable-90-loaderentry.patch
