@@ -1,3 +1,26 @@
+systemd (258.1-2) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Backport patch to fix autopkgtest with new util-linux due to file move
+    (Closes: #1118360)
+  * getty-static: add missing Documentation=
+  * systemd-tests: drop unused overrides
+
+  [ Simon McVittie ]
+  * d/libnss-systemd.postinst: Ensure module is enabled for all four
+    databases. Before version 251.3-2, libnss-systemd was only enabled for
+    the passwd and group databases. Since that version, new installations
+    are set up in all four user/group databases (passwd, group, shadow and
+    gshadow) but older installations' configuration remained unchanged
+    until now. This resulted in configuration drift: shadow and gshadow
+    would list systemd dynamic users in new installations of Debian 12 or
+    13, but not in installations that had been upgraded from Debian 11 or
+    older, preventing new versions of gdm3 from working on those older
+    systems. Address this by doing a one-time migration from the old to
+    new configuration. (Closes: #1118640)
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 27 Oct 2025 13:06:14 +0000
+
 systemd (258.1-1) unstable; urgency=medium
 
   * Override Lintian warning for groff-message. These manpages are
