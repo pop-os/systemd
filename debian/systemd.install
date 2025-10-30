@@ -155,7 +155,7 @@ usr/lib/systemd/system/emergency.service
 usr/lib/systemd/system/emergency.target
 usr/lib/systemd/system/exit.target
 usr/lib/systemd/system/factory-reset.target
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/factory-reset.target.wants/systemd-pcrphase-factory-reset.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/factory-reset.target.wants/systemd-pcrphase-factory-reset.service
 usr/lib/systemd/system/final.target
 usr/lib/systemd/system/first-boot-complete.target
 usr/lib/systemd/system-generators/systemd-debug-generator
@@ -256,7 +256,7 @@ usr/lib/systemd/system/soft-reboot.target
 usr/lib/systemd/system/sound.target
 usr/lib/systemd/system/ssh-access.target
 usr/lib/systemd/system/storage-target-mode.target
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/storage-target-mode.target.wants/systemd-pcrphase-storage-target-mode.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/storage-target-mode.target.wants/systemd-pcrphase-storage-target-mode.service
 usr/lib/systemd/system/suspend.target
 usr/lib/systemd/system/suspend-then-hibernate.target
 usr/lib/systemd/system/swap.target
