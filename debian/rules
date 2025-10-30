@@ -185,8 +185,7 @@ CONFFLAGS += \
 	-Dvmlinux-h=provided \
 	-Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h \
 	-Dbpf-framework=enabled \
-	-Dbpf-compiler=clang \
-	-Dvmlinux-h-path=/usr/include/$(DEB_HOST_MULTIARCH)/linux/bpf/vmlinux.h
+	-Dbpf-compiler=clang
 
 ifeq ($(DEB_VENDOR),Ubuntu)
 # TODO: drop this and the alternative build dep once support for Noble is dropped
