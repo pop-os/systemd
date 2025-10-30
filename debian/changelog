@@ -1,3 +1,70 @@
+systemd (258.1-2ubuntu1) resolute; urgency=medium
+
+  * Merge with Debian unstable (LP: #2130132). Remaining changes:
+    - debian/systemd.postinst:
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/control:
+      + Add Recommends: networkd-dispatcher systemd-resolved to systemd package
+      + Make systemd-cryptsetup Priority: important
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Do not build systemd-boot-efi-{amd64,arm64}-signed-template
+    - d/rules: disable bpf support on riscv64 for now (LP #2099864)
+    - d/extra/dbus-1: remove SetLocale restriction from dbus policy (LP #2102028)
+    - d/rules: enable 10-systemd-logind-root-ignore-inhibitors.rules.example
+      polkit rule by default (LP #2092438)
+      [ was: "d/extra/polkit-1: let root ignore inhibitors on reboot etc" ]
+    - Fix d/extra/initramfs-tools/hooks/udev, so that udev rules that are
+      specific to s390x ccw devices are only prevented from being copied if
+      zdev_early=0 is set, but copy rules in case of zdev_early=1 or if
+      zdev_early is not specified at all. (LP #2102236)
+    - Delta for i386:
+      + debian/systemd.install: exclude files that are not built for i386
+      + debian/systemd.manpages: do not ship un-built manpages on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with tpm libraries on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with libqrencode on i386
+      + debian/rules: Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/libnss-systemd.*:
+      + debian/libnss-systemd.nss: install after 'compat' too (LP #2125403)
+      + debian/libnss-systemd.preinst: force nsswitch.conf update
+        Drop systemd instances in nsswitch.conf, and force postinst to
+        re-generate the file (LP #2121017)
+      + debian/linbnss-systemd.nss: Install systemd service after files.
+        As suggested by upstream the systemd NSS service should come just after
+        files
+    - debian/tests:
+      + d/t/boot-and-services: use coreutils tunable in apparmor test (LP #2125614)
+      + d/t/upstream: use GNU cp in test setup (LP #2122363)
+      + d/t/boot-and-services: tweak test_rsyslog regexes
+      + debian/tests/boot-and-services: skip apparmor tests on armhf
+    - debian/patches:
+      + switch-root: use MS_MOVE for /run when switchig from initrd
+      + test-network: add handling for Ubuntu FAN patches (LP #2104943)
+      + basic: validate timezones in get_timezones() (LP #2125405)
+      + test: ignore coredumps for gnusleep in addition to sleep (LP #2116459)
+      + test: follow /usr/bin/sleep symlink when checking coredumps (LP #2116465)
+      + test: skip TEST-50-DISSECT.dissect (LP #2116460)
+  * Dropped changes, no longer needed:
+    - d/control: Conflicts: and Replaces: systemd-resolved-dnssec
+    - meson.build: build with -Wl,-z,gcs-report=none on arm64 (LP #2119100)
+  * Dropped changes, included in Debian:
+    - Do not create /etc/tmpfiles.d/tmp.conf on upgrades
+    - d/rules: drop bpf build workarounds for Ubuntu
+  * Dropped changes, included upstream:
+    - wait-online/resolve-rename-varlink_subscription-varlink_query_results.patch
+    - wait-online/resolved-add-link_get_default_route-helper.patch
+    - wait-online/resolved-add-a-helper-to-check-if-DNS-server-is-accessibl.patch
+    - wait-online/test-add-test-for-resolved-SubscribeDNSConfiguration-API.patch
+    - wait-online/networkd-test-add-basic-tests-for-systemd-networkd-wait-o.patch
+    - wait-online/wait-online-add-support-for-waiting-for-DNS-configuration.patch
+    - wait-online/resolved-add-SubscribeDNSConfiguration-to-varlink-API.patch
+    - wait-online/varlink-util-add-varlink_many_notify.patch
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 04 Nov 2025 04:35:17 -0500
+
 systemd (258.1-2) unstable; urgency=medium
 
   [ Luca Boccassi ]
