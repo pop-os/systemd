@@ -37,8 +37,12 @@ usr/lib/systemd/system/dbus-org.freedesktop.portable1.service
 <pkg.systemd.upstream> usr/lib/systemd/system/dbus-org.freedesktop.sysupdate1.service
 usr/lib/systemd/user/machine.slice
 usr/lib/systemd/user/machines.target
+<pkg.systemd.upstream> usr/lib/systemd/user/dbus-org.freedesktop.import1.service
 <pkg.systemd.upstream> usr/lib/systemd/user/dbus-org.freedesktop.machine1.service
+<pkg.systemd.upstream> usr/lib/systemd/user/sockets.target.wants/systemd-importd.socket
 <pkg.systemd.upstream> usr/lib/systemd/user/sockets.target.wants/systemd-machined.socket
+<pkg.systemd.upstream> usr/lib/systemd/user/systemd-importd.service
+<pkg.systemd.upstream> usr/lib/systemd/user/systemd-importd.socket
 <pkg.systemd.upstream> usr/lib/systemd/user/systemd-machined.service
 <pkg.systemd.upstream> usr/lib/systemd/user/systemd-machined.socket
 usr/lib/systemd/user/systemd-nspawn@.service
@@ -48,6 +52,7 @@ usr/bin/systemd-nspawn
 usr/lib/tmpfiles.d/portables.conf
 usr/lib/tmpfiles.d/systemd-nspawn.conf
 usr/sbin/mount.ddi
+<pkg.systemd.upstream> usr/share/dbus-1/services/org.freedesktop.import1.service
 <pkg.systemd.upstream> usr/share/dbus-1/services/org.freedesktop.machine1.service
 usr/share/dbus-1/system.d/org.freedesktop.import1.conf
 usr/share/dbus-1/system.d/org.freedesktop.machine1.conf

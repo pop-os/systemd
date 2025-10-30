@@ -1,5 +1,6 @@
 [Unit]
 Description=getty on tty2-tty6 if dbus and logind are not available
+Documentation=man:agetty(8) man:systemd-getty-generator(8)
 ConditionPathExists=/dev/tty0
 ConditionPathExists=!/usr/bin/dbus-daemon
 ConditionPathExists=!/usr/bin/dbus-broker

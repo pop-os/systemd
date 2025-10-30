@@ -1,0 +1,16 @@
+Author: Luca Boccassi <luca.boccassi@gmail.com>
+Origin: https://github.com/systemd/systemd/commit/2a5e68e27d952a6840f04e7af0e680c727b83850
+Forwarded: https://github.com/systemd/systemd/pull/39331
+Description: test: install bsdextrautils in debian minimal img
+ 'rev' moved to bsdextrautils and TEST-50-DISSECT uses it, so it now
+ fails
+--- a/mkosi/mkosi.images/minimal-base/mkosi.conf.d/debian-ubuntu.conf
++++ b/mkosi/mkosi.images/minimal-base/mkosi.conf.d/debian-ubuntu.conf
+@@ -7,6 +7,7 @@
+ [Content]
+ PrepareScripts=%D/mkosi/mkosi.conf.d/debian-ubuntu/systemd.prepare
+ Packages=
++        bsdextrautils
+         hostname
+         iproute2
+         mount
