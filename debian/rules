@@ -329,6 +329,10 @@ ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 execute_after_dh_link:
 	# Mask systemd-gpt-auto-generator by default on Ubuntu
 	dh_link -psystemd /dev/null /etc/systemd/system-generators/systemd-gpt-auto-generator
+
+	# Enable this example to allow root to ignore inhibitors
+	dh_link -psystemd /usr/share/polkit-1/rules.d/10-systemd-logind-root-ignore-inhibitors.rules.example \
+			  /usr/share/polkit-1/rules.d/10-systemd-logind-root-ignore-inhibitors.rules
 endif
 endif
 
