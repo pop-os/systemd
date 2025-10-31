@@ -16,6 +16,12 @@ if [ "$#" -ge 5 ]; then
     exit 0
 fi
 
+if [ -n "${KERNEL_INSTALL_INITRD_GENERATOR:-}" ]; then
+    # No-op when another initrd generator (e.g. dracut) is explicitly
+    # configured.
+    exit 0
+fi
+
 if [ -e "$INITRD_SRC" ]; then
     [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "Installing '$INITRD_SRC'"
     ln -fs "$INITRD_SRC" "$KERNEL_INSTALL_STAGING_AREA"
