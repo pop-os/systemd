@@ -169,7 +169,8 @@ usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
 usr/lib/systemd/system-generators/systemd-sysv-generator
-usr/lib/systemd/system-generators/systemd-tpm2-generator
+<!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-tpm2-generator
+[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
 usr/lib/systemd/system/breakpoint-pre-basic.service
 usr/lib/systemd/system/breakpoint-pre-mount.service
 usr/lib/systemd/system/breakpoint-pre-switch-root.service
