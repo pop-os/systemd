@@ -36,6 +36,7 @@ usr/lib/udev/rules.d/60-dmi-id.rules
 usr/lib/udev/rules.d/60-drm.rules
 usr/lib/udev/rules.d/60-evdev.rules
 usr/lib/udev/rules.d/60-fido-id.rules
+<pkg.systemd.upstream> usr/lib/udev/rules.d/60-gpiochip.rules
 usr/lib/udev/rules.d/60-infiniband.rules
 usr/lib/udev/rules.d/60-input-id.rules
 usr/lib/udev/rules.d/60-persistent-alsa.rules
