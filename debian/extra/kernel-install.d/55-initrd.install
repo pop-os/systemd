@@ -17,8 +17,14 @@ if [ "$#" -ge 5 ]; then
 fi
 
 if [ -n "${KERNEL_INSTALL_INITRD_GENERATOR:-}" ]; then
-    # No-op when another initrd generator (e.g. dracut) is explicitly
-    # configured.
+    # No-op when another initrd generator is explicitly configured.
+    exit 0
+fi
+
+if ls "$KERNEL_INSTALL_STAGING_AREA/initrd"* >/dev/null 2>&1; then
+    # If another initrd generator (i.e. dracut) does not declare itself, avoid
+    # duplicate initrds.
+    [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "Staging area already contains an initrd, not installing another"
     exit 0
 fi
 
