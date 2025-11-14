@@ -53,7 +53,6 @@ fi
 IDL_FILE="$(mktemp)"
 varlinkctl introspect /run/systemd/journal/io.systemd.journal io.systemd.Journal | tee "${IDL_FILE:?}"
 varlinkctl validate-idl "$IDL_FILE"
-varlinkctl validate-idl "$IDL_FILE"
 cat /bin/sh >"$IDL_FILE"
 (! varlinkctl validate-idl "$IDL_FILE")
 
@@ -91,7 +90,7 @@ trap rm_rf_sshbindir EXIT
 
 # Create a fake "ssh" binary that validates everything works as expected if invoked for the "ssh-unix:" Varlink transport
 cat > "$SSHBINDIR"/ssh <<'EOF'
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -xe
 
@@ -107,7 +106,7 @@ SYSTEMD_SSH="$SSHBINDIR/ssh" varlinkctl info ssh-unix:foobar:/run/systemd/journa
 
 # Now build another fake "ssh" binary that does the same for "ssh-exec:"
 cat > "$SSHBINDIR"/ssh <<'EOF'
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -xe
 
@@ -167,7 +166,7 @@ done
 (! varlinkctl call "")
 (! varlinkctl call "" "")
 (! varlinkctl call "" "" "")
-(! varlinkctl call /run/systemd/userdb/io.systemd.Multiplexer io.systemd.UserDatabase.GetUserRecord </dev/null)
+(! varlinkctl call /run/systemd/userdb/io.systemd.Multiplexer io.systemd.UserDatabase.GetUserRecord '{ "service" : "io.systemd.ShouldNotExist" }')
 (! varlinkctl validate-idl "")
 (! varlinkctl validate-idl </dev/null)
 

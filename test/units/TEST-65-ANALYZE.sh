@@ -19,7 +19,7 @@ systemd-analyze time || :
 systemd-analyze critical-chain || :
 # blame
 systemd-analyze blame
-systemd-run --wait --user --pipe -M testuser@.host systemd-analyze blame
+systemd-run --wait --user --pipe -M testuser@.host systemd-analyze blame --no-pager
 (! systemd-analyze blame --global)
 # plot
 systemd-analyze plot >/dev/null || :
@@ -510,6 +510,12 @@ systemd-analyze verify /tmp/testwarnings.service
 
 rm /tmp/testwarnings.service
 
+TESTDATA=/usr/lib/systemd/tests/testdata/TEST-65-ANALYZE.units
+systemd-analyze verify "${TESTDATA}/loopy.service"
+systemd-analyze verify "${TESTDATA}/loopy2.service"
+systemd-analyze verify "${TESTDATA}/loopy3.service"
+systemd-analyze verify "${TESTDATA}/loopy4.service"
+
 # Added an additional "INVALID_ID" id to the .json to verify that nothing breaks when input is malformed
 # The PrivateNetwork id description and weight was changed to verify that 'security' is actually reading in
 # values from the .json file when required. The default weight for "PrivateNetwork" is 2500, and the new weight
@@ -982,13 +988,13 @@ systemd-analyze security --threshold=90 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --root=/tmp/img/ testfile.service
 
-# The strict profile adds a lot of sanboxing options
+# The strict profile adds a lot of sandboxing options
 systemd-analyze security --threshold=25 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --profile=strict \
                            --root=/tmp/img/ testfile.service
 
-# The trusted profile doesn't add any sanboxing options
+# The trusted profile doesn't add any sandboxing options
 (! systemd-analyze security --threshold=25 --offline=true \
                            --security-policy=/tmp/testfile.json \
                            --profile=/usr/lib/systemd/portable/profile/trusted/service.conf \
@@ -1127,7 +1133,7 @@ Description=Test unit for systemd-analyze unit-shell
 [Service]
 Type=notify
 NotifyAccess=all
-ExecStart=/bin/sh -c "echo 'Hello from test unit' >/tmp/testfile; systemd-notify --ready; sleep infinity"
+ExecStart=sh -c "echo 'Hello from test unit' >/tmp/testfile; systemd-notify --ready; sleep infinity"
 PrivateTmp=disconnected
 EOF
 # Start the service

@@ -34,6 +34,7 @@
 #include "hexdecoct.h"
 #include "initrd-util.h"
 #include "json-util.h"
+#include "label-util.h"
 #include "list.h"
 #include "main-func.h"
 #include "mkdir-label.h"
@@ -2192,7 +2193,7 @@ static int show_log_table(EventLog *el, sd_json_variant **ret_variant) {
 
         r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, /* show_header= */true);
         if (r < 0)
-                return log_error_errno(r, "Failed to output table: %m");
+                return r;
 
         return 0;
 }
@@ -2353,7 +2354,7 @@ static int show_pcr_table(EventLog *el, sd_json_variant **ret_variant) {
 
         r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, /* show_header= */ true);
         if (r < 0)
-                return log_error_errno(r, "Failed to output table: %m");
+                return r;
 
         if (!sd_json_format_enabled(arg_json_format_flags))
                 printf("\n"
@@ -2664,7 +2665,7 @@ static int verb_list_components(int argc, char *argv[], void *userdata) {
         if (!table_isempty(table) || sd_json_format_enabled(arg_json_format_flags)) {
                 r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, /* show_header= */ true);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to output table: %m");
+                        return r;
         }
 
         if (!sd_json_format_enabled(arg_json_format_flags)) {
@@ -4414,7 +4415,7 @@ static int write_boot_policy_file(const char *json_text) {
                         AT_FDCWD,
                         boot_policy_file,
                         &encoded,
-                        WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_MKDIR_0755);
+                        WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write boot policy file to '%s': %m", boot_policy_file);
 
@@ -4480,9 +4481,18 @@ static int make_policy(bool force, RecoveryPinMode recovery_pin_mode) {
         if (DEBUG_LOGGING)
                 (void) sd_json_variant_dump(new_prediction_json, SD_JSON_FORMAT_PRETTY_AUTO|SD_JSON_FORMAT_COLOR_AUTO, stderr, NULL);
 
-        _cleanup_(tpm2_pcrlock_policy_done) Tpm2PCRLockPolicy old_policy = {};
+        /* v257 and older mistakenly used --pcrlock= for the path. To keep backward compatibility, let's fallback to it when
+         * --policy= is unspecified but --pcrlock is specified. */
+        if (!arg_policy_path && arg_pcrlock_path) {
+                log_notice("Specified --pcrlock= option for make-policy command. Please use --policy= instead.");
 
-        r = tpm2_pcrlock_policy_load(arg_pcrlock_path, &old_policy);
+                arg_policy_path = strdup(arg_pcrlock_path);
+                if (!arg_policy_path)
+                        return log_oom();
+        }
+
+        _cleanup_(tpm2_pcrlock_policy_done) Tpm2PCRLockPolicy old_policy = {};
+        r = tpm2_pcrlock_policy_load(arg_policy_path, &old_policy);
         if (r < 0)
                 return r;
 
@@ -4520,15 +4530,13 @@ static int make_policy(bool force, RecoveryPinMode recovery_pin_mode) {
 
         _cleanup_(tpm2_handle_freep) Tpm2Handle *srk_handle = NULL;
 
-        if (iovec_is_set(&srk_blob)) {
-                r = tpm2_deserialize(
-                                tc,
-                                srk_blob.iov_base,
-                                srk_blob.iov_len,
-                                &srk_handle);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to deserialize SRK TR: %m");
-        } else {
+        r = tpm2_deserialize(
+                        tc,
+                        &srk_blob,
+                        &srk_handle);
+        if (r < 0)
+                return log_error_errno(r, "Failed to deserialize SRK TR: %m");
+        if (r == 0) {
                 r = tpm2_get_or_create_srk(
                                 tc,
                                 /* session= */ NULL,
@@ -4597,13 +4605,11 @@ static int make_policy(bool force, RecoveryPinMode recovery_pin_mode) {
         _cleanup_(tpm2_handle_freep) Tpm2Handle *nv_handle = NULL;
         TPM2_HANDLE nv_index = 0;
 
-        if (iovec_is_set(&nv_blob)) {
-                r = tpm2_deserialize(tc, nv_blob.iov_base, nv_blob.iov_len, &nv_handle);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to deserialize NV index TR: %m");
-
+        r = tpm2_deserialize(tc, &nv_blob, &nv_handle);
+        if (r < 0)
+                return log_error_errno(r, "Failed to deserialize NV index TR: %m");
+        if (r > 0)
                 nv_index = old_policy.nv_index;
-        }
 
         TPM2B_AUTH auth = {};
         CLEANUP_ERASE(auth);
@@ -4789,13 +4795,13 @@ static int make_policy(bool force, RecoveryPinMode recovery_pin_mode) {
         }
 
         if (!iovec_is_set(&nv_blob)) {
-                r = tpm2_serialize(tc, nv_handle, &nv_blob.iov_base, &nv_blob.iov_len);
+                r = tpm2_serialize(tc, nv_handle, &nv_blob);
                 if (r < 0)
                         return log_error_errno(r, "Failed to serialize NV index TR: %m");
         }
 
         if (!iovec_is_set(&srk_blob)) {
-                r = tpm2_serialize(tc, srk_handle, &srk_blob.iov_base, &srk_blob.iov_len);
+                r = tpm2_serialize(tc, srk_handle, &srk_blob);
                 if (r < 0)
                         return log_error_errno(r, "Failed to serialize SRK index TR: %m");
         }
@@ -4825,12 +4831,12 @@ static int make_policy(bool force, RecoveryPinMode recovery_pin_mode) {
         if (r < 0)
                 return log_error_errno(r, "Failed to format new configuration to JSON: %m");
 
-        const char *path = arg_pcrlock_path ?: (in_initrd() ? "/run/systemd/pcrlock.json" : "/var/lib/systemd/pcrlock.json");
-        r = write_string_file(path, text, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_MKDIR_0755);
+        const char *path = arg_policy_path ?: (in_initrd() ? "/run/systemd/pcrlock.json" : "/var/lib/systemd/pcrlock.json");
+        r = write_string_file(path, text, WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_SYNC|WRITE_STRING_FILE_MKDIR_0755|WRITE_STRING_FILE_LABEL);
         if (r < 0)
                 return log_error_errno(r, "Failed to write new configuration to '%s': %m", path);
 
-        if (!arg_pcrlock_path && !in_initrd()) {
+        if (!arg_policy_path && !in_initrd()) {
                 r = remove_policy_file("/run/systemd/pcrlock.json");
                 if (r < 0)
                         return r;
@@ -4872,20 +4878,18 @@ static int undefine_policy_nv_index(
         _cleanup_(tpm2_handle_freep) Tpm2Handle *srk_handle = NULL;
         r = tpm2_deserialize(
                         tc,
-                        srk_blob->iov_base,
-                        srk_blob->iov_len,
+                        srk_blob,
                         &srk_handle);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to deserialize SRK TR: %m");
+        if (r < 0)
+                return log_error_errno(r, "Failed to deserialize SRK TR: %m");
 
         _cleanup_(tpm2_handle_freep) Tpm2Handle *nv_handle = NULL;
         r = tpm2_deserialize(
                         tc,
-                        nv_blob->iov_base,
-                        nv_blob->iov_len,
+                        nv_blob,
                         &nv_handle);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to deserialize NV TR: %m");
+        if (r < 0)
+                return log_error_errno(r, "Failed to deserialize NV TR: %m");
 
         _cleanup_(tpm2_handle_freep) Tpm2Handle *encryption_session = NULL;
         r = tpm2_make_encryption_session(
@@ -5424,6 +5428,10 @@ static int run(int argc, char *argv[]) {
         int r;
 
         log_setup();
+
+        r = mac_init();
+        if (r < 0)
+                return r;
 
         r = parse_argv(argc, argv);
         if (r <= 0)

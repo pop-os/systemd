@@ -343,7 +343,7 @@ static int update_efi_boot_binaries(const char *esp_path, const char *source_pat
         assert(esp_path);
         assert(source_path);
 
-        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -396,10 +396,10 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!p)
                 return log_oom();
 
-        r = chase(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+        r = chase(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &source_path, NULL);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+                r = chase(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &source_path, NULL);
         if (r < 0)
                 return log_error_errno(r,
                                        "Failed to resolve path %s%s%s: %m",
@@ -411,7 +411,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
         if (!q)
                 return log_oom();
 
-        r = chase(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &dest_path, NULL);
+        r = chase(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT|CHASE_TRIGGER_AUTOFS, &dest_path, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", q, esp_path);
 
@@ -428,7 +428,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
                 v = strjoina("/EFI/BOOT/BOOT", e);
                 ascii_strupper(strrchr(v, '/') + 1);
 
-                r = chase(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &default_dest_path, NULL);
+                r = chase(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT|CHASE_TRIGGER_AUTOFS, &default_dest_path, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", v, esp_path);
 
@@ -449,11 +449,11 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
         _cleanup_free_ char *path = NULL;
         int r;
 
-        r = chase_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+        r = chase_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &path, &d);
         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
-                r = chase_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
-        if (r == -ENOENT && arg_graceful) {
+                r = chase_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &path, &d);
+        if (r == -ENOENT && arg_graceful() != ARG_GRACEFUL_NO) {
                 log_debug("Source directory does not exist, ignoring.");
                 return 0;
         }
@@ -481,7 +481,7 @@ static int install_binaries(const char *esp_path, const char *arch, bool force) 
                 k = copy_one_file(esp_path, de->d_name, force);
                 /* Don't propagate an error code if no update necessary, installed version already equal or
                  * newer version, or other boot loader in place. */
-                if (arg_graceful && IN_SET(k, -ESTALE, -ESRCH))
+                if (arg_graceful() != ARG_GRACEFUL_NO && IN_SET(k, -ESTALE, -ESRCH))
                         continue;
                 RET_GATHER(r, k);
         }
@@ -634,7 +634,7 @@ static int install_secure_boot_auto_enroll(const char *esp, X509 *certificate, E
         if (r < 0)
                 return r;
 
-        _cleanup_close_ int keys_fd = chase_and_open("loader/keys/auto", esp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY, NULL);
+        _cleanup_close_ int keys_fd = chase_and_open("loader/keys/auto", esp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, O_DIRECTORY, NULL);
         if (keys_fd < 0)
                 return log_error_errno(keys_fd, "Failed to chase loader/keys/auto in the ESP: %m");
 
@@ -881,7 +881,7 @@ static int install_variables(
         uint16_t slot;
         int r;
 
-        r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL);
+        r = chase_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, F_OK, NULL);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -961,7 +961,9 @@ int verb_install(int argc, char *argv[], void *userdata) {
         /* Invoked for both "update" and "install" */
 
         install = streq(argv[0], "install");
-        graceful = !install && arg_graceful; /* support graceful mode for updates */
+
+        /* Support graceful mode only for updates, unless forcibly enabled in chroot environments */
+        graceful = arg_graceful() == ARG_GRACEFUL_FORCE || (!install && arg_graceful() != ARG_GRACEFUL_NO);
 
         if (arg_secure_boot_auto_enroll) {
                 if (arg_certificate_source_type == OPENSSL_CERTIFICATE_SOURCE_FILE) {
@@ -1097,7 +1099,7 @@ static int remove_boot_efi(const char *esp_path) {
         _cleanup_free_ char *p = NULL;
         int r, c = 0;
 
-        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+        r = chase_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_TRIGGER_AUTOFS, &p, &d);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -1365,7 +1367,7 @@ int verb_is_installed(int argc, char *argv[], void *userdata) {
         int r;
 
         r = acquire_esp(/* unprivileged_mode= */ false,
-                        /* graceful= */ arg_graceful,
+                        /* graceful= */ arg_graceful() != ARG_GRACEFUL_NO,
                         NULL, NULL, NULL, NULL, NULL);
         if (r < 0)
                 return r;

@@ -526,7 +526,7 @@ static int display_user(int argc, char *argv[], void *userdata) {
                 if (!table_isempty(table)) {
                         r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, arg_legend);
                         if (r < 0)
-                                return table_log_print_error(r);
+                                return r;
                 }
 
                 if (arg_legend) {
@@ -865,7 +865,7 @@ static int display_group(int argc, char *argv[], void *userdata) {
                 if (!table_isempty(table)) {
                         r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, arg_legend);
                         if (r < 0)
-                                return table_log_print_error(r);
+                                return r;
                 }
 
                 if (arg_legend) {
@@ -1017,7 +1017,7 @@ static int display_memberships(int argc, char *argv[], void *userdata) {
                 if (!table_isempty(table)) {
                         r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, arg_legend);
                         if (r < 0)
-                                return table_log_print_error(r);
+                                return r;
                 }
 
                 if (arg_legend) {
@@ -1085,7 +1085,7 @@ static int display_services(int argc, char *argv[], void *userdata) {
         if (!table_isempty(t)) {
                 r = table_print_with_pager(t, arg_json_format_flags, arg_pager_flags, arg_legend);
                 if (r < 0)
-                        return table_log_print_error(r);
+                        return r;
         }
 
         if (arg_legend && arg_output != OUTPUT_JSON) {
@@ -1405,7 +1405,7 @@ static int load_credential_one(
 
         if (ur)
                 STRV_FOREACH(g, ur->member_of) {
-                        _cleanup_free_ char *membership = strjoin(ur->user_name, ":", *g);
+                        _cleanup_free_ char *membership = strjoin(ur->user_name, ":", *g, ".membership");
                         if (!membership)
                                 return log_oom();
 
@@ -1417,7 +1417,7 @@ static int load_credential_one(
                 }
         else
                 STRV_FOREACH(u, gr->members) {
-                        _cleanup_free_ char *membership = strjoin(*u, ":", gr->group_name);
+                        _cleanup_free_ char *membership = strjoin(*u, ":", gr->group_name, ".membership");
                         if (!membership)
                                 return log_oom();
 

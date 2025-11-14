@@ -193,7 +193,7 @@ testcase_sanity() {
     # "Fake" getent passwd's bare minimum, so we don't have to pull it in
     # with all the DSO shenanigans
     cat >"$root/bin/getent" <<\EOF
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [[ $# -eq 0 ]]; then
     :
@@ -245,6 +245,15 @@ EOF
                    --bind="$tmpdir:/foo" \
                    --bind="$tmpdir:/also-foo:noidmap,norbind" \
                    bash -xec 'test -e /foo/foo; touch /foo/bar; test -e /also-foo/bar'
+    # --bind= recursive
+    rm -f "$tmpdir/bar"
+    mount --bind "$tmpdir/1" "$tmpdir/2"
+    systemd-nspawn --directory="$root" \
+                   ${COVERAGE_BUILD_DIR:+--bind="$COVERAGE_BUILD_DIR"} \
+                   --bind="$tmpdir:/foo" \
+                   --bind="$tmpdir:/also-foo:noidmap,norbind" \
+                   bash -xec 'test -e /foo/2/one; ! test -e /foo/2/two; test -e /also-foo/2/two; ! test -e /also-foo/2/one; test -e /foo/foo; touch /foo/bar; test -e /also-foo/bar'
+    umount "$tmpdir/2"
     test -e "$tmpdir/bar"
     # --bind-ro=
     systemd-nspawn --directory="$root" \
@@ -447,7 +456,7 @@ Port=tcp:60
 Port=udp:60:61
 EOF
     cat >"$root/entrypoint.sh" <<\EOF
-#!/bin/bash
+#!/usr/bin/env bash
 set -ex
 
 env
@@ -835,7 +844,7 @@ testcase_owneridmap() {
     # "Fake" getent passwd's bare minimum, so we don't have to pull it in
     # with all the DSO shenanigans
     cat >"$root/bin/getent" <<\EOF
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [[ $# -eq 0 ]]; then
     :
@@ -860,7 +869,7 @@ EOF
                            --user=testuser \
                            --bind=/tmp/owneridmap/bind:/home/testuser:owneridmap \
                            ${COVERAGE_BUILD_DIR:+--bind="$COVERAGE_BUILD_DIR"} \
-                           /usr/bin/bash -c "$cmd" |& tee nspawn.out; then
+                           bash -c "$cmd" |& tee nspawn.out; then
         if grep -q "Failed to map ids for bind mount.*: Function not implemented" nspawn.out; then
             echo "idmapped mounts are not supported, skipping the test..."
             return 0
@@ -897,7 +906,8 @@ testcase_os_release() {
     create_dummy_container "$root"
     entrypoint="$root/entrypoint.sh"
     cat >"$entrypoint" <<\EOF
-#!/usr/bin/bash -ex
+#!/usr/bin/env bash
+set -ex
 
 . /tmp/os-release
 [[ -n "${ID:-}" && "$ID" != "$container_host_id" ]] && exit 1
@@ -944,7 +954,7 @@ testcase_machinectl_bind() {
     cat >"$service_path" <<EOF
 [Service]
 Type=notify
-ExecStart=systemd-nspawn --directory="$root" --notify-ready=no /usr/bin/bash -xec "$cmd"
+ExecStart=systemd-nspawn --directory="$root" --notify-ready=no bash -xec "$cmd"
 EOF
 
     systemctl daemon-reload
@@ -1199,28 +1209,6 @@ EOF
     rm -fr "$root"
 }
 
-can_do_rootless_nspawn() {
-    # Our create_dummy_ddi() uses squashfs and openssl.
-    command -v mksquashfs &&
-    command -v openssl &&
-
-    # mountfsd must be enabled...
-    [[ -S /run/systemd/io.systemd.MountFileSystem ]] &&
-    # ...and have pidfd support for unprivileged operation.
-    systemd-analyze compare-versions "$(uname -r)" ge 6.5 &&
-    systemd-analyze compare-versions "$(pkcheck --version | awk '{print $3}')" ge 124 &&
-
-    # nsresourced must be enabled...
-    [[ -S /run/systemd/userdb/io.systemd.NamespaceResource ]] &&
-    # ...and must support the UserNamespaceInterface.
-    ! (SYSTEMD_LOG_TARGET=console varlinkctl call \
-           /run/systemd/userdb/io.systemd.NamespaceResource \
-           io.systemd.NamespaceResource.AllocateUserRange \
-           '{"name":"test-supported","size":65536,"userNamespaceFileDescriptor":0}' \
-           2>&1 || true) |
-        grep -q "io.systemd.NamespaceResource.UserNamespaceInterfaceNotSupported"
-}
-
 create_dummy_ddi() {
     local outdir="${1:?}"
     local container_name="${2:?}"
@@ -1435,6 +1423,49 @@ testcase_unpriv_dir() {
     chown root:root "$root/.."
 
     rm -rf "$root"
+}
+
+testcase_link_journal_host() {
+    local root hoge i
+
+    root="$(mktemp -d /var/lib/machines/TEST-13-NSPAWN.link-journal.XXX)"
+    create_dummy_container "$root"
+
+    systemd-id128 new > "$root"/etc/machine-id
+
+    hoge="/var/log/journal/$(cat "$root"/etc/machine-id)/"
+    mkdir -p "$hoge"
+    # The systemd-journal group is not mapped, so ensure the directory is owned by root:root
+    chown root:root "$hoge"
+
+    for i in no yes pick; do
+        systemd-nspawn \
+            --directory="$root" --private-users="$i" --link-journal=host \
+            bash -xec 'p="/var/log/journal/$(cat /etc/machine-id)"; mountpoint "$p"; [[ "$(stat "$p" --format=%u)" == 0 ]]; touch "$p/hoge"'
+
+        [[ "$(stat "${hoge}/hoge" --format=%u)" == 0 ]]
+        rm "${hoge}/hoge"
+    done
+
+    rm -fr "$root" "$hoge"
+}
+
+testcase_cap_net_bind_service() {
+    local root
+
+    root="$(mktemp -d /var/lib/machines/TEST-13-NSPAWN.cap-net-bind-service.XXX)"
+    create_dummy_container "$root"
+
+    # Check that CAP_NET_BIND_SERVICE is available without --private-users
+    systemd-nspawn --register=no --directory="$root" capsh --has-p=cap_net_bind_service
+
+    # Check that CAP_NET_BIND_SERVICE is not available with --private-users=identity
+    (! systemd-nspawn --register=no --directory="$root" --private-users=identity capsh --has-p=cap_net_bind_service)
+
+    # Check that CAP_NET_BIND_SERVICE is not available with --private-users=pick
+    (! systemd-nspawn --register=no --directory="$root" --private-users=pick capsh --has-p=cap_net_bind_service)
+
+    rm -fr "$root"
 }
 
 run_testcases

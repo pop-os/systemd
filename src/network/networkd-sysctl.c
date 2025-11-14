@@ -26,7 +26,7 @@
 #include "string-util.h"
 #include "sysctl-util.h"
 
-#if HAVE_VMLINUX_H
+#if ENABLE_SYSCTL_BPF
 
 #include "bpf-link.h"
 #include "bpf/sysctl-monitor/sysctl-monitor-skel.h"
@@ -376,6 +376,8 @@ static int link_set_ip_forwarding(Link *link, int family) {
          * re-apply per-link setting for all links. */
         if (FLAGS_SET(link->network->ip_masquerade, AF_TO_ADDRESS_FAMILY(family)) &&
             link->manager->ip_forwarding[family == AF_INET6] < 0) {
+
+                log_link_notice(link, "IPMasquerade= is enabled on the interface, enabling the global IPv6Forwarding= setting, which may affect NDisc and DHCPv6 client on other interfaces.");
 
                 link->manager->ip_forwarding[family == AF_INET6] = true;
                 manager_set_ip_forwarding(link->manager, family);

@@ -1353,10 +1353,10 @@ void unit_modify_nft_set(Unit *u, bool add) {
 
                 r = nft_set_element_modify_any(u->manager->fw_ctx, add, nft_set->nfproto, nft_set->table, nft_set->set, &element, sizeof(element));
                 if (r < 0)
-                        log_warning_errno(r, "Failed to %s NFT set: family %s, table %s, set %s, cgroup %" PRIu64 ", ignoring: %m",
+                        log_warning_errno(r, "Failed to %s NFT set entry: family %s, table %s, set %s, cgroup %" PRIu64 ", ignoring: %m",
                                           add? "add" : "delete", nfproto_to_string(nft_set->nfproto), nft_set->table, nft_set->set, crt->cgroup_id);
                 else
-                        log_debug("%s NFT set: family %s, table %s, set %s, cgroup %" PRIu64,
+                        log_debug("%s NFT set entry: family %s, table %s, set %s, cgroup %" PRIu64,
                                   add? "Added" : "Deleted", nfproto_to_string(nft_set->nfproto), nft_set->table, nft_set->set, crt->cgroup_id);
         }
 }
@@ -2087,9 +2087,6 @@ static int unit_update_cgroup(
 
         if (!UNIT_HAS_CGROUP_CONTEXT(u))
                 return 0;
-
-        if (u->freezer_state != FREEZER_RUNNING)
-                return log_unit_error_errno(u, SYNTHETIC_ERRNO(EBUSY), "Cannot realize cgroup for frozen unit.");
 
         r = unit_get_cgroup_path_with_fallback(u, &cgroup);
         if (r < 0)
@@ -4265,6 +4262,15 @@ int cgroup_runtime_serialize(Unit *u, FILE *f, FDSet *fds) {
         if (!crt)
                 return 0;
 
+        if (crt->cgroup_path)
+                (void) serialize_item(f, "cgroup", crt->cgroup_path);
+        if (crt->cgroup_id != 0)
+                (void) serialize_item_format(f, "cgroup-id", "%" PRIu64, crt->cgroup_id);
+
+        (void) serialize_cgroup_mask(f, "cgroup-realized-mask", crt->cgroup_realized_mask);
+        (void) serialize_cgroup_mask(f, "cgroup-enabled-mask", crt->cgroup_enabled_mask);
+        (void) serialize_cgroup_mask(f, "cgroup-invalidated-mask", crt->cgroup_invalidated_mask);
+
         (void) serialize_item_format(f, "cpu-usage-base", "%" PRIu64, crt->cpu_usage_base);
         if (crt->cpu_usage_last != NSEC_INFINITY)
                 (void) serialize_item_format(f, "cpu-usage-last", "%" PRIu64, crt->cpu_usage_last);
@@ -4298,15 +4304,6 @@ int cgroup_runtime_serialize(Unit *u, FILE *f, FDSet *fds) {
                         (void) serialize_item_format(f, io_accounting_metric_field_last_to_string(im), "%" PRIu64, crt->io_accounting_last[im]);
         }
 
-        if (crt->cgroup_path)
-                (void) serialize_item(f, "cgroup", crt->cgroup_path);
-        if (crt->cgroup_id != 0)
-                (void) serialize_item_format(f, "cgroup-id", "%" PRIu64, crt->cgroup_id);
-
-        (void) serialize_cgroup_mask(f, "cgroup-realized-mask", crt->cgroup_realized_mask);
-        (void) serialize_cgroup_mask(f, "cgroup-enabled-mask", crt->cgroup_enabled_mask);
-        (void) serialize_cgroup_mask(f, "cgroup-invalidated-mask", crt->cgroup_invalidated_mask);
-
         (void) bpf_socket_bind_serialize(u, f, fds);
 
         (void) bpf_program_serialize_attachment(f, fds, "ip-bpf-ingress-installed", crt->ip_bpf_ingress_installed);
@@ -4333,7 +4330,7 @@ int cgroup_runtime_serialize(Unit *u, FILE *f, FDSet *fds) {
                                         log_unit_debug_errno(u, _deserialize_r, \
                                                              "Failed to parse \"%s=%s\", ignoring.", l, v); \
                                 else                                    \
-                                        crt->target = _deserialize_r; \
+                                        crt->target = _deserialize_r;   \
                         }                                               \
                 }                                                       \
                 _deserialize_matched;                                   \
@@ -4356,7 +4353,7 @@ int cgroup_runtime_serialize(Unit *u, FILE *f, FDSet *fds) {
                 _deserialize_matched;                                   \
         })
 
-#define MATCH_DESERIALIZE_METRIC(u, key, l, v, parse_func, target)             \
+#define MATCH_DESERIALIZE_METRIC(u, key, l, v, parse_func, target)      \
         ({                                                              \
                 bool _deserialize_matched = streq(l, key);              \
                 if (_deserialize_matched) {                             \
@@ -4369,7 +4366,7 @@ int cgroup_runtime_serialize(Unit *u, FILE *f, FDSet *fds) {
                                         log_unit_debug_errno(u, _deserialize_r, \
                                                              "Failed to parse \"%s=%s\", ignoring.", l, v); \
                                 else                                    \
-                                        crt->target = _deserialize_r; \
+                                        crt->target = _deserialize_r;   \
                         }                                               \
                 }                                                       \
                 _deserialize_matched;                                   \

@@ -16,8 +16,8 @@
 #include "log.h"
 #include "namespace-util.h"
 #include "parse-util.h"
-#include "pidref.h"
 #include "process-util.h"
+#include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -475,6 +475,13 @@ Virtualization detect_vm(void) {
                    VIRTUALIZATION_ORACLE,
                    VIRTUALIZATION_XEN,
                    VIRTUALIZATION_AMAZON,
+                   /* Unable to distinguish a GCE machine from a VM to bare-metal
+                    * for non-x86 architectures due to its necessity for cpuid
+                    * detection, which functions solely on x86 platforms. Report
+                    * as a VM for other architectures. */
+#if !defined(__i386__) && !defined(__x86_64__)
+                   VIRTUALIZATION_GOOGLE,
+#endif
                    VIRTUALIZATION_PARALLELS)) {
                 v = dmi;
                 goto finish;
@@ -809,16 +816,19 @@ int running_in_chroot(void) {
         if (getenv_bool("SYSTEMD_IGNORE_CHROOT") > 0)
                 return 0;
 
-        r = pidref_from_same_root_fs(&PIDREF_MAKE_FROM_PID(1), NULL);
-        if (r == -ENOSYS) {
-                if (getpid_cached() == 1)
-                        return false; /* We will mount /proc, assuming we're not in a chroot. */
+        r = inode_same("/proc/1/root", "/", /* flags = */ 0);
+        if (r == -ENOENT) {
+                r = proc_mounted();
+                if (r == 0) {
+                        if (getpid_cached() == 1)
+                                return false; /* We will mount /proc, assuming we're not in a chroot. */
 
-                log_debug("/proc/ is not mounted, assuming we're in a chroot.");
-                return true;
+                        log_debug("/proc/ is not mounted, assuming we're in a chroot.");
+                        return true;
+                }
+                if (r > 0) /* If we have fake /proc/, we can't do the check properly. */
+                        return -ENOSYS;
         }
-        if (r == -ESRCH) /* We must have a fake /proc/, we can't do the check properly. */
-                return -ENOSYS;
         if (r < 0)
                 return r;
 

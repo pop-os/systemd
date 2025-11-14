@@ -81,10 +81,10 @@ valgrind_cmd = ''
 enable_debug = True
 env = {}
 wait_online_env = {}
-asan_options = None
-lsan_options = None
-ubsan_options = None
-with_coverage = False
+asan_options = os.getenv('ASAN_OPTIONS')
+lsan_options = os.getenv('LSAN_OPTIONS')
+ubsan_options = os.getenv('UBSAN_OPTIONS')
+with_coverage = os.getenv('COVERAGE_BUILD_DIR') != None
 show_journal = True # When true, show journal on stopping networkd.
 
 active_units = []
@@ -427,6 +427,8 @@ def save_active_units():
             'systemd-networkd.socket',
             'systemd-networkd-varlink.socket',
             'systemd-networkd.service',
+            'systemd-resolved-monitor.socket',
+            'systemd-resolved-varlink.socket',
             'systemd-resolved.service',
             'systemd-timesyncd.service',
             'firewalld.service'
@@ -436,18 +438,30 @@ def save_active_units():
             active_units.append(u)
 
 def restore_active_units():
-    has_socket = False
+    has_network_socket = False
+    has_resolve_socket = False
 
     if 'systemd-networkd.socket' in active_units:
         call('systemctl stop systemd-networkd.socket')
-        has_socket = True
+        has_network_socket = True
 
     if 'systemd-networkd-varlink.socket' in active_units:
         call('systemctl stop systemd-networkd-varlink.socket')
-        has_socket = True
+        has_network_socket = True
 
-    if has_socket:
+    if 'systemd-resolved-monitor.socket' in active_units:
+        call('systemctl stop systemd-resolved-monitor.socket')
+        has_resolve_socket = True
+
+    if 'systemd-resolved-varlink.socket' in active_units:
+        call('systemctl stop systemd-resolved-varlink.socket')
+        has_resolve_socket = True
+
+    if has_network_socket:
         call('systemctl stop systemd-networkd.service')
+
+    if has_resolve_socket:
+        call('systemctl stop systemd-resolved.service')
 
     for u in active_units:
         call(f'systemctl restart {u}')
@@ -473,7 +487,19 @@ def create_service_dropin(service, command, additional_settings=None):
     if ubsan_options:
         drop_in += [f'Environment=UBSAN_OPTIONS="{ubsan_options}"']
     if asan_options or lsan_options or ubsan_options:
-        drop_in += ['SystemCallFilter=']
+        # Disable system call filter when running with sanitizers, as they seem to call filtered syscall at
+        # the very end of the execution and stuck the process. See issue #39567.
+        drop_in += [
+            'LockPersonality=no',
+            'ProtectClock=no',
+            'ProtectKernelLogs=no',
+            'RestrictAddressFamilies=',
+            'RestrictNamespaces=no',
+            'RestrictRealtime=no',
+            'RestrictSUIDSGID=no',
+            'SystemCallArchitectures=',
+            'SystemCallFilter=',
+        ]
     if use_valgrind or asan_options or lsan_options or ubsan_options:
         drop_in += ['MemoryDenyWriteExecute=no']
     if use_valgrind:

@@ -115,6 +115,7 @@ shared_sources = files(
         'libmount-util.c',
         'local-addresses.c',
         'locale-setup.c',
+        'log-assert-critical.c',
         'logs-show.c',
         'loop-util.c',
         'loopback-setup.c',
@@ -226,6 +227,10 @@ shared_sources = files(
         'wifi-util.c',
         'xml.c',
 )
+
+if conf.get('ENABLE_NSS') == 1
+        shared_sources += files('nss-util.c')
+endif
 
 if get_option('tests') != 'false'
         shared_sources += files('tests.c')

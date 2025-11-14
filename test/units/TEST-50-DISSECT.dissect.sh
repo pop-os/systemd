@@ -17,9 +17,9 @@ systemd-dissect "$MINIMAL_IMAGE.raw" | grep -q -F -f <(sed 's/"//g' "$OS_RELEASE
 
 systemd-dissect --list "$MINIMAL_IMAGE.raw" | grep -q '^etc/os-release$'
 systemd-dissect --mtree "$MINIMAL_IMAGE.raw" --mtree-hash yes | \
-    grep -qe "^./usr/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]* sha256sum=[a-z0-9]*$"
+    grep -qE "^.(/usr|)/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]* sha256sum=[a-z0-9]*$"
 systemd-dissect --mtree "$MINIMAL_IMAGE.raw" --mtree-hash no  | \
-    grep -qe "^./usr/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]*$"
+    grep -qE "^.(/usr|)/bin/cat type=file mode=0755 uid=0 gid=0 size=[0-9]*$"
 
 read -r SHA256SUM1 _ < <(systemd-dissect --copy-from "$MINIMAL_IMAGE.raw" etc/os-release | sha256sum)
 test "$SHA256SUM1" != ""
@@ -70,6 +70,10 @@ verity_count=$(find /dev/mapper/ -name "*verity*" | wc -l)
 if [[ "$verity_count" -lt 1 ]]; then
     echo "Verity device $MINIMAL_IMAGE.raw not found in /dev/mapper/"
     exit 1
+fi
+# Ensure the kernel is verifying the signature if the mkosi key is in the keyring
+if [ "$VERITY_SIG_SUPPORTED" -eq 1 ]; then
+    veritysetup status "$(cat "$MINIMAL_IMAGE.roothash")-verity" | grep -q "verified (with signature)"
 fi
 systemd-dissect --umount "$IMAGE_DIR/mount"
 systemd-dissect --umount "$IMAGE_DIR/mount2"
@@ -355,7 +359,7 @@ systemctl start testservice-50d.service
 
 # Mount twice to exercise mount-beneath (on kernel 6.5+, on older kernels it will just overmount)
 mkdir -p /tmp/wrong/foo
-mksquashfs /tmp/wrong/foo /tmp/wrong.raw
+mksquashfs /tmp/wrong/foo /tmp/wrong.raw -noappend
 systemctl mount-image --mkdir testservice-50d.service /tmp/wrong.raw /tmp/img
 test "$(systemctl show -P SubState testservice-50d.service)" = "running"
 systemctl mount-image --mkdir testservice-50d.service "$MINIMAL_IMAGE.raw" /tmp/img root:nosuid
@@ -456,8 +460,8 @@ RootImage=$MINIMAL_IMAGE.raw
 ExtensionImages=/tmp/app0.raw /tmp/app1.raw:nosuid
 # Relevant only for sanitizer runs
 UnsetEnvironment=LD_PRELOAD
-ExecStart=bash -c '/opt/script0.sh | grep ID'
-ExecStart=bash -c '/opt/script1.sh | grep ID'
+ExecStart=bash -o pipefail -c '/opt/script0.sh | grep ID'
+ExecStart=bash -o pipefail -c '/opt/script1.sh | grep ID'
 Type=oneshot
 RemainAfterExit=yes
 EOF
@@ -474,7 +478,7 @@ mkdir "$VDIR" "$EMPTY_VDIR"
 ln -s /tmp/app0.raw "$VDIR/${VBASE}_0.raw"
 ln -s /tmp/app1.raw "$VDIR/${VBASE}_1.raw"
 
-systemd-run -P -p ExtensionImages="$VDIR -$EMPTY_VDIR -$NONEXISTENT_VDIR" bash -c '/opt/script1.sh | grep ID'
+systemd-run -P -p ExtensionImages="$VDIR -$EMPTY_VDIR -$NONEXISTENT_VDIR" bash -o pipefail -c '/opt/script1.sh | grep ID'
 
 rm -rf "$VDIR" "$EMPTY_VDIR"
 
@@ -571,7 +575,7 @@ EnvironmentFile=-/usr/lib/systemd/systemd-asan-env
 PrivateTmp=disconnected
 BindPaths=/tmp/markers/
 ExtensionDirectories=-${VDIR}
-ExecStart=bash -x -c ' \\
+ExecStart=bash -o pipefail -x -c ' \\
     trap "{ \\
         systemd-notify --reloading; \\
         (ls /etc | grep marker || echo no-marker) >/tmp/markers/50g; \\
@@ -612,7 +616,7 @@ EnvironmentFile=-/usr/lib/systemd/systemd-asan-env
 PrivateTmp=disconnected
 BindPaths=/tmp/markers/
 ExtensionImages=-$VDIR2
-ExecStart=bash -x -c ' \\
+ExecStart=bash -o pipefail -x -c ' \\
     trap "{ \\
         systemd-notify --reloading; \\
         (ls /etc | grep marker || echo no-marker) >/tmp/markers/50h; \\
@@ -622,14 +626,14 @@ ExecStart=bash -x -c ' \\
     while true; do sleep 1; done; \\
 '
 EOF
-mksquashfs "$VDIR/${VBASE}_1" "$VDIR2/${VBASE}_1.raw"
+mksquashfs "$VDIR/${VBASE}_1" "$VDIR2/${VBASE}_1.raw" -noappend
 systemctl start testservice-50h.service
 systemctl is-active testservice-50h.service
 # First reload should pick up the v1 marker
 systemctl reload testservice-50h.service
 grep -q -F "${VBASE}_1.marker" /tmp/markers/50h
 # Second reload should pick up the v2 marker
-mksquashfs "$VDIR/${VBASE}_2" "$VDIR2/${VBASE}_2.raw"
+mksquashfs "$VDIR/${VBASE}_2" "$VDIR2/${VBASE}_2.raw" -noappend
 systemctl reload testservice-50h.service
 grep -q -F "${VBASE}_2.marker" /tmp/markers/50h
 # Test that removing all the extensions don't cause any issues
@@ -650,10 +654,10 @@ BindPaths=/tmp/markers/
 RootImage=$MINIMAL_IMAGE.raw
 ExtensionDirectories=-${VDIR}
 NotifyAccess=all
-ExecStart=bash -x -c ' \
+ExecStart=bash -x -o pipefail -c ' \
     trap '"'"' \
         now=\$\$(grep "^now" /proc/timer_list | cut -d" " -f3 | rev | cut -c 4- | rev); \
-        printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
+        stdbuf -o1K printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
         (ls /etc | grep marker) >/tmp/markers/50i; \
         (cat /usr/lib/os-release) >>/tmp/markers/50i; \
         echo "READY=1" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
@@ -685,10 +689,10 @@ BindPaths=/tmp/markers/
 RootDirectory=/tmp/vpickminimg
 ExtensionDirectories=-${VDIR}
 NotifyAccess=all
-ExecStart=bash -x -c ' \
+ExecStart=bash -x -o pipefail -c ' \
     trap '"'"' \
         now=\$\$(grep "^now" /proc/timer_list | cut -d" " -f3 | rev | cut -c 4- | rev); \
-        printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
+        stdbuf -o1K printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
         (ls /etc | grep marker) >/tmp/markers/50j; \
         (cat /usr/lib/os-release) >>/tmp/markers/50j; \
         echo "READY=1" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
@@ -715,10 +719,10 @@ RootImage=$MINIMAL_IMAGE.raw
 ExtensionImages=-$VDIR2 /tmp/app0.raw
 PrivateUsers=yes
 NotifyAccess=all
-ExecStart=bash -x -c ' \
+ExecStart=bash -x -o pipefail -c ' \
     trap '"'"' \
         now=\$\$(grep "^now" /proc/timer_list | cut -d" " -f3 | rev | cut -c 4- | rev); \
-        printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
+        stdbuf -o1K printf "RELOADING=1\\nMONOTONIC_USEC=\$\${now}\\n" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
         (ls /etc | grep marker) >/tmp/markers/50k; \
         (cat /usr/lib/os-release) >>/tmp/markers/50k; \
         echo "READY=1" | socat -t 5 - UNIX-SENDTO:\$\$NOTIFY_SOCKET; \
@@ -729,12 +733,16 @@ ExecStart=bash -x -c ' \
 EOF
 systemctl start testservice-50k.service
 systemctl is-active testservice-50k.service
+# Ensure the kernel is verifying the signature if the mkosi key is in the keyring
+if [ "$VERITY_SIG_SUPPORTED" -eq 1 ]; then
+    veritysetup status "$(cat "$MINIMAL_IMAGE.roothash")-verity" | grep -q "verified (with signature)"
+fi
 # First reload should pick up the v1 marker
-mksquashfs "$VDIR/${VBASE}_1" "$VDIR2/${VBASE}_1.raw"
+mksquashfs "$VDIR/${VBASE}_1" "$VDIR2/${VBASE}_1.raw" -noappend
 systemctl reload testservice-50k.service
 grep -q -F "${VBASE}_1.marker" /tmp/markers/50k
 # Second reload should pick up the v2 marker
-mksquashfs "$VDIR/${VBASE}_2" "$VDIR2/${VBASE}_2.raw"
+mksquashfs "$VDIR/${VBASE}_2" "$VDIR2/${VBASE}_2.raw" -noappend
 systemctl reload testservice-50k.service
 grep -q -F "${VBASE}_2.marker" /tmp/markers/50k
 # Test that removing all the extensions don't cause any issues
@@ -751,6 +759,8 @@ rm -rf "$VDIR" "$VDIR2" /tmp/vpickminimg /tmp/markers/
 # Test that an extension consisting of an empty directory under /etc/extensions/ takes precedence
 mkdir -p /var/lib/extensions/
 ln -s /tmp/app-nodistro.raw /var/lib/extensions/app-nodistro.raw
+systemd-sysext status
+systemd-sysext list
 systemd-sysext merge
 grep -q -F "MARKER=1" /usr/lib/systemd/system/some_file
 systemd-sysext unmerge
@@ -857,7 +867,7 @@ echo "ID=_any" >/run/confexts/test/etc/extension-release.d/extension-release.tes
 echo "ARCHITECTURE=_any" >>/run/confexts/test/etc/extension-release.d/extension-release.test
 echo "MARKER_CONFEXT_123" >/run/confexts/test/etc/testfile
 cat <<EOF >/run/confexts/test/etc/testscript
-#!/bin/bash
+#!/usr/bin/env bash
 echo "This should not happen"
 EOF
 chmod +x /run/confexts/test/etc/testscript
@@ -895,7 +905,7 @@ mkdir -p /run/extensions/ testkit/usr/lib/extension-release.d/
 echo "ID=_any" >testkit/usr/lib/extension-release.d/extension-release.testkit
 echo "ARCHITECTURE=_any" >>testkit/usr/lib/extension-release.d/extension-release.testkit
 echo "MARKER_SYSEXT_123" >testkit/usr/lib/testfile
-mksquashfs testkit/ testkit.raw
+mksquashfs testkit/ testkit.raw -noappend
 cp testkit.raw /run/extensions/
 unsquashfs -l /run/extensions/testkit.raw
 systemd-dissect --no-pager /run/extensions/testkit.raw | grep -q '✓ sysext for portable service'
@@ -911,7 +921,7 @@ mkdir -p /run/confexts/ testjob/etc/extension-release.d/
 echo "ID=_any" >testjob/etc/extension-release.d/extension-release.testjob
 echo "ARCHITECTURE=_any" >>testjob/etc/extension-release.d/extension-release.testjob
 echo "MARKER_CONFEXT_123" >testjob/etc/testfile
-mksquashfs testjob/ testjob.raw
+mksquashfs testjob/ testjob.raw -noappend
 cp testjob.raw /run/confexts/
 unsquashfs -l /run/confexts/testjob.raw
 systemd-dissect --no-pager /run/confexts/testjob.raw | grep -q '✓ confext for system'

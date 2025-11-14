@@ -4405,8 +4405,6 @@ int verity_dissect_and_mount(
                 _cleanup_strv_free_ char **extension_release = NULL;
                 ImageClass class = IMAGE_SYSEXT;
 
-                assert(!isempty(extension_release_data->os_release_id));
-
                 r = load_extension_release_pairs(dest, required_class >= 0 ? required_class : IMAGE_SYSEXT, dissected_image->image_name, relax_extension_release_check, &extension_release);
                 if (r == -ENOENT) {
                         if (required_class >= 0)
@@ -4713,12 +4711,12 @@ int mountfsd_mount_directory(
 
         r = sd_varlink_push_dup_fd(vl, directory_fd);
         if (r < 0)
-                return log_error_errno(r, "Failed to push image fd into varlink connection: %m");
+                return log_error_errno(r, "Failed to push directory fd into varlink connection: %m");
 
         if (userns_fd >= 0) {
                 r = sd_varlink_push_dup_fd(vl, userns_fd);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to push image fd into varlink connection: %m");
+                        return log_error_errno(r, "Failed to push user namespace fd into varlink connection: %m");
         }
 
         sd_json_variant *reply = NULL;

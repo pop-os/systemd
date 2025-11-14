@@ -79,7 +79,7 @@ typedef enum LoaderType {
 #define LOADER_TYPE_PROCESS_RANDOM_SEED(t) IN_SET(t, LOADER_LINUX, LOADER_UKI, LOADER_TYPE2_UKI)
 
 /* Whether to persistently save the selected entry in an EFI variable, if that's requested. */
-#define LOADER_TYPE_SAVE_ENTRY(t) IN_SET(t, LOADER_EFI, LOADER_LINUX, LOADER_UKI, LOADER_UKI_URL, LOADER_TYPE2_UKI)
+#define LOADER_TYPE_SAVE_ENTRY(t) IN_SET(t, LOADER_AUTO, LOADER_EFI, LOADER_LINUX, LOADER_UKI, LOADER_UKI_URL, LOADER_TYPE2_UKI)
 
 typedef enum {
         REBOOT_NO,
@@ -1165,6 +1165,10 @@ static void boot_entry_parse_tries(
         if (!strcaseeq16(counter, suffix))
                 return;
 
+        entry->id = xasprintf("%.*ls%ls",
+                        (int) prefix_len - 1,
+                        file,
+                        suffix);
         entry->tries_left = tries_left;
         entry->tries_done = tries_done;
         entry->path = xstrdup16(path);
@@ -1395,7 +1399,9 @@ static void boot_entry_add_type1(
         }
 
         entry->device = device;
-        entry->id = xstrdup16(file);
+
+        if (!entry->id)
+                entry->id = xstrdup16(file);
         strtolower16(entry->id);
 
         config_add_entry(config, entry);

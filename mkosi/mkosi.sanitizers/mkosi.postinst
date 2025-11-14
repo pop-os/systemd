@@ -62,6 +62,7 @@ wrap=(
     findmnt
     getent
     getfacl
+    groups
     id
     integritysetup
     iscsid
@@ -89,6 +90,7 @@ wrap=(
     socat
     sshd
     stat
+    stress-ng
     su
     tar
     tgtd
