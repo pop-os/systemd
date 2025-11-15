@@ -265,6 +265,7 @@ usr/lib/systemd/system/swap.target
 usr/lib/systemd/system/sys-fs-fuse-connections.mount
 usr/lib/systemd/system/sysinit.target
 usr/lib/systemd/system/sysinit.target.wants/systemd-hibernate-clear.service
+[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrnvdone.service
 [amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrproduct.service
 usr/lib/systemd/system/sysinit.target.wants/dev-hugepages.mount
 usr/lib/systemd/system/sysinit.target.wants/dev-mqueue.mount
@@ -374,6 +375,7 @@ usr/lib/systemd/system/systemd-network-generator.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-storage-target-mode.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-sysinit.service
+[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/systemd-pcrnvdone.service
 [amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/systemd-pcrproduct.service
 usr/lib/systemd/system/systemd-poweroff.service
 usr/lib/systemd/system/systemd-pstore.service
