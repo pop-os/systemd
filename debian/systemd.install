@@ -169,7 +169,7 @@ usr/lib/systemd/system-generators/systemd-rc-local-generator
 usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
-usr/lib/systemd/system-generators/systemd-sysv-generator
+<!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-sysv-generator
 <!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-tpm2-generator
 [amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
 usr/lib/systemd/system/breakpoint-pre-basic.service
@@ -558,7 +558,7 @@ usr/share/zsh/vendor-completions/_varlinkctl
 var/lib/systemd/
 ../extra/init-functions.d usr/lib/lsb/
 ../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
-../extra/systemd-sysv-install usr/lib/systemd/
+<!pkg.systemd.upstream> ../extra/systemd-sysv-install usr/lib/systemd/
 ../extra/kernel-install.d/* usr/lib/kernel/install.d/
 ../extra/pam.d/* usr/lib/pam.d/
 ../extra/journald.conf.d usr/lib/systemd/
