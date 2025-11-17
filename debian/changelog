@@ -1,3 +1,37 @@
+systemd (259~rc1-1) unstable; urgency=medium
+
+  [ Nick Rosbrook ]
+  * kernel-install: skip 55-initrd.install when an initrd generator is
+    configured. This provides a way to avoid conflicts with initrd
+    generators using kernel-install like dracut. E.g., dracut can now:  1.
+    Ship /usr/lib/kernel/install.conf.d/50-dracut.conf with at least
+    initrd_generator=dracut  2. Skip its own scripts unless
+    $KERNEL_INSTALL_INITRD_GENERATOR=dracut (Closes: #1117563)
+  * d/t/boot-and-services: tweak test_rsyslog regex
+  * d/t/boot-and-services: run transient unit to check syslog messages
+  * d/t/boot-and-services: skip apparmor test on armhf
+  * d/rules: enable 10-systemd-logind-root-ignore-inhibitors.rules.example
+    on Ubuntu
+  * kernel-install: skip 55-initrd.install when an initrd is already
+    staged. Unfortunately, dracut upstream does not think it makes sense
+    to ship an install.conf.d drop-in to set initrd_generator=dracut, so
+    we need to cope with situations where an initrd is already present in
+    the staging area. See https://github.com/dracut-ng/dracut-ng/pull/1812
+    (Closes: #1117563)
+
+  [ Luca Boccassi ]
+  * Update upstream source from tag 'upstream/259_rc1' Update to upstream
+    version '259~rc1' with Debian dir
+    ffbb3991599b616b38161a464c0428f8aec93869
+  * Drop patches, all merged upstream
+  * Install new files for v259~rc1
+  * Update symbols file for v259~rc1
+
+  [ Frank Heimes ]
+  * initramfs-tools: only skip chzdev rules if zdev_early=0
+
+ -- Luca Boccassi <bluca@debian.org>  Mon, 17 Nov 2025 18:55:33 +0000
+
 systemd (258.1-2) unstable; urgency=medium
 
   [ Luca Boccassi ]
