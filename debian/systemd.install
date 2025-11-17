@@ -42,7 +42,7 @@ usr/bin/systemd-id128
 usr/bin/systemd-inhibit
 usr/bin/systemd-machine-id-setup
 usr/bin/systemd-mount
-<pkg.systemd.upstream> usr/bin/systemd-mute-console
+usr/bin/systemd-mute-console
 usr/bin/systemd-notify
 usr/bin/systemd-path
 usr/bin/systemd-pty-forward
@@ -64,7 +64,7 @@ usr/lib/kernel/install.d/50-depmod.install
 usr/lib/kernel/install.d/90-loaderentry.install
 usr/lib/kernel/install.d/90-uki-copy.install
 usr/lib/modprobe.d/systemd.conf
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/nvpcr/hardware.nvpcr
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/nvpcr/hardware.nvpcr
 <!stage1> usr/lib/pcrlock.d/
 [alpha amd64 arm64 ia64 loong64 mips64el ppc64 ppc64el riscv64 loong64 s390x sparc64] usr/lib/sysctl.d/50-pid-max.conf
 usr/lib/systemd/catalog/
@@ -170,8 +170,7 @@ usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
 <!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-sysv-generator
-<!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-tpm2-generator
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
 usr/lib/systemd/system/breakpoint-pre-basic.service
 usr/lib/systemd/system/breakpoint-pre-mount.service
 usr/lib/systemd/system/breakpoint-pre-switch-root.service
@@ -250,7 +249,7 @@ usr/lib/systemd/system/sockets.target.wants/systemd-hostnamed.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald-dev-log.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-journald.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-logind-varlink.socket
-<pkg.systemd.upstream> usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
+usr/lib/systemd/system/sockets.target.wants/systemd-mute-console.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrextend.socket
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sockets.target.wants/systemd-pcrlock.socket
 usr/lib/systemd/system/sockets.target.wants/systemd-sysext.socket
@@ -265,8 +264,8 @@ usr/lib/systemd/system/swap.target
 usr/lib/systemd/system/sys-fs-fuse-connections.mount
 usr/lib/systemd/system/sysinit.target
 usr/lib/systemd/system/sysinit.target.wants/systemd-hibernate-clear.service
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrnvdone.service
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrproduct.service
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrnvdone.service
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrproduct.service
 usr/lib/systemd/system/sysinit.target.wants/dev-hugepages.mount
 usr/lib/systemd/system/sysinit.target.wants/dev-mqueue.mount
 usr/lib/systemd/system/sysinit.target.wants/kmod-static-nodes.service
@@ -351,8 +350,8 @@ usr/lib/systemd/system/systemd-logind-varlink.socket
 usr/lib/systemd/system/systemd-loop@.service
 usr/lib/systemd/system/systemd-machine-id-commit.service
 usr/lib/systemd/system/systemd-modules-load.service
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-mute-console.socket
-<pkg.systemd.upstream> usr/lib/systemd/system/systemd-mute-console@.service
+usr/lib/systemd/system/systemd-mute-console.socket
+usr/lib/systemd/system/systemd-mute-console@.service
 usr/lib/systemd/system/systemd-networkd*.service
 usr/lib/systemd/system/systemd-networkd*.socket
 usr/lib/systemd/system/systemd-network-generator.service
@@ -375,8 +374,8 @@ usr/lib/systemd/system/systemd-network-generator.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-storage-target-mode.service
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrphase-sysinit.service
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/systemd-pcrnvdone.service
-[amd64 i386 arm64 armhf riscv64 loong64] <pkg.systemd.upstream !stage1> usr/lib/systemd/system/systemd-pcrproduct.service
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrnvdone.service
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/systemd-pcrproduct.service
 usr/lib/systemd/system/systemd-poweroff.service
 usr/lib/systemd/system/systemd-pstore.service
 usr/lib/systemd/system/systemd-quotacheck*.service
@@ -408,7 +407,7 @@ usr/lib/systemd/system/systemd-update-done.service
 usr/lib/systemd/system/systemd-user-sessions.service
 usr/lib/systemd/system/systemd-validatefs@.service
 usr/lib/systemd/system/systemd-volatile-root.service
-<pkg.systemd.upstream> usr/lib/systemd/system/system-systemd\x2dmute\x2dconsole.slice
+usr/lib/systemd/system/system-systemd\x2dmute\x2dconsole.slice
 usr/lib/systemd/system/system-update-cleanup.service
 usr/lib/systemd/system/system-update-pre.target
 usr/lib/systemd/system/system-update.target
@@ -529,7 +528,7 @@ usr/share/polkit-1/actions/org.freedesktop.systemd1.policy
 usr/share/polkit-1/actions/org.freedesktop.timedate1.policy
 usr/share/polkit-1/actions/org.freedesktop.timesync1.policy
 usr/share/polkit-1/rules.d/10-systemd-logind-root-ignore-inhibitors.rules.example
-<pkg.systemd.upstream> usr/share/polkit-1/rules.d/empower.rules
+usr/share/polkit-1/rules.d/empower.rules
 usr/share/polkit-1/rules.d/systemd-networkd.rules
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
@@ -541,7 +540,7 @@ usr/share/zsh/vendor-completions/_localectl
 usr/share/zsh/vendor-completions/_loginctl
 usr/share/zsh/vendor-completions/_networkctl
 usr/share/zsh/vendor-completions/_run0
-<pkg.systemd.upstream> usr/share/zsh/vendor-completions/_sd_bus_address
+usr/share/zsh/vendor-completions/_sd_bus_address
 usr/share/zsh/vendor-completions/_sd_hosts_or_user_at_host
 usr/share/zsh/vendor-completions/_sd_outputmodes
 usr/share/zsh/vendor-completions/_sd_unit_files
