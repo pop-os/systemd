@@ -4,7 +4,6 @@
 
 #include "constants.h"
 #include "errno-util.h"
-#include "json-util.h"
 #include "manager.h"
 #include "path-util.h"
 #include "pidref.h"
@@ -385,6 +384,8 @@ int manager_setup_varlink_server(Manager *m) {
         r = sd_varlink_server_bind_method_many(
                         s,
                         "io.systemd.Manager.Describe", vl_method_describe_manager,
+                        "io.systemd.Manager.Reexecute", vl_method_reexecute_manager,
+                        "io.systemd.Manager.Reload", vl_method_reload_manager,
                         "io.systemd.Unit.List", vl_method_list_units,
                         "io.systemd.service.Ping", varlink_method_ping,
                         "io.systemd.service.GetEnvironment", varlink_method_get_environment);
@@ -426,9 +427,6 @@ static int manager_varlink_init_system(Manager *m) {
 
         assert(m);
 
-        if (!MANAGER_IS_SYSTEM(m))
-                return 0;
-
         r = manager_setup_varlink_server(m);
         if (r < 0)
                 return log_error_errno(r, "Failed to set up varlink server: %m");
@@ -456,9 +454,6 @@ static int manager_varlink_init_user(Manager *m) {
         int r;
 
         assert(m);
-
-        if (!MANAGER_IS_USER(m))
-                return 0;
 
         if (MANAGER_IS_TEST_RUN(m))
                 return 0;
@@ -501,4 +496,19 @@ void manager_varlink_done(Manager *m) {
 
         m->varlink_server = sd_varlink_server_unref(m->varlink_server);
         m->managed_oom_varlink = sd_varlink_close_unref(m->managed_oom_varlink);
+}
+
+void manager_varlink_send_pending_reload_message(Manager *m) {
+        int r;
+
+        assert(m);
+
+        if (!m->pending_reload_message_vl)
+                return;
+
+        r = sd_varlink_reply(m->pending_reload_message_vl, /* parameters= */ NULL);
+        if (r < 0)
+                log_warning_errno(r, "Failed to send queued reload message, ignoring: %m");
+
+        m->pending_reload_message_vl = sd_varlink_unref(m->pending_reload_message_vl);
 }

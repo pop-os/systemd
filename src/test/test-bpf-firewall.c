@@ -9,7 +9,6 @@
 #include "in-addr-prefix-util.h"
 #include "load-fragment.h"
 #include "manager.h"
-#include "memory-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
 #include "service.h"
@@ -50,10 +49,9 @@ int main(int argc, char *argv[]) {
         if (!can_memlock())
                 return log_tests_skipped("Can't use mlock()");
 
-        _cleanup_free_ char *cgroup_path = NULL;
-        r = enter_cgroup_subroot(&cgroup_path);
+        r = enter_cgroup_subroot(NULL);
         if (r == -ENOMEDIUM)
-                return log_tests_skipped("cgroupfs not available");
+                return log_tests_skipped("cgroupfs v2 is not mounted");
 
         r = find_executable("ping", NULL);
         if (r < 0)

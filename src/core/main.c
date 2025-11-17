@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/oom.h>
+#include <linux/vt.h>
 #include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
@@ -255,6 +256,22 @@ static int console_setup(void) {
         return 0;
 }
 
+static int parse_timeout(const char *value, usec_t *ret) {
+        int r = 0;
+
+        assert(value);
+        assert(ret);
+
+        if (streq(value, "default"))
+                *ret = USEC_INFINITY;
+        else if (streq(value, "off"))
+                *ret = 0;
+        else
+                r = parse_sec(value, ret);
+
+        return r;
+}
+
 static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
         int r;
 
@@ -456,16 +473,10 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (streq(value, "default"))
-                        arg_runtime_watchdog = USEC_INFINITY;
-                else if (streq(value, "off"))
-                        arg_runtime_watchdog = 0;
-                else {
-                        r = parse_sec(value, &arg_runtime_watchdog);
-                        if (r < 0) {
-                                log_warning_errno(r, "Failed to parse systemd.watchdog_sec= argument '%s', ignoring: %m", value);
-                                return 0;
-                        }
+                r = parse_timeout(value, &arg_runtime_watchdog);
+                if (r < 0) {
+                        log_warning_errno(r, "Failed to parse systemd.watchdog_sec= argument '%s', ignoring: %m", value);
+                        return 0;
                 }
 
                 arg_kexec_watchdog = arg_reboot_watchdog = arg_runtime_watchdog;
@@ -475,16 +486,10 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (streq(value, "default"))
-                        arg_pretimeout_watchdog = USEC_INFINITY;
-                else if (streq(value, "off"))
-                        arg_pretimeout_watchdog = 0;
-                else {
-                        r = parse_sec(value, &arg_pretimeout_watchdog);
-                        if (r < 0) {
-                                log_warning_errno(r, "Failed to parse systemd.watchdog_pre_sec= argument '%s', ignoring: %m", value);
-                                return 0;
-                        }
+                r = parse_timeout(value, &arg_pretimeout_watchdog);
+                if (r < 0) {
+                        log_warning_errno(r, "Failed to parse systemd.watchdog_pre_sec= argument '%s', ignoring: %m", value);
+                        return 0;
                 }
 
         } else if (proc_cmdline_key_streq(key, "systemd.watchdog_pretimeout_governor")) {
@@ -1927,6 +1932,32 @@ static void finish_remaining_processes(ManagerObjective objective) {
                 broadcast_signal(SIGKILL, /* wait_for_exit= */ false, /* send_sighup= */ false, arg_defaults.timeout_stop_usec);
 }
 
+static void reduce_vt(ManagerObjective objective) {
+        int r;
+
+        if (objective != MANAGER_SOFT_REBOOT)
+                return;
+
+        /* Switches back to VT 1, and releases all other VTs, in an attempt to return to a situation similar
+         * to how it was during the original kernel initialization. This is important because if some random
+         * TTY is in foreground, /dev/console will end up pointing to it, where the future init system will
+         * then write its status output to, but where it probably shouldn't be writing to. */
+
+        r = chvt(1);
+        if (r < 0)
+                log_debug_errno(r, "Failed to switch to VT TTY 1, ignoring: %m");
+
+        _cleanup_close_ int tty0_fd = open_terminal("/dev/tty0", O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
+        if (tty0_fd < 0)
+                return (void) log_debug_errno(tty0_fd, "Failed to open '/dev/tty0', ignoring: %m");
+
+        for (int ttynr = 2; ttynr <= VTNR_MAX; ttynr++)
+                if (ioctl(tty0_fd, VT_DISALLOCATE, ttynr) < 0)
+                        log_debug_errno(errno, "Failed to disallocate VT TTY %i, ignoring: %m", ttynr);
+                else
+                        log_debug("Successfully disallocated VT TTY %i.", ttynr);
+}
+
 static int do_reexecute(
                 ManagerObjective objective,
                 int argc,
@@ -1994,6 +2025,7 @@ static int do_reexecute(
                 (void) setrlimit(RLIMIT_MEMLOCK, saved_rlimit_memlock);
 
         finish_remaining_processes(objective);
+        reduce_vt(objective);
 
         if (switch_root_dir) {
                 r = switch_root(/* new_root= */ switch_root_dir,
@@ -2607,12 +2639,10 @@ static int do_queue_default_job(
                 return log_struct_errno(LOG_EMERG, r,
                                         LOG_MESSAGE("Failed to isolate default target: %s", bus_error_message(&error, r)),
                                         LOG_MESSAGE_ID(SD_MESSAGE_CORE_ISOLATE_TARGET_FAILED_STR));
-        } else
-                log_info("Queued %s job for default target %s.",
-                         job_type_to_string(job->type),
-                         unit_status_string(job->unit, NULL));
+        }
 
-        m->default_unit_job_id = job->id;
+        log_info("Queued %s job for default target %s.",
+                 job_type_to_string(job->type), unit_status_string(job->unit, NULL));
 
         return 0;
 }
@@ -2736,7 +2766,7 @@ static void reset_arguments(void) {
         arg_default_environment = strv_free(arg_default_environment);
         arg_manager_environment = strv_free(arg_manager_environment);
 
-        arg_capability_bounding_set = CAP_MASK_UNSET;
+        arg_capability_bounding_set = CAP_MASK_ALL;
         arg_no_new_privs = false;
         arg_protect_system = -1;
         arg_timer_slack_nsec = NSEC_INFINITY;
@@ -2806,25 +2836,23 @@ static int parse_configuration(const struct rlimit *saved_rlimit_nofile,
                         log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
         }
 
-        /* Initialize some default rlimits for services if they haven't been configured */
-        fallback_rlimit_nofile(saved_rlimit_nofile);
-        fallback_rlimit_memlock(saved_rlimit_memlock);
-
-        /* Note that this also parses bits from the kernel command line, including "debug". */
-        log_parse_environment();
-
-        /* Initialize the show status setting if it hasn't been set explicitly yet */
+        /* Initialize the show status setting if it hasn't been explicitly set yet */
         if (arg_show_status == _SHOW_STATUS_INVALID)
                 arg_show_status = SHOW_STATUS_YES;
-
-        /* Slightly raise the OOM score for our services if we are running for unprivileged users. */
-        determine_default_oom_score_adjust();
 
         /* Push variables into the manager environment block */
         setenv_manager_environment();
 
-        /* Parse log environment variables again to take into account any new environment variables. */
+        /* Parse log environment variables to take into account any new environment variables.
+         * Note that this also parses bits from the kernel command line, including "debug". */
         log_parse_environment();
+
+        /* Initialize some default rlimits for services if they haven't been configured */
+        fallback_rlimit_nofile(saved_rlimit_nofile);
+        fallback_rlimit_memlock(saved_rlimit_memlock);
+
+        /* Slightly raise the OOM score for our services if we are running for unprivileged users. */
+        determine_default_oom_score_adjust();
 
         return 0;
 }

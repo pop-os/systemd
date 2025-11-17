@@ -40,6 +40,7 @@
 #include "process-util.h"
 #include "service-util.h"
 #include "signal-util.h"
+#include "stat-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "udev-util.h"
@@ -440,35 +441,45 @@ static int deliver_session_device_fd(Session *s, const char *fdname, int fd, dev
         return 0;
 }
 
-static int deliver_session_leader_fd_consume(Session *s, const char *fdname, int fd) {
+static int deliver_session_leader_fd_consume(Session *s, const char *fdname, int fd_consume) {
+        _cleanup_close_ int fd = ASSERT_FD(fd_consume);
         _cleanup_(pidref_done) PidRef leader_fdstore = PIDREF_NULL;
         int r;
 
         assert(s);
         assert(fdname);
-        assert(fd >= 0);
 
-        if (!pid_is_valid(s->deserialized_pid)) {
+        /* Already deserialized via pidfd id? */
+        if (pidref_is_set(&s->leader)) {
+                assert(s->leader.pid == s->deserialized_pid);
+                assert(s->leader.fd >= 0);
+
+                r = fd_inode_same(fd, s->leader.fd);
+                if (r < 0)
+                        return log_warning_errno(r, "Failed to compare pidfd with deserialized leader for session '%s': %m",
+                                                 s->id);
+                if (r > 0)
+                        return 0;
+
+                log_warning("Got leader pidfd for session '%s' which mismatches with the deserialized process, resetting with pidfd.",
+                            s->id);
+
+        } else if (!pid_is_valid(s->deserialized_pid)) {
                 r = log_warning_errno(SYNTHETIC_ERRNO(EOWNERDEAD),
                                       "Got leader pidfd for session '%s', but LEADER= is not set, refusing.",
                                       s->id);
                 goto fail_close;
         }
 
-        if (!s->leader_fd_saved)
-                log_warning("Got leader pidfd for session '%s', but not recorded in session state, proceeding anyway.",
-                            s->id);
-        else
-                assert(!pidref_is_set(&s->leader));
-
         r = pidref_set_pidfd_take(&leader_fdstore, fd);
         if (r < 0) {
-                if (r == -ESRCH)
-                        log_debug_errno(r, "Leader of session '%s' is gone while deserializing.", s->id);
-                else
-                        log_warning_errno(r, "Failed to create reference to leader of session '%s': %m", s->id);
+                log_warning_errno(r,
+                                  r == -ESRCH ? "Leader of session '%s' is gone while deserializing."
+                                              : "Failed to create reference to leader of session '%s': %m",
+                                  s->id);
                 goto fail_close;
         }
+        TAKE_FD(fd);
 
         if (leader_fdstore.pid != s->deserialized_pid)
                 log_warning("Leader from pidfd (" PID_FMT ") doesn't match with LEADER=" PID_FMT " for session '%s', proceeding anyway.",
@@ -481,7 +492,7 @@ static int deliver_session_leader_fd_consume(Session *s, const char *fdname, int
         return 0;
 
 fail_close:
-        close_and_notify_warn(fd, fdname);
+        close_and_notify_warn(TAKE_FD(fd), fdname);
         return r;
 }
 
@@ -555,7 +566,7 @@ static int manager_enumerate_sessions(Manager *m) {
                 session_add_to_gc_queue(s);
 
                 k = session_load(s);
-                if (k < 0)
+                if (k < 0 && k != -ESRCH)
                         RET_GATHER(r, log_warning_errno(k, "Failed to deserialize session '%s', ignoring: %m", s->id));
         }
 
@@ -1340,6 +1351,7 @@ static int run(int argc, char *argv[]) {
                                "Manager for user logins and devices and privileged operations.",
                                BUS_IMPLEMENTATIONS(&manager_object,
                                                    &log_control_object),
+                               /* runtime_scope= */ NULL,
                                argc, argv);
         if (r <= 0)
                 return r;

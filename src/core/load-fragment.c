@@ -17,7 +17,6 @@
 #include "bpf-restrict-fs.h"
 #include "bus-error.h"
 #include "calendarspec.h"
-#include "capability-list.h"
 #include "capability-util.h"
 #include "cgroup-setup.h"
 #include "condition.h"
@@ -32,7 +31,6 @@
 #include "execute.h"
 #include "extract-word.h"
 #include "fd-util.h"
-#include "firewall-util.h"
 #include "fstab-util.h"
 #include "hashmap.h"
 #include "hexdecoct.h"
@@ -1716,9 +1714,7 @@ int config_parse_exec_root_hash(
                 void *data,
                 void *userdata) {
 
-        _cleanup_free_ void *roothash_decoded = NULL;
         ExecContext *c = ASSERT_PTR(data);
-        size_t roothash_decoded_size = 0;
         int r;
 
         assert(filename);
@@ -1728,8 +1724,7 @@ int config_parse_exec_root_hash(
         if (isempty(rvalue)) {
                 /* Reset if the empty string is assigned */
                 c->root_hash_path = mfree(c->root_hash_path);
-                c->root_hash = mfree(c->root_hash);
-                c->root_hash_size = 0;
+                iovec_done(&c->root_hash);
                 return 0;
         }
 
@@ -1742,24 +1737,24 @@ int config_parse_exec_root_hash(
                         return -ENOMEM;
 
                 free_and_replace(c->root_hash_path, p);
-                c->root_hash = mfree(c->root_hash);
-                c->root_hash_size = 0;
+                iovec_done(&c->root_hash);
                 return 0;
         }
 
         /* We have a roothash to decode, eg: RootHash=012345789abcdef */
-        r = unhexmem(rvalue, &roothash_decoded, &roothash_decoded_size);
+        _cleanup_(iovec_done) struct iovec roothash_decoded = {};
+        r = unhexmem(rvalue, &roothash_decoded.iov_base, &roothash_decoded.iov_len);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to decode RootHash=, ignoring: %s", rvalue);
                 return 0;
         }
-        if (roothash_decoded_size < sizeof(sd_id128_t)) {
+        if (roothash_decoded.iov_len < sizeof(sd_id128_t)) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0, "RootHash= is too short, ignoring: %s", rvalue);
                 return 0;
         }
 
-        free_and_replace(c->root_hash, roothash_decoded);
-        c->root_hash_size = roothash_decoded_size;
+        iovec_done(&c->root_hash);
+        c->root_hash = TAKE_STRUCT(roothash_decoded);
         c->root_hash_path = mfree(c->root_hash_path);
 
         return 0;
@@ -1777,10 +1772,7 @@ int config_parse_exec_root_hash_sig(
                 void *data,
                 void *userdata) {
 
-        _cleanup_free_ void *roothash_sig_decoded = NULL;
-        char *value;
         ExecContext *c = ASSERT_PTR(data);
-        size_t roothash_sig_decoded_size = 0;
         int r;
 
         assert(filename);
@@ -1790,8 +1782,7 @@ int config_parse_exec_root_hash_sig(
         if (isempty(rvalue)) {
                 /* Reset if the empty string is assigned */
                 c->root_hash_sig_path = mfree(c->root_hash_sig_path);
-                c->root_hash_sig = mfree(c->root_hash_sig);
-                c->root_hash_sig_size = 0;
+                iovec_done(&c->root_hash_sig);
                 return 0;
         }
 
@@ -1804,26 +1795,27 @@ int config_parse_exec_root_hash_sig(
                         return log_oom();
 
                 free_and_replace(c->root_hash_sig_path, p);
-                c->root_hash_sig = mfree(c->root_hash_sig);
-                c->root_hash_sig_size = 0;
+                iovec_done(&c->root_hash_sig);
                 return 0;
         }
 
-        if (!(value = startswith(rvalue, "base64:"))) {
+        const char *value = startswith(rvalue, "base64:");
+        if (!value) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Failed to decode RootHashSignature=, not a path but doesn't start with 'base64:', ignoring: %s", rvalue);
                 return 0;
         }
 
         /* We have a roothash signature to decode, eg: RootHashSignature=base64:012345789abcdef */
-        r = unbase64mem(value, &roothash_sig_decoded, &roothash_sig_decoded_size);
+        _cleanup_(iovec_done) struct iovec roothash_sig_decoded = {};
+        r = unbase64mem(value, &roothash_sig_decoded.iov_base, &roothash_sig_decoded.iov_len);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to decode RootHashSignature=, ignoring: %s", rvalue);
                 return 0;
         }
 
-        free_and_replace(c->root_hash_sig, roothash_sig_decoded);
-        c->root_hash_sig_size = roothash_sig_decoded_size;
+        iovec_done(&c->root_hash_sig);
+        c->root_hash_sig = TAKE_STRUCT(roothash_sig_decoded);
         c->root_hash_sig_path = mfree(c->root_hash_sig_path);
 
         return 0;
@@ -1874,41 +1866,22 @@ int config_parse_capability_set(
                 void *userdata) {
 
         uint64_t *capability_set = ASSERT_PTR(data);
-        uint64_t sum = 0, initial, def;
-        bool invert = false;
         int r;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
 
-        if (rvalue[0] == '~') {
-                invert = true;
-                rvalue++;
-        }
+        uint64_t initial = streq(lvalue, "CapabilityBoundingSet") ? CAP_MASK_ALL : 0;
 
-        if (streq(lvalue, "CapabilityBoundingSet")) {
-                initial = CAP_MASK_ALL; /* initialized to all bits on */
-                def = CAP_MASK_UNSET;   /* not set */
-        } else
-                def = initial = 0; /* All bits off */
-
-        r = capability_set_from_string(rvalue, &sum);
+        r = parse_capability_set(rvalue, initial, capability_set);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse %s= specifier '%s', ignoring: %m", lvalue, rvalue);
                 return 0;
         }
 
-        if (sum == 0 || *capability_set == def)
-                /* "", "~" or uninitialized data -> replace */
-                *capability_set = invert ? ~sum : sum;
-        else {
-                /* previous data -> merge */
-                if (invert)
-                        *capability_set &= ~sum;
-                else
-                        *capability_set |= sum;
-        }
+        if (*capability_set == CAP_MASK_UNSET)
+                *capability_set = 0;
 
         return 0;
 }
@@ -4439,7 +4412,7 @@ int config_parse_io_limit(
         if (r < 0)
                 return 0;
 
-        if (streq("infinity", p))
+        if (streq(p, "infinity"))
                 num = CGROUP_LIMIT_MAX;
         else {
                 r = parse_size(p, 1000, &num);
@@ -6125,7 +6098,7 @@ int unit_load_fragment(Unit *u) {
                                 _cleanup_freecon_ char *selcon = NULL;
 
                                 /* Cache the SELinux context of the unit file here. We'll make use of when checking access permissions to loaded units */
-                                r = fgetfilecon_raw(fileno(f), &selcon);
+                                r = sym_fgetfilecon_raw(fileno(f), &selcon);
                                 if (r < 0)
                                         log_unit_warning_errno(u, r, "Failed to read SELinux context of '%s', ignoring: %m", fragment);
 
@@ -6654,7 +6627,7 @@ int config_parse_protect_hostname(
 
         const char *colon = strchr(rvalue, ':');
         if (colon) {
-                r = unit_full_printf_full(u, colon + 1, HOST_NAME_MAX, &h);
+                r = unit_full_printf_full(u, colon + 1, LINUX_HOST_NAME_MAX, &h);
                 if (r < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to resolve unit specifiers in '%s', ignoring: %m", colon + 1);

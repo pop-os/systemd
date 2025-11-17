@@ -1668,6 +1668,7 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
                         return r;
 
                 if (manager_add_user_by_uid(m, uid, &u) >= 0) {
+                        (void) user_send_changed(u, "Linger");
                         r = user_start(u);
                         if (r < 0) {
                                 user_add_to_gc_queue(u);
@@ -1685,6 +1686,7 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
                         /* Make sure that disabling lingering will terminate the user tracking if no sessions pin it. */
                         u->gc_mode = USER_GC_BY_PIN;
                         user_add_to_gc_queue(u);
+                        (void) user_send_changed(u, "Linger");
                 }
         }
 
@@ -1944,6 +1946,11 @@ static int send_prepare_for(Manager *m, const HandleActionData *a, bool _active)
 
         assert(m);
         assert(a);
+
+        /* Only sleep/shutdown actions emit a signal */
+        if (a->inhibit_what < 0)
+                return 0;
+
         assert(IN_SET(a->inhibit_what, INHIBIT_SHUTDOWN, INHIBIT_SLEEP));
 
         /* We need to send both old and new signal for backward compatibility. The newer one allows clients
@@ -2161,6 +2168,7 @@ int bus_manager_shutdown_or_sleep_now_or_later(
 
         delayed =
                 m->inhibit_delay_max > 0 &&
+                a->inhibit_what >= 0 &&
                 manager_is_inhibited(m, a->inhibit_what, NULL, MANAGER_IS_INHIBITED_CHECK_DELAY, UID_INVALID, NULL);
 
         if (delayed)

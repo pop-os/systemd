@@ -35,7 +35,6 @@
 #include "id128-util.h"
 #include "install.h"
 #include "iovec-util.h"
-#include "label-util.h"
 #include "load-dropin.h"
 #include "load-fragment.h"
 #include "log.h"
@@ -44,6 +43,7 @@
 #include "manager.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
+#include "netlink-internal.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "quota-util.h"
@@ -1936,7 +1936,7 @@ int unit_start(Unit *u, ActivationDetails *details) {
         state = unit_active_state(u);
         if (UNIT_IS_ACTIVE_OR_RELOADING(state))
                 return -EALREADY;
-        if (state == UNIT_MAINTENANCE)
+        if (IN_SET(state, UNIT_DEACTIVATING, UNIT_MAINTENANCE))
                 return -EAGAIN;
 
         /* Units that aren't loaded cannot be started */
@@ -1983,10 +1983,11 @@ int unit_start(Unit *u, ActivationDetails *details) {
         if (u->freezer_state != FREEZER_RUNNING)
                 return -EDEADLK;
 
-        /* Check our ability to start early so that failure conditions don't cause us to enter a busy loop. */
-        if (UNIT_VTABLE(u)->can_start) {
-                r = UNIT_VTABLE(u)->can_start(u);
-                if (r < 0)
+        /* Check our ability to start early so that ratelimited or already starting/started units don't
+         * cause us to enter a busy loop. */
+        if (UNIT_VTABLE(u)->test_startable) {
+                r = UNIT_VTABLE(u)->test_startable(u);
+                if (r <= 0)
                         return r;
         }
 
@@ -2419,10 +2420,20 @@ static int unit_log_resources(Unit *u) {
                 iovec[n_iovec++] = IOVEC_MAKE_STRING(TAKE_PTR(t));
 
                 /* Format the CPU time for inclusion in the human language message string */
-                if (strextendf_with_separator(&message, ", ",
-                                              "Consumed %s CPU time",
-                                              FORMAT_TIMESPAN(cpu_nsec / NSEC_PER_USEC, USEC_PER_MSEC)) < 0)
-                        return log_oom();
+                if (dual_timestamp_is_set(&u->inactive_exit_timestamp) &&
+                    dual_timestamp_is_set(&u->inactive_enter_timestamp)) {
+                        usec_t wall_clock_usec = usec_sub_unsigned(u->inactive_enter_timestamp.monotonic, u->inactive_exit_timestamp.monotonic);
+                        if (strextendf_with_separator(&message, ", ",
+                                                      "Consumed %s CPU time over %s wall clock time",
+                                                      FORMAT_TIMESPAN(cpu_nsec / NSEC_PER_USEC, USEC_PER_MSEC),
+                                                      FORMAT_TIMESPAN(wall_clock_usec, USEC_PER_MSEC)) < 0)
+                                return log_oom();
+                } else {
+                        if (strextendf_with_separator(&message, ", ",
+                                                      "Consumed %s CPU time",
+                                                      FORMAT_TIMESPAN(cpu_nsec / NSEC_PER_USEC, USEC_PER_MSEC)) < 0)
+                                return log_oom();
+                }
 
                 log_level = raise_level(log_level,
                                         cpu_nsec > MENTIONWORTHY_CPU_NSEC,
@@ -5288,19 +5299,17 @@ static void unit_modify_user_nft_set(Unit *u, bool add, NFTSetSource source, uin
         if (!c)
                 return;
 
-        if (!u->manager->fw_ctx) {
-                r = fw_ctx_new_full(&u->manager->fw_ctx, /* init_tables= */ false);
+        if (!u->manager->nfnl) {
+                r = sd_nfnl_socket_open(&u->manager->nfnl);
                 if (r < 0)
                         return;
-
-                assert(u->manager->fw_ctx);
         }
 
         FOREACH_ARRAY(nft_set, c->nft_set_context.sets, c->nft_set_context.n_sets) {
                 if (nft_set->source != source)
                         continue;
 
-                r = nft_set_element_modify_any(u->manager->fw_ctx, add, nft_set->nfproto, nft_set->table, nft_set->set, &element, sizeof(element));
+                r = nft_set_element_modify_any(u->manager->nfnl, add, nft_set->nfproto, nft_set->table, nft_set->set, &element, sizeof(element));
                 if (r < 0)
                         log_warning_errno(r, "Failed to %s NFT set entry: family %s, table %s, set %s, ID %u, ignoring: %m",
                                           add? "add" : "delete", nfproto_to_string(nft_set->nfproto), nft_set->table, nft_set->set, element);
@@ -5497,7 +5506,6 @@ int unit_set_exec_params(Unit *u, ExecParameters *p) {
         if (r < 0)
                 return r;
 
-        p->cgroup_supported = u->manager->cgroup_supported;
         p->prefix = u->manager->prefix;
         SET_FLAG(p->flags, EXEC_PASS_LOG_UNIT|EXEC_CHOWN_DIRECTORIES, MANAGER_IS_SYSTEM(u->manager));
 
@@ -5551,11 +5559,11 @@ int unit_fork_helper_process(Unit *u, const char *name, bool into_cgroup, PidRef
          * with the child's PID. */
 
         if (into_cgroup) {
-                (void) unit_realize_cgroup(u);
+                r = unit_realize_cgroup(u);
+                if (r < 0)
+                        return r;
 
-                crt = unit_setup_cgroup_runtime(u);
-                if (!crt)
-                        return -ENOMEM;
+                crt = unit_get_cgroup_runtime(u);
         }
 
         r = safe_fork(name, FORK_REOPEN_LOG|FORK_DEATHSIG_SIGTERM, &pid);
@@ -5997,15 +6005,11 @@ int unit_prepare_exec(Unit *u) {
 
         assert(u);
 
-        /* Load any custom firewall BPF programs here once to test if they are existing and actually loadable.
-         * Fail here early since later errors in the call chain unit_realize_cgroup to cgroup_context_apply are ignored. */
-        r = bpf_firewall_load_custom(u);
-        if (r < 0)
-                return r;
-
         /* Prepares everything so that we can fork of a process for this unit */
 
-        (void) unit_realize_cgroup(u);
+        r = unit_realize_cgroup(u);
+        if (r < 0)
+                return r;
 
         CGroupRuntime *crt = unit_get_cgroup_runtime(u);
         if (crt && crt->reset_accounting) {
@@ -6434,9 +6438,7 @@ void unit_next_freezer_state(Unit *u, FreezerAction action, FreezerState *ret_ne
                 assert_not_reached();
         }
 
-        objective = freezer_state_finish(next);
-        if (objective == FREEZER_FROZEN_BY_PARENT)
-                objective = FREEZER_FROZEN;
+        objective = freezer_state_objective(next);
         assert(IN_SET(objective, FREEZER_RUNNING, FREEZER_FROZEN));
 
         *ret_next = next;
