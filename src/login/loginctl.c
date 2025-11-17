@@ -457,10 +457,10 @@ static int show_unit_cgroup(
 
                 /* Fallback for older systemd versions where the GetUnitProcesses() call is not yet available */
 
-                if (cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, cgroup) != 0 && leader <= 0)
+                if (cg_is_empty(cgroup) != 0 && leader <= 0)
                         return 0;
 
-                show_cgroup_and_extra(SYSTEMD_CGROUP_CONTROLLER, cgroup, prefix, c, &leader, leader > 0, get_output_flags());
+                show_cgroup_and_extra(cgroup, prefix, c, &leader, leader > 0, get_output_flags());
         } else if (r < 0)
                 return log_error_errno(r, "Failed to dump process list: %s", bus_error_message(&error, r));
 
@@ -1600,10 +1600,8 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'o':
-                        if (streq(optarg, "help")) {
-                                DUMP_STRING_TABLE(output_mode, OutputMode, _OUTPUT_MODE_MAX);
-                                return 0;
-                        }
+                        if (streq(optarg, "help"))
+                                return DUMP_STRING_TABLE(output_mode, OutputMode, _OUTPUT_MODE_MAX);
 
                         arg_output = output_mode_from_string(optarg);
                         if (arg_output < 0)

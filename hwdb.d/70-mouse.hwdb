@@ -267,6 +267,18 @@ mouse:usb:v056ep0155:name:ELECOM ELECOM Relacon:*
  MOUSE_DPI=*500 1000 1500
  MOUSE_WHEEL_CLICK_ANGLE=30
 
+# Elecom IST Pro (via wired usb) (M-IPT10MRSABK)
+mouse:usb:v056ep018a:name:ELECOM ELECOM IST PRO Mouse:*
+ ID_INPUT_TRACKBALL=1
+
+# Elecom IST Pro (via usb receiver) (M-IPT10MRSABK)
+mouse:usb:v056ep01a9:name:ELECOM ELECOM Bridge G1000 Mouse:*
+ ID_INPUT_TRACKBALL=1
+
+# Elecom IST Pro (via Bluetooth) (M-IPT10MRSABK)
+mouse:bluetooth:v056ep018a:name:ELECOM IST PRO Mouse:*
+ ID_INPUT_TRACKBALL=1
+
 ##########################################
 # Fujitsu Siemens
 ##########################################
@@ -609,6 +621,10 @@ mouse:bluetooth:v046dpb019:name:MX Master 2S Mouse:*
 # Logitech MX Master 3S (via Bolt Receiver and Bluetooth)
 mouse:usb:v046dpc548:name:Logitech USB Receiver Mouse:*
 mouse:bluetooth:v046dpb035:name:MX Master 3S B Mouse:*
+ MOUSE_DPI=1000@142
+
+# Logitech MX Master 4 (via Bluetooth)
+mouse:bluetooth:v046dpb042:name:MX Master 4 Mouse:*
  MOUSE_DPI=1000@142
 
 # Logitech MX Ergo

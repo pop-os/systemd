@@ -733,9 +733,9 @@ static int method_set_timezone(sd_bus_message *m, void *userdata, sd_bus_error *
         log_struct(LOG_INFO,
                    LOG_MESSAGE_ID(SD_MESSAGE_TIMEZONE_CHANGE_STR),
                    LOG_ITEM("TIMEZONE=%s", c->zone),
-                   LOG_ITEM("TIMEZONE_SHORTNAME=%s", tzname[daylight]),
+                   LOG_ITEM("TIMEZONE_SHORTNAME=%s", get_tzname(daylight)),
                    LOG_ITEM("DAYLIGHT=%i", daylight),
-                   LOG_MESSAGE("Changed time zone to '%s' (%s).", c->zone, tzname[daylight]));
+                   LOG_MESSAGE("Changed time zone to '%s' (%s).", c->zone, get_tzname(daylight)));
 
         (void) sd_bus_emit_properties_changed(sd_bus_message_get_bus(m),
                                               "/org/freedesktop/timedate1", "org.freedesktop.timedate1", "Timezone",
@@ -1164,6 +1164,7 @@ static int run(int argc, char *argv[]) {
                                "Manage the system clock and timezone and NTP enablement.",
                                BUS_IMPLEMENTATIONS(&manager_object,
                                                    &log_control_object),
+                               /* runtime_scope= */ NULL,
                                argc, argv);
         if (r <= 0)
                 return r;

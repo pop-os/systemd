@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 
-#include "forward.h"
+#include "basic-forward.h"
 
 /* maximum length of fdname */
 #define FDNAME_MAX 255
@@ -112,6 +112,8 @@ int get_max_fd(void);
 
 int close_all_fds(const int except[], size_t n_except);
 int close_all_fds_without_malloc(const int except[], size_t n_except);
+int close_all_fds_by_proc(const int except[], size_t n_except);
+int close_all_fds_frugal(const int except[], size_t n_except);
 
 int pack_fds(int fds[], size_t n);
 
@@ -149,6 +151,7 @@ int fd_reopen_propagate_append_and_position(int fd, int flags);
 int fd_reopen_condition(int fd, int flags, int mask, int *ret_new_fd);
 
 int fd_is_opath(int fd);
+int fd_vet_accmode(int fd, int mode);
 
 int fd_verify_safe_flags_full(int fd, int extra_flags);
 static inline int fd_verify_safe_flags(int fd) {

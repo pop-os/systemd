@@ -17,10 +17,13 @@ typedef struct Manager {
         sd_netlink *rtnl;
         /* lazy initialized */
         sd_netlink *genl;
+        sd_netlink *nfnl;
         sd_event *event;
         sd_resolve *resolve;
         sd_bus *bus;
         sd_varlink_server *varlink_server;
+        sd_varlink_server *varlink_resolve_hook_server;
+        Set *query_filter_subscriptions;
         sd_device_monitor *device_monitor;
         Hashmap *polkit_registry;
         int ethtool_fd;
@@ -102,8 +105,6 @@ typedef struct Manager {
         usec_t speed_meter_interval_usec;
         usec_t speed_meter_usec_new;
         usec_t speed_meter_usec_old;
-
-        FirewallContext *fw_ctx;
 
         bool request_queued;
         OrderedSet *request_queue;

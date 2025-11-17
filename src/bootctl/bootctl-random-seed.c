@@ -61,7 +61,7 @@ static int set_system_token(void) {
         if (!touch_variables())
                 return 0;
 
-        r = getenv_bool("SYSTEMD_WRITE_SYSTEM_TOKEN");
+        r = secure_getenv_bool("SYSTEMD_WRITE_SYSTEM_TOKEN");
         if (r < 0) {
                 if (r != -ENXIO)
                         log_warning_errno(r, "Failed to parse $SYSTEMD_WRITE_SYSTEM_TOKEN, ignoring.");
@@ -121,6 +121,9 @@ int install_random_seed(const char *esp) {
         assert(esp);
 
         assert_cc(RANDOM_EFI_SEED_SIZE == SHA256_DIGEST_SIZE);
+
+        if (!arg_install_random_seed)
+                return 0;
 
         esp_fd = open(esp, O_DIRECTORY|O_RDONLY|O_CLOEXEC);
         if (esp_fd < 0)

@@ -11,7 +11,6 @@
 #include "strv.h"
 #include "systemctl.h"
 #include "systemctl-compat-shutdown.h"
-#include "systemctl-logind.h"
 #include "time-util.h"
 
 static int shutdown_help(void) {
@@ -96,8 +95,28 @@ static int parse_shutdown_time_spec(const char *t, usec_t *ret) {
                 if (r < 0)
                         return r;
 
-                while (s <= n)
-                        s += USEC_PER_DAY;
+                if (s <= n) {
+                        /* The specified time is today, but in the past. We need to schedule it for tomorrow
+                         * at the same time. Adding USEC_PER_DAY would be wrong across DST changes, so just
+                         * let mktime() normalise it. */
+                        int requested_hour = tm.tm_hour;
+                        int requested_min = tm.tm_min;
+
+                        tm.tm_mday++;
+                        tm.tm_isdst = -1;
+                        r = mktime_or_timegm_usec(&tm, /* utc= */ false, &s);
+                        if (r < 0)
+                                return r;
+
+                        if (tm.tm_hour != requested_hour || tm.tm_min != requested_min) {
+                                log_warning("Requested shutdown time %02d:%02d does not exist. "
+                                            "Rescheduling to %02d:%02d.",
+                                            requested_hour,
+                                            requested_min,
+                                            tm.tm_hour,
+                                            tm.tm_min);
+                        }
+                }
 
                 *ret = s;
         }
