@@ -82,6 +82,20 @@ class ServicesTest(unittest.TestCase):
         out = subprocess.check_output(['ps', 'u', pid], universal_newlines=True)
         self.assertIn('bin/rsyslogd', out)
         self.active_unit('rsyslog')
+
+        subprocess.check_call(
+            ['systemd-run',
+             '--quiet',
+             '--wait',
+             '--unit',
+             'test-boot-and-services-rsyslog.service',
+             '--',
+             'echo',
+             'hello rsyslog'
+            ]
+        )
+        subprocess.check_call(['journalctl', '--sync'])
+
         with open('/var/log/syslog') as f:
             log = f.read()
         if not is_container:
@@ -90,7 +104,8 @@ class ServicesTest(unittest.TestCase):
         # has init messages
         self.assertRegex(log, 'systemd.*Reached target')
         # has other services
-        self.assertRegex(log, 'systemd-resolved.*:')
+        self.assertRegex(log, 'echo.*: hello rsyslog')
+        self.assertRegex(log, 'test-boot-and-services-rsyslog.service.*:')
 
     @unittest.skipIf(is_container, 'udev does not work in containers')
     def test_udev(self):

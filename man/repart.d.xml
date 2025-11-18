@@ -257,6 +257,17 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>VolumeLabel=</varname></term>
+
+        <listitem><para>The textual label to assign to the LUKS superblock if applicable. If not specified
+        defaults to the same string as the partition label (see <varname>Label=</varname> above), however
+        prefixed with <literal>luks-</literal>. This setting has no effect if encryption is not enabled for
+        this partition.</para>
+
+        <xi:include href="version-info.xml" xpointer="v259"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>UUID=</varname></term>
 
         <listitem><para>The UUID to assign to the partition if none is assigned yet. Note that this
@@ -612,6 +623,10 @@
                 <entry><literal>ro</literal></entry>
                 <entry>Make this subvolume read-only.</entry>
               </row>
+              <row id='C'>
+                <entry><literal>nodatacow</literal></entry>
+                <entry>Disable data CoW for this subvolume.</entry>
+              </row>
             </tbody>
           </tgroup>
         </table>
@@ -867,6 +882,31 @@
         is specified on the <command>systemd-repart</command> command line.</para>
 
         <xi:include href="version-info.xml" xpointer="v256"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>TPM2PCRs=</varname></term>
+
+        <listitem><para>Configures the list of PCRs to use for LUKS2 volumes configured with
+        the <varname>Encrypt=tpm2</varname> setting in partition files.
+        This option take the same parameters as the similarly named options to
+        <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        and have the same effect on partitions where TPM2 enrollment is requested.
+        This option will be overridden by the global <varname>--tpm2-pcrs=</varname> option.</para>
+
+        <xi:include href="version-info.xml" xpointer="v259"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>KeyFile=</varname></term>
+
+        <listitem><para>Takes a file system path. This path must be absolute, otherwise the option is ignored.
+        Configures the encryption key to use when setting up LUKS2 volumes configured with the
+        <varname>Encrypt=key-file</varname> setting in partition files. Please refer to the documentation of
+        <varname>--key-file=</varname> for more details. This option will be overridden by the global
+        <varname>--key-file=</varname> option.</para>
+
+        <xi:include href="version-info.xml" xpointer="v259"/></listitem>
       </varlistentry>
 
       <varlistentry>

@@ -6,7 +6,6 @@
 
 #include "alloc-util.h"
 #include "argv-util.h"
-#include "cgroup-util.h"
 #include "dropin.h"
 #include "escape.h"
 #include "fd-util.h"
@@ -26,11 +25,11 @@
 #include "tmpfile-util.h"
 #include "unit-name.h"
 
-static int symlink_unless_exists(const char *from, const char *to) {
-        (void) mkdir_parents(to, 0755);
+static int symlink_unless_exists(const char *target, const char *linkpath) {
+        (void) mkdir_parents(linkpath, 0755);
 
-        if (symlink(from, to) < 0 && errno != EEXIST)
-                return log_error_errno(errno, "Failed to create symlink %s: %m", to);
+        if (symlink(target, linkpath) < 0 && errno != EEXIST)
+                return log_error_errno(errno, "Failed to create symlink %s: %m", linkpath);
         return 0;
 }
 
@@ -162,7 +161,7 @@ static int generator_add_ordering(
         assert(order);
         assert(dst);
 
-        /* Adds in an explicit ordering dependency of type <order> from <src> to <dst>. If <instance> is
+        /* Adds an explicit ordering dependency of type <order> from <src> to <dst>. If <instance> is
          * specified, it is inserted into <dst>. */
 
         if (instance) {

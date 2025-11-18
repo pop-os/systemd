@@ -69,8 +69,6 @@ CONFFLAGS = \
 	-Dloadkeys-path=/usr/bin/loadkeys \
 	-Dsetfont-path=/usr/bin/setfont \
 	-Dnologin-path=/usr/sbin/nologin \
-	-Dsysvinit-path=/etc/init.d \
-	-Dsysvrcnd-path=/etc \
 	-Dlocalegen-path=/usr/sbin/locale-gen \
 	-Ddebug-shell=/usr/bin/bash \
 	-Dzshcompletiondir=/usr/share/zsh/vendor-completions \
@@ -216,6 +214,8 @@ endif
 ifeq (, $(filter pkg.systemd.upstream, $(DEB_BUILD_PROFILES)))
 CONFFLAGS += -Ddns-servers=''
 CONFFLAGS += -Dsbat-distro-url=https://tracker.debian.org/pkg/systemd
+CONFFLAGS += -Dsysvinit-path=/etc/init.d
+CONFFLAGS += -Dsysvrcnd-path=/etc
 else
 CONFFLAGS += --buildtype=debugoptimized
 CONFFLAGS += -Dsbat-distro-url=https://github.com/systemd/systemd

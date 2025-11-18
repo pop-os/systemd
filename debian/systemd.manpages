@@ -25,9 +25,9 @@ debian/tmp/usr/share/man/man1/systemd-inhibit.1
 debian/tmp/usr/share/man/man1/systemd-machine-id-setup.1
 [!i386] <!stage1> debian/tmp/usr/share/man/man1/systemd-measure.1
 debian/tmp/usr/share/man/man1/systemd-mount.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-mute-console.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-mute-console.socket.1
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man1/systemd-mute-console@.service.1
+debian/tmp/usr/share/man/man1/systemd-mute-console.1
+debian/tmp/usr/share/man/man1/systemd-mute-console.socket.1
+debian/tmp/usr/share/man/man1/systemd-mute-console@.service.1
 debian/tmp/usr/share/man/man1/systemd-notify.1
 debian/tmp/usr/share/man/man1/systemd-path.1
 debian/tmp/usr/share/man/man1/systemd-pty-forward.1
@@ -43,8 +43,8 @@ debian/tmp/usr/share/man/man1/timedatectl.1
 debian/tmp/usr/share/man/man1/varlinkctl.1
 debian/tmp/usr/share/man/man5/binfmt.d.5
 debian/tmp/usr/share/man/man5/capsule@.service.5
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/confext.conf.5
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/confext.conf.d.5
+debian/tmp/usr/share/man/man5/confext.conf.5
+debian/tmp/usr/share/man/man5/confext.conf.d.5
 debian/tmp/usr/share/man/man5/environment.d.5
 debian/tmp/usr/share/man/man5/extension-release.5
 debian/tmp/usr/share/man/man5/hostname.5
@@ -76,8 +76,8 @@ debian/tmp/usr/share/man/man5/pstore.conf.5
 debian/tmp/usr/share/man/man5/pstore.conf.d.5
 debian/tmp/usr/share/man/man5/sleep.conf.d.5
 debian/tmp/usr/share/man/man5/sysctl.d.5
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/sysext.conf.5
-<pkg.systemd.upstream> debian/tmp/usr/share/man/man5/sysext.conf.d.5
+debian/tmp/usr/share/man/man5/sysext.conf.5
+debian/tmp/usr/share/man/man5/sysext.conf.d.5
 debian/tmp/usr/share/man/man5/system.conf.d.5
 debian/tmp/usr/share/man/man5/systemd.automount.5
 debian/tmp/usr/share/man/man5/systemd.device.5
@@ -214,9 +214,11 @@ debian/tmp/usr/share/man/man8/systemd-network-generator.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrlock-secureboot-authority.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrlock-secureboot-policy.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrmachine.service.8
+[amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrnvdone.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrphase-initrd.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrphase.service.8
 [amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrphase-sysinit.service.8
+[amd64 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-pcrproduct.service.8
 debian/tmp/usr/share/man/man8/systemd-poweroff.service.8
 debian/tmp/usr/share/man/man8/systemd-pstore.8
 debian/tmp/usr/share/man/man8/systemd-pstore.service.8

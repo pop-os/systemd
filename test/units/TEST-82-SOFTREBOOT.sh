@@ -32,7 +32,7 @@ KERNEL!="null", GOTO="end"
 ACTION=="remove", GOTO="end"
 
 IMPORT{db}="HISTORY"
-IMPORT{program}="/bin/bash -c 'systemctl show --property=SoftRebootsCount'"
+IMPORT{program}="/usr/bin/systemctl show --property=SoftRebootsCount"
 ENV{HISTORY}+="%E{ACTION}_%E{SEQNUM}_%E{SoftRebootsCount}"
 
 LABEL="end"
@@ -70,8 +70,6 @@ check_device_property() {
 
     assert_eq "$count" "$expected_count"
 }
-
-systemd-analyze log-level debug
 
 export SYSTEMD_LOG_LEVEL=debug
 
@@ -242,7 +240,7 @@ else
 
     survive_sigterm="/dev/shm/survive-sigterm-$RANDOM.sh"
     cat >"$survive_sigterm" <<EOF
-#!/bin/bash
+#!/usr/bin/env bash
 trap "" TERM
 systemd-notify --ready
 rm "$survive_sigterm"
@@ -252,7 +250,7 @@ EOF
 
     survive_argv="/dev/shm/survive-argv-$RANDOM.sh"
     cat >"$survive_argv" <<EOF
-#!/bin/bash
+#!/usr/bin/env bash
 systemd-notify --ready
 rm "$survive_argv"
 exec -a @sleep sleep infinity
@@ -324,8 +322,6 @@ EOF
     # Now block until the soft-boot killing spree kills us
     exec sleep infinity
 fi
-
-systemd-analyze log-level info
 
 touch /testok
 systemctl --no-block exit 123

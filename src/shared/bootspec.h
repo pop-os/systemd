@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "forward.h"
+#include "shared-forward.h"
 
 typedef enum BootEntryType {
         BOOT_ENTRY_TYPE1,     /* Boot Loader Specification Type #1 entries: *.conf files */
@@ -51,6 +51,7 @@ typedef struct BootEntry {
         char *kernel;        /* linux is #defined to 1, yikes! */
         char *efi;
         char *uki;
+        char *uki_url;
         char **initrd;
         char *device_tree;
         char **device_tree_overlay;
@@ -65,6 +66,7 @@ typedef struct BootEntry {
                 .source = (s),                  \
                 .tries_left = UINT_MAX,         \
                 .tries_done = UINT_MAX,         \
+                .profile = UINT_MAX,            \
         }
 
 typedef struct BootConfig {

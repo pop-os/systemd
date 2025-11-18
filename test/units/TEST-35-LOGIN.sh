@@ -21,7 +21,7 @@ cleanup_test_user() (
 
 setup_test_user() {
     mkdir -p /var/spool/cron /var/spool/mail
-    useradd -m -s /bin/bash logind-test-user
+    useradd -m -s /usr/bin/bash logind-test-user
     trap cleanup_test_user EXIT
 }
 
@@ -32,13 +32,15 @@ Environment=SYSTEMD_LOG_LEVEL=debug
 EOF
 
     # We test "coldplug" (completely stop and start logind) here. So we need to preserve
-    # the fdstore, which might contain session leader pidfds. This is extremely rare use case
-    # and shall not be considered fully supported.
+    # the fdstore, which might contain session leader pidfds, but only if pidfd id isn't
+    # a thing. This is extremely rare use case and shall not be considered fully supported.
     # See also: https://github.com/systemd/systemd/pull/30610#discussion_r1440507850
-    systemctl edit --runtime --stdin systemd-logind.service --drop-in=fdstore-preserve.conf <<EOF
+    if systemd-analyze compare-versions "$(uname -r)" lt 6.9; then
+        systemctl edit --runtime --stdin systemd-logind.service --drop-in=fdstore-preserve.conf <<EOF
 [Service]
 FileDescriptorStorePreserve=yes
 EOF
+    fi
 
     systemctl restart systemd-logind.service
 }
@@ -351,7 +353,7 @@ create_session() {
 [Service]
 Type=simple
 ExecStart=
-ExecStart=-/sbin/agetty --autologin logind-test-user --noclear %I $TERM
+ExecStart=-agetty --autologin logind-test-user --noclear %I $TERM
 Restart=no
 EOF
     systemctl daemon-reload
@@ -590,7 +592,10 @@ testcase_list_users_sessions_seats() {
     assert_eq "$(loginctl list-users --no-legend | awk '$2 == "logind-test-user" { print $3 }')" no
     assert_eq "$(loginctl list-users --no-legend | awk '$2 == "logind-test-user" { print $4 }')" active
 
-    loginctl enable-linger logind-test-user
+    systemd-run --quiet --service-type=notify --unit=test-linger-signal-wait --pty \
+                -p Environment=SYSTEMD_LOG_LEVEL=debug \
+                -p ExecStartPost="loginctl enable-linger logind-test-user" \
+		busctl --timeout=30 wait "/org/freedesktop/login1/user/_$(id -ru logind-test-user)" org.freedesktop.DBus.Properties PropertiesChanged | grep -qF '"Linger" b true'
     assert_eq "$(loginctl list-users --no-legend | awk '$2 == "logind-test-user" { print $3 }')" yes
 
     for s in $(loginctl list-sessions --no-legend | grep tty | awk '$3 == "logind-test-user" { print $1 }'); do
@@ -669,7 +674,7 @@ testcase_ambient_caps() {
     TRANSIENTUNIT="capwakealarm$RANDOM.service"
     SCRIPT="/tmp/capwakealarm$RANDOM.sh"
 
-    cat > /etc/pam.d/"$PAMSERVICE" <<EOF
+    cat >/etc/pam.d/"$PAMSERVICE" <<EOF
 auth sufficient    pam_unix.so
 auth required      pam_deny.so
 account sufficient pam_unix.so
@@ -679,7 +684,7 @@ session required   pam_unix.so
 EOF
 
     cat > "$SCRIPT" <<'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 set -ex
 typeset -i AMB MASK
 AMB="0x$(grep 'CapAmb:' /proc/self/status | cut -d: -f2 | tr -d '[:space:]')"
@@ -720,7 +725,7 @@ testcase_background() {
 
     trap background_at_return RETURN
 
-    cat > /etc/pam.d/"$PAMSERVICE" <<EOF
+    cat >/etc/pam.d/"$PAMSERVICE" <<EOF
 auth sufficient    pam_unix.so
 auth required      pam_deny.so
 account sufficient pam_unix.so

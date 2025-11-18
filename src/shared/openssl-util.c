@@ -871,9 +871,8 @@ int ecc_pkey_from_curve_x_y(
         TAKE_PTR(eckey);
 #endif
 
-    *ret = TAKE_PTR(pkey);
-
-    return 0;
+        *ret = TAKE_PTR(pkey);
+        return 0;
 }
 
 int ecc_pkey_to_curve_x_y(
@@ -1645,25 +1644,20 @@ static int load_x509_certificate_from_provider(const char *provider, const char 
         return -EOPNOTSUPP;
 #endif
 }
-#endif
 
 OpenSSLAskPasswordUI* openssl_ask_password_ui_free(OpenSSLAskPasswordUI *ui) {
-#if HAVE_OPENSSL && !defined(OPENSSL_NO_UI_CONSOLE)
         if (!ui)
                 return NULL;
 
+#ifndef OPENSSL_NO_UI_CONSOLE
         assert(UI_get_default_method() == ui->method);
         UI_set_default_method(UI_OpenSSL());
         UI_destroy_method(ui->method);
-        return mfree(ui);
-#else
-        assert(ui == NULL);
-        return NULL;
 #endif
+        return mfree(ui);
 }
 
 int x509_fingerprint(X509 *cert, uint8_t buffer[static SHA256_DIGEST_SIZE]) {
-#if HAVE_OPENSSL
         _cleanup_free_ uint8_t *der = NULL;
         int dersz;
 
@@ -1675,9 +1669,6 @@ int x509_fingerprint(X509 *cert, uint8_t buffer[static SHA256_DIGEST_SIZE]) {
 
         sha256_direct(der, dersz, buffer);
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot calculate X509 fingerprint.");
-#endif
 }
 
 int openssl_load_x509_certificate(
@@ -1685,7 +1676,7 @@ int openssl_load_x509_certificate(
                 const char *certificate_source,
                 const char *certificate,
                 X509 **ret) {
-#if HAVE_OPENSSL
+
         int r;
 
         assert(certificate);
@@ -1709,9 +1700,6 @@ int openssl_load_x509_certificate(
                                 certificate_source);
 
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot load X509 certificate.");
-#endif
 }
 
 int openssl_load_private_key(
@@ -1721,18 +1709,20 @@ int openssl_load_private_key(
                 const AskPasswordRequest *request,
                 EVP_PKEY **ret_private_key,
                 OpenSSLAskPasswordUI **ret_user_interface) {
-#if HAVE_OPENSSL
+
         int r;
 
         assert(private_key);
         assert(request);
+        assert(ret_private_key);
 
         if (private_key_source_type == OPENSSL_KEY_SOURCE_FILE) {
                 r = openssl_load_private_key_from_file(private_key, ret_private_key);
                 if (r < 0)
                         return r;
 
-                *ret_user_interface = NULL;
+                if (ret_user_interface)
+                        *ret_user_interface = NULL;
         } else {
                 _cleanup_(openssl_ask_password_ui_freep) OpenSSLAskPasswordUI *ui = NULL;
                 r = openssl_ask_password_ui_new(request, &ui);
@@ -1757,14 +1747,13 @@ int openssl_load_private_key(
                                         private_key,
                                         private_key_source);
 
-                *ret_user_interface = TAKE_PTR(ui);
+                if (ret_user_interface)
+                        *ret_user_interface = TAKE_PTR(ui);
         }
 
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot load private key.");
-#endif
 }
+#endif
 
 int parse_openssl_certificate_source_argument(
                 const char *argument,
