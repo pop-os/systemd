@@ -170,7 +170,7 @@ usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
 <!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-sysv-generator
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system-generators/systemd-tpm2-generator
 usr/lib/systemd/system/breakpoint-pre-basic.service
 usr/lib/systemd/system/breakpoint-pre-mount.service
 usr/lib/systemd/system/breakpoint-pre-switch-root.service
@@ -264,8 +264,8 @@ usr/lib/systemd/system/swap.target
 usr/lib/systemd/system/sys-fs-fuse-connections.mount
 usr/lib/systemd/system/sysinit.target
 usr/lib/systemd/system/sysinit.target.wants/systemd-hibernate-clear.service
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrnvdone.service
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrproduct.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrnvdone.service
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/systemd/system/sysinit.target.wants/systemd-pcrproduct.service
 usr/lib/systemd/system/sysinit.target.wants/dev-hugepages.mount
 usr/lib/systemd/system/sysinit.target.wants/dev-mqueue.mount
 usr/lib/systemd/system/sysinit.target.wants/kmod-static-nodes.service

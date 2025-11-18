@@ -1,7 +1,7 @@
 #!/usr/bin/dh-exec
 usr/bin/systemd-cryptenroll
 usr/bin/systemd-cryptsetup
-[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/nvpcr/cryptsetup.nvpcr
+[amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/nvpcr/cryptsetup.nvpcr
 usr/lib/systemd/system/cryptsetup-pre.target
 usr/lib/systemd/system/cryptsetup.target
 usr/lib/systemd/system/integritysetup-pre.target
