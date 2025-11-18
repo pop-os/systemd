@@ -8,10 +8,10 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2104943
  1 file changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/test/test-network/systemd-networkd-tests.py b/test/test-network/systemd-networkd-tests.py
-index b650b34..d531465 100755
+index 7ee6ee1..d772c40 100755
 --- a/test/test-network/systemd-networkd-tests.py
 +++ b/test/test-network/systemd-networkd-tests.py
-@@ -3222,7 +3222,16 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
+@@ -3241,7 +3241,16 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
  
          output = check_output('ip -d link show vxlan-slaac')
          print(output)

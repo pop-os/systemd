@@ -3,4 +3,3 @@ lp2104943-test-network-add-handling-for-Ubuntu-FAN-patches.patch
 test-ignore-coredumps-for-gnusleep-in-addition-to-sleep-L.patch
 test-follow-usr-bin-sleep-symlink-when-checking-coredumps.patch
 test-skip-TEST-50-DISSECT.dissect.patch
-test-install-bsdextrautils-in-debian-minimal-img.patch

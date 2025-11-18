@@ -12,7 +12,7 @@ Forwarded: no
  1 file changed, 4 insertions(+)
 
 diff --git a/test/units/TEST-50-DISSECT.sh b/test/units/TEST-50-DISSECT.sh
-index 38bafa5..d53f505 100755
+index b42aa6e..42e3df2 100755
 --- a/test/units/TEST-50-DISSECT.sh
 +++ b/test/units/TEST-50-DISSECT.sh
 @@ -3,6 +3,10 @@
