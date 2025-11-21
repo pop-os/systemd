@@ -93,7 +93,6 @@ Multi-Arch: foreign
 Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
             linux-sysctl-defaults,
-            networkd-dispatcher,
             login,
             systemd-timesyncd | time-daemon,
             systemd-resolved,
