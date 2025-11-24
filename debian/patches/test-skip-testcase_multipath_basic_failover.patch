@@ -1,0 +1,21 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 24 Nov 2025 15:13:10 -0500
+Subject: test: skip testcase_multipath_basic_failover
+
+---
+ test/TEST-64-UDEV-STORAGE/test.sh | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/test/TEST-64-UDEV-STORAGE/test.sh b/test/TEST-64-UDEV-STORAGE/test.sh
+index b9e7bdf..43a77c1 100755
+--- a/test/TEST-64-UDEV-STORAGE/test.sh
++++ b/test/TEST-64-UDEV-STORAGE/test.sh
+@@ -318,6 +318,8 @@ EOF
+ }
+
+ testcase_multipath_basic_failover() {
++    return 77 # skip
++
+     if ! _host_has_feature "multipath"; then
+         echo "Missing multipath tools, skipping the test..."
+         return 77

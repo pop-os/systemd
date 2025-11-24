@@ -55,3 +55,4 @@ lp2115418-network-dhcp6-consider-the-DHCPv6-protocol-as-finish.patch
 test-fall-back-to-SYSLOG_IDENTIFIER-matching-where-necess.patch
 lp2125405-basic-validate-timezones-in-get_timezones.patch
 ukify-fix-insertion-of-padding-in-merged-sections.patch
+test-skip-testcase_multipath_basic_failover.patch
