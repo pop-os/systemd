@@ -56,3 +56,4 @@ test-fall-back-to-SYSLOG_IDENTIFIER-matching-where-necess.patch
 lp2125405-basic-validate-timezones-in-get_timezones.patch
 ukify-fix-insertion-of-padding-in-merged-sections.patch
 test-skip-testcase_multipath_basic_failover.patch
+core-downgrade-a-log-message-from-warning-to-debug.patch

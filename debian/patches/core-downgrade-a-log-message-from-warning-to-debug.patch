@@ -1,0 +1,26 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 24 Nov 2025 15:16:50 -0500
+Subject: core: downgrade a log message from warning to debug
+
+Bug-Ubuntu: https://launchpad.net/bugs/2130554
+Forwarded: no, not needed
+
+This log message can create unnecessary journal spam. It has already
+been downgraded in newer upstream versions, so do the same here.
+---
+ src/core/manager.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index ea4ee6f..555c9ea 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -2742,7 +2742,7 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t
+                 }
+
+         if (!found)
+-                log_warning("Cannot find unit for notify message of PID "PID_FMT", ignoring.", ucred->pid);
++                log_debug("Cannot find unit for notify message of PID "PID_FMT", ignoring.", ucred->pid);
+
+         if (fdset_size(fds) > 0)
+                 log_warning("Got extra auxiliary fds with notification message, closing them.");
