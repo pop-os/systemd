@@ -57,3 +57,4 @@ lp2125405-basic-validate-timezones-in-get_timezones.patch
 ukify-fix-insertion-of-padding-in-merged-sections.patch
 test-skip-testcase_multipath_basic_failover.patch
 core-downgrade-a-log-message-from-warning-to-debug.patch
+lp2133159-network-also-check-ID_NET_MANAGED_BY-property-on-reconfigure.patch
