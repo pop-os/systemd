@@ -63,3 +63,4 @@ CVE-2026-29111-3.patch
 CVE-2026-29111-4.patch
 udev-check-for-invalid-chars-in-various-fields-received-f.patch
 udev-fix-review-mixup.patch
+lp2133159-network-also-check-ID_NET_MANAGED_BY-property-on-reconfigure.patch
