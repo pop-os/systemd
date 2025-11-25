@@ -1,3 +1,17 @@
+systemd (255.4-1ubuntu8.12) noble; urgency=medium
+
+  * basic: validate timezones in get_timezones() (LP: #2125405)
+  * ukify: fix insertion of padding in merged sections (LP: #2132666)
+  * core: downgrade a log message from warning to debug (LP: #2130554)
+  * test: skip testcase_multipath_basic_failover.
+    This test has been failing on Ubuntu infrastructure for a long time.
+    Leaving this alone at the moment allows other failures to potentially go
+    unnoticed, because the migration reference baseline has been reset to
+    fail. Skip the test to try and reset the baseline to pass.
+  * d/gbp.conf: stop using wrap_cl.py
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 25 Nov 2025 13:16:31 -0500
+
 systemd (255.4-1ubuntu8.11) noble; urgency=medium
 
   [ Nick Rosbrook ]
