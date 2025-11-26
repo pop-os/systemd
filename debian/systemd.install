@@ -502,6 +502,7 @@ usr/share/bash-completion/completions/systemd-run
 usr/share/bash-completion/completions/systemd-sysext
 usr/share/bash-completion/completions/systemd-vpick
 usr/share/bash-completion/completions/timedatectl
+usr/share/bash-completion/completions/varlinkctl
 usr/share/dbus-1/services/org.freedesktop.systemd1.service
 usr/share/dbus-1/system.d/org.freedesktop.hostname1.conf
 usr/share/dbus-1/system.d/org.freedesktop.locale1.conf
