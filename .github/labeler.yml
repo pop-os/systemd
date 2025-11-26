@@ -226,9 +226,9 @@ sd-resolve:
 selinux:
   - changed-files:
     - any-glob-to-any-file: '**/*selinux*'
-shell-completion:
+shell completion:
   - changed-files:
-    - any-glob-to-any-file: 'shell-completion/*'
+    - any-glob-to-any-file: 'shell-completion/**'
 shell profile:
   - changed-files:
     - any-glob-to-any-file: 'profile.d/*'

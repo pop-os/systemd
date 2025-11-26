@@ -15,7 +15,7 @@ project('systemd', 'c',
 
 add_test_setup(
         'default',
-        exclude_suites : ['clang-tidy', 'integration-tests'],
+        exclude_suites : ['clang-tidy', 'unused-symbols', 'integration-tests'],
         is_default : true,
 )
 
@@ -1163,8 +1163,9 @@ endif
 
 libmount = dependency('mount',
                       version : fuzzer_build ? '>= 0' : '>= 2.30',
-                      disabler : true,
                       required : get_option('libmount'))
+have = libmount.found()
+conf.set10('HAVE_LIBMOUNT', have)
 libmount_cflags = libmount.partial_dependency(includes: true, compile_args: true)
 
 libfdisk = dependency('fdisk',
@@ -2227,7 +2228,7 @@ libudev = shared_library(
         implicit_include_directories : false,
         link_args : ['-shared',
                      '-Wl,--version-script=' + libudev_sym_path],
-        link_with : [libsystemd_static, libshared_static],
+        link_with : [libsystemd_static],
         link_whole : libudev_basic,
         dependencies : [threads,
                         userspace],
@@ -2561,11 +2562,13 @@ foreach dict : executables
                 continue
         endif
 
+        exe_sources = dict.get('sources', []) + dict.get('extract', [])
+
         kwargs = {}
         foreach key, val : dict
                 if key in ['name', 'dbus', 'public', 'conditions',
                            'type', 'suite', 'timeout', 'parallel',
-                           'objects', 'extract']
+                           'objects', 'sources', 'extract']
                         continue
                 endif
 
@@ -2596,12 +2599,17 @@ foreach dict : executables
 
         if is_fuzz
                 foreach key, val : fuzz_additional_kwargs
-                        kwargs += { key : [ kwargs.get(key, []), val ] }
+                        if key == 'sources'
+                                exe_sources += val
+                        else
+                                kwargs += { key : [ kwargs.get(key, []), val ] }
+                        endif
                 endforeach
         endif
 
         exe = executable(
                 name,
+                sources : exe_sources,
                 kwargs : kwargs,
                 implicit_include_directories : false,
         )
@@ -2609,7 +2617,7 @@ foreach dict : executables
         executables_by_name += { name : exe }
 
         if not name.endswith('.standalone')
-                sources += dict.get('sources', [])
+                sources += exe_sources
         endif
 
         if dict.has_key('extract')
@@ -2999,6 +3007,19 @@ if meson.version().version_compare('>=1.4.0')
                 endforeach
         endforeach
 endif
+
+symbol_analysis_exes = []
+foreach name, exe : executables_by_name
+        symbol_analysis_exes += exe
+endforeach
+
+find_unused_library_symbols = find_program('tools/find-unused-library-symbols.py')
+test(
+        'libshared-unused-symbols',
+        find_unused_library_symbols,
+        suite : 'unused-symbols',
+        args : [libshared, libcore] + nss_targets + pam_targets + symbol_analysis_exes,
+)
 
 run_target(
         'check-api-docs',

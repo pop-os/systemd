@@ -28,7 +28,6 @@
 #include "extract-word.h"
 #include "fileio.h"
 #include "fs-util.h"
-#include "fstab-util.h"
 #include "hexdecoct.h"
 #include "json-util.h"
 #include "libfido2-util.h"
@@ -36,7 +35,6 @@
 #include "log.h"
 #include "main-func.h"
 #include "memory-util.h"
-#include "mount-util.h"
 #include "nulstr-util.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -1233,7 +1231,7 @@ static int measured_crypt_activate_by_passphrase(
         if (keyslot < 0)
                 return keyslot;
 
-        return measured_crypt_activate_by_volume_key(cd, mechanism, name, keyslot, vk, vks, flags);
+        return measured_crypt_activate_by_volume_key(cd, name, mechanism, keyslot, vk, vks, flags);
 
 shortcut:
         keyslot = crypt_activate_by_passphrase(cd, name, keyslot, passphrase, passphrase_size, flags);

@@ -7,7 +7,6 @@
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include "sd-json.h"
@@ -32,11 +31,9 @@
 #include "hashmap.h"
 #include "hostname-setup.h"
 #include "id128-util.h"
-#include "initrd-util.h"
 #include "lock-util.h"
 #include "log.h"
 #include "loop-util.h"
-#include "mkdir.h"
 #include "namespace-util.h"
 #include "nsresource.h"
 #include "nulstr-util.h"
@@ -174,13 +171,13 @@ static char** image_settings_path(Image *image, RuntimeScope scope) {
                 SD_PATH_SYSTEM_CONFIGURATION,
                 SD_PATH_SYSTEM_RUNTIME,
                 SD_PATH_SYSTEM_LIBRARY_PRIVATE,
-                UINT64_MAX
+                _SD_PATH_INVALID
         };
         static const uint64_t user_locations[] = {
                 SD_PATH_USER_CONFIGURATION,
                 SD_PATH_USER_RUNTIME,
                 SD_PATH_USER_LIBRARY_PRIVATE,
-                UINT64_MAX
+                _SD_PATH_INVALID
         };
         const uint64_t *locations;
 
@@ -197,7 +194,7 @@ static char** image_settings_path(Image *image, RuntimeScope scope) {
                 assert_not_reached();
         }
 
-        for (size_t k = 0; locations[k] != UINT64_MAX; k++) {
+        for (size_t k = 0; locations[k] != _SD_PATH_INVALID; k++) {
                 _cleanup_free_ char *s = NULL;
                 r = sd_path_lookup(locations[k], "systemd/nspawn", &s);
                 if (r == -ENXIO)
@@ -844,7 +841,7 @@ int image_find(RuntimeScope scope,
                                         continue;
                                 }
                                 if (!result.path) {
-                                        log_debug("Found versioned directory '%s', without matching entry, skipping: %m", vp);
+                                        log_debug("Found versioned directory '%s', without matching entry, skipping.", vp);
                                         continue;
                                 }
 
@@ -1052,7 +1049,7 @@ int image_discover(
                                                 continue;
                                         }
                                         if (!result.path) {
-                                                log_debug("Found versioned directory '%s', without matching entry, skipping: %m", vp);
+                                                log_debug("Found versioned directory '%s', without matching entry, skipping.", vp);
                                                 continue;
                                         }
 
