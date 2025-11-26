@@ -815,7 +815,7 @@ static int sysupdate_run_simple(sd_json_variant **ret, Target *t, ...) {
                 if (DEBUG_LOGGING) {
                         _cleanup_free_ char *s = NULL;
 
-                        s = quote_command_line((char**) args, SHELL_ESCAPE_EMPTY);
+                        s = quote_command_line(args, SHELL_ESCAPE_EMPTY);
                         if (!s) {
                                 log_oom();
                                 _exit(EXIT_FAILURE);
@@ -2037,14 +2037,14 @@ static int manager_add_bus_objects(Manager *m) {
 static bool manager_is_idle(void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
 
-	return hashmap_isempty(m->jobs);
+        return hashmap_isempty(m->jobs);
 }
 
 static void manager_check_idle(Manager *m) {
-	assert(m);
+        assert(m);
 
-	if (!hashmap_isempty(m->jobs))
-		return;
+        if (!hashmap_isempty(m->jobs))
+                return;
 
         hashmap_clear(m->targets);
         log_debug("Cleared target cache");
