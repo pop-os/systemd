@@ -140,3 +140,4 @@ lp2134334-0000-sd-device-introduce-device_get_property_bool.patch
 lp2134334-0001-net-id-depending-on-new-udev-prop,-include-exclude-PCI-domain-from-netif-names.patch.patch
 lp2134334-0002-hwdb-disable-inclusion-of-the-PCI-domain-in-MANA-network-interface-naming.patch
 lp2134334-0003-udev-rules.d-import-hwdb-before-calling-net_id-builtin.patch
+lp2133220-network-support-ID_NET_MANAGED_BY-udev-property.patch

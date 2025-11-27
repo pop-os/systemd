@@ -1,0 +1,100 @@
+From 60ac8c68a7851a3998613704b2be719d75c6ba10 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 31 Oct 2023 18:07:08 +0900
+Subject: network: support ID_NET_MANAGED_BY udev property
+
+If the property is set, networkd manages the interface only when its
+value is "io.systemd.Network".
+
+Closes #29768.
+
+Bug-Ubuntu: https://launchpad.net/bugs/2133220
+Origin: backport, https://github.com/systemd/systemd/commit/ba87a61d05d637be9f0b21707f7fe3b0a74c5a05
+[rmalz - this patch also includes follow up changes from upstream commit 78f8d5ed.
+Integration test added with 78f8d5ed was not backported due to lack of upstream patch 046286e8]
+---
+ man/systemd.network.xml     |  8 ++++++++
+ src/network/networkd-link.c | 10 ++++++++++
+ 2 files changed, 18 insertions(+)
+
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
+@@ -72,6 +72,14 @@
+       first (in lexical order) of the network files that matches a given device is applied, all later files
+       are ignored, even if they match as well.</para>
+ 
++      <para>Note that any network interfaces that have the <varname>ID_NET_MANAGED_BY=</varname> udev property
++      set will never be matched by any .network files – unless the property's value is the string
++      <literal>io.systemd.Network</literal> – even if the [Match] section would otherwise match. This may be
++      used to exclude specific network interfaces from <command>systemd-networkd</command>'s management, while
++      keeping the [Match] section generic. The <varname>ID_NET_MANAGED_BY=</varname> poperty thus declares
++      intended <emphasis>ownership</emphasis> of the device, and permits ensuring that concurrent network
++      management implementations do not compete for management of specific devices.</para>
++
+       <para>A network file is said to match a network interface if all matches specified by the [Match]
+       section are satisfied. When a network file does not contain valid settings in [Match] section, then the
+       file will match all interfaces and <command>systemd-networkd</command> warns about that. Hint: to avoid
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -1227,12 +1227,42 @@
+         return -ENOENT;
+ }
+ 
++static int link_managed_by_us(Link *link) {
++        int r;
++
++        assert(link);
++
++        if (!link->sd_device)
++                return true;
++
++        const char *s;
++        r = sd_device_get_property_value(link->sd_device, "ID_NET_MANAGED_BY", &s);
++        if (r == -ENOENT)
++                return true;
++        if (r < 0)
++                return log_link_warning_errno(link, r, "Failed to get ID_NET_MANAGED_BY udev property: %m");
++
++        if (streq(s, "io.systemd.Network"))
++                return true;
++
++        if (link->state == LINK_STATE_UNMANAGED)
++                return false; /* Already in unmanaged state */
++
++        log_link_debug(link, "Interface is requested to be managed by '%s', unmanaging the interface.", s);
++        link_set_state(link, LINK_STATE_UNMANAGED);
++        return false;
++}
++
+ static int link_reconfigure_impl(Link *link, bool force) {
+         Network *network;
+         int r;
+ 
+         assert(link);
+ 
++        r = link_managed_by_us(link);
++        if (r <= 0)
++                return r;
++
+         r = link_get_network(link, &network);
+         if (r == -ENOENT) {
+                 link_set_state(link, LINK_STATE_UNMANAGED);
+@@ -1401,6 +1431,7 @@
+ }
+ 
+ static int link_initialized(Link *link, sd_device *device) {
++        int r;
+         assert(link);
+         assert(device);
+ 
+@@ -1410,6 +1441,10 @@
+         sd_device_unref(link->sd_device);
+         link->sd_device = device;
+ 
++        r = link_managed_by_us(link);
++        if (r <= 0)
++                return r;
++
+         /* Do not ignore unamanaged state case here. If an interface is renamed after being once
+          * configured, and the corresponding .network file has Name= in [Match] section, then the
+          * interface may be already in unmanaged state. See #20657. */
