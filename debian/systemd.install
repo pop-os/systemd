@@ -66,7 +66,7 @@ usr/lib/kernel/install.d/90-uki-copy.install
 usr/lib/modprobe.d/systemd.conf
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> usr/lib/nvpcr/hardware.nvpcr
 <!stage1> usr/lib/pcrlock.d/
-[alpha amd64 arm64 ia64 loong64 mips64el ppc64 ppc64el riscv64 loong64 s390x sparc64] usr/lib/sysctl.d/50-pid-max.conf
+[any-alpha any-amd64 any-arm64 any-ia64 any-loong64 any-mips64 any-mips64el any-mips64r6 any-mips64r6el any-ppc64 any-ppc64el any-riscv64 any-s390x any-sparc64] usr/lib/sysctl.d/50-pid-max.conf
 usr/lib/systemd/catalog/
 usr/lib/systemd/network/80-6rd-tunnel.link
 usr/lib/systemd/network/80-6rd-tunnel.network
