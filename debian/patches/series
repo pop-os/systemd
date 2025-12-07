@@ -141,3 +141,7 @@ CVE-2026-29111-2.patch
 CVE-2026-29111-3.patch
 udev-check-for-invalid-chars-in-various-fields-received-f.patch
 udev-fix-review-mixup.patch
+lp2134334-0000-sd-device-introduce-device_get_property_bool.patch
+lp2134334-0001-net-id-depending-on-new-udev-prop,-include-exclude-PCI-domain-from-netif-names.patch.patch
+lp2134334-0002-hwdb-disable-inclusion-of-the-PCI-domain-in-MANA-network-interface-naming.patch
+lp2134334-0003-udev-rules.d-import-hwdb-before-calling-net_id-builtin.patch

@@ -1,0 +1,42 @@
+From a7deadd763427fcff67b6697557dfbd0c91647ec Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 12 Jun 2025 18:25:54 +0900
+Subject: udev/rules.d: import hwdb before calling net_id builtin
+
+Origin: upstream, https://github.com/systemd/systemd/commit/a7deadd763427fcff67b6697557dfbd0c91647ec
+Bug-Ubuntu: https://launchpad.net/bugs/2134334
+
+The commit cdcb1eeeb883b2ecb3992865f458f874900ddb87 adds
+ID_NET_NAME_INCLUDE_DOMAIN property support in net_id builtin.
+The property is basically set through hwdb. However, previously hwdb was
+imported after calling net_id builtin, hence when net_id is called, the
+property was never set.
+
+This makes hwdb is imported before calling net_id builtin, so that the
+property is set when net_id is called if hwdb has an entry about that
+for the interface.
+
+Follow-up for cdcb1eeeb883b2ecb3992865f458f874900ddb87.
+Fixes #37758.
+
+diff --git a/rules.d/75-net-description.rules b/rules.d/75-net-description.rules
+index 7e62f8b26b..c55c3b67ea 100644
+--- a/rules.d/75-net-description.rules
++++ b/rules.d/75-net-description.rules
+@@ -3,12 +3,13 @@
+ ACTION=="remove", GOTO="net_end"
+ SUBSYSTEM!="net", GOTO="net_end"
+
+-IMPORT{builtin}="net_id"
+-
+ SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id", IMPORT{builtin}="hwdb --subsystem=usb"
+-SUBSYSTEMS=="usb", GOTO="net_end"
++SUBSYSTEMS=="usb", GOTO="import_net_id"
+
+ SUBSYSTEMS=="pci", ENV{ID_BUS}="pci", ENV{ID_VENDOR_ID}="$attr{vendor}", ENV{ID_MODEL_ID}="$attr{device}"
+ SUBSYSTEMS=="pci", IMPORT{builtin}="hwdb --subsystem=pci"
+
++LABEL="import_net_id"
++IMPORT{builtin}="net_id"
++
+ LABEL="net_end"
