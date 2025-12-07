@@ -1,0 +1,45 @@
+From 15345fc67739b8b62bcde55521a882d826faf801 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 28 Apr 2022 21:37:59 +0900
+Subject: sd-device: introduce device_get_property_bool()
+
+Origin: upstream, https://github.com/systemd/systemd/commit/15345fc67739b8b62bcde55521a882d826faf801
+Bug-Ubuntu: https://launchpad.net/bugs/2134334
+
+diff --git a/src/libsystemd/sd-device/device-private.h b/src/libsystemd/sd-device/device-private.h
+index 88374451e7..3f2efb4935 100644
+--- a/src/libsystemd/sd-device/device-private.h
++++ b/src/libsystemd/sd-device/device-private.h
+@@ -19,6 +19,7 @@ static inline int device_new_from_watch_handle(sd_device **ret, int wd) {
+ int device_new_from_devname(sd_device **ret, const char *devname);
+
+ int device_get_property_int(sd_device *device, const char *key, int *ret);
++int device_get_property_bool(sd_device *device, const char *key);
+ int device_get_device_id(sd_device *device, const char **ret);
+
+ int device_get_devlink_priority(sd_device *device, int *priority);
+diff --git a/src/libsystemd/sd-device/sd-device.c b/src/libsystemd/sd-device/sd-device.c
+index 2b9be2461d..05c894430e 100644
+--- a/src/libsystemd/sd-device/sd-device.c
++++ b/src/libsystemd/sd-device/sd-device.c
+@@ -1904,6 +1904,20 @@ _public_ int sd_device_get_property_value(sd_device *device, const char *key, co
+         return 0;
+ }
+
++int device_get_property_bool(sd_device *device, const char *key) {
++        const char *value;
++        int r;
++
++        assert(device);
++        assert(key);
++
++        r = sd_device_get_property_value(device, key, &value);
++        if (r < 0)
++                return r;
++
++        return parse_boolean(value);
++}
++
+ int device_get_property_int(sd_device *device, const char *key, int *ret) {
+         const char *value;
+         int r, v;

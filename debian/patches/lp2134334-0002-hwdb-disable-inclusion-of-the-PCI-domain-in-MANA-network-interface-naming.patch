@@ -1,0 +1,21 @@
+From 9311c28b3407fbad69d0b747129b03ce1c7a6309 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 4 Sep 2024 17:13:00 +0200
+Subject: hwdb: disable inclusion of the PCI domain in MANA network
+ interface naming
+
+Origin: upstream, https://github.com/systemd/systemd/commit/9311c28b3407fbad69d0b747129b03ce1c7a6309
+Bug-Ubuntu: https://launchpad.net/bugs/2134334
+
+diff --git a/hwdb.d/20-net-ifname.hwdb b/hwdb.d/20-net-ifname.hwdb
+index 2408dc172f..ba136860a8 100644
+--- a/hwdb.d/20-net-ifname.hwdb
++++ b/hwdb.d/20-net-ifname.hwdb
+@@ -3,3 +3,7 @@
+ # Dell iDRAC Virtual USB NIC
+ usb:v413CpA102*
+  ID_NET_NAME_FROM_DATABASE=idrac
++
++# Disable inclusion of PCI domain in interface names on Azure MANA
++pci:v00001414d000000BA*
++ ID_NET_NAME_INCLUDE_DOMAIN=0
