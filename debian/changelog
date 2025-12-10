@@ -1,3 +1,23 @@
+systemd (259~rc3-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * d/t/control: pull in optional libs for boot-and-services too
+  * Update upstream source from tag 'upstream/259_rc3' Update to upstream
+    version '259~rc3' with Debian dir
+    537fd85ae77caecee4426e24c5b5e59ee5d3ec44
+  * Install new udev rule
+
+  [ Helmut Grohne ]
+  * Mirror dmi_arches from meson.build into debian/udev.install
+  * Update architecture match for 50-pid-max.conf
+
+  [ Nick Rosbrook ]
+  * d/extra/dbus-1: rename systemd-localed-read-only.conf (LP: #2133889)
+  * d/t/tests-in-lxd: re-construct --pin-packages arguments for
+    autopkgtest
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 10 Dec 2025 17:39:27 +0000
+
 systemd (259~rc2-1) unstable; urgency=medium
 
   * d/t/control: ensure unit-tests autopkgtest pulls in dlopened libraries
