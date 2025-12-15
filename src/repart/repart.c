@@ -50,6 +50,7 @@
 #include "initrd-util.h"
 #include "io-util.h"
 #include "json-util.h"
+#include "libmount-util.h"
 #include "list.h"
 #include "loop-util.h"
 #include "main-func.h"
@@ -6616,6 +6617,8 @@ static int partition_populate_filesystem(Context *context, Partition *p, const c
          * appear in the host namespace. Hence we fork a child that has its own file system namespace and
          * detached mount propagation. */
 
+        (void) dlopen_libmount();
+
         r = safe_fork("(sd-copy)", FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_WAIT|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE, NULL);
         if (r < 0)
                 return r;
@@ -8294,13 +8297,12 @@ static int context_fstab(Context *context) {
         switch (arg_append_fstab) {
         case APPEND_AUTO: {
                 r = read_full_file(path, &c, NULL);
-                if (r < 0) {
-                        if (r == -ENOENT) {
-                                log_debug("File fstab not found in %s", path);
-                                break;
-                        }
-                        return log_error_errno(r, "Failed to open %s: %m", path);
+                if (r == -ENOENT) {
+                        log_debug("File fstab not found in %s", path);
+                        break;
                 }
+                if (r < 0)
+                        return log_error_errno(r, "Failed to open %s: %m", path);
 
                 const char *acs, *ace;
                 acs = find_line(c, AUTOMATIC_FSTAB_HEADER_START);
@@ -9710,11 +9712,10 @@ static int parse_efi_variable_factory_reset(void) {
                 return 0;
 
         r = efi_get_variable_string(EFI_SYSTEMD_VARIABLE_STR("FactoryReset"), &value);
-        if (r < 0) {
-                if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r))
-                        return 0;
+        if (r == -ENOENT || ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                return 0;
+        if (r < 0)
                 return log_error_errno(r, "Failed to read EFI variable FactoryReset: %m");
-        }
 
         log_warning("Warning, EFI variable FactoryReset is in use, please migrate to use FactoryResetRequest instead, support will be removed in v260!");
 
@@ -9735,11 +9736,10 @@ static int remove_efi_variable_factory_reset(void) {
         // FIXME: Remove this in v260, see above
 
         r = efi_set_variable(EFI_SYSTEMD_VARIABLE_STR("FactoryReset"), NULL, 0);
-        if (r < 0) {
-                if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r))
-                        return 0;
+        if (r == -ENOENT || ERRNO_IS_NEG_NOT_SUPPORTED(r))
+                return 0;
+        if (r < 0)
                 return log_error_errno(r, "Failed to remove EFI variable FactoryReset: %m");
-        }
 
         log_info("Successfully unset EFI variable FactoryReset.");
         return 0;

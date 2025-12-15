@@ -51,7 +51,7 @@ int parse_acl(
                 acl_t *ret_acl_access_exec,
                 acl_t *ret_acl_default,
                 bool want_mask);
-int acls_for_file(const char *path, acl_type_t type, acl_t new, acl_t *ret);
+int acls_for_file(const char *path, acl_type_t type, acl_t acl, acl_t *ret);
 int fd_add_uid_acl_permission(int fd, uid_t uid, unsigned mask);
 
 int fd_acl_make_read_only(int fd);
@@ -68,9 +68,26 @@ static inline int acl_set_perm(acl_permset_t ps, acl_perm_t p, bool b) {
 
 #else
 
+typedef void *acl_t;
+typedef int acl_tag_t;
+typedef unsigned acl_type_t;
+
 #define ACL_READ    0x04
 #define ACL_WRITE   0x02
 #define ACL_EXECUTE 0x01
+
+/* acl_tag_t */
+#define ACL_UNDEFINED_TAG       (0x00)
+#define ACL_USER_OBJ            (0x01)
+#define ACL_USER                (0x02)
+#define ACL_GROUP_OBJ           (0x04)
+#define ACL_GROUP               (0x08)
+#define ACL_MASK                (0x10)
+#define ACL_OTHER               (0x20)
+
+/* acl_type_t */
+#define ACL_TYPE_ACCESS         (0x8000)
+#define ACL_TYPE_DEFAULT        (0x4000)
 
 static inline int dlopen_libacl(void) {
         return -EOPNOTSUPP;

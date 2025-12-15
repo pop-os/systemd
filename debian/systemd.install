@@ -66,7 +66,7 @@ usr/lib/kernel/install.d/90-uki-copy.install
 usr/lib/modprobe.d/systemd.conf
 [amd64 arm64 armhf riscv64 loong64] <!stage1> usr/lib/nvpcr/hardware.nvpcr
 [!i386] <!stage1> usr/lib/pcrlock.d/
-[alpha amd64 arm64 ia64 loong64 mips64el ppc64 ppc64el riscv64 loong64 s390x sparc64] usr/lib/sysctl.d/50-pid-max.conf
+[any-alpha any-amd64 any-arm64 any-ia64 any-loong64 any-mips64 any-mips64el any-mips64r6 any-mips64r6el any-ppc64 any-ppc64el any-riscv64 any-s390x any-sparc64] usr/lib/sysctl.d/50-pid-max.conf
 usr/lib/systemd/catalog/
 usr/lib/systemd/network/80-6rd-tunnel.link
 usr/lib/systemd/network/80-6rd-tunnel.network
@@ -502,6 +502,7 @@ usr/share/bash-completion/completions/systemd-run
 usr/share/bash-completion/completions/systemd-sysext
 usr/share/bash-completion/completions/systemd-vpick
 usr/share/bash-completion/completions/timedatectl
+usr/share/bash-completion/completions/varlinkctl
 usr/share/dbus-1/services/org.freedesktop.systemd1.service
 usr/share/dbus-1/system.d/org.freedesktop.hostname1.conf
 usr/share/dbus-1/system.d/org.freedesktop.locale1.conf
@@ -570,4 +571,4 @@ var/lib/systemd/
 ../extra/user.conf.d/10-coredump-debian.conf usr/lib/systemd/user.conf.d/
 ../extra/sysctl.d/10-coredump-debian.conf usr/lib/sysctl.d/
 ../extra/limits.d/10-coredump-debian.conf etc/security/limits.d/
-../extra/dbus-1/system.d/systemd-localed-read-only.conf usr/share/dbus-1/system.d/
+../extra/dbus-1/system.d/org.freedesktop.locale1.read-only.conf usr/share/dbus-1/system.d/
