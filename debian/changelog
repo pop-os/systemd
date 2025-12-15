@@ -1,4 +1,4 @@
-systemd (259~rc3-1ubuntu1) UNRELEASED; urgency=medium
+systemd (259~rc3-1ubuntu1) resolute; urgency=medium
 
   * Merge with Debian unstable (LP: #2130132). Remaining changes:
     - debian/systemd.postinst:
@@ -45,7 +45,7 @@ systemd (259~rc3-1ubuntu1) UNRELEASED; urgency=medium
   * New upstream release:
     - Fixes LP: #2133462
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 15 Dec 2025 11:34:13 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 15 Dec 2025 13:53:39 -0500
 
 systemd (259~rc3-1) unstable; urgency=medium
 
