@@ -1,0 +1,66 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Tue, 16 Dec 2025 10:24:14 -0500
+Subject: test: cope with uutils coreutils flag parsing for date command
+
+Bug-Ubuntu: https://launchpad.net/bugs/2136408
+
+With GNU coreutils, one can pass an argument to the "set" flag like:
+
+ date -s "-3 days"
+
+With uutils coreutils, that gives an error:
+
+ error: unexpected argument '-3' found
+    tip: to pass '-3' as a value, use '-- -3'
+
+That's a bug (https://github.com/uutils/coreutils/issues/9679), but both
+implementations accept --set="-3 days" just fine, so use that instead.
+---
+ test/units/TEST-53-TIMER.RandomizedDelaySec-reload.sh | 2 +-
+ test/units/TEST-53-TIMER.issue-16347.sh               | 4 ++--
+ test/units/TEST-53-TIMER.restart-trigger.sh           | 4 ++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/test/units/TEST-53-TIMER.RandomizedDelaySec-reload.sh b/test/units/TEST-53-TIMER.RandomizedDelaySec-reload.sh
+index e9b9d4f..2baa47c 100755
+--- a/test/units/TEST-53-TIMER.RandomizedDelaySec-reload.sh
++++ b/test/units/TEST-53-TIMER.RandomizedDelaySec-reload.sh
+@@ -84,7 +84,7 @@ check_elapse_timestamp
+ # elapse timestamp (this goes through a slightly different codepath that actually contained the original
+ # issue).
+ : "Next elapse timestamp after time jump"
+-date -s "tomorrow 00:10"
++date --set="tomorrow 00:10"
+ check_elapse_timestamp
+ 
+ : "Next elapse timestamp after daemon-reload"
+diff --git a/test/units/TEST-53-TIMER.issue-16347.sh b/test/units/TEST-53-TIMER.issue-16347.sh
+index 8b26614..b486787 100755
+--- a/test/units/TEST-53-TIMER.issue-16347.sh
++++ b/test/units/TEST-53-TIMER.issue-16347.sh
+@@ -4,8 +4,8 @@ set -eux
+ set -o pipefail
+ 
+ # Reset host date to current time, 3 days in the past.
+-date -s "-3 days"
+-trap 'date -s "+3 days"' EXIT
++date --set="-3 days"
++trap 'date --set="+3 days"' EXIT
+ 
+ # Run a timer for every 15 minutes.
+ systemd-run --unit test-timer --on-calendar "*:0/15:0" true
+diff --git a/test/units/TEST-53-TIMER.restart-trigger.sh b/test/units/TEST-53-TIMER.restart-trigger.sh
+index e5cd575..71de99c 100755
+--- a/test/units/TEST-53-TIMER.restart-trigger.sh
++++ b/test/units/TEST-53-TIMER.restart-trigger.sh
+@@ -37,8 +37,8 @@ JOURNAL_TS="$(date "+%s")"
+ systemctl restart "$UNIT_NAME.timer"
+ systemctl status "$UNIT_NAME.timer"
+ 
+-date -s '+2 hours'
+-trap 'date -s "-2 hours"' EXIT
++date --set='+2 hours'
++trap 'date --set="-2 hours"' EXIT
+ sleep 1
+ systemctl status "$UNIT_NAME.timer"
+ assert_eq "$(journalctl -q -p info --since="@$JOURNAL_TS" --unit="$UNIT_NAME" --grep="$TEST_MESSAGE" | wc -l)" "1"
