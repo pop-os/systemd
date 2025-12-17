@@ -249,7 +249,7 @@ int pid_get_cmdline(pid_t pid, size_t max_columns, ProcessCmdlineFlags flags, ch
 
                 /* Drop trailing NULs, otherwise strv_parse_nulstr() adds additional empty strings at the end.
                  * See also issue #21186. */
-                args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
+                args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls= */ true);
                 if (!args)
                         return -ENOMEM;
 
@@ -315,7 +315,7 @@ int pid_get_cmdline_strv(pid_t pid, ProcessCmdlineFlags flags, char ***ret) {
         if (r < 0)
                 return r;
 
-        args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
+        args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls= */ true);
         if (!args)
                 return -ENOMEM;
 
@@ -1703,7 +1703,8 @@ int pidref_safe_fork_full(
          * foreign environment. Note that this has no effect on NSS! (i.e. it only has effect on uses of our
          * dlopen_safe(), which we use comprehensively in our codebase, but glibc NSS doesn't bother, of
          * course.) */
-        block_dlopen();
+        if (!FLAGS_SET(flags, FORK_ALLOW_DLOPEN))
+                block_dlopen();
 
         if (flags & (FORK_DEATHSIG_SIGTERM|FORK_DEATHSIG_SIGINT|FORK_DEATHSIG_SIGKILL))
                 if (prctl(PR_SET_PDEATHSIG, fork_flags_to_signal(flags)) < 0) {
@@ -1906,6 +1907,7 @@ int namespace_fork(
         /* This is much like safe_fork(), but forks twice, and joins the specified namespaces in the middle
          * process. This ensures that we are fully a member of the destination namespace, with pidns an all, so that
          * /proc/self/fd works correctly. */
+        assert(!FLAGS_SET(flags, FORK_ALLOW_DLOPEN)); /* never allow loading shared library from another ns */
 
         r = safe_fork_full(outer_name,
                            NULL,
@@ -2339,7 +2341,7 @@ int read_errno(int errno_fd) {
         /* The issue here is that it's impossible to distinguish between an error code returned by child and
          * IO error arose when reading it. So, the function logs errors and return EIO for the later case. */
 
-        ssize_t n = loop_read(errno_fd, &r, sizeof(r), /* do_poll = */ false);
+        ssize_t n = loop_read(errno_fd, &r, sizeof(r), /* do_poll= */ false);
         if (n < 0) {
                 log_debug_errno(n, "Failed to read errno: %m");
                 return -EIO;
