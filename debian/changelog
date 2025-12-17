@@ -1,3 +1,18 @@
+systemd (259-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Downgrade depends to recommends for IPC endpoint of respective libnss
+    modules. Minimal container images might want the libnss modules to
+    resolve users, but without the IPC endpoints which will be running on
+    the host and which will be reachable anyway via IPC.
+  * Update upstream source from tag 'upstream/259' Update to upstream
+    version '259' with Debian dir 7a7b4d948977ac3c011ae6188deefd8d2c1efc8c
+
+  [ Helmut Grohne ]
+  * Update architecture match for 50-pid-max.conf
+
+ -- Luca Boccassi <bluca@debian.org>  Wed, 17 Dec 2025 23:08:45 +0000
+
 systemd (259~rc3-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
