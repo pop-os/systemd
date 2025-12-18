@@ -179,6 +179,11 @@ export SYSTEMD_INTEGRATION_TESTS=1
 export NO_BUILD=1
 export NO_SYNC=1
 
+if dpkg-vendor --is Ubuntu; then
+    export TEST_SKIP_SUBTEST="machined" # LP: #2136413
+    export TEST_SKIP="TEST-08-INITRD" # LP: #2136419
+fi
+
 mkosi --debug genkey
 mkosi summary
 meson setup "${workdir}/btrfs/build" -Dintegration-tests=true -Dtests=true
