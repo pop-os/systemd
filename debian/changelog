@@ -39,10 +39,10 @@ systemd (259-1ubuntu1) UNRELEASED; urgency=medium
       (LP: #2136497)
     - test: cope with uutils coreutils flag parsing for date command
       (LP: #2136408)
-    - test: cope with uutils coreutils flag parsing for date command
-      (LP: #2136408)
+    - test: workaround uutils dd broken pipe
+      (LP: #2136752)
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 18 Dec 2025 10:24:39 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 18 Dec 2025 11:12:46 -0500
 
 systemd (259-1) unstable; urgency=medium
 
