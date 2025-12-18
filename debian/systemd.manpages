@@ -252,7 +252,7 @@ debian/tmp/usr/share/man/man8/systemd-sysext-initrd.service.8
 debian/tmp/usr/share/man/man8/systemd-system-update-generator.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.service.8
-debian/tmp/usr/share/man/man8/systemd-sysv-generator.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-sysv-generator.8
 debian/tmp/usr/share/man/man8/systemd-timedated.8
 debian/tmp/usr/share/man/man8/systemd-timedated.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles.8
