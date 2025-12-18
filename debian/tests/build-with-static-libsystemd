@@ -31,7 +31,7 @@ int main(void)
 }
 EOF
 
-gcc -Wall -Werror -o uuid-gen uuid-gen.c -l:libsystemd.a -lcap
+gcc -Wall -Werror -o uuid-gen uuid-gen.c -l:libsystemd.a
 echo "build: OK"
 [ -x uuid-gen ]
 ./uuid-gen

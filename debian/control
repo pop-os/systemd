@@ -33,7 +33,6 @@ Build-Depends: debhelper-compat (= 13),
                linux-tools-generic <pkg.systemd.upstream> | bpftool <pkg.systemd.upstream>,
                gettext,
                gperf,
-               libcap-dev,
                libcrypt-dev,
                libpam0g-dev,
                libapparmor-dev (>= 2.13) <!stage1>,
@@ -357,7 +356,6 @@ Architecture: linux-any
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
-         libcap-dev,
          libsystemd0 (= ${binary:Version})
 Description: systemd utility library - development files
  This library provides APIs to interface with various system components such as
@@ -419,7 +417,6 @@ Architecture: linux-any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
-         libcap-dev,
          libudev1 (= ${binary:Version})
 Description: libudev development files
  This library provides APIs to introspect and enumerate devices on the local
