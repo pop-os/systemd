@@ -481,6 +481,7 @@ Description: userspace out-of-memory (OOM) killer
 Package: systemd-userdbd
 Build-Profiles: <!stage1>
 Architecture: linux-any
+Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libnss-systemd (= ${binary:Version}),
