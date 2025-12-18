@@ -1,3 +1,49 @@
+systemd (259-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge with Debian unstable (LP: #2130132). Remaining changes:
+    - debian/systemd.postinst:
+      + manually call systemd-tmpfiles --create in postinst
+    - debian/control:
+      + Add Recommends: systemd-resolved to systemd package
+      + Make systemd-cryptsetup Priority: important
+      + Give systemd-resolved Priority: important
+      + Add Recommends: systemd-hwe-hwdb to udev package
+      + Drop Recommends: libnss-myhostname libnss-resolve from systemd-resolved
+      + Do not build systemd-boot-efi-{amd64,arm64}-signed-template
+    - d/rules: disable bpf support on riscv64 for now (LP #2099864)
+    - d/extra/dbus-1: remove SetLocale restriction from dbus policy (LP #2102028)
+    - Delta for i386:
+      + debian/systemd.install: exclude files that are not built for i386
+      + debian/systemd.manpages: do not ship un-built manpages on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with tpm libraries on i386
+      + debian/rules,debian/control,debian/tests/control:
+        Do not build with libqrencode on i386
+      + debian/rules: Remove unneeded efi artifacts on i386 to avoid debugedit errors
+    - debian/libnss-systemd.*:
+      + debian/libnss-systemd.nss: install after 'compat' too (LP #2125403)
+      + debian/libnss-systemd.preinst: force nsswitch.conf update
+        Drop systemd instances in nsswitch.conf, and force postinst to
+        re-generate the file (LP #2121017)
+      + debian/linbnss-systemd.nss: Install systemd service after files.
+        As suggested by upstream the systemd NSS service should come just after
+        files
+    - debian/tests:
+      + d/t/boot-and-services: use coreutils tunable in apparmor test (LP #2125614)
+      + d/t/upstream: use GNU cp in test setup (LP #2122363)
+    - debian/patches:
+      + switch-root: use MS_MOVE for /run when switchig from initrd
+      + test: skip TEST-50-DISSECT.dissect (LP #2116460)
+  * New changes:
+    - test: use journalctl -n option instead of piping to head
+      (LP: #2136497)
+    - test: cope with uutils coreutils flag parsing for date command
+      (LP: #2136408)
+    - test: cope with uutils coreutils flag parsing for date command
+      (LP: #2136408)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 18 Dec 2025 10:24:39 -0500
+
 systemd (259-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
