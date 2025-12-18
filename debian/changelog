@@ -1,4 +1,4 @@
-systemd (259-1ubuntu1) UNRELEASED; urgency=medium
+systemd (259-1ubuntu1) resolute; urgency=medium
 
   * Merge with Debian unstable (LP: #2130132). Remaining changes:
     - debian/systemd.postinst:
@@ -42,7 +42,7 @@ systemd (259-1ubuntu1) UNRELEASED; urgency=medium
     - test: workaround uutils dd broken pipe
       (LP: #2136752)
 
- -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 18 Dec 2025 11:12:46 -0500
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 18 Dec 2025 11:13:46 -0500
 
 systemd (259-1) unstable; urgency=medium
 
