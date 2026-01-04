@@ -135,7 +135,6 @@ CONFFLAGS += \
 	-Dimportd=enabled \
 	-Dmicrohttpd=enabled \
 	-Dopenssl=enabled \
-	-Dcryptolib=openssl \
 	-Ddns-over-tls=openssl \
 	-Dlibfido2=enabled \
 	-Dtpm2=enabled \
