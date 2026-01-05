@@ -1,0 +1,111 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Fri, 19 Dec 2025 11:01:49 -0500
+Subject: ukify: omit .osrel section when --os-release= is empty
+
+Origin: upstream, https://github.com/systemd/systemd/commit/75890d949f92c412c0936b8536b2e0dc8f7dfb40
+Bug-Ubuntu: https://launchpad.net/bugs/2133402
+
+The primary motivation for this is to allow users of ukify to build
+UKI-like objects, without having them later be detected as a UKI by
+tools like kernel-install and bootctl.
+
+The common code used by these tools to determine if a PE binary is a UKI
+checks that both .osrel and .linux sections are present. Hence, adding
+a mechansim to skip .osrel provides a way to avoid being labeled a UKI.
+---
+ man/ukify.xml                |  5 ++++-
+ src/ukify/test/test_ukify.py | 15 +++++++++++----
+ src/ukify/ukify.py           | 10 +++++++++-
+ 3 files changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/man/ukify.xml b/man/ukify.xml
+index 8297616..7462c5c 100644
+--- a/man/ukify.xml
++++ b/man/ukify.xml
+@@ -365,7 +365,10 @@
+           <listitem><para>The os-release description (the <literal>.osrel</literal> section). The argument
+           may be a literal string, or <literal>@</literal> followed by a path name. If not specified, the
+           <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry> file
+-          will be picked up from the host system.</para>
++          will be picked up from the host system. If explicitly set to an empty string, the ".osrel" section
++          is omitted from the UKI (this is not recommended in most cases, and causes the resulting artifact
++          to not be recognized as a UKI by other tools like <command>kernel-install</command>
++          and <command>bootctl</command>).</para>
+ 
+           <xi:include href="version-info.xml" xpointer="v253"/></listitem>
+         </varlistentry>
+diff --git a/src/ukify/test/test_ukify.py b/src/ukify/test/test_ukify.py
+index f75ef0c..224a385 100755
+--- a/src/ukify/test/test_ukify.py
++++ b/src/ukify/test/test_ukify.py
+@@ -641,7 +641,7 @@ def test_efi_signing_pesign(kernel_initrd, tmp_path):
+ 
+     shutil.rmtree(tmp_path)
+ 
+-def test_inspect(kernel_initrd, tmp_path, capsys):
++def test_inspect(kernel_initrd, tmp_path, capsys, osrel=True):
+     if kernel_initrd is None:
+         pytest.skip('linux+initrd not found')
+     if not shutil.which('sbsign'):
+@@ -653,7 +653,7 @@ def test_inspect(kernel_initrd, tmp_path, capsys):
+ 
+     output = f'{tmp_path}/signed2.efi'
+     uname_arg='1.2.3'
+-    osrel_arg='Linux'
++    osrel_arg='Linux' if osrel else ''
+     cmdline_arg='ARG1 ARG2 ARG3'
+ 
+     args = [
+@@ -680,8 +680,12 @@ def test_inspect(kernel_initrd, tmp_path, capsys):
+ 
+     text = capsys.readouterr().out
+ 
+-    expected_osrel = f'.osrel:\n  size: {len(osrel_arg)}'
+-    assert expected_osrel in text
++    if osrel:
++        expected_osrel = f'.osrel:\n  size: {len(osrel_arg)}'
++        assert expected_osrel in text
++    else:
++        assert '.osrel:' not in text
++
+     expected_cmdline = f'.cmdline:\n  size: {len(cmdline_arg)}'
+     assert expected_cmdline in text
+     expected_uname = f'.uname:\n  size: {len(uname_arg)}'
+@@ -694,6 +698,9 @@ def test_inspect(kernel_initrd, tmp_path, capsys):
+ 
+     shutil.rmtree(tmp_path)
+ 
++def test_inspect_no_osrel(kernel_initrd, tmp_path, capsys):
++    test_inspect(kernel_initrd, tmp_path, capsys, osrel=False)
++
+ @pytest.mark.skipif(not slow_tests, reason='slow')
+ def test_pcr_signing(kernel_initrd, tmp_path):
+     if kernel_initrd is None:
+diff --git a/src/ukify/ukify.py b/src/ukify/ukify.py
+index ad65605..1e6e50c 100755
+--- a/src/ukify/ukify.py
++++ b/src/ukify/ukify.py
+@@ -1477,6 +1477,9 @@ def make_uki(opts: UkifyConfig) -> None:
+         '.profile',
+     }
+ 
++    if not opts.os_release:
++        to_import.remove('.osrel')
++
+     for profile in opts.join_profiles:
+         pe = pefile.PE(profile, fast_load=True)
+         prev_len = len(uki.sections)
+@@ -2412,7 +2415,12 @@ def finalize_options(opts: argparse.Namespace) -> None:
+ 
+     opts.os_release = resolve_at_path(opts.os_release)
+ 
+-    if not opts.os_release and opts.linux:
++    if opts.os_release == '':
++        # If --os-release= with an empty string was passed, treat that as
++        # explicitly disabling the .osrel section, and do not fallback to the
++        # system's os-release files.
++        pass
++    elif opts.os_release is None and opts.linux:
+         p = Path('/etc/os-release')
+         if not p.exists():
+             p = Path('/usr/lib/os-release')
