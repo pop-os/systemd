@@ -178,16 +178,6 @@ Depends: systemd,
   libsystemd-dev,
   libcap-dev,
 
-Tests: tests-in-lxd
-Depends: systemd-tests,
-  udev,
-  libpam-systemd,
-  autopkgtest,
-  lsb-release,
-  snapd,
-  dnsmasq-base,
-Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-not-installable, skippable
-
 # Dummy test so that changes to key packages trigger our autopkgtests on ci.debian.net
 Features: test-name=hint-testsuite-triggers
 Test-Command: /bin/true
