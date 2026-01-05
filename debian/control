@@ -518,7 +518,7 @@ Build-Profiles: <!stage1>
 Architecture: amd64 i386 arm64 armhf loong64 riscv64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         efibootmgr,
+         efibootmgr [amd64 arm64],
          systemd (= ${binary:Version}),
          systemd-boot-tools (= ${binary:Version}),
          systemd-boot-efi (= ${binary:Version}) [!amd64 !arm64],
