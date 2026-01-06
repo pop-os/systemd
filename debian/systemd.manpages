@@ -130,7 +130,7 @@ debian/tmp/usr/share/man/man7/systemd.v.7
 debian/tmp/usr/share/man/man8/30-systemd-environment-d-generator.8
 debian/tmp/usr/share/man/man8/kernel-install.8
 debian/tmp/usr/share/man/man8/pam_systemd_loadkey.8
-debian/tmp/usr/share/man/man8/rc-local.service.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/rc-local.service.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-console.path.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-console.service.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-wall.path.8
@@ -227,7 +227,7 @@ debian/tmp/usr/share/man/man8/systemd-quotacheck@.service.8
 debian/tmp/usr/share/man/man8/systemd-quotacheck-root.service.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.service.8
-debian/tmp/usr/share/man/man8/systemd-rc-local-generator.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-rc-local-generator.8
 debian/tmp/usr/share/man/man8/systemd-reboot.service.8
 debian/tmp/usr/share/man/man8/systemd-remount-fs.8
 debian/tmp/usr/share/man/man8/systemd-remount-fs.service.8

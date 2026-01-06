@@ -165,7 +165,7 @@ usr/lib/systemd/system-generators/systemd-fstab-generator
 usr/lib/systemd/system-generators/systemd-getty-generator
 usr/lib/systemd/system-generators/systemd-gpt-auto-generator
 usr/lib/systemd/system-generators/systemd-hibernate-resume-generator
-usr/lib/systemd/system-generators/systemd-rc-local-generator
+<!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-rc-local-generator
 usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
@@ -228,7 +228,7 @@ usr/lib/systemd/system/printer.target
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.automount
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.mount
 usr/lib/systemd/system/quotaon*.service
-usr/lib/systemd/system/rc-local.service
+<!pkg.systemd.upstream> usr/lib/systemd/system/rc-local.service
 usr/lib/systemd/system/reboot.target
 usr/lib/systemd/system/remote-fs-pre.target
 usr/lib/systemd/system/remote-fs.target
@@ -563,7 +563,7 @@ var/lib/systemd/
 ../extra/pam.d/* usr/lib/pam.d/
 ../extra/journald.conf.d usr/lib/systemd/
 ../extra/units/getty-static.service usr/lib/systemd/system/
-../extra/units/rc-local.service.d usr/lib/systemd/system/
+<!pkg.systemd.upstream> ../extra/units/rc-local.service.d usr/lib/systemd/system/
 ../extra/units/systemd-fsck-root.service.d/ usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/
