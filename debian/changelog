@@ -1,3 +1,12 @@
+systemd (259-1ubuntu2) resolute; urgency=medium
+
+  * d/control: have systemd-boot depend on efibootmgr for amd64 and arm64 only
+  * ukify: omit .osrel section when --os-release= is empty (LP: #2133402)
+  * d/tests: drop tests-in-lxd
+  * test: skip TEST-13-NSPAWN.machined (LP: #2136413)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Tue, 06 Jan 2026 10:28:46 -0500
+
 systemd (259-1ubuntu1) resolute; urgency=medium
 
   * Merge with Debian unstable (LP: #2130132). Remaining changes:
