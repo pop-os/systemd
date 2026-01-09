@@ -30,10 +30,6 @@ _restart_managers() {
     # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
     # D-Bus as dbus-user-session is not guaranteed to be available.
     _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
-    # do not restart logind
-    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
-    _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-journald.service || true
 }
 
 # Update Message Catalogs database and binfmt registrations in response to dpkg triggers
