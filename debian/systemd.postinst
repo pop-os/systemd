@@ -25,11 +25,13 @@ _update_sysctl() {
 }
 
 _restart_managers() {
-    _systemctl daemon-reexec || true
-    # Re-exec user instances so that running user managers are updated too.
-    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
-    # D-Bus as dbus-user-session is not guaranteed to be available.
-    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
+    if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
+        deb-systemd-invoke daemon-reexec || true
+        # Re-exec user instances so that running user managers are updated too.
+        # Note that this is asynchronous, but we can't use
+        # D-Bus as dbus-user-session is not guaranteed to be available.
+        deb-systemd-invoke --user --no-dbus daemon-reexec || true
+    fi
 }
 
 # Update Message Catalogs database and binfmt registrations in response to dpkg triggers
