@@ -19,5 +19,4 @@ cryptswap-mount-fix.patch
 systemd-boot-id-compat.patch
 system76-usb.patch
 timesyncd-disable.patch
-systemd-resolvconf.patch
 disable-90-loaderentry.patch
