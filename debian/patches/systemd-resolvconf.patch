@@ -7,7 +7,7 @@ Index: systemd/debian/control
 ===================================================================
 --- systemd.orig/debian/control
 +++ systemd/debian/control
-@@ -569,3 +569,14 @@ Description: systemd development files
+@@ -569,3 +569,12 @@
   are different from the libsystemd's and libudev's pkg-config files, which can
   still be found in the respective dev packages, but instead provide data such as
   the installation directories for units, and more.
@@ -18,13 +18,5 @@ Index: systemd/debian/control
 +Priority: optional
 +Depends: ${shlibs:Depends},
 +         ${misc:Depends},
-+         systemd
-+Conflicts: resolvconf
-+Provides: resolvconf
-+Description: Symlinks the resolvconf command to resolvectl for compatibility.
-Index: systemd/debian/systemd-resolvconf.links
-===================================================================
---- /dev/null
-+++ systemd/debian/systemd-resolvconf.links
-@@ -0,0 +1 @@
-+/usr/bin/resolvectl /usr/sbin/resolvconf
++         systemd-resolved
++Description: Empty transitional package (can be safely removed).
