@@ -6,3 +6,4 @@ lp2136752-test-workaround-uutils-dd-broken-pipe.patch
 lp2133402-ukify-omit-.osrel-section-when-os-release-is-empty.patch
 lp2136413-test-skip-TEST-13-NSPAWN.machined.patch
 test-disable-pipefail-again-in-monitor_check_rr.patch
+resolve-include-current-DNS-server-in-JSON-again.patch

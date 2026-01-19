@@ -1,0 +1,33 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 19 Jan 2026 13:29:52 -0500
+Subject: resolve: include current DNS server in JSON again
+
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2138680
+Origin: https://github.com/systemd/systemd/commit/d990b426b9879cfe37e5abfcf786413647e8b91b
+
+The current_dns_server_json object in dns_configuration_json_append() is
+always NULL, because the logic to dump the current DNS server to JSON
+was removed by mistake in a re-factoring commit. Add that logic back.
+
+Fixes c6b6ac63ea ("resolve: drop unnecessary preparation of empty arrays").
+---
+ src/resolve/resolved-manager.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index df0b221..95e635d 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -2071,6 +2071,12 @@ static int dns_configuration_json_append(
+ 
+         assert(configuration);
+ 
++        if (current_dns_server) {
++                r = dns_server_dump_configuration_to_json(current_dns_server, &current_dns_server_json);
++                if (r < 0)
++                        return r;
++        }
++
+         SET_FOREACH(scope, dns_scopes) {
+                 _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
+ 
