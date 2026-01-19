@@ -5,3 +5,4 @@ lp2136408-test-cope-with-uutils-coreutils-flag-parsing-for-date-com.patch
 lp2136752-test-workaround-uutils-dd-broken-pipe.patch
 lp2133402-ukify-omit-.osrel-section-when-os-release-is-empty.patch
 lp2136413-test-skip-TEST-13-NSPAWN.machined.patch
+test-disable-pipefail-again-in-monitor_check_rr.patch
