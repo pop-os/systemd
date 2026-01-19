@@ -1,3 +1,12 @@
+systemd (259-1ubuntu3) resolute; urgency=medium
+
+  * test: skip TEST-13-NSPAWN.nspawn also (LP: #2136413)
+  * test: disable pipefail again in monitor_check_rr() (LP: #2136819)
+  * d/control: demote systemd-userdbd to Suggests for libnss-systemd
+  * resolve: include current DNS server in JSON again (LP: #2138680)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 19 Jan 2026 16:30:42 -0500
+
 systemd (259-1ubuntu2) resolute; urgency=medium
 
   * d/control: have systemd-boot depend on efibootmgr for amd64 and arm64 only
