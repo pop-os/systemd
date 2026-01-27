@@ -26,7 +26,7 @@ _update_sysctl() {
 
 _restart_managers() {
     if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
-        deb-systemd-invoke daemon-reexec || true
+        deb-systemd-invoke --no-dbus daemon-reexec || true
         # Re-exec user instances so that running user managers are updated too.
         # Note that this is asynchronous, but we can't use
         # D-Bus as dbus-user-session is not guaranteed to be available.
