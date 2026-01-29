@@ -113,6 +113,7 @@ CONFFLAGS = \
 	-Dutmp=false \
 	-Dtty-mode=0600 \
 	-Dvmspawn=enabled \
+	-Defi-stub-extra-sections=500 \
 	-Dmode=$(if $(filter pkg.systemd.upstream,$(DEB_BUILD_PROFILES)),developer,release)
 
 ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
@@ -220,13 +221,6 @@ CONFFLAGS += --buildtype=debugoptimized
 CONFFLAGS += -Dsbat-distro-url=https://github.com/systemd/systemd
 CONFFLAGS += -Dsbat-distro=upstream
 CONFFLAGS += -Dsbat-distro-summary='Upstream build from git'
-endif
-
-# Increase the minimum number of sections to keep free in stub PE header in
-# order to be able to create an UKI file with many DTBs (each of them is stored
-# in a different .dtbauto section)
-ifneq (,$(filter $(DEB_TARGET_ARCH), arm64 armhf riscv64))
-CONFFLAGS += -Defi-stub-extra-sections=500
 endif
 
 override_dh_auto_configure:
