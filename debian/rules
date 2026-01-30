@@ -282,9 +282,10 @@ override_dh_installsystemd:
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
 	dh_installsystemd -psystemd-repart --restart-after-upgrade systemd-repart.socket
 	dh_installsystemd -psystemd-repart -X systemd-repart.socket --no-start --no-stop-on-upgrade --restart-after-upgrade
-	dh_installsystemd -psystemd-resolved
+	dh_installsystemd -psystemd-resolved --no-also systemd-resolved.service
+	dh_installsystemd -psystemd-resolved -X systemd-resolved.service --no-stop-on-upgrade
 	dh_installsystemd -pudev systemd-udevd.service
-	dh_installsystemd -pudev -X systemd-udevd.service --no-enable --no-start --no-stop-on-upgrade --restart-after-upgrade
+	dh_installsystemd -pudev -X systemd-udevd.service --no-enable --no-start --no-stop-on-upgrade
 	dh_installsystemd -psystemd-boot --no-start --no-stop-on-upgrade --restart-after-upgrade
 	# do not restart logind
 	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
