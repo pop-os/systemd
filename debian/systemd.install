@@ -555,7 +555,7 @@ usr/share/zsh/vendor-completions/_systemd-run
 usr/share/zsh/vendor-completions/_systemd-tmpfiles
 usr/share/zsh/vendor-completions/_timedatectl
 usr/share/zsh/vendor-completions/_varlinkctl
-var/lib/systemd/
+<!pkg.systemd.upstream> var/lib/systemd/
 ../extra/init-functions.d usr/lib/lsb/
 ../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
 <!pkg.systemd.upstream> ../extra/systemd-sysv-install usr/lib/systemd/
