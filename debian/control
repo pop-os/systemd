@@ -166,6 +166,7 @@ Architecture: linux-any
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         libarchive13t64,
          systemd,
          default-dbus-system-bus | dbus-system-bus
 Recommends: libnss-mymachines,
