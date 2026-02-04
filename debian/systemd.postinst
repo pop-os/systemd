@@ -74,9 +74,9 @@ fi
 # Initial update of the Message Catalogs database
 _update_catalog
 
-#DEBHELPER#
-
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _restart_managers
 fi
+
+#DEBHELPER#
