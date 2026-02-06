@@ -27,6 +27,7 @@
 #include "parse-util.h"
 #include "pkcs11-util.h"
 #include "pretty-print.h"
+#include "process-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "tpm2-pcr.h"
@@ -151,7 +152,7 @@ static int determine_default_node(void) {
                 return log_error_errno(SYNTHETIC_ERRNO(ENXIO), "Block device backing /var/ is not a LUKS2 device.");
 
         _cleanup_(sd_device_unrefp) sd_device *origin = NULL;
-        r = block_device_get_originating(dev, &origin);
+        r = block_device_get_originating(dev, &origin, /* recursive= */ false);
         if (r < 0)
                 return log_error_errno(r, "Failed to get originating device of LUKS2 device backing /var/: %m");
 
@@ -850,7 +851,7 @@ static int run(int argc, char *argv[]) {
                 return r;
 
         /* A delicious drop of snake oil */
-        (void) mlockall(MCL_FUTURE);
+        (void) safe_mlockall(MCL_CURRENT|MCL_FUTURE|MCL_ONFAULT);
 
         cryptsetup_enable_logging(NULL);
 

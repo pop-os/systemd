@@ -1946,11 +1946,8 @@ static void manager_preset_all(Manager *m) {
         log_info("Applying preset policy.");
         r = unit_file_preset_all(RUNTIME_SCOPE_SYSTEM, /* file_flags= */ 0,
                                  /* root_dir= */ NULL, mode, &changes, &n_changes);
-        install_changes_dump(r, "preset", changes, n_changes, /* quiet= */ false);
-        if (r < 0)
-                log_full_errno(r == -EEXIST ? LOG_NOTICE : LOG_WARNING, r,
-                               "Failed to populate /etc with preset unit settings, ignoring: %m");
-        else
+        r = install_changes_dump(r, "preset all", changes, n_changes, /* quiet= */ false);
+        if (r >= 0)
                 log_info("Populated /etc with preset unit settings.");
 }
 
@@ -2277,6 +2274,11 @@ int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error 
                         unit,
                         tr->anchor_job,
                         mode == JOB_IGNORE_DEPENDENCIES ? TRANSACTION_IGNORE_ORDER : 0);
+
+        /* Only activate the transaction if it contains jobs other than NOP anchor.
+         * Short-circuiting here avoids unnecessary processing, such as emitting D-Bus signals. */
+        if (hashmap_size(tr->jobs) <= 1)
+                return 0;
 
         r = transaction_activate(tr, m, mode, NULL, e);
         if (r < 0)

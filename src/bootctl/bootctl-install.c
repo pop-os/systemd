@@ -16,12 +16,12 @@
 #include "efi-fundamental.h"
 #include "efivars.h"
 #include "env-file.h"
-#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "glyph-util.h"
 #include "id128-util.h"
+#include "install-file.h"
 #include "io-util.h"
 #include "kernel-config.h"
 #include "log.h"
@@ -597,17 +597,12 @@ static int install_entry_token(void) {
 
 #if HAVE_OPENSSL
 static int efi_timestamp(EFI_TIME *ret) {
-        uint64_t epoch = UINT64_MAX;
         struct tm tm = {};
         int r;
 
         assert(ret);
 
-        r = secure_getenv_uint64("SOURCE_DATE_EPOCH", &epoch);
-        if (r != -ENXIO)
-                log_debug_errno(r, "Failed to parse $SOURCE_DATE_EPOCH, ignoring: %m");
-
-        r = localtime_or_gmtime_usec(epoch != UINT64_MAX ? epoch : now(CLOCK_REALTIME), /* utc= */ true, &tm);
+        r = localtime_or_gmtime_usec(source_date_epoch_or_now(), /* utc= */ true, &tm);
         if (r < 0)
                 return log_error_errno(r, "Failed to convert timestamp to calendar time: %m");
 
@@ -965,12 +960,14 @@ static int are_we_installed(const char *esp_path) {
 #if HAVE_OPENSSL
 static int load_secure_boot_auto_enroll(
                 X509 **ret_certificate,
-                EVP_PKEY **ret_private_key) {
+                EVP_PKEY **ret_private_key,
+                OpenSSLAskPasswordUI **ret_ui) {
 
         int r;
 
         assert(ret_certificate);
         assert(ret_private_key);
+        assert(ret_ui);
 
         if (!arg_secure_boot_auto_enroll) {
                 *ret_certificate = NULL;
@@ -999,7 +996,6 @@ static int load_secure_boot_auto_enroll(
                         return log_error_errno(r, "Failed to parse private key path %s: %m", arg_private_key);
         }
 
-        _cleanup_(EVP_PKEY_freep) EVP_PKEY *private_key = NULL;
         r = openssl_load_private_key(
                         arg_private_key_source_type,
                         arg_private_key_source,
@@ -1012,13 +1008,12 @@ static int load_secure_boot_auto_enroll(
                                 .until = USEC_INFINITY,
                                 .hup_fd = -EBADF,
                         },
-                        &private_key,
-                        /* ret_user_interface= */ NULL);
+                        ret_private_key,
+                        ret_ui);
         if (r < 0)
                 return log_error_errno(r, "Failed to load private key from %s: %m", arg_private_key);
 
         *ret_certificate = TAKE_PTR(certificate);
-        *ret_private_key = TAKE_PTR(private_key);
 
         return 0;
 }
@@ -1039,9 +1034,10 @@ int verb_install(int argc, char *argv[], void *userdata) {
         graceful = arg_graceful() == ARG_GRACEFUL_FORCE || (!install && arg_graceful() != ARG_GRACEFUL_NO);
 
 #if HAVE_OPENSSL
+        _cleanup_(openssl_ask_password_ui_freep) OpenSSLAskPasswordUI *ui = NULL;
         _cleanup_(EVP_PKEY_freep) EVP_PKEY *private_key = NULL;
         _cleanup_(X509_freep) X509 *certificate = NULL;
-        r = load_secure_boot_auto_enroll(&certificate, &private_key);
+        r = load_secure_boot_auto_enroll(&certificate, &private_key, &ui);
         if (r < 0)
                 return r;
 #endif
