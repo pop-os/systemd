@@ -1725,10 +1725,12 @@ static int generate_ssh_keypair(const char *key_path, const char *key_type) {
                 log_debug("Executing: %s", joined);
         }
 
-        r = safe_fork(
+        r = safe_fork_full(
                         ssh_keygen,
-                        FORK_WAIT|FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE|FORK_REARRANGE_STDIO,
-                        NULL);
+                        (int[]) { -EBADF, -EBADF, STDERR_FILENO },
+                        /* except_fds= */ NULL, /* n_except_fds= */ 0,
+                        FORK_WAIT|FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_LOG|FORK_RLIMIT_NOFILE_SAFE|FORK_REARRANGE_STDIO|FORK_REOPEN_LOG,
+                        /* ret_pid= */ NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -2395,11 +2397,14 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                         return log_oom();
         }
 
-        r = strv_prepend(&arg_kernel_cmdline_extra, "console=hvc0");
-        if (r < 0)
-                return log_oom();
+        if (arg_console_mode != CONSOLE_GUI) {
+                r = strv_prepend(&arg_kernel_cmdline_extra, "console=hvc0");
+                if (r < 0)
+                        return log_oom();
+        }
 
-        FOREACH_ARRAY(mount, arg_runtime_mounts.mounts, arg_runtime_mounts.n_mounts) {
+        for (size_t j = 0; j < arg_runtime_mounts.n_mounts; j++) {
+                RuntimeMount *m = arg_runtime_mounts.mounts + j;
                 _cleanup_free_ char *listen_address = NULL;
                 _cleanup_(fork_notify_terminate) PidRef child = PIDREF_NULL;
 
@@ -2408,9 +2413,9 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
                 r = start_virtiofsd(
                                 unit,
-                                mount->source,
-                                /* source_uid= */ mount->source_uid,
-                                /* target_uid= */ mount->target_uid,
+                                m->source,
+                                /* source_uid= */ m->source_uid,
+                                /* target_uid= */ m->target_uid,
                                 /* uid_range= */ 1U,
                                 runtime_dir,
                                 sd_socket_activate,
@@ -2435,7 +2440,7 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                         return log_oom();
 
                 _cleanup_free_ char *id = NULL;
-                if (asprintf(&id, "mnt%zi", mount - arg_runtime_mounts.mounts) < 0)
+                if (asprintf(&id, "mnt%zu", j) < 0)
                         return log_oom();
 
                 if (strv_extendf(&cmdline, "socket,id=%s,path=%s", id, escaped_listen_address) < 0)
@@ -2447,12 +2452,12 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 if (strv_extendf(&cmdline, "vhost-user-fs-pci,queue-size=1024,chardev=%1$s,tag=%1$s", id) < 0)
                         return log_oom();
 
-                _cleanup_free_ char *clean_target = xescape(mount->target, "\":");
+                _cleanup_free_ char *clean_target = xescape(m->target, "\":");
                 if (!clean_target)
                         return log_oom();
 
                 if (strv_extendf(&arg_kernel_cmdline_extra, "systemd.mount-extra=\"%s:%s:virtiofs:%s\"",
-                                 id, clean_target, mount->read_only ? "ro" : "rw") < 0)
+                                 id, clean_target, m->read_only ? "ro" : "rw") < 0)
                         return log_oom();
         }
 
