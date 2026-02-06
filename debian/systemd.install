@@ -520,6 +520,7 @@ usr/share/doc/systemd/
 usr/share/factory/
 usr/share/locale/
 usr/share/mime/packages/io.systemd.xml
+usr/share/polkit-1/actions/io.systemd.ask-password.policy
 usr/share/polkit-1/actions/io.systemd.credentials.policy
 usr/share/polkit-1/actions/org.freedesktop.hostname1.policy
 usr/share/polkit-1/actions/org.freedesktop.locale1.policy
