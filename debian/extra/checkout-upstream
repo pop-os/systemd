@@ -65,11 +65,12 @@ else
 fi
 
 # If we are on a stable branch, check out the corresponding packaging branch. For some settings like
-# build dependencies it is already too late, but this is mostly relevant for the dh_install files and
+# build dependencies it is already too late (so try to install them again), but this is mostly relevant for the dh_install files and
 # the tests.
 if [ -d .git ] && echo "$UPSTREAM_VER" | grep -q '\.'; then
     rm -rf .pc
     git reset --hard "origin/ci/v${UPSTREAM_VER%%.*}-stable"
+    apt build-dep --yes . || true
 fi
 
 if [ -n "${KEEP_DEBIAN_PATCHES:-}" ]; then
