@@ -1,3 +1,40 @@
+systemd (259.1-1) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Drop dependencies on libcap-dev, no longer used since v259
+  * Mark sd-userdbd as Multi-Arch: foreign (Closes: #1123615)
+  * Use dh_installsystemd more to manage units. Ensure more units are
+    handled as they are added to various packages
+  * Use dh_installsystemd to handle journald and networkd
+  * Use deb-systemd-invoke to reexec instead of manual calls. Allows the
+    tool to handle the complications and use varlink where available
+  * Increase number of sections of sd-stub on amd64 too. The default limit
+    breaks adding more than 28 sections, which can happen with a UKI with
+    many optional profiles. Bump it on amd64 too, at the cost of an extra
+    ~80KB in size on the stub.
+  * Update upstream source from tag 'upstream/259.1' Update to upstream
+    version '259.1' with Debian dir
+    f7a9425f1024ef75b5020a216f6be3d0af9ac227
+  * Restrict the tpm2-generator manpage to arches where it is built
+  * Install ask-password polkit policy file
+
+  [ Yu Watanabe ]
+  * Drop use of deprecated options. These options are deprecated since
+    v258.
+
+  [ Nick Rosbrook ]
+  * d/control: have systemd-boot depend on efibootmgr for amd64 and arm64
+    only
+  * d/tests: drop tests-in-lxd
+  * d/control: make systemd-container Depends: libarchive13t64. This is
+    needed for e.g. systemd-import-generator + rd.systemd.pull= to work
+    properly. Dracut would like to be able to use that feature reliably
+    when systemd-importd is available, so explicitly depend on libarchive.
+    Currently, it is only a Suggests of libsystemd-shared via dlopen
+    machinery. (LP: #2139822)
+
+ -- Luca Boccassi <bluca@debian.org>  Fri, 06 Feb 2026 18:37:22 +0000
+
 systemd (259-1) unstable; urgency=medium
 
   [ Luca Boccassi ]
