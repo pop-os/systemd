@@ -25,15 +25,13 @@ _update_sysctl() {
 }
 
 _restart_managers() {
-    _systemctl daemon-reexec || true
-    # Re-exec user instances so that running user managers are updated too.
-    # SIGRTMIN+25 -> reexec. Note that this is asynchronous, but we can't use
-    # D-Bus as dbus-user-session is not guaranteed to be available.
-    _systemctl kill --kill-whom='main' --signal='SIGRTMIN+25' 'user@*.service' || true
-    # do not restart logind
-    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
-    _systemctl try-restart systemd-networkd.service || true
-    _systemctl try-restart systemd-journald.service || true
+    if [ -z "$DPKG_ROOT" ] && [ -d /run/systemd/system ]; then
+        # Re-exec user instances so that running user managers are updated too.
+        # Note that this is asynchronous, but we can't use
+        # D-Bus as dbus-user-session is not guaranteed to be available.
+        deb-systemd-invoke --user --no-dbus daemon-reexec || true
+        deb-systemd-invoke --no-dbus daemon-reexec || true
+    fi
 }
 
 # Update Message Catalogs database and binfmt registrations in response to dpkg triggers
@@ -82,9 +80,9 @@ _update_catalog
 # Ignore if this fails, because e.g. %b will fail on WSL
 systemd-tmpfiles --create || :
 
-#DEBHELPER#
-
 # skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
 if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _restart_managers
 fi
+
+#DEBHELPER#

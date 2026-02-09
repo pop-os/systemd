@@ -87,7 +87,7 @@ usr/lib/systemd/network/89-ethernet.network.example
 usr/lib/systemd/profile.d/70-systemd-shell-extra.sh
 usr/lib/systemd/profile.d/80-systemd-osc-context.sh
 usr/lib/systemd/ssh_config.d/20-systemd-ssh-proxy.conf
-usr/lib/systemd/system/autovt@.service
+<!pkg.systemd.upstream> usr/lib/systemd/system/autovt@.service
 usr/lib/systemd/system/basic.target
 usr/lib/systemd/system/blockdev@.target
 usr/lib/systemd/system/bluetooth.target
@@ -165,7 +165,7 @@ usr/lib/systemd/system-generators/systemd-fstab-generator
 usr/lib/systemd/system-generators/systemd-getty-generator
 usr/lib/systemd/system-generators/systemd-gpt-auto-generator
 usr/lib/systemd/system-generators/systemd-hibernate-resume-generator
-usr/lib/systemd/system-generators/systemd-rc-local-generator
+<!pkg.systemd.upstream> usr/lib/systemd/system-generators/systemd-rc-local-generator
 usr/lib/systemd/system-generators/systemd-run-generator
 usr/lib/systemd/system-generators/systemd-ssh-generator
 usr/lib/systemd/system-generators/systemd-system-update-generator
@@ -228,7 +228,7 @@ usr/lib/systemd/system/printer.target
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.automount
 usr/lib/systemd/system/proc-sys-fs-binfmt_misc.mount
 usr/lib/systemd/system/quotaon*.service
-usr/lib/systemd/system/rc-local.service
+<!pkg.systemd.upstream> usr/lib/systemd/system/rc-local.service
 usr/lib/systemd/system/reboot.target
 usr/lib/systemd/system/remote-fs-pre.target
 usr/lib/systemd/system/remote-fs.target
@@ -520,6 +520,7 @@ usr/share/doc/systemd/
 usr/share/factory/
 usr/share/locale/
 usr/share/mime/packages/io.systemd.xml
+usr/share/polkit-1/actions/io.systemd.ask-password.policy
 usr/share/polkit-1/actions/io.systemd.credentials.policy
 usr/share/polkit-1/actions/org.freedesktop.hostname1.policy
 usr/share/polkit-1/actions/org.freedesktop.locale1.policy
@@ -555,7 +556,7 @@ usr/share/zsh/vendor-completions/_systemd-run
 usr/share/zsh/vendor-completions/_systemd-tmpfiles
 usr/share/zsh/vendor-completions/_timedatectl
 usr/share/zsh/vendor-completions/_varlinkctl
-var/lib/systemd/
+<!pkg.systemd.upstream> var/lib/systemd/
 ../extra/init-functions.d usr/lib/lsb/
 ../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
 <!pkg.systemd.upstream> ../extra/systemd-sysv-install usr/lib/systemd/
@@ -563,7 +564,7 @@ var/lib/systemd/
 ../extra/pam.d/* usr/lib/pam.d/
 ../extra/journald.conf.d usr/lib/systemd/
 ../extra/units/getty-static.service usr/lib/systemd/system/
-../extra/units/rc-local.service.d usr/lib/systemd/system/
+<!pkg.systemd.upstream> ../extra/units/rc-local.service.d usr/lib/systemd/system/
 ../extra/units/systemd-fsck-root.service.d/ usr/lib/systemd/system/
 ../extra/units/systemd-localed.service.d usr/lib/systemd/system/
 ../extra/units/systemd-logind.service.d usr/lib/systemd/system/

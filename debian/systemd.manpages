@@ -130,7 +130,7 @@ debian/tmp/usr/share/man/man7/systemd.v.7
 debian/tmp/usr/share/man/man8/30-systemd-environment-d-generator.8
 debian/tmp/usr/share/man/man8/kernel-install.8
 debian/tmp/usr/share/man/man8/pam_systemd_loadkey.8
-debian/tmp/usr/share/man/man8/rc-local.service.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/rc-local.service.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-console.path.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-console.service.8
 debian/tmp/usr/share/man/man8/systemd-ask-password-wall.path.8
@@ -227,7 +227,7 @@ debian/tmp/usr/share/man/man8/systemd-quotacheck@.service.8
 debian/tmp/usr/share/man/man8/systemd-quotacheck-root.service.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.8
 debian/tmp/usr/share/man/man8/systemd-random-seed.service.8
-debian/tmp/usr/share/man/man8/systemd-rc-local-generator.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-rc-local-generator.8
 debian/tmp/usr/share/man/man8/systemd-reboot.service.8
 debian/tmp/usr/share/man/man8/systemd-remount-fs.8
 debian/tmp/usr/share/man/man8/systemd-remount-fs.service.8
@@ -252,7 +252,7 @@ debian/tmp/usr/share/man/man8/systemd-sysext-initrd.service.8
 debian/tmp/usr/share/man/man8/systemd-system-update-generator.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.8
 debian/tmp/usr/share/man/man8/systemd-sysusers.service.8
-debian/tmp/usr/share/man/man8/systemd-sysv-generator.8
+<!pkg.systemd.upstream> debian/tmp/usr/share/man/man8/systemd-sysv-generator.8
 debian/tmp/usr/share/man/man8/systemd-timedated.8
 debian/tmp/usr/share/man/man8/systemd-timedated.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles.8
@@ -262,7 +262,7 @@ debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev-early.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup-dev.service.8
 debian/tmp/usr/share/man/man8/systemd-tmpfiles-setup.service.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-clear.service.8
-debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
+[amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-generator.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup-early.service.8
 [amd64 i386 arm64 armhf riscv64 loong64] <!stage1> debian/tmp/usr/share/man/man8/systemd-tpm2-setup.service.8

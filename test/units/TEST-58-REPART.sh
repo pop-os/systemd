@@ -22,10 +22,6 @@ export SYSTEMD_UTF8=0
 
 seed=750b6cd5c4ae4012a15e7be3c29e6a47
 
-if ! systemd-detect-virt --quiet --container; then
-    udevadm control --log-level debug
-fi
-
 esp_guid=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 xbootldr_guid=BC13C2FF-59E6-4262-A352-B275FD6F7172
 
@@ -1836,6 +1832,53 @@ EOF
     varlinkctl --more --collect call "$REPART" io.systemd.Repart.Run '{"definitions":["'"$defs"'"],"empty":"force","seed":"'"$seed"'","dryRun":false,"node":"'"$imgs/disk3.img"'"}'
 
     cmp "$imgs/disk1.img" "$imgs/disk3.img"
+}
+
+testcase_ext_reproducibility() {
+    local defs imgs ts
+
+    # Online mode mounts the filesystem which updates inode timestamps non-deterministically
+    if [[ "$OFFLINE" != "yes" ]]; then
+        echo "Skipping ext reproducibility test in online mode."
+        return 0
+    fi
+
+    defs="$(mktemp --directory "/tmp/test-repart.defs.XXXXXXXXXX")"
+    imgs="$(mktemp --directory "/var/tmp/test-repart.imgs.XXXXXXXXXX")"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$defs' '$imgs'" RETURN
+
+    tee "$defs/root.conf" <<EOF
+[Partition]
+Type=root
+Format=ext4
+EOF
+
+    # Build the image twice with the same seed and verify they are identical
+    ts=$(date +%s)
+    env SOURCE_DATE_EPOCH="$ts" \
+        systemd-repart \
+        --offline="$OFFLINE" \
+        --definitions="$defs" \
+        --empty=create \
+        --size=50M \
+        --seed="$seed" \
+        --dry-run=no \
+        "$imgs/test1.img"
+
+    sleep 2
+
+    env SOURCE_DATE_EPOCH="$ts" \
+        systemd-repart \
+        --offline="$OFFLINE" \
+        --definitions="$defs" \
+        --empty=create \
+        --size=50M \
+        --seed="$seed" \
+        --dry-run=no \
+        "$imgs/test2.img"
+
+    cmp "$imgs/test1.img" "$imgs/test2.img"
 }
 
 OFFLINE="yes"

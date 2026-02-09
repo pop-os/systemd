@@ -113,6 +113,7 @@ CONFFLAGS = \
 	-Dutmp=false \
 	-Dtty-mode=0600 \
 	-Dvmspawn=enabled \
+	-Defi-stub-extra-sections=500 \
 	-Dmode=$(if $(filter pkg.systemd.upstream,$(DEB_BUILD_PROFILES)),developer,release)
 
 ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
@@ -135,7 +136,6 @@ CONFFLAGS += \
 	-Dimportd=enabled \
 	-Dmicrohttpd=enabled \
 	-Dopenssl=enabled \
-	-Dcryptolib=openssl \
 	-Ddns-over-tls=openssl \
 	-Dlibfido2=enabled \
 	-Dtpm2=$(if $(filter i386,$(DEB_HOST_ARCH)),disabled,enabled) \
@@ -223,13 +223,6 @@ CONFFLAGS += -Dsbat-distro=upstream
 CONFFLAGS += -Dsbat-distro-summary='Upstream build from git'
 endif
 
-# Increase the minimum number of sections to keep free in stub PE header in
-# order to be able to create an UKI file with many DTBs (each of them is stored
-# in a different .dtbauto section)
-ifneq (,$(filter $(DEB_TARGET_ARCH), arm64 armhf riscv64))
-CONFFLAGS += -Defi-stub-extra-sections=500
-endif
-
 override_dh_auto_configure:
 	dh_auto_configure \
 		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_UPSTREAM)
@@ -285,13 +278,24 @@ override_dh_missing:
 
 override_dh_installsystemd:
 	dh_installsystemd -psystemd-timesyncd
-	dh_installsystemd -psystemd-oomd systemd-oomd.service
+	dh_installsystemd -psystemd-oomd -X systemd-oomd.socket
 	dh_installsystemd -psystemd-oomd --no-stop-on-upgrade systemd-oomd.socket
 	dh_installsystemd -psystemd-container --no-stop-on-upgrade machines.target
+	dh_installsystemd -psystemd-container -X machines.target --no-enable --no-start --no-stop-on-upgrade --restart-after-upgrade
 	dh_installsystemd -psystemd-userdbd --no-stop-on-upgrade systemd-userdbd.socket
+	# TODO: drop --no-also once https://salsa.debian.org/debian/debhelper/-/merge_requests/144 is available
+	dh_installsystemd -psystemd-userdbd -X systemd-userdbd.socket --no-enable --no-start --no-stop-on-upgrade --restart-after-upgrade --no-also
 	dh_installsystemd -psystemd-homed --no-also systemd-homed.service systemd-homed-activate.service
-	dh_installsystemd -psystemd-resolved
+	dh_installsystemd -psystemd-repart --restart-after-upgrade systemd-repart.socket
+	dh_installsystemd -psystemd-repart -X systemd-repart.socket --no-start --no-stop-on-upgrade --restart-after-upgrade
+	dh_installsystemd -psystemd-resolved --no-also systemd-resolved.service
+	dh_installsystemd -psystemd-resolved -X systemd-resolved.service --no-stop-on-upgrade
 	dh_installsystemd -pudev systemd-udevd.service
+	dh_installsystemd -pudev -X systemd-udevd.service --no-enable --no-start --no-stop-on-upgrade
+	dh_installsystemd -psystemd-boot --no-start --no-stop-on-upgrade --restart-after-upgrade
+	# do not restart logind
+	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=919509
+	dh_installsystemd -psystemd --no-enable --no-start --no-stop-on-upgrade --restart-after-upgrade --no-also systemd-networkd.service systemd-journald.service
 
 override_dh_installsystemduser:
 

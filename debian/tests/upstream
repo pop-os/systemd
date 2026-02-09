@@ -185,7 +185,7 @@ fi
 
 mkosi --debug genkey
 mkosi summary
-meson setup "${workdir}/btrfs/build" -Dintegration-tests=true -Dtests=true
+meson setup "${workdir}/btrfs/build" -Dtests=true
 if [ -f mkosi/mkosi.key ]; then
     cp mkosi/mkosi.key mkosi/mkosi.crt "${workdir}/btrfs/build"
 else

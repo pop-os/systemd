@@ -39,6 +39,8 @@ usr/lib/systemd/user/machine.slice
 usr/lib/systemd/user/machines.target
 usr/lib/systemd/user/dbus-org.freedesktop.import1.service
 usr/lib/systemd/user/dbus-org.freedesktop.machine1.service
+<pkg.systemd.upstream> usr/lib/systemd/user/dbus-org.freedesktop.portable1.service
+<pkg.systemd.upstream> usr/lib/systemd/user/portable/
 usr/lib/systemd/user/sockets.target.wants/systemd-importd.socket
 usr/lib/systemd/user/sockets.target.wants/systemd-machined.socket
 usr/lib/systemd/user/systemd-importd.service
@@ -46,6 +48,7 @@ usr/lib/systemd/user/systemd-importd.socket
 usr/lib/systemd/user/systemd-machined.service
 usr/lib/systemd/user/systemd-machined.socket
 usr/lib/systemd/user/systemd-nspawn@.service
+<pkg.systemd.upstream> usr/lib/systemd/user/systemd-portabled.service
 usr/lib/systemd/user/systemd-vmspawn@.service
 usr/bin/systemd-dissect
 usr/bin/systemd-nspawn
@@ -54,6 +57,7 @@ usr/lib/tmpfiles.d/systemd-nspawn.conf
 usr/sbin/mount.ddi
 usr/share/dbus-1/services/org.freedesktop.import1.service
 usr/share/dbus-1/services/org.freedesktop.machine1.service
+<pkg.systemd.upstream> usr/share/dbus-1/services/org.freedesktop.portable1.service
 usr/share/dbus-1/system.d/org.freedesktop.import1.conf
 usr/share/dbus-1/system.d/org.freedesktop.machine1.conf
 usr/share/dbus-1/system.d/org.freedesktop.portable1.conf
@@ -64,6 +68,7 @@ usr/share/dbus-1/system-services/org.freedesktop.portable1.service
 <pkg.systemd.upstream> usr/share/dbus-1/system-services/org.freedesktop.sysupdate1.service
 usr/share/polkit-1/actions/io.systemd.mount-file-system.policy
 usr/share/polkit-1/actions/io.systemd.namespace-resource.policy
+<pkg.systemd.upstream> usr/share/polkit-1/actions/io.systemd.sysext.policy
 usr/share/polkit-1/actions/org.freedesktop.import1.policy
 usr/share/polkit-1/actions/org.freedesktop.machine1.policy
 usr/share/polkit-1/actions/org.freedesktop.portable1.policy
