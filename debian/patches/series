@@ -61,3 +61,4 @@ lp2133159-network-also-check-ID_NET_MANAGED_BY-property-on-reconfigure.patch
 lp2134334/0001-net-id-depending-on-new-udev-prop,-include-exclude-PCI-domain-from-netif-names.patch
 lp2134334/0002-hwdb-disable-inclusion-of-the-PCI-domain-in-MANA-network-interface-naming.patch
 lp2134334/0003-udev-rules.d-import-hwdb-before-calling-net_id-builtin.patch
+lp2141296-timer-don-t-run-service-immediately-after-restart-of-timer.patch
