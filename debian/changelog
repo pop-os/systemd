@@ -1,3 +1,15 @@
+systemd (259.1-1ubuntu2) resolute; urgency=medium
+
+  [ Nick Rosbrook ]
+  * seccomp-util: add lsm_get_self_attr and lsm_list_modules to @default
+    (LP: #2142428)
+
+  [ Alessandro Astone ]
+  * d/p/lp2077538: Grant GPU rendering access to GNOME Remote Desktop
+    (LP: #2077538, LP: #2142306)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 25 Feb 2026 10:32:56 -0500
+
 systemd (259.1-1ubuntu1) resolute; urgency=medium
 
   * Merge with Debian unstable. Remaining changes:
