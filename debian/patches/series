@@ -8,3 +8,4 @@ lp2077538/xaccess-Rework-from-boolean-into-a-list-of-tags.patch
 lp2077538/udev-Tag-GPU-render-nodes-as-xaccess-render.patch
 lp2077538/udev-Trigger-uaccess-builtin-on-xaccess-prefix.patch
 lp2077538/Move-new-symbol-out-of-public-library.patch
+lp2142428-seccomp-util-add-lsm_get_self_attr-and-lsm_list_modules-t.patch
