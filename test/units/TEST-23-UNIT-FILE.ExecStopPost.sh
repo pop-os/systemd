@@ -4,8 +4,6 @@ set -eux
 
 # Test that ExecStopPost= is always run
 
-systemd-analyze log-level debug
-
 systemd-run --unit=simple1.service --wait -p StandardOutput=tty -p StandardError=tty -p Type=simple \
     -p ExecStopPost='touch /run/simple1' true
 test -f /run/simple1
@@ -19,7 +17,7 @@ systemd-run --unit=exec1.service --wait -p StandardOutput=tty -p StandardError=t
 test -f /run/exec1
 
 (! systemd-run --unit=exec2.service --wait -p StandardOutput=tty -p StandardError=tty -p Type=exec \
-   -p ExecStopPost='touch /run/exec2' sh -c 'sleep 1; false')
+   -p ExecStopPost='touch /run/exec2' bash -c 'sleep 1; false')
 test -f /run/exec2
 
 cat >/tmp/forking1.sh <<EOF
@@ -101,5 +99,3 @@ test -f /run/idle1
 (! systemd-run --unit=idle2.service --wait -p StandardOutput=tty -p StandardError=tty -p Type=idle \
     -p ExecStopPost='touch /run/idle2' false)
 test -f /run/idle2
-
-systemd-analyze log-level info

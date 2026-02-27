@@ -12,6 +12,7 @@
 #include "chase.h"
 #include "conf-files.h"
 #include "copy.h"
+#include "cryptsetup-util.h"
 #include "data-fd-util.h"
 #include "dirent-util.h"
 #include "discover-image.h"
@@ -28,6 +29,7 @@
 #include "glyph-util.h"
 #include "install.h"
 #include "iovec-util.h"
+#include "libmount-util.h"
 #include "log-context.h"
 #include "log.h"
 #include "loop-util.h"
@@ -310,10 +312,11 @@ static int extract_now(
 #if HAVE_SELINUX
                         /* The units will be copied on the host's filesystem, so if they had a SELinux label
                          * we have to preserve it. Copy it out so that it can be applied later. */
-
-                        r = fgetfilecon_raw(fd, &con);
-                        if (r < 0 && !ERRNO_IS_XATTR_ABSENT(errno))
-                                log_debug_errno(errno, "Failed to get SELinux file context from '%s', ignoring: %m", de->d_name);
+                        if (mac_selinux_use()) {
+                                r = sym_fgetfilecon_raw(fd, &con);
+                                if (r < 0 && !ERRNO_IS_XATTR_ABSENT(errno))
+                                        log_debug_errno(errno, "Failed to get SELinux file context from '%s', ignoring: %m", de->d_name);
+                        }
 #endif
 
                         if (socket_fd >= 0) {
@@ -418,6 +421,10 @@ static int portable_extract_by_path(
                  * there, and extract the metadata we need. The metadata is sent from the child back to us. */
 
                 BLOCK_SIGNALS(SIGCHLD);
+
+                /* Load some libraries before we fork workers off that want to use them */
+                (void) dlopen_cryptsetup();
+                (void) dlopen_libmount();
 
                 r = mkdtemp_malloc("/tmp/inspect-XXXXXX", &tmpdir);
                 if (r < 0)
@@ -589,7 +596,8 @@ static int extract_image_and_extensions(
                 r = path_pick(/* toplevel_path= */ NULL,
                               /* toplevel_fd= */ AT_FDCWD,
                               name_or_path,
-                              &pick_filter_image_any,
+                              pick_filter_image_any,
+                              ELEMENTSOF(pick_filter_image_any),
                               PICK_ARCHITECTURE|PICK_TRIES|PICK_RESOLVE,
                               &result);
                 if (r < 0)
@@ -627,7 +635,8 @@ static int extract_image_and_extensions(
                                 r = path_pick(/* toplevel_path= */ NULL,
                                               /* toplevel_fd= */ AT_FDCWD,
                                               *p,
-                                              &pick_filter_image_any,
+                                              pick_filter_image_any,
+                                              ELEMENTSOF(pick_filter_image_any),
                                               PICK_ARCHITECTURE|PICK_TRIES|PICK_RESOLVE,
                                               &ext_result);
                                 if (r < 0)
@@ -733,7 +742,7 @@ static int extract_image_and_extensions(
 
                 e = strv_env_pairs_get(extension_release, "PORTABLE_PREFIXES");
                 if (e) {
-                        r = strv_split_and_extend(&valid_prefixes, e, WHITESPACE, /* filter_duplicates = */ true);
+                        r = strv_split_and_extend(&valid_prefixes, e, WHITESPACE, /* filter_duplicates= */ true);
                         if (r < 0)
                                 return r;
                 }
@@ -1183,7 +1192,7 @@ static int install_chroot_dropin(
                                                ext->path,
                                                /* With --force tell PID1 to avoid enforcing that the image <name> and
                                                 * extension-release.<name> have to match. */
-                                               !IN_SET(type, IMAGE_DIRECTORY, IMAGE_SUBVOLUME) &&
+                                               !IN_SET(ext->type, IMAGE_DIRECTORY, IMAGE_SUBVOLUME) &&
                                                    FLAGS_SET(flags, PORTABLE_FORCE_EXTENSION) ?
                                                        ":x-systemd.relax-extension-release-check\n" :
                                                        "\n",
@@ -1776,7 +1785,8 @@ static bool marker_matches_images(const char *marker, const char *name_or_path, 
                         r = path_pick(/* toplevel_path= */ NULL,
                                       /* toplevel_fd= */ AT_FDCWD,
                                       *image_name_or_path,
-                                      &pick_filter_image_any,
+                                      pick_filter_image_any,
+                                      ELEMENTSOF(pick_filter_image_any),
                                       PICK_ARCHITECTURE|PICK_TRIES|PICK_RESOLVE,
                                       &result);
                         if (r < 0)

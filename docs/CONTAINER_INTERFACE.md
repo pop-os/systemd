@@ -188,7 +188,7 @@ manager, please consider supporting the following interfaces.
    activation work. The protocol to hand sockets from systemd to services is
    hence the same as from the container manager to the container systemd. For
    further details see the explanations of
-   [sd_listen_fds(1)](https://0pointer.de/public/systemd-man/sd_listen_fds.html)
+   [sd_listen_fds(1)](https://www.freedesktop.org/software/systemd/man/latest/sd_listen_fds.html)
    and the [blog story for service
    developers](https://0pointer.de/blog/projects/socket-activation.html).
 
@@ -306,6 +306,12 @@ care should be taken to avoid naming conflicts. `systemd` (and in particular
     directories of users that shall be made available in the container to. This
     may be used in combination with `/run/host/userdb/` above: one defines the
     user record, the other contains the user's home directory.
+
+12. The `/run/host/root/` directory may be used to bind mount the host root
+    filesystem. Binding the host's root filesystem into the container is a
+    major security hole: any container manager that maintains a security
+    boundary should not use this; however, if having the root filesystem in
+    the container is desired, this is a good place to mount it to.
 
 ## What You Shouldn't Do
 

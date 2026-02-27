@@ -22,7 +22,6 @@
 #include "fs-util.h"
 #include "fsck-util.h"
 #include "main-func.h"
-#include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
@@ -134,7 +133,7 @@ static void parse_credentials(void) {
         _cleanup_free_ char *value = NULL;
         int r;
 
-        r = read_credential("fsck.mode", (void**) &value, /* ret_size = */ NULL);
+        r = read_credential("fsck.mode", (void**) &value, /* ret_size= */ NULL);
         if (r < 0)
                 log_debug_errno(r, "Failed to read credential 'fsck.mode', ignoring: %m");
         else {
@@ -145,7 +144,7 @@ static void parse_credentials(void) {
 
         value = mfree(value);
 
-        r = read_credential("fsck.repair", (void**) &value, /* ret_size = */ NULL);
+        r = read_credential("fsck.repair", (void**) &value, /* ret_size= */ NULL);
         if (r < 0)
                 log_debug_errno(r, "Failed to read credential 'fsck.repair', ignoring: %m");
         else {

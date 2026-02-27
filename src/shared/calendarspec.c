@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -11,7 +10,6 @@
 #include "log.h"
 #include "memstream-util.h"
 #include "parse-util.h"
-#include "process-util.h"
 #include "sort-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -328,7 +326,7 @@ static void _format_chain(FILE *f, int space, const CalendarComponent *c, bool s
 }
 
 static void format_chain(FILE *f, int space, const CalendarComponent *c, bool usec) {
-        _format_chain(f, space, c, /* start = */ true, usec);
+        _format_chain(f, space, c, /* start= */ true, usec);
 }
 
 int calendar_spec_to_string(const CalendarSpec *c, char **ret) {
@@ -370,9 +368,10 @@ int calendar_spec_to_string(const CalendarSpec *c, char **ret) {
 
                 tzset();
 
-                if (!isempty(tzname[c->dst])) {
+                const char *z = get_tzname(c->dst);
+                if (z) {
                         fputc(' ', f);
-                        fputs(tzname[c->dst], f);
+                        fputs(z, f);
                 }
         }
 
@@ -897,10 +896,11 @@ int calendar_spec_from_string(const char *p, CalendarSpec **ret) {
 
                 /* Check if the local timezone was specified? */
                 for (j = 0; j <= 1; j++) {
-                        if (isempty(tzname[j]))
+                        const char *z = get_tzname(j);
+                        if (!z)
                                 continue;
 
-                        e = endswith_no_case(p, tzname[j]);
+                        e = endswith_no_case(p, z);
                         if (!e)
                                 continue;
                         if (e == p)
@@ -1194,9 +1194,10 @@ static int tm_within_bounds(struct tm *tm, bool utc) {
          * other sub time units are already reset in find_next().
          */
         int cmp;
-        if ((cmp = CMP(t.tm_year, tm->tm_year)) != 0)
+        if ((cmp = CMP(t.tm_year, tm->tm_year)) != 0) {
                 t.tm_mon = 0;
-        else if ((cmp = CMP(t.tm_mon, tm->tm_mon)) != 0)
+                t.tm_mday = 1;
+        } else if ((cmp = CMP(t.tm_mon, tm->tm_mon)) != 0)
                 t.tm_mday = 1;
         else if ((cmp = CMP(t.tm_mday, tm->tm_mday)) != 0)
                 t.tm_hour = 0;
@@ -1426,13 +1427,7 @@ static int calendar_spec_next_usec_impl(const CalendarSpec *spec, usec_t usec, u
         return 0;
 }
 
-typedef struct SpecNextResult {
-        usec_t next;
-        int return_value;
-} SpecNextResult;
-
 int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *ret_next) {
-        SpecNextResult *shared, tmp;
         int r;
 
         assert(spec);
@@ -1440,39 +1435,13 @@ int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *ret_n
         if (isempty(spec->timezone))
                 return calendar_spec_next_usec_impl(spec, usec, ret_next);
 
-        shared = mmap(NULL, sizeof *shared, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-        if (shared == MAP_FAILED)
-                return negative_errno();
+        SAVE_TIMEZONE;
 
-        r = safe_fork("(sd-calendar)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGKILL|FORK_WAIT, NULL);
-        if (r < 0) {
-                (void) munmap(shared, sizeof *shared);
+        r = RET_NERRNO(setenv("TZ", spec->timezone, /* overwrite= */ true));
+        if (r < 0)
                 return r;
-        }
-        if (r == 0) {
-                char *colon_tz;
 
-                /* tzset(3) says $TZ should be prefixed with ":" if we reference timezone files */
-                colon_tz = strjoina(":", spec->timezone);
+        tzset();
 
-                if (setenv("TZ", colon_tz, 1) != 0) {
-                        shared->return_value = negative_errno();
-                        _exit(EXIT_FAILURE);
-                }
-
-                tzset();
-
-                shared->return_value = calendar_spec_next_usec_impl(spec, usec, &shared->next);
-
-                _exit(EXIT_SUCCESS);
-        }
-
-        tmp = *shared;
-        if (munmap(shared, sizeof *shared) < 0)
-                return negative_errno();
-
-        if (tmp.return_value == 0 && ret_next)
-                *ret_next = tmp.next;
-
-        return tmp.return_value;
+        return calendar_spec_next_usec_impl(spec, usec, ret_next);
 }

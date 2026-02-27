@@ -2,7 +2,6 @@
 
 #include <grp.h>
 #include <pwd.h>
-#include <unistd.h>
 
 #include "alloc-util.h"
 #include "chase.h"
@@ -94,6 +93,8 @@ static int convert_user(
                 uid_t allocate_uid,
                 const char *shell,
                 bool shell_copy,
+                const char *home_mount_directory,
+                char **groups,
                 UserRecord **ret_converted_user,
                 GroupRecord **ret_converted_group) {
 
@@ -124,7 +125,7 @@ static int convert_user(
                 return log_error_errno(SYNTHETIC_ERRNO(EBUSY),
                                        "Sorry, the group '%s' already exists in the machine.", g->group_name);
 
-        h = path_join("/run/host/home/", u->user_name);
+        h = path_join(home_mount_directory, u->user_name);
         if (!h)
                 return log_oom();
 
@@ -138,13 +139,14 @@ static int convert_user(
         r = user_record_build(
                         &converted_user,
                         SD_JSON_BUILD_OBJECT(
-                                        SD_JSON_BUILD_PAIR("userName", SD_JSON_BUILD_STRING(u->user_name)),
-                                        SD_JSON_BUILD_PAIR("uid", SD_JSON_BUILD_UNSIGNED(allocate_uid)),
-                                        SD_JSON_BUILD_PAIR("gid", SD_JSON_BUILD_UNSIGNED(allocate_uid)),
+                                        SD_JSON_BUILD_PAIR_STRING("userName", u->user_name),
+                                        SD_JSON_BUILD_PAIR_UNSIGNED("uid", allocate_uid),
+                                        SD_JSON_BUILD_PAIR_UNSIGNED("gid", allocate_uid),
                                         SD_JSON_BUILD_PAIR_CONDITION(u->disposition >= 0, "disposition", SD_JSON_BUILD_STRING(user_disposition_to_string(u->disposition))),
-                                        SD_JSON_BUILD_PAIR("homeDirectory", SD_JSON_BUILD_STRING(h)),
+                                        SD_JSON_BUILD_PAIR_STRING("homeDirectory", h),
                                         SD_JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.NSpawn")),
                                         JSON_BUILD_PAIR_STRING_NON_EMPTY("shell", shell),
+                                        SD_JSON_BUILD_PAIR_STRV("memberOf", groups),
                                         SD_JSON_BUILD_PAIR("privileged", SD_JSON_BUILD_OBJECT(
                                                                            SD_JSON_BUILD_PAIR_CONDITION(!strv_isempty(u->hashed_password), "hashedPassword", SD_JSON_BUILD_VARIANT(hp)),
                                                                            SD_JSON_BUILD_PAIR_CONDITION(!!ssh, "sshAuthorizedKeys", SD_JSON_BUILD_VARIANT(ssh))))));
@@ -154,8 +156,8 @@ static int convert_user(
         r = group_record_build(
                         &converted_group,
                         SD_JSON_BUILD_OBJECT(
-                                        SD_JSON_BUILD_PAIR("groupName", SD_JSON_BUILD_STRING(g->group_name)),
-                                        SD_JSON_BUILD_PAIR("gid", SD_JSON_BUILD_UNSIGNED(allocate_uid)),
+                                        SD_JSON_BUILD_PAIR_STRING("groupName", g->group_name),
+                                        SD_JSON_BUILD_PAIR_UNSIGNED("gid", allocate_uid),
                                         SD_JSON_BUILD_PAIR_CONDITION(g->disposition >= 0, "disposition", SD_JSON_BUILD_STRING(user_disposition_to_string(g->disposition))),
                                         SD_JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.NSpawn"))));
         if (r < 0)
@@ -211,6 +213,8 @@ int machine_bind_user_prepare(
                 char **bind_user,
                 const char *bind_user_shell,
                 bool bind_user_shell_copy,
+                const char *bind_user_home_mount_directory,
+                char **bind_user_groups,
                 MachineBindUserContext **ret) {
 
         _cleanup_(machine_bind_user_context_freep) MachineBindUserContext *c = NULL;
@@ -240,8 +244,10 @@ int machine_bind_user_prepare(
                 _cleanup_(group_record_unrefp) GroupRecord *g = NULL, *cg = NULL;
 
                 r = userdb_by_name(*n, /* match= */ NULL, USERDB_DONT_SYNTHESIZE_INTRINSIC|USERDB_DONT_SYNTHESIZE_FOREIGN, &u);
+                if (r == -ENOEXEC)
+                        return log_error_errno(r, "User '%s' did not pass filter.", *n);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to resolve user '%s': %m", *n);
+                        return log_error_errno(r, "Failed to resolve user '%s': %s", *n, STRERROR_USER(r));
 
                 /* For now, let's refuse mapping the root/nobody users explicitly. The records we generate
                  * are strictly additive, nss-systemd is typically placed last in /etc/nsswitch.conf. Thus
@@ -262,8 +268,11 @@ int machine_bind_user_prepare(
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Cannot bind user with no UID, refusing.");
 
                 r = groupdb_by_gid(user_record_gid(u), /* match= */ NULL, USERDB_DONT_SYNTHESIZE_INTRINSIC|USERDB_DONT_SYNTHESIZE_FOREIGN, &g);
+                if (r == -ENOEXEC)
+                        return log_error_errno(r, "Group of user '%s' did not pass filter.", u->user_name);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to resolve group of user '%s': %m", u->user_name);
+                        return log_error_errno(r, "Failed to resolve group of user '%s': %s",
+                                               u->user_name, STRERROR_GROUP(r));
 
                 /* We want to synthesize exactly one user + group from the host into the machine. This only
                  * makes sense if the user on the host has its own private group. We can't reasonably check
@@ -280,7 +289,15 @@ int machine_bind_user_prepare(
                 if (r < 0)
                         return r;
 
-                r = convert_user(directory, u, g, current_uid, bind_user_shell, bind_user_shell_copy, &cu, &cg);
+                r = convert_user(
+                                directory,
+                                u, g,
+                                current_uid,
+                                bind_user_shell,
+                                bind_user_shell_copy,
+                                bind_user_home_mount_directory,
+                                bind_user_groups,
+                                &cu, &cg);
                 if (r < 0)
                         return r;
 

@@ -337,7 +337,9 @@ static bool manager_sample_spike_detection(Manager *m, double offset, double del
         j = 0;
         FOREACH_ELEMENT(sample, m->samples)
                 j += pow(sample->offset - m->samples[idx_min].offset, 2);
-        m->samples_jitter = sqrt(j / (ELEMENTSOF(m->samples) - 1));
+
+        size_t n = ELEMENTSOF(m->samples);
+        m->samples_jitter = sqrt(j / (n - 1));
 
         /* ignore samples when resyncing */
         if (m->poll_resync)
@@ -911,7 +913,7 @@ void manager_disconnect(Manager *m) {
         (void) sd_notify(false, "STATUS=Idle.");
 }
 
-void manager_flush_server_names(Manager  *m, ServerType t) {
+void manager_flush_server_names(Manager *m, ServerType t) {
         assert(m);
 
         if (t == SERVER_SYSTEM)
@@ -966,19 +968,19 @@ Manager* manager_free(Manager *m) {
         return mfree(m);
 }
 
-static int manager_network_read_link_servers(Manager *m) {
+static bool manager_network_read_link_servers(Manager *m) {
         _cleanup_strv_free_ char **ntp = NULL;
         bool changed = false;
         int r;
 
         assert(m);
 
+        bool existing = m->link_servers;
+
         r = sd_network_get_ntp(&ntp);
-        if (r < 0 && r != -ENODATA) {
-                if (r == -ENOMEM)
-                        log_oom();
-                else
-                        log_debug_errno(r, "Failed to get link NTP servers: %m");
+        if (r < 0) {
+                if (!IN_SET(r, -ENOENT, -ENODATA))
+                        log_error_errno(r, "Failed to get link NTP servers: %m");
                 goto clear;
         }
 
@@ -1025,7 +1027,7 @@ static int manager_network_read_link_servers(Manager *m) {
 
 clear:
         manager_flush_server_names(m, SERVER_LINK);
-        return r;
+        return existing; /* return true if there were existing servers. */
 }
 
 static bool manager_is_connected(Manager *m) {
@@ -1043,7 +1045,6 @@ static int manager_network_event_handler(sd_event_source *s, int fd, uint32_t re
 
         sd_network_monitor_flush(m->network_monitor);
 
-        /* When manager_network_read_link_servers() failed, we assume that the servers are changed. */
         changed = manager_network_read_link_servers(m);
 
         /* check if the machine is online */
@@ -1200,7 +1201,7 @@ int manager_setup_save_time_event(Manager *m) {
                         m,
                         SD_EVENT_PRIORITY_NORMAL,
                         "save-time",
-                        /* force_reset = */ false);
+                        /* force_reset= */ false);
         if (r < 0)
                 return log_error_errno(r, "Failed to reset event source for saving time: %m");
 
@@ -1216,7 +1217,7 @@ static int manager_save_time_and_rearm(Manager *m, usec_t t) {
          * clock, but otherwise uses the specified timestamp. Note that whenever we acquire an NTP sync the
          * specified timestamp value might be more accurate than the system clock, since the latter is
          * subject to slow adjustments. */
-        r = touch_file(TIMESYNCD_CLOCK_FILE, /* parents = */ false, t, UID_INVALID, GID_INVALID, MODE_INVALID);
+        r = touch_file(TIMESYNCD_CLOCK_FILE, /* parents= */ false, t, UID_INVALID, GID_INVALID, MODE_INVALID);
         if (r < 0)
                 log_debug_errno(r, "Failed to update "TIMESYNCD_CLOCK_FILE", ignoring: %m");
 

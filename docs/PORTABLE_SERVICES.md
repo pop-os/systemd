@@ -131,7 +131,7 @@ And that's already it.
 
 Note that the images need to stay around (and in the same location) as long as the
 portable service is attached.
-If an image is moved, the `RootImage=` line written to the unit drop-in would point to an non-existent path, and break access to the image.
+If an image is moved, the `RootImage=` line written to the unit drop-in would point to a non-existent path, and break access to the image.
 
 The `portablectl detach` command executes the reverse operation:
 it looks for the drop-ins and the unit files associated with the image, and removes them.
@@ -162,7 +162,7 @@ Specifically, the following requirements are made for an image that can be attac
    an image with a partition table understood by the Linux kernel with only a
    single partition defined, or alternatively, a GPT partition table with a set
    of properly marked partitions following the
-   [Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification).
+   [UAPI.2 Discoverable Partitions Specification](https://uapi-group.org/specifications/specs/discoverable_partitions_specification).
 
 3. The image must at least contain one matching unit file, with the right name
    prefix and suffix (see above).
@@ -239,7 +239,7 @@ image.
 As mentioned, `mkosi -b` takes care of all of that for you, but any other image generator should work too.
 
 The
-[os-release(5)](https://www.freedesktop.org/software/systemd/man/os-release.html)
+[os-release(5)](https://www.freedesktop.org/software/systemd/man/latest/os-release.html)
 file may optionally be extended with a `PORTABLE_PREFIXES=` field listing all
 supported portable service prefixes for the image (see above).
 This is useful for informational purposes (as it allows recognizing portable service images
@@ -361,7 +361,7 @@ PORTABLE_EXTENSION_NAME_AND_VERSION=app_1
 
 ## Links
 
-[`portablectl(1)`](https://www.freedesktop.org/software/systemd/man/portablectl.html)<br>
-[`systemd-portabled.service(8)`](https://www.freedesktop.org/software/systemd/man/systemd-portabled.service.html)<br>
+[`portablectl(1)`](https://www.freedesktop.org/software/systemd/man/latest/portablectl.html)<br>
+[`systemd-portabled.service(8)`](https://www.freedesktop.org/software/systemd/man/latest/systemd-portabled.service.html)<br>
 [Walkthrough for Portable Services](https://0pointer.net/blog/walkthrough-for-portable-services.html)<br>
 [Repo with examples](https://github.com/systemd/portable-walkthrough)

@@ -56,6 +56,7 @@ NAME_TO_MAGIC = {
     # gfs is an old version of gfs2 and reuses the magic
     'gfs':             ['GFS2_MAGIC'],
     'gfs2':            ['GFS2_MAGIC'],
+    'gmem':            ['GUEST_MEMFD_MAGIC'],
     'hostfs':          ['HOSTFS_SUPER_MAGIC'],
     'hpfs':            ['HPFS_SUPER_MAGIC'],
     'hugetlbfs':       ['HUGETLBFS_MAGIC'],
@@ -79,6 +80,7 @@ NAME_TO_MAGIC = {
     'nsfs':            ['NSFS_MAGIC'],
     'ntfs':            ['NTFS_SB_MAGIC'],
     'ntfs3':           ['NTFS3_SUPER_MAGIC'],
+    'nullfs':          ['NULL_FS_MAGIC'],
     'ocfs2':           ['OCFS2_SUPER_MAGIC'],
     'openpromfs':      ['OPENPROM_SUPER_MAGIC'],
     'orangefs':        ['ORANGEFS_DEVREQ_MAGIC'],

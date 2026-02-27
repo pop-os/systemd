@@ -3,7 +3,7 @@
 
 #include "sd-daemon.h" /* IWYU pragma: export */
 
-#include "forward.h"
+#include "shared-forward.h"
 
 #define NOTIFY_READY_MESSAGE "READY=1\n" "STATUS=Processing requests..."
 #define NOTIFY_STOPPING_MESSAGE "STOPPING=1\n" "STATUS=Shutting down..."
@@ -21,6 +21,7 @@ static inline void notify_on_cleanup(const char **p) {
                 (void) sd_notify(false, *p);
 }
 
+int notify_remove_fd(const char *name);
 int notify_remove_fd_warn(const char *name);
 int notify_remove_fd_warnf(const char *format, ...) _printf_(1, 2);
 int close_and_notify_warn(int fd, const char *name);

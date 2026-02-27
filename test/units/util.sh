@@ -203,7 +203,7 @@ can_do_rootless_nspawn() {
     # Need to have bpf-lsm
     grep -q bpf /sys/kernel/security/lsm &&
     # ...and libbpf installed
-    find /usr/lib* -name "libbpf.so.*" 2>/dev/null | grep -q . &&
+    find /usr/lib* -name "libbpf.so.*" 2>/dev/null | grep . >/dev/null &&
 
     # Ensure mountfsd/nsresourced are listening
     systemctl start systemd-mountfsd.socket systemd-nsresourced.socket &&
@@ -222,7 +222,7 @@ can_do_rootless_nspawn() {
            io.systemd.NamespaceResource.AllocateUserRange \
            '{"name":"test-supported","size":65536,"userNamespaceFileDescriptor":0}' \
            2>&1 || true) |
-        grep -q "io.systemd.NamespaceResource.UserNamespaceInterfaceNotSupported"
+        grep "io.systemd.NamespaceResource.UserNamespaceInterfaceNotSupported" >/dev/null
 }
 
 # Bump the reboot counter and call systemctl with the given arguments
@@ -281,6 +281,20 @@ kernel_supports_lsm() {
             return 0
         fi
     done
+
+    return 1
+}
+
+machine_supports_verity_keyring() {
+    # Requires kernel built with certain kconfigs, as listed in README:
+    # https://oracle.github.io/kconfigs/?config=UTS_RELEASE&config=DM_VERITY_VERIFY_ROOTHASH_SIG&config=DM_VERITY_VERIFY_ROOTHASH_SIG_SECONDARY_KEYRING&config=DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING&config=IMA_ARCH_POLICY&config=INTEGRITY_MACHINE_KEYRING
+    if grep -q "$(openssl x509 -noout -subject -in /usr/share/mkosi.crt | sed 's/^.*CN=//')" /proc/keys && \
+            ( . /etc/os-release; [ "$ID" != "centos" ] || systemd-analyze compare-versions "$VERSION_ID" ge 10 ) && \
+            ( . /etc/os-release; [ "$ID" != "debian" ] || [ -z "${VERSION_ID:-}" ] || systemd-analyze compare-versions "$VERSION_ID" ge 13 ) && \
+            ( . /etc/os-release; [ "$ID" != "ubuntu" ] || systemd-analyze compare-versions "$VERSION_ID" ge 24.04 ) && \
+            systemd-analyze compare-versions "$(cryptsetup --version | sed 's/^cryptsetup \([0-9]*\.[0-9]*\.[0-9]*\) .*/\1/')" ge 2.3.0; then
+        return 0
+    fi
 
     return 1
 }
@@ -453,3 +467,42 @@ generate_locale() {
         locale-gen "$locale"
     fi
 }
+
+built_with_musl() (
+    set +ex
+    ! systemd-analyze --quiet condition 'ConditionVersion=glibc $= ?*'
+)
+
+check_nss_module() (
+    set +e
+
+    local name="${1:?}"
+    local have=
+    local i
+
+    if [[ ! -e /etc/nsswitch.conf ]]; then
+        : "/etc/nsswitch.conf not found."
+        return 1
+    fi
+
+    if ! find /usr/lib* -name "libnss_${name}.so.*" 2>/dev/null | grep . >/dev/null; then
+        : "NSS module $name not found."
+        return 1
+    fi
+
+    if [[ "$name" == systemd ]]; then
+        for i in passwd group shadow; do
+            if ! grep -qE "^$i:.*[[:space:]]*systemd" /etc/nsswitch.conf; then
+                : "systemd NSS module is not enabled for $i database."
+                return 1
+            fi
+        done
+    else
+        if ! grep -qE "^hosts:.*[[:space:]]*$name" /etc/nsswitch.conf; then
+            : "$name NSS module is not enabled for hosts database."
+            return 1
+        fi
+    fi
+
+    return 0
+)

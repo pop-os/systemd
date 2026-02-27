@@ -195,16 +195,27 @@ EFI_STATUS file_read(
         return file_handle_read(handle, offset, size, ret, ret_size);
 }
 
+void set_attribute_safe(size_t attr) {
+        /* Various UEFI implementations suppress color changes from a color to the same color. Often, we want
+         * to force out the color change though, hence change the color here once, and then back. We simply
+         * mark the color as bright for a moment, and then revert that. */
+
+        attr ^= 0x08;
+        ST->ConOut->SetAttribute(ST->ConOut, attr);
+        attr ^= 0x08;
+        ST->ConOut->SetAttribute(ST->ConOut, attr);
+}
+
 void print_at(size_t x, size_t y, size_t attr, const char16_t *str) {
         assert(str);
         ST->ConOut->SetCursorPosition(ST->ConOut, x, y);
-        ST->ConOut->SetAttribute(ST->ConOut, attr);
+        set_attribute_safe(attr);
         ST->ConOut->OutputString(ST->ConOut, (char16_t *) str);
 }
 
 void clear_screen(size_t attr) {
         log_wait();
-        ST->ConOut->SetAttribute(ST->ConOut, attr);
+        set_attribute_safe(attr);
         ST->ConOut->ClearScreen(ST->ConOut);
 }
 
@@ -313,14 +324,14 @@ bool is_ascii(const char16_t *f) {
         return true;
 }
 
-char16_t **strv_free(char16_t **v) {
-        if (!v)
+char16_t **strv_free(char16_t **l) {
+        if (!l)
                 return NULL;
 
-        for (char16_t **i = v; *i; i++)
+        for (char16_t **i = l; *i; i++)
                 free(*i);
 
-        return mfree(v);
+        return mfree(l);
 }
 
 EFI_STATUS open_directory(
@@ -504,6 +515,51 @@ void *xmalloc(size_t size) {
         void *p = NULL;
         assert_se(BS->AllocatePool(EfiLoaderData, size, &p) == EFI_SUCCESS);
         return p;
+}
+
+Pages xmalloc_aligned_pages(
+                EFI_ALLOCATE_TYPE type,
+                EFI_MEMORY_TYPE memory_type,
+                size_t n_pages,
+                size_t alignment,
+                EFI_PHYSICAL_ADDRESS addr) {
+
+        EFI_PHYSICAL_ADDRESS aligned = addr;
+
+        /* Allow to pass block_io->Media->IoAlign to this function directly.
+         * alignment <= 1 means no alignment is required, in that case just
+         * allocate pages directly.
+         */
+        if (alignment <= 1)
+                alignment = EFI_PAGE_SIZE;
+
+        assert(ISPOWEROF2(alignment));
+
+        if (alignment <= EFI_PAGE_SIZE) {
+                assert_se(BS->AllocatePages(type, memory_type, n_pages, &aligned) == EFI_SUCCESS);
+                return (Pages) {
+                        .addr = aligned,
+                        .n_pages = n_pages,
+                };
+        }
+
+        size_t total_pages = n_pages + EFI_SIZE_TO_PAGES(alignment);
+        assert_se(BS->AllocatePages(type, memory_type, total_pages, &addr) == EFI_SUCCESS);
+
+        aligned = ALIGN_TO(addr, alignment);
+        size_t unaligned_pages = EFI_SIZE_TO_PAGES(aligned - addr);
+        if (unaligned_pages > 0)
+                assert_se(BS->FreePages(addr, unaligned_pages) == EFI_SUCCESS);
+
+        addr = aligned + n_pages * EFI_PAGE_SIZE;
+        unaligned_pages = total_pages - n_pages - unaligned_pages;
+        if (unaligned_pages > 0)
+                assert_se(BS->FreePages(addr, unaligned_pages) == EFI_SUCCESS);
+
+        return (Pages) {
+                .addr = aligned,
+                .n_pages = n_pages,
+        };
 }
 
 bool free_and_xstrdup16(char16_t **p, const char16_t *s) {

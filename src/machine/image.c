@@ -120,7 +120,7 @@ int image_clean_pool_operation(Manager *manager, ImageCleanPoolMode mode, Operat
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
 
                 _cleanup_hashmap_free_ Hashmap *images = NULL;
-                r = image_discover(manager->runtime_scope, IMAGE_MACHINE, /* root = */ NULL, &images);
+                r = image_discover(manager->runtime_scope, IMAGE_MACHINE, /* root= */ NULL, &images);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to discover images: %m");
                         report_errno_and_exit(errno_pipe_fd[1], r);
@@ -143,7 +143,7 @@ int image_clean_pool_operation(Manager *manager, ImageCleanPoolMode mode, Operat
                         if (mode == IMAGE_CLEAN_POOL_REMOVE_HIDDEN && !image_is_hidden(image))
                                 continue;
 
-                        r = image_remove(image);
+                        r = image_remove(image, manager->runtime_scope);
                         if (r == -EBUSY) {
                                 log_debug("Keeping image '%s' because it's currently used.", image->name);
                                 continue;

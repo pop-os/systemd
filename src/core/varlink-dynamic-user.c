@@ -3,11 +3,11 @@
 #include "sd-varlink.h"
 
 #include "dynamic-user.h"
-#include "errno-util.h"
 #include "hashmap.h"
 #include "json-util.h"
 #include "manager.h"
 #include "string-util.h"
+#include "uid-classification.h"
 #include "user-util.h"
 #include "varlink-dynamic-user.h"
 
@@ -27,13 +27,13 @@ static int build_user_json(const char *user_name, uid_t uid, sd_json_variant **r
         assert(ret);
 
         return sd_json_buildo(ret, SD_JSON_BUILD_PAIR("record", SD_JSON_BUILD_OBJECT(
-                                       SD_JSON_BUILD_PAIR("userName", SD_JSON_BUILD_STRING(user_name)),
-                                       SD_JSON_BUILD_PAIR("uid", SD_JSON_BUILD_UNSIGNED(uid)),
-                                       SD_JSON_BUILD_PAIR("gid", SD_JSON_BUILD_UNSIGNED(uid)),
+                                       SD_JSON_BUILD_PAIR_STRING("userName", user_name),
+                                       SD_JSON_BUILD_PAIR_UNSIGNED("uid", uid),
+                                       SD_JSON_BUILD_PAIR_UNSIGNED("gid", uid),
                                        SD_JSON_BUILD_PAIR("realName", JSON_BUILD_CONST_STRING("Dynamic User")),
                                        SD_JSON_BUILD_PAIR("homeDirectory", JSON_BUILD_CONST_STRING("/")),
                                        SD_JSON_BUILD_PAIR("shell", JSON_BUILD_CONST_STRING(NOLOGIN)),
-                                       SD_JSON_BUILD_PAIR("locked", SD_JSON_BUILD_BOOLEAN(true)),
+                                       SD_JSON_BUILD_PAIR_BOOLEAN("locked", true),
                                        SD_JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.DynamicUser")),
                                        SD_JSON_BUILD_PAIR("disposition", JSON_BUILD_CONST_STRING("dynamic")))));
 }
@@ -92,6 +92,9 @@ int vl_method_get_user_record(sd_varlink *link, sd_json_variant *parameters, sd_
                         if (r < 0)
                                 return r;
 
+                        if (!uid_is_dynamic(uid))
+                                continue;
+
                         if (!user_match_lookup_parameters(&p, d->name, uid))
                                 continue;
 
@@ -137,9 +140,9 @@ static int build_group_json(const char *group_name, gid_t gid, sd_json_variant *
         assert(ret);
 
         return sd_json_buildo(ret, SD_JSON_BUILD_PAIR("record", SD_JSON_BUILD_OBJECT(
-                                       SD_JSON_BUILD_PAIR("groupName", SD_JSON_BUILD_STRING(group_name)),
+                                       SD_JSON_BUILD_PAIR_STRING("groupName", group_name),
                                        SD_JSON_BUILD_PAIR("description", JSON_BUILD_CONST_STRING("Dynamic Group")),
-                                       SD_JSON_BUILD_PAIR("gid", SD_JSON_BUILD_UNSIGNED(gid)),
+                                       SD_JSON_BUILD_PAIR_UNSIGNED("gid", gid),
                                        SD_JSON_BUILD_PAIR("service", JSON_BUILD_CONST_STRING("io.systemd.DynamicUser")),
                                        SD_JSON_BUILD_PAIR("disposition", JSON_BUILD_CONST_STRING("dynamic")))));
 }
@@ -187,7 +190,7 @@ int vl_method_get_group_record(sd_varlink *link, sd_json_variant *parameters, sd
         if (gid_is_valid(p.gid))
                 r = dynamic_user_lookup_uid(m, (uid_t) p.gid, &found_name);
         else if (p.group_name)
-                r = dynamic_user_lookup_name(m, p.group_name, (uid_t*) &found_gid);
+                r = dynamic_user_lookup_name(m, p.group_name, &found_gid);
         else {
                 DynamicUser *d;
 
@@ -199,6 +202,9 @@ int vl_method_get_group_record(sd_varlink *link, sd_json_variant *parameters, sd
                                 continue;
                         if (r < 0)
                                 return r;
+
+                        if (!gid_is_dynamic((gid_t) uid))
+                                continue;
 
                         if (!group_match_lookup_parameters(&p, d->name, (gid_t) uid))
                                 continue;

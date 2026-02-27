@@ -235,15 +235,15 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(NetDev*, netdev_unref);
 bool netdev_is_managed(NetDev *netdev);
 int netdev_get(Manager *manager, const char *name, NetDev **ret);
 void link_assign_netdev(Link *link);
-int netdev_set_ifindex(NetDev *netdev, sd_netlink_message *newlink);
-int netdev_generate_hw_addr(NetDev *netdev, Link *link, const char *name,
+int netdev_set_ifindex(NetDev *netdev, sd_netlink_message *message);
+int netdev_generate_hw_addr(NetDev *netdev, Link *parent, const char *name,
                             const struct hw_addr_data *hw_addr, struct hw_addr_data *ret);
 
 bool netdev_needs_reconfigure(NetDev *netdev, NetDevLocalAddressType type);
 int link_request_stacked_netdev(Link *link, NetDev *netdev);
 
 const char* netdev_kind_to_string(NetDevKind d) _const_;
-NetDevKind netdev_kind_from_string(const char *d) _pure_;
+NetDevKind netdev_kind_from_string(const char *s) _pure_;
 
 static inline NetDevCreateType netdev_get_create_type(NetDev *netdev) {
         assert(netdev);
@@ -256,9 +256,19 @@ CONFIG_PARSER_PROTOTYPE(config_parse_netdev_kind);
 CONFIG_PARSER_PROTOTYPE(config_parse_netdev_hw_addr);
 
 /* gperf */
-const struct ConfigPerfItem* network_netdev_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
+const struct ConfigPerfItem* network_netdev_gperf_lookup(const char *str, GPERF_LEN_TYPE length);
 
 /* Macros which append INTERFACE= to the message */
+
+#define log_netdev_syntax(netdev, level, message_id, fmt, ...)          \
+        ({                                                              \
+                const NetDev *_n = (netdev);                            \
+                const char *_ifname = _n ? _n->ifname : NULL;           \
+                log_struct(level,                                       \
+                           LOG_MESSAGE(fmt, __VA_ARGS__),               \
+                           LOG_MESSAGE_ID(message_id),                  \
+                           LOG_ITEM("INTERFACE=%s", strempty(_ifname))); \
+        })
 
 #define log_netdev_full_errno_zerook(netdev, level, error, ...)         \
         ({                                                              \

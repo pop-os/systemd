@@ -113,7 +113,7 @@ static int do_mcopy(const char *node, const char *root) {
         assert(root);
 
         /* Return early if there's nothing to copy. */
-        if (dir_is_empty(root, /*ignore_hidden_or_backup=*/ false))
+        if (dir_is_empty(root, /* ignore_hidden_or_backup= */ false))
                 return 0;
 
         r = find_executable("mcopy", &mcopy);
@@ -418,12 +418,19 @@ int make_filesystem(
 
         /* When changing this conditional, also adjust the log statement below. */
         if (STR_IN_SET(fstype, "ext2", "ext3", "ext4")) {
+                const char *ext_e_opts;
+
+                /* Set hash_seed to the same value as the filesystem UUID for reproducibility */
+                ext_e_opts = strjoina(FLAGS_SET(flags, MKFS_DISCARD) ? "discard" : "nodiscard",
+                                      ",lazy_itable_init=1,hash_seed=",
+                                      vol_id);
+
                 argv = strv_new(mkfs,
                                 "-L", label,
                                 "-U", vol_id,
                                 "-I", "256",
                                 "-m", "0",
-                                "-E", FLAGS_SET(flags, MKFS_DISCARD) ? "discard,lazy_itable_init=1" : "nodiscard,lazy_itable_init=1",
+                                "-E", ext_e_opts,
                                 "-b", "4096",
                                 "-T", "default");
                 if (!argv)
@@ -443,9 +450,21 @@ int make_filesystem(
 
                 if (sector_size > 0) {
                         if (strv_extend(&env, "MKE2FS_DEVICE_SECTSIZE") < 0)
-                                        return log_oom();
+                                return log_oom();
 
                         if (strv_extendf(&env, "%"PRIu64, sector_size) < 0)
+                                return log_oom();
+                }
+
+                /* e2fsprogs supports $SOURCE_DATE_EPOCH since v1.47.1. For older versions, we need to set
+                 * $E2FSPROGS_FAKE_TIME. See the following:
+                 * https://github.com/tytso/e2fsprogs/commit/b6e2913061577ad981464e435026d71a48fd5caf
+                 * Note, $E2FSPROGS_FAKE_TIME and $SOURCE_DATE_EPOCH are mostly equivalent, except for the
+                 * 0 value handling, where $E2FSPROGS_FAKE_TIME=0 is ignored and the current time is used,
+                 * but $SOURCE_DATE_EPOCH=0 sets 1970-01-01 as the timestamp. */
+                if (!secure_getenv("E2FSPROGS_FAKE_TIME")) { /* honor $E2FSPROGS_FAKE_TIME if already set */
+                        const char *e = secure_getenv("SOURCE_DATE_EPOCH");
+                        if (e && strv_extend_strv(&env, STRV_MAKE("E2FSPROGS_FAKE_TIME", e), /* filter_duplicates= */ false) < 0)
                                 return log_oom();
                 }
 
@@ -466,17 +485,22 @@ int make_filesystem(
                         return log_oom();
 
                 if (compression) {
-                        _cleanup_free_ char *c = NULL;
+                        if (!root)
+                                log_warning("Btrfs compression setting ignored because no files are being copied. "
+                                            "Compression= can only be applied when CopyFiles= is also specified.");
+                        else {
+                                _cleanup_free_ char *c = NULL;
 
-                        c = strdup(compression);
-                        if (!c)
-                                return log_oom();
+                                c = strdup(compression);
+                                if (!c)
+                                        return log_oom();
 
-                        if (compression_level && !strextend(&c, ":", compression_level))
-                                return log_oom();
+                                if (compression_level && !strextend(&c, ":", compression_level))
+                                        return log_oom();
 
-                        if (strv_extend_many(&argv, "--compress", c) < 0)
-                                return log_oom();
+                                if (strv_extend_many(&argv, "--compress", c) < 0)
+                                        return log_oom();
+                        }
                 }
 
                 /* mkfs.btrfs unconditionally warns about several settings changing from v5.15 onwards which
@@ -681,17 +705,17 @@ int make_filesystem(
         r = safe_fork_full(
                         "(mkfs)",
                         stdio_fds,
-                        /*except_fds=*/ NULL,
-                        /*n_except_fds=*/ 0,
+                        /* except_fds= */ NULL,
+                        /* n_except_fds= */ 0,
                         fork_flags,
-                        /*ret_pid=*/ NULL);
+                        /* ret_pid= */ NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
 
                 STRV_FOREACH_PAIR(k, v, env)
-                        if (setenv(*k, *v, /* replace = */ true) < 0) {
+                        if (setenv(*k, *v, /* replace= */ true) < 0) {
                                 log_error_errno(r, "Failed to set %s=%s environment variable: %m", *k, *v);
                                 _exit(EXIT_FAILURE);
                         }

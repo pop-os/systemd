@@ -8,6 +8,7 @@
 #include "sd-event.h"
 #include "sd-netlink.h"
 #include "sd-resolve.h"
+#include "sd-varlink.h"
 
 #include "alloc-util.h"
 #include "bus-error.h"
@@ -23,9 +24,9 @@
 #include "env-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "firewall-util.h"
 #include "initrd-util.h"
 #include "mount-util.h"
+#include "netlink-internal.h"
 #include "netlink-util.h"
 #include "networkd-address.h"
 #include "networkd-address-label.h"
@@ -37,6 +38,7 @@
 #include "networkd-neighbor.h"
 #include "networkd-nexthop.h"
 #include "networkd-queue.h"
+#include "networkd-resolve-hook.h"
 #include "networkd-route.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-serialize.h"
@@ -205,15 +207,16 @@ static int manager_connect_udev(Manager *m) {
         return 0;
 }
 
-static int manager_listen_fds(Manager *m, int *ret_rtnl_fd, int *ret_varlink_fd) {
+static int manager_listen_fds(Manager *m, int *ret_rtnl_fd, int *ret_varlink_fd, int *ret_resolve_hook_fd) {
         _cleanup_strv_free_ char **names = NULL;
-        int n, rtnl_fd = -EBADF, varlink_fd = -EBADF;
+        int n, rtnl_fd = -EBADF, varlink_fd = -EBADF, resolve_hook_fd = -EBADF;
 
         assert(m);
         assert(ret_rtnl_fd);
         assert(ret_varlink_fd);
+        assert(ret_resolve_hook_fd);
 
-        n = sd_listen_fds_with_names(/* unset_environment = */ true, &names);
+        n = sd_listen_fds_with_names(/* unset_environment= */ true, &names);
         if (n < 0)
                 return n;
 
@@ -235,6 +238,11 @@ static int manager_listen_fds(Manager *m, int *ret_rtnl_fd, int *ret_varlink_fd)
                         continue;
                 }
 
+                if (streq(names[i], "resolve-hook")) {
+                        resolve_hook_fd = fd;
+                        continue;
+                }
+
                 if (manager_set_serialization_fd(m, fd, names[i]) >= 0)
                         continue;
 
@@ -250,6 +258,7 @@ static int manager_listen_fds(Manager *m, int *ret_rtnl_fd, int *ret_varlink_fd)
 
         *ret_rtnl_fd = rtnl_fd;
         *ret_varlink_fd = varlink_fd;
+        *ret_resolve_hook_fd = resolve_hook_fd;
 
         return 0;
 }
@@ -280,6 +289,28 @@ static int manager_connect_genl(Manager *m) {
         r = genl_add_match(m->genl, NULL, NL80211_GENL_NAME, NL80211_MULTICAST_GROUP_MLME, 0,
                            &manager_genl_process_nl80211_mlme, NULL, m, "network-genl_process_nl80211_mlme");
         if (r < 0 && r != -EOPNOTSUPP)
+                return r;
+
+        return 0;
+}
+
+static int manager_connect_nfnl(Manager *m) {
+        int r;
+
+        assert(m);
+
+        r = sd_nfnl_socket_open(&m->nfnl);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to open nftables netlink socket. IPMasquerade= and NFTSet= settings will not be applied. Ignoring: %m");
+                return 0;
+        }
+
+        r = sd_netlink_increase_rxbuf(m->nfnl, RCVBUF_SIZE);
+        if (r < 0)
+                log_warning_errno(r, "Failed to increase receive buffer size for nftables netlink socket, ignoring: %m");
+
+        r = sd_netlink_attach_event(m->nfnl, m->event, 0);
+        if (r < 0)
                 return r;
 
         return 0;
@@ -435,7 +466,7 @@ static int manager_post_handler(sd_event_source *s, void *userdata) {
 
                 if (netlink_get_reply_callback_count(manager->rtnl) > 0 ||
                     netlink_get_reply_callback_count(manager->genl) > 0 ||
-                    fw_ctx_get_reply_callback_count(manager->fw_ctx) > 0)
+                    netlink_get_reply_callback_count(manager->nfnl) > 0)
                         return 0; /* There are some message calls waiting for their replies. */
 
                 (void) manager_serialize(manager);
@@ -473,7 +504,7 @@ static int manager_stop(Manager *manager, ManagerState state) {
 
         Link *link;
         HASHMAP_FOREACH(link, manager->links_by_index)
-                (void) link_stop_engines(link, /* may_keep_dynamic = */ true);
+                (void) link_stop_engines(link, /* may_keep_dynamic= */ true);
 
         return 0;
 }
@@ -489,7 +520,7 @@ static int signal_restart_callback(sd_event_source *s, const struct signalfd_sig
 static int signal_reload_callback(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
 
-        (void) manager_reload(m, /* message = */ NULL);
+        (void) manager_reload(m, /* message= */ NULL);
 
         return 0;
 }
@@ -521,7 +552,7 @@ static int manager_set_keep_configuration(Manager *m) {
 }
 
 int manager_setup(Manager *m) {
-        _cleanup_close_ int rtnl_fd = -EBADF, varlink_fd = -EBADF;
+        _cleanup_close_ int rtnl_fd = -EBADF, varlink_fd = -EBADF, resolve_hook_fd = -EBADF;
         int r;
 
         assert(m);
@@ -545,7 +576,7 @@ int manager_setup(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = manager_listen_fds(m, &rtnl_fd, &varlink_fd);
+        r = manager_listen_fds(m, &rtnl_fd, &varlink_fd, &resolve_hook_fd);
         if (r < 0)
                 return r;
 
@@ -557,10 +588,18 @@ int manager_setup(Manager *m) {
         if (r < 0)
                 return r;
 
+        r = manager_connect_nfnl(m);
+        if (r < 0)
+                return r;
+
         if (m->test_mode)
                 return 0;
 
-        r = manager_connect_varlink(m, TAKE_FD(varlink_fd));
+        r = manager_varlink_init(m, TAKE_FD(varlink_fd));
+        if (r < 0)
+                return r;
+
+        r = manager_varlink_init_resolve_hook(m, TAKE_FD(resolve_hook_fd));
         if (r < 0)
                 return r;
 
@@ -696,6 +735,7 @@ Manager* manager_free(Manager *m) {
 
         sd_netlink_unref(m->rtnl);
         sd_netlink_unref(m->genl);
+        sd_netlink_unref(m->nfnl);
         sd_resolve_unref(m->resolve);
 
         m->routes = set_free(m->routes);
@@ -710,7 +750,9 @@ Manager* manager_free(Manager *m) {
 
         sd_device_monitor_unref(m->device_monitor);
 
-        manager_varlink_done(m);
+        m->varlink_server = sd_varlink_server_unref(m->varlink_server);
+        m->varlink_resolve_hook_server = sd_varlink_server_unref(m->varlink_resolve_hook_server);
+        m->query_filter_subscriptions = set_free(m->query_filter_subscriptions);
         hashmap_free(m->polkit_registry);
         sd_bus_flush_close_unref(m->bus);
 
@@ -719,8 +761,6 @@ Manager* manager_free(Manager *m) {
 
         safe_close(m->ethtool_fd);
         safe_close(m->persistent_storage_fd);
-
-        m->fw_ctx = fw_ctx_free(m->fw_ctx);
 
         m->serialization_fd = safe_close(m->serialization_fd);
 
@@ -1218,8 +1258,8 @@ int manager_reload(Manager *m, sd_bus_message *message) {
         }
 
         HASHMAP_FOREACH(link, m->links_by_index)
-                (void) link_reconfigure_full(link, /* flags = */ 0, message,
-                                             /* counter = */ message ? &m->reloading : NULL);
+                (void) link_reconfigure_full(link, /* flags= */ 0, message,
+                                             /* counter= */ message ? &m->reloading : NULL);
 
         log_debug("Reloaded.");
         r = 0;

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
-#include "forward.h"
+#include "basic-forward.h"
 
 /* Limits the use of ANSI colors to a subset. */
 typedef enum ColorMode {
@@ -28,6 +28,8 @@ bool underline_enabled(void);
 
 void reset_ansi_feature_caches(void);
 
+bool looks_like_ansi_color_code(const char *str);
+
 /* Regular colors */
 #define ANSI_BLACK   "\x1B[0;30m" /* Some type of grey usually. */
 #define ANSI_RED     "\x1B[0;31m"
@@ -48,7 +50,7 @@ void reset_ansi_feature_caches(void);
 #define ANSI_BRIGHT_CYAN    "\x1B[0;96m"
 #define ANSI_BRIGHT_WHITE   "\x1B[0;97m"
 
-#define ANSI_GREY    "\x1B[0;38;5;245m"
+#define ANSI_GREY    "\x1B[0;38:5:245m"
 
 /* Bold/highlighted */
 #define ANSI_HIGHLIGHT_BLACK    "\x1B[0;1;30m"

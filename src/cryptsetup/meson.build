@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
-if conf.get('HAVE_LIBCRYPTSETUP') != 1
+if conf.get('HAVE_LIBCRYPTSETUP') != 1 or conf.get('HAVE_LIBMOUNT') != 1
         subdir_done()
 endif
 
@@ -19,6 +19,7 @@ executables += [
                 'sources' : systemd_cryptsetup_sources,
                 'dependencies' : [
                         libcryptsetup,
+                        libmount_cflags,
                         libopenssl,
                         libp11kit_cflags,
                 ],

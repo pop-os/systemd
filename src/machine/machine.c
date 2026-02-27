@@ -15,7 +15,6 @@
 #include "bus-unit-util.h"
 #include "env-file.h"
 #include "errno-util.h"
-#include "escape.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -25,6 +24,7 @@
 #include "log.h"
 #include "machine.h"
 #include "machine-dbus.h"
+#include "machined-resolve-hook.h"
 #include "machined.h"
 #include "mkdir-label.h"
 #include "namespace-util.h"
@@ -89,7 +89,7 @@ int machine_link(Manager *manager, Machine *machine) {
                 return -EINVAL;
 
         if (machine->class != MACHINE_HOST) {
-                char *temp = path_join("/run/systemd/machines", machine->name);
+                char *temp = path_join(manager->state_dir, machine->name);
                 if (!temp)
                         return -ENOMEM;
 
@@ -171,14 +171,14 @@ int machine_save(Machine *m) {
 
         _cleanup_(unlink_and_freep) char *sl = NULL; /* auto-unlink! */
         if (m->unit && !m->subgroup) {
-                sl = strjoin("/run/systemd/machines/unit:", m->unit);
+                sl = strjoin(m->manager->state_dir, "/unit:", m->unit);
                 if (!sl)
                         return log_oom();
         }
 
-        r = mkdir_safe_label("/run/systemd/machines", 0755, 0, 0, MKDIR_WARN_MODE);
+        r = mkdir_safe_label(m->manager->state_dir, 0755, UID_INVALID, GID_INVALID, MKDIR_WARN_MODE);
         if (r < 0)
-                return log_error_errno(r, "Failed to create /run/systemd/machines/: %m");
+                return log_error_errno(r, "Failed to create '%s': %m", m->manager->state_dir);
 
         _cleanup_(unlink_and_freep) char *temp_path = NULL;
         _cleanup_fclose_ FILE *f = NULL;
@@ -268,7 +268,7 @@ static void machine_unlink(Machine *m) {
         assert(m);
 
         if (m->unit && !m->subgroup) {
-                const char *sl = strjoina("/run/systemd/machines/unit:", m->unit);
+                const char *sl = strjoina(m->manager->state_dir, "/unit:", m->unit);
                 (void) unlink(sl);
         }
 
@@ -439,7 +439,7 @@ static int machine_start_scope(
                 return log_oom();
 
         r = bus_message_new_method_call(
-                        machine->manager->bus,
+                        machine->manager->api_bus,
                         &m,
                         bus_systemd_mgr,
                         "StartTransientUnit");
@@ -509,7 +509,7 @@ static int machine_start_scope(
                  * doesn't support PIDFDs yet, let's try without. */
                 if (allow_pidfd &&
                     sd_bus_error_has_names(&e, SD_BUS_ERROR_UNKNOWN_PROPERTY, SD_BUS_ERROR_PROPERTY_READ_ONLY))
-                        return machine_start_scope(machine, /* allow_pidfd = */ false, more_properties, error);
+                        return machine_start_scope(machine, /* allow_pidfd= */ false, more_properties, error);
 
                 return sd_bus_error_move(error, &e);
         }
@@ -532,7 +532,7 @@ static int machine_ensure_scope(Machine *m, sd_bus_message *properties, sd_bus_e
         assert(m->class != MACHINE_HOST);
 
         if (!m->unit) {
-                r = machine_start_scope(m, /* allow_pidfd = */ true, properties, error);
+                r = machine_start_scope(m, /* allow_pidfd= */ true, properties, error);
                 if (r < 0)
                         return log_error_errno(r, "Failed to start machine scope: %s", bus_error_message(error, r));
         }
@@ -596,7 +596,7 @@ static int machine_dispatch_cgroup_empty(sd_event_source *s, const struct inotif
 
         assert(m->cgroup);
 
-        r = cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, m->cgroup);
+        r = cg_is_empty(m->cgroup);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine if cgroup '%s' is empty: %m", m->cgroup);
 
@@ -616,7 +616,7 @@ static int machine_watch_cgroup(Machine *m) {
                 return 0;
 
         _cleanup_free_ char *p = NULL;
-        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, m->cgroup, "cgroup.events", &p);
+        r = cg_get_path(m->cgroup, "cgroup.events", &p);
         if (r < 0)
                 return log_error_errno(r, "Failed to get cgroup path for cgroup '%s': %m", m->cgroup);
 
@@ -673,7 +673,9 @@ int machine_start(Machine *m, sd_bus_message *properties, sd_bus_error *error) {
         /* Save new machine data */
         machine_save(m);
 
-        machine_send_signal(m, true);
+        machine_send_signal(m, "MachineNew");
+
+        (void) manager_notify_hook_filters(m->manager);
 
         return 0;
 }
@@ -731,8 +733,10 @@ int machine_finalize(Machine *m) {
         machine_add_to_gc_queue(m);
 
         if (m->started) {
-                machine_send_signal(m, false);
+                machine_send_signal(m, "MachineRemoved");
                 m->started = false;
+
+                (void) manager_notify_hook_filters(m->manager);
         }
 
         return 0;
@@ -778,7 +782,7 @@ bool machine_may_gc(Machine *m, bool drop_not_started) {
         }
 
         if (m->cgroup) {
-                r = cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, m->cgroup);
+                r = cg_is_empty(m->cgroup);
                 if (IN_SET(r, 0, -ENOENT))
                         return true;
                 if (r < 0)
@@ -800,16 +804,16 @@ void machine_add_to_gc_queue(Machine *m) {
         manager_enqueue_gc(m->manager);
 }
 
-MachineState machine_get_state(Machine *s) {
-        assert(s);
+MachineState machine_get_state(Machine *m) {
+        assert(m);
 
-        if (s->class == MACHINE_HOST)
+        if (m->class == MACHINE_HOST)
                 return MACHINE_RUNNING;
 
-        if (s->stopping)
+        if (m->stopping)
                 return MACHINE_CLOSING;
 
-        if (s->scope_job)
+        if (m->scope_job)
                 return MACHINE_OPENING;
 
         return MACHINE_RUNNING;
@@ -921,10 +925,10 @@ int machine_start_getty(Machine *m, const char *ptmx_name, sd_bus_error *error) 
         if (r < 0)
                 return log_debug_errno(r, "Failed to create DBus to machine: %m");
 
-        container_bus = allocated_bus ?: m->manager->bus;
+        container_bus = allocated_bus ?: m->manager->system_bus;
         getty = strjoina("container-getty@", p, ".service");
 
-        r = bus_call_method(container_bus, bus_systemd_mgr, "StartUnit", error, /* ret_reply = */ NULL, "ss", getty, "replace");
+        r = bus_call_method(container_bus, bus_systemd_mgr, "StartUnit", error, /* ret_reply= */ NULL, "ss", getty, "replace");
         if (r < 0)
                 return log_debug_errno(r, "Failed to StartUnit '%s' in container '%s': %m", getty, m->name);
 
@@ -967,7 +971,7 @@ int machine_start_shell(
         if (r < 0)
                 return log_debug_errno(r, "Failed to create DBus to machine: %m");
 
-        container_bus = allocated_bus ?: m->manager->bus;
+        container_bus = allocated_bus ?: m->manager->system_bus;
         r = bus_message_new_method_call(container_bus, &tm, bus_systemd_mgr, "StartTransientUnit");
         if (r < 0)
                 return r;
@@ -1179,14 +1183,14 @@ int machine_copy_from_to_operation(
 
         r = namespace_fork("(sd-copyns)",
                            "(sd-copy)",
-                           /* except_fds = */ NULL,
-                           /* n_except_fds = */ 0,
+                           /* except_fds= */ NULL,
+                           /* n_except_fds= */ 0,
                            FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
-                           /* pidns_fd = */ -EBADF,
+                           /* pidns_fd= */ -EBADF,
                            target_mntns_fd,
-                           /* netns_fd = */ -EBADF,
-                           /* userns_fd = */ -EBADF,
-                           /* root_fd = */ -EBADF,
+                           /* netns_fd= */ -EBADF,
+                           /* userns_fd= */ -EBADF,
+                           /* root_fd= */ -EBADF,
                            &child);
         if (r < 0)
                 return log_debug_errno(r, "Failed to fork into mount namespace of machine '%s': %m", machine->name);
@@ -1219,8 +1223,8 @@ int machine_copy_from_to_operation(
                                         uid_shift == 0 ? UID_INVALID : 0,
                                         uid_shift == 0 ? GID_INVALID : 0,
                                         copy_flags,
-                                        /* denylist = */ NULL,
-                                        /* subvolumes = */ NULL);
+                                        /* denylist= */ NULL,
+                                        /* subvolumes= */ NULL);
                 else
                         r = copy_tree_at(
                                         host_fd,
@@ -1230,8 +1234,8 @@ int machine_copy_from_to_operation(
                                         uid_shift == 0 ? UID_INVALID : uid_shift,
                                         uid_shift == 0 ? GID_INVALID : uid_shift,
                                         copy_flags,
-                                        /* denylist = */ NULL,
-                                        /* subvolumes = */ NULL);
+                                        /* denylist= */ NULL,
+                                        /* subvolumes= */ NULL);
                 if (r < 0)
                         log_debug_errno(r, "Failed to copy tree: %m");
 
@@ -1532,10 +1536,10 @@ int machine_open_root_directory(Machine *machine) {
                 pid_t child;
 
                 r = pidref_namespace_open(&machine->leader,
-                                          /* ret_pidns_fd = */ NULL,
+                                          /* ret_pidns_fd= */ NULL,
                                           &mntns_fd,
-                                          /* ret_netns_fd = */ NULL,
-                                          /* ret_userns_fd = */ NULL,
+                                          /* ret_netns_fd= */ NULL,
+                                          /* ret_userns_fd= */ NULL,
                                           &root_fd);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to open mount namespace of machine '%s': %m", machine->name);
@@ -1549,13 +1553,13 @@ int machine_open_root_directory(Machine *machine) {
                 r = namespace_fork(
                                 "(sd-openrootns)",
                                 "(sd-openroot)",
-                                /* except_fds = */ NULL,
-                                /* n_except_fds = */ 0,
+                                /* except_fds= */ NULL,
+                                /* n_except_fds= */ 0,
                                 FORK_RESET_SIGNALS|FORK_DEATHSIG_SIGKILL,
-                                /* pidns_fd = */  -EBADF,
+                                /* pidns_fd= */  -EBADF,
                                 mntns_fd,
-                                /* netns_fd = */  -EBADF,
-                                /* userns_fd = */ -EBADF,
+                                /* netns_fd= */  -EBADF,
+                                /* userns_fd= */ -EBADF,
                                 root_fd,
                                 &child);
                 if (r < 0)
@@ -1572,7 +1576,7 @@ int machine_open_root_directory(Machine *machine) {
                                 report_errno_and_exit(errno_pipe_fd[1], -errno);
                         }
 
-                        r = send_one_fd(fd_pass_socket[1], dfd, /* flags = */ 0);
+                        r = send_one_fd(fd_pass_socket[1], dfd, /* flags= */ 0);
                         dfd = safe_close(dfd);
                         if (r < 0) {
                                 log_debug_errno(r, "Failed to send FD over socket: %m");
@@ -1585,7 +1589,7 @@ int machine_open_root_directory(Machine *machine) {
                 errno_pipe_fd[1] = safe_close(errno_pipe_fd[1]);
                 fd_pass_socket[1] = safe_close(fd_pass_socket[1]);
 
-                r = wait_for_terminate_and_check("(sd-openrootns)", child, /* flags = */ 0);
+                r = wait_for_terminate_and_check("(sd-openrootns)", child, /* flags= */ 0);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to wait for child: %m");
 

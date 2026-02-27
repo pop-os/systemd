@@ -114,9 +114,10 @@ endif
 ############################################################
 
 udev_dependencies = [
-        libacl,
-        libblkid,
-        libkmod,
+        libacl_cflags,
+        libblkid_cflags,
+        libkmod_cflags,
+        libmount_cflags,
         threads,
 ]
 
@@ -131,8 +132,8 @@ udev_plugin_template = executable_template + {
 udev_common_template = {
         'objects' : ['udevadm'],
         'dependencies' : [
-                libacl,
-                libblkid,
+                libacl_cflags,
+                libblkid_cflags,
                 threads,
         ],
 }
@@ -144,8 +145,8 @@ udev_binaries_dict = [
                 'name' : 'udevadm',
                 'public' : true,
                 'sources' : udevadm_sources +
-                            udevadm_extract_sources +
                             keyboard_keys_from_name_inc,
+                'extract' : udevadm_extract_sources,
                 'include_directories' : [
                         libexec_template['include_directories'],
                         include_directories('.', 'net'),
@@ -154,7 +155,6 @@ udev_binaries_dict = [
                 'link_with' : udev_link_with,
                 'install_rpath' : udev_rpath,
                 'install_tag' : 'udev',
-                'extract' : udevadm_extract_sources,
         },
         udev_plugin_template + {
                 'name' : 'ata_id',
@@ -171,10 +171,7 @@ udev_binaries_dict = [
         },
         udev_plugin_template + {
                 'name' : 'fido_id',
-                'sources' : files(
-                        'fido_id/fido_id.c',
-                        'fido_id/fido_id_desc.c',
-                ),
+                'sources' : files('fido_id/fido_id.c'),
                 'extract' : files('fido_id/fido_id_desc.c'),
         },
         udev_plugin_template + {
@@ -232,7 +229,7 @@ executables += [
         udev_test_template + {
                 'sources' : files('test-udev-rule-runner.c'),
                 'dependencies' : udev_dependencies + [
-                        libselinux,
+                        libselinux_cflags,
                 ],
                 'type' : 'manual',
         },

@@ -184,6 +184,9 @@ static int vl_method_create_session(sd_varlink *link, sd_json_variant *parameter
         if (r != 0)
                 return r;
 
+        if (p.class == SESSION_NONE)
+                return sd_varlink_error_invalid_parameter_name(link, "Class");
+
         Seat *seat = NULL;
         if (p.seat) {
                 seat = hashmap_get(m->seats, p.seat);
@@ -369,7 +372,7 @@ int manager_varlink_init(Manager *m, int fd) {
         else
                 r = sd_varlink_server_listen_fd(s, fd);
         if (r < 0)
-                return log_error_errno(r, "Failed to bind to varlink socket: %m");
+                return log_error_errno(r, "Failed to bind to varlink socket '/run/systemd/io.systemd.Login': %m");
 
         TAKE_FD(fd_close);
 

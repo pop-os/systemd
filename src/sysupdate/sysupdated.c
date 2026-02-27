@@ -221,10 +221,8 @@ static int job_new(JobType type, Target *t, sd_bus_message *msg, JobComplete com
 }
 
 static int job_parse_child_output(int _fd, sd_json_variant **ret) {
+        _cleanup_close_ int fd = ASSERT_FD(_fd); /* Take ownership of the passed fd */
         _cleanup_(sd_json_variant_unrefp) sd_json_variant *v = NULL;
-        /* Take ownership of the passed fd */
-        _cleanup_close_ int fd = _fd;
-        _cleanup_fclose_ FILE *f = NULL;
         struct stat st;
         int r;
 
@@ -240,16 +238,10 @@ static int job_parse_child_output(int _fd, sd_json_variant **ret) {
                 return 0;
         }
 
-        if (lseek(fd, SEEK_SET, 0) == (off_t) -1)
-                return log_debug_errno(errno, "Failed to seek to beginning of memfd: %m");
-
-        f = take_fdopen(&fd, "r");
-        if (!f)
-                return log_debug_errno(errno, "Failed to reopen memfd: %m");
-
-        r = sd_json_parse_file(f, "stdout", 0, &v, NULL, NULL);
+        r = sd_json_parse_file_at(/* f= */ NULL, fd, /* path= */ NULL, /* flags= */ 0,
+                                  &v, /* reterr_line= */ NULL, /* reterr_column= */ NULL);
         if (r < 0)
-                return log_debug_errno(r, "Failed to parse JSON: %m");
+                return log_debug_errno(r, "Failed to parse child output as JSON: %m");
 
         *ret = TAKE_PTR(v);
         return 0;
@@ -551,7 +543,7 @@ static int job_start(Job *j) {
         r = sd_event_source_set_child_process_own(j->child, true);
         if (r < 0)
                 return log_error_errno(r, "Event loop failed to take ownership of child process: %m");
-        TAKE_PIDREF(pid);
+        pidref_done(&pid); /* disarm sigkill_wait */
 
         j->stdout_fd = TAKE_FD(stdout_fd);
 
@@ -823,7 +815,7 @@ static int sysupdate_run_simple(sd_json_variant **ret, Target *t, ...) {
                 if (DEBUG_LOGGING) {
                         _cleanup_free_ char *s = NULL;
 
-                        s = quote_command_line((char**) args, SHELL_ESCAPE_EMPTY);
+                        s = quote_command_line(args, SHELL_ESCAPE_EMPTY);
                         if (!s) {
                                 log_oom();
                                 _exit(EXIT_FAILURE);
@@ -1967,7 +1959,7 @@ static int method_list_appstream(sd_bus_message *msg, void *userdata, sd_bus_err
                 if (r < 0)
                         return r;
 
-                r = strv_extend_strv_consume(&urls, target_appstream, /* filter_duplicates = */ true);
+                r = strv_extend_strv_consume(&urls, target_appstream, /* filter_duplicates= */ true);
                 if (r < 0)
                         return r;
         }
@@ -2045,14 +2037,14 @@ static int manager_add_bus_objects(Manager *m) {
 static bool manager_is_idle(void *userdata) {
         Manager *m = ASSERT_PTR(userdata);
 
-	return hashmap_isempty(m->jobs);
+        return hashmap_isempty(m->jobs);
 }
 
 static void manager_check_idle(Manager *m) {
-	assert(m);
+        assert(m);
 
-	if (!hashmap_isempty(m->jobs))
-		return;
+        if (!hashmap_isempty(m->jobs))
+                return;
 
         hashmap_clear(m->targets);
         log_debug("Cleared target cache");
@@ -2079,6 +2071,7 @@ static int run(int argc, char *argv[]) {
                                "System update management service.",
                                BUS_IMPLEMENTATIONS(&manager_object,
                                                    &log_control_object),
+                               /* runtime_scope= */ NULL,
                                argc, argv);
         if (r <= 0)
                 return r;

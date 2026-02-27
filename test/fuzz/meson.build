@@ -23,7 +23,7 @@ unit_directives = []
 foreach section : ['Automount', 'Mount', 'Path', 'Scope', 'Service', 'Slice', 'Socket', 'Swap', 'Timer']
         unit_type = section.to_lower()
         sec_rx = section == 'Service' ? '(Service|Unit|Install)' : section
-        name = 'directives.@0@'.format(unit_type)
+        name = f'directives.@unit_type@'
         unit_directives += custom_target(
                 output: name,
                 command: [generate_directives_py, load_fragment_gperf_gperf, sec_rx, unit_type],
@@ -42,7 +42,7 @@ if git.found() and fs.is_dir(meson.project_source_root() / '.git')
                           'ls-files', ':/@0@/*/*'.format(fuzz_testsdir),
                           check: true)
 else
-        out = run_command(sh, '-c', 'cd "@0@"; echo @1@/*/*'.format(meson.project_source_root(), fuzz_testsdir), check: true)
+        out = run_command(sh, '-c', 'cd "@0@"; printf "%s " @1@/*/*'.format(meson.project_source_root(), fuzz_testsdir), check: true)
 endif
 
 # Add crafted fuzz inputs we have in the repo

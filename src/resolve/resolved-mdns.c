@@ -5,13 +5,13 @@
 #include "sd-event.h"
 
 #include "alloc-util.h"
+#include "dns-answer.h"
 #include "dns-domain.h"
+#include "dns-packet.h"
+#include "dns-question.h"
+#include "dns-rr.h"
 #include "fd-util.h"
 #include "log.h"
-#include "resolved-dns-answer.h"
-#include "resolved-dns-packet.h"
-#include "resolved-dns-question.h"
-#include "resolved-dns-rr.h"
 #include "resolved-dns-scope.h"
 #include "resolved-dns-transaction.h"
 #include "resolved-link.h"
@@ -413,14 +413,6 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
         if (r <= 0)
                 return r;
 
-        /* Refuse traffic from the local host, to avoid query loops. However, allow legacy mDNS
-         * unicast queries through anyway (we never send those ourselves, hence no risk).
-         * i.e. check for the source port nr. */
-        if (p->sender_port == MDNS_PORT && manager_packet_from_local_address(m, p)) {
-                log_debug("Got mDNS UDP packet from local host, ignoring.");
-                return 0;
-        }
-
         scope = manager_find_scope(m, p);
         if (!scope) {
                 log_debug("Got mDNS UDP packet on unknown scope. Ignoring.");
@@ -537,6 +529,14 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                 if (unsolicited_packet)
                         mdns_notify_browsers_unsolicited_updates(m, p->answer, p->family);
         } else if (dns_packet_validate_query(p) > 0)  {
+                /* Refuse traffic from the local host, to avoid query loops. However, allow legacy mDNS
+                 * unicast queries through anyway (we never send those ourselves, hence no risk).
+                 * i.e. check for the source port nr. */
+                if (p->sender_port == MDNS_PORT && manager_packet_from_local_address(m, p)) {
+                        log_debug("Got mDNS UDP packet from local host, ignoring.");
+                        return 0;
+                }
+
                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));
 
                 r = mdns_scope_process_query(scope, p);

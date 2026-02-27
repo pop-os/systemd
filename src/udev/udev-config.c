@@ -557,9 +557,10 @@ int manager_serialize_config(Manager *manager) {
         if (r < 0)
                 return log_warning_errno(r, "Failed to finalize serialization file: %m");
 
+        /* This may fail on shutdown/reboot. Let's not warn louder. */
         r = notify_push_fd(fileno(f), "config-serialization");
         if (r < 0)
-                return log_warning_errno(r, "Failed to push serialization fd to service manager: %m");
+                return log_debug_errno(r, "Failed to push serialization fd to service manager: %m");
 
         log_debug("Serialized configurations.");
         return 0;
@@ -638,7 +639,7 @@ static usec_t extra_timeout_usec(void) {
 
         parsed = true;
 
-        e = getenv("SYSTEMD_UDEV_EXTRA_TIMEOUT_SEC");
+        e = secure_getenv("SYSTEMD_UDEV_EXTRA_TIMEOUT_SEC");
         if (!e)
                 return saved;
 

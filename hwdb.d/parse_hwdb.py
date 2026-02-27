@@ -180,6 +180,7 @@ def property_grammar():
              ('ID_HARDWARE_WALLET', Or((Literal('0'), Literal('1')))),
              ('ID_SOFTWARE_RADIO', Or((Literal('0'), Literal('1')))),
              ('ID_MM_DEVICE_IGNORE', Or((Literal('0'), Literal('1')))),
+             ('ID_NET_AUTO_LINK_LOCAL_ONLY', Or((Literal('0'), Literal('1')))),
              ('POINTINGSTICK_SENSITIVITY', INTEGER),
              ('ID_INPUT_JOYSTICK_INTEGRATION', Or(('internal', 'external'))),
              ('ID_INPUT_TOUCHPAD_INTEGRATION', Or(('internal', 'external'))),
@@ -205,7 +206,7 @@ def property_grammar():
                    for name, val in props]
     kbd_props = [Regex(r'KEYBOARD_KEY_[0-9a-f]+')('NAME')
                  - Suppress('=') -
-                 ('!' ^ (Optional('!') - Word(alphanums + '_')))('VALUE')
+                 Group('!' ^ (Optional('!') - Word(alphanums + '_')))('VALUE')
                 ]
     abs_props = [Regex(r'EVDEV_ABS_[0-9a-f]{2}')('NAME')
                  - Suppress('=') -
@@ -336,7 +337,7 @@ def print_summary(fname, groups):
     print(f'{fname}: {len(groups)} match groups, {n_matches} matches, {n_props} properties')
 
     if n_matches == 0 or n_props == 0:
-        error(f'{fname}: no matches or props')
+        print(f'{fname}: no matches or props')
 
 if __name__ == '__main__':
     args = sys.argv[1:] or sorted(glob.glob(os.path.dirname(sys.argv[0]) + '/[678][0-9]-*.hwdb'))

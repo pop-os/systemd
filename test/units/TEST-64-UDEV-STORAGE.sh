@@ -266,6 +266,12 @@ EOF
 testcase_multipath_basic_failover() {
     local dmpath i path wwid
 
+    . /etc/os-release
+    if [[ "${ID_LIKE:-}" == "alpine" ]]; then
+        echo "multipath on alpine/postmarketos is broken, skipping the test" | tee --append /skipped
+        exit 77
+    fi
+
     # Configure multipath
     cat >/etc/multipath.conf <<\EOF
 defaults {
@@ -611,6 +617,13 @@ EOF
 }
 
 testcase_simultaneous_events() {
+    . /etc/os-release
+    if [[ "$ID" == "debian" ]]; then
+        # See https://github.com/systemd/systemd/issues/39552
+        echo "Simultaneous events test cases are not working on Debian, skipping the test" | tee --append /skipped
+        exit 77
+    fi
+
     testcase_simultaneous_events_1
     testcase_simultaneous_events_2
     testcase_simultaneous_events_3
@@ -624,8 +637,8 @@ testcase_lvm_basic() {
     )
 
     . /etc/os-release
-    if [[ "$ID" == "ubuntu" ]]; then
-        echo "LVM on Ubuntu is broken, skipping the test" | tee --append /skipped
+    if [[ "$ID" == "ubuntu" || "${ID_LIKE:-}" == "alpine" ]]; then
+        echo "LVM on Ubuntu/alpine/postmarketos is broken, skipping the test" | tee --append /skipped
         exit 77
     fi
 
@@ -868,8 +881,8 @@ EOF
     for ((i = 0; i < ${#devices[@]}; i++)); do
         # Intentionally use weaker cipher-related settings, since we don't care
         # about security here as it's a throwaway LUKS partition
-        udevadm lock --timeout=30 --device="${devices[$i]}" \
-                cryptsetup luksFormat -q \
+        SYSTEMD_LOG_LEVEL=debug udevadm lock --timeout=30 --device="${devices[$i]}" \
+                cryptsetup luksFormat -q --debug \
                 --use-urandom --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
                 --uuid "deadbeef-dead-dead-beef-11111111111$i" --label "encdisk$i" "${devices[$i]}" /etc/btrfs_keyfile
         udevadm wait --settle --timeout=30 "/dev/disk/by-uuid/deadbeef-dead-dead-beef-11111111111$i" "/dev/disk/by-label/encdisk$i"
@@ -1000,7 +1013,7 @@ testcase_iscsi_lvm() {
     udevadm wait --settle --timeout=30 "${devices[0]}"
     mount "${devices[0]}" "$mpoint"
     for i in {1..4}; do
-        dd if=/dev/zero of="$mpoint/lun$i.img" bs=1M count=32
+        truncate -s 32M "$mpoint/lun$i.img"
     done
     # Initialize a new iSCSI target <$target_name> consisting of 4 LUNs, each
     # backed by a file
@@ -1335,7 +1348,6 @@ testcase_mdadm_lvm() {
 }
 
 udevadm settle
-udevadm control --log-level debug
 lsblk -a
 
 echo "Check if all symlinks under /dev/disk/ are valid (pre-test)"
@@ -1354,8 +1366,6 @@ udevadm settle --timeout=60
 
 echo "Check if all symlinks under /dev/disk/ are valid (post-test)"
 helper_check_device_symlinks
-
-udevadm control --log-level info
 
 systemctl status systemd-udevd
 

@@ -37,7 +37,8 @@ SPDX-License-Identifier: LGPL-2.1-or-later
           int a, b, c;
   ```
 
-  (i.e. use double indentation — 16 spaces — for the parameter list.)
+  (i.e. use double indentation — 16 spaces — for the parameter list and leave a
+  newline between the function declaration and the first variable declaration.)
 
 - Try to write this:
 
@@ -64,6 +65,18 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 
   ```c
   const char *foo(const char *input);
+  ```
+
+- Casts should be written like this:
+
+  ```c
+  (const char*) s;
+  ```
+
+  instead of this:
+
+  ```c
+  (const char *)s;
   ```
 
 - Single-line `if` blocks should not be enclosed in `{}`. Write this:
@@ -234,6 +247,24 @@ SPDX-License-Identifier: LGPL-2.1-or-later
                   const char *input);
   ```
 
+- When passing `NULL` or another value meaning "unset" to a function, use a comment
+  to indicate the argument name to make it more clear where we're passing an "unset"
+  value.
+
+  Bad:
+
+  ```c
+  myfunction(NULL, NULL, NULL);
+  ```
+
+  Good:
+
+  ```c
+  myfunction(/* a= */ NULL, /* b= */ NULL, /* c= */ NULL);
+  ```
+
+  This guidance should be applied tree-wide, including in test files.
+
 - Please do not introduce new circular dependencies between header files.
   Effectively this means that if a.h includes b.h, then b.h cannot include a.h,
   directly or transitively via another header. Circular header dependencies can
@@ -249,9 +280,9 @@ SPDX-License-Identifier: LGPL-2.1-or-later
     inline functions that require the full definition of a struct into the
     implementation file so that only a forward declaration of the struct is
     required and not the full definition.
-  - `src/basic/forward.h` contains forward declarations for common types. If
-    possible, only include `forward.h` in header files which makes circular
-    header dependencies a non-issue.
+  - `src/basic/basic-forward.h` contains forward declarations for common types.
+    If possible, only include `basic-forward.h` in header files which makes
+    circular header dependencies a non-issue.
 
   Bad:
 
@@ -318,13 +349,21 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   incremental builds as much as possible.
 
   To avoid having to include other headers in header files, always include
-  `forward.h` in each header file and then add other required includes as
-  needed. `forward.h` already includes generic headers and contains forward
-  declarations for common types which should be sufficient for most header
-  files. For each extra include you add on top of `forward.h`, check if it can
-  be replaced by adding another forward declaration to `forward.h`. Depending on
-  the daemon, there might be a specific forward header to include (e.g.
-  `resolved-forward.h` for systemd-resolved header files).
+  the corresponding forward declaration header in each header file and then add
+  other required includes as needed. The forward declaration header already
+  includes generic headers and contains forward declarations for common types
+  which should be sufficient for most header files. For each extra include you
+  add on top of, check if it can be replaced by adding another forward
+  declaration to the forward declaration header. Depending on the daemon, there
+  might be a specific forward header to include (e.g. `resolved-forward.h` for
+  systemd-resolved header files).
+
+  For common code, there are three different forward declaration headers:
+
+  - `src/basic`: `basic-forward.h`
+  - `src/libsystemd`: `sd-forward.h`
+  - `src/libsystemd-network`: `sd-forward.h`
+  - `src/shared`: `shared-forward.h`
 
   Header files that extend other header files can include the original header
   file. For example, `iovec-util.h` includes `iovec-fundamental.h` and
@@ -351,7 +390,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   ```c
   // source.h
 
-  #include "forward.h"
+  #include "basic-forward.h"
 
   void my_function_that_logs(size_t sz);
 
@@ -574,8 +613,8 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   code. (With one exception: it is OK to log with DEBUG level from any code,
   with the exception of maybe inner loops).
 
-- In public API calls, you **must** validate all your input arguments for
-  programming error with `assert_return()` and return a sensible return
+- In libsystemd public API calls, you **must** validate all your input arguments
+  for programming error with `assert_return()` and return a sensible return
   code. In all other calls, it is recommended to check for programming errors
   with a more brutal `assert()`. We are more forgiving to public users than for
   ourselves! Note that `assert()` and `assert_return()` really only should be
@@ -649,6 +688,26 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   if (n != sizeof s)
           return log_error_errno(SYNTHETIC_ERRNO(EIO), "Failed to read ...");
   ```
+
+- When generating log messages that contain filenames, user controlled strings,
+  or similar, please enclose them in single ticks.
+
+- Think about the log level you choose: for functions that are of the "logging"
+  kind (see above), please ensure that failures we propagate should be logged
+  about at `LOG_ERR` level. Failures that are noteworthy, but we proceed anyway,
+  should be loged at `LOG_WARN` level. Important informational messages should
+  use `LOG_NOTICE` and regular informational messages should use
+  `LOG_INFO`. Note that the latter is the default maximum log level, i.e. only
+  `LOG_DEBUG` messages are hidden by default.
+
+- All log messages that show some failure which is not fatal for the immediate
+  operation (i.e. generally those you'd log at `LOG_WARN` level, as described
+  above) should be suffixed with a `…, ignoring: %m"` or similar. Or in other
+  words, they should make clear not only in log level but also in English
+  language that the issue is not fatal, but ignored. Depending on context you
+  can also use `…, proceeding anyway: %m"`, `…, skipping: %m` or other language
+  that makes clear that the failure is not actionable and doesn't strictly
+  require immediate administrator attention.
 
 ## Memory Allocation
 
@@ -973,5 +1032,49 @@ SPDX-License-Identifier: LGPL-2.1-or-later
   macro exists for your specific use case, please add a new assertion macro in a
   separate commit.
 
+- Use `ASSERT_OK_ERRNO()` and similar macros instead of `ASSERT_OK()` when
+  calling glibc APIs that return the error in `errno`.
+
 - When modifying existing tests, please convert the test to use the new assertion
   macros from `tests.h` if it is not already using those.
+
+## Integration Tests
+
+- Never use `grep -q` in a pipeline, use `grep >/dev/null` instead. The former
+  will generate `SIGPIPE` for the previous command in the pipeline when it finds
+  a match which will cause the test to fail unexpectedly.
+
+## Kernel Version Dependencies
+
+- For entirely new functionality it's fine to rely on features of very recent
+  (released!) kernel versions. If a feature is added to the upstream kernel,
+  and a stable release is made, then it's immediately OK to merge *new*
+  functionality into systemd relying on it, as long as that functionality is
+  optional. (In some cases, it might be OK to merge a feature into systemd
+  slightly before the final kernel release that it is based on, as long as the
+  kernel development cycle has already progressed far enough that the feature
+  is unlikely to be still reverted – for example once RC2 of the kernel release
+  has been released.)
+
+- For components that already have been released in a stable version
+  compatibility with older kernels must be retained, down to the "minimum
+  baseline" version as listed in the README, or the version current when the
+  component was added to our tree, whichever is newer.
+
+- When adding a fallback path, please avoid checking for kernel versions, as
+  downstream distributions tend to backport features, and version checks are
+  not great replacements for feature checks hence.
+
+- When adding a compatibility code path for an older kernel version, please add
+  a comment in the following style to the relevant codepath:
+
+```c
+        // FIXME: This compatibility code path shall be removed once kernel X.Y
+        //        becomes the new minimal baseline
+```
+
+  When this syntax is followed we'll have an easier time tracking down these
+  codepaths and removing them when bumping baselines.
+
+- Whenever support for a new kernel API feature is added, please update the
+  kernel feature/version list in README as well (as part of the same PR).

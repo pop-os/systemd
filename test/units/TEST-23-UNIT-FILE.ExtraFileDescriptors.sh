@@ -15,10 +15,8 @@ at_exit() {
 trap at_exit EXIT
 
 mkdir /tmp/test-extra-fd
-echo "Hello" > /tmp/test-extra-fd/1.txt
-echo "Extra" > /tmp/test-extra-fd/2.txt
-
-systemd-analyze log-level debug
+echo "Hello" >/tmp/test-extra-fd/1.txt
+echo "Extra" >/tmp/test-extra-fd/2.txt
 
 # Open files and assign FD to variables
 exec {TEST_FD1}</tmp/test-extra-fd/1.txt
@@ -61,5 +59,3 @@ assert_eq "$(systemctl show -P Result "$TEST_UNIT")" "success"
 assert_eq "$(systemctl show -P ExecMainStatus "$TEST_UNIT")" "0"
 
 systemctl stop "$TEST_UNIT"
-
-systemctl log-level info

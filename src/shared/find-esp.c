@@ -76,22 +76,26 @@ static int verify_esp_blkid(
         const char *v;
         int r;
 
+        r = dlopen_libblkid();
+        if (r < 0)
+                return log_debug_errno(r, "No libblkid support: %m");
+
         r = devname_from_devnum(S_IFBLK, devid, &node);
         if (r < 0)
                 return log_error_errno(r, "Failed to get device path for " DEVNUM_FORMAT_STR ": %m", DEVNUM_FORMAT_VAL(devid));
 
         errno = 0;
-        b = blkid_new_probe_from_filename(node);
+        b = sym_blkid_new_probe_from_filename(node);
         if (!b)
                 return log_error_errno(errno ?: SYNTHETIC_ERRNO(ENOMEM), "Failed to open file system \"%s\": %m", node);
 
-        blkid_probe_enable_superblocks(b, 1);
-        blkid_probe_set_superblocks_flags(b, BLKID_SUBLKS_TYPE);
-        blkid_probe_enable_partitions(b, 1);
-        blkid_probe_set_partitions_flags(b, BLKID_PARTS_ENTRY_DETAILS);
+        sym_blkid_probe_enable_superblocks(b, 1);
+        sym_blkid_probe_set_superblocks_flags(b, BLKID_SUBLKS_TYPE);
+        sym_blkid_probe_enable_partitions(b, 1);
+        sym_blkid_probe_set_partitions_flags(b, BLKID_PARTS_ENTRY_DETAILS);
 
         errno = 0;
-        r = blkid_do_safeprobe(b);
+        r = sym_blkid_do_safeprobe(b);
         if (r == -2)
                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "File system \"%s\" is ambiguous.", node);
         if (r == 1)
@@ -99,7 +103,7 @@ static int verify_esp_blkid(
         if (r != 0)
                 return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe file system \"%s\": %m", node);
 
-        r = blkid_probe_lookup_value(b, "TYPE", &v, NULL);
+        r = sym_blkid_probe_lookup_value(b, "TYPE", &v, NULL);
         if (r != 0)
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
@@ -109,7 +113,7 @@ static int verify_esp_blkid(
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
                                       "File system \"%s\" is not FAT.", node);
 
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_SCHEME", &v, NULL);
+        r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_SCHEME", &v, NULL);
         if (r != 0)
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
@@ -120,7 +124,7 @@ static int verify_esp_blkid(
                                       "File system \"%s\" is not on a GPT partition table.", node);
 
         errno = 0;
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
+        r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
         if (r != 0)
                 return log_error_errno(errno ?: EIO, "Failed to probe partition type UUID of \"%s\": %m", node);
         if (sd_id128_string_equal(v, SD_GPT_ESP) <= 0)
@@ -128,37 +132,25 @@ static int verify_esp_blkid(
                                        SYNTHETIC_ERRNO(searching ? EADDRNOTAVAIL : ENODEV),
                                        "File system \"%s\" has wrong type for an EFI System Partition (ESP).", node);
 
-        errno = 0;
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_UUID", &v, NULL);
-        if (r != 0)
-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition entry UUID of \"%s\": %m", node);
-        r = sd_id128_from_string(v, &uuid);
+        r = blkid_probe_lookup_value_id128(b, "PART_ENTRY_UUID", &uuid);
         if (r < 0)
-                return log_error_errno(r, "Partition \"%s\" has invalid UUID \"%s\".", node, v);
+                return log_error_errno(r, "Failed to probe partition entry UUID of \"%s\": %m", node);
 
         errno = 0;
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_NUMBER", &v, NULL);
+        r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_NUMBER", &v, NULL);
         if (r != 0)
                 return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition number of \"%s\": %m", node);
         r = safe_atou32(v, &part);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse PART_ENTRY_NUMBER field.");
 
-        errno = 0;
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_OFFSET", &v, NULL);
-        if (r != 0)
-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition offset of \"%s\": %m", node);
-        r = safe_atou64(v, &pstart);
+        r = blkid_probe_lookup_value_u64(b, "PART_ENTRY_OFFSET", &pstart);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse PART_ENTRY_OFFSET field.");
+                return log_error_errno(r, "Failed to probe partition offset of \"%s\": %m", node);
 
-        errno = 0;
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_SIZE", &v, NULL);
-        if (r != 0)
-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition size of \"%s\": %m", node);
-        r = safe_atou64(v, &psize);
+        r = blkid_probe_lookup_value_u64(b, "PART_ENTRY_SIZE", &psize);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse PART_ENTRY_SIZE field.");
+                return log_error_errno(r, "Failed to probe partition size of \"%s\": %m", node);
 #endif
 
         if (ret_part)
@@ -291,7 +283,7 @@ static int verify_fsroot_dir(
 
         r = path_extract_filename(path, &f);
         if (r < 0 && r != -EADDRNOTAVAIL)
-                return log_error_errno(r, "Failed to extract filename of %s: %m", path);
+                return log_error_errno(r, "Failed to extract filename of \"%s\": %m", path);
 
         if (statx(dir_fd, strempty(f),
                   AT_SYMLINK_NOFOLLOW|(isempty(f) ? AT_EMPTY_PATH : 0),
@@ -300,7 +292,8 @@ static int verify_fsroot_dir(
                                       (unprivileged_mode && ERRNO_IS_PRIVILEGE(errno)) ? LOG_DEBUG : LOG_ERR, errno,
                                       "Failed to determine block device node of \"%s\": %m", path);
 
-        assert(S_ISDIR(sxa.stx_mode)); /* We used O_DIRECTORY above, when opening, so this must hold */
+        if (!S_ISDIR(sxa.stx_mode))
+                return log_error_errno(SYNTHETIC_ERRNO(ENOTDIR), "Path \"%s\" is not a directory", path);
 
         if (FLAGS_SET(sxa.stx_attributes_mask, STATX_ATTR_MOUNT_ROOT)) {
 
@@ -383,13 +376,13 @@ static int verify_esp(
 
                 r = path_extract_filename(p, &f);
                 if (r < 0 && r != -EADDRNOTAVAIL)
-                        return log_error_errno(r, "Failed to extract filename of %s: %m", p);
+                        return log_error_errno(r, "Failed to extract filename of \"%s\": %m", p);
 
                 /* Trigger any automounts so that xstatfsat() operates on the mount instead of the mountpoint
                  * directory. */
                 r = trigger_automount_at(pfd, f);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to trigger automount at %s: %m", p);
+                        return log_error_errno(r, "Failed to trigger automount at \"%s\": %m", p);
 
                 r = xstatfsat(pfd, strempty(f), &sfs);
                 if (r < 0)
@@ -489,12 +482,12 @@ int find_esp_and_warn_at(
 
                 if (!path_is_valid(path) || !path_is_absolute(path))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "$SYSTEMD_ESP_PATH does not refer to an absolute path, refusing to use it: %s",
+                                               "$SYSTEMD_ESP_PATH does not refer to an absolute path, refusing to use it: \"%s\"",
                                                path);
 
                 r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT|CHASE_TRIGGER_AUTOFS, &p, &fd);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to resolve path %s: %m", path);
+                        return log_error_errno(r, "Failed to resolve path \"%s\": %m", path);
 
                 /* Note: when the user explicitly configured things with an env var we won't validate the
                  * path beyond checking it refers to a directory. After all we want this to be useful for
@@ -603,21 +596,25 @@ static int verify_xbootldr_blkid(
         const char *type, *v;
         int r;
 
+        r = dlopen_libblkid();
+        if (r < 0)
+                return log_debug_errno(r, "No libblkid support: %m");
+
         r = devname_from_devnum(S_IFBLK, devid, &node);
         if (r < 0)
                 return log_error_errno(r, "Failed to get block device path for " DEVNUM_FORMAT_STR ": %m",
                                        DEVNUM_FORMAT_VAL(devid));
 
         errno = 0;
-        b = blkid_new_probe_from_filename(node);
+        b = sym_blkid_new_probe_from_filename(node);
         if (!b)
                 return log_error_errno(errno_or_else(ENOMEM), "%s: Failed to create blkid probe: %m", node);
 
-        blkid_probe_enable_partitions(b, 1);
-        blkid_probe_set_partitions_flags(b, BLKID_PARTS_ENTRY_DETAILS);
+        sym_blkid_probe_enable_partitions(b, 1);
+        sym_blkid_probe_set_partitions_flags(b, BLKID_PARTS_ENTRY_DETAILS);
 
         errno = 0;
-        r = blkid_do_safeprobe(b);
+        r = sym_blkid_do_safeprobe(b);
         if (r == _BLKID_SAFEPROBE_AMBIGUOUS)
                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "%s: File system is ambiguous.", node);
         if (r == _BLKID_SAFEPROBE_NOT_FOUND)
@@ -627,7 +624,7 @@ static int verify_xbootldr_blkid(
 
         assert(r == _BLKID_SAFEPROBE_FOUND);
 
-        r = blkid_probe_lookup_value(b, "PART_ENTRY_SCHEME", &type, NULL);
+        r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_SCHEME", &type, NULL);
         if (r != 0)
                 return log_full_errno(searching ? LOG_DEBUG : LOG_ERR,
                                       searching ? SYNTHETIC_ERRNO(EADDRNOTAVAIL) : SYNTHETIC_ERRNO(EIO),
@@ -635,7 +632,7 @@ static int verify_xbootldr_blkid(
         if (streq(type, "gpt")) {
 
                 errno = 0;
-                r = blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
+                r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
                 if (r != 0)
                         return log_error_errno(errno_or_else(EIO), "%s: Failed to probe PART_ENTRY_TYPE: %m", node);
                 if (sd_id128_string_equal(v, SD_GPT_XBOOTLDR) <= 0)
@@ -643,18 +640,14 @@ static int verify_xbootldr_blkid(
                                               searching ? SYNTHETIC_ERRNO(EADDRNOTAVAIL) : SYNTHETIC_ERRNO(ENODEV),
                                               "%s: Partition has wrong PART_ENTRY_TYPE=%s for XBOOTLDR partition.", node, v);
 
-                errno = 0;
-                r = blkid_probe_lookup_value(b, "PART_ENTRY_UUID", &v, NULL);
-                if (r != 0)
-                        return log_error_errno(errno_or_else(EIO), "%s: Failed to probe PART_ENTRY_UUID: %m", node);
-                r = sd_id128_from_string(v, &uuid);
+                r = blkid_probe_lookup_value_id128(b, "PART_ENTRY_UUID", &uuid);
                 if (r < 0)
-                        return log_error_errno(r, "%s: Partition has invalid UUID PART_ENTRY_TYPE=%s: %m", node, v);
+                        return log_error_errno(r, "%s: Failed to probe PART_ENTRY_UUID: %m", node);
 
         } else if (streq(type, "dos")) {
 
                 errno = 0;
-                r = blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
+                r = sym_blkid_probe_lookup_value(b, "PART_ENTRY_TYPE", &v, NULL);
                 if (r != 0)
                         return log_error_errno(errno_or_else(EIO), "%s: Failed to probe PART_ENTRY_TYPE: %m", node);
                 if (!streq(v, "0xea"))
@@ -841,12 +834,12 @@ int find_xbootldr_and_warn_at(
 
                 if (!path_is_valid(path) || !path_is_absolute(path))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "$SYSTEMD_XBOOTLDR_PATH does not refer to an absolute path, refusing to use it: %s",
+                                               "$SYSTEMD_XBOOTLDR_PATH does not refer to an absolute path, refusing to use it: \"%s\"",
                                                path);
 
                 r = chaseat(rfd, path, CHASE_AT_RESOLVE_IN_ROOT|CHASE_TRIGGER_AUTOFS, &p, &fd);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to resolve path %s: %m", p);
+                        return log_error_errno(r, "Failed to resolve path \"%s\": %m", p);
 
                 if (fstat(fd, &st) < 0)
                         return log_error_errno(errno, "Failed to stat '%s': %m", p);

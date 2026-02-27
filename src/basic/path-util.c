@@ -1304,6 +1304,7 @@ bool hidden_or_backup_file(const char *filename) {
          */
 
         return STR_IN_SET(dot + 1,
+                          "ignore",
                           "rpmnew",
                           "rpmsave",
                           "rpmorig",
@@ -1464,11 +1465,11 @@ int path_glob_can_match(const char *pattern, const char *prefix, char **ret) {
                 const char *p, *q;
                 int r, s;
 
-                r = path_find_first_component(&a, /* accept_dot_dot = */ false, &p);
+                r = path_find_first_component(&a, /* accept_dot_dot= */ false, &p);
                 if (r < 0)
                         return r;
 
-                s = path_find_first_component(&b, /* accept_dot_dot = */ false, &q);
+                s = path_find_first_component(&b, /* accept_dot_dot= */ false, &q);
                 if (s < 0)
                         return s;
 

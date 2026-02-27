@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <spawn.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
@@ -20,8 +21,10 @@
 #include "alloc-util.h"
 #include "architecture.h"
 #include "argv-util.h"
+#include "capability-util.h"
 #include "cgroup-util.h"
 #include "dirent-util.h"
+#include "dlfcn-util.h"
 #include "env-file.h"
 #include "errno-util.h"
 #include "escape.h"
@@ -248,7 +251,7 @@ int pid_get_cmdline(pid_t pid, size_t max_columns, ProcessCmdlineFlags flags, ch
 
                 /* Drop trailing NULs, otherwise strv_parse_nulstr() adds additional empty strings at the end.
                  * See also issue #21186. */
-                args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
+                args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls= */ true);
                 if (!args)
                         return -ENOMEM;
 
@@ -314,7 +317,7 @@ int pid_get_cmdline_strv(pid_t pid, ProcessCmdlineFlags flags, char ***ret) {
         if (r < 0)
                 return r;
 
-        args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls = */ true);
+        args = strv_parse_nulstr_full(t, k, /* drop_trailing_nuls= */ true);
         if (!args)
                 return -ENOMEM;
 
@@ -1662,7 +1665,7 @@ int pidref_safe_fork_full(
                 }
 
                 if (ret_pid) {
-                        if (FLAGS_SET(flags, FORK_PID_ONLY))
+                        if (FLAGS_SET(flags, _FORK_PID_ONLY))
                                 *ret_pid = PIDREF_MAKE_FROM_PID(pid);
                         else {
                                 r = pidref_set_pid(ret_pid, pid);
@@ -1694,6 +1697,16 @@ int pidref_safe_fork_full(
                         log_full_errno(flags & FORK_LOG ? LOG_WARNING : LOG_DEBUG,
                                        r, "Failed to rename process, ignoring: %m");
         }
+
+        /* let's disable dlopen() in the child, as a paranoia safety precaution: children should not live for
+         * long and only do minimal work before exiting or exec()ing. Doing dlopen() is not either. If people
+         * want dlopen() they should do it before forking. This is a safety precaution in particular for
+         * cases where the child does namespace shenanigans: we should never end up loading a module from a
+         * foreign environment. Note that this has no effect on NSS! (i.e. it only has effect on uses of our
+         * dlopen_safe(), which we use comprehensively in our codebase, but glibc NSS doesn't bother, of
+         * course.) */
+        if (!FLAGS_SET(flags, FORK_ALLOW_DLOPEN))
+                block_dlopen();
 
         if (flags & (FORK_DEATHSIG_SIGTERM|FORK_DEATHSIG_SIGINT|FORK_DEATHSIG_SIGKILL))
                 if (prctl(PR_SET_PDEATHSIG, fork_flags_to_signal(flags)) < 0) {
@@ -1840,7 +1853,7 @@ int pidref_safe_fork_full(
                 freeze();
 
         if (ret_pid) {
-                if (FLAGS_SET(flags, FORK_PID_ONLY))
+                if (FLAGS_SET(flags, _FORK_PID_ONLY))
                         *ret_pid = PIDREF_MAKE_FROM_PID(getpid_cached());
                 else {
                         r = pidref_set_self(ret_pid);
@@ -1869,7 +1882,7 @@ int safe_fork_full(
          * a pidref to the caller. */
         assert(!FLAGS_SET(flags, FORK_DETACH) || !ret_pid);
 
-        r = pidref_safe_fork_full(name, stdio_fds, except_fds, n_except_fds, flags|FORK_PID_ONLY, ret_pid ? &pidref : NULL);
+        r = pidref_safe_fork_full(name, stdio_fds, except_fds, n_except_fds, flags|_FORK_PID_ONLY, ret_pid ? &pidref : NULL);
         if (r < 0 || !ret_pid)
                 return r;
 
@@ -1896,6 +1909,7 @@ int namespace_fork(
         /* This is much like safe_fork(), but forks twice, and joins the specified namespaces in the middle
          * process. This ensures that we are fully a member of the destination namespace, with pidns an all, so that
          * /proc/self/fd works correctly. */
+        assert(!FLAGS_SET(flags, FORK_ALLOW_DLOPEN)); /* never allow loading shared library from another ns */
 
         r = safe_fork_full(outer_name,
                            NULL,
@@ -2146,11 +2160,7 @@ int posix_spawn_wrapper(
         if (cgroup && have_clone_into_cgroup) {
                 _cleanup_free_ char *resolved_cgroup = NULL;
 
-                r = cg_get_path_and_check(
-                                SYSTEMD_CGROUP_CONTROLLER,
-                                cgroup,
-                                /* suffix= */ NULL,
-                                &resolved_cgroup);
+                r = cg_get_path(cgroup, /* suffix= */ NULL, &resolved_cgroup);
                 if (r < 0)
                         return r;
 
@@ -2289,6 +2299,26 @@ int proc_dir_read_pidref(DIR *d, PidRef *ret) {
         return 0;
 }
 
+int safe_mlockall(int flags) {
+        int r;
+
+        /* When dealing with sensitive data, let's lock ourselves into memory. We do this only when
+         * privileged however, as otherwise the amount of lockable memory that RLIMIT_MEMLOCK grants us is
+         * frequently too low to make this work. The resource limit has no effect on CAP_IPC_LOCK processes,
+         * hence that's the capability we check for. */
+        r = have_effective_cap(CAP_IPC_LOCK);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine if we have CAP_IPC_LOCK: %m");
+        if (r == 0)
+                return log_debug_errno(SYNTHETIC_ERRNO(EPERM), "Lacking CAP_IPC_LOCK, skipping mlockall().");
+
+        if (mlockall(flags) < 0)
+                return log_debug_errno(errno, "Failed to call mlockall(): %m");
+
+        log_debug("Successfully called mlockall().");
+        return 0;
+}
+
 static const char *const sigchld_code_table[] = {
         [CLD_EXITED] = "exited",
         [CLD_KILLED] = "killed",
@@ -2333,7 +2363,7 @@ int read_errno(int errno_fd) {
         /* The issue here is that it's impossible to distinguish between an error code returned by child and
          * IO error arose when reading it. So, the function logs errors and return EIO for the later case. */
 
-        ssize_t n = loop_read(errno_fd, &r, sizeof(r), /* do_poll = */ false);
+        ssize_t n = loop_read(errno_fd, &r, sizeof(r), /* do_poll= */ false);
         if (n < 0) {
                 log_debug_errno(n, "Failed to read errno: %m");
                 return -EIO;

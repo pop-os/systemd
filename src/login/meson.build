@@ -45,11 +45,9 @@ executables += [
         libexec_template + {
                 'name' : 'systemd-logind',
                 'dbus' : true,
-                'sources' : systemd_logind_sources + systemd_logind_extract_sources,
-                'include_directories' : [libexec_template['include_directories'], include_directories('.')],
+                'sources' : systemd_logind_sources,
                 'extract' : systemd_logind_extract_sources,
                 'dependencies' : [
-                        libacl,
                         threads,
                 ],
         },
@@ -111,7 +109,7 @@ custom_target(
         input : 'logind.conf.in',
         output : 'logind.conf',
         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
-        install : install_sysconfdir_samples and pkgsysconfdir != 'no',
+        install : install_sysconfdir_samples,
         install_dir : pkgconfigfiledir)
 
 custom_target(

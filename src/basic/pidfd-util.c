@@ -29,7 +29,7 @@ int pidfd_check_pidfs(int pid_fd) {
 
         _cleanup_close_ int our_fd = -EBADF;
         if (pid_fd < 0) {
-                our_fd = pidfd_open(getpid_cached(), /* flags = */ 0);
+                our_fd = pidfd_open(getpid_cached(), /* flags= */ 0);
                 if (our_fd < 0)
                         return -errno;
 
@@ -73,7 +73,7 @@ int pidfd_get_namespace(int fd, unsigned long ns_type_cmd) {
         return nsfd;
 }
 
-static int pidfd_get_info(int fd, struct pidfd_info *info) {
+int pidfd_get_info(int fd, struct pidfd_info *info) {
         static bool cached_supported = true;
 
         assert(fd >= 0);
@@ -239,7 +239,7 @@ int pidfd_get_inode_id_impl(int fd, uint64_t *ret) {
         if (file_handle_supported) {
                 union {
                         struct file_handle file_handle;
-                        uint8_t space[offsetof(struct file_handle, f_handle) + sizeof(uint64_t)];
+                        uint8_t space[MAX_HANDLE_SZ];
                 } fh = {
                         .file_handle.handle_bytes = sizeof(uint64_t),
                         .file_handle.handle_type = FILEID_KERNFS,

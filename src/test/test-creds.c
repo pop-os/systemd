@@ -134,7 +134,7 @@ static void test_encrypt_decrypt_with(sd_id128_t mode, uid_t uid) {
                         mode,
                         "foo",
                         /* timestamp= */ USEC_INFINITY,
-                        /* not_after=*/ USEC_INFINITY,
+                        /* not_after= */ USEC_INFINITY,
                         /* tpm2_device= */ NULL,
                         /* tpm2_hash_pcr_mask= */ 0,
                         /* tpm2_pubkey_path= */ NULL,
@@ -164,7 +164,7 @@ static void test_encrypt_decrypt_with(sd_id128_t mode, uid_t uid) {
                         &encrypted,
                         CREDENTIAL_ALLOW_NULL,
                         &decrypted);
-        ASSERT_ERROR(r, EREMOTE); /* name didn't match */
+        ASSERT_ERROR(r, EDESTADDRREQ); /* name didn't match */
 
         r = decrypt_credential_and_warn(
                         "foo",

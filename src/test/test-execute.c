@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fnmatch.h>
-#include <linux/prctl.h>
+#include <gnu/libc-version.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mount.h>
@@ -21,6 +21,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "libmount-util.h"
 #include "manager.h"
 #include "mkdir.h"
 #include "mount-util.h"
@@ -264,7 +265,7 @@ static bool have_userns_privileges(void) {
                  * configured to make CLONE_NEWUSER require CAP_SYS_ADMIN.
                  * Additionally, AppArmor may restrict unprivileged user
                  * namespace creation. */
-                r = capability_bounding_set_drop(UINT64_C(1) << CAP_SYS_ADMIN, /* right_now = */ true);
+                r = capability_bounding_set_drop(UINT64_C(1) << CAP_SYS_ADMIN, /* right_now= */ true);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to drop capabilities: %m");
                         _exit(2);
@@ -368,6 +369,12 @@ static void test_exec_workingdirectory(Manager *m) {
 }
 
 static void test_exec_execsearchpath(Manager *m) {
+        int r;
+
+        ASSERT_OK(r = is_symlink("/bin/ls"));
+        if (r > 0)
+                return (void) log_tests_skipped("/bin/ls is a symlink, maybe coreutils is built with --enable-single-binary=symlinks");
+
         ASSERT_OK(mkdir_p("/tmp/test-exec_execsearchpath", 0755));
 
         ASSERT_OK(copy_file("/bin/ls", "/tmp/test-exec_execsearchpath/ls_temp", 0,  0777, COPY_REPLACE));
@@ -1170,6 +1177,9 @@ static void test_exec_capabilityboundingset(Manager *m) {
 }
 
 static void test_exec_basic(Manager *m) {
+        if (isempty(gnu_get_libc_version()))
+                return (void) log_tests_skipped("ConditionVersion=glibc will not pass under musl");
+
         if (MANAGER_IS_SYSTEM(m) || have_userns_privileges())
                 test(m, "exec-basic.service", can_unshare || MANAGER_IS_SYSTEM(m) ? 0 : EXIT_NAMESPACE, CLD_EXITED);
         else
@@ -1569,7 +1579,7 @@ TEST(run_tests_without_unshare) {
         if (prepare_ns("(test-execute-without-unshare)") == 0) {
                 _cleanup_hashmap_free_ Hashmap *s = NULL;
 
-                r = seccomp_syscall_resolve_name("unshare");
+                r = sym_seccomp_syscall_resolve_name("unshare");
                 ASSERT_NE(r, __NR_SCMP_ERROR);
                 ASSERT_OK(hashmap_ensure_put(&s, NULL, UINT32_TO_PTR(r + 1), INT_TO_PTR(-1)));
                 ASSERT_OK(seccomp_load_syscall_filter_set_raw(SCMP_ACT_ALLOW, s, SCMP_ACT_ERRNO(EOPNOTSUPP), true));
@@ -1596,7 +1606,7 @@ TEST(run_tests_unprivileged) {
         ASSERT_NOT_NULL((filters = strv_copy(strv_skip(saved_argv, 1))));
 
         if (prepare_ns("(test-execute-unprivileged)") == 0) {
-                ASSERT_OK(capability_bounding_set_drop(0, /* right_now = */ true));
+                ASSERT_OK(capability_bounding_set_drop(0, /* right_now= */ true));
 
                 can_unshare = false;
                 run_tests(RUNTIME_SCOPE_USER, filters);
@@ -1605,6 +1615,8 @@ TEST(run_tests_unprivileged) {
 }
 
 static int intro(void) {
+        int r;
+
 #if HAS_FEATURE_ADDRESS_SANITIZER
         if (strstr_ptr(ci_environment(), "travis") || strstr_ptr(ci_environment(), "github-actions"))
                 return log_tests_skipped("Running on Travis CI/GH Actions under ASan, see https://github.com/systemd/systemd/issues/10696");
@@ -1613,11 +1625,18 @@ static int intro(void) {
         if (geteuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0)
                 return log_tests_skipped("not privileged");
 
+        if (running_in_chroot() != 0)
+                return log_tests_skipped("running in chroot");
+
         if (enter_cgroup_subroot(NULL) == -ENOMEDIUM)
                 return log_tests_skipped("cgroupfs not available");
 
         if (path_is_read_only_fs("/sys") > 0)
                 return log_tests_skipped("/sys is mounted read-only");
+
+        r = dlopen_libmount();
+        if (r < 0)
+                return log_tests_skipped("libmount not available.");
 
         /* Create dummy network interface for testing PrivateNetwork=yes */
         have_net_dummy = system("ip link add dummy-test-exec type dummy") == 0;

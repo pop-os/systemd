@@ -10,6 +10,7 @@
 #include "device-internal.h"
 #include "device-private.h"
 #include "device-util.h"
+#include "errno-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -684,7 +685,7 @@ int device_clone_with_db(sd_device *device, sd_device **ret) {
         }
 
         /* Finally, read the udev database. */
-        r = device_read_db_internal(dest, /* force = */ true);
+        r = device_read_db_internal(dest, /* force= */ true);
         if (r < 0)
                 return r;
 
@@ -692,13 +693,40 @@ int device_clone_with_db(sd_device *device, sd_device **ret) {
         return 0;
 }
 
-void device_cleanup_tags(sd_device *device) {
+int device_copy_all_tags(sd_device *dest, sd_device *src) {
+        int r;
+
+        assert(dest);
+
+        if (!src)
+                return 0;
+
+        FOREACH_DEVICE_TAG(src, tag) {
+                r = device_add_tag(dest, tag, /* both= */ false);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
+int device_cleanup_tags(sd_device *device, sd_device *original) {
+        int r;
+
         assert(device);
 
-        device->all_tags = set_free(device->all_tags);
+        _cleanup_set_free_ Set *saved = TAKE_PTR(device->all_tags);
         device->current_tags = set_free(device->current_tags);
         device->property_tags_outdated = true;
         device->tags_generation++;
+
+        r = device_copy_all_tags(device, original);
+        if (r < 0) {
+                set_free_and_replace(device->all_tags, saved);
+                return r;
+        }
+
+        return 0;
 }
 
 void device_cleanup_devlinks(sd_device *device) {
@@ -742,23 +770,11 @@ static int device_tag(sd_device *device, const char *tag, bool add) {
         return 0;
 }
 
-int device_tag_index(sd_device *device, sd_device *device_old, bool add) {
-        int r = 0, k;
+int device_tag_index(sd_device *device, bool add) {
+        int r = 0;
 
-        if (add && device_old)
-                /* delete possible left-over tags */
-                FOREACH_DEVICE_TAG(device_old, tag)
-                        if (!sd_device_has_tag(device, tag)) {
-                                k = device_tag(device_old, tag, false);
-                                if (r >= 0 && k < 0)
-                                        r = k;
-                        }
-
-        FOREACH_DEVICE_TAG(device, tag) {
-                k = device_tag(device, tag, add);
-                if (r >= 0 && k < 0)
-                        r = k;
-        }
+        FOREACH_DEVICE_TAG(device, tag)
+                RET_GATHER(r, device_tag(device, tag, add));
 
         return r;
 }

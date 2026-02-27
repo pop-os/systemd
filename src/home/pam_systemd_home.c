@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <libintl.h>
-#include <security/pam_ext.h>
 #include <security/pam_misc.h>
-#include <security/pam_modules.h>
 
 #include "sd-bus.h"
 
@@ -64,7 +62,7 @@ static int parse_argv(
                                 *debug = k;
 
                 } else
-                        pam_syslog(handle, LOG_WARNING, "Unknown parameter '%s', ignoring", argv[i]);
+                        pam_syslog(handle, LOG_WARNING, "Unknown parameter '%s', ignoring.", argv[i]);
         }
 
         return 0;
@@ -188,9 +186,8 @@ static int acquire_user_record(
                                 goto user_unknown;
                         }
 
-                        pam_syslog(handle, LOG_ERR,
-                                   "Failed to query user record: %s", bus_error_message(&error, r));
-                        return PAM_SERVICE_ERR;
+                        return pam_syslog_pam_error(handle, LOG_ERR, PAM_SERVICE_ERR,
+                                                    "Failed to query user record: %s", bus_error_message(&error, r));
                 }
 
                 r = sd_bus_message_read(reply, "sbo", &json, NULL, NULL);
@@ -438,7 +435,7 @@ static int handle_generic_user_record_error(
 
                 assert(secret);
 
-                (void) pam_prompt_graceful(handle, PAM_ERROR_MSG, NULL, _("Please authenticate physically on security token of user %s."), user_name);
+                (void) pam_prompt_graceful(handle, PAM_TEXT_INFO, NULL, _("Please authenticate physically on security token of user %s."), user_name);
 
                 r = user_record_set_pkcs11_protected_authentication_path_permitted(secret, true);
                 if (r < 0)
@@ -449,7 +446,7 @@ static int handle_generic_user_record_error(
 
                 assert(secret);
 
-                (void) pam_prompt_graceful(handle, PAM_ERROR_MSG, NULL, _("Please confirm presence on security token of user %s."), user_name);
+                (void) pam_prompt_graceful(handle, PAM_TEXT_INFO, NULL, _("Please confirm presence on security token of user %s."), user_name);
 
                 r = user_record_set_fido2_user_presence_permitted(secret, true);
                 if (r < 0)
@@ -460,7 +457,7 @@ static int handle_generic_user_record_error(
 
                 assert(secret);
 
-                (void) pam_prompt_graceful(handle, PAM_ERROR_MSG, NULL, _("Please verify user on security token of user %s."), user_name);
+                (void) pam_prompt_graceful(handle, PAM_TEXT_INFO, NULL, _("Please verify user on security token of user %s."), user_name);
 
                 r = user_record_set_fido2_user_verification_permitted(secret, true);
                 if (r < 0)
@@ -686,8 +683,10 @@ static int acquire_home(
                                                 if (home_locked)
                                                         (void) pam_prompt_graceful(handle, PAM_ERROR_MSG, NULL, _("Home of user %s is currently locked, please unlock locally first."), ur->user_name);
 
-                                                if (FLAGS_SET(flags, ACQUIRE_MUST_AUTHENTICATE) || debug)
-                                                        pam_syslog(handle, FLAGS_SET(flags, ACQUIRE_MUST_AUTHENTICATE) ? LOG_ERR : LOG_DEBUG, "Failed to prompt for password/prompt.");
+                                                if (FLAGS_SET(flags, ACQUIRE_MUST_AUTHENTICATE))
+                                                        pam_syslog(handle, LOG_ERR, "Failed to prompt for password/prompt.");
+                                                else if (debug)
+                                                        pam_debug_syslog(handle, debug, "Failed to prompt for password/prompt.");
 
                                                 return home_not_active || home_locked ? PAM_PERM_DENIED : PAM_CONV_ERR;
                                         }
@@ -791,6 +790,11 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
 
         AcquireHomeFlags flags = 0;
         bool debug = false;
+        int r;
+
+        r = dlopen_libpam();
+        if (r < 0)
+                return PAM_SERVICE_ERR;
 
         pam_log_setup();
 
@@ -803,7 +807,7 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
                        &debug) < 0)
                 return PAM_AUTH_ERR;
 
-        pam_debug_syslog(handle, debug, "pam-systemd-homed authenticating");
+        pam_debug_syslog(handle, debug, "pam-systemd-homed: authenticating...");
 
         return acquire_home(handle, ACQUIRE_MUST_AUTHENTICATE|flags, debug, /* bus_data= */ NULL);
 }
@@ -855,6 +859,10 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         bool debug = false;
         int r;
 
+        r = dlopen_libpam();
+        if (r < 0)
+                return PAM_SERVICE_ERR;
+
         pam_log_setup();
 
         if (parse_env(handle, &flags) < 0)
@@ -866,7 +874,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                        &debug) < 0)
                 return PAM_SESSION_ERR;
 
-        pam_debug_syslog(handle, debug, "pam-systemd-homed session start");
+        pam_debug_syslog(handle, debug, "pam-systemd-homed: starting session...");
 
         r = fallback_shell_can_work(handle, &flags);
         if (r != PAM_SUCCESS)
@@ -916,7 +924,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                        &debug) < 0)
                 return PAM_SESSION_ERR;
 
-        pam_debug_syslog(handle, debug, "pam-systemd-homed session end");
+        pam_debug_syslog(handle, debug, "pam-systemd-homed: closing session...");
 
         r = pam_get_user(handle, &username, NULL);
         if (r != PAM_SUCCESS)
@@ -969,6 +977,10 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
         usec_t t;
         int r;
 
+        r = dlopen_libpam();
+        if (r < 0)
+                return PAM_SERVICE_ERR;
+
         pam_log_setup();
 
         if (parse_env(handle, &flags) < 0)
@@ -980,7 +992,7 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
                        &debug) < 0)
                 return PAM_AUTH_ERR;
 
-        pam_debug_syslog(handle, debug, "pam-systemd-homed account management");
+        pam_debug_syslog(handle, debug, "pam-systemd-homed: starting account management...");
 
         r = fallback_shell_can_work(handle, &flags);
         if (r != PAM_SUCCESS)
@@ -1084,6 +1096,10 @@ _public_ PAM_EXTERN int pam_sm_chauthtok(
         bool debug = false;
         int r;
 
+        r = dlopen_libpam();
+        if (r < 0)
+                return PAM_SERVICE_ERR;
+
         pam_log_setup();
 
         if (parse_argv(handle,
@@ -1092,7 +1108,7 @@ _public_ PAM_EXTERN int pam_sm_chauthtok(
                        &debug) < 0)
                 return PAM_AUTH_ERR;
 
-        pam_debug_syslog(handle, debug, "pam-systemd-homed account management");
+        pam_debug_syslog(handle, debug, "pam-systemd-homed: starting authentication token management...");
 
         r = acquire_user_record(handle, /* username= */ NULL, debug, &ur, /* bus_data= */ NULL);
         if (r != PAM_SUCCESS)

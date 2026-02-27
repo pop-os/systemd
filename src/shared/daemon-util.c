@@ -9,20 +9,29 @@
 #include "string-util.h"
 #include "time-util.h"
 
-int notify_remove_fd_warn(const char *name) {
+static int notify_remove_fd_full(int log_level, const char *name) {
         int r;
 
         assert(name);
 
-        r = sd_notifyf(/* unset_environment = */ false,
+        r = sd_notifyf(/* unset_environment= */ false,
                        "FDSTOREREMOVE=1\n"
                        "FDNAME=%s", name);
         if (r < 0)
-                return log_warning_errno(r,
-                                         "Failed to remove file descriptor \"%s\" from the store, ignoring: %m",
-                                         name);
+                return log_full_errno(
+                                log_level, r,
+                                "Failed to remove file descriptor \"%s\" from the store, ignoring: %m",
+                                name);
 
         return 0;
+}
+
+int notify_remove_fd(const char *name) {
+        return notify_remove_fd_full(LOG_DEBUG, name);
+}
+
+int notify_remove_fd_warn(const char *name) {
+        return notify_remove_fd_full(LOG_WARNING, name);
 }
 
 int notify_remove_fd_warnf(const char *format, ...) {
@@ -62,7 +71,7 @@ int notify_push_fd(int fd, const char *name) {
         /* Remove existing fds with the same name in fdstore. */
         (void) notify_remove_fd_warn(name);
 
-        return sd_pid_notify_with_fds(0, /* unset_environment = */ false, state, &fd, 1);
+        return sd_pid_notify_with_fds(0, /* unset_environment= */ false, state, &fd, 1);
 }
 
 int notify_push_fdf(int fd, const char *format, ...) {
@@ -85,7 +94,7 @@ int notify_push_fdf(int fd, const char *format, ...) {
 int notify_reloading_full(const char *status) {
         int r;
 
-        r = sd_notifyf(/* unset_environment = */ false,
+        r = sd_notifyf(/* unset_environment= */ false,
                        "RELOADING=1\n"
                        "MONOTONIC_USEC=" USEC_FMT
                        "%s%s",

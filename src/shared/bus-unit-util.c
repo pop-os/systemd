@@ -160,7 +160,7 @@ static int bus_append_string(sd_bus_message *m, const char *field, const char *e
         return 1;
 }
 
-static int bus_append_strv_full(sd_bus_message *m, const char *field, const char *eq, ExtractFlags flags) {
+static int bus_append_strv_full(sd_bus_message *m, const char *field, const char *eq, const char *separators, ExtractFlags flags) {
         int r;
 
         assert(m);
@@ -185,7 +185,7 @@ static int bus_append_strv_full(sd_bus_message *m, const char *field, const char
         for (const char *p = eq;;) {
                 _cleanup_free_ char *word = NULL;
 
-                r = extract_first_word(&p, &word, /* separators= */ NULL, flags);
+                r = extract_first_word(&p, &word, separators, flags);
                 if (r < 0)
                         return parse_log_error(r, field, eq);
                 if (r == 0)
@@ -212,11 +212,16 @@ static int bus_append_strv_full(sd_bus_message *m, const char *field, const char
 }
 
 static int bus_append_strv(sd_bus_message *m, const char *field, const char *eq) {
-        return bus_append_strv_full(m, field, eq, EXTRACT_UNQUOTE);
+        return bus_append_strv_full(m, field, eq, /* separators= */ NULL, EXTRACT_UNQUOTE);
 }
 
 static int bus_append_strv_cunescape(sd_bus_message *m, const char *field, const char *eq) {
-        return bus_append_strv_full(m, field, eq, EXTRACT_UNQUOTE | EXTRACT_CUNESCAPE);
+        return bus_append_strv_full(m, field, eq, /* separators= */ NULL, EXTRACT_UNQUOTE | EXTRACT_CUNESCAPE);
+}
+
+static int bus_append_strv_colon(sd_bus_message *m, const char *field, const char *eq) {
+        /* This also accepts colon as the separator. */
+        return bus_append_strv_full(m, field, eq, ":" WHITESPACE, EXTRACT_UNQUOTE);
 }
 
 static int bus_append_byte_array(sd_bus_message *m, const char *field, const void *buf, size_t n) {
@@ -1252,7 +1257,8 @@ static int bus_append_standard_input_text(sd_bus_message *m, const char *field, 
         /* Note that we don't expand specifiers here, but that should be OK, as this is a
          * programmatic interface anyway */
 
-        return bus_append_byte_array(m, field, unescaped, l + 1);
+        /* The server side does not have StandardInputText, using StandardInputData instead. */
+        return bus_append_byte_array(m, "StandardInputData", unescaped, l + 1);
 }
 
 static int bus_append_standard_input_data(sd_bus_message *m, const char *field, const char *eq) {
@@ -1639,7 +1645,6 @@ static int bus_append_root_hash(sd_bus_message *m, const char *field, const char
 }
 
 static int bus_append_root_hash_signature(sd_bus_message *m, const char *field, const char *eq) {
-        char *value;
         _cleanup_free_ void *roothash_sig_decoded = NULL;
         size_t roothash_sig_decoded_size = 0;
         int r;
@@ -1648,7 +1653,8 @@ static int bus_append_root_hash_signature(sd_bus_message *m, const char *field, 
         if (path_is_absolute(eq))
                 return bus_append_string(m, "RootHashSignaturePath", eq);
 
-        if (!(value = startswith(eq, "base64:")))
+        const char *value = startswith(eq, "base64:");
+        if (!value)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Failed to decode %s value '%s': neither a path nor starts with 'base64:'.",
                                        field, eq);
@@ -2419,6 +2425,7 @@ static const BusProperty execute_properties[] = {
         { "ProtectProc",                           bus_append_string                             },
         { "ProcSubset",                            bus_append_string                             },
         { "NetworkNamespacePath",                  bus_append_string                             },
+        { "UserNamespacePath",                     bus_append_string                             },
         { "IPCNamespacePath",                      bus_append_string                             },
         { "LogNamespace",                          bus_append_string                             },
         { "RootImagePolicy",                       bus_append_string                             },
@@ -2464,7 +2471,7 @@ static const BusProperty execute_properties[] = {
         { "InaccessiblePaths",                     bus_append_strv                               },
         { "ExecPaths",                             bus_append_strv                               },
         { "NoExecPaths",                           bus_append_strv                               },
-        { "ExecSearchPath",                        bus_append_strv                               },
+        { "ExecSearchPath",                        bus_append_strv_colon                         },
         { "ExtensionDirectories",                  bus_append_strv                               },
         { "ConfigurationDirectory",                bus_append_strv                               },
         { "SupplementaryGroups",                   bus_append_strv                               },
@@ -2563,7 +2570,6 @@ static const BusProperty kill_properties[] = {
         { "RestartKillSignal",                     bus_append_signal_from_string                 },
         { "FinalKillSignal",                       bus_append_signal_from_string                 },
         { "WatchdogSignal",                        bus_append_signal_from_string                 },
-        { "ReloadSignal",                          bus_append_signal_from_string                 },
         {}
 };
 
@@ -2648,6 +2654,8 @@ static const BusProperty service_properties[] = {
         { "ExecStartPostEx",                       bus_append_exec_command                       }, /* compat */
         { "ExecReload",                            bus_append_exec_command                       },
         { "ExecReloadEx",                          bus_append_exec_command                       }, /* compat */
+        { "ExecReloadPost",                        bus_append_exec_command                       },
+        { "ExecReloadPostEx",                      bus_append_exec_command                       }, /* compat */
         { "ExecStop",                              bus_append_exec_command                       },
         { "ExecStopEx",                            bus_append_exec_command                       }, /* compat */
         { "ExecStopPost",                          bus_append_exec_command                       },
@@ -2656,6 +2664,7 @@ static const BusProperty service_properties[] = {
         { "RestartForceExitStatus",                bus_append_exit_status                        },
         { "SuccessExitStatus",                     bus_append_exit_status                        },
         { "OpenFile",                              bus_append_open_file                          },
+        { "ReloadSignal",                          bus_append_signal_from_string                 },
         {}
 };
 
@@ -3103,7 +3112,7 @@ static int unit_freezer_action(UnitFreezer *f, bool freeze) {
         r = bus_call_method(f->bus, bus_systemd_mgr,
                             freeze ? "FreezeUnit" : "ThawUnit",
                             &error,
-                            /* ret_reply = */ NULL,
+                            /* ret_reply= */ NULL,
                             "s",
                             f->name);
         if (r < 0) {

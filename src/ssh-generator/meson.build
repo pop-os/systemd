@@ -4,6 +4,7 @@ executables += [
         generator_template + {
                 'name' : 'systemd-ssh-generator',
                 'sources' : files('ssh-generator.c'),
+                'extract' : files('ssh-util.c'),
         },
         libexec_template + {
                 'name' : 'systemd-ssh-proxy',
@@ -12,6 +13,7 @@ executables += [
         libexec_template + {
                 'name' : 'systemd-ssh-issue',
                 'sources' : files('ssh-issue.c'),
+                'objects' : ['systemd-ssh-generator'],
         },
 ]
 
@@ -23,7 +25,7 @@ if conf.get('ENABLE_SSH_PROXY_CONFIG') == 1
                 install : true,
                 install_dir : sshconfdir.startswith('/usr/') ? sshconfdir : libexecdir / 'ssh_config.d')
 
-        if conf.get('LINK_SSH_PROXY_DROPIN') == 1
+        if (not sshconfdir.startswith(sysconfdir) or install_sysconfdir) and conf.get('LINK_SSH_PROXY_DROPIN') == 1
                 if meson.version().version_compare('>=1.3.0')
                         install_symlink(
                                 '20-systemd-ssh-proxy.conf',

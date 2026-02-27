@@ -9,7 +9,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 
 systemd provides support for automatically reverting back to the previous
 version of the OS or kernel in case the system consistently fails to boot. The
-[Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
+[UAPI.1 Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
 describes how to annotate boot loader entries with a counter that specifies how
 many attempts should be made to boot it. This document describes how systemd
 implements this scheme.
@@ -21,47 +21,47 @@ other boot loaders or take actions outside of the boot loader.
 Here's a brief overview of the complete set of components:
 
 * The
-  [`kernel-install(8)`](https://www.freedesktop.org/software/systemd/man/kernel-install.html)
+  [`kernel-install(8)`](https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html)
   script can optionally create boot loader entries that carry an initial boot
   counter (the initial counter is configurable in `/etc/kernel/tries`).
 
 * The
-  [`systemd-boot(7)`](https://www.freedesktop.org/software/systemd/man/systemd-boot.html)
+  [`systemd-boot(7)`](https://www.freedesktop.org/software/systemd/man/latest/systemd-boot.html)
   boot loader optionally maintains a per-boot-loader-entry counter described by
-  the [Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
+  the [UAPI.1 Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting)
   that is decreased by one on each attempt to boot the entry, prioritizing
   entries that have non-zero counters over those which already reached a
   counter of zero when choosing the entry to boot.
 
 * The `boot-complete.target` target unit (see
-  [`systemd.special(7)`](https://www.freedesktop.org/software/systemd/man/systemd.special.html))
+  [`systemd.special(7)`](https://www.freedesktop.org/software/systemd/man/latest/systemd.special.html))
   serves as a generic extension point both for units that are necessary to
   consider a boot successful (e.g. `systemd-boot-check-no-failures.service`
   described below), and units that want to act only if the boot is
   successful (e.g. `systemd-bless-boot.service` described below).
 
 * The
-  [`systemd-boot-check-no-failures.service(8)`](https://www.freedesktop.org/software/systemd/man/systemd-boot-check-no-failures.service.html)
+  [`systemd-boot-check-no-failures.service(8)`](https://www.freedesktop.org/software/systemd/man/latest/systemd-boot-check-no-failures.service.html)
   service is a simple service health check tool. When enabled it becomes an
   indirect dependency of `systemd-bless-boot.service` (by means of
   `boot-complete.target`, see below), ensuring that the boot will not be
   considered successful if there are any failed services.
 
 * The
-  [`systemd-bless-boot.service(8)`](https://www.freedesktop.org/software/systemd/man/systemd-bless-boot.service.html)
+  [`systemd-bless-boot.service(8)`](https://www.freedesktop.org/software/systemd/man/latest/systemd-bless-boot.service.html)
   service automatically marks a boot loader entry, for which boot counting as
   mentioned above is enabled, as "good" when a boot has been determined to be
   successful, thus turning off boot counting for it.
 
 * The
-  [`systemd-bless-boot-generator(8)`](https://www.freedesktop.org/software/systemd/man/systemd-bless-boot-generator.html)
+  [`systemd-bless-boot-generator(8)`](https://www.freedesktop.org/software/systemd/man/latest/systemd-bless-boot-generator.html)
   generator automatically pulls in `systemd-bless-boot.service` when use of
   `systemd-boot` with boot counting enabled is detected.
 
 ## Details
 
 As described in the
-[Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting),
+[UAPI.1 Boot Loader Specification](https://uapi-group.org/specifications/specs/boot_loader_specification/#boot-counting),
 the boot counting data is stored in the file name of the boot loader entries as
 a plus (`+`), followed by a number, optionally followed by `-` and another
 number, right before the file name suffix (`.conf` or `.efi`).
@@ -189,7 +189,7 @@ are a couple of recommendations.
 
    Depending on the setup, it may be most convenient to pull in such units
    through normal enablement symlinks, or during early boot using a
-   [`generator`](https://www.freedesktop.org/software/systemd/man/systemd.generator.html),
+   [`generator`](https://www.freedesktop.org/software/systemd/man/latest/systemd.generator.html),
    or even during later boot. In the last case, care must be taken to ensure
    that the start job is created before `boot-complete.target` has been
    reached.
@@ -199,9 +199,9 @@ are a couple of recommendations.
    in.
 
    Such unit would be typically wanted (or required) by one of the
-   [`bootup`](https://www.freedesktop.org/software/systemd/man/bootup.html) targets,
+   [`bootup`](https://www.freedesktop.org/software/systemd/man/latest/bootup.html) targets,
    for example, `multi-user.target`. To avoid potential loops due to conflicting
-   [default dependencies](https://www.freedesktop.org/software/systemd/man/systemd.unit.html#Default%20Dependencies)
+   [default dependencies](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Default%20Dependencies)
    ordering, it is recommended to also add an explicit dependency (e.g.
    `After=multi-user.target`) to the unit. This overrides the implicit ordering
    and allows `boot-complete.target` to start after the given bootup target.

@@ -41,7 +41,7 @@ int chattr_full(
          * drivers, where the ioctl might have different effects. Notably, DRM is using the same
          * ioctl() number. */
 
-        if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode))
+        if (!inode_type_can_chattr(st.st_mode))
                 return -ENOTTY;
 
         if (mask == 0 && !ret_previous && !ret_final)
@@ -140,7 +140,7 @@ int read_attr_fd(int fd, unsigned *ret) {
         if (fstat(fd, &st) < 0)
                 return -errno;
 
-        if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode))
+        if (!inode_type_can_chattr(st.st_mode))
                 return -ENOTTY;
 
         _cleanup_close_ int fd_close = -EBADF;
@@ -241,10 +241,14 @@ static int set_proj_id_cb(
 int set_proj_id_recursive(int fd, uint32_t proj_id) {
         return recurse_dir_at(
                         fd,
-                        /* path = */ NULL,
-                        /* statx_mask = */ 0,
-                        /* n_depth_max = */ UINT_MAX,
+                        /* path= */ NULL,
+                        /* statx_mask= */ 0,
+                        /* n_depth_max= */ UINT_MAX,
                         RECURSE_DIR_ENSURE_TYPE|RECURSE_DIR_TOPLEVEL|RECURSE_DIR_INODE_FD,
                         set_proj_id_cb,
                         UINT32_TO_PTR(proj_id));
+}
+
+bool inode_type_can_chattr(mode_t mode) {
+        return IN_SET(mode & S_IFMT, S_IFREG, S_IFDIR);
 }

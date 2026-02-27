@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
+#include "ansi-color.h"
 #include "bus-util.h"
 #include "format-table.h"
 #include "hostname-util.h"
@@ -110,10 +111,8 @@ int parse_signal_argument(const char *s, int *ret) {
         assert(s);
         assert(ret);
 
-        if (streq(s, "help")) {
-                DUMP_STRING_TABLE(signal, int, _NSIG);
-                return 0;
-        }
+        if (streq(s, "help"))
+                return DUMP_STRING_TABLE(signal, int, _NSIG);
 
         if (streq(s, "list")) {
                 _cleanup_(table_unrefp) Table *table = NULL;
@@ -164,4 +163,11 @@ int parse_machine_argument(const char *s, const char **ret_host, BusTransport *r
                 *ret_transport = BUS_TRANSPORT_MACHINE;
 
         return 0;
+}
+
+int parse_background_argument(const char *s, char **arg) {
+        if (!isempty(s) && !looks_like_ansi_color_code(s))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid --background= argument: %s", s);
+
+        return free_and_strdup_warn(arg, s);
 }

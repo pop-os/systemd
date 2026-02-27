@@ -4,7 +4,7 @@
 #include <linux/ethtool.h>
 
 #include "conf-parser-forward.h"
-#include "forward.h"
+#include "shared-forward.h"
 
 #define N_ADVERTISE 4
 
@@ -100,21 +100,6 @@ typedef enum NetDevPort {
         _NET_DEV_PORT_INVALID = -EINVAL,
 } NetDevPort;
 
-#define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32    (SCHAR_MAX)
-#define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBYTES  (4 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
-
-/* layout of the struct passed from/to userland */
-union ethtool_link_usettings {
-        struct ethtool_link_settings base;
-
-        struct {
-                uint8_t header[offsetof(struct ethtool_link_settings, link_mode_masks)];
-                uint32_t supported[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
-                uint32_t advertising[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
-                uint32_t lp_advertising[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
-        } link_modes;
-};
-
 typedef struct u32_opt {
         uint32_t value; /* a value of 0 indicates the hardware advertised maximum should be used. */
         bool set;
@@ -167,7 +152,7 @@ int ethtool_get_permanent_hw_addr(int *ethtool_fd, const char *ifname, struct hw
 int ethtool_set_wol(int *ethtool_fd, const char *ifname, uint32_t wolopts, const uint8_t password[SOPASS_MAX]);
 int ethtool_set_nic_buffer_size(int *ethtool_fd, const char *ifname, const netdev_ring_param *ring);
 int ethtool_set_features(int *ethtool_fd, const char *ifname, const int features[static _NET_DEV_FEAT_MAX]);
-int ethtool_set_glinksettings(
+int ethtool_set_link_settings(
                 int *fd,
                 const char *ifname,
                 int autonegotiation,
@@ -188,12 +173,12 @@ int ethtool_set_eee_settings(
                 uint32_t advertise);
 
 const char* duplex_to_string(Duplex d) _const_;
-Duplex duplex_from_string(const char *d) _pure_;
+Duplex duplex_from_string(const char *s) _pure_;
 
 int wol_options_to_string_alloc(uint32_t opts, char **ret);
 
 const char* port_to_string(NetDevPort port) _const_;
-NetDevPort port_from_string(const char *port) _pure_;
+NetDevPort port_from_string(const char *s) _pure_;
 
 const char* mdi_to_string(int mdi) _const_;
 

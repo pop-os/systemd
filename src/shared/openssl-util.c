@@ -871,9 +871,8 @@ int ecc_pkey_from_curve_x_y(
         TAKE_PTR(eckey);
 #endif
 
-    *ret = TAKE_PTR(pkey);
-
-    return 0;
+        *ret = TAKE_PTR(pkey);
+        return 0;
 }
 
 int ecc_pkey_to_curve_x_y(
@@ -1109,7 +1108,7 @@ int digest_and_sign(
                 bool invalid_digest = ERR_GET_REASON(ERR_peek_last_error()) == EVP_R_INVALID_DIGEST;
                 r = log_openssl_errors("Failed to initialize signature context");
                 return invalid_digest ? -EADDRNOTAVAIL : r;
-}
+        }
 
         /* Determine signature size */
         size_t ss;
@@ -1400,6 +1399,7 @@ int pkey_generate_volume_keys(
 static int load_key_from_provider(
                 const char *provider,
                 const char *private_key_uri,
+                UI_METHOD *ui_method,
                 EVP_PKEY **ret) {
 
         assert(provider);
@@ -1416,8 +1416,8 @@ static int load_key_from_provider(
 
         _cleanup_(OSSL_STORE_closep) OSSL_STORE_CTX *store = OSSL_STORE_open(
                         private_key_uri,
-                        /*ui_method=*/ NULL,
-                        /*ui_method=*/ NULL,
+                        ui_method,
+                        /* ui_data= */ NULL,
                         /* post_process= */ NULL,
                         /* post_process_data= */ NULL);
         if (!store)
@@ -1442,7 +1442,7 @@ static int load_key_from_provider(
 #endif
 }
 
-static int load_key_from_engine(const char *engine, const char *private_key_uri, EVP_PKEY **ret) {
+static int load_key_from_engine(const char *engine, const char *private_key_uri, UI_METHOD *ui_method, EVP_PKEY **ret) {
         assert(engine);
         assert(private_key_uri);
         assert(ret);
@@ -1456,7 +1456,7 @@ static int load_key_from_engine(const char *engine, const char *private_key_uri,
         if (ENGINE_init(e) == 0)
                 return log_openssl_errors("Failed to initialize signing engine '%s'", engine);
 
-        _cleanup_(EVP_PKEY_freep) EVP_PKEY *private_key = ENGINE_load_private_key(e, private_key_uri, /*ui_method=*/ NULL, /*callback_data=*/ NULL);
+        _cleanup_(EVP_PKEY_freep) EVP_PKEY *private_key = ENGINE_load_private_key(e, private_key_uri, ui_method, /* callback_data= */ NULL);
         if (!private_key)
                 return log_openssl_errors("Failed to load private key from '%s'", private_key_uri);
         REENABLE_WARNING;
@@ -1620,8 +1620,8 @@ static int load_x509_certificate_from_provider(const char *provider, const char 
 
         _cleanup_(OSSL_STORE_closep) OSSL_STORE_CTX *store = OSSL_STORE_open(
                         certificate_uri,
-                        /*ui_method=*/ NULL,
-                        /*ui_method=*/ NULL,
+                        /* ui_method= */ NULL,
+                        /* ui_method= */ NULL,
                         /* post_process= */ NULL,
                         /* post_process_data= */ NULL);
         if (!store)
@@ -1645,25 +1645,20 @@ static int load_x509_certificate_from_provider(const char *provider, const char 
         return -EOPNOTSUPP;
 #endif
 }
-#endif
 
 OpenSSLAskPasswordUI* openssl_ask_password_ui_free(OpenSSLAskPasswordUI *ui) {
-#if HAVE_OPENSSL && !defined(OPENSSL_NO_UI_CONSOLE)
         if (!ui)
                 return NULL;
 
+#ifndef OPENSSL_NO_UI_CONSOLE
         assert(UI_get_default_method() == ui->method);
         UI_set_default_method(UI_OpenSSL());
         UI_destroy_method(ui->method);
-        return mfree(ui);
-#else
-        assert(ui == NULL);
-        return NULL;
 #endif
+        return mfree(ui);
 }
 
 int x509_fingerprint(X509 *cert, uint8_t buffer[static SHA256_DIGEST_SIZE]) {
-#if HAVE_OPENSSL
         _cleanup_free_ uint8_t *der = NULL;
         int dersz;
 
@@ -1675,9 +1670,6 @@ int x509_fingerprint(X509 *cert, uint8_t buffer[static SHA256_DIGEST_SIZE]) {
 
         sha256_direct(der, dersz, buffer);
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot calculate X509 fingerprint.");
-#endif
 }
 
 int openssl_load_x509_certificate(
@@ -1685,7 +1677,7 @@ int openssl_load_x509_certificate(
                 const char *certificate_source,
                 const char *certificate,
                 X509 **ret) {
-#if HAVE_OPENSSL
+
         int r;
 
         assert(certificate);
@@ -1709,9 +1701,6 @@ int openssl_load_x509_certificate(
                                 certificate_source);
 
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot load X509 certificate.");
-#endif
 }
 
 int openssl_load_private_key(
@@ -1721,31 +1710,38 @@ int openssl_load_private_key(
                 const AskPasswordRequest *request,
                 EVP_PKEY **ret_private_key,
                 OpenSSLAskPasswordUI **ret_user_interface) {
-#if HAVE_OPENSSL
+
         int r;
 
         assert(private_key);
         assert(request);
+        assert(ret_private_key);
 
         if (private_key_source_type == OPENSSL_KEY_SOURCE_FILE) {
                 r = openssl_load_private_key_from_file(private_key, ret_private_key);
                 if (r < 0)
                         return r;
 
-                *ret_user_interface = NULL;
+                if (ret_user_interface)
+                        *ret_user_interface = NULL;
         } else {
                 _cleanup_(openssl_ask_password_ui_freep) OpenSSLAskPasswordUI *ui = NULL;
                 r = openssl_ask_password_ui_new(request, &ui);
                 if (r < 0)
                         return log_debug_errno(r, "Failed to allocate ask-password user interface: %m");
 
+                UI_METHOD *ui_method = NULL;
+#ifndef OPENSSL_NO_UI_CONSOLE
+                ui_method = ui->method;
+#endif
+
                 switch (private_key_source_type) {
 
                 case OPENSSL_KEY_SOURCE_ENGINE:
-                        r = load_key_from_engine(private_key_source, private_key, ret_private_key);
+                        r = load_key_from_engine(private_key_source, private_key, ui_method, ret_private_key);
                         break;
                 case OPENSSL_KEY_SOURCE_PROVIDER:
-                        r = load_key_from_provider(private_key_source, private_key, ret_private_key);
+                        r = load_key_from_provider(private_key_source, private_key, ui_method, ret_private_key);
                         break;
                 default:
                         assert_not_reached();
@@ -1757,14 +1753,40 @@ int openssl_load_private_key(
                                         private_key,
                                         private_key_source);
 
-                *ret_user_interface = TAKE_PTR(ui);
+                if (ret_user_interface)
+                        *ret_user_interface = TAKE_PTR(ui);
         }
 
         return 0;
-#else
-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "OpenSSL is not supported, cannot load private key.");
-#endif
 }
+
+int openssl_extract_public_key(EVP_PKEY *private_key, EVP_PKEY **ret) {
+        int r;
+
+        assert(private_key);
+        assert(ret);
+
+        _cleanup_(memstream_done) MemStream m = {};
+        FILE *tf = memstream_init(&m);
+        if (!tf)
+                return -ENOMEM;
+
+        if (i2d_PUBKEY_fp(tf, private_key) != 1)
+                return -EIO;
+
+        _cleanup_(erase_and_freep) char *buf = NULL;
+        size_t len;
+        r = memstream_finalize(&m, &buf, &len);
+        if (r < 0)
+                return r;
+
+        const unsigned char *t = (unsigned char*) buf;
+        if (!d2i_PUBKEY(ret, &t, len))
+                return -EIO;
+
+        return 0;
+}
+#endif
 
 int parse_openssl_certificate_source_argument(
                 const char *argument,

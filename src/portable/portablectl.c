@@ -141,7 +141,7 @@ static int extract_prefix(const char *path, char **ret) {
         else {
                 const char *e;
 
-                e = endswith(bn, ".raw");
+                e = ENDSWITH_SET(bn, ".raw.v", ".raw", ".v");
                 if (!e)
                         e = strchr(bn, 0);
 
@@ -152,8 +152,8 @@ static int extract_prefix(const char *path, char **ret) {
         if (!name)
                 return -ENOMEM;
 
-        /*  A slightly reduced version of what's permitted in unit names. With ':' and '\' are removed, as well as '_'
-         *  which we use as delimiter for the second part of the image string, which we ignore for now. */
+        /* A slightly reduced version of what's permitted in unit names. With ':' and '\' are removed, as well as '_'
+         * which we use as delimiter for the second part of the image string, which we ignore for now. */
         if (!in_charset(name, DIGITS LETTERS "-."))
                 return -EINVAL;
 

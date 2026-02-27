@@ -1,11 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <security/_pam_macros.h>
-#include <security/pam_ext.h>
-#include <security/pam_misc.h>
-#include <security/pam_modules.h>
-#include <security/pam_modutil.h>
-
 #include "keyring-util.h"
 #include "nulstr-util.h"
 #include "pam-util.h"
@@ -21,7 +15,13 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
                 int flags,
                 int argc, const char **argv) {
 
+        int r;
+
         assert(handle);
+
+        r = dlopen_libpam();
+        if (r < 0)
+                return PAM_SERVICE_ERR;
 
         pam_log_setup();
 
@@ -44,7 +44,7 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
                         pam_syslog(handle, LOG_WARNING, "Unknown parameter '%s', ignoring.", argv[i]);
         }
 
-        pam_debug_syslog(handle, debug, "pam-systemd-loadkey initializing");
+        pam_debug_syslog(handle, debug, "pam-systemd-loadkey: initializing...");
 
         /* Retrieve the key. */
 
@@ -63,7 +63,6 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
 
         _cleanup_(erase_and_freep) void *p = NULL;
         size_t n;
-        int r;
 
         r = keyring_read(serial, &p, &n);
         if (r < 0)
@@ -77,10 +76,10 @@ _public_ PAM_EXTERN int pam_sm_authenticate(
 
         size_t passwords_len = strv_length(passwords);
         if (passwords_len == 0) {
-                pam_debug_syslog(handle, debug, "Key is empty");
+                pam_debug_syslog(handle, debug, "Key is empty.");
                 return PAM_AUTHINFO_UNAVAIL;
         } else if (passwords_len > 1)
-                pam_debug_syslog(handle, debug, "Multiple passwords found in the key. Using the last one");
+                pam_debug_syslog(handle, debug, "Multiple passwords found in the key. Using the last one.");
 
         r = pam_set_item(handle, PAM_AUTHTOK, passwords[passwords_len - 1]);
         if (r != PAM_SUCCESS)

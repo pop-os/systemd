@@ -115,7 +115,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_LIST_DEVICES:
-                        r = blockdev_list(BLOCKDEV_LIST_SHOW_SYMLINKS|BLOCKDEV_LIST_IGNORE_ZRAM);
+                        r = blockdev_list(BLOCKDEV_LIST_SHOW_SYMLINKS|BLOCKDEV_LIST_IGNORE_ZRAM, /* ret_devices= */ NULL, /* ret_n_devices= */ NULL);
                         if (r < 0)
                                 return r;
 
@@ -390,7 +390,7 @@ static int nvme_subsystem_add(const char *node, int consumed_fd, sd_device *devi
                 return log_oom();
 
         if (fd < 0) {
-                fd = RET_NERRNO(open(node, O_RDONLY|O_CLOEXEC|O_NONBLOCK));
+                fd = RET_NERRNO(open(node, O_RDWR|O_CLOEXEC|O_NONBLOCK));
                 if (fd < 0)
                         return log_error_errno(fd, "Failed to open '%s': %m", node);
         }
@@ -848,7 +848,7 @@ static void device_track_back(sd_device *d, sd_device **ret) {
         (void) sd_device_get_devname(d, &devname);
 
         _cleanup_(sd_device_unrefp) sd_device *d_originating = NULL;
-        r = block_device_get_originating(d, &d_originating);
+        r = block_device_get_originating(d, &d_originating, /* recursive= */ true);
         if (r < 0 && r != -ENOENT)
                 log_device_debug_errno(d, r, "Failed to get originating device for '%s', ignoring: %m", strna(devname));
 
@@ -923,7 +923,6 @@ static bool device_is_allowed(sd_device *d) {
 }
 
 static int device_added(Context *c, sd_device *device) {
-        _cleanup_close_ int fd = -EBADF;
         int r;
 
         assert(c);
@@ -967,7 +966,7 @@ static int device_added(Context *c, sd_device *device) {
                 return 0;
         }
 
-        fd = sd_device_open(device, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
+        int fd = sd_device_open(device, O_RDWR|O_CLOEXEC|O_NONBLOCK);
         if (fd < 0) {
                 log_device_warning_errno(device, fd, "Failed to open newly acquired device '%s', ignoring device: %m", devname);
                 return 0;

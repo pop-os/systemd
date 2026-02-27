@@ -94,6 +94,7 @@ static void boot_entry_free(BootEntry *entry) {
         free(entry->kernel);
         free(entry->efi);
         free(entry->uki);
+        free(entry->uki_url);
         strv_free(entry->initrd);
         free(entry->device_tree);
         strv_free(entry->device_tree_overlay);
@@ -406,6 +407,10 @@ static int boot_entry_load_type1(
                         r = parse_path_one(tmp.path, line, field, &tmp.efi, p);
                 else if (streq(field, "uki"))
                         r = parse_path_one(tmp.path, line, field, &tmp.uki, p);
+                else if (streq(field, "uki-url"))
+                        r = free_and_strdup(&tmp.uki_url, p);
+                else if (streq(field, "profile"))
+                        r = safe_atou_full(p, 10, &tmp.profile);
                 else if (streq(field, "initrd"))
                         r = parse_path_strv(tmp.path, line, field, &tmp.initrd, p);
                 else if (streq(field, "devicetree"))
@@ -430,21 +435,21 @@ int boot_config_load_type1(
                 const char *root,
                 const BootEntrySource source,
                 const char *dir,
-                const char *fname) {
+                const char *filename) {
         int r;
 
         assert(config);
         assert(f);
         assert(root);
         assert(dir);
-        assert(fname);
+        assert(filename);
 
         if (!GREEDY_REALLOC(config->entries, config->n_entries + 1))
                 return log_oom();
 
         BootEntry *entry = config->entries + config->n_entries;
 
-        r = boot_entry_load_type1(f, root, source, dir, fname, entry);
+        r = boot_entry_load_type1(f, root, source, dir, filename, entry);
         if (r < 0)
                 return r;
         config->n_entries++;
@@ -515,7 +520,7 @@ int boot_loader_read_conf(BootConfig *config, FILE *file, const char *path) {
                 else if (STR_IN_SET(field, "timeout", "editor", "auto-entries", "auto-firmware",
                                     "auto-poweroff", "auto-reboot", "beep", "reboot-for-bitlocker",
                                     "reboot-on-error", "secure-boot-enroll", "secure-boot-enroll-action",
-                                    "console-mode"))
+                                    "secure-boot-enroll-timeout-sec", "console-mode", "log-level"))
                         r = 0; /* we don't parse these in userspace, but they are OK */
                 else {
                         log_syntax(NULL, LOG_WARNING, path, line, 0, "Unknown line '%s', ignoring.", field);
@@ -1011,7 +1016,7 @@ static int pe_find_uki_sections(
                 }
 
                 /* Permit "masking" of sections in the base profile */
-                if (found->VirtualSize == 0)
+                if (le32toh(found->VirtualSize) == 0)
                         continue;
 
                 r = pe_read_section_data(fd, found, PE_SECTION_SIZE_MAX, (void**) t->data, /* ret_size= */ NULL);
@@ -1632,6 +1637,7 @@ int boot_config_augment_from_loader(
                         .reported_by_loader = true,
                         .tries_left = UINT_MAX,
                         .tries_done = UINT_MAX,
+                        .profile = UINT_MAX,
                         .global_addons = &no_addons,
                 };
         }
@@ -1764,8 +1770,8 @@ static int json_addon(
 
         r = sd_json_variant_append_arraybo(
                         array,
-                        SD_JSON_BUILD_PAIR(addon_str, SD_JSON_BUILD_STRING(addon->location)),
-                        SD_JSON_BUILD_PAIR("options", SD_JSON_BUILD_STRING(addon->cmdline)));
+                        SD_JSON_BUILD_PAIR_STRING(addon_str, addon->location),
+                        SD_JSON_BUILD_PAIR_STRING("options", addon->cmdline));
         if (r < 0)
                 return log_oom();
 
@@ -1807,7 +1813,7 @@ static int json_cmdline(
 
         r = sd_json_variant_merge_objectbo(
                         v,
-                        SD_JSON_BUILD_PAIR("addons", SD_JSON_BUILD_VARIANT(addons_array)),
+                        SD_JSON_BUILD_PAIR_VARIANT("addons", addons_array),
                         SD_JSON_BUILD_PAIR_CONDITION(!!combined_cmdline, "cmdline", SD_JSON_BUILD_STRING(combined_cmdline)));
         if (r < 0)
                 return log_oom();
@@ -1902,6 +1908,10 @@ int show_boot_entry(
                 boot_entry_file_list("efi", e->root, e->efi, &status);
         if (e->uki)
                 boot_entry_file_list("uki", e->root, e->uki, &status);
+        if (e->uki_url)
+                printf("      uki-url: %s\n", e->uki_url);
+        if (e->profile != UINT_MAX)
+                printf("      profile: %u\n", e->profile);
 
         STRV_FOREACH(s, e->initrd)
                 boot_entry_file_list(s == e->initrd ? "initrd" : NULL,
@@ -1949,8 +1959,8 @@ int boot_entry_to_json(const BootConfig *c, size_t i, sd_json_variant **ret) {
 
         r = sd_json_variant_merge_objectbo(
                         &v,
-                        SD_JSON_BUILD_PAIR("type", SD_JSON_BUILD_STRING(boot_entry_type_to_string(e->type))),
-                        SD_JSON_BUILD_PAIR("source", SD_JSON_BUILD_STRING(boot_entry_source_to_string(e->source))),
+                        SD_JSON_BUILD_PAIR_STRING("type", boot_entry_type_to_string(e->type)),
+                        SD_JSON_BUILD_PAIR_STRING("source", boot_entry_source_to_string(e->source)),
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->id, "id", SD_JSON_BUILD_STRING(e->id)),
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->path, "path", SD_JSON_BUILD_STRING(e->path)),
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->root, "root", SD_JSON_BUILD_STRING(e->root)),
@@ -1964,6 +1974,8 @@ int boot_entry_to_json(const BootConfig *c, size_t i, sd_json_variant **ret) {
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->kernel, "linux", SD_JSON_BUILD_STRING(e->kernel)),
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->efi, "efi", SD_JSON_BUILD_STRING(e->efi)),
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->uki, "uki", SD_JSON_BUILD_STRING(e->uki)),
+                        SD_JSON_BUILD_PAIR_CONDITION(!!e->uki_url, "ukiUrl", SD_JSON_BUILD_STRING(e->uki_url)),
+                        SD_JSON_BUILD_PAIR_CONDITION(e->profile != UINT_MAX, "profile", SD_JSON_BUILD_UNSIGNED(e->profile)),
                         SD_JSON_BUILD_PAIR_CONDITION(!strv_isempty(e->initrd), "initrd", SD_JSON_BUILD_STRV(e->initrd)));
         if (r < 0)
                 return log_oom();
@@ -1975,7 +1987,7 @@ int boot_entry_to_json(const BootConfig *c, size_t i, sd_json_variant **ret) {
                         &v,
                         SD_JSON_BUILD_PAIR_CONDITION(!!e->device_tree, "devicetree", SD_JSON_BUILD_STRING(e->device_tree)),
                         SD_JSON_BUILD_PAIR_CONDITION(!strv_isempty(e->device_tree_overlay), "devicetreeOverlay", SD_JSON_BUILD_STRV(e->device_tree_overlay)),
-                        SD_JSON_BUILD_PAIR("isReported", SD_JSON_BUILD_BOOLEAN(e->reported_by_loader)),
+                        SD_JSON_BUILD_PAIR_BOOLEAN("isReported", e->reported_by_loader),
                         SD_JSON_BUILD_PAIR_CONDITION(e->tries_left != UINT_MAX, "triesLeft", SD_JSON_BUILD_UNSIGNED(e->tries_left)),
                         SD_JSON_BUILD_PAIR_CONDITION(e->tries_done != UINT_MAX, "triesDone", SD_JSON_BUILD_UNSIGNED(e->tries_done)),
                         SD_JSON_BUILD_PAIR_CONDITION(c->default_entry >= 0, "isDefault", SD_JSON_BUILD_BOOLEAN(i == (size_t) c->default_entry)),

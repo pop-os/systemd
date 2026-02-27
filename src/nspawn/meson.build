@@ -30,7 +30,7 @@ generated_sources += nspawn_gperf_c
 nspawn_extract_sources += nspawn_gperf_c
 
 nspawn_common_template = {
-        'dependencies' : libseccomp,
+        'dependencies' : libseccomp_cflags,
         'objects' : ['systemd-nspawn'],
 }
 nspawn_test_template = test_template + nspawn_common_template
@@ -40,16 +40,16 @@ executables += [
         executable_template + {
                 'name' : 'systemd-nspawn',
                 'public' : true,
-                'sources' : nspawn_sources + nspawn_extract_sources,
+                'sources' : nspawn_sources,
+                'extract' : nspawn_extract_sources,
                 'include_directories' : [
                         executable_template['include_directories'],
                         include_directories('.')
                 ],
-                'extract' : nspawn_extract_sources,
                 'dependencies' : [
-                        libblkid,
-                        libseccomp,
-                        libselinux,
+                        libmount_cflags,
+                        libseccomp_cflags,
+                        libselinux_cflags,
                 ],
         },
         nspawn_test_template + {

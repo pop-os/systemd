@@ -124,9 +124,9 @@ int settle_entry_token(void) {
 
         r = boot_entry_token_ensure(
                         arg_root,
-                        getenv("KERNEL_INSTALL_CONF_ROOT"),
+                        secure_getenv("KERNEL_INSTALL_CONF_ROOT"),
                         arg_machine_id,
-                        /* machine_id_is_random = */ false,
+                        /* machine_id_is_random= */ false,
                         &arg_entry_token_type,
                         &arg_entry_token);
         if (r < 0)

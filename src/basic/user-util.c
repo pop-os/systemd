@@ -28,6 +28,26 @@
 #include "user-util.h"
 #include "utf8.h"
 
+#define DEFINE_STRERROR_ACCOUNT(type)                                   \
+        const char* strerror_##type(                                    \
+                        int errnum,                                     \
+                        char *buf,                                      \
+                        size_t buflen) {                                \
+                                                                        \
+                errnum = ABS(errnum);                                   \
+                switch (errnum) {                                       \
+                case ESRCH:                                             \
+                        return "Unknown " STRINGIFY(type);              \
+                case ENOEXEC:                                           \
+                        return "Not a system " STRINGIFY(type);         \
+                default:                                                \
+                        return strerror_r(errnum, buf, buflen);         \
+                }                                                       \
+        }
+
+DEFINE_STRERROR_ACCOUNT(user);
+DEFINE_STRERROR_ACCOUNT(group);
+
 bool uid_is_valid(uid_t uid) {
 
         /* Also see POSIX IEEE Std 1003.1-2008, 2016 Edition, 3.436. */
@@ -831,7 +851,7 @@ char* mangle_gecos(const char *d) {
         char *mangled;
 
         /* Makes sure the provided string becomes valid as a GEGOS field, by dropping bad chars. glibc's
-         * putwent() only changes \n and : to spaces. We do more: replace all CC too, and remove invalid
+         * putpwent() only changes \n and : to spaces. We do more: replace all CC too, and remove invalid
          * UTF-8 */
 
         mangled = strdup(d);
@@ -900,19 +920,28 @@ int maybe_setgroups(size_t size, const gid_t *list) {
 
         /* Check if setgroups is allowed before we try to drop all the auxiliary groups */
         if (size == 0) { /* Dropping all aux groups? */
+
+                /* The kernel refuses setgroups() if there are no GID mappings in the current
+                 * user namespace, so check that beforehand and don't try to setgroups() if
+                 * there are no GID mappings. */
+                _cleanup_fclose_ FILE *f = fopen("/proc/self/gid_map", "re");
+                if (!f && errno != ENOENT)
+                        return -errno;
+                if (f) {
+                        r = safe_fgetc(f, /* ret= */ NULL);
+                        if (r < 0)
+                                return r;
+                        if (r == 0) {
+                                log_debug("Skipping setgroups(), /proc/self/gid_map is empty");
+                                return 0;
+                        }
+                }
+
                 _cleanup_free_ char *setgroups_content = NULL;
-                bool can_setgroups;
-
                 r = read_one_line_file("/proc/self/setgroups", &setgroups_content);
-                if (r == -ENOENT)
-                        /* Old kernels don't have /proc/self/setgroups, so assume we can use setgroups */
-                        can_setgroups = true;
-                else if (r < 0)
+                if (r < 0 && r != -ENOENT)
                         return r;
-                else
-                        can_setgroups = streq(setgroups_content, "allow");
-
-                if (!can_setgroups) {
+                if (r > 0 && streq(setgroups_content, "deny")) {
                         log_debug("Skipping setgroups(), /proc/self/setgroups is set to 'deny'");
                         return 0;
                 }
@@ -1090,7 +1119,7 @@ int getpwnam_malloc(const char *name, struct passwd **ret) {
                         return -ENOMEM;
 
                 struct passwd *pw = NULL;
-                r = getpwnam_r(name, buf, (char*) buf + ALIGN(sizeof(struct passwd)), (size_t) bufsize, &pw);
+                r = getpwnam_r(name, buf, (char*) buf + ALIGN(sizeof(struct passwd)), bufsize, &pw);
                 if (r == 0) {
                         if (pw) {
                                 if (ret)
@@ -1131,7 +1160,7 @@ int getpwuid_malloc(uid_t uid, struct passwd **ret) {
                         return -ENOMEM;
 
                 struct passwd *pw = NULL;
-                r = getpwuid_r(uid, buf, (char*) buf + ALIGN(sizeof(struct passwd)), (size_t) bufsize, &pw);
+                r = getpwuid_r(uid, buf, (char*) buf + ALIGN(sizeof(struct passwd)), bufsize, &pw);
                 if (r == 0) {
                         if (pw) {
                                 if (ret)
@@ -1175,7 +1204,7 @@ int getgrnam_malloc(const char *name, struct group **ret) {
                         return -ENOMEM;
 
                 struct group *gr = NULL;
-                r = getgrnam_r(name, buf, (char*) buf + ALIGN(sizeof(struct group)), (size_t) bufsize, &gr);
+                r = getgrnam_r(name, buf, (char*) buf + ALIGN(sizeof(struct group)), bufsize, &gr);
                 if (r == 0) {
                         if (gr) {
                                 if (ret)
@@ -1214,7 +1243,7 @@ int getgrgid_malloc(gid_t gid, struct group **ret) {
                         return -ENOMEM;
 
                 struct group *gr = NULL;
-                r = getgrgid_r(gid, buf, (char*) buf + ALIGN(sizeof(struct group)), (size_t) bufsize, &gr);
+                r = getgrgid_r(gid, buf, (char*) buf + ALIGN(sizeof(struct group)), bufsize, &gr);
                 if (r == 0) {
                         if (gr) {
                                 if (ret)

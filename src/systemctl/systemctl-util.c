@@ -29,6 +29,7 @@
 #include "reboot-util.h"
 #include "runtime-scope.h"
 #include "set.h"
+#include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "systemctl.h"
@@ -589,6 +590,13 @@ int unit_find_paths(
                         return log_error_errno(r, "Failed to find fragment for '%s': %m", unit_name);
 
                 if (_path) {
+                        /* Check if unit is masked (symlinked to /dev/null or empty) */
+                        r = null_or_empty_path(_path);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to check if '%s' is masked: %m", unit_name);
+                        if (r > 0)
+                                return -ERFKILL; /* special case: no logging */
+
                         path = strdup(_path);
                         if (!path)
                                 return log_oom();
@@ -752,7 +760,7 @@ int append_unit_dependencies(sd_bus *bus, char **names, char ***ret) {
 
                 (void) unit_get_dependencies(bus, *name, &deps);
 
-                if (strv_extend_strv_consume(&with_deps, deps, /* filter_duplicates = */ true) < 0)
+                if (strv_extend_strv_consume(&with_deps, deps, /* filter_duplicates= */ true) < 0)
                         return log_oom();
         }
 

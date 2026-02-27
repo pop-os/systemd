@@ -1,11 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "dirent-util.h"
 #include "fs-util.h"
 #include "glob-util.h"
 #include "rm-rf.h"
@@ -60,7 +58,7 @@ TEST(safe_glob) {
         ASSERT_NOT_NULL(mkdtemp(template));
 
         fn = strjoina(template, "/*");
-        ASSERT_ERROR(safe_glob(fn, /* flags = */ 0, &v), ENOENT);
+        ASSERT_ERROR(safe_glob(fn, /* flags= */ 0, &v), ENOENT);
 
         fn2 = strjoina(template, "/.*");
         ASSERT_ERROR(safe_glob(fn2, GLOB_NOSORT|GLOB_BRACE, &v), ENOENT);
@@ -68,7 +66,7 @@ TEST(safe_glob) {
         fname = strjoina(template, "/.foobar");
         ASSERT_OK(touch(fname));
 
-        ASSERT_ERROR(safe_glob(fn, /* flags = */ 0, &v), ENOENT);
+        ASSERT_ERROR(safe_glob(fn, /* flags= */ 0, &v), ENOENT);
 
         ASSERT_OK(safe_glob(fn2, GLOB_NOSORT|GLOB_BRACE, &v));
         ASSERT_EQ(strv_length(v), 1u);

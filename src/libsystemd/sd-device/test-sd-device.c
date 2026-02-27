@@ -3,8 +3,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "sd-daemon.h"
 #include "sd-event.h"
 
+#include "capability-util.h"
 #include "device-internal.h"
 #include "device-private.h"
 #include "device-util.h"
@@ -12,6 +14,7 @@
 #include "fd-util.h"
 #include "fs-util.h"
 #include "hashmap.h"
+#include "libmount-util.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -25,14 +28,17 @@
 #include "tests.h"
 #include "tmpfile-util.h"
 #include "udev-util.h"
+#include "virt.h"
 
 TEST(mdio_bus) {
         int r;
 
         /* For issue #37711 */
 
-        if (getuid() != 0)
-                return (void) log_tests_skipped("not running as root");
+        if (getuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0)
+                return (void) log_tests_skipped("Not privileged");
+        if (running_in_chroot() > 0)
+                return (void) log_tests_skipped("Running in chroot");
 
         ASSERT_OK(r = safe_fork("(mdio_bus)", FORK_CLOSE_ALL_FDS|FORK_DEATHSIG_SIGTERM|FORK_REOPEN_LOG|FORK_LOG|FORK_WAIT|FORK_NEW_MOUNTNS|FORK_MOUNTNS_SLAVE, NULL));
         if (r == 0) {
@@ -50,7 +56,7 @@ TEST(mdio_bus) {
                         { sd_device_get_sysname,          "Qualcomm Atheros AR8031/AR8033" },
                 };
 
-                ASSERT_OK_ERRNO(setenv("SYSTEMD_DEVICE_VERIFY_SYSFS", "0", /* overwrite = */ false));
+                ASSERT_OK_ERRNO(setenv("SYSTEMD_DEVICE_VERIFY_SYSFS", "0", /* overwrite= */ false));
                 ASSERT_OK(mount_nofollow_verbose(LOG_ERR, "tmpfs", "/sys/bus/", "tmpfs", 0, NULL));
                 r = mkdir_p(syspath, 0755);
                 if (ERRNO_IS_NEG_PRIVILEGE(r)) {
@@ -458,6 +464,10 @@ TEST(sd_device_enumerator_filter_subsystem) {
                 return;
         }
 
+        /* The rest of this test depends on a full booted system with a working udev and so on */
+        if (!sd_booted())
+                return (void) log_tests_skipped("Test requires fully booted system with udev/etc, skipping to avoid hanging forever.");
+
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         ASSERT_OK(sd_event_default(&event));
         ASSERT_OK(sd_event_add_inotify(event, NULL, "/run/udev" , IN_DELETE, on_inotify, NULL));
@@ -829,8 +839,14 @@ TEST(devname_from_devnum) {
 }
 
 static int intro(void) {
+        int r;
+
         if (path_is_mount_point("/sys") <= 0)
-                return log_tests_skipped("/sys is not mounted");
+                return log_tests_skipped("/sys/ is not mounted");
+
+        r = dlopen_libmount();
+        if (r < 0)
+                return log_tests_skipped("libmount not available.");
 
         return EXIT_SUCCESS;
 }

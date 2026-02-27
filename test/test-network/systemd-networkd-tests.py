@@ -425,13 +425,15 @@ def clear_udev_rules():
 def save_active_units():
     for u in [
             'systemd-networkd.socket',
+            'systemd-networkd-resolve-hook.socket',
             'systemd-networkd-varlink.socket',
             'systemd-networkd.service',
             'systemd-resolved-monitor.socket',
             'systemd-resolved-varlink.socket',
             'systemd-resolved.service',
             'systemd-timesyncd.service',
-            'firewalld.service'
+            'firewalld.service',
+            'nftables.service',
     ]:
         if call(f'systemctl is-active --quiet {u}') == 0:
             call(f'systemctl stop {u}')
@@ -443,6 +445,10 @@ def restore_active_units():
 
     if 'systemd-networkd.socket' in active_units:
         call('systemctl stop systemd-networkd.socket')
+        has_network_socket = True
+
+    if 'systemd-networkd-resolve-hook.socket' in active_units:
+        call('systemctl stop systemd-networkd-resolve-hook.socket')
         has_network_socket = True
 
     if 'systemd-networkd-varlink.socket' in active_units:
@@ -487,18 +493,9 @@ def create_service_dropin(service, command, additional_settings=None):
     if ubsan_options:
         drop_in += [f'Environment=UBSAN_OPTIONS="{ubsan_options}"']
     if asan_options or lsan_options or ubsan_options:
-        # Disable system call filter when running with sanitizers, as they seem to call filtered syscall at
-        # the very end of the execution and stuck the process. See issue #39567.
         drop_in += [
-            'LockPersonality=no',
-            'ProtectClock=no',
-            'ProtectKernelLogs=no',
-            'RestrictAddressFamilies=',
-            'RestrictNamespaces=no',
-            'RestrictRealtime=no',
-            'RestrictSUIDSGID=no',
-            'SystemCallArchitectures=',
             'SystemCallFilter=',
+            'TimeoutStopFailureMode=abort',
         ]
     if use_valgrind or asan_options or lsan_options or ubsan_options:
         drop_in += ['MemoryDenyWriteExecute=no']
@@ -524,8 +521,9 @@ def setup_system_units():
         for unit in [
                 'systemd-networkd.service',
                 'systemd-networkd.socket',
-                'systemd-networkd-varlink.socket',
                 'systemd-networkd-persistent-storage.service',
+                'systemd-networkd-resolve-hook.socket',
+                'systemd-networkd-varlink.socket',
                 'systemd-resolved.service',
                 'systemd-timesyncd.service',
                 'systemd-udevd.service',
@@ -551,22 +549,7 @@ def setup_system_units():
 
     # TODO: also run udevd with sanitizers, valgrind, or coverage
     create_unit_dropin(
-        'systemd-udevd.service',
-        [
-            '[Service]',
-            'ExecStart=',
-            f'ExecStart=@{udevadm_bin} systemd-udevd',
-        ]
-    )
-    create_unit_dropin(
         'systemd-networkd.socket',
-        [
-            '[Unit]',
-            'StartLimitIntervalSec=0',
-        ]
-    )
-    create_unit_dropin(
-        'systemd-networkd-varlink.socket',
         [
             '[Unit]',
             'StartLimitIntervalSec=0',
@@ -583,6 +566,28 @@ def setup_system_units():
             'ExecStop=',
             f'ExecStop={networkctl_bin} persistent-storage no',
             'Environment=SYSTEMD_LOG_LEVEL=debug' if enable_debug else '',
+        ]
+    )
+    create_unit_dropin(
+        'systemd-networkd-resolve-hook.socket',
+        [
+            '[Unit]',
+            'StartLimitIntervalSec=0',
+        ]
+    )
+    create_unit_dropin(
+        'systemd-networkd-varlink.socket',
+        [
+            '[Unit]',
+            'StartLimitIntervalSec=0',
+        ]
+    )
+    create_unit_dropin(
+        'systemd-udevd.service',
+        [
+            '[Service]',
+            'ExecStart=',
+            f'ExecStart=@{udevadm_bin} systemd-udevd',
         ]
     )
 
@@ -603,8 +608,9 @@ def clear_system_units():
 
     rm_unit('systemd-networkd.service')
     rm_unit('systemd-networkd.socket')
-    rm_unit('systemd-networkd-varlink.socket')
     rm_unit('systemd-networkd-persistent-storage.service')
+    rm_unit('systemd-networkd-resolve-hook.socket')
+    rm_unit('systemd-networkd-varlink.socket')
     rm_unit('systemd-resolved.service')
     rm_unit('systemd-timesyncd.service')
     rm_unit('systemd-udevd.service')
@@ -989,10 +995,12 @@ def stop_networkd(show_logs=True, check_failed=True):
 
     if check_failed:
         check_output('systemctl stop systemd-networkd.socket')
+        check_output('systemctl stop systemd-networkd-resolve-hook.socket')
         check_output('systemctl stop systemd-networkd-varlink.socket')
         check_output('systemctl stop systemd-networkd.service')
     else:
         call('systemctl stop systemd-networkd.socket')
+        call('systemctl stop systemd-networkd-resolve-hook.socket')
         call('systemctl stop systemd-networkd-varlink.socket')
         call('systemctl stop systemd-networkd.service')
 
@@ -4626,6 +4634,21 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertNotIn('149.10.124.59', output)
         self.assertIn('default via 149.10.124.60 proto static', output)
 
+    def test_gateway_clear_routes(self):
+        copy_network_unit('25-gateway-clear-routes.network', '12-dummy.netdev')
+        start_networkd()
+        self.wait_online('dummy98:routable')
+
+        print('### ip -4 route show dev dummy98')
+        output = check_output('ip -4 route show dev dummy98')
+        print(output)
+        # All routes should be cleared - no default gateway, no [Route] section routes
+        self.assertNotIn('default via 10.0.0.2', output)
+        self.assertNotIn('192.168.1.0/24', output)
+        self.assertNotIn('192.168.2.0/24', output)
+        # Only the directly connected network should remain
+        self.assertIn('10.0.0.0/24 proto kernel scope link src 10.0.0.1', output)
+
     def test_ip_route_ipv6_src_route(self):
         # a dummy device does not make the addresses go through tentative state, so we
         # reuse a bond from an earlier test, which does make the addresses go through
@@ -7340,6 +7363,40 @@ class NetworkdDHCPServerTests(unittest.TestCase, Utilities):
         self.assertIn('Address: 10.1.1.200 (DHCPv4 via 10.1.1.1)', output)
         self.assertRegex(output, 'DHCPv4 Client ID: IAID:[0-9a-z]*/DUID')
 
+    def test_dhcp_server_static_lease_hostname_simple(self):
+        copy_network_unit('25-veth.netdev',
+                          '25-dhcp-client-simple-hostname.network',
+                          '25-dhcp-server-static-hostname.network')
+        start_networkd()
+        self.wait_online('veth99:routable', 'veth-peer:routable')
+
+        output = networkctl_json('veth99')
+        check_json(output)
+        data = json.loads(output)
+        self.assertEqual(data['DHCPv4Client']['Lease']['Hostname'], 'simple-host')
+
+    def test_dhcp_server_static_lease_hostname_fqdn(self):
+        copy_network_unit('25-veth.netdev',
+                          '25-dhcp-client-fqdn-hostname.network',
+                          '25-dhcp-server-static-hostname.network')
+        start_networkd()
+        self.wait_online('veth99:routable', 'veth-peer:routable')
+
+        output = networkctl_json('veth99')
+        check_json(output)
+        data = json.loads(output)
+        self.assertEqual(data['DHCPv4Client']['Lease']['Hostname'], 'fqdn.example.com')
+
+    def test_dhcp_server_resolve_hook(self):
+        copy_network_unit('25-veth.netdev', '25-dhcp-client-resolve-hook.network', '25-dhcp-server-resolve-hook.network')
+        start_networkd()
+        self.wait_online('veth99:routable', 'veth-peer:routable')
+
+        output = check_output('resolvectl query flummy._networkdtest')
+        print(output)
+        self.assertIn('192.168.5.2', output)
+
+
 class NetworkdDHCPServerRelayAgentTests(unittest.TestCase, Utilities):
 
     def setUp(self):
@@ -8573,9 +8630,8 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
 
         start_networkd()
         self.wait_online('veth-peer:carrier')
-        masq = lambda bs: ':'.join(f'{b:02x}' for b in bs)
-        start_dnsmasq('--dhcp-option=114,' + masq(b'http://\x00invalid/url'),
-                      '--dhcp-option=option6:103,' + masq(b'http://\x00/invalid/url'))
+        start_dnsmasq('--dhcp-option=114,http://|invalid/url',
+                      '--dhcp-option=option6:103,http://|invalid/url')
 
         check(self, True, True)
         check(self, True, False)
@@ -8866,7 +8922,7 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
 
         self.teardown_nftset('addr6', 'network6', 'ifindex')
 
-    def verify_dhcp4_6rd(self, tunnel_name, address_prefix, border_router):
+    def verify_dhcp4_6rd(self, tunnel_name, address_prefix, address_prefix_re, border_router):
         print('### ip -4 address show dev veth-peer scope global')
         output = check_output('ip -4 address show dev veth-peer scope global')
         print(output)
@@ -9031,7 +9087,7 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
         output = check_output(f'ip -6 address show dev {tunnel_name}')
         print(output)
         self.assertRegex(output, 'inet6 2001:db8:6464:[0-9a-f]+0[23]:[0-9a-f]*:[0-9a-f]*:[0-9a-f]*:[0-9a-f]*/64 (metric 256 |)scope global dynamic')
-        self.assertRegex(output, fr'inet6 ::{address_prefix}[0-9]+/96 scope global')
+        self.assertRegex(output, fr'inet6 ::{address_prefix_re}/96 scope global')
 
         print(f'### ip -6 route show dev {tunnel_name}')
         output = check_output(f'ip -6 route show dev {tunnel_name}')
@@ -9043,7 +9099,7 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
         output = check_output('ip -6 route show default')
         print(output)
         self.assertIn('default', output)
-        self.assertIn(f'via ::{border_router} dev {tunnel_name}', output)
+        self.assertRegex(output, fr'via ::{border_router} dev {tunnel_name}')
 
     def test_dhcp4_6rd(self):
         def get_dhcp_6rd_prefix(link):
@@ -9103,13 +9159,13 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
 
         self.wait_online(f'{tunnel_name}:routable')
 
-        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.1', '10.0.0.1')
+        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.1', '(10.100.100.1[0-9][0-9]|a64:64[6-9a-c][0-9a-f])', '(10.0.0.1|a00:1)')
 
         # Test case for reconfigure
         networkctl_reconfigure('dummy98', 'dummy99')
         self.wait_online('dummy98:routable', 'dummy99:degraded')
 
-        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.1', '10.0.0.1')
+        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.1', '(10.100.100.1[0-9][0-9]|a64:64[6-9a-c][0-9a-f])', '(10.0.0.1|a00:1)')
 
         # Change the address range and (border) router, then if check the same tunnel is reused.
         stop_dnsmasq()
@@ -9123,7 +9179,7 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
         self.wait_online('veth99:routable', 'test1:routable', 'dummy97:routable', 'dummy98:routable', 'dummy99:degraded',
                          'veth97:routable', 'veth97-peer:routable', 'veth98:routable', 'veth98-peer:routable')
 
-        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.2', '10.0.0.2')
+        self.verify_dhcp4_6rd(tunnel_name, '10.100.100.2', '(10.100.100.2[0-5][0-9]|a64:64[c-f][0-9a-f])', '(10.0.0.2|a00:2)')
 
 class NetworkdIPv6PrefixTests(unittest.TestCase, Utilities):
 
@@ -9319,7 +9375,7 @@ class NetworkdSysctlTest(unittest.TestCase, Utilities):
         tear_down_common()
 
     @unittest.skipUnless(compare_kernel_version("6.12"), reason="On kernels <= 6.12, bpf_current_task_under_cgroup() isn't available for program types BPF_PROG_TYPE_CGROUP_SYSCTL")
-    def check_sysctl_watch(self):
+    def test_sysctl_monitor(self):
         copy_network_unit('12-dummy.network', '12-dummy.netdev', '12-dummy.link')
         start_networkd()
 
@@ -9342,6 +9398,7 @@ class NetworkdSysctlTest(unittest.TestCase, Utilities):
         self.assertRegex(log, r"Foreign process 'sysctl\[\d+\]' changed sysctl '/proc/sys/net/ipv6/conf/dummy98/proxy_ndp' from '0' to '1', conflicting with our setting to '0'")
         self.assertNotIn("changed sysctl '/proc/sys/net/ipv6/conf/dummy98/hop_limit'", log)
         self.assertNotIn("changed sysctl '/proc/sys/net/ipv6/conf/dummy98/max_addresses'", log)
+        self.assertNotIn("Sysctl monitor BPF returned error", log)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

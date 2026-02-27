@@ -13,15 +13,13 @@ at_exit() {
     set +e
 
     machinectl status long-running &>/dev/null && machinectl kill --signal=KILL long-running
-    mountpoint -q /var/lib/machines && timeout 30 sh -c "until umount /var/lib/machines; do sleep .5; done"
+    mountpoint -q /var/lib/machines && timeout 30 bash -c "until umount /var/lib/machines; do sleep .5; done"
     [[ -n "${NSPAWN_FRAGMENT:-}" ]] && rm -f "/etc/systemd/nspawn/$NSPAWN_FRAGMENT" "/var/lib/machines/$NSPAWN_FRAGMENT"
     rm -f /run/systemd/nspawn/*.nspawn
 }
 
 trap at_exit EXIT
 
-systemctl service-log-level systemd-machined debug
-systemctl service-log-level systemd-importd debug
 # per request in https://github.com/systemd/systemd/pull/35117
 systemctl edit --runtime --stdin 'systemd-nspawn@.service' --drop-in=debug.conf <<EOF
 [Service]
@@ -192,7 +190,7 @@ test ! -d /var/lib/machines/.hidden1
 
 # Prepare a simple raw container
 mkdir -p /tmp/mnt
-dd if=/dev/zero of=/var/tmp/container.raw bs=1M count=256
+truncate -s 384M /var/tmp/container.raw
 mkfs.ext4 /var/tmp/container.raw
 mount -o loop /var/tmp/container.raw /tmp/mnt
 cp -r /var/lib/machines/container1/* /tmp/mnt
@@ -310,8 +308,8 @@ timeout 30 bash -c "while varlinkctl call /run/systemd/machine/io.systemd.Machin
 # test io.systemd.Machine.List with sshAddress and sshPrivateKeyPath fields
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Register '{"name": "registered-container", "class": "container", "sshAddress": "localhost", "sshPrivateKeyPath": "/non-existent"}'
 timeout 30 bash -c "until varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{\"name\":\"registered-container\"}'; do sleep 0.5; done"
-varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name":"registered-container"}' | jq '.sshAddress' | grep -q 'localhost'
-varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name":"registered-container"}' | jq '.sshPrivateKeyPath' | grep -q 'non-existent'
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name":"registered-container"}' | jq '.sshAddress' | grep 'localhost' >/dev/null
+varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name":"registered-container"}' | jq '.sshPrivateKeyPath' | grep 'non-existent' >/dev/null
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Unregister '{"name": "registered-container"}'
 
 # test io.systemd.Machine.List with addresses, OSRelease, and UIDShift fields
@@ -371,7 +369,7 @@ journalctl --sync
 (! journalctl -u systemd-machined.service --since="$TS" --grep 'Connection busy')
 machinectl terminate container-without-os-release
 
-(ip addr show lo | grep -q 192.168.1.100) || ip address add 192.168.1.100/24 dev lo
+(ip addr show lo | grep 192.168.1.100 >/dev/null) || ip address add 192.168.1.100/24 dev lo
 (! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name": ".host"}' | grep 'addresses')
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name": ".host", "acquireMetadata": "yes"}' | grep 'addresses'
 (! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.List '{"name": ".host"}' | grep 'OSRelease')
@@ -399,7 +397,7 @@ rm -f /tmp/none-existent-file
 # server side, to not generate early SIGHUP. Hence, let's just invoke "sleep
 # infinity" client side, once we acquired the fd (passing it to it), and kill
 # it once we verified everything worked.
-PID=$(systemd-notify --fork -- varlinkctl --exec call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell", "user": "root", "path": "/usr/bin/bash", "args": ["bash", "-c", "echo $FOO > /tmp/none-existent-file"], "environment": ["FOO=BAR"]}' -- sleep infinity)
+PID=$(systemd-notify --fork -- varlinkctl --exec call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.Open '{"name": ".host", "mode": "shell", "user": "root", "path": "/usr/bin/bash", "args": ["bash", "-c", "echo $FOO >/tmp/none-existent-file"], "environment": ["FOO=BAR"]}' -- sleep infinity)
 timeout 30 bash -c "until test -e /tmp/none-existent-file; do sleep .5; done"
 grep -q "BAR" /tmp/none-existent-file
 kill "$PID"
@@ -426,7 +424,7 @@ diff /tmp/foo /var/lib/machines/long-running/root/foo
 (! varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo"}') # FileExists
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo", "replace": true}'
 
-echo "sample-test-output" > /tmp/foo
+echo "sample-test-output" >/tmp/foo
 varlinkctl call /run/systemd/machine/io.systemd.Machine io.systemd.Machine.CopyTo '{"name": "long-running", "source": "/tmp/foo", "destination": "/root/foo", "replace": true}'
 diff /tmp/foo /var/lib/machines/long-running/root/foo
 rm -f /tmp/foo /var/lib/machines/long-running/root/foo

@@ -318,7 +318,7 @@ static int json_dispatch_rlimit_value(const char *name, sd_json_variant *variant
                 uint64_t w;
 
                 w = sd_json_variant_unsigned(variant);
-                if (w == RLIM_INFINITY || (uint64_t) w != sd_json_variant_unsigned(variant))
+                if (w == RLIM_INFINITY || w != sd_json_variant_unsigned(variant))
                         return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "Resource limit value '%s' is out of range.", name);
 
                 *ret = (rlim_t) w;
@@ -629,7 +629,7 @@ int json_dispatch_user_group_list(const char *name, sd_json_variant *variant, sd
                         return json_log(e, flags, r, "Failed to append array element: %m");
         }
 
-        r = strv_extend_strv_consume(list, TAKE_PTR(l), /* filter_duplicates = */ true);
+        r = strv_extend_strv_consume(list, TAKE_PTR(l), /* filter_duplicates= */ true);
         if (r < 0)
                 return json_log(variant, flags, r, "Failed to merge user/group arrays: %m");
 
@@ -2041,7 +2041,7 @@ uint64_t user_record_luks_sector_size(UserRecord *h) {
                 return 512;
 
         /* Allow up to 4K due to dm-crypt support and 4K alignment by the homed LUKS backend */
-        return CLAMP(UINT64_C(1) << (63 - __builtin_clzl(h->luks_sector_size)), 512U, 4096U);
+        return CLAMP(UINT64_C(1) << (63 - __builtin_clzll(h->luks_sector_size)), 512U, 4096U);
 }
 
 const char* user_record_luks_pbkdf_hash_algorithm(UserRecord *h) {
@@ -2777,7 +2777,8 @@ bool userdb_match_is_set(const UserDBMatch *match) {
         return !strv_isempty(match->fuzzy_names) ||
                 !FLAGS_SET(match->disposition_mask, USER_DISPOSITION_MASK_ALL) ||
                 match->uid_min > 0 ||
-                match->uid_max < UID_INVALID-1;
+                match->uid_max < UID_INVALID-1 ||
+                !sd_id128_is_null(match->uuid);
 }
 
 void userdb_match_done(UserDBMatch *match) {
@@ -2834,6 +2835,9 @@ bool user_record_match(UserRecord *u, const UserDBMatch *match) {
                 return false;
 
         if (!BIT_SET(match->disposition_mask, user_record_disposition(u)))
+                return false;
+
+        if (!sd_id128_is_null(match->uuid) && !sd_id128_equal(match->uuid, u->uuid))
                 return false;
 
         if (!strv_isempty(match->fuzzy_names)) {

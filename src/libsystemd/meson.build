@@ -203,7 +203,6 @@ simple_tests += files(
         'sd-bus/test-bus-vtable.c',
         'sd-device/test-device-util.c',
         'sd-device/test-sd-device-monitor.c',
-        'sd-device/test-sd-device.c',
         'sd-journal/test-journal-flush.c',
         'sd-journal/test-journal-interleaving.c',
         'sd-journal/test-journal-stream.c',
@@ -214,6 +213,10 @@ simple_tests += files(
 )
 
 libsystemd_tests += [
+        {
+                'sources' : files('sd-device/test-sd-device.c'),
+                'dependencies' : [ threads, libmount_cflags ],
+        },
         {
                 'sources' : files('sd-bus/test-bus-address.c'),
                 'dependencies' : threads
@@ -229,7 +232,7 @@ libsystemd_tests += [
         },
         {
                 'sources' : files('sd-bus/test-bus-cleanup.c'),
-                'dependencies' : [threads, libseccomp],
+                'dependencies' : [threads, libseccomp_cflags],
         },
         {
                 'sources' : files('sd-bus/test-bus-marshal.c'),
@@ -264,7 +267,7 @@ libsystemd_tests += [
         },
         {
                 'sources' : files('sd-bus/test-bus-track.c'),
-                'dependencies' : libseccomp,
+                'dependencies' : libseccomp_cflags,
         },
         {
                 'sources' : files('sd-bus/test-bus-watch-bind.c'),

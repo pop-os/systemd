@@ -2,7 +2,7 @@
 
 #include "varlink-io.systemd.BootControl.h"
 
-static SD_VARLINK_DEFINE_ENUM_TYPE(
+SD_VARLINK_DEFINE_ENUM_TYPE(
                 BootEntryType,
                 SD_VARLINK_FIELD_COMMENT("Boot Loader Specification Type #1 entries (.conf files)"),
                 SD_VARLINK_DEFINE_ENUM_VALUE(type1),
@@ -13,7 +13,7 @@ static SD_VARLINK_DEFINE_ENUM_TYPE(
                 SD_VARLINK_FIELD_COMMENT("Automatically generated entries"),
                 SD_VARLINK_DEFINE_ENUM_VALUE(auto));
 
-static SD_VARLINK_DEFINE_ENUM_TYPE(
+SD_VARLINK_DEFINE_ENUM_TYPE(
                 BootEntrySource,
                 SD_VARLINK_FIELD_COMMENT("Boot entry found in EFI system partition (ESP)"),
                 SD_VARLINK_DEFINE_ENUM_VALUE(esp),
@@ -48,6 +48,7 @@ static SD_VARLINK_DEFINE_STRUCT_TYPE(
                 SD_VARLINK_DEFINE_FIELD(linux, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_FIELD(efi, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_FIELD(uki, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
+                SD_VARLINK_DEFINE_FIELD(profile, SD_VARLINK_INT, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_FIELD(initrd, SD_VARLINK_STRING, SD_VARLINK_NULLABLE|SD_VARLINK_ARRAY),
                 SD_VARLINK_DEFINE_FIELD(devicetree, SD_VARLINK_STRING, SD_VARLINK_NULLABLE),
                 SD_VARLINK_DEFINE_FIELD(devicetreeOverlay, SD_VARLINK_STRING, SD_VARLINK_NULLABLE|SD_VARLINK_ARRAY),

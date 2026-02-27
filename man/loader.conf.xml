@@ -51,7 +51,7 @@
     and type #2 (<filename><replaceable>ESP</replaceable>/EFI/Linux/*.uki</filename>
     and <filename><replaceable>XBOOTLDR</replaceable>/EFI/Linux/*.uki</filename>).
     Those files are described by the
-    <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader
+    <ulink url="https://uapi-group.org/specifications/specs/boot_loader_specification">UAPI.1 Boot Loader
     Specification</ulink>.</para>
 
     <para>Note: the behaviour of <command>systemd-boot</command> is also influenced by EFI variables. Some of
@@ -293,8 +293,10 @@
         <para>Controls enrollment of secure boot keys found on the ESP if the system is in setup mode:
         <variablelist>
           <varlistentry>
-            <term><option>off</option></term>
-            <listitem><para>No action is taken.</para>
+            <term><option>if-safe</option></term>
+            <listitem><para>This is the default. Same behavior as <option>manual</option>, but will try to automatically
+            enroll the key named <literal>auto</literal> if it is considered to be safe. Currently, this is only
+            the case if the system is running inside a virtual machine.</para>
 
             <xi:include href="version-info.xml" xpointer="v253"/></listitem>
           </varlistentry>
@@ -308,10 +310,8 @@
           </varlistentry>
 
           <varlistentry>
-            <term><option>if-safe</option></term>
-            <listitem><para>Same behavior as <option>manual</option>, but will try to automatically
-            enroll the key <literal>auto</literal> if it is considered to be safe. Currently, this is only
-            the case if the system is running inside a virtual machine.</para>
+            <term><option>off</option></term>
+            <listitem><para>No action is taken.</para>
 
             <xi:include href="version-info.xml" xpointer="v253"/></listitem>
           </varlistentry>
@@ -422,6 +422,17 @@ sbvarsign --attr "${attr}" --key KEK.key --cert KEK.pem --output db.auth db db.e
       </varlistentry>
 
       <varlistentry>
+        <term>secure-boot-enroll-timeout-sec</term>
+        <listitem>
+          <para>How long the warning should be shown in seconds before the key enrollment process starts.</para>
+          <para>If set to <literal>hidden</literal> or <literal>0</literal>, no warning is shown and the keys
+          will be enrolled immediately. The default timeout (if not set explicitly) is 15 seconds.</para>
+          <para>This option is only relevant if <literal>secure-boot-enroll</literal> is enabled.</para>
+          <xi:include href="version-info.xml" xpointer="v259"/>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term>reboot-for-bitlocker</term>
 
         <listitem><para>Caveat: This feature is experimental, and is likely to be changed (or removed in its
@@ -479,6 +490,28 @@ sbvarsign --attr "${attr}" --key KEK.key --cert KEK.pem --output db.auth db db.e
         </para>
 
         <xi:include href="version-info.xml" xpointer="v258"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term>log-level</term>
+
+        <listitem><para>Controls the log level used by
+        <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+        </para>
+
+        <para>Valid values are <literal>emerg</literal>, <literal>alert</literal>, <literal>crit</literal>,
+        <literal>err</literal>, <literal>warning</literal>, <literal>notice</literal>,
+        <literal>info</literal>, and <literal>debug</literal>.</para>
+
+        <para>If unspecified, <literal>info</literal> will be used, unless one has already been configured
+        via an SMBIOS Type 11 string, see
+        <citerefentry><refentrytitle>smbios-type-11</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+        </para>
+
+        <para>Note that the configured level will only be used after <filename>loader.conf</filename> has
+        been parsed, so log messages generated before that point may be unaffected by this setting.</para>
+
+        <xi:include href="version-info.xml" xpointer="v259"/></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>

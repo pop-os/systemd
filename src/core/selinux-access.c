@@ -4,8 +4,6 @@
 
 #if HAVE_SELINUX
 
-#include <selinux/avc.h>
-#include <selinux/selinux.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
@@ -121,9 +119,9 @@ _printf_(2, 3) static int log_callback(int type, const char *fmt, ...) {
 
                 if (r >= 0) {
                         if (type == SELINUX_AVC)
-                                audit_log_user_avc_message(fd, AUDIT_USER_AVC, buf, NULL, NULL, NULL, getuid());
+                                sym_audit_log_user_avc_message(fd, AUDIT_USER_AVC, buf, NULL, NULL, NULL, getuid());
                         else if (type == SELINUX_ERROR)
-                                audit_log_user_avc_message(fd, AUDIT_USER_SELINUX_ERR, buf, NULL, NULL, NULL, getuid());
+                                sym_audit_log_user_avc_message(fd, AUDIT_USER_SELINUX_ERR, buf, NULL, NULL, NULL, getuid());
 
                         return 0;
                 }
@@ -144,7 +142,7 @@ _printf_(2, 3) static int log_callback(int type, const char *fmt, ...) {
         return 0;
 }
 
-static int access_init(sd_bus_error *error) {
+static int access_init(sd_bus_error *reterr_error) {
         int r;
 
         if (!mac_selinux_use())
@@ -153,7 +151,7 @@ static int access_init(sd_bus_error *error) {
         if (initialized)
                 return 1;
 
-        if (avc_open(NULL, 0) != 0) {
+        if (sym_avc_open(NULL, 0) != 0) {
                 /* Passing errno to save original value for later */
                 r = log_selinux_enforcing_errno(errno, "Failed to open the SELinux AVC: %m");
                 if (r == 0)
@@ -165,11 +163,11 @@ static int access_init(sd_bus_error *error) {
                 /* Return an access denied error based on the original errno, if we couldn't load the AVC but
                  * enforcing mode was on, or we couldn't determine whether it is one. */
                 errno = -r;
-                return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Failed to open the SELinux AVC: %m");
+                return sd_bus_error_setf(reterr_error, SD_BUS_ERROR_ACCESS_DENIED, "Failed to open the SELinux AVC: %m");
         }
 
-        selinux_set_callback(SELINUX_CB_AUDIT, (union selinux_callback) { .func_audit = audit_callback });
-        selinux_set_callback(SELINUX_CB_LOG, (union selinux_callback) { .func_log = log_callback });
+        sym_selinux_set_callback(SELINUX_CB_AUDIT, (union selinux_callback) { .func_audit = audit_callback });
+        sym_selinux_set_callback(SELINUX_CB_LOG, (union selinux_callback) { .func_log = log_callback });
 
         initialized = true;
         return 1;
@@ -196,7 +194,7 @@ static int get_our_contexts(const Unit *unit, const char **ret_acon, const char 
          * does exactly the same - call getcon_raw(). However, it involves
          * selinux_init() which opens label DB. It was not part of the
          * original code. I don't want to change it for now. */
-        if (getcon_raw(&fcon) < 0)
+        if (sym_getcon_raw(&fcon) < 0)
                 return log_debug_errno(errno, "SELinux getcon_raw() failed: %m");
 
         if (!fcon)
@@ -214,7 +212,7 @@ static int check_access(
                 const char *tclass,
                 const char *permission,
                 struct audit_info *audit_info,
-                sd_bus_error *error) {
+                sd_bus_error *reterr_error) {
 
         bool enforce = mac_selinux_enforcing();
         int r;
@@ -226,12 +224,12 @@ static int check_access(
         assert(audit_info);
         assert(audit_info->function);
 
-        r = selinux_check_access(scon, tcon, tclass, permission, audit_info);
+        r = sym_selinux_check_access(scon, tcon, tclass, permission, audit_info);
         if (r < 0) {
                 errno = -(r = errno_or_else(EPERM));
 
                 if (enforce)
-                        sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "SELinux policy denies access: %m");
+                        sd_bus_error_setf(reterr_error, SD_BUS_ERROR_ACCESS_DENIED, "SELinux policy denies access: %m");
         }
 
         return log_selinux_enforcing_errno(
@@ -258,7 +256,7 @@ int mac_selinux_access_check_bus_internal(
                 const Unit *unit,
                 const char *permission,
                 const char *function,
-                sd_bus_error *error) {
+                sd_bus_error *reterr_error) {
 
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
         const char *tclass, *scon, *acon;
@@ -272,7 +270,7 @@ int mac_selinux_access_check_bus_internal(
         assert(permission);
         assert(function);
 
-        r = access_init(error);
+        r = access_init(reterr_error);
         if (r <= 0)
                 return r;
 
@@ -311,9 +309,9 @@ int mac_selinux_access_check_bus_internal(
                         return 0;
 
                 if (r == -EOPNOTSUPP)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "We appear not to have any SELinux context: %m");
+                        return sd_bus_error_setf(reterr_error, SD_BUS_ERROR_ACCESS_DENIED, "We appear not to have any SELinux context: %m");
 
-                return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Failed to get current context: %m");
+                return sd_bus_error_setf(reterr_error, SD_BUS_ERROR_ACCESS_DENIED, "Failed to get current context: %m");
         }
 
         (void) sd_bus_creds_get_cmdline(creds, &cmdline);
@@ -326,7 +324,7 @@ int mac_selinux_access_check_bus_internal(
                 .function = function,
         };
 
-        return check_access(scon, acon, tclass, permission, &audit_info, error);
+        return check_access(scon, acon, tclass, permission, &audit_info, reterr_error);
 }
 
 int mac_selinux_access_check_varlink_internal(
@@ -343,7 +341,7 @@ int mac_selinux_access_check_varlink_internal(
         assert(permission);
         assert(function);
 
-        r = access_init(/* error= */ NULL);
+        r = access_init(/* reterr_error= */ NULL);
         if (r <= 0)
                 /* access_init() does log_selinux_enforcing_errno() */
                 return r;
@@ -357,7 +355,7 @@ int mac_selinux_access_check_varlink_internal(
 
         /* We should call mac_selinux_get_peer_label() here similarly to get_our_contexts().
          * See the explanation there why not. */
-        if (getpeercon_raw(fd, &scon) < 0)
+        if (sym_getpeercon_raw(fd, &scon) < 0)
                 return log_selinux_enforcing_errno(
                                 errno,
                                 "Failed to get peer SELinux context%s: %m",
@@ -382,7 +380,7 @@ int mac_selinux_access_check_varlink_internal(
                 .function = function,
         };
 
-        return check_access(scon, acon, tclass, permission, &audit_info, /* error= */ NULL);
+        return check_access(scon, acon, tclass, permission, &audit_info, /* reterr_error= */ NULL);
 }
 
 #else /* HAVE_SELINUX */
@@ -392,7 +390,7 @@ int mac_selinux_access_check_bus_internal(
                 const Unit *unit,
                 const char *permission,
                 const char *function,
-                sd_bus_error *error) {
+                sd_bus_error *reterr_error) {
 
         return 0;
 }

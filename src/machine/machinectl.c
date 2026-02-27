@@ -104,6 +104,7 @@ static const char* arg_format = NULL;
 static const char *arg_uid = NULL;
 static char **arg_setenv = NULL;
 static unsigned arg_max_addresses = 1;
+static RuntimeScope arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
 
 STATIC_DESTRUCTOR_REGISTER(arg_property, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_setenv, strv_freep);
@@ -451,10 +452,10 @@ static int show_unit_cgroup(
 
                 /* Fallback for older systemd versions where the GetUnitProcesses() call is not yet available */
 
-                if (cg_is_empty(SYSTEMD_CGROUP_CONTROLLER, cgroup) != 0 && leader <= 0)
+                if (cg_is_empty(cgroup) != 0 && leader <= 0)
                         return 0;
 
-                show_cgroup_and_extra(SYSTEMD_CGROUP_CONTROLLER, cgroup, "\t\t  ", c, &leader, leader > 0, get_output_flags());
+                show_cgroup_and_extra(cgroup, "\t\t  ", c, &leader, leader > 0, get_output_flags());
         } else if (r < 0)
                 return log_error_errno(r, "Failed to dump process list: %s", bus_error_message(&error, r));
 
@@ -641,15 +642,15 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
                         show_journal_by_unit(
                                         stdout,
                                         i->unit,
-                                        /* namespace = */ NULL,
+                                        /* namespace= */ NULL,
                                         arg_output,
-                                        /* n_columns = */ 0,
+                                        /* n_columns= */ 0,
                                         i->timestamp.monotonic,
                                         arg_lines,
                                         get_output_flags() | OUTPUT_BEGIN_NEWLINE,
                                         SD_JOURNAL_LOCAL_ONLY,
-                                        /* system_unit = */ true,
-                                        /* ellipsized = */ NULL);
+                                        /* system_unit= */ true,
+                                        /* ellipsized= */ NULL);
         }
 }
 
@@ -1471,7 +1472,7 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        return process_forward(event, slot, master, /* flags = */ 0, machine);
+        return process_forward(event, slot, master, /* flags= */ 0, machine);
 }
 
 static int normalize_nspawn_filename(const char *name, char **ret_file) {
@@ -1606,7 +1607,7 @@ static int cat_settings(int argc, char *argv[], void *userdata) {
                                                        "Invalid settings file path '%s'.",
                                                        *name);
 
-                        q = cat_files(*name, /* dropins = */ NULL, /* flags = */ CAT_FORMAT_HAS_SECTIONS);
+                        q = cat_files(*name, /* dropins= */ NULL, /* flags= */ CAT_FORMAT_HAS_SECTIONS);
                         if (q < 0)
                                 return r < 0 ? r : q;
                         continue;
@@ -1627,7 +1628,7 @@ static int cat_settings(int argc, char *argv[], void *userdata) {
                         return r < 0 ? r : q;
                 }
 
-                q = cat_files(path, /* dropins = */ NULL, /* flags = */ CAT_FORMAT_HAS_SECTIONS);
+                q = cat_files(path, /* dropins= */ NULL, /* flags= */ CAT_FORMAT_HAS_SECTIONS);
                 if (q < 0)
                         return r < 0 ? r : q;
         }
@@ -1903,7 +1904,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                 if (!new_args)
                         return log_oom();
 
-                r = strv_extend_strv(&new_args, argv + 1, /* filter_duplicates = */ false);
+                r = strv_extend_strv(&new_args, argv + 1, /* filter_duplicates= */ false);
                 if (r < 0)
                         return log_oom();
 
@@ -2099,6 +2100,8 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --no-ask-password        Do not ask for system passwords\n"
                "  -H --host=[USER@]HOST       Operate on remote host\n"
                "  -M --machine=CONTAINER      Operate on local container\n"
+               "     --system                 Connect to system machine manager\n"
+               "     --user                   Connect to user machine manager\n"
                "  -p --property=NAME          Show only properties by this name\n"
                "     --value                  When showing properties, only print the value\n"
                "  -P NAME                     Equivalent to --value --property=NAME\n"
@@ -2152,6 +2155,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_FORMAT,
                 ARG_UID,
                 ARG_MAX_ADDRESSES,
+                ARG_SYSTEM,
+                ARG_USER,
         };
 
         static const struct option options[] = {
@@ -2181,6 +2186,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "uid",             required_argument, NULL, ARG_UID             },
                 { "setenv",          required_argument, NULL, 'E'                 },
                 { "max-addresses",   required_argument, NULL, ARG_MAX_ADDRESSES   },
+                { "user",            no_argument,       NULL, ARG_USER            },
+                { "system",          no_argument,       NULL, ARG_SYSTEM          },
                 {}
         };
 
@@ -2288,10 +2295,8 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'o':
-                        if (streq(optarg, "help")) {
-                                DUMP_STRING_TABLE(output_mode, OutputMode, _OUTPUT_MODE_MAX);
-                                return 0;
-                        }
+                        if (streq(optarg, "help"))
+                                return DUMP_STRING_TABLE(output_mode, OutputMode, _OUTPUT_MODE_MAX);
 
                         r = output_mode_from_string(optarg);
                         if (r < 0)
@@ -2347,10 +2352,8 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_VERIFY:
-                        if (streq(optarg, "help")) {
-                                DUMP_STRING_TABLE(import_verify, ImportVerify, _IMPORT_VERIFY_MAX);
-                                return 0;
-                        }
+                        if (streq(optarg, "help"))
+                                return DUMP_STRING_TABLE(import_verify, ImportVerify, _IMPORT_VERIFY_MAX);
 
                         r = import_verify_from_string(optarg);
                         if (r < 0)
@@ -2402,6 +2405,14 @@ static int parse_argv(int argc, char *argv[]) {
                         else if (safe_atou(optarg, &arg_max_addresses) < 0)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Invalid number of addresses: %s", optarg);
+                        break;
+
+                case ARG_USER:
+                        arg_runtime_scope = RUNTIME_SCOPE_USER;
+                        break;
+
+                case ARG_SYSTEM:
+                        arg_runtime_scope = RUNTIME_SCOPE_SYSTEM;
                         break;
 
                 case '?':
@@ -2488,9 +2499,9 @@ static int run(int argc, char *argv[]) {
                           "list-transfers", "cancel-transfer"))
                 return chainload_importctl(argc, argv);
 
-        r = bus_connect_transport(arg_transport, arg_host, RUNTIME_SCOPE_SYSTEM, &bus);
+        r = bus_connect_transport(arg_transport, arg_host, arg_runtime_scope, &bus);
         if (r < 0)
-                return bus_log_connect_error(r, arg_transport, RUNTIME_SCOPE_SYSTEM);
+                return bus_log_connect_error(r, arg_transport, arg_runtime_scope);
 
         (void) sd_bus_set_allow_interactive_authorization(bus, arg_ask_password);
 

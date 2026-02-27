@@ -9,6 +9,7 @@
 #include "fd-util.h"
 #include "log.h"
 #include "main-func.h"
+#include "parse-argument.h"
 #include "pidref.h"
 #include "pretty-print.h"
 #include "process-util.h"
@@ -96,7 +97,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_BACKGROUND:
-                        r = free_and_strdup_warn(&arg_background, optarg);
+                        r = parse_background_argument(optarg, &arg_background);
                         if (r < 0)
                                 return r;
                         break;
@@ -155,7 +156,7 @@ static int run(int argc, char *argv[]) {
 
         log_setup();
 
-        assert_se(sigprocmask_many(SIG_BLOCK, /*ret_old_mask=*/ NULL, SIGCHLD) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, /* ret_old_mask= */ NULL, SIGCHLD) >= 0);
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -171,7 +172,7 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to get event loop: %m");
 
-        pty_fd = openpt_allocate(O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC, /*ret_peer_path=*/ NULL);
+        pty_fd = openpt_allocate(O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC, /* ret_peer_path= */ NULL);
         if (pty_fd < 0)
                 return log_error_errno(pty_fd, "Failed to acquire pseudo tty: %m");
 

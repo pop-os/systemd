@@ -13,6 +13,7 @@ if conf.get('ENABLE_SYSUSERS') == 1
                      # https://github.com/mesonbuild/meson/issues/2681
                      args : exe.full_path(),
                      depends : exe,
+                     env : test_env,
                      suite : 'sysusers')
 
                 if have_standalone_binaries
@@ -22,6 +23,7 @@ if conf.get('ENABLE_SYSUSERS') == 1
                              # https://github.com/mesonbuild/meson/issues/2681
                              args : exe.full_path(),
                              depends : exe,
+                             env : test_env,
                              suite : 'sysusers')
                 endif
         endif
@@ -106,7 +108,7 @@ endif
 ############################################################
 
 test_compare_versions_sh = files('test-compare-versions.sh')
-if want_tests != 'false'
+if want_tests != 'false' and executables_by_name.has_key('systemd-analyze')
         exe = executables_by_name.get('systemd-analyze')
         test('test-compare-versions',
              test_compare_versions_sh,
@@ -149,7 +151,7 @@ endif
 ############################################################
 
 test_fstab_generator_sh = files('test-fstab-generator.sh')
-if want_tests != 'false'
+if want_tests != 'false' and executables_by_name.has_key('systemd-fstab-generator')
         exe = executables_by_name.get('systemd-fstab-generator')
         test('test-fstab-generator',
              test_fstab_generator_sh,
@@ -192,7 +194,7 @@ if want_tests != 'false'
         test('test-udev',
              test_udev_py,
              args : ['-v'],
-             env : ['UDEV_RULE_RUNNER=' + exe.full_path()],
+             env : test_env + { 'UDEV_RULE_RUNNER' : exe.full_path() },
              depends : exe,
              timeout : 180,
              suite : 'udev')

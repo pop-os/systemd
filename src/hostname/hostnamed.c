@@ -862,7 +862,7 @@ static int context_write_data_machine_info(Context *c) {
         r = write_env_file(
                         AT_FDCWD,
                         etc_machine_info(),
-                        /* headers= */NULL,
+                        /* headers= */ NULL,
                         l,
                         WRITE_ENV_FILE_LABEL);
         if (r < 0)
@@ -1687,7 +1687,7 @@ static int build_describe_response(Context *c, bool privileged, sd_json_variant 
         (void) vsock_get_local_cid(&local_cid);
 
         (void) load_os_release_pairs(/* root= */ NULL, &os_release_pairs);
-        (void) load_env_file_pairs(/* f=*/ NULL, etc_machine_info(), &machine_info_pairs);
+        (void) load_env_file_pairs(/* f= */ NULL, etc_machine_info(), &machine_info_pairs);
 
         r = sd_json_buildo(
                         &v,
@@ -1988,6 +1988,7 @@ static int run(int argc, char *argv[]) {
                                "Manage the system hostname and related metadata.",
                                BUS_IMPLEMENTATIONS(&manager_object,
                                                    &log_control_object),
+                               /* runtime_scope= */ NULL,
                                argc, argv);
         if (r <= 0)
                 return r;

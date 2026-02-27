@@ -38,6 +38,7 @@ bool fstab_enabled_full(int enabled) {
 }
 
 int fstab_has_fstype(const char *fstype) {
+#if HAVE_LIBMOUNT
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         int r;
@@ -56,15 +57,18 @@ int fstab_has_fstype(const char *fstype) {
         for (;;) {
                 struct libmnt_fs *fs;
 
-                r = mnt_table_next_fs(table, iter, &fs);
+                r = sym_mnt_table_next_fs(table, iter, &fs);
                 if (r < 0)
                         return r;
                 if (r > 0) /* EOF */
                         return false;
 
-                if (streq_ptr(mnt_fs_get_fstype(fs), fstype))
+                if (streq_ptr(sym_mnt_fs_get_fstype(fs), fstype))
                         return true;
         }
+#else
+        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "libmount support not compiled in");
+#endif
 }
 
 bool fstab_is_extrinsic(const char *mount, const char *opts) {
@@ -92,6 +96,7 @@ bool fstab_is_extrinsic(const char *mount, const char *opts) {
         return false;
 }
 
+#if HAVE_LIBMOUNT
 static int fstab_is_same_node(const char *what_fstab, const char *path) {
         _cleanup_free_ char *node = NULL;
 
@@ -110,8 +115,10 @@ static int fstab_is_same_node(const char *what_fstab, const char *path) {
 
         return false;
 }
+#endif
 
 int fstab_has_mount_point_prefix_strv(char * const *prefixes) {
+#if HAVE_LIBMOUNT
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         int r;
@@ -134,22 +141,26 @@ int fstab_has_mount_point_prefix_strv(char * const *prefixes) {
                 struct libmnt_fs *fs;
                 const char *path;
 
-                r = mnt_table_next_fs(table, iter, &fs);
+                r = sym_mnt_table_next_fs(table, iter, &fs);
                 if (r < 0)
                         return r;
                 if (r > 0) /* EOF */
                         return false;
 
-                path = mnt_fs_get_target(fs);
+                path = sym_mnt_fs_get_target(fs);
                 if (!path)
                         continue;
 
                 if (path_startswith_strv(path, prefixes))
                         return true;
         }
+#else
+        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "libmount support not compiled in");
+#endif
 }
 
 int fstab_is_mount_point_full(const char *where, const char *path) {
+#if HAVE_LIBMOUNT
         _cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
         int r;
@@ -168,22 +179,25 @@ int fstab_is_mount_point_full(const char *where, const char *path) {
         for (;;) {
                 struct libmnt_fs *fs;
 
-                r = mnt_table_next_fs(table, iter, &fs);
+                r = sym_mnt_table_next_fs(table, iter, &fs);
                 if (r < 0)
                         return r;
                 if (r > 0) /* EOF */
                         return false;
 
-                if (where && !path_equal(mnt_fs_get_target(fs), where))
+                if (where && !path_equal(sym_mnt_fs_get_target(fs), where))
                         continue;
 
                 if (!path)
                         return true;
 
-                r = fstab_is_same_node(mnt_fs_get_source(fs), path);
+                r = fstab_is_same_node(sym_mnt_fs_get_source(fs), path);
                 if (r > 0 || (r < 0 && !ERRNO_IS_DEVICE_ABSENT(r)))
                         return r;
         }
+#else
+        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "libmount support not compiled in");
+#endif
 }
 
 int fstab_filter_options(
@@ -256,7 +270,7 @@ int fstab_filter_options(
                 }
 
                 if (ret_filtered) {
-                        filtered = strv_join_full(filtered_strv, ",", NULL, /* escape_separator = */ true);
+                        filtered = strv_join_full(filtered_strv, ",", NULL, /* escape_separator= */ true);
                         if (!filtered)
                                 return -ENOMEM;
                 }

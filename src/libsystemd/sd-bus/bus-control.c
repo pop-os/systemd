@@ -4,6 +4,7 @@
 
 #include "alloc-util.h"
 #include "bus-control.h"
+#include "bus-error.h"
 #include "bus-internal.h"
 #include "bus-message.h"
 #include "fd-util.h"
@@ -136,11 +137,14 @@ static int default_request_name_handler(
         assert(m);
 
         if (sd_bus_message_is_method_error(m, NULL)) {
-                log_debug_errno(sd_bus_message_get_errno(m),
-                                "Unable to request name, failing connection: %s",
-                                sd_bus_message_get_error(m)->message);
+                const sd_bus_error *e = ASSERT_PTR(sd_bus_message_get_error(m));
+                r = sd_bus_error_get_errno(e);
 
-                bus_enter_closing(sd_bus_message_get_bus(m));
+                log_debug_errno(r,
+                                "Unable to request name, failing connection: %s",
+                                bus_error_message(e, r));
+
+                bus_enter_closing(sd_bus_message_get_bus(m), -r);
                 return 1;
         }
 
@@ -164,12 +168,12 @@ static int default_request_name_handler(
 
         case BUS_NAME_EXISTS:
                 log_debug("Requested service name already owned, failing connection.");
-                bus_enter_closing(sd_bus_message_get_bus(m));
+                bus_enter_closing(sd_bus_message_get_bus(m), -EEXIST);
                 return 1;
         }
 
         log_debug("Unexpected response from RequestName(), failing connection.");
-        bus_enter_closing(sd_bus_message_get_bus(m));
+        bus_enter_closing(sd_bus_message_get_bus(m), -EPROTO);
         return 1;
 }
 
@@ -290,11 +294,12 @@ static int default_release_name_handler(
         assert(m);
 
         if (sd_bus_message_is_method_error(m, NULL)) {
-                log_debug_errno(sd_bus_message_get_errno(m),
-                                "Unable to release name, failing connection: %s",
-                                sd_bus_message_get_error(m)->message);
+                const sd_bus_error *e = ASSERT_PTR(sd_bus_message_get_error(m));
+                r = sd_bus_error_get_errno(e);
 
-                bus_enter_closing(sd_bus_message_get_bus(m));
+                log_debug_errno(r, "Unable to release name, failing connection: %s", bus_error_message(e, r));
+
+                bus_enter_closing(sd_bus_message_get_bus(m), -r);
                 return 1;
         }
 
@@ -318,7 +323,7 @@ static int default_release_name_handler(
         }
 
         log_debug("Unexpected response from ReleaseName(), failing connection.");
-        bus_enter_closing(sd_bus_message_get_bus(m));
+        bus_enter_closing(sd_bus_message_get_bus(m), -EPROTO);
         return 1;
 }
 

@@ -44,12 +44,9 @@ static void _test_one(int line, const char *input, const char *output) {
 static void _test_next(int line, const char *input, const char *new_tz, usec_t after, usec_t expect) {
         _cleanup_(calendar_spec_freep) CalendarSpec *c = NULL;
         usec_t u;
-        char *old_tz;
         int r;
 
-        old_tz = getenv("TZ");
-        if (old_tz)
-                old_tz = strdupa_safe(old_tz);
+        SAVE_TIMEZONE;
 
         if (!isempty(new_tz) && !strchr(new_tz, ','))
                 new_tz = strjoina(":", new_tz);
@@ -68,9 +65,6 @@ static void _test_next(int line, const char *input, const char *new_tz, usec_t a
                 assert_se(r >= 0 && u == expect);
         else
                 assert_se(r == -ENOENT);
-
-        assert_se(set_unset_env("TZ", old_tz, true) == 0);
-        tzset();
 }
 #define test_next(input, new_tz, after, expect) _test_next(__LINE__, input,new_tz,after,expect)
 
@@ -225,6 +219,8 @@ TEST(calendar_spec_next) {
         test_next("Sun *-*-* 01:00:00 Europe/Dublin", "IST", 1616412478000000, 1617494400000000);
         /* Europe/Dublin TZ that moves DST backwards */
         test_next("hourly", "IST-1GMT-0,M10.5.0/1,M3.5.0/1", 1743292800000000, 1743296400000000);
+        /* Check when the year changes, see issue #40260 */
+        test_next("*-*-1/11 23:00:00 UTC", "", 1763938800000000, 1764630000000000);
 }
 
 TEST(calendar_spec_from_string) {

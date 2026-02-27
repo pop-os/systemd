@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "sd-bus.h"
+#include "sd-varlink.h"
 
 #include "ask-password-api.h"
 #include "bitfield.h"
@@ -15,6 +16,7 @@
 #include "capability-list.h"
 #include "capability-util.h"
 #include "cgroup-util.h"
+#include "chase.h"
 #include "creds-util.h"
 #include "dirent-util.h"
 #include "dns-domain.h"
@@ -45,14 +47,17 @@
 #include "path-util.h"
 #include "percent-util.h"
 #include "pkcs11-util.h"
+#include "plymouth-util.h"
 #include "polkit-agent.h"
 #include "pretty-print.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
+#include "prompt-util.h"
 #include "recurse-dir.h"
 #include "rlimit-util.h"
 #include "runtime-scope.h"
 #include "stat-util.h"
+#include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "terminal-util.h"
@@ -65,6 +70,14 @@
 #include "user-util.h"
 #include "userdb.h"
 #include "verbs.h"
+
+typedef enum {
+        EXPORT_FORMAT_FULL,          /* export the full record */
+        EXPORT_FORMAT_STRIPPED,      /* strip "state" + "binding", but leave signature in place */
+        EXPORT_FORMAT_MINIMAL,       /* also strip signature */
+        _EXPORT_FORMAT_MAX,
+        _EXPORT_FORMAT_INVALID = -EINVAL,
+} ExportFormat;
 
 static PagerFlags arg_pager_flags = 0;
 static bool arg_legend = true;
@@ -94,20 +107,20 @@ static bool arg_recovery_key = false;
 static sd_json_format_flags_t arg_json_format_flags = SD_JSON_FORMAT_OFF;
 static bool arg_and_resize = false;
 static bool arg_and_change_password = false;
-static enum {
-        EXPORT_FORMAT_FULL,          /* export the full record */
-        EXPORT_FORMAT_STRIPPED,      /* strip "state" + "binding", but leave signature in place */
-        EXPORT_FORMAT_MINIMAL,       /* also strip signature */
-} arg_export_format = EXPORT_FORMAT_FULL;
-static uint64_t arg_capability_bounding_set = UINT64_MAX;
-static uint64_t arg_capability_ambient_set = UINT64_MAX;
-static bool arg_prompt_new_user = false;
+static ExportFormat arg_export_format = EXPORT_FORMAT_FULL;
+static uint64_t arg_capability_bounding_set = CAP_MASK_UNSET;
+static uint64_t arg_capability_ambient_set = CAP_MASK_UNSET;
 static char *arg_blob_dir = NULL;
 static bool arg_blob_clear = false;
 static Hashmap *arg_blob_files = NULL;
 static char *arg_key_name = NULL;
 static bool arg_dry_run = false;
 static bool arg_seize = true;
+static bool arg_prompt_new_user = false;
+static bool arg_prompt_shell = true;
+static bool arg_prompt_groups = true;
+static bool arg_chrome = true;
+static bool arg_mute_console = false;
 
 STATIC_DESTRUCTOR_REGISTER(arg_identity_extra, sd_json_variant_unrefp);
 STATIC_DESTRUCTOR_REGISTER(arg_identity_extra_this_machine, sd_json_variant_unrefp);
@@ -123,6 +136,14 @@ STATIC_DESTRUCTOR_REGISTER(arg_blob_files, hashmap_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_key_name, freep);
 
 static const BusLocator *bus_mgr;
+
+static const char *export_format_table[_EXPORT_FORMAT_MAX] = {
+        [EXPORT_FORMAT_FULL]     = "full",
+        [EXPORT_FORMAT_STRIPPED] = "stripped",
+        [EXPORT_FORMAT_MINIMAL]  = "minimal",
+};
+
+DEFINE_PRIVATE_STRING_TABLE_LOOKUP(export_format, ExportFormat);
 
 static bool identity_properties_specified(void) {
         return
@@ -584,7 +605,7 @@ static int acquire_passed_secrets(const char *user_name, UserRecord **ret) {
         r = acquire_existing_password(
                         user_name,
                         secret,
-                        /* emphasize_current_password = */ false,
+                        /* emphasize_current_password= */ false,
                         ASK_PASSWORD_ACCEPT_CACHED | ASK_PASSWORD_NO_TTY | ASK_PASSWORD_NO_AGENT);
         if (r < 0)
                 return r;
@@ -1220,7 +1241,7 @@ static int acquire_new_password(
         if (r > 0) {
                 /* As above, this is not for use, just for testing */
 
-                r = user_record_set_password(hr, STRV_MAKE(envpw), /* prepend = */ true);
+                r = user_record_set_password(hr, STRV_MAKE(envpw), /* prepend= */ true);
                 if (r < 0)
                         return log_error_errno(r, "Failed to store password: %m");
 
@@ -1284,7 +1305,7 @@ static int acquire_new_password(
                                         return log_oom();
                         }
 
-                        r = user_record_set_password(hr, first, /* prepend = */ true);
+                        r = user_record_set_password(hr, first, /* prepend= */ true);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to store password: %m");
 
@@ -1442,11 +1463,11 @@ static int create_home_common(sd_json_variant *input, bool show_enforce_password
                         _cleanup_(erase_and_freep) char *new_password = NULL;
 
                         /* No regular (i.e. non-PKCS#11) hashed passwords set in the record, let's fix that. */
-                        r = acquire_new_password(hr->user_name, hr, /* suggest = */ true, &new_password);
+                        r = acquire_new_password(hr->user_name, hr, /* suggest= */ true, &new_password);
                         if (r < 0)
                                 return r;
 
-                        r = user_record_make_hashed_password(hr, STRV_MAKE(new_password), /* extend = */ false);
+                        r = user_record_make_hashed_password(hr, STRV_MAKE(new_password), /* extend= */ false);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to hash password: %m");
                 } else {
@@ -1518,11 +1539,11 @@ static int create_home_common(sd_json_variant *input, bool show_enforce_password
                                 if (show_enforce_password_policy_hint)
                                         log_info("(Use --enforce-password-policy=no to turn off password quality checks for this account.)");
 
-                                r = acquire_new_password(hr->user_name, hr, /* suggest = */ false, &new_password);
+                                r = acquire_new_password(hr->user_name, hr, /* suggest= */ false, &new_password);
                                 if (r < 0)
                                         return r;
 
-                                r = user_record_make_hashed_password(hr, STRV_MAKE(new_password), /* extend = */ false);
+                                r = user_record_make_hashed_password(hr, STRV_MAKE(new_password), /* extend= */ false);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to hash passwords: %m");
                         } else {
@@ -1829,9 +1850,15 @@ static int acquire_updated_home_record(
                         return r;
         }
 
+        if (arg_recovery_key) {
+                r = identity_add_recovery_key(&json);
+                if (r < 0)
+                        return r;
+        }
+
         /* If the user supplied a full record, then add in lastChange, but do not override. Otherwise always
          * override. */
-        r = update_last_change(&json, arg_pkcs11_token_uri || arg_fido2_device, !arg_identity);
+        r = update_last_change(&json, arg_pkcs11_token_uri || arg_fido2_device || arg_recovery_key, !arg_identity);
         if (r < 0)
                 return r;
 
@@ -2090,7 +2117,7 @@ static int passwd_home(int argc, char *argv[], void *userdata) {
         if (!new_secret)
                 return log_oom();
 
-        r = acquire_new_password(username, new_secret, /* suggest = */ true, NULL);
+        r = acquire_new_password(username, new_secret, /* suggest= */ true, NULL);
         if (r < 0)
                 return r;
 
@@ -2120,7 +2147,7 @@ static int passwd_home(int argc, char *argv[], void *userdata) {
 
                                 log_error_errno(r, "%s", bus_error_message(&error, r));
 
-                                r = acquire_new_password(username, new_secret, /* suggest = */ false, NULL);
+                                r = acquire_new_password(username, new_secret, /* suggest= */ false, NULL);
 
                         } else if (sd_bus_error_has_name(&error, BUS_ERROR_BAD_PASSWORD_AND_NO_TOKEN))
 
@@ -2352,7 +2379,7 @@ static int with_home(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return bus_log_create_error(r);
 
-                r = sd_bus_message_append(m, "b", /* please_suspend = */ getenv_bool("SYSTEMD_PLEASE_SUSPEND_HOME") > 0);
+                r = sd_bus_message_append(m, "b", /* please_suspend= */ getenv_bool("SYSTEMD_PLEASE_SUSPEND_HOME") > 0);
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -2674,77 +2701,21 @@ static int group_completion_callback(const char *key, char ***ret_list, void *us
         return 0;
 }
 
-static int create_interactively(void) {
-        _cleanup_free_ char *username = NULL;
+static int prompt_groups(const char *username, char ***ret_groups) {
         int r;
 
-        if (!arg_prompt_new_user) {
-                log_debug("Prompting for user creation was not requested.");
+        assert(username);
+        assert(ret_groups);
+
+        if (!arg_prompt_groups) {
+                *ret_groups = NULL;
                 return 0;
         }
 
         putchar('\n');
-        if (emoji_enabled()) {
-                fputs(glyph(GLYPH_HOME), stdout);
-                putchar(' ');
-        }
-        printf("Please create your user account!\n");
-
-        if (!any_key_to_proceed()) {
-                log_notice("Skipping.");
-                return 0;
-        }
-
-        (void) terminal_reset_defensive_locked(STDOUT_FILENO, /* flags= */ 0);
-
-        for (;;) {
-                username = mfree(username);
-
-                r = ask_string(&username,
-                               "%s Please enter user name to create (empty to skip): ",
-                               glyph(GLYPH_TRIANGULAR_BULLET));
-                if (r < 0)
-                        return log_error_errno(r, "Failed to query user for username: %m");
-
-                if (isempty(username)) {
-                        log_info("No data entered, skipping.");
-                        return 0;
-                }
-
-                if (!valid_user_group_name(username, /* flags= */ 0)) {
-                        log_notice("Specified user name is not a valid UNIX user name, try again: %s", username);
-                        continue;
-                }
-
-                r = userdb_by_name(username, /* match= */ NULL, USERDB_SUPPRESS_SHADOW, /* ret= */ NULL);
-                if (r == -ESRCH)
-                        break;
-                if (r < 0)
-                        return log_error_errno(r, "Failed to check if specified user '%s' already exists: %m", username);
-
-                log_notice("Specified user '%s' exists already, try again.", username);
-        }
-
-        r = sd_json_variant_set_field_string(&arg_identity_extra, "userName", username);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set userName field: %m");
-
-        /* Let's not insist on a strong password in the firstboot interactive interface. Insisting on this is
-         * really annoying, as the user cannot just invoke the tool again with "--enforce-password-policy=no"
-         * because after all the tool is called from the boot process, and not from an interactive
-         * shell. Moreover, when setting up an initial system we can assume the user owns it, and hence we
-         * don't need to hard enforce some policy on password strength some organization or OS vendor
-         * requires. Note that this just disables the *strict* enforcement of the password policy. Even with
-         * this disabled we'll still tell the user in the UI that the password is too weak and suggest better
-         * ones, even if we then accept the weak ones if the user insists, by repeating it. */
-        r = sd_json_variant_set_field_boolean(&arg_identity_extra, "enforcePasswordPolicy", false);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set enforcePasswordPolicy field: %m");
 
         _cleanup_strv_free_ char **available = NULL, **groups = NULL;
         for (;;) {
-                _cleanup_free_ char *s = NULL;
-
                 strv_sort_uniq(groups);
 
                 if (!strv_isempty(groups)) {
@@ -2755,10 +2726,11 @@ static int create_interactively(void) {
                         log_info("Currently selected groups: %s", j);
                 }
 
+                _cleanup_free_ char *s = NULL;
                 r = ask_string_full(&s,
                                group_completion_callback, &available,
                                "%s Please enter an auxiliary group for user %s (empty to continue, \"list\" to list available groups): ",
-                               glyph(GLYPH_TRIANGULAR_BULLET), username);
+                               glyph(GLYPH_LABEL), username);
                 if (r < 0)
                         return log_error_errno(r, "Failed to query user for auxiliary group: %m");
 
@@ -2813,7 +2785,7 @@ static int create_interactively(void) {
                         continue;
                 }
 
-                r = groupdb_by_name(s, /* match= */ NULL, USERDB_SUPPRESS_SHADOW|USERDB_EXCLUDE_DYNAMIC_USER, /*ret=*/ NULL);
+                r = groupdb_by_name(s, /* match= */ NULL, USERDB_SUPPRESS_SHADOW|USERDB_EXCLUDE_DYNAMIC_USER, /* ret= */ NULL);
                 if (r == -ESRCH) {
                         log_notice("Specified auxiliary group does not exist, try again: %s", s);
                         continue;
@@ -2828,6 +2800,151 @@ static int create_interactively(void) {
                         return log_oom();
         }
 
+        *ret_groups = TAKE_PTR(groups);
+        return 0;
+}
+
+static int shell_is_ok(const char *path, void *userdata) {
+        int r;
+
+        assert(path);
+
+        if (!valid_shell(path)) {
+                log_error("String '%s' is not a valid path to a shell, refusing.", path);
+                return false;
+        }
+
+        r = chase_and_access(path, /* root= */ NULL, CHASE_MUST_BE_REGULAR, X_OK, /* ret_path= */ NULL) >= 0;
+        if (r == -ENOENT) {
+                log_error_errno(r, "Shell '%s' does not exist, try again.", path);
+                return false;
+        }
+        if (ERRNO_IS_NEG_PRIVILEGE(r)) {
+                log_error_errno(r, "File '%s' is not executable, try again.", path);
+                return false;
+        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to check if shell '%s' exists and is executable: %m", path);
+
+        return true;
+}
+
+static int prompt_shell(const char *username, char **ret_shell) {
+        assert(username);
+        assert(ret_shell);
+
+        if (!arg_prompt_shell) {
+                *ret_shell = NULL;
+                return 0;
+        }
+
+        putchar('\n');
+
+        _cleanup_free_ char *q = strjoin("Please enter the shell to use for user ", username);
+        if (!q)
+                return log_oom();
+
+        return prompt_loop(
+                        q,
+                        GLYPH_SHELL,
+                        /* menu= */ NULL,
+                        /* accepted= */ NULL,
+                        /* ellipsize_percentage= */ 0,
+                        /* n_columns= */ 3,
+                        /* column_width= */ 20,
+                        shell_is_ok,
+                        /* refresh= */ NULL,
+                        /* userdata= */ NULL,
+                        PROMPT_MAY_SKIP|PROMPT_SILENT_VALIDATE,
+                        ret_shell);
+}
+
+static int username_is_ok(const char *name, void *userdata) {
+        int r;
+
+        assert(name);
+
+        if (!valid_user_group_name(name, /* flags= */ 0)) {
+                log_notice("Specified user name is not a valid UNIX user name, try again: %s", name);
+                return false;
+        }
+
+        r = userdb_by_name(name, /* match= */ NULL, USERDB_SUPPRESS_SHADOW, /* ret= */ NULL);
+        if (r == -ESRCH)
+                return true;
+        if (r < 0)
+                return log_error_errno(r, "Failed to check if specified user '%s' already exists: %m", name);
+
+        log_notice("Specified user '%s' exists already, try again.", name);
+        return false;
+}
+
+static int create_interactively(void) {
+        _cleanup_free_ char *username = NULL;
+        int r;
+
+        if (!arg_prompt_new_user) {
+                log_debug("Prompting for user creation was not requested.");
+                return 0;
+        }
+
+        /* Needs to be called before mute_console or it will garble the screen */
+        (void) plymouth_hide_splash();
+
+        _cleanup_(sd_varlink_flush_close_unrefp) sd_varlink *mute_console_link = NULL;
+        (void) mute_console(&mute_console_link);
+
+        (void) terminal_reset_defensive_locked(STDOUT_FILENO, /* flags= */ 0);
+
+        if (arg_chrome)
+                chrome_show("Create a User Account", /* bottom= */ NULL);
+
+        DEFER_VOID_CALL(chrome_hide);
+
+        if (emoji_enabled()) {
+                fputs(glyph(GLYPH_HOME), stdout);
+                putchar(' ');
+        }
+        printf("Please create your user account!\n\n");
+
+        r = prompt_loop("Please enter user name to create",
+                        GLYPH_IDCARD,
+                        /* menu= */ NULL,
+                        /* accepted= */ NULL,
+                        /* ellipsize_percentage= */ 60,
+                        /* n_columns= */ 3,
+                        /* column_width= */ 20,
+                        username_is_ok,
+                        /* refresh= */ NULL,
+                        /* userdata= */ NULL,
+                        PROMPT_MAY_SKIP|PROMPT_SILENT_VALIDATE,
+                        &username);
+        if (r < 0)
+                return r;
+        if (isempty(username))
+                return 0;
+
+        r = sd_json_variant_set_field_string(&arg_identity_extra, "userName", username);
+        if (r < 0)
+                return log_error_errno(r, "Failed to set userName field: %m");
+
+        /* Let's not insist on a strong password in the firstboot interactive interface. Insisting on this is
+         * really annoying, as the user cannot just invoke the tool again with "--enforce-password-policy=no"
+         * because after all the tool is called from the boot process, and not from an interactive
+         * shell. Moreover, when setting up an initial system we can assume the user owns it, and hence we
+         * don't need to hard enforce some policy on password strength some organization or OS vendor
+         * requires. Note that this just disables the *strict* enforcement of the password policy. Even with
+         * this disabled we'll still tell the user in the UI that the password is too weak and suggest better
+         * ones, even if we then accept the weak ones if the user insists, by repeating it. */
+        r = sd_json_variant_set_field_boolean(&arg_identity_extra, "enforcePasswordPolicy", false);
+        if (r < 0)
+                return log_error_errno(r, "Failed to set enforcePasswordPolicy field: %m");
+
+        _cleanup_strv_free_ char **groups = NULL;
+        r = prompt_groups(username, &groups);
+        if (r < 0)
+                return r;
+
         if (!strv_isempty(groups)) {
                 strv_sort_uniq(groups);
 
@@ -2837,35 +2954,9 @@ static int create_interactively(void) {
         }
 
         _cleanup_free_ char *shell = NULL;
-
-        for (;;) {
-                shell = mfree(shell);
-
-                r = ask_string(&shell,
-                               "%s Please enter the shell to use for user %s (empty for default): ",
-                               glyph(GLYPH_TRIANGULAR_BULLET), username);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to query user for username: %m");
-
-                if (isempty(shell)) {
-                        log_info("No data entered, leaving at default.");
-                        break;
-                }
-
-                if (!valid_shell(shell)) {
-                        log_notice("Specified shell is not a valid UNIX shell path, try again: %s", shell);
-                        continue;
-                }
-
-                r = RET_NERRNO(access(shell, X_OK));
-                if (r >= 0)
-                        break;
-
-                if (r != -ENOENT)
-                        return log_error_errno(r, "Failed to check if shell %s exists: %m", shell);
-
-                log_notice("Specified shell '%s' is not installed, try another one.", shell);
-        }
+        r = prompt_shell(username, &shell);
+        if (r < 0)
+                return r;
 
         if (!isempty(shell)) {
                 log_info("Selected %s as the shell for user %s", shell, username);
@@ -2875,7 +2966,14 @@ static int create_interactively(void) {
                         return log_error_errno(r, "Failed to set shell field: %m");
         }
 
-        return create_home_common(/* input= */ NULL, /* show_enforce_password_policy_hint= */ false);
+        putchar('\n');
+
+        r = create_home_common(/* input= */ NULL, /* show_enforce_password_policy_hint= */ false);
+        if (r < 0)
+                return r;
+
+        log_info("Successfully created account '%s'.", username);
+        return 0;
 }
 
 static int add_signing_keys_from_credentials(void);
@@ -2887,7 +2985,7 @@ static int verb_firstboot(int argc, char *argv[], void *userdata) {
          * tool. */
 
         bool enabled;
-        r = proc_cmdline_get_bool("systemd.firstboot", /* flags = */ 0, &enabled);
+        r = proc_cmdline_get_bool("systemd.firstboot", /* flags= */ 0, &enabled);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse systemd.firstboot= kernel command line argument, ignoring: %m");
         if (r > 0 && !enabled) {
@@ -3015,11 +3113,18 @@ static int help(int argc, char *argv[], void *userdata) {
                "  -E                           When specified once equals -j --export-format=\n"
                "                               stripped, when specified twice equals\n"
                "                               -j --export-format=minimal\n"
-               "     --prompt-new-user         firstboot: Query user interactively for user\n"
-               "                               to create\n"
                "     --key-name=NAME           Key name when adding a signing key\n"
                "     --seize=no                Do not strip existing signatures of user record\n"
                "                               when creating\n"
+               "     --prompt-new-user         firstboot: Query user interactively for user\n"
+               "                               to create\n"
+               "     --prompt-groups=no        In first-boot mode, don't prompt for auxiliary\n"
+               "                               group memberships\n"
+               "     --prompt-shell=no         In first-boot mode, don't prompt for shells\n"
+               "     --chrome=no               In first-boot mode, don't show colour bar at top\n"
+               "                               and bottom of terminal\n"
+               "     --mute-console=yes        In first-boot mode, tell kernel/PID 1 to not\n"
+               "                               write to the console while running\n"
                "\n%4$sGeneral User Record Properties:%5$s\n"
                "  -c --real-name=REALNAME      Real name for user\n"
                "     --realm=REALM             Realm to create user in\n"
@@ -3256,6 +3361,10 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_KEY_NAME,
                 ARG_SEIZE,
                 ARG_MATCH,
+                ARG_PROMPT_SHELL,
+                ARG_PROMPT_GROUPS,
+                ARG_CHROME,
+                ARG_MUTE_CONSOLE,
         };
 
         static const struct option options[] = {
@@ -3362,6 +3471,10 @@ static int parse_argv(int argc, char *argv[]) {
                 { "key-name",                     required_argument, NULL, ARG_KEY_NAME                    },
                 { "seize",                        required_argument, NULL, ARG_SEIZE                       },
                 { "match",                        required_argument, NULL, ARG_MATCH                       },
+                { "prompt-shell",                 required_argument, NULL, ARG_PROMPT_SHELL                },
+                { "prompt-groups",                required_argument, NULL, ARG_PROMPT_GROUPS               },
+                { "chrome",                       required_argument, NULL, ARG_CHROME                      },
+                { "mute-console",                 required_argument, NULL, ARG_MUTE_CONSOLE                },
                 {}
         };
 
@@ -3696,8 +3809,8 @@ static int parse_argv(int argc, char *argv[]) {
 
                         r = sd_json_variant_set_fieldbo(
                                         &arg_identity_extra_rlimits, t,
-                                        SD_JSON_BUILD_PAIR("cur", SD_JSON_BUILD_VARIANT(jcur)),
-                                        SD_JSON_BUILD_PAIR("max", SD_JSON_BUILD_VARIANT(jmax)));
+                                        SD_JSON_BUILD_PAIR_VARIANT("cur", jcur),
+                                        SD_JSON_BUILD_PAIR_VARIANT("max", jmax));
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set %s field: %m", rlimit_to_string(l));
 
@@ -4164,7 +4277,7 @@ static int parse_argv(int argc, char *argv[]) {
                                         return log_error_errno(r, "Failed to parse SSH authorized keys list: %m");
                         }
 
-                        r = strv_extend_strv_consume(&l, TAKE_PTR(add), /* filter_duplicates = */ true);
+                        r = strv_extend_strv_consume(&l, TAKE_PTR(add), /* filter_duplicates= */ true);
                         if (r < 0)
                                 return log_oom();
 
@@ -4636,18 +4749,12 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_EXPORT_FORMAT:
-                        if (streq(optarg, "full"))
-                                arg_export_format = EXPORT_FORMAT_FULL;
-                        else if (streq(optarg, "stripped"))
-                                arg_export_format = EXPORT_FORMAT_STRIPPED;
-                        else if (streq(optarg, "minimal"))
-                                arg_export_format = EXPORT_FORMAT_MINIMAL;
-                        else if (streq(optarg, "help")) {
-                                puts("full\n"
-                                     "stripped\n"
-                                     "minimal");
-                                return 0;
-                        }
+                        if (streq(optarg, "help"))
+                                return DUMP_STRING_TABLE(export_format, ExportFormat, _EXPORT_FORMAT_MAX);
+
+                        arg_export_format = export_format_from_string(optarg);
+                        if (arg_export_format < 0)
+                                return log_error_errno(arg_export_format, "Invalid export format: %s", optarg);
 
                         break;
 
@@ -4681,9 +4788,8 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_CAPABILITY_AMBIENT_SET:
                 case ARG_CAPABILITY_BOUNDING_SET: {
                         _cleanup_strv_free_ char **l = NULL;
-                        bool subtract = false;
-                        uint64_t parsed, *which, updated;
-                        const char *p, *field;
+                        uint64_t *which;
+                        const char *field;
 
                         if (c == ARG_CAPABILITY_AMBIENT_SET) {
                                 which = &arg_capability_ambient_set;
@@ -4694,42 +4800,27 @@ static int parse_argv(int argc, char *argv[]) {
                                 field = "capabilityBoundingSet";
                         }
 
-                        if (isempty(optarg)) {
+                        r = parse_capability_set(optarg, CAP_MASK_UNSET, which);
+                        if (r == 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid capabilities in capability string '%s'.", optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse capability string '%s': %m", optarg);
+
+                        if (*which == CAP_MASK_UNSET) {
                                 r = drop_from_identity(field);
                                 if (r < 0)
                                         return r;
 
-                                *which = UINT64_MAX;
                                 break;
                         }
 
-                        p = optarg;
-                        if (*p == '~') {
-                                subtract = true;
-                                p++;
-                        }
-
-                        r = capability_set_from_string(p, &parsed);
-                        if (r == 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid capabilities in capability string '%s'.", p);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to parse capability string '%s': %m", p);
-
-                        if (*which == UINT64_MAX)
-                                updated = subtract ? all_capabilities() & ~parsed : parsed;
-                        else if (subtract)
-                                updated = *which & ~parsed;
-                        else
-                                updated = *which | parsed;
-
-                        if (capability_set_to_strv(updated, &l) < 0)
+                        if (capability_set_to_strv(*which, &l) < 0)
                                 return log_oom();
 
                         r = sd_json_variant_set_field_strv(match_identity ?: &arg_identity_extra, field, l);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set %s field: %m", field);
 
-                        *which = updated;
                         break;
                 }
 
@@ -4919,6 +5010,34 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 case 'N':
                         match_identity = &arg_identity_extra_other_machines;
+                        break;
+
+                case ARG_PROMPT_SHELL:
+                        r = parse_boolean_argument("--prompt-shell=", optarg, &arg_prompt_shell);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_PROMPT_GROUPS:
+                        r = parse_boolean_argument("--prompt-groups=", optarg, &arg_prompt_groups);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_CHROME:
+                        r = parse_boolean_argument("--chrome=", optarg, &arg_chrome);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case ARG_MUTE_CONSOLE:
+                        r = parse_boolean_argument("--mute-console=", optarg, &arg_mute_console);
+                        if (r < 0)
+                                return r;
+
                         break;
 
                 case '?':

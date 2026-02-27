@@ -71,7 +71,7 @@ service manager, and typically consumed by the service:
   service's cgroup. In order to make debugging easier, and allow later
   extension it is recommended for applications to also allow this path to refer
   to an `AF_UNIX` stream socket in the file system or a FIFO inode in the file
-  system. Regardless which of the three types of inodes this absolute path
+  system. Regardless of which of the three types of inodes this absolute path
   refers to, all three are `poll()`-able for memory pressure events. The
   variable can also be set to the literal string `/dev/null`. If so the service
   code should take this as indication that memory pressure monitoring is not
@@ -165,7 +165,7 @@ The service manager provides two per-service settings that control the memory
 pressure handling:
 
 * The
-  [`MemoryPressureWatch=`](https://www.freedesktop.org/software/systemd/man/systemd.resource-control.html#MemoryPressureWatch=)
+  [`MemoryPressureWatch=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html#MemoryPressureWatch=)
   setting controls whether to enable the memory pressure protocol for the
   service in question.
 
@@ -197,12 +197,12 @@ When memory pressure monitoring is enabled for a service via
 ## Memory Pressure Events in `sd-event`
 
 The
-[`sd-event`](https://www.freedesktop.org/software/systemd/man/sd-event.html)
+[`sd-event`](https://www.freedesktop.org/software/systemd/man/latest/sd-event.html)
 event loop library provides two API calls that encapsulate the
 functionality described above:
 
 * The
-  [`sd_event_add_memory_pressure()`](https://www.freedesktop.org/software/systemd/man/sd_event_add_memory_pressure.html)
+  [`sd_event_add_memory_pressure()`](https://www.freedesktop.org/software/systemd/man/latest/sd_event_add_memory_pressure.html)
   call implements the service-side of the memory pressure protocol and
   integrates it with an `sd-event` event loop. It reads the two environment
   variables, connects/opens the specified file, writes the specified data to it,
@@ -227,12 +227,15 @@ handling, it's typically sufficient to add a line such as:
 
 Other programming environments might have native APIs to watch memory
 pressure/low memory events. Most notable is probably GLib's
-[GMemoryMonitor](https://docs.gtk.org/gio/iface.MemoryMonitor.html). It
-currently uses the per-system Linux PSI interface as the backend, but operates
-differently than the above: memory pressure events are picked up by a system
-service, which then propagates this through D-Bus to the applications. This is
-typically less than ideal, since this means each notification event has to
-traverse three processes before being handled. This traversal creates
+[GMemoryMonitor](https://docs.gtk.org/gio/iface.MemoryMonitor.html). As of GLib
+2.86.0, it uses the per-cgroup PSI kernel file to monitor for memory pressure,
+but does not yet read the environment variables recommended above.
+
+In older versions, it used the per-system Linux PSI interface as the backend, but operated
+differently than the above: memory pressure events were picked up by a system
+service, which then propagated this through D-Bus to the applications. This was
+typically less than ideal, since this means each notification event had to
+traverse three processes before being handled. This traversal created
 additional latencies at a time where the system is already experiencing adverse
-latencies. Moreover, it focuses on system-wide PSI events, even though
+latencies. Moreover, it focused on system-wide PSI events, even though
 service-local ones are generally the better approach.
