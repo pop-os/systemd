@@ -1,3 +1,16 @@
+systemd (259.2-0ubuntu1) resolute; urgency=medium
+
+  * New upstream stable version 259.2
+    - Bug fixes
+    - Update upstream source from tag 'upstream/259.2'
+      Update to upstream version '259.2'
+      with Debian dir c25e0517a7a4ebd6d9009de0cf949dd265182a67
+    - Drop lp2142428-seccomp-util-add-lsm_get_self_attr-and-lsm_list_modules-t.patch.
+      Applied upstream: https://github.com/systemd/systemd/commit/515816197e
+  * test: use gnuenv to workaround broken --block-signal= (LP: #2142900)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 27 Feb 2026 09:20:52 -0500
+
 systemd (259.1-1ubuntu2) resolute; urgency=medium
 
   [ Nick Rosbrook ]
