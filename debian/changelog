@@ -1,3 +1,10 @@
+systemd (259.2-0ubuntu2) resolute; urgency=medium
+
+  * Tag KFD and ACCEL devices for uaccess (LP: #2143010)
+  * d/control: Add missing dh-dlopenlibdeps to b-d
+
+ -- Mario Limonciello <superm1@gmail.com>  Tue, 03 Mar 2026 12:06:36 -0600
+
 systemd (259.2-0ubuntu1) resolute; urgency=medium
 
   * New upstream stable version 259.2
