@@ -1,3 +1,13 @@
+systemd (259.3-0ubuntu1) resolute; urgency=medium
+
+  * New upstream stable version 259.3
+    - Update upstream source from tag 'upstream/259.3'
+      Update to upstream version '259.3'
+      with Debian dir 4fea3198a053eb40e77ea3ad3c3be030151f3f46
+    - Bug fixes
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 06 Mar 2026 09:05:25 -0500
+
 systemd (259.2-0ubuntu2) resolute; urgency=medium
 
   * Tag KFD and ACCEL devices for uaccess (LP: #2143010)
