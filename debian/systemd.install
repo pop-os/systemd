@@ -550,11 +550,13 @@ usr/share/zsh/vendor-completions/_systemctl
 usr/share/zsh/vendor-completions/_systemd
 usr/share/zsh/vendor-completions/_systemd-analyze
 usr/share/zsh/vendor-completions/_systemd-delta
+usr/share/zsh/vendor-completions/_systemd-id128
 usr/share/zsh/vendor-completions/_systemd-inhibit
 usr/share/zsh/vendor-completions/_systemd-path
 usr/share/zsh/vendor-completions/_systemd-run
 usr/share/zsh/vendor-completions/_systemd-tmpfiles
 usr/share/zsh/vendor-completions/_timedatectl
+usr/share/zsh/vendor-completions/_userdbctl
 usr/share/zsh/vendor-completions/_varlinkctl
 <!pkg.systemd.upstream> var/lib/systemd/
 ../extra/init-functions.d usr/lib/lsb/
