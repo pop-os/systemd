@@ -57,3 +57,9 @@ lp2125405-basic-validate-timezones-in-get_timezones.patch
 ukify-fix-insertion-of-padding-in-merged-sections.patch
 test-skip-testcase_multipath_basic_failover.patch
 core-downgrade-a-log-message-from-warning-to-debug.patch
+CVE-2026-29111-1.patch
+CVE-2026-29111-2.patch
+CVE-2026-29111-3.patch
+CVE-2026-29111-4.patch
+udev-check-for-invalid-chars-in-various-fields-received-f.patch
+udev-fix-review-mixup.patch

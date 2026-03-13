@@ -1,3 +1,18 @@
+systemd (255.4-1ubuntu8.14) noble-security; urgency=medium
+
+  * SECURITY UPDATE: Local unprivileged user can trigger an assert in systemd
+    - d/p/CVE-2026-29111-1.patch: path-util: add flavour of path_startswith() that leaves
+      a leading slash in place
+    - d/p/CVE-2026-29111-2.patch: path-util: invert PATH_STARTSWITH_ACCEPT_DOT_DOT flag
+    - d/p/CVE-2026-29111-3.patch: core/cgroup: avoid one unnecessary strjoina()
+    - d/p/CVE-2026-29111-4.patch: core: validate input cgroup path more prudently
+  * SECURITY UPDATE: Local root execution via malicious hardware devices
+    - d/p/udev-check-for-invalid-chars-in-various-fields-received-f.patch
+    - d/p/udev-fix-review-mixup.patch
+    - No CVE number
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 13 Mar 2026 12:48:42 -0400
+
 systemd (255.4-1ubuntu8.12) noble; urgency=medium
 
   * basic: validate timezones in get_timezones() (LP: #2125405)
