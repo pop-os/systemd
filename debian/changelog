@@ -1,3 +1,17 @@
+systemd (259.5-0ubuntu1) resolute; urgency=medium
+
+  [ Nick Rosbrook ]
+  * New upstream stable version 259.5
+    - Update upstream source from tag 'upstream/259.5'
+      Update to upstream version '259.5'
+      with Debian dir 1076161727931a7063674200c474ec7747a5177f
+    - Bug fixes
+
+  [ Oliver Reiche ]
+  * Fix issue overwriting /tmp on dist-upgrade (LP: #2144032)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 13 Mar 2026 12:27:31 -0400
+
 systemd (259.3-0ubuntu1) resolute; urgency=medium
 
   * New upstream stable version 259.3
