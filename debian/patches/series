@@ -136,3 +136,8 @@ CVE_2025_4598_3.patch
 lp2100252-0001-sd-device-introduce-sd_device_new_from_devname.patch
 lp2100252-0002-core-device-store-the-original-path.patch
 lp2100252-0003-core-device-always-accept-syspath-change.patch
+CVE-2026-29111-1.patch
+CVE-2026-29111-2.patch
+CVE-2026-29111-3.patch
+udev-check-for-invalid-chars-in-various-fields-received-f.patch
+udev-fix-review-mixup.patch

@@ -1,3 +1,16 @@
+systemd (249.11-0ubuntu3.19) jammy-security; urgency=medium
+
+  * SECURITY UPDATE: Local unprivileged user can overwrite stack in systemd
+    - d/p/CVE-2026-29111-1.patch: path-util: backport path_startswith_full
+    - d/p/CVE-2026-29111-2.patch: core/cgroup: avoid one unnecessary strjoina()
+    - d/p/CVE-2026-29111-3.patch: core: validate input cgroup path more prudently
+  * SECURITY UPDATE: Local root execution via malicious hardware devices
+    - d/p/udev-check-for-invalid-chars-in-various-fields-received-f.patch
+    - d/p/udev-fix-review-mixup.patch
+    - No CVE number
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Fri, 13 Mar 2026 12:47:41 -0400
+
 systemd (249.11-0ubuntu3.17) jammy; urgency=medium
 
   [ Nick Rosbrook ]
