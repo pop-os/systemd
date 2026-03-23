@@ -11,3 +11,4 @@ lp2077538/Move-new-symbol-out-of-public-library.patch
 test-use-gnuenv-to-workaround-broken-block-signal.patch
 lp2143010_tag_kfd_accel.patch
 lp2145027/ssh-proxy-return-an-error-if-user-supplies-VMADDR_CID_ANY.patch
+lp2145027/socket-util-filter-out-VMADDR_CID_ANY-in-vsock_get_local_.patch
