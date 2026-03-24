@@ -1,3 +1,16 @@
+systemd (255.4-1ubuntu8.15) noble; urgency=medium
+
+  [ Robert Malz ]
+  * network: also check ID_NET_MANAGED_BY property on reconfigure
+    (LP: #2133159)
+  * net_id: depending on new udev prop, include/exclude PCI domain from netif names
+    (LP: #2134334)
+
+  [ Ioana Lazea ]
+  * timer: don't run service immediately after restart of a timer (LP: #2141296)
+
+ -- Robert Malz <robert.malz@canonical.com>  Tue, 24 Mar 2026 09:45:53 -0400
+
 systemd (255.4-1ubuntu8.14) noble-security; urgency=medium
 
   * SECURITY UPDATE: Local unprivileged user can trigger an assert in systemd
