@@ -1,3 +1,12 @@
+systemd (249.11-0ubuntu3.20) jammy; urgency=medium
+
+  * net_id: depending on new udev prop, include/exclude PCI domain from netif names
+    (LP: #2134334)
+  * network: support ID_NET_MANAGED_BY udev property
+    (LP: #2133220)
+
+ -- Robert Malz <robert.malz@canonical.com>  Tue, 24 Mar 2026 09:52:29 -0400
+
 systemd (249.11-0ubuntu3.19) jammy-security; urgency=medium
 
   * SECURITY UPDATE: Local unprivileged user can overwrite stack in systemd
