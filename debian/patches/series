@@ -12,3 +12,6 @@ test-use-gnuenv-to-workaround-broken-block-signal.patch
 lp2143010_tag_kfd_accel.patch
 lp2145027/ssh-proxy-return-an-error-if-user-supplies-VMADDR_CID_ANY.patch
 lp2145027/socket-util-filter-out-VMADDR_CID_ANY-in-vsock_get_local_.patch
+lp2141588/ether-addr-util-introduce-hw_addr_is_valid.patch
+lp2141588/network-generator-support-BOOTIF-and-rd.bootif-0-options.patch
+lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
