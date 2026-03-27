@@ -15,3 +15,4 @@ lp2145027/socket-util-filter-out-VMADDR_CID_ANY-in-vsock_get_local_.patch
 lp2141588/ether-addr-util-introduce-hw_addr_is_valid.patch
 lp2141588/network-generator-support-BOOTIF-and-rd.bootif-0-options.patch
 lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
+tmpfiles-remove-duplicate-run-lock-definition.patch
