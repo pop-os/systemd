@@ -1,3 +1,13 @@
+systemd (259.5-0ubuntu2) resolute; urgency=medium
+
+  * Fix handling of VMADDR_CID_ANY in a couple places (LP: #2145027)
+    - ssh-proxy: return an error if user supplies VMADDR_CID_ANY
+    - socket-util: filter out VMADDR_CID_ANY in vsock_get_local_cid()
+  * network-generator: support BOOTIF= and rd.bootif=0 options (LP: #2141588)
+  * tmpfiles: remove duplicate /run/lock definition (LP: #2146544)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 02 Apr 2026 08:31:45 -0400
+
 systemd (259.5-0ubuntu1) resolute; urgency=medium
 
   [ Nick Rosbrook ]
