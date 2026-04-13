@@ -315,4 +315,5 @@ Depends: systemd (>= 254~),
   zstd,
   uidmap,
   jq,
+  libcrypt-dev,
 Restrictions: needs-root, allow-stderr, isolation-machine, needs-internet, breaks-testbed, skip-not-installable, skippable
