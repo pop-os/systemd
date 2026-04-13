@@ -74,14 +74,6 @@ mount "$loop" "$workdir/btrfs" --options compress=zstd:1,user_subvol_rm_allowed,
 # so unset these variables to hide it
 unset SUDO_USER SUDO_UID SUDO_GID
 
-mkosi_tree="${AUTOPKGTEST_TMP}/mkosi"
-git clone https://github.com/systemd/mkosi.git "$mkosi_tree"
-# If we have it, pin the mkosi version to the same one used by Github Actions, to ensure consistency
-if [ -f .github/workflows/mkosi.yml ]; then
-    mkosi_hash="$(grep systemd/mkosi@ .github/workflows/mkosi.yml | sed "s|.*systemd/mkosi@||g")"
-    git -C "$mkosi_tree" checkout "$mkosi_hash"
-fi
-
 apt_dir="/etc/apt"
 local_binaries=""
 if [ -d "${AUTOPKGTEST_TMP}/../binaries" ]; then
@@ -138,17 +130,20 @@ EOF
 # associates it with the user session, and kills it later when the machine is shut down,
 # disable registration to avoid it. This is a workaround for versions older than 25, where
 # MachinedRegister=no does the same.
-if systemd-analyze compare-versions "$(git -C "$mkosi_tree" describe | tr -d 'v')" lt 25; then
-    sed -i "/  register_machine(/d" "$mkosi_tree/mkosi/qemu.py"
-else
-    tee -a "${mkosi_local_conf}" <<EOF
+tee -a "${mkosi_local_conf}" <<EOF
 [Runtime]
 Register=no
 EOF
-fi
 
 # kernel 6.12 broke mounting btrfs filesystems from loop devices, so switch to ext4
 sed -i "s/Format=btrfs/Format=ext4/" mkosi.repart/10-root.conf || true
+
+# Ubuntu uses v26 from the archive
+sed -i "/^MinimumVersion=.*/d" mkosi/mkosi.conf
+for f in mkosi/mkosi.images/minimal-0/mkosi.conf mkosi/mkosi.images/minimal-base/mkosi.conf mkosi/mkosi.images/minimal-1/mkosi.conf; do
+    sed -i "/^Incremental=relaxed/d" "$f"
+    sed -i "/^CacheOnly=metadata/d" "$f"
+done
 
 # qemu/vsock does not appear to work on ppc64el/s390x, so skip those tests
 # qemu tests time out on arm64, so skip them
@@ -164,7 +159,6 @@ if [ ! -e /dev/kvm ]; then
 fi
 
 export ARTIFACT_DIRECTORY="$AUTOPKGTEST_ARTIFACTS"
-export PATH="${mkosi_tree}/bin:$PATH"
 export TEST_SAVE_JOURNAL=fail
 export TEST_SHOW_JOURNAL=warning
 export QEMU_TIMEOUT=2400

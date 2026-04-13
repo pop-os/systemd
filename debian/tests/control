@@ -316,4 +316,5 @@ Depends: systemd (>= 254~),
   uidmap,
   jq,
   libcrypt-dev,
-Restrictions: needs-root, allow-stderr, isolation-machine, needs-internet, breaks-testbed, skip-not-installable, skippable
+  mkosi,
+Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-not-installable, skippable
