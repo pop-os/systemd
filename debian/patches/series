@@ -16,3 +16,4 @@ lp2141588/ether-addr-util-introduce-hw_addr_is_valid.patch
 lp2141588/network-generator-support-BOOTIF-and-rd.bootif-0-options.patch
 lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
 tmpfiles-remove-duplicate-run-lock-definition.patch
+test-do-not-use-nanoseconds-width-specifier-in-date-comma.patch
