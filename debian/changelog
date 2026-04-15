@@ -1,3 +1,12 @@
+systemd (259.5-0ubuntu3) resolute; urgency=medium
+
+  * Drop needs-internet restriction and fix test failures masked by this (LP: #2148202)
+    - d/t/upstream: use mkosi from the archive to drop needs-internet
+    - d/t/control: add Depends: libcrypt-dev for upstream test
+    - test: do not use nanoseconds width specifier in date command
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 15 Apr 2026 14:32:53 -0400
+
 systemd (259.5-0ubuntu2) resolute; urgency=medium
 
   * Fix handling of VMADDR_CID_ANY in a couple places (LP: #2145027)
