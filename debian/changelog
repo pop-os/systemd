@@ -1,3 +1,9 @@
+systemd (259.5-0ubuntu3pop0) resolute; urgency=medium
+
+  * Pop patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Mon, 04 May 2026 13:12:38 -0600
+
 systemd (259.5-0ubuntu3) resolute; urgency=medium
 
   * Drop needs-internet restriction and fix test failures masked by this (LP: #2148202)
@@ -4611,7 +4617,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
