@@ -1,3 +1,9 @@
+systemd (255.4-1ubuntu8.15pop0) noble; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 14 May 2026 07:41:50 -0600
+
 systemd (255.4-1ubuntu8.15) noble; urgency=medium
 
   [ Robert Malz ]
@@ -2103,7 +2109,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
