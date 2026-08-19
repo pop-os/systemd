@@ -18,7 +18,6 @@ lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
 tmpfiles-remove-duplicate-run-lock-definition.patch
 test-do-not-use-nanoseconds-width-specifier-in-date-comma.patch
 lp2150773-core-Open-netfilter-socket-only-when-needed.patch
-lp2148619-units-order-networkd-resolve-hook-After-network-pre.targe.patch
 lp2148619-units-drop-Before-sockets.target-from-networkd-resolve-ho.patch
 lp2155132-mkosi-trim-verity.sig-json-files-to-remove-NUL-padding-be.patch
 lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
