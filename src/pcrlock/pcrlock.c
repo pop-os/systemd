@@ -817,7 +817,9 @@ static int event_log_record_extract_firmware_description(EventLogRecord *rec) {
                                 goto invalid;
                         }
 
-                        if (left < offsetof(packed_EFI_DEVICE_PATH, path) || left < dp->length) {
+                        if (left < offsetof(packed_EFI_DEVICE_PATH, path) ||
+                            dp->length < offsetof(packed_EFI_DEVICE_PATH, path) ||
+                            left < dp->length) {
                                 log_warning("Device path element too short, ignoring.");
                                 goto invalid;
                         }
@@ -899,6 +901,10 @@ static int event_log_load_firmware(EventLog *el) {
         path = tpm2_firmware_log_path();
 
         r = read_full_file(path, (char**) &buf, &bufsize);
+        if (r == -ENOENT) {
+                log_notice("No '%s' file, assuming TPM without firmware support.", path);
+                return 0;
+        }
         if (r < 0)
                 return log_error_errno(r, "Failed to open TPM2 event log '%s': %m", path);
 
@@ -946,6 +952,11 @@ static int event_log_load_firmware(EventLog *el) {
 
                 if (event->eventType == EV_NO_ACTION) { /* Ignore pseudo events, that don't result in a measurement */
                         log_debug("Skipping NO_ACTION event.");
+                        continue;
+                }
+
+                if (event->pcrIndex >= TPM2_PCRS_MAX) {
+                        log_debug("Skipping event on PCR %" PRIu32 " (out of range).", event->pcrIndex);
                         continue;
                 }
 
@@ -1143,6 +1154,7 @@ static int event_log_load_userspace(EventLog *el) {
         _cleanup_free_ char *b = NULL;
         bool beginning = true;
         const char *path;
+        struct stat st;
         size_t bn = 0;
         int r;
 
@@ -1160,6 +1172,13 @@ static int event_log_load_userspace(EventLog *el) {
 
         if (flock(fileno(f), LOCK_SH) < 0)
                 return log_error_errno(errno, "Failed to lock userspace TPM measurement log file: %m");
+
+        /* The sticky bit marks the log as incomplete: a writer died between updating a PCR and appending
+         * the matching record. Load the log anyway, the affected PCRs will simply fail validation. */
+        if (fstat(fileno(f), &st) < 0)
+                log_warning_errno(errno, "Failed to stat userspace TPM measurement log file, cannot determine whether it is complete, ignoring: %m");
+        else if (FLAGS_SET(st.st_mode, S_ISVTX))
+                log_warning("Userspace TPM measurement log file is marked as incomplete, PCR validation may fail.");
 
         for (;;) {
                 _cleanup_(sd_json_variant_unrefp) sd_json_variant *j = NULL;
@@ -1934,7 +1953,7 @@ static int event_log_match_component_variant(
                 return r;
 
         if (assign) {
-                /* Take ownership (Note we allow multiple components and variants to take owneship of the same record!) */
+                /* Take ownership (Note we allow multiple components and variants to take ownership of the same record!) */
                 if (!GREEDY_REALLOC(el->records[i]->mapped, el->records[i]->n_mapped+1))
                         return log_oom();
 

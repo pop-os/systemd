@@ -126,7 +126,7 @@ static int mdns_maintenance_query(sd_event_source *s, uint64_t usec, void *userd
                 return log_error_errno(r, "Failed to create mDNS query for maintenance: %m");
 
         q->complete = mdns_maintenance_query_complete;
-        q->varlink_request = sd_varlink_ref(service->service_browser->link);
+        q->service_browser_request = dns_service_browser_ref(service->service_browser);
         q->dnsservice_request = dnssd_discovered_service_ref(service);
 
         /* Schedule the next maintenance query based on the TTL */
@@ -177,8 +177,8 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
                 .query = NULL,
                 .rr_ttl_state = DNS_RECORD_TTL_STATE_80_PERCENT,
         };
-
-        LIST_PREPEND(dns_services, sb->dns_services, s);
+        if (!s->rr)
+                return log_oom();
 
         /* Schedule the first cache maintenance query at 80% of the record's
          * TTL. Subsequent queries issued at 5% increments until 100% of the
@@ -217,6 +217,8 @@ int dns_add_new_service(DnsServiceBrowser *sb, DnsResourceRecord *rr, int owner_
                 return log_error_errno(
                                 r,
                                 "Failed to schedule mDNS maintenance query for DNS service: %m");
+
+        LIST_PREPEND(dns_services, sb->dns_services, s);
 
         TAKE_PTR(s);
         return 0;

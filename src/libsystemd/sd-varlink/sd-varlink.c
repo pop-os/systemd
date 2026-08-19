@@ -40,7 +40,7 @@
 #include "varlink-org.varlink.service.h"
 
 #define VARLINK_DEFAULT_CONNECTIONS_MAX 4096U
-#define VARLINK_DEFAULT_CONNECTIONS_PER_UID_MAX 1024U
+#define VARLINK_DEFAULT_CONNECTIONS_PER_UID_MAX 128U
 
 #define VARLINK_DEFAULT_TIMEOUT_USEC (45U*USEC_PER_SEC)
 #define VARLINK_BUFFER_MAX (16U*1024U*1024U)
@@ -3441,8 +3441,6 @@ static int count_connection(sd_varlink_server *server, const struct ucred *ucred
         assert(server);
         assert(ucred);
 
-        server->n_connections++;
-
         if (FLAGS_SET(server->flags, SD_VARLINK_SERVER_ACCOUNT_UID)) {
                 assert(uid_is_valid(ucred->uid));
 
@@ -3459,6 +3457,8 @@ static int count_connection(sd_varlink_server *server, const struct ucred *ucred
                 if (r < 0)
                         return varlink_server_log_errno(server, r, "Failed to increment counter in UID hash table: %m");
         }
+
+        server->n_connections++;
 
         return 0;
 }
@@ -3560,6 +3560,7 @@ VarlinkServerSocket* varlink_server_socket_free(VarlinkServerSocket *ss) {
         if (!ss)
                 return NULL;
 
+        sd_event_source_disable_unref(ss->event_source);
         free(ss->address);
         return mfree(ss);
 }

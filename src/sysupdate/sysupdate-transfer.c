@@ -1190,7 +1190,7 @@ int transfer_acquire_instance(Transfer *t, Instance *i, TransferProgress cb, voi
                  * download. */
 
                 if (!i->metadata.sha256sum_set)
-                        return log_error_errno(r, "SHA256 checksum not known for download '%s', refusing.", i->path);
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "SHA256 checksum not known for download '%s', refusing.", i->path);
 
                 digest = hexmem(i->metadata.sha256sum, sizeof(i->metadata.sha256sum));
                 if (!digest)
@@ -1524,6 +1524,10 @@ int transfer_install_instance(
                         r = path_make_relative(parent, link_target, &relative);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to make symlink path '%s' relative to '%s': %m", link_target, parent);
+
+                        r = mkdir_parents(link_path, 0755);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to create directory for current symlink '%s': %m", link_path);
 
                         r = symlink_atomic(relative, link_path);
                         if (r < 0)

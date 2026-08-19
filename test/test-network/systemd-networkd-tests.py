@@ -302,6 +302,23 @@ def compare_kernel_version(min_kernel_version):
 
     return version.parse(kver) >= version.parse(min_kernel_version)
 
+
+def networkd_has_sysctl_monitor_bpf():
+    """Check whether systemd-networkd was built with ENABLE_SYSCTL_BPF support."""
+    if not networkd_bin:
+        return False
+    try:
+        output = subprocess.run(
+            [networkd_bin, '--version'],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return '+BTF' in output.split()
+
+
 def copy_network_unit(*units, copy_dropins=True):
     """
     Copy networkd unit files into the testbed.
@@ -1226,7 +1243,13 @@ class Utilities():
             if not link_exists(link):
                 time.sleep(0.5)
                 continue
-            output = networkctl_status(link)
+            try:
+                output = networkctl_status(link)
+            except subprocess.CalledProcessError:
+                # networkctl status may transiently fail e.g. when networkd has not
+                # yet picked up the link from the kernel. Retry until the timeout.
+                time.sleep(0.5)
+                continue
             if re.search(rf'(?m)^\s*State:\s+{operstate}\s+\({setup_state}\)\s*$', output):
                 return True
             time.sleep(0.5)
@@ -6881,14 +6904,35 @@ class NetworkdRATests(unittest.TestCase, Utilities):
         self.wait_route('veth99', r'2002:da8:1:1:1a:2b:3c:4d nhid [0-9]* via fe80::1 proto redirect', ipv='-6', timeout_sec=10)
         self.wait_route('veth99', r'2002:da8:1:2:1a:2b:3c:4d nhid [0-9]* via fe80::2 proto redirect', ipv='-6', timeout_sec=10)
 
+        print('### before sending NA without router flag')
+        output = check_output('ip -6 route show dev veth99')
+        print(output)
+        self.assertIn('2002:da8:1::/64 proto ra', output)
+        self.assertIn('2002:da8:2::/64 proto ra', output)
+        self.assertRegex(output, 'default .* proto ra')
+        self.assertRegex(output, '2002:da8:1:1:1a:2b:3c:4d .* proto redirect')
+        self.assertRegex(output, '2002:da8:1:2:1a:2b:3c:4d .* proto redirect')
+        self.assertIn('2002:da8:1:3:1a:2b:3c:4d proto redirect', output)
+
         # Send Neighbor Advertisement without the router flag to announce the default router is not available anymore.
         # Then, verify that all redirect routes and the default route are dropped.
         output = check_output('ip -6 address show dev veth-peer scope link')
         veth_peer_ipv6ll = re.search('fe80:[:0-9a-f]*', output).group()
         print(f'veth-peer IPv6LL address: {veth_peer_ipv6ll}')
         check_output(f'{test_ndisc_send} --interface veth-peer --type neighbor-advertisement --target-address {veth_peer_ipv6ll} --is-router no')
-        self.wait_route_dropped('veth99', 'proto ra', ipv='-6', timeout_sec=10)
+        self.wait_route_dropped('veth99', 'default .* proto ra', ipv='-6', timeout_sec=10)
         self.wait_route_dropped('veth99', 'proto redirect', ipv='-6', timeout_sec=10)
+
+        # Check if the non-default routes are unchanged, and others are actually dropped.
+        print('### after sending NA without router flag')
+        output = check_output('ip -6 route show dev veth99')
+        print(output)
+        self.assertIn('2002:da8:1::/64 proto ra', output)
+        self.assertIn('2002:da8:2::/64 proto ra', output)
+        self.assertNotRegex(output, 'default .* proto ra')
+        self.assertNotRegex(output, '2002:da8:1:1:1a:2b:3c:4d .* proto redirect')
+        self.assertNotRegex(output, '2002:da8:1:2:1a:2b:3c:4d .* proto redirect')
+        self.assertNotIn('2002:da8:1:3:1a:2b:3c:4d proto redirect', output)
 
         # Check if sd-radv refuses RS from the same interface.
         # See https://github.com/systemd/systemd/pull/32267#discussion_r1566721306
@@ -9171,7 +9215,7 @@ class NetworkdDHCPPDTests(unittest.TestCase, Utilities):
 
         # ipv4masklen: 8
         # 6rd-prefix: 2001:db8::/32
-        # br-addresss: 10.0.0.1
+        # br-address: 10.0.0.1
 
         start_dnsmasq('--dhcp-option=212,08:20:20:01:0d:b8:00:00:00:00:00:00:00:00:00:00:00:00:0a:00:00:01',
                       ipv4_range='10.100.100.100,10.100.100.200',
@@ -9415,7 +9459,14 @@ class NetworkdSysctlTest(unittest.TestCase, Utilities):
     def tearDown(self):
         tear_down_common()
 
-    @unittest.skipUnless(compare_kernel_version("6.12"), reason="On kernels <= 6.12, bpf_current_task_under_cgroup() isn't available for program types BPF_PROG_TYPE_CGROUP_SYSCTL")
+    @unittest.skipUnless(
+        compare_kernel_version('6.12'),
+        reason='On kernels <= 6.12, bpf_current_task_under_cgroup() is not available for program types BPF_PROG_TYPE_CGROUP_SYSCTL',
+    )
+    @unittest.skipUnless(
+        networkd_has_sysctl_monitor_bpf(),
+        reason='systemd-networkd was built without ENABLE_SYSCTL_BPF support (HAVE_VMLINUX_H=0)',
+    )
     def test_sysctl_monitor(self):
         copy_network_unit('12-dummy.network', '12-dummy.netdev', '12-dummy.link')
         start_networkd()
@@ -9498,7 +9549,7 @@ if __name__ == '__main__':
     if build_dir:
         test_ndisc_send = os.path.normpath(os.path.join(build_dir, 'test-ndisc-send'))
     else:
-        test_ndisc_send = '/usr/lib/tests/test-ndisc-send'
+        test_ndisc_send = '/usr/lib/systemd/tests/unit-tests/manual/test-ndisc-send'
 
     if asan_options:
         env.update({'ASAN_OPTIONS': asan_options})

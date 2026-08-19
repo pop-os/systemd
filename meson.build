@@ -15,7 +15,8 @@ project('systemd', 'c',
 
 add_test_setup(
         'default',
-        exclude_suites : ['clang-tidy', 'unused-symbols', 'integration-tests'],
+        exclude_suites : ['clang-tidy', 'coccinelle', 'unused-symbols', 'integration-tests'],
+        exe_wrapper : find_program('tools/test-crash-trace.sh'),
         is_default : true,
 )
 
@@ -37,10 +38,17 @@ conf.set_quoted('PROJECT_VERSION_STR', project_major_version,
         description: 'Stringified project version (used where a simple string is expected)')
 conf.set_quoted('PROJECT_VERSION_FULL', meson.project_version(), description : 'Full project version')
 
-relative_source_path = run_command('realpath',
-                                   '--relative-to=@0@'.format(meson.project_build_root()),
-                                   meson.project_source_root(),
-                                   check : true).stdout().strip()
+fs = import('fs')
+
+if meson.version().version_compare('>=1.3.0')
+        relative_source_path = fs.relative_to(meson.project_source_root(),
+                                              meson.project_build_root())
+else
+        relative_source_path = run_command('realpath',
+                                           '--relative-to=@0@'.format(meson.project_build_root()),
+                                           meson.project_source_root(),
+                                           check : true).stdout().strip()
+endif
 conf.set_quoted('RELATIVE_SOURCE_PATH', relative_source_path)
 
 conf.set10('BUILD_MODE_DEVELOPER', get_option('mode') == 'developer',
@@ -79,7 +87,6 @@ summary({
 
 #####################################################################
 
-fs = import('fs')
 if get_option('split-bin') == 'auto'
         split_bin = not fs.is_symlink('/usr/sbin')
 else
@@ -501,6 +508,11 @@ possible_cc_flags = [
 
 if get_option('mode') == 'developer'
         possible_cc_flags += '-fno-omit-frame-pointer'
+endif
+
+# Work around stack alignment issues observed with musl + libucontext on i386.
+if get_option('libc') == 'musl' and host_machine.cpu_family() == 'x86'
+        possible_cc_flags += '-mstackrealign'
 endif
 
 add_project_arguments(
@@ -2556,7 +2568,7 @@ foreach dict : executables
 
         foreach val : dict.get('objects', [])
                 obj = objects_by_name[val]
-                kwargs += { 'objects' : obj['objects'] }
+                kwargs += { 'objects' : kwargs.get('objects', []) + obj['objects'] }
                 include_directories += obj['include_directories']
         endforeach
 
@@ -2905,7 +2917,13 @@ if git.found()
                      'ls-files', ':/*.[ch]', ':/*.cc',
                 check : false)
         if all_files.returncode() == 0
-                all_files = files(all_files.stdout().split())
+                existing_files = []
+                foreach f : all_files.stdout().split()
+                        if fs.exists(f)
+                                existing_files += f
+                        endif
+                endforeach
+                all_files = files(existing_files)
 
                 custom_target(
                         output : 'tags',

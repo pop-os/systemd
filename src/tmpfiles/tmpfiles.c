@@ -744,10 +744,10 @@ static int dir_cleanup(
                         }
                 }
 
-                atime_nsec = FLAGS_SET(sx.stx_mask, STATX_ATIME) ? statx_timestamp_load_nsec(&sx.stx_atime) : 0;
-                mtime_nsec = FLAGS_SET(sx.stx_mask, STATX_MTIME) ? statx_timestamp_load_nsec(&sx.stx_mtime) : 0;
-                ctime_nsec = FLAGS_SET(sx.stx_mask, STATX_CTIME) ? statx_timestamp_load_nsec(&sx.stx_ctime) : 0;
-                btime_nsec = FLAGS_SET(sx.stx_mask, STATX_BTIME) ? statx_timestamp_load_nsec(&sx.stx_btime) : 0;
+                atime_nsec = FLAGS_SET(sx.stx_mask, STATX_ATIME) ? statx_timestamp_load_nsec(&sx.stx_atime) : NSEC_INFINITY;
+                mtime_nsec = FLAGS_SET(sx.stx_mask, STATX_MTIME) ? statx_timestamp_load_nsec(&sx.stx_mtime) : NSEC_INFINITY;
+                ctime_nsec = FLAGS_SET(sx.stx_mask, STATX_CTIME) ? statx_timestamp_load_nsec(&sx.stx_ctime) : NSEC_INFINITY;
+                btime_nsec = FLAGS_SET(sx.stx_mask, STATX_BTIME) ? statx_timestamp_load_nsec(&sx.stx_btime) : NSEC_INFINITY;
 
                 sub_path = path_join(p, de->d_name);
                 if (!sub_path) {
@@ -901,11 +901,19 @@ finish:
                 log_action("Would restore", "Restoring",
                            "%s access and modification time on \"%s\": %s, %s",
                            p,
-                           FORMAT_TIMESTAMP_STYLE(self_atime_nsec / NSEC_PER_USEC, TIMESTAMP_US),
-                           FORMAT_TIMESTAMP_STYLE(self_mtime_nsec / NSEC_PER_USEC, TIMESTAMP_US));
+                           self_atime_nsec != NSEC_INFINITY
+                                ? FORMAT_TIMESTAMP_STYLE(self_atime_nsec / NSEC_PER_USEC, TIMESTAMP_US)
+                                : "(omitted)",
+                           self_mtime_nsec != NSEC_INFINITY
+                                ? FORMAT_TIMESTAMP_STYLE(self_mtime_nsec / NSEC_PER_USEC, TIMESTAMP_US)
+                                : "(omitted)");
 
-                timespec_store_nsec(ts + 0, self_atime_nsec);
-                timespec_store_nsec(ts + 1, self_mtime_nsec);
+                ts[0] = self_atime_nsec != NSEC_INFINITY
+                        ? *TIMESPEC_STORE_NSEC(self_atime_nsec)
+                        : TIMESPEC_OMIT;
+                ts[1] = self_mtime_nsec != NSEC_INFINITY
+                        ? *TIMESPEC_STORE_NSEC(self_mtime_nsec)
+                        : TIMESPEC_OMIT;
 
                 /* Restore original directory timestamps */
                 if (!arg_dry_run &&
@@ -1423,16 +1431,20 @@ static int path_set_acl(
                    strna(t), pretty);
 
         if (!arg_dry_run &&
-            sym_acl_set_file(path, type, dup) < 0) {
-                if (ERRNO_IS_NOT_SUPPORTED(errno))
+            (r = RET_NERRNO(sym_acl_set_file(path, type, dup))) < 0) {
+                if (ERRNO_IS_NOT_SUPPORTED(r))
                         /* No error if filesystem doesn't support ACLs. Return negative. */
-                        return -errno;
-                else
-                        /* Return positive to indicate we already warned */
-                        return -log_error_errno(errno,
-                                                "Setting %s ACL \"%s\" on %s failed: %m",
-                                                type == ACL_TYPE_ACCESS ? "access" : "default",
-                                                strna(t), pretty);
+                        return r;
+                if (r == -EINVAL && running_in_chroot() > 0)
+                        return log_warning_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                                 "Setting %s ACL \"%s\" on %s failed. A chroot environment was detected, ignoring.",
+                                                 type == ACL_TYPE_ACCESS ? "access" : "default",
+                                                 strna(t), pretty);
+                /* Return positive to indicate we already warned */
+                return -log_error_errno(r,
+                                        "Setting %s ACL \"%s\" on %s failed: %m",
+                                        type == ACL_TYPE_ACCESS ? "access" : "default",
+                                        strna(t), pretty);
         }
         return 0;
 }
@@ -2301,10 +2313,10 @@ static int create_device(
                 }
         }
 
-        log_debug("%s %s device node \"%s\" %u:%u.",
+        log_debug("%s %s device node \"%s\" " DEVNUM_FORMAT_STR ".",
                   creation_mode_verb_to_string(creation),
                   i->type == CREATE_BLOCK_DEVICE ? "block" : "char",
-                  i->path, major(i->mode), minor(i->mode));
+                  i->path, DEVNUM_FORMAT_VAL(i->major_minor));
 
         return fd_set_perms(c, i, fd, i->path, &st, creation);
 
@@ -2629,10 +2641,9 @@ static int glob_item_recursively(
                 /* Make sure we won't trigger/follow file object (such as device nodes, automounts, ...)
                  * pointed out by 'fn' with O_PATH. Note, when O_PATH is used, flags other than
                  * O_CLOEXEC, O_DIRECTORY, and O_NOFOLLOW are ignored. */
-
-                fd = open(*fn, O_CLOEXEC|O_NOFOLLOW|O_PATH);
+                fd = path_open_safe(*fn);
                 if (fd < 0) {
-                        RET_GATHER(r, log_error_errno(errno, "Failed to open '%s': %m", *fn));
+                        RET_GATHER(r, fd);
                         continue;
                 }
 
@@ -3202,8 +3213,7 @@ static int clean_item(Context *c, Item *i) {
         case CREATE_SUBVOLUME_INHERIT_QUOTA:
         case CREATE_SUBVOLUME_NEW_QUOTA:
         case COPY_FILES:
-                clean_item_instance(c, i, i->path, CREATION_EXISTING);
-                return 0;
+                return clean_item_instance(c, i, i->path, CREATION_EXISTING);
 
         case EMPTY_DIRECTORY:
         case IGNORE_PATH:

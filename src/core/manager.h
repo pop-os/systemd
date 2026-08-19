@@ -14,8 +14,12 @@
 
 struct libmnt_monitor;
 
-/* Enforce upper limit how many names we allow */
+/* Enforce upper limit on how many names we allow */
 #define MANAGER_MAX_NAMES 131072 /* 128K */
+
+/* Enforce upper limit on the number of patterns/states requested over IPC */
+#define MANAGER_MAX_PATTERNS_PER_CALL 4096U
+#define MANAGER_MAX_STATES_PER_CALL 256U
 
 /* On sigrtmin+18, private commands */
 enum {
@@ -646,6 +650,8 @@ LogTarget manager_get_executor_log_target(Manager *m);
 void manager_log_caller(Manager *manager, PidRef *caller, const char *method);
 
 int manager_allocate_idle_pipe(Manager *m);
+
+int update_first_boot_file(bool b);
 
 void unit_defaults_init(UnitDefaults *defaults, RuntimeScope scope);
 void unit_defaults_done(UnitDefaults *defaults);

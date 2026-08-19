@@ -969,7 +969,7 @@ static int get_supplementary_groups(
          * be positive, otherwise fail.
          */
         errno = 0;
-        int ngroups_max = (int) sysconf(_SC_NGROUPS_MAX);
+        long ngroups_max = sysconf(_SC_NGROUPS_MAX);
         if (ngroups_max <= 0)
                 return errno_or_else(EOPNOTSUPP);
 
@@ -1141,7 +1141,7 @@ static int ask_password_conv(
 
                                 if (creds_dir) {
                                         if (setenv("CREDENTIALS_DIRECTORY", creds_dir, /* overwrite= */ true) < 0)
-                                                return log_error_errno(r, "Failed to set $CREDENTIALS_DIRECTORY: %m");
+                                                return log_error_errno(errno, "Failed to set $CREDENTIALS_DIRECTORY: %m");
                                 } else
                                         (void) unsetenv("CREDENTIALS_DIRECTORY");
 
@@ -1690,8 +1690,16 @@ static int apply_syscall_filter(const ExecContext *c, const ExecParameters *p) {
                 action = negative_action;
         }
 
-        /* Sending over exec_fd or handoff_timestamp_fd requires write() syscall. */
+        /* Sending over exec_fd or handoff_timestamp_fd requires write() syscall.
+         *
+         * Note: this mutates c->syscall_filter despite the 'const ExecContext *c' qualifier.
+         * That is intentional and safe here because apply_syscall_filter() runs only in the
+         * post-fork child, which holds a private copy of the address space; the hashmap
+         * change is never visible to the manager process. */
         if (p->exec_fd >= 0 || p->handoff_timestamp_fd >= 0) {
+                if (c->syscall_allow_list)
+                        log_debug("SystemCallFilter= allow-list in effect; adding 'write' syscall required for exec handoff.");
+
                 r = seccomp_filter_set_add_by_name(c->syscall_filter, c->syscall_allow_list, "write");
                 if (r < 0)
                         return r;
@@ -4046,11 +4054,21 @@ static int apply_root_directory(
         assert(exit_status);
 
         if (params->flags & EXEC_APPLY_CHROOT)
-                if (!needs_mount_ns && context->root_directory)
+                if (!needs_mount_ns && context->root_directory) {
                         if (chroot(runtime->ephemeral_copy ?: context->root_directory) < 0) {
                                 *exit_status = EXIT_CHROOT;
                                 return -errno;
                         }
+
+                        /* chroot(2) changes only the process root, not cwd. Move cwd into the new root
+                         * immediately so that a subsequent apply_working_directory() failure that is
+                         * silently ignored via working_directory_missing_ok cannot leave cwd pointing
+                         * at a pre-chroot dentry outside the new root. */
+                        if (chdir("/") < 0) {
+                                *exit_status = EXIT_CHROOT;
+                                return -errno;
+                        }
+                }
 
         return 0;
 }
@@ -5278,7 +5296,7 @@ int exec_invoke(
                         own_user = getusername_malloc();
                         if (!own_user) {
                                 *exit_status = EXIT_USER;
-                                return log_error_errno(r, "Failed to determine my own user ID: %m");
+                                return log_oom();
                         }
                         u = own_user;
                 } else
@@ -5832,8 +5850,10 @@ int exec_invoke(
                  * Users with CAP_SYS_ADMIN can set up user namespaces last because they will be able to
                  * set up all of the other namespaces (i.e. network, mount, UTS) without a user namespace. */
 
-                if (context->user_namespace_path && runtime->shared->userns_storage_socket[0] >= 0)
+                if (context->user_namespace_path && runtime->shared->userns_storage_socket[0] >= 0) {
+                        *exit_status = EXIT_USER;
                         return log_error_errno(SYNTHETIC_ERRNO(EPERM), "UserNamespacePath= is configured, but user namespace setup not permitted");
+                }
 
                 PrivateUsers pu = exec_context_get_effective_private_users(context, params);
                 if (pu == PRIVATE_USERS_NO)
@@ -5906,12 +5926,16 @@ int exec_invoke(
          * case of mount namespaces being less privileged when the mount point list is copied from a
          * different user namespace). */
         if (needs_sandboxing && context->user_namespace_path && runtime->shared && runtime->shared->userns_storage_socket[0] >= 0) {
-                if (!namespace_type_supported(NAMESPACE_USER))
+                if (!namespace_type_supported(NAMESPACE_USER)) {
+                        *exit_status = EXIT_USER;
                         return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "UserNamespacePath= is not supported, refusing.");
+                }
 
                 r = setup_shareable_ns(runtime->shared->userns_storage_socket, CLONE_NEWUSER);
-                if (ERRNO_IS_NEG_PRIVILEGE(r))
-                        return log_notice_errno(r, "PrivateUsers= is configured, but user namespace setup not permitted, refusing.");
+                if (ERRNO_IS_NEG_PRIVILEGE(r)) {
+                        *exit_status = EXIT_USER;
+                        return log_error_errno(r, "UserNamespacePath= is configured, but user namespace setup not permitted, refusing.");
+                }
                 if (r < 0) {
                         *exit_status = EXIT_USER;
                         return log_error_errno(r, "Failed to set up user namespacing: %m");

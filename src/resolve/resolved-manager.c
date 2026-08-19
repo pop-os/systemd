@@ -368,7 +368,7 @@ static int manager_network_monitor_listen(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = sd_event_source_set_priority(m->network_event_source, SD_EVENT_PRIORITY_IMPORTANT+5);
+        r = sd_event_source_set_priority(m->network_event_source, SD_EVENT_PRIORITY_IMPORTANT-5);
         if (r < 0)
                 return r;
 
@@ -659,6 +659,7 @@ static int manager_dispatch_reload_signal(sd_event_source *s, const struct signa
         m->unicast_scope = dns_scope_free(m->unicast_scope);
         m->delegates = hashmap_free(m->delegates);
         dns_trust_anchor_flush(&m->trust_anchor);
+        manager_etc_hosts_flush(m);
 
         manager_set_defaults(m);
 

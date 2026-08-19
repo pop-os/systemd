@@ -1186,6 +1186,8 @@ int unit_merge(Unit *u, Unit *other) {
         if (r < 0)
                 return r;
 
+        UnitLoadState saved_load_state = other->load_state;
+
         other->load_state = UNIT_MERGED;
         other->merged_into = u;
 
@@ -1194,7 +1196,7 @@ int unit_merge(Unit *u, Unit *other) {
 
         /* If there is still some data attached to the other node, we
          * don't need it anymore, and can free it. */
-        if (other->load_state != UNIT_STUB)
+        if (saved_load_state != UNIT_STUB)
                 if (UNIT_VTABLE(other)->done)
                         UNIT_VTABLE(other)->done(other);
 
@@ -2322,7 +2324,7 @@ static void retroactively_stop_dependencies(Unit *u) {
 
 void unit_start_on_termination_deps(Unit *u, UnitDependencyAtom atom) {
         const char *dependency_name = NULL;
-        JobMode job_mode;
+        JobMode job_mode = _JOB_MODE_INVALID;
         unsigned n_jobs = 0;
         int r;
 
@@ -5297,15 +5299,15 @@ static void unit_modify_user_nft_set(Unit *u, bool add, NFTSetSource source, uin
         if (!c)
                 return;
 
-        if (!u->manager->nfnl) {
-                r = sd_nfnl_socket_open(&u->manager->nfnl);
-                if (r < 0)
-                        return;
-        }
-
         FOREACH_ARRAY(nft_set, c->nft_set_context.sets, c->nft_set_context.n_sets) {
                 if (nft_set->source != source)
                         continue;
+
+                if (!u->manager->nfnl) {
+                        r = sd_nfnl_socket_open(&u->manager->nfnl);
+                        if (r < 0)
+                                return (void) log_once_errno(LOG_WARNING, r, "Failed to open NETLINK_NETFILTER socket, ignoring: %m");
+                }
 
                 r = nft_set_element_modify_any(u->manager->nfnl, add, nft_set->nfproto, nft_set->table, nft_set->set, &element, sizeof(element));
                 if (r < 0)

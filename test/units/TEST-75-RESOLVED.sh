@@ -1262,13 +1262,13 @@ testcase_14_refuse_record_types() {
     grep -qF "127.128.0.5" "$RUN_OUT"
 
     (! run resolvectl query localhost5 --type=SRV)
-    grep -qF "DNS query type refused." "$RUN_OUT"
+    grep -qF "DNS query type refused" "$RUN_OUT"
 
     (! run resolvectl query localhost5 --type=TXT)
-    grep -qF "DNS query type refused." "$RUN_OUT"
+    grep -qF "DNS query type refused" "$RUN_OUT"
 
     (! run resolvectl query localhost5 --type=AAAA)
-    grep -qF "DNS query type refused." "$RUN_OUT"
+    grep -qF "DNS query type refused" "$RUN_OUT"
 
     run resolvectl query localhost5 --type=A
     grep -qF "127.128.0.5" "$RUN_OUT"
@@ -1308,7 +1308,7 @@ testcase_14_refuse_record_types() {
     grep -qF "does not have any RR of the requested type" "$RUN_OUT"
 
     (! run resolvectl query localhost5 --type=AAAA)
-    grep -qF "DNS query type refused." "$RUN_OUT"
+    grep -qF "DNS query type refused" "$RUN_OUT"
 
     run resolvectl service _mysvc._tcp signed.test
     grep -qF "myservice.signed.test:1234" "$RUN_OUT"
@@ -1387,7 +1387,7 @@ testcase_15_wait_online_dns() {
         echo "===== journalctl -u $unit ====="
         journalctl -b --no-pager --no-hostname --full -u "$unit"
         echo "=========="
-        rm -f "$override"
+        rm -f "$override" "$cursor_file"
         restart_resolved
         resolvectl revert dns0
     }
@@ -1396,6 +1396,7 @@ testcase_15_wait_online_dns() {
 
     local unit
     local override
+    local cursor_file
 
     unit="wait-online-dns-$(systemd-id128 new -u).service"
     override="/run/systemd/resolved.conf.d/90-global-dns.conf"
@@ -1416,12 +1417,26 @@ testcase_15_wait_online_dns() {
     systemctl stop systemd-resolved.service
     systemctl start systemd-resolved-monitor.socket systemd-resolved-varlink.socket
 
+    # Capture a journal cursor before starting the unit so we can match only on
+    # log messages emitted afterwards. We deliberately do not filter on
+    # _SYSTEMD_UNIT= because journald may attach stale cgroup metadata
+    # (e.g. _SYSTEMD_UNIT=init.scope) to the very first messages emitted by a
+    # freshly-spawned process, before its cgroup migration into the new service
+    # is observed. Filtering by SYSLOG_IDENTIFIER and a cursor is not affected
+    # by that race.
+    cursor_file=$(mktemp)
+    journalctl -n 0 --cursor-file="$cursor_file"
+
     # Begin systemd-networkd-wait-online --dns
     systemd-run -u "$unit" -p "Environment=SYSTEMD_LOG_LEVEL=debug" -p "Environment=SYSTEMD_LOG_TARGET=journal" --service-type=exec \
         /usr/lib/systemd/systemd-networkd-wait-online --timeout=0 --dns --interface=dns0
 
-    # Wait until it blocks waiting for updated DNS config
-    timeout 30 bash -c "journalctl -b -u $unit -f | grep -m1 'dns0: No.*DNS server is accessible'" >/dev/null
+    # Wait until it blocks waiting for updated DNS config.
+    # Note: don't use 'journalctl -f | grep -m1 ...' here. Once grep exits on
+    # match, journalctl -f will only notice the closed pipe on its next write
+    # attempt, which may never come for an otherwise idle unit, causing the
+    # pipeline to hang.
+    timeout 30 bash -c "until journalctl --after-cursor=\"\$(cat \"$cursor_file\")\" SYSLOG_IDENTIFIER=systemd-networkd-wait-online --grep 'dns0: No.*DNS server is accessible' >/dev/null 2>&1; do sleep 0.5; done"
 
     # Update the global configuration. Restart rather than reload systemd-resolved so that
     # systemd-networkd-wait-online has to re-connect to the varlink service.
@@ -1436,10 +1451,10 @@ testcase_15_wait_online_dns() {
     journalctl --sync
 
     # Check that a disconnect happened, and was handled.
-    journalctl -b -u "$unit" --grep="DNS configuration monitor disconnected, reconnecting..." >/dev/null
+    journalctl --after-cursor="$(cat "$cursor_file")" SYSLOG_IDENTIFIER=systemd-networkd-wait-online --grep="DNS configuration monitor disconnected, reconnecting..." >/dev/null
 
     # Check that dns0 was found to be online.
-    journalctl -b -u "$unit" --grep="dns0: link is configured by networkd and online." >/dev/null
+    journalctl --after-cursor="$(cat "$cursor_file")" SYSLOG_IDENTIFIER=systemd-networkd-wait-online --grep="dns0: link is configured by networkd and online." >/dev/null
 }
 
 testcase_delegate() {
@@ -1484,6 +1499,114 @@ EOF
     # Should work again without delegation in the mix
     run resolvectl query delegation.exercise.test
     grep -qF "1.2.3.4" "$RUN_OUT"
+}
+
+# Regression test for CVE/strict-DoT verification: when the global
+# DNSOverTLS= is "no" or "opportunistic" but a specific link is configured
+# with DNSOverTLS=yes (per-link strict mode), resolved must still enable
+# OpenSSL peer certificate verification and host/IP name checking on that
+# link. Previously dnstls_stream_connect_tls() looked at the manager-wide
+# field directly instead of dns_server_get_dns_over_tls_mode(), so a
+# self-signed/untrusted DoT server would be silently accepted on a strict
+# link, allowing trivial MITM.
+testcase_dot_strict_per_link_verify() {
+    if ! command -v openssl >/dev/null; then
+        echo "openssl not found, skipping per-link strict DoT test"
+        return 0
+    fi
+
+    local certdir s_server_pid="" link_addr="10.123.99.1"
+    local journal_cursor
+
+    certdir="$(mktemp -d)"
+
+    # shellcheck disable=SC2317,SC2329
+    cleanup() {
+        if [[ -n "$s_server_pid" ]] && kill -0 "$s_server_pid" 2>/dev/null; then
+            kill "$s_server_pid" || :
+            wait "$s_server_pid" 2>/dev/null || :
+        fi
+        rm -f /run/systemd/resolved.conf.d/95-strict-dot-test.conf
+        rm -f /run/systemd/network/10-dns3-strict-dot.netdev
+        rm -f /run/systemd/network/10-dns3-strict-dot.network
+        networkctl reload || :
+        ip link del dns3-sdot 2>/dev/null || :
+        systemctl reload systemd-resolved.service || :
+        rm -rf "$certdir" "$journal_cursor"
+    }
+
+    trap cleanup RETURN ERR
+
+    # Self-signed cert for CN=strict-dot.test, with a SAN matching the link
+    # IP. It is intentionally NOT in the system CA store, so peer
+    # verification (when actually enabled) MUST reject it.
+    openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "$certdir/key.pem" -out "$certdir/cert.pem" \
+        -subj "/CN=strict-dot.test" \
+        -addext "subjectAltName=IP:${link_addr},DNS:strict-dot.test" \
+        -days 1
+
+    # Dummy interface that hosts both the fake DoT server and the strict
+    # client-side configuration.
+    {
+        echo "[NetDev]"
+        echo "Name=dns3-sdot"
+        echo "Kind=dummy"
+    } >/run/systemd/network/10-dns3-strict-dot.netdev
+    {
+        echo "[Match]"
+        echo "Name=dns3-sdot"
+        echo ""
+        echo "[Network]"
+        echo "IPv6AcceptRA=no"
+        echo "Address=${link_addr}/24"
+        echo "DNS=${link_addr}"
+        echo "DNSOverTLS=yes"
+        echo "DNSSEC=no"
+    } >/run/systemd/network/10-dns3-strict-dot.network
+
+    # Force the manager-wide DoT mode to "no". Before the fix this would
+    # cause SSL_VERIFY_PEER to NOT be set, even though the link is strict.
+    {
+        echo "[Resolve]"
+        echo "DNSOverTLS=no"
+    } >/run/systemd/resolved.conf.d/95-strict-dot-test.conf
+
+    networkctl reload
+    networkctl reconfigure dns3-sdot
+    /usr/lib/systemd/systemd-networkd-wait-online --timeout=30 --interface=dns3-sdot --dns
+
+    systemctl reload systemd-resolved.service
+
+    assert_eq "$(resolvectl --json=short dnsovertls dns3-sdot | jq -rc '.[0].dnsOverTLS')" 'yes'
+
+    # Start an unauthenticated TLS listener using the self-signed cert.
+    # -naccept lets resolved reconnect a few times during retries.
+    openssl s_server \
+        -accept "${link_addr}:853" \
+        -cert "$certdir/cert.pem" -key "$certdir/key.pem" \
+        -quiet -naccept 8 </dev/null >/dev/null 2>&1 &
+    s_server_pid=$!
+
+    timeout 10s bash -c "until ss -lnt 'sport = :853' | grep -F ${link_addr} >/dev/null; do sleep 0.2; done"
+
+    journal_cursor="$(mktemp)"
+    journalctl -n0 -q --cursor-file="$journal_cursor"
+
+    # The query must fail: a strict-DoT link must refuse an untrusted cert.
+    set +e
+    timeout 15s resolvectl query -i dns3-sdot strict-dot.test
+    local rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then
+        echo "resolvectl query against untrusted DoT server on strict link succeeded, should have failed"
+        return 1
+    fi
+
+    # Ensure the test failed for the right reason
+    journalctl --sync
+    journalctl -u systemd-resolved.service --cursor-file="$journal_cursor" \
+        --grep "Failed to invoke SSL_do_handshake.*(certificate verify failed|self[- ]signed certificate|unable to get local issuer)"
 }
 
 # PRE-SETUP
