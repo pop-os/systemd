@@ -21,7 +21,6 @@ lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
 CVE-2026-16742/homed-fix-verification-of-local-identity-file.patch
 CVE-2026-16742/homed-verify-privileged-worker-changes.patch
 GHSA-m8q3-73v4-wvg7.patch
-GHSA-2p9f-rcmv-x36h.patch
 GHSA-3jgj-3phh-hx5j/sd-bus-store-the-strv-size-when-extending-it.patch
 GHSA-3jgj-3phh-hx5j/core-limit-the-number-of-units-that-can-be-requested-over.patch
 GHSA-3jgj-3phh-hx5j/sd-json-user-record-store-the-strv-size-when-extending-it.patch
