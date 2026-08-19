@@ -18,5 +18,4 @@ lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
 tmpfiles-remove-duplicate-run-lock-definition.patch
 test-do-not-use-nanoseconds-width-specifier-in-date-comma.patch
 lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
-CVE-2026-16742/homed-fix-verification-of-local-identity-file.patch
 GHSA-3jgj-3phh-hx5j/dbus-limit-the-number-of-env-variables-to-something-reaso.patch
