@@ -21,6 +21,5 @@ lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
 CVE-2026-16742/homed-fix-verification-of-local-identity-file.patch
 CVE-2026-16742/homed-verify-privileged-worker-changes.patch
 GHSA-m8q3-73v4-wvg7.patch
-GHSA-3jgj-3phh-hx5j/dns-question-limit-the-number-of-questions-per-query.patch
 GHSA-3jgj-3phh-hx5j/dbus-limit-the-number-of-env-variables-to-something-reaso.patch
 GHSA-3jgj-3phh-hx5j/resolve-enforce-the-search-domain-limit-earlier.patch
