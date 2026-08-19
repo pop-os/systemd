@@ -21,7 +21,6 @@ lp2150773-core-Open-netfilter-socket-only-when-needed.patch
 lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
 CVE-2026-16742/homed-fix-verification-of-local-identity-file.patch
 CVE-2026-16742/homed-verify-privileged-worker-changes.patch
-GHSA-5rm9-cc37-35gq.patch
 GHSA-m8q3-73v4-wvg7.patch
 GHSA-2p9f-rcmv-x36h.patch
 GHSA-3jgj-3phh-hx5j/sd-bus-store-the-strv-size-when-extending-it.patch
