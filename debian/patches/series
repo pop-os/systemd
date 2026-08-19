@@ -18,7 +18,6 @@ lp2141588/network-generator-initramfs-tools-compat-for-empty-DHCP-type.patch
 tmpfiles-remove-duplicate-run-lock-definition.patch
 test-do-not-use-nanoseconds-width-specifier-in-date-comma.patch
 lp2150773-core-Open-netfilter-socket-only-when-needed.patch
-lp2148619-units-drop-Before-sockets.target-from-networkd-resolve-ho.patch
 lp2157342-test-use-gnudate-in-TEST-45-TIMEDATE.patch
 CVE-2026-16742/homed-fix-verification-of-local-identity-file.patch
 CVE-2026-16742/homed-verify-privileged-worker-changes.patch
