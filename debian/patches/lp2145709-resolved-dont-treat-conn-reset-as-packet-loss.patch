@@ -1,0 +1,52 @@
+From 030dbbc39e54666bd0f393ef47f0b0d9b2dfe8b4 Mon Sep 17 00:00:00 2001
+From: Ronan Pigott <ronan@rjp.ie>
+Date: Thu, 1 Aug 2024 10:59:12 -0700
+Subject: [PATCH] resolved: don't treat conn reset as packet loss
+
+tcp reset / icmp port-unreachable are markedly different conditions than
+packet loss. It doesn't make much sense to retry in this case. It's
+actually not clear if there is any benefit at all retrying tcp
+connections, which were presumably already retried as necessary by the
+tcp stack.
+
+(cherry picked from commit ddd710a355acc698b48159f3e501dda5a7dc2704)
+(cherry picked from commit f5376fea7de173e9369e8af569fc6ecabd0d7282)
+
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/030dbbc39e54666bd0f393ef47f0b0d9b2dfe8b4
+Bug: https://github.com/systemd/systemd/issues/33719
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2145709
+---
+ src/resolve/resolved-dns-stream.c      | 6 ++++++
+ src/resolve/resolved-dns-transaction.c | 2 +-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-stream.c b/src/resolve/resolved-dns-stream.c
+index 1a43d0bd49..8c1512006a 100644
+--- a/src/resolve/resolved-dns-stream.c
++++ b/src/resolve/resolved-dns-stream.c
+@@ -322,6 +322,12 @@ static int on_stream_io(sd_event_source *es, int fd, uint32_t revents, void *use
+                         return dns_stream_complete(s, -r);
+         }
+
++        if (revents & EPOLLERR) {
++                socklen_t errlen = sizeof(r);
++                if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &r, &errlen) == 0)
++                        return dns_stream_complete(s, r);
++        }
++
+         if ((revents & EPOLLOUT) &&
+             s->write_packet &&
+             s->n_written < sizeof(s->write_size) + s->write_packet->size) {
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 3f48b566b5..1354acbd0f 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -626,7 +626,7 @@ static int on_stream_complete(DnsStream *s, int error) {
+         if (ERRNO_IS_DISCONNECT(error) && s->protocol != DNS_PROTOCOL_LLMNR) {
+                 log_debug_errno(error, "Connection failure for DNS TCP stream: %m");
+
+-                if (s->transactions) {
++                if (error != ECONNRESET && s->transactions) {
+                         DnsTransaction *t;
+
+                         t = s->transactions;
