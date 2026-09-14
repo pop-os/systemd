@@ -334,7 +334,11 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        OptionParser opts = { argc, argv, OPTION_PARSER_STOP_AT_FIRST_NONOPTION };
+        /* Our positional arguments are kernel command line arguments rather than a command to
+         * execute, and those never begin with a dash, so there's no reason to stop looking for
+         * options at the first of them. "--" still ends option parsing, for the rare argument that
+         * does look like an option. */
+        OptionParser opts = { argc, argv };
 
         FOREACH_OPTION_OR_RETURN(c, &opts)
                 switch (c) {
@@ -413,6 +417,11 @@ static int parse_argv(int argc, char *argv[]) {
                         r = parse_size(opts.arg, 1024, &arg_grow_image);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --grow-image= parameter: %s", opts.arg);
+
+                        if (arg_grow_image > UINT64_MAX - 4095)
+                                return log_error_errno(SYNTHETIC_ERRNO(ERANGE),
+                                                       "Specified --grow-image= size too large: %s", opts.arg);
+                        arg_grow_image = ROUND_UP(arg_grow_image, 4096);
                         break;
 
                 OPTION_GROUP("Host Configuration"): {}
@@ -2078,12 +2087,6 @@ static int grow_image(const char *path, uint64_t size) {
         if (size == 0)
                 return 0;
 
-        /* Round up to multiple of 4K */
-        size = DIV_ROUND_UP(size, 4096);
-        if (size > UINT64_MAX / 4096)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Specified file size too large, refusing.");
-        size *= 4096;
-
         _cleanup_close_ int fd = xopenat_full(AT_FDCWD, path, O_RDWR|O_CLOEXEC, XO_REGULAR, /* mode= */ 0);
         if (fd < 0)
                 return log_error_errno(fd, "Failed to open image file '%s': %m", path);
@@ -2408,6 +2411,7 @@ static int prepare_primary_drive(const char *runtime_dir, DriveInfos *drives) {
                 }
                 d->overlay_fd = TAKE_FD(overlay_fd);
                 d->flags |= QMP_DRIVE_NO_FLUSH;
+                d->grow_to = arg_grow_image;
         }
 
         drives->drives[drives->n_drives++] = TAKE_PTR(d);
@@ -2537,7 +2541,8 @@ static int prepare_device_info(const char *runtime_dir, MachineConfig *c) {
 static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
         _cleanup_(ovmf_config_freep) OvmfConfig *ovmf_config = NULL;
         _cleanup_free_ char *qemu_binary = NULL, *mem = NULL;
-        _cleanup_(rm_rf_physical_and_freep) char *ssh_private_key_path = NULL, *ssh_public_key_path = NULL;
+        /* Always assigned paths below the runtime directory, whose removal takes them along. */
+        _cleanup_free_ char *ssh_private_key_path = NULL, *ssh_public_key_path = NULL;
         _cleanup_(rm_rf_subvolume_and_freep) char *snapshot_directory = NULL;
         _cleanup_(release_lock_file) LockFile tree_global_lock = LOCK_FILE_INIT, tree_local_lock = LOCK_FILE_INIT;
         _cleanup_close_ int notify_sock_fd = -EBADF;
@@ -2547,6 +2552,11 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                 .network = { .fd = -EBADF },
                 .vsock   = { .fd = -EBADF },
         };
+        /* Declared before the CLEANUP_ARRAY() below, so that cleanup order (reverse of declaration) lets
+         * fork_notify_terminate_many() reap the helpers before this directory goes away: their sockets,
+         * state, and the QEMU config file all live below it, and pulling it out from under them gives
+         * spurious errors and can leave the directory behind. */
+        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
         sd_event_source **children = NULL;
         size_t n_children = 0, n_pass_fds = 0;
         int r;
@@ -2642,8 +2652,6 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
         /* Create our runtime directory. We need this for the QMP varlink control socket, the QEMU
          * config file, TPM state, virtiofsd sockets, runtime mounts, and SSH key material. */
-        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
-
         r = runtime_directory_make(arg_runtime_scope, "systemd/vmspawn", arg_machine, &runtime_dir);
         if (r < 0)
                 return log_error_errno(r, "Failed to create runtime directory: %m");
@@ -3113,14 +3121,18 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
                                                        arg_image);
                 }
 
-                if (arg_image_disk_type != DISK_TYPE_VIRTIO_SCSI_CDROM) {
+                if (arg_image_disk_type == DISK_TYPE_VIRTIO_SCSI_CDROM) {
+                        /* CD-ROMs are read-only, so override any "rw" on the kernel command line. */
+                        if (strv_contains(arg_kernel_cmdline_extra, "rw") &&
+                            strv_extend(&arg_kernel_cmdline_extra, "ro") < 0)
+                                return log_oom();
+                } else if (!arg_ephemeral) {
+                        /* In ephemeral mode the original image is never written to, the requested size is
+                         * applied to the qcow2 overlay instead, see prepare_primary_drive(). */
                         r = grow_image(arg_image, arg_grow_image);
                         if (r < 0)
                                 return r;
-                /* CD-ROMs are read-only, so override any "rw" on the kernel command line. */
-                } else if (strv_contains(arg_kernel_cmdline_extra, "rw") &&
-                           strv_extend(&arg_kernel_cmdline_extra, "ro") < 0)
-                        return log_oom();
+                }
         }
 
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
@@ -3696,11 +3708,9 @@ static int run_virtual_machine(int kvm_device_fd, int vhost_device_fd) {
 
         /* Connect to VMM backend */
         _cleanup_(vmspawn_qmp_bridge_freep) VmspawnQmpBridge *bridge = NULL;
-        r = vmspawn_qmp_init(&bridge, bridge_fds[0], event);
+        r = vmspawn_qmp_init(&bridge, TAKE_FD(bridge_fds[0]), event);
         if (r < 0)
                 return r;
-
-        TAKE_FD(bridge_fds[0]);
 
         /* Probe QEMU feature availability synchronously before device setup consumes the flags. */
         r = vmspawn_qmp_probe_features(bridge);
@@ -3948,12 +3958,23 @@ static int determine_names(void) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to find image for machine '%s': %m", arg_machine);
 
-                        if (IN_SET(i->type, IMAGE_RAW, IMAGE_BLOCK))
+                        switch (i->type) {
+                        case IMAGE_RAW:
+                        case IMAGE_BLOCK:
                                 r = free_and_strdup(&arg_image, i->path);
-                        else if (IN_SET(i->type, IMAGE_DIRECTORY, IMAGE_SUBVOLUME))
+                                break;
+
+                        case IMAGE_DIRECTORY:
+                        case IMAGE_SUBVOLUME:
                                 r = free_and_strdup(&arg_directory, i->path);
-                        else
-                                assert_not_reached();
+                                break;
+
+                        default:
+                                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                                       "Image '%s' at '%s' has unsupported type '%s'. "
+                                                       "Please use 'systemd-nspawn -M %s' instead.",
+                                                       arg_machine, i->path, image_type_to_string(i->type), arg_machine);
+                        }
                         if (r < 0)
                                 return log_oom();
                 } else {
@@ -4064,7 +4085,9 @@ static int verify_arguments(void) {
                         log_warning("--grow-image has no effect with --image-disk-type=scsi-cd (CD-ROMs are read-only).");
         }
 
-        if (arg_grow_image && arg_image_format == IMAGE_FORMAT_QCOW2)
+        /* In ephemeral mode the size is picked when creating the qcow2 overlay, so the base image format
+         * doesn't matter. */
+        if (arg_grow_image && arg_image_format == IMAGE_FORMAT_QCOW2 && !arg_ephemeral)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "--grow-image is not supported for qcow2 images, use 'qemu-img resize FILE SIZE'.");
 

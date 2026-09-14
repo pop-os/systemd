@@ -421,6 +421,10 @@ static int parse_argv(int argc, char *argv[], char ***remaining_args) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Positional arguments are not allowed with --cat-config/--tldr.");
 
+        if (arg_inline && strv_isempty(*remaining_args))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--inline requires positional arguments.");
+
         return 1;
 }
 
@@ -441,10 +445,16 @@ static int run(int argc, char *argv[]) {
                 unsigned pos = 0;
 
                 STRV_FOREACH(arg, args) {
-                        if (arg_inline)
+                        if (arg_inline) {
+                                pos++;
+
+                                const char *s = skip_leading_chars(*arg, /* bad= */ NULL);
+                                if (IN_SET(*s, '\0', '#'))
+                                        continue;
+
                                 /* Use (argument):n, where n==1 for the first positional arg */
-                                RET_GATHER(r, parse_line("(argument)", ++pos, *arg, /* invalid_config= */ NULL, &sysctl_options));
-                        else
+                                RET_GATHER(r, parse_line("(argument)", pos, s, /* invalid_config= */ NULL, &sysctl_options));
+                        } else
                                 RET_GATHER(r, parse_file(&sysctl_options, *arg, false));
                 }
         } else {

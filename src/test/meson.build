@@ -59,6 +59,7 @@ simple_tests += files(
         'test-architecture.c',
         'test-argv-util.c',
         'test-arphrd-util.c',
+        'test-ask-password-agent.c',
         'test-audit-util.c',
         'test-barrier.c',
         'test-binfmt-util.c',
@@ -170,6 +171,7 @@ simple_tests += files(
         'test-pe-binary.c',
         'test-percent-util.c',
         'test-pidref.c',
+        'test-plymouth-util.c',
         'test-pressure.c',
         'test-pretty-print.c',
         'test-printf.c',
@@ -291,6 +293,10 @@ executables += [
                 'sources' : files('test-crypto-util.c'),
                 'dependencies' : libopenssl_cflags,
                 'conditions' : ['HAVE_OPENSSL'],
+        },
+        test_template + {
+                'sources' : files('test-dbus-name-holder.c'),
+                'type' : 'manual',
         },
         test_template + {
                 'sources' : files('test-display-quota.c'),
