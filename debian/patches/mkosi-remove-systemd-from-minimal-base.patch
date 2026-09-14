@@ -1,0 +1,20 @@
+From: Nick Rosbrook <enr0n@ubuntu.com>
+Date: Mon, 14 Sep 2026 19:01:14 -0400
+Subject: mkosi: remove systemd from minimal-base
+
+---
+ mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf b/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
+index b9fd7bc..ea34cf2 100644
+--- a/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
++++ b/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
+@@ -2,3 +2,7 @@
+ 
+ [Match]
+ Distribution=ubuntu
++
++[Content]
++RemovePackages=
++        systemd
