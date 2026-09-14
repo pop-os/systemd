@@ -1,3 +1,17 @@
+systemd (261.3-0ubuntu1) stonking; urgency=medium
+
+  * New upstream stable version 261.3
+    - d/gbp.conf: set upstream branch to 261.x stable
+    - d/watch: track 261.x stable
+    - Update upstream source from tag 'upstream/261.3'
+      Update to upstream version '261.3'
+      with Debian dir 3857375784a9bdd0b319a0e09222392a5d485461
+    - Bug fixes
+  * mkosi: remove systemd from minimal-base on ubuntu
+  * d/systemd.links: stop creating hwclock.service mask
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Mon, 21 Sep 2026 17:15:49 -0400
+
 systemd (261.2-1ubuntu2) stonking; urgency=medium
 
   * Drop test-use-gnuenv-to-workaround-broken-block-signal.patch.
