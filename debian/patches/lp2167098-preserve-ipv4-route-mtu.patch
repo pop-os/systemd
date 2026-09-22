@@ -1,0 +1,105 @@
+From: Dean Marx <dean.marx@canonical.com>
+Date: Fri, 11 Sep 2026 09:28:36 +0900
+Subject: network/route: preserve IPv4 route MTU (LP: #2167098)
+
+In systemd v250, commit 3b6a3bdebfb ("network: use
+NetworkConfigSource/State to manage addresses and routes") changed how
+networkd handles route requests. Before that commit, link_request_route()
+queued each newly requested Route object, which was then passed to
+route_configure(), which built and sent an RTM_NEWROUTE rtnetlink message
+to the kernel. The kernel then decided whether the message described a new
+route or an update to an existing route, based on the kernel routing key.
+
+After 3b6a3bdebfb, link_request_route() first calls route_get() to check
+whether networkd is already tracking an equivalent Route object. If a
+match is found, networkd reuses the previously tracked object instead of
+the newly requested one, copying only a few select fields such as
+source, provider, and later lifetime_usec. The problem is that this match
+is decided by route_hash_func() and route_compare_func(), and in v255
+those functions do not include Route.mtu. As a result, a route request
+that differs only in MTU is treated as matching the existing tracked
+route. The newly requested object, carrying the updated MTU, is discarded,
+and the stale tracked object is passed to route_configure() instead.
+
+route_configure() already knows how to send Route.mtu to the kernel as
+RTAX_MTU inside the RTA_METRICS container. The bug is that, after the
+v250 route request refactor, route_configure() can be given the stale
+tracked Route object rather than the freshly requested one. This causes
+the old MTU to be sent back to the kernel and the updated MTU to be lost.
+
+This patch is a targeted v255 fix for that behaviour. It includes
+Route.mtu in the IPv4 route hash and comparison functions, so two IPv4
+routes that differ only in MTU are no longer treated as the same tracked
+route. It also reads RTAX_MTU from received rtnetlink route messages into
+Route.mtu, so Route objects built from kernel notifications have the same
+MTU information that networkd sends during route configuration.
+
+Upstream no longer has this bug in v256 and later, but the upstream fix
+is not a single small change that can be applied directly to v255. Commit
+d32a520b095f ("network/route-metric: introduce RouteMetric") moved route
+metric fields, including MTU, out of struct Route and into struct
+RouteMetric. Commit ebf4fa1e82b ("network/route-metric: manage uint32_t
+RTAX_XYZ attributes in the same way") then stored those values in a
+RouteMetric.metrics array indexed by RTAX_* attributes. This made MTU
+available as metrics[RTAX_MTU], and route_metric_compare_func() compares
+that metrics array as a whole. Commit 7027cdbd79c ("network/route:
+remove existing route if some property conflict with requested ones")
+then added route_can_update() / route_metric_can_update(), so networkd
+can reject reuse of an existing route whose metrics do not match the
+requested route.
+
+Backporting that upstream implementation would require bringing in the
+larger RouteMetric refactoring and its dependent changes. Instead, this
+vendor patch reproduces the relevant behaviour using the v255 data
+structure: MTU remains stored in Route.mtu, but it is now a part of
+the same route identity decision that determines whether an existing
+tracked route may be reused.
+
+Origin: vendor
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/2167098
+Forwarded: not-needed
+Last-Update: 2026-09-22
+---
+ src/network/networkd-route.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/network/networkd-route.c b/src/network/networkd-route.c
+index b7de582..189402c 100644
+--- a/src/network/networkd-route.c
++++ b/src/network/networkd-route.c
+@@ -141,6 +141,9 @@ static void route_hash_func(const Route *route, struct siphash *state) {
+                 siphash24_compress(&route->scope, sizeof(route->scope), state);
+                 siphash24_compress(&route->type, sizeof(route->type), state);
+ 
++                if (route->family == AF_INET)
++                        siphash24_compress(&route->mtu, sizeof(route->mtu), state);
++
+                 siphash24_compress(&route->initcwnd, sizeof(route->initcwnd), state);
+                 siphash24_compress(&route->initrwnd, sizeof(route->initrwnd), state);
+ 
+@@ -222,6 +225,12 @@ static int route_compare_func(const Route *a, const Route *b) {
+                 if (r != 0)
+                         return r;
+ 
++                if (a->family == AF_INET) {
++                        r = CMP(a->mtu, b->mtu);
++                        if (r != 0)
++                                return r;
++                }
++
+                 r = CMP(a->initcwnd, b->initcwnd);
+                 if (r != 0)
+                         return r;
+@@ -1870,6 +1879,12 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, Ma
+                 return 0;
+         }
+         if (r >= 0) {
++                r = sd_netlink_message_read_u32(message, RTAX_MTU, &tmp->mtu);
++                if (r < 0 && r != -ENODATA) {
++                        log_link_warning_errno(link, r, "rtnl: received route message with invalid MTU, ignoring: %m");
++                        return 0;
++                }
++
+                 r = sd_netlink_message_read_u32(message, RTAX_INITCWND, &tmp->initcwnd);
+                 if (r < 0 && r != -ENODATA) {
+                         log_link_warning_errno(link, r, "rtnl: received route message with invalid initcwnd, ignoring: %m");
