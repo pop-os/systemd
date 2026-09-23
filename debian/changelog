@@ -1,3 +1,9 @@
+systemd (261.3-0ubuntu2) stonking; urgency=medium
+
+  * d/udev.install: do not install tpm2 rules on i386
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Wed, 23 Sep 2026 08:39:15 -0400
+
 systemd (261.3-0ubuntu1) stonking; urgency=medium
 
   * New upstream stable version 261.3
