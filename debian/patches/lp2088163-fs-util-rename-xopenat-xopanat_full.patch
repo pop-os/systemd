@@ -1,0 +1,495 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Feb 2024 08:23:35 +0900
+Subject: fs-util: rename xopenat() -> xopanat_full()
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/c5c9a85a4b9cd3e41f4a68404cab38618572ff95
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+(cherry picked from commit e40b11be04b8abfe040507338336ce8e5e456ff6)
+---
+ src/basic/chase.c                    | 30 +++++++++++------------
+ src/basic/chattr-util.c              |  2 +-
+ src/basic/fs-util.c                  |  8 +++----
+ src/basic/fs-util.h                  | 10 ++++++--
+ src/basic/lock-util.c                | 14 +++++------
+ src/basic/stat-util.c                |  2 +-
+ src/libsystemd/sd-id128/id128-util.c |  4 ++--
+ src/shared/btrfs-util.c              | 10 +++-----
+ src/shared/copy.c                    | 22 ++++++++---------
+ src/shared/loop-util.c               |  8 +++----
+ src/test/test-btrfs.c                |  2 +-
+ src/test/test-copy.c                 |  4 ++--
+ src/test/test-fs-util.c              | 46 ++++++++++++++++++------------------
+ src/tmpfiles/tmpfiles.c              |  2 +-
+ 14 files changed, 83 insertions(+), 81 deletions(-)
+
+diff --git a/src/basic/chase.c b/src/basic/chase.c
+index 26bc2d6..9f5477e 100644
+--- a/src/basic/chase.c
++++ b/src/basic/chase.c
+@@ -374,11 +374,11 @@ int chaseat(int dir_fd, const char *path, ChaseFlags flags, char **ret_path, int
+                                 return r;
+ 
+                         if (FLAGS_SET(flags, CHASE_MKDIR_0755) && !isempty(todo)) {
+-                                child = xopenat(fd,
+-                                                first,
+-                                                O_DIRECTORY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,
+-                                                /* xopen_flags = */ 0,
+-                                                0755);
++                                child = xopenat_full(fd,
++                                                     first,
++                                                     O_DIRECTORY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,
++                                                     /* xopen_flags = */ 0,
++                                                     0755);
+                                 if (child < 0)
+                                         return child;
+                         } else if (FLAGS_SET(flags, CHASE_PARENT) && isempty(todo)) {
+@@ -760,10 +760,10 @@ int chase_and_open(const char *path, const char *root, ChaseFlags chase_flags, i
+         if (empty_or_root(root) && !ret_path &&
+             (chase_flags & (CHASE_NO_AUTOFS|CHASE_SAFE|CHASE_PROHIBIT_SYMLINKS|CHASE_PARENT|CHASE_MKDIR_0755)) == 0)
+                 /* Shortcut this call if none of the special features of this call are requested */
+-                return xopenat(AT_FDCWD, path,
+-                               open_flags | (FLAGS_SET(chase_flags, CHASE_NOFOLLOW) ? O_NOFOLLOW : 0),
+-                               /* xopen_flags = */ 0,
+-                               mode);
++                return xopenat_full(AT_FDCWD, path,
++                                    open_flags | (FLAGS_SET(chase_flags, CHASE_NOFOLLOW) ? O_NOFOLLOW : 0),
++                                    /* xopen_flags = */ 0,
++                                    mode);
+ 
+         r = chase(path, root, CHASE_PARENT|chase_flags, &p, &path_fd);
+         if (r < 0)
+@@ -777,7 +777,7 @@ int chase_and_open(const char *path, const char *root, ChaseFlags chase_flags, i
+                         return r;
+         }
+ 
+-        r = xopenat(path_fd, strempty(fname), open_flags|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
++        r = xopenat_full(path_fd, strempty(fname), open_flags|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
+         if (r < 0)
+                 return r;
+ 
+@@ -964,10 +964,10 @@ int chase_and_openat(int dir_fd, const char *path, ChaseFlags chase_flags, int o
+         if (dir_fd == AT_FDCWD && !ret_path &&
+             (chase_flags & (CHASE_NO_AUTOFS|CHASE_SAFE|CHASE_PROHIBIT_SYMLINKS|CHASE_PARENT|CHASE_MKDIR_0755)) == 0)
+                 /* Shortcut this call if none of the special features of this call are requested */
+-                return xopenat(dir_fd, path,
+-                               open_flags | (FLAGS_SET(chase_flags, CHASE_NOFOLLOW) ? O_NOFOLLOW : 0),
+-                               /* xopen_flags = */ 0,
+-                               mode);
++                return xopenat_full(dir_fd, path,
++                                    open_flags | (FLAGS_SET(chase_flags, CHASE_NOFOLLOW) ? O_NOFOLLOW : 0),
++                                    /* xopen_flags = */ 0,
++                                    mode);
+ 
+         r = chaseat(dir_fd, path, chase_flags|CHASE_PARENT, &p, &path_fd);
+         if (r < 0)
+@@ -979,7 +979,7 @@ int chase_and_openat(int dir_fd, const char *path, ChaseFlags chase_flags, int o
+                         return r;
+         }
+ 
+-        r = xopenat(path_fd, strempty(fname), open_flags|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
++        r = xopenat_full(path_fd, strempty(fname), open_flags|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/basic/chattr-util.c b/src/basic/chattr-util.c
+index fe8b9ab..d76be5c 100644
+--- a/src/basic/chattr-util.c
++++ b/src/basic/chattr-util.c
+@@ -29,7 +29,7 @@ int chattr_full(
+ 
+         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+ 
+-        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+         if (fd < 0)
+                 return fd;
+ 
+diff --git a/src/basic/fs-util.c b/src/basic/fs-util.c
+index 5e05e7d..21cd6dd 100644
+--- a/src/basic/fs-util.c
++++ b/src/basic/fs-util.c
+@@ -1054,7 +1054,7 @@ int open_mkdir_at(int dirfd, const char *path, int flags, mode_t mode) {
+                 path = fname;
+         }
+ 
+-        fd = xopenat(dirfd, path, flags|O_CREAT|O_DIRECTORY|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
++        fd = xopenat_full(dirfd, path, flags|O_CREAT|O_DIRECTORY|O_NOFOLLOW, /* xopen_flags = */ 0, mode);
+         if (IN_SET(fd, -ELOOP, -ENOTDIR))
+                 return -EEXIST;
+         if (fd < 0)
+@@ -1110,7 +1110,7 @@ int openat_report_new(int dirfd, const char *pathname, int flags, mode_t mode, b
+         }
+ }
+ 
+-int xopenat(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode) {
++int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode) {
+         _cleanup_close_ int fd = -EBADF;
+         bool made = false;
+         int r;
+@@ -1191,7 +1191,7 @@ int xopenat(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags
+         return TAKE_FD(fd);
+ }
+ 
+-int xopenat_lock(
++int xopenat_lock_full(
+                 int dir_fd,
+                 const char *path,
+                 int open_flags,
+@@ -1214,7 +1214,7 @@ int xopenat_lock(
+         for (;;) {
+                 struct stat st;
+ 
+-                fd = xopenat(dir_fd, path, open_flags, xopen_flags, mode);
++                fd = xopenat_full(dir_fd, path, open_flags, xopen_flags, mode);
+                 if (fd < 0)
+                         return fd;
+ 
+diff --git a/src/basic/fs-util.h b/src/basic/fs-util.h
+index 1023ab7..6a1e2e7 100644
+--- a/src/basic/fs-util.h
++++ b/src/basic/fs-util.h
+@@ -137,6 +137,12 @@ typedef enum XOpenFlags {
+         XO_SUBVOLUME = 1 << 1,
+ } XOpenFlags;
+ 
+-int xopenat(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode);
++int xopenat_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode);
++static inline int xopenat(int dir_fd, const char *path, int open_flags) {
++        return xopenat_full(dir_fd, path, open_flags, 0, 0);
++}
+ 
+-int xopenat_lock(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode, LockType locktype, int operation);
++int xopenat_lock_full(int dir_fd, const char *path, int open_flags, XOpenFlags xopen_flags, mode_t mode, LockType locktype, int operation);
++static inline int xopenat_lock(int dir_fd, const char *path, int open_flags, LockType locktype, int operation) {
++        return xopenat_lock_full(dir_fd, path, open_flags, 0, 0, locktype, operation);
++}
+diff --git a/src/basic/lock-util.c b/src/basic/lock-util.c
+index 047fd01..7bffe85 100644
+--- a/src/basic/lock-util.c
++++ b/src/basic/lock-util.c
+@@ -40,13 +40,13 @@ int make_lock_file_at(int dir_fd, const char *p, int operation, LockFile *ret) {
+         if (!t)
+                 return -ENOMEM;
+ 
+-        fd = xopenat_lock(dfd,
+-                          p,
+-                          O_CREAT|O_RDWR|O_NOFOLLOW|O_CLOEXEC|O_NOCTTY,
+-                          /* xopen_flags = */ 0,
+-                          0600,
+-                          LOCK_UNPOSIX,
+-                          operation);
++        fd = xopenat_lock_full(dfd,
++                               p,
++                               O_CREAT|O_RDWR|O_NOFOLLOW|O_CLOEXEC|O_NOCTTY,
++                               /* xopen_flags = */ 0,
++                               0600,
++                               LOCK_UNPOSIX,
++                               operation);
+         if (fd < 0)
+                 return fd == -EAGAIN ? -EBUSY : fd;
+ 
+diff --git a/src/basic/stat-util.c b/src/basic/stat-util.c
+index c54374b..6f719dd 100644
+--- a/src/basic/stat-util.c
++++ b/src/basic/stat-util.c
+@@ -470,7 +470,7 @@ int xstatfsat(int dir_fd, const char *path, struct statfs *ret) {
+         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+         assert(ret);
+ 
+-        fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, O_PATH|O_CLOEXEC|O_NOCTTY);
+         if (fd < 0)
+                 return fd;
+ 
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index 94bfd70..b9714ee 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -138,7 +138,7 @@ int id128_read_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t *ret) {
+         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+         assert(path);
+ 
+-        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NOCTTY);
+         if (fd < 0)
+                 return fd;
+ 
+@@ -184,7 +184,7 @@ int id128_write_at(int dir_fd, const char *path, Id128Flag f, sd_id128_t id) {
+         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+         assert(path);
+ 
+-        fd = xopenat(dir_fd, path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, /* xopen_flags = */ 0, 0444);
++        fd = xopenat_full(dir_fd, path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, /* xopen_flags = */ 0, 0444);
+         if (fd < 0)
+                 return fd;
+ 
+diff --git a/src/shared/btrfs-util.c b/src/shared/btrfs-util.c
+index b3e4b50..2ed6bf2 100644
+--- a/src/shared/btrfs-util.c
++++ b/src/shared/btrfs-util.c
+@@ -65,7 +65,7 @@ int btrfs_subvol_set_read_only_at(int dir_fd, const char *path, bool b) {
+ 
+         assert(dir_fd >= 0 || dir_fd == AT_FDCWD);
+ 
+-        fd = xopenat(dir_fd, path, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+         if (fd < 0)
+                 return fd;
+ 
+@@ -113,7 +113,7 @@ int btrfs_get_block_device_at(int dir_fd, const char *path, dev_t *ret) {
+         assert(path);
+         assert(ret);
+ 
+-        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
+         if (fd < 0)
+                 return fd;
+ 
+@@ -1276,8 +1276,6 @@ static int subvol_snapshot_children(
+         if (FLAGS_SET(flags, BTRFS_SNAPSHOT_LOCK_BSD)) {
+                 subvolume_fd = xopenat_lock(new_fd, subvolume,
+                                             O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW,
+-                                            /* xopen_flags = */ 0,
+-                                            /* mode = */ 0,
+                                             LOCK_BSD,
+                                             LOCK_EX);
+                 if (subvolume_fd < 0)
+@@ -1445,7 +1443,7 @@ int btrfs_subvol_snapshot_at_full(
+         assert(dir_fdt >= 0 || dir_fdt == AT_FDCWD);
+         assert(to);
+ 
+-        old_fd = xopenat(dir_fdf, from, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY, /* xopen_flags = */ 0, /* mode = */ 0);
++        old_fd = xopenat(dir_fdf, from, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+         if (old_fd < 0)
+                 return old_fd;
+ 
+@@ -1482,8 +1480,6 @@ int btrfs_subvol_snapshot_at_full(
+                 if (FLAGS_SET(flags, BTRFS_SNAPSHOT_LOCK_BSD)) {
+                         subvolume_fd = xopenat_lock(new_fd, subvolume,
+                                                     O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW,
+-                                                    /* xopen_flags = */ 0,
+-                                                    /* mode = */ 0,
+                                                     LOCK_BSD,
+                                                     LOCK_EX);
+                         if (subvolume_fd < 0)
+diff --git a/src/shared/copy.c b/src/shared/copy.c
+index bc8643e..1573731 100644
+--- a/src/shared/copy.c
++++ b/src/shared/copy.c
+@@ -984,12 +984,12 @@ static int fd_copy_directory(
+ 
+         exists = r >= 0;
+ 
+-        fdt = xopenat_lock(dt, to,
+-                           O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW|(exists ? 0 : O_CREAT|O_EXCL),
+-                           (copy_flags & COPY_MAC_CREATE ? XO_LABEL : 0)|(set_contains(subvolumes, st) ? XO_SUBVOLUME : 0),
+-                           st->st_mode & 07777,
+-                           copy_flags & COPY_LOCK_BSD ? LOCK_BSD : LOCK_NONE,
+-                           LOCK_EX);
++        fdt = xopenat_lock_full(dt, to,
++                                O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW|(exists ? 0 : O_CREAT|O_EXCL),
++                                (copy_flags & COPY_MAC_CREATE ? XO_LABEL : 0)|(set_contains(subvolumes, st) ? XO_SUBVOLUME : 0),
++                                st->st_mode & 07777,
++                                copy_flags & COPY_LOCK_BSD ? LOCK_BSD : LOCK_NONE,
++                                LOCK_EX);
+         if (fdt < 0)
+                 return fdt;
+ 
+@@ -1378,11 +1378,11 @@ int copy_file_at_full(
+                 return r;
+ 
+         WITH_UMASK(0000) {
+-                fdt = xopenat_lock(dir_fdt, to,
+-                                   flags|O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY,
+-                                   (copy_flags & COPY_MAC_CREATE ? XO_LABEL : 0),
+-                                   mode != MODE_INVALID ? mode : st.st_mode,
+-                                   copy_flags & COPY_LOCK_BSD ? LOCK_BSD : LOCK_NONE, LOCK_EX);
++                fdt = xopenat_lock_full(dir_fdt, to,
++                                        flags|O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY,
++                                        (copy_flags & COPY_MAC_CREATE ? XO_LABEL : 0),
++                                        mode != MODE_INVALID ? mode : st.st_mode,
++                                        copy_flags & COPY_LOCK_BSD ? LOCK_BSD : LOCK_NONE, LOCK_EX);
+                 if (fdt < 0)
+                         return fdt;
+         }
+diff --git a/src/shared/loop-util.c b/src/shared/loop-util.c
+index 5860303..6d55df7 100644
+--- a/src/shared/loop-util.c
++++ b/src/shared/loop-util.c
+@@ -702,9 +702,9 @@ int loop_device_make_by_path_at(
+         direct_flags = FLAGS_SET(loop_flags, LO_FLAGS_DIRECT_IO) ? O_DIRECT : 0;
+         rdwr_flags = open_flags >= 0 ? open_flags : O_RDWR;
+ 
+-        fd = xopenat(dir_fd, path, basic_flags|direct_flags|rdwr_flags, /* xopen_flags = */ 0, /* mode = */ 0);
++        fd = xopenat(dir_fd, path, basic_flags|direct_flags|rdwr_flags);
+         if (fd < 0 && direct_flags != 0) /* If we had O_DIRECT on, and things failed with that, let's immediately try again without */
+-                fd = xopenat(dir_fd, path, basic_flags|rdwr_flags, /* xopen_flags = */ 0, /* mode = */ 0);
++                fd = xopenat(dir_fd, path, basic_flags|rdwr_flags);
+         else
+                 direct = direct_flags != 0;
+         if (fd < 0) {
+@@ -714,9 +714,9 @@ int loop_device_make_by_path_at(
+                 if (open_flags >= 0 || !(ERRNO_IS_PRIVILEGE(r) || r == -EROFS))
+                         return r;
+ 
+-                fd = xopenat(dir_fd, path, basic_flags|direct_flags|O_RDONLY, /* xopen_flags = */ 0, /* mode = */ 0);
++                fd = xopenat(dir_fd, path, basic_flags|direct_flags|O_RDONLY);
+                 if (fd < 0 && direct_flags != 0) /* as above */
+-                        fd = xopenat(dir_fd, path, basic_flags|O_RDONLY, /* xopen_flags = */ 0, /* mode = */ 0);
++                        fd = xopenat(dir_fd, path, basic_flags|O_RDONLY);
+                 else
+                         direct = direct_flags != 0;
+                 if (fd < 0)
+diff --git a/src/test/test-btrfs.c b/src/test/test-btrfs.c
+index 205142e..6dff709 100644
+--- a/src/test/test-btrfs.c
++++ b/src/test/test-btrfs.c
+@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
+         if (r < 0)
+                 log_error_errno(r, "Failed to make snapshot: %m");
+         if (r >= 0)
+-                assert_se(xopenat_lock(AT_FDCWD, "/xxxtest4", 0, 0, 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
++                assert_se(xopenat_lock(AT_FDCWD, "/xxxtest4", 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
+ 
+         safe_close(r);
+ 
+diff --git a/src/test/test-copy.c b/src/test/test-copy.c
+index f3144f0..61bfbc0 100644
+--- a/src/test/test-copy.c
++++ b/src/test/test-copy.c
+@@ -520,12 +520,12 @@ TEST(copy_lock) {
+         assert_se((fd = copy_directory_at(tfd, "abc", tfd, "qed", COPY_LOCK_BSD)) >= 0);
+         assert_se(faccessat(tfd, "qed", F_OK, 0) >= 0);
+         assert_se(faccessat(tfd, "qed/def", F_OK, 0) >= 0);
+-        assert_se(xopenat_lock(tfd, "qed", 0, 0, 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
++        assert_se(xopenat_lock(tfd, "qed", 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
+         fd = safe_close(fd);
+ 
+         assert_se((fd = copy_file_at(tfd, "abc/def", tfd, "poi", 0, 0644, COPY_LOCK_BSD)));
+         assert_se(read_file_at_and_streq(tfd, "poi", "abc\n"));
+-        assert_se(xopenat_lock(tfd, "poi", 0, 0, 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
++        assert_se(xopenat_lock(tfd, "poi", 0, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
+         fd = safe_close(fd);
+ }
+ 
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index ef335b4..b32feff 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -673,37 +673,37 @@ TEST(openat_report_new) {
+         assert_se(b);
+ }
+ 
+-TEST(xopenat) {
++TEST(xopenat_full) {
+         _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
+         _cleanup_close_ int tfd = -EBADF, fd = -EBADF, fd2 = -EBADF;
+ 
+         assert_se((tfd = mkdtemp_open(NULL, 0, &t)) >= 0);
+ 
+-        /* Test that xopenat() creates directories if O_DIRECTORY is specified. */
++        /* Test that xopenat_full() creates directories if O_DIRECTORY is specified. */
+ 
+-        assert_se((fd = xopenat(tfd, "abc", O_DIRECTORY|O_CREAT|O_EXCL|O_CLOEXEC, 0, 0755)) >= 0);
++        assert_se((fd = xopenat_full(tfd, "abc", O_DIRECTORY|O_CREAT|O_EXCL|O_CLOEXEC, 0, 0755)) >= 0);
+         assert_se((fd_verify_directory(fd) >= 0));
+         fd = safe_close(fd);
+ 
+-        assert_se(xopenat(tfd, "abc", O_DIRECTORY|O_CREAT|O_EXCL|O_CLOEXEC, 0, 0755) == -EEXIST);
++        assert_se(xopenat_full(tfd, "abc", O_DIRECTORY|O_CREAT|O_EXCL|O_CLOEXEC, 0, 0755) == -EEXIST);
+ 
+-        assert_se((fd = xopenat(tfd, "abc", O_DIRECTORY|O_CREAT|O_CLOEXEC, 0, 0755)) >= 0);
++        assert_se((fd = xopenat_full(tfd, "abc", O_DIRECTORY|O_CREAT|O_CLOEXEC, 0, 0755)) >= 0);
+         assert_se((fd_verify_directory(fd) >= 0));
+         fd = safe_close(fd);
+ 
+-        /* Test that xopenat() creates regular files if O_DIRECTORY is not specified. */
++        /* Test that xopenat_full() creates regular files if O_DIRECTORY is not specified. */
+ 
+-        assert_se((fd = xopenat(tfd, "def", O_CREAT|O_EXCL|O_CLOEXEC, 0, 0644)) >= 0);
++        assert_se((fd = xopenat_full(tfd, "def", O_CREAT|O_EXCL|O_CLOEXEC, 0, 0644)) >= 0);
+         assert_se(fd_verify_regular(fd) >= 0);
+         fd = safe_close(fd);
+ 
+-        /* Test that we can reopen an existing fd with xopenat() by specifying an empty path. */
++        /* Test that we can reopen an existing fd with xopenat_full() by specifying an empty path. */
+ 
+-        assert_se((fd = xopenat(tfd, "def", O_PATH|O_CLOEXEC, 0, 0)) >= 0);
+-        assert_se((fd2 = xopenat(fd, "", O_RDWR|O_CLOEXEC, 0, 0644)) >= 0);
++        assert_se((fd = xopenat_full(tfd, "def", O_PATH|O_CLOEXEC, 0, 0)) >= 0);
++        assert_se((fd2 = xopenat_full(fd, "", O_RDWR|O_CLOEXEC, 0, 0644)) >= 0);
+ }
+ 
+-TEST(xopenat_lock) {
++TEST(xopenat_lock_full) {
+         _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
+         _cleanup_close_ int tfd = -EBADF, fd = -EBADF;
+         siginfo_t si;
+@@ -714,11 +714,11 @@ TEST(xopenat_lock) {
+          * and close the file descriptor and still properly create the directory and acquire the lock in
+          * another process.  */
+ 
+-        fd = xopenat_lock(tfd, "abc", O_CREAT|O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX);
++        fd = xopenat_lock_full(tfd, "abc", O_CREAT|O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX);
+         assert_se(fd >= 0);
+         assert_se(faccessat(tfd, "abc", F_OK, 0) >= 0);
+         assert_se(fd_verify_directory(fd) >= 0);
+-        assert_se(xopenat_lock(tfd, "abc", O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
++        assert_se(xopenat_lock_full(tfd, "abc", O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
+ 
+         pid_t pid = fork();
+         assert_se(pid >= 0);
+@@ -726,21 +726,21 @@ TEST(xopenat_lock) {
+         if (pid == 0) {
+                 safe_close(fd);
+ 
+-                fd = xopenat_lock(tfd, "abc", O_CREAT|O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX);
++                fd = xopenat_lock_full(tfd, "abc", O_CREAT|O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX);
+                 assert_se(fd >= 0);
+                 assert_se(faccessat(tfd, "abc", F_OK, 0) >= 0);
+                 assert_se(fd_verify_directory(fd) >= 0);
+-                assert_se(xopenat_lock(tfd, "abc", O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
++                assert_se(xopenat_lock_full(tfd, "abc", O_DIRECTORY|O_CLOEXEC, 0, 0755, LOCK_BSD, LOCK_EX|LOCK_NB) == -EAGAIN);
+ 
+                 _exit(EXIT_SUCCESS);
+         }
+ 
+-        /* We need to give the child process some time to get past the xopenat() call in xopenat_lock() and
+-         * block in the call to lock_generic() waiting for the lock to become free. We can't modify
+-         * xopenat_lock() to signal an eventfd to let us know when that has happened, so we just sleep for a
+-         * little and assume that's enough time for the child process to get along far enough. It doesn't
+-         * matter if it doesn't get far enough, in that case we just won't trigger the fallback logic in
+-         * xopenat_lock(), but the test will still succeed. */
++        /* We need to give the child process some time to get past the xopenat() call in xopenat_lock_full()
++         * and block in the call to lock_generic() waiting for the lock to become free. We can't modify
++         * xopenat_lock_full() to signal an eventfd to let us know when that has happened, so we just sleep
++         * for a little and assume that's enough time for the child process to get along far enough. It
++         * doesn't matter if it doesn't get far enough, in that case we just won't trigger the fallback logic
++         * in xopenat_lock_full(), but the test will still succeed. */
+         assert_se(usleep_safe(20 * USEC_PER_MSEC) >= 0);
+ 
+         assert_se(unlinkat(tfd, "abc", AT_REMOVEDIR) >= 0);
+@@ -749,8 +749,8 @@ TEST(xopenat_lock) {
+         assert_se(wait_for_terminate(pid, &si) >= 0);
+         assert_se(si.si_code == CLD_EXITED);
+ 
+-        assert_se(xopenat_lock(tfd, "abc", 0, 0, 0755, LOCK_POSIX, LOCK_EX) == -EBADF);
+-        assert_se(xopenat_lock(tfd, "def", O_DIRECTORY, 0, 0755, LOCK_POSIX, LOCK_EX) == -EBADF);
++        assert_se(xopenat_lock_full(tfd, "abc", 0, 0, 0755, LOCK_POSIX, LOCK_EX) == -EBADF);
++        assert_se(xopenat_lock_full(tfd, "def", O_DIRECTORY, 0, 0755, LOCK_POSIX, LOCK_EX) == -EBADF);
+ }
+ 
+ static int intro(void) {
+diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
+index 6421eac..2f9d44e 100644
+--- a/src/tmpfiles/tmpfiles.c
++++ b/src/tmpfiles/tmpfiles.c
+@@ -817,7 +817,7 @@ static int dir_cleanup(
+                                            cutoff_nsec, sub_path, age_by_file, false))
+                                 continue;
+ 
+-                        fd = xopenat(dirfd(d),
++                        fd = xopenat_full(dirfd(d),
+                                      de->d_name,
+                                      O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NOATIME|O_NONBLOCK,
+                                      /* xopen_flags = */ 0,

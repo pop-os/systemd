@@ -1,0 +1,37 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Feb 2024 22:46:06 +0900
+Subject: journal-file-util: use COPY_VERIFY_LINKED
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/04209567d40b4bf802ac22b631f126aa52647732
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+As the main thread may call journal_directory_vacuum() ->
+unlinkat_deallocate() while another thread is copying the file.
+
+Fixes #24150 and #31222.
+
+(cherry picked from commit 18d4e475c7fad8a5f003e5eb2a9ed0616e0ade20)
+---
+ src/shared/journal-file-util.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/journal-file-util.c b/src/shared/journal-file-util.c
+index b05ae0d..bdceac4 100644
+--- a/src/shared/journal-file-util.c
++++ b/src/shared/journal-file-util.c
+@@ -210,11 +210,15 @@ static void journal_file_set_offline_internal(JournalFile *f) {
+ 
+                                 log_debug_errno(r, "Failed to re-enable copy-on-write for %s: %m, rewriting file", f->path);
+ 
++                                /* Here, setting COPY_VERIFY_LINKED flag is crucial. Otherwise, a broken
++                                 * journal file may be created, if journal_directory_vacuum() ->
++                                 * unlinkat_deallocate() is called in the main thread while this thread is
++                                 * copying the file. See issue #24150 and #31222. */
+                                 r = copy_file_atomic_at_full(
+                                                 f->fd, NULL, AT_FDCWD, f->path, f->mode,
+                                                 0,
+                                                 FS_NOCOW_FL,
+-                                                COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS,
++                                                COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS | COPY_VERIFY_LINKED,
+                                                 NULL, NULL);
+                                 if (r < 0) {
+                                         log_debug_errno(r, "Failed to rewrite %s: %m", f->path);

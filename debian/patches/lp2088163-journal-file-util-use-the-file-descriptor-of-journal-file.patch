@@ -1,0 +1,35 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 14 Feb 2024 09:36:45 +0900
+Subject: journal-file-util: use the file descriptor of journal file on copy
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/8ee43d11581f8f8debef9793c7776a584eb4157d
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+No effective functionality changed, just refactoring.
+
+(cherry picked from commit f73ad0a9fb18bdba3f0704f5feef2dcbd6130915)
+---
+ src/shared/journal-file-util.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/shared/journal-file-util.c b/src/shared/journal-file-util.c
+index e444a2b..b05ae0d 100644
+--- a/src/shared/journal-file-util.c
++++ b/src/shared/journal-file-util.c
+@@ -210,11 +210,12 @@ static void journal_file_set_offline_internal(JournalFile *f) {
+ 
+                                 log_debug_errno(r, "Failed to re-enable copy-on-write for %s: %m, rewriting file", f->path);
+ 
+-                                r = copy_file_atomic_full(FORMAT_PROC_FD_PATH(f->fd), f->path, f->mode,
+-                                                          0,
+-                                                          FS_NOCOW_FL,
+-                                                          COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS,
+-                                                          NULL, NULL);
++                                r = copy_file_atomic_at_full(
++                                                f->fd, NULL, AT_FDCWD, f->path, f->mode,
++                                                0,
++                                                FS_NOCOW_FL,
++                                                COPY_REPLACE | COPY_FSYNC | COPY_HOLES | COPY_ALL_XATTRS,
++                                                NULL, NULL);
+                                 if (r < 0) {
+                                         log_debug_errno(r, "Failed to rewrite %s: %m", f->path);
+                                         continue;

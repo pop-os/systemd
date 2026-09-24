@@ -87,3 +87,11 @@ lp2145709-resolved-dont-treat-conn-reset-as-packet-loss.patch
 lp2167098-preserve-ipv4-route-mtu.patch
 lp2085314-fix-stack-overflow-when-dropping-tclass-qdisc.patch
 lp2085314-avoid-concurrent-set-modification-tclass-qdisc.patch
+lp2088163-fs-util-rename-xopenat-xopanat_full.patch
+lp2088163-copy-use-xopenat-to-make-from-argument-optional.patch
+lp2088163-stat-util-introduce-stat-fd-_verify_linked.patch
+lp2088163-sd-journal-use-stat_verify_linked.patch
+lp2088163-copy-introduce-COPY_VERIFY_LINKED-flag.patch
+lp2088163-journal-file-util-use-the-file-descriptor-of-journal-file.patch
+lp2088163-journal-file-util-use-COPY_VERIFY_LINKED.patch
+lp2088163-test-add-test-cases-for-journal-corruption-on-btrfs.patch

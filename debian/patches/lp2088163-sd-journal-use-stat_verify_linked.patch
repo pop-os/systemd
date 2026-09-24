@@ -1,0 +1,27 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Feb 2024 10:08:23 +0900
+Subject: sd-journal: use stat_verify_linked()
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/aa45d8c39e5b859152ef7191a3a882878959bf90
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+(cherry picked from commit cb0d5f73e600c70026b031cd4046487582ac5452)
+---
+ src/libsystemd/sd-journal/journal-file.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index d2493a0..f0d0477 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -736,8 +736,9 @@ int journal_file_fstat(JournalFile *f) {
+                 return r;
+ 
+         /* Refuse appending to files that are already deleted */
+-        if (f->last_stat.st_nlink <= 0)
+-                return -EIDRM;
++        r = stat_verify_linked(&f->last_stat);
++        if (r < 0)
++                return r;
+ 
+         return 0;
+ }

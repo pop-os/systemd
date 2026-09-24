@@ -1,0 +1,159 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Feb 2024 19:37:43 +0900
+Subject: copy: introduce COPY_VERIFY_LINKED flag
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/47c90f516f58b0d4ab2ff3c676e49111e064a149
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+If the flag is set, then copy_file() and friends check if the source
+file still exists when the copy operation finished.
+
+(cherry picked from commit 72ef2a617f43e156dbe15e9fa28b84224c2969ad)
+---
+ src/shared/copy.c    | 46 ++++++++++++++++++++++++++++++++++++++++++++--
+ src/shared/copy.h    |  1 +
+ src/test/test-copy.c | 22 ++++++++++++++++++++++
+ 3 files changed, 67 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/copy.c b/src/shared/copy.c
+index 5c104a1..2b87cba 100644
+--- a/src/shared/copy.c
++++ b/src/shared/copy.c
+@@ -208,6 +208,7 @@ int copy_bytes_full(
+                                         r = reflink_range(fdf, foffset, fdt, toffset, max_bytes == UINT64_MAX ? 0 : max_bytes); /* partial reflink */
+                                 if (r >= 0) {
+                                         off_t t;
++                                        int ret;
+ 
+                                         /* This worked, yay! Now — to be fully correct — let's adjust the file pointers */
+                                         if (max_bytes == UINT64_MAX) {
+@@ -226,7 +227,14 @@ int copy_bytes_full(
+                                                 if (t < 0)
+                                                         return -errno;
+ 
+-                                                return 0; /* we copied the whole thing, hence hit EOF, return 0 */
++                                                if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                                                        r = fd_verify_linked(fdf);
++                                                        if (r < 0)
++                                                                return r;
++                                                }
++
++                                                /* We copied the whole thing, hence hit EOF, return 0. */
++                                                ret = 0;
+                                         } else {
+                                                 t = lseek(fdf, foffset + max_bytes, SEEK_SET);
+                                                 if (t < 0)
+@@ -236,8 +244,18 @@ int copy_bytes_full(
+                                                 if (t < 0)
+                                                         return -errno;
+ 
+-                                                return 1; /* we copied only some number of bytes, which worked, but this means we didn't hit EOF, return 1 */
++                                                /* We copied only some number of bytes, which worked, but
++                                                 * this means we didn't hit EOF, return 1. */
++                                                ret = 1;
++                                        }
++
++                                        if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                                                r = fd_verify_linked(fdf);
++                                                if (r < 0)
++                                                        return r;
+                                         }
++
++                                        return ret;
+                                 }
+                         }
+                 }
+@@ -483,6 +501,12 @@ int copy_bytes_full(
+                 copied_something = true;
+         }
+ 
++        if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                r = fd_verify_linked(fdf);
++                if (r < 0)
++                        return r;
++        }
++
+         if (copy_flags & COPY_TRUNCATE) {
+                 off_t off = lseek(fdt, 0, SEEK_CUR);
+                 if (off < 0)
+@@ -798,6 +822,12 @@ static int fd_copy_regular(
+         (void) futimens(fdt, (struct timespec[]) { st->st_atim, st->st_mtim });
+         (void) copy_xattr(fdf, NULL, fdt, NULL, copy_flags);
+ 
++        if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                r = fd_verify_linked(fdf);
++                if (r < 0)
++                        return r;
++        }
++
+         if (copy_flags & COPY_FSYNC) {
+                 if (fsync(fdt) < 0) {
+                         r = -errno;
+@@ -1333,6 +1363,12 @@ int copy_file_fd_at_full(
+                 (void) copy_xattr(fdf, NULL, fdt, NULL, copy_flags);
+         }
+ 
++        if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                r = fd_verify_linked(fdf);
++                if (r < 0)
++                        return r;
++        }
++
+         if (copy_flags & COPY_FSYNC_FULL) {
+                 r = fsync_full(fdt);
+                 if (r < 0)
+@@ -1403,6 +1439,12 @@ int copy_file_at_full(
+         (void) copy_times(fdf, fdt, copy_flags);
+         (void) copy_xattr(fdf, NULL, fdt, NULL, copy_flags);
+ 
++        if (FLAGS_SET(copy_flags, COPY_VERIFY_LINKED)) {
++                r = fd_verify_linked(fdf);
++                if (r < 0)
++                        goto fail;
++        }
++
+         if (chattr_mask != 0)
+                 (void) chattr_fd(fdt, chattr_flags, chattr_mask & ~CHATTR_EARLY_FL, NULL);
+ 
+diff --git a/src/shared/copy.h b/src/shared/copy.h
+index d842edd..b8fb28a 100644
+--- a/src/shared/copy.h
++++ b/src/shared/copy.h
+@@ -30,6 +30,7 @@ typedef enum CopyFlags {
+         COPY_GRACEFUL_WARN = 1 << 15, /* Skip copying file types that aren't supported by the target filesystem */
+         COPY_TRUNCATE      = 1 << 16, /* Truncate to current file offset after copying */
+         COPY_LOCK_BSD      = 1 << 17, /* Return a BSD exclusively locked file descriptor referring to the copied image/directory. */
++        COPY_VERIFY_LINKED = 1 << 18, /* Check the source file is still linked after copying. */
+ } CopyFlags;
+ 
+ typedef enum DenyType {
+diff --git a/src/test/test-copy.c b/src/test/test-copy.c
+index 61bfbc0..9674e78 100644
+--- a/src/test/test-copy.c
++++ b/src/test/test-copy.c
+@@ -529,4 +529,26 @@ TEST(copy_lock) {
+         fd = safe_close(fd);
+ }
+ 
++TEST(copy_verify_linked) {
++        _cleanup_(rm_rf_physical_and_freep) char *t = NULL;
++        _cleanup_close_ int tfd = -EBADF, fd_1 = -EBADF, fd_2 = -EBADF;
++
++        tfd = mkdtemp_open(NULL, O_PATH, &t);
++        assert_se(tfd >= 0);
++
++        assert_se(write_string_file_at(tfd, "hoge", "bar bar", WRITE_STRING_FILE_CREATE) >= 0);
++
++        fd_1 = openat(tfd, "hoge", O_CLOEXEC | O_NOCTTY | O_RDONLY);
++        assert_se(fd_1 >= 0);
++        fd_2 = openat(tfd, "hoge", O_CLOEXEC | O_NOCTTY | O_RDONLY);
++        assert_se(fd_2 >= 0);
++        assert_se(unlinkat(tfd, "hoge", 0) >= 0);
++
++        assert_se(copy_file_at(fd_1, NULL, tfd, "to_1", 0, 0644, 0) >= 0);
++        assert_se(read_file_at_and_streq(tfd, "to_1", "bar bar\n"));
++
++        assert_se(copy_file_at(fd_2, NULL, tfd, "to_2", O_EXCL, 0644, COPY_VERIFY_LINKED) == -EIDRM);
++        assert_se(faccessat(tfd, "to_2", F_OK, AT_SYMLINK_NOFOLLOW) < 0 && errno == ENOENT);
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);

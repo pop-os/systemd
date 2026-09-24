@@ -1,0 +1,70 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Sat, 10 Feb 2024 16:24:10 +0900
+Subject: test: add test cases for journal corruption on btrfs
+Origin: upstream, https://github.com/systemd/systemd-stable/commit/d1a7ffc8b192c1378d07d5ae17eca739fd4ddfc6
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2088163
+
+For issue #24150 and #31222.
+
+(cherry picked from commit 8cc42169f1f945d286ea334c55e7013d585947d8)
+---
+ test/test-functions                        |  2 +-
+ test/units/testsuite-04.journal-corrupt.sh | 36 ++++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+ create mode 100755 test/units/testsuite-04.journal-corrupt.sh
+
+diff --git a/test/test-functions b/test/test-functions
+index 3e20d7c..2e04193 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -2103,7 +2103,7 @@ install_testuser() {
+     # create unprivileged user for user manager tests
+     mkdir -p "${initdir:?}/etc/sysusers.d"
+     cat >"$initdir/etc/sysusers.d/testuser.conf" <<EOF
+-u testuser    4711     "Test User" /home/testuser
++u testuser    4711     "Test User" /home/testuser /bin/bash
+ EOF
+ 
+     mkdir -p "$initdir/home/testuser"
+diff --git a/test/units/testsuite-04.journal-corrupt.sh b/test/units/testsuite-04.journal-corrupt.sh
+new file mode 100755
+index 0000000..051d0ab
+--- /dev/null
++++ b/test/units/testsuite-04.journal-corrupt.sh
+@@ -0,0 +1,36 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++journalctl --rotate --vacuum-files=1
++# Nuke all archived journals, so we start with a clean slate
++rm -f "/var/log/journal/$(</etc/machine-id)"/system@*.journal
++rm -f "/var/log/journal/$(</etc/machine-id)"/user-*@*.journal
++journalctl --header | grep path
++
++# Make sure the user instance is active when we rotate journals
++systemd-run --unit user-sleep.service --user -M testuser@ sleep infinity
++
++for _ in {0..9}; do
++    journalctl --rotate
++    journalctl --sync
++    SYSTEMD_LOG_LEVEL=debug journalctl -n1 -q
++    (! journalctl -n0 -q |& grep corrupted)
++done
++
++systemctl stop --user -M testuser@ user-sleep.service
++
++journalctl --sync
++journalctl --rotate --vacuum-files=1
++# Nuke all archived journals, so we start with a clean slate
++rm -f "/var/log/journal/$(</etc/machine-id)"/system@*.journal
++rm -f "/var/log/journal/$(</etc/machine-id)/"user-*@*.journal
++journalctl --header | grep path
++
++for _ in {0..9}; do
++    journalctl --rotate --vacuum-files=1
++    journalctl --sync
++    SYSTEMD_LOG_LEVEL=debug journalctl -n1 -q
++    (! journalctl -n0 -q |& grep corrupted)
++done
