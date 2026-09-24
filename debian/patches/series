@@ -85,3 +85,5 @@ GHSA-3jgj-3phh-hx5j/resolve-limit-the-number-NTAs-to-something-sensible.patch
 lp2170538-resolved-pick-up-new-DNSSEC-KSK-from-2024.patch
 lp2145709-resolved-dont-treat-conn-reset-as-packet-loss.patch
 lp2167098-preserve-ipv4-route-mtu.patch
+lp2085314-fix-stack-overflow-when-dropping-tclass-qdisc.patch
+lp2085314-avoid-concurrent-set-modification-tclass-qdisc.patch
