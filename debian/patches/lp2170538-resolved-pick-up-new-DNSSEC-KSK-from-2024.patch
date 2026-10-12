@@ -1,0 +1,36 @@
+Description: resolved: add the root zone KSK-2024 (key tag 38696) to the built-in trust anchor
+ Since 2026-10-11 the root zone DNSKEY RRset is signed only by KSK-2024.
+ With DNSSEC=yes (or allow-downgrade against a DNSSEC-capable upstream)
+ and no local trust anchor file, systemd-resolved trusts only KSK-2017
+ (20326), so every lookup fails with "DNSSEC validation failed: missing-key".
+Author: Lennart Poettering <lennart@poettering.net>
+Origin: upstream, https://github.com/systemd/systemd/commit/8113361e82eea2741290f7117034d356acb3ab4d
+Bug: https://github.com/systemd/systemd/issues/36260
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/2170538
+Last-Update: 2026-10-12
+---
+Index: systemd-255.4/src/resolve/resolved-dns-trust-anchor.c
+===================================================================
+--- systemd-255.4.orig/src/resolve/resolved-dns-trust-anchor.c
++++ systemd-255.4/src/resolve/resolved-dns-trust-anchor.c
+@@ -25,6 +25,10 @@ static const uint8_t root_digest2[] =
+         { 0xE0, 0x6D, 0x44, 0xB8, 0x0B, 0x8F, 0x1D, 0x39, 0xA9, 0x5C, 0x0B, 0x0D, 0x7C, 0x65, 0xD0, 0x84,
+           0x58, 0xE8, 0x80, 0x40, 0x9B, 0xBC, 0x68, 0x34, 0x57, 0x10, 0x42, 0x37, 0xC7, 0xF8, 0xEC, 0x8D };
+ 
++static const uint8_t root_digest3[] =
++        { 0x68, 0x3D, 0x2D, 0x0A, 0xCB, 0x8C, 0x9B, 0x71, 0x2A, 0x19, 0x48, 0xB2, 0x7F, 0x74, 0x12, 0x19,
++          0x29, 0x8D, 0x0A, 0x45, 0x0D, 0x61, 0x2C, 0x48, 0x3A, 0xF4, 0x44, 0xA4, 0xC0, 0xFB, 0x2B, 0x16 };
++
+ static bool dns_trust_anchor_knows_domain_positive(DnsTrustAnchor *d, const char *name) {
+         assert(d);
+ 
+@@ -95,6 +99,9 @@ static int dns_trust_anchor_add_builtin_
+         r = add_root_ksk(answer, key, 20326, DNSSEC_ALGORITHM_RSASHA256, DNSSEC_DIGEST_SHA256, root_digest2, sizeof(root_digest2));
+         if (r < 0)
+                 return r;
++        r = add_root_ksk(answer, key, 38696, DNSSEC_ALGORITHM_RSASHA256, DNSSEC_DIGEST_SHA256, root_digest3, sizeof(root_digest3));
++        if (r < 0)
++                return r;
+ 
+         r = hashmap_put(d->positive_by_key, key, answer);
+         if (r < 0)

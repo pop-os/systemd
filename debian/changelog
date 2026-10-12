@@ -1,3 +1,13 @@
+systemd (255.4-1ubuntu8.18) noble-security; urgency=medium
+
+  * d/p/lp2170538-resolved-pick-up-new-DNSSEC-KSK-from-2024.patch: add
+    the root zone KSK-2024 (key tag 38696) to the built-in DNSSEC trust
+    anchor. Since 2026-10-11 the root DNSKEY RRset is signed only by
+    this key, so with DNSSEC enabled and no local trust anchor file
+    every lookup failed with "missing-key" (LP: #2170538)
+
+ -- CyberNative AI LLC <hello@cybernative.ai>  Mon, 12 Oct 2026 07:36:16 +0000
+
 systemd (255.4-1ubuntu8.17) noble-security; urgency=medium
 
   * SECURITY UPDATE: systemd-homed: local privilege escalation via missing home-record signature verification on the authenticate path
