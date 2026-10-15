@@ -1,3 +1,27 @@
+systemd (255.4-1ubuntu8.19) noble; urgency=medium
+
+  [ Seyeong Kim ]
+  * Avoid resolved TCP reset busy loops (LP: #2145709)
+    - d/p/lp2145709-resolved-dont-treat-conn-reset-as-packet-loss.patch:
+      Consume socket errors reported through EPOLLERR and do not retry
+      ECONNRESET failures.
+
+  [ Dean Marx ]
+  * network/route: preserve IPv4 route MTU (LP: #2167098)
+    - d/p/lp2167098-preserve-ipv4-route-mtu.patch:
+      preserve IPv4 route MTU by making MTU part of v255's route identity
+      and reading RTAX_MTU from rtnetlink messages.
+  * Avoid systemd-networkd segfault (LP: #2085314)
+    - d/p/lp2085314-fix-stack-overflow-when-dropping-tclass-qdisc.patch,
+      d/p/lp2085314-avoid-concurrent-set-modification-tclass-qdisc.patch:
+      Avoid a stack overflow and concurrent set modification when dropping
+      traffic-class qdiscs in systemd-networkd.
+
+  [ Willow Carlson-Huber ]
+  * Fix user journal corruption on rotate when using btrfs (LP: #2088163)
+
+ -- Nick Rosbrook <enr0n@ubuntu.com>  Thu, 15 Oct 2026 11:58:12 -0400
+
 systemd (255.4-1ubuntu8.18) noble-security; urgency=medium
 
   * d/p/lp2170538-resolved-pick-up-new-DNSSEC-KSK-from-2024.patch: add
