@@ -1,3 +1,9 @@
+systemd (261.3-0ubuntu2pop1) resolute; urgency=medium
+
+  * Backport
+
+ -- Michael Murphy <michael@mmurphy.dev>  Mon, 16 Nov 2026 17:12:33 +0100
+
 systemd (261.3-0ubuntu2) stonking; urgency=medium
 
   * d/udev.install: do not install tpm2 rules on i386
@@ -5182,7 +5188,7 @@ systemd (251.4-1ubuntu6) kinetic; urgency=medium
 
 systemd (251.4-1ubuntu5) kinetic; urgency=medium
 
-  * enable building systemd-boot for riscv64 (LP: #1989457) 
+  * enable building systemd-boot for riscv64 (LP: #1989457)
 
  -- Heinrich Schuchardt <heinrich.schuchardt@canonical.com>  Tue, 13 Sep 2022 13:43:01 +0200
 
