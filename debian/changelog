@@ -1,3 +1,9 @@
+systemd (249.11-0ubuntu3.22pop0) jammy; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 19 Nov 2026 13:47:55 -0700
+
 systemd (249.11-0ubuntu3.22) jammy-security; urgency=medium
 
   * SECURITY UPDATE: systemd: crash triggered by unprivileged users in various
